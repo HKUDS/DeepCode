@@ -4,6 +4,8 @@ Streamlit UI Components Module
 Contains all reusable UI components
 """
 
+from ast import Not
+from pydoc import doc
 import streamlit as st
 import sys
 from typing import Dict, Any, Optional
@@ -790,6 +792,217 @@ def url_input_component(task_counter: int) -> Optional[str]:
 
     return None
 
+def tech_input_component(task_counter: int) -> Optional[str]:
+    """"Technical implementation input component, including a doc file (either file or URL) and a description of the technique to be implemented."""
+    
+    input_items = {
+        "file": None,
+        "url": None,
+        "description": None,
+    }
+    
+    st.markdown(
+        """
+    <div style="background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+                border-radius: 10px;
+                padding: 15px;
+                margin-bottom: 20px;
+                border-left: 4px solid #4dd0e1;">
+        <h4 style="color: white; margin: 0 0 10px 0; font-size: 1.1rem;">
+            ⚙️ Describe the Technique to Implement
+        </h4>
+        <p style="color: #e0f7fa; margin: 0; font-size: 0.9rem;">
+            Provide a detailed description of the technique you want to implement, including any specific requirements or constraints. If needed, you can up load a document file (PDF, DOCX, etc.) that contains the technical details, or provide a URL to a document that describes the technique.
+        </p>
+    </div>
+    """,
+        unsafe_allow_html=True,
+    )
+    # Part-1: the user requirement
+    user_input = st.text_area(
+        "Enter your technical implementation requirements:",
+        placeholder="Example: According to the API docuemntation, I want to implement a technique that involves...",
+        height=200,
+        help="Describe the technique you want to implement, including functionality, technologies, and any specific requirements",
+        key=f"tech_input_{task_counter}",
+    )
+
+    if user_input and len(user_input.strip()) > 20:
+        word_count = len(user_input.split())
+        char_count = len(user_input)
+
+        st.success(
+            f"✅ **Requirements captured!** ({word_count} words, {char_count} characters)"
+        )
+
+        with st.expander("📋 Preview your requirements", expanded=False):
+            st.text_area(
+                "Your input:",
+                user_input,
+                height=100,
+                disabled=True,
+                key=f"tech_preview_{task_counter}",
+            )
+
+        input_items['description'] = user_input.strip()
+
+    elif user_input and len(user_input.strip()) <= 20:
+        st.warning(
+            "⚠️ Please provide more detailed requirements (at least 20 characters)"
+        )
+    
+    # Part-2: optionally upload a document file or URL
+    doc_input = st.selectbox(
+        "Would you like to upload a document file or provide a URL?",
+        options=["Upload File", "Provide URL"],
+        key=f"doc_input_select_{task_counter}",
+    )
+    if doc_input == "Upload File":
+        uploaded_file = st.file_uploader(
+            "Upload research paper file",
+            type=[
+                "pdf",
+                "docx",
+                "doc",
+                "ppt",
+                "pptx",
+                "xls",
+                "xlsx",
+                "html",
+                "htm",
+                "txt",
+                "md",
+            ],
+            help="Supported formats: PDF, Word, PowerPoint, Excel, HTML, Text (all files will be converted to PDF)",
+            key=f"file_uploader_{task_counter}",
+        )
+
+        if uploaded_file is not None:
+            # Display file information
+            file_size = len(uploaded_file.getvalue())
+            st.info(f"📄 **File:** {uploaded_file.name} ({format_file_size(file_size)})")
+
+            # Save uploaded file to temporary directory
+            try:
+                import tempfile
+                import sys
+                import os
+                from pathlib import Path
+
+                # Add project root to path for imports
+                current_dir = Path(__file__).parent
+                project_root = current_dir.parent
+                if str(project_root) not in sys.path:
+                    sys.path.insert(0, str(project_root))
+
+                # Import PDF converter
+                from tools.pdf_converter import PDFConverter
+
+                # Save original file
+                file_ext = uploaded_file.name.split(".")[-1].lower()
+                with tempfile.NamedTemporaryFile(
+                    delete=False, suffix=f".{file_ext}"
+                ) as tmp_file:
+                    tmp_file.write(uploaded_file.getvalue())
+                    original_file_path = tmp_file.name
+
+                st.success("✅ File uploaded successfully!")
+
+                # Check if file is already PDF
+                if file_ext == "pdf":
+                    st.info("📑 File is already in PDF format, no conversion needed.")
+                    input_items['file'] = original_file_path
+
+                # Convert to PDF
+                else:
+                    with st.spinner(f"🔄 Converting {file_ext.upper()} to PDF..."):
+                        try:
+                            converter = PDFConverter()
+
+                            # Check dependencies
+                            deps = converter.check_dependencies()
+                            missing_deps = []
+
+                            if (
+                                file_ext in {"doc", "docx", "ppt", "pptx", "xls", "xlsx"}
+                                and not deps["libreoffice"]
+                            ):
+                                missing_deps.append("LibreOffice")
+
+                            if file_ext in {"txt", "md"} and not deps["reportlab"]:
+                                missing_deps.append("ReportLab")
+
+                            if missing_deps:
+                                st.error(f"❌ Missing dependencies: {', '.join(missing_deps)}")
+                                st.info("💡 Please install the required dependencies:")
+                                if "LibreOffice" in missing_deps:
+                                    st.code(
+                                        "# Install LibreOffice\n"
+                                        "# Windows: Download from https://www.libreoffice.org/\n"
+                                        "# macOS: brew install --cask libreoffice\n"
+                                        "# Ubuntu: sudo apt-get install libreoffice"
+                                    )
+                                if "ReportLab" in missing_deps:
+                                    st.code("pip install reportlab")
+
+                                # Clean up original file
+                                try:
+                                    os.unlink(original_file_path)
+                                except Exception:
+                                    pass
+
+                            # Perform conversion
+                            pdf_path = converter.convert_to_pdf(original_file_path)
+
+                            # Clean up original file
+                            try:
+                                os.unlink(original_file_path)
+                            except Exception:
+                                pass
+
+                            # Display conversion result
+                            pdf_size = Path(pdf_path).stat().st_size
+                            st.success("✅ Successfully converted to PDF!")
+                            st.info(
+                                f"📑 **PDF File:** {Path(pdf_path).name} ({format_file_size(pdf_size)})"
+                            )
+
+                            input_items['file'] = str(pdf_path)
+
+                        except Exception as e:
+                            st.error(f"❌ PDF conversion failed: {str(e)}")
+                            st.warning("💡 You can try:")
+                            st.markdown("- Converting the file to PDF manually")
+                            st.markdown("- Using a different file format")
+                            st.markdown("- Checking if the file is corrupted")
+
+                            # Clean up original file
+                            try:
+                                os.unlink(original_file_path)
+                            except Exception:
+                                pass
+
+            except Exception as e:
+                st.error(f"❌ Failed to process uploaded file: {str(e)}")
+
+    else:
+        url_input = st.text_input(
+            "Enter paper URL",
+            placeholder="https://platform.openai.com/docs/..., https://help.aliyun.com/zh/..., etc.",
+            help="Enter a direct link to a research paper (arXiv, IEEE, ACM, etc.)",
+            key=f"url_input_{task_counter}",
+        )
+
+        if url_input:
+            # Simple URL validation
+            if url_input.startswith(("http://", "https://")):
+                st.success(f"✅ URL entered: {url_input}")
+                input_items['url'] = url_input
+            else:
+                st.warning("⚠️ Please enter a valid URL starting with http:// or https://")
+
+    return input_items
+
 
 def chat_input_component(task_counter: int) -> Optional[str]:
     """
@@ -885,7 +1098,7 @@ The system should be scalable and production-ready, with proper error handling a
     return None
 
 
-def input_method_selector(task_counter: int) -> tuple[Optional[str], Optional[str]]:
+def input_method_selector(task_counter: int) -> tuple[Optional[str | dict[str, Optional[str]]], Optional[str]]:
     """
     Input method selector
 
@@ -916,7 +1129,7 @@ def input_method_selector(task_counter: int) -> tuple[Optional[str], Optional[st
 
     input_method = st.radio(
         "Choose your input method:",
-        ["📁 Upload File", "🌐 Enter URL", "💬 Chat Input"],
+        ["📁 Upload File", "🌐 Enter URL", "💬 Chat Input", "⚙️ Technique Implementation"],
         horizontal=True,
         label_visibility="hidden",
         key=f"input_method_{task_counter}",
@@ -931,10 +1144,16 @@ def input_method_selector(task_counter: int) -> tuple[Optional[str], Optional[st
     elif input_method == "🌐 Enter URL":
         input_source = url_input_component(task_counter)
         input_type = "url" if input_source else None
-    else:  # Chat input
+    elif input_method == "💬 Chat Input":
         input_source = chat_input_component(task_counter)
         input_type = "chat" if input_source else None
+    elif input_method == "⚙️ Technique Implementation":
+        input_source = tech_input_component(task_counter)
+        input_type = "technique" if input_source else None
+    else:
+        raise NotImplementedError
 
+    print(f"Input source: {input_source}, Input type: {input_type}")
     return input_source, input_type
 
 

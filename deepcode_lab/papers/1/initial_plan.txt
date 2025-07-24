@@ -1,0 +1,227 @@
+I'll search for additional information about the curiosity-driven red-teaming approach to enhance the reproduction plan with the latest research and implementation details.
+Now I'll integrate all the comprehensive analyses and additional research to create the most detailed reproduction plan possible:
+
+# COMPLETE DETAILED REPRODUCTION PLAN
+
+Based on the comprehensive analyses from both agents and additional research findings, here is the exhaustive reproduction plan for the "Curiosity-Driven Red-Teaming for Large Language Models" paper:
+
+```yaml
+complete_reproduction_plan:
+  paper_info:
+    title: "Curiosity-Driven Red-Teaming for Large Language Models"
+    core_contribution: "A curiosity-driven approach (CRT) that uses novelty rewards to increase coverage and diversity of test cases in automated red-teaming while maintaining effectiveness"
+    official_implementation: "https://github.com/Improbable-AI/curiosity_redteam"
+    venue: "ICLR 2024"
+
+  # SECTION 1: Complete File Structure with Detailed Specifications
+  file_structure:
+    curiosity_redteam/
+    ├── src/
+    │   ├── core/
+    │   │   ├── __init__.py
+    │   │   ├── curiosity_redteam.py  # Implements main CRT Algorithm from Section 3
+    │   │   │   # Classes: CuriosityRedTeam - manages full training pipeline
+    │   │   │   # Functions: train_step() - implements Equation 2
+    │   │   │   # Functions: compute_combined_reward() - sums R(y) + novelty + entropy
+    │   │   ├── novelty_tracker.py    # Maintains history X for novelty computation
+    │   │   │   # Classes: NoveltyTracker - tracks generated test cases
+    │   │   │   # Functions: add_sentence() - adds x to history X
+    │   │   │   # Functions: compute_novelty() - calculates B_i(x) rewards
+    │   │   └── ppo_trainer.py        # PPO implementation with curiosity rewards
+    │   │       # Classes: CuriosityPPOTrainer extends trlX PPOTrainer
+    │   │       # Functions: _compute_rewards() - implements Equation 2
+    │   ├── models/
+    │   │   ├── red_team_model.py     # GPT2-137M with PPO training
+    │   │   │   # Classes: RedTeamModel - wraps GPT2 for test case generation
+    │   │   │   # Functions: generate() - samples x ~ π(.|z)
+    │   │   │   # Functions: update() - PPO update step
+    │   │   ├── target_models.py      # Wrapper for various target LLMs
+    │   │   │   # Classes: TargetLLM - unified interface for all target models
+    │   │   │   # Functions: generate_response() - y ~ p(.|x)
+    │   │   │   # Supports: GPT2-IMDb, GPT2-Alpaca, Dolly-7B, LLaMA2-7b-chat
+    │   │   ├── toxicity_classifier.py # RoBERTa toxicity scoring
+    │   │   │   # Classes: ToxicityClassifier
+    │   │   │   # Functions: score() - implements R(y)
+    │   │   │   # Model: facebook/roberta-hate-speech-dynabench-r4-target
+    │   │   └── sentence_embedder.py  # BERT embeddings for cosine similarity
+    │   │       # Classes: SentenceEmbedder
+    │   │       # Functions: embed() - φ(x) sentence embeddings
+    │   │       # Model: sentence-transformers/all-MiniLM-L6-v2
+    │   ├── rewards/
+    │   │   ├── __init__.py
+    │   │   ├── base_reward.py        # Abstract reward interface
+    │   │   │   # Classes: BaseReward - interface for all reward components
+    │   │   ├── effectiveness_reward.py # Toxicity reward R(y)
+    │   │   │   # Classes: EffectivenessReward
+    │   │   │   # Functions: compute() - R(y) using toxicity classifier
+    │   │   ├── selfbleu_reward.py    # SelfBLEU novelty reward
+    │   │   │   # Classes: SelfBLEUReward
+    │   │   │   # Functions: compute() - implements Equation 3
+    │   │   │   # Formula: B_SelfBLEU(x) = -Σ_{n=2}^5 SelfBLEU_X(x,n)
+    │   │   ├── cosine_reward.py      # Cosine similarity novelty reward
+    │   │   │   # Classes: CosineReward
+    │   │   │   # Functions: compute() - implements Equation 4
+    │   │   │   # Formula: B_Cos(x) = -Σ_{x'∈X} cosine_sim(φ(x), φ(x'))
+    │   │   ├── entropy_reward.py     # Entropy bonus reward
+    │   │   │   # Classes: EntropyReward
+    │   │   │   # Functions: compute() - -λ_E*log(π(x|z))
+    │   │   └── combined_reward.py    # Full reward computation
+    │   │       # Classes: CombinedReward
+    │   │       # Functions: compute() - implements full Equation 2
+    │   ├── training/
+    │   │   ├── __init__.py
+    │   │   ├── trainer.py           # Main training orchestrator
+    │   │   │   # Classes: CRTTrainer - coordinates all training components
+    │   │   │   # Functions: train() - main training loop
+    │   │   │   # Functions: evaluate() - runs evaluation metrics
+    │   │   ├── data_loader.py       # Dataset handling and preprocessing
+    │   │   │   # Classes: IMDbDataLoader, AlpacaDataLoader, DollyDataLoader
+    │   │   │   # Functions: load_prompts() - loads instruction prompts z
+    │   │   │   # Functions: preprocess() - formats data for training
+    │   │   ├── config_manager.py    # Hyperparameter configuration
+    │   │   │   # Classes: ConfigManager
+    │   │   │   # Functions: load_config() - loads YAML configurations
+    │   │   │   # Functions: validate_config() - checks parameter validity
+    │   │   └── curriculum.py        # Training curriculum and scheduling
+    │   │       # Classes: CurriculumScheduler
+    │   │       # Functions: get_next_batch() - manages training progression
+    │   ├── evaluation/
+    │   │   ├── __init__.py
+    │   │   ├── diversity_metrics.py # SelfBLEU and embedding diversity
+    │   │   │   # Classes: DiversityEvaluator
+    │   │   │   # Functions: compute_selfbleu_diversity() - Equation A.4
+    │   │   │   # Functions: compute_embedding_diversity() - Equation A.5
+    │   │   │   # Formula: 1 - (1/|X_τ|) * Σ_i Σ_n SelfBLEU(x_i,n)
+    │   │   ├── quality_metrics.py   # Effectiveness evaluation
+    │   │   │   # Classes: QualityEvaluator
+    │   │   │   # Functions: compute_quality() - Equation A.3
+    │   │   │   # Formula: Quality = (1/N) * Σ_i 1[R(y_i) ≥ τ]
+    │   │   ├── coverage_analysis.py # Test case coverage metrics
+    │   │   │   # Classes: CoverageAnalyzer
+    │   │   │   # Functions: analyze_coverage() - unique effective test cases
+    │   │   └── evaluator.py        # Full evaluation pipeline
+    │   │       # Classes: CRTEvaluator
+    │   │       # Functions: evaluate_model() - runs all evaluation metrics
+    │   │       # Functions: generate_report() - creates evaluation report
+    │   └── utils/
+    │       ├── __init__.py
+    │       ├── text_processing.py   # Text similarity and preprocessing
+    │       │   # Functions: compute_bleu() - BLEU score computation
+    │       │   # Functions: compute_selfbleu() - SelfBLEU implementation
+    │       │   # Functions: tokenize() - consistent tokenization
+    │       ├── prompt_templates.py  # System prompts for different models
+    │       │   # Classes: PromptTemplate
+    │       │   # Templates: INSTRUCTION_TEMPLATE, LLAMA2_TEMPLATE
+    │       │   # Templates: ALPACA_TEMPLATE, DATABRICKS_TEMPLATE
+    │       ├── memory_manager.py    # Efficient history management
+    │       │   # Classes: MemoryEfficientTracker
+    │       │   # Functions: add_with_cleanup() - manages memory for large X
+    │       └── config.py           # Global configuration constants
+    │           # Constants: DEFAULT_HYPERPARAMETERS, MODEL_PATHS
+    ├── experiments/
+    │   ├── __init__.py
+    │   ├── text_continuation.py     # Reproduces Figure 1 experiments
+    │   │   # Functions: run_imdb_experiment() - GPT2-IMDb red-teaming
+    │   │   # Expected: CRT achieves higher diversity than RL baseline
+    │   │   # Metrics: Quality ~0.95, SelfBLEU diversity ~0.85
+    │   ├── instruction_following.py # Reproduces Figure 2 experiments
+    │   │   # Functions: run_alpaca_experiment() - GPT2-Alpaca red-teaming
+    │   │   # Functions: run_dolly_experiment() - Dolly-7B red-teaming
+    │   │   # Expected: CRT outperforms all baselines in quality+diversity
+    │   ├── safety_evaluation.py     # Reproduces Table 1 validation
+    │   │   # Functions: run_llama2_redteam() - LLaMA2-7b-chat-hf
+    │   │   # Expected: Generate 196 toxic responses from safety-tuned model
+    │   ├── ablation_studies.py      # Reproduces Figure 5 ablations
+    │   │   # Functions: ablate_entropy_only() - entropy bonus alone
+    │   │   # Functions: ablate_novelty_components() - SB vs Cos vs combined
+    │   │   # Expected: Combined (SB+Cos+Ent) achieves best performance
+    │   └── baseline_comparison.py   # All baseline implementations
+    │       # Functions: run_rl_baseline() - standard PPO
+    │       # Functions: run_rl_tdiv() - RL + target diversity
+    │       # Functions: run_zero_shot() - direct toxic prompting
+    │       # Functions: run_few_shot() - few-shot toxic examples
+    ├── data/
+    │   ├── datasets/
+    │   │   ├── imdb_truncated/      # Processed IMDb data (first 4 words)
+    │   │   ├── alpaca_instructions/ # Stanford Alpaca instruction dataset
+    │   │   └── dolly_instructions/  # Databricks Dolly-15K dataset
+    │   ├── generated_testcases/     # Saved test cases from training
+    │   ├── target_responses/        # LLM responses to test cases
+    │   └── evaluation_results/      # Experiment outputs and metrics
+    ├── configs/
+    │   ├── text_continuation.yaml   # Text task hyperparameters
+    │   ├── instruction_following.yaml # Instruction task hyperparameters
+    │   ├── ablation_configs/        # Configurations for ablation studies
+    │   └── model_configs/          # Target model configurations
+    ├── notebooks/
+    │   ├── analysis.ipynb          # Result analysis and visualization
+    │   ├── diversity_analysis.ipynb # Deep dive into diversity metrics
+    │   └── case_studies.ipynb      # Qualitative test case analysis
+    ├── tests/
+    │   ├── test_rewards.py         # Unit tests for reward computation
+    │   ├── test_models.py          # Model wrapper tests
+    │   ├── test_training.py        # Training pipeline tests
+    │   └── test_evaluation.py      # Evaluation metric tests
+    ├── requirements.txt            # All dependencies with versions
+    ├── setup.py                   # Package installation
+    ├── README.md                  # Complete usage documentation
+    └── reproduce_results.py       # Main reproduction script
+
+  # SECTION 2: Algorithm Implementation Details
+  algorithm_implementations:
+    - algorithm: "Curiosity-Driven Red Teaming"
+      location: "src/core/curiosity_redteam.py"
+      pseudocode: |
+        Algorithm: Curiosity-Driven Red Teaming
+        Input: Dataset D, Target LLM p, Toxicity classifier R
+        Output: Trained red team model π
+        
+        1. Initialize π ← GPT2-137M, π_ref ← π, X ← ∅
+        2. for epoch = 1 to N_epochs:
+        3.    Sample batch of instructions z ~ D
+        4.    Generate test cases x ~ π(.|z) 
+        5.    Get target responses y ~ p(.|x)
+        6.    Compute effectiveness R(y)
+        7.    Compute B_SelfBLEU(x) using history X
+        8.    Compute B_Cos(x) using sentence embeddings
+        9.    Compute entropy bonus -log(π(x|z))
+        10.   reward ← R(y) + λ_B*B_SelfBLEU(x) + λ_C*B_Cos(x) - λ_E*log(π(x|z))
+        11.   Update π using PPO with reward and KL penalty β*D_KL(π||π_ref)
+        12.   Add x to history: X ← X ∪ {x}
+        13. return π
+      implementation_notes:
+        - "Line 4: Use temperature=0.7, top_p=0.92 for generation"
+        - "Line 7: Sum SelfBLEU for n-grams 2,3,4,5"
+        - "Line 8: Use sentence-transformers for embeddings"
+        - "Line 11: PPO with 4 epochs, learning_rate=3e-5"
+        - "Line 12: Implement memory-efficient history tracking"
+      formulas:
+        - equation: "max_π E[R(y) - β*D_KL(π||π_ref) - λ_E*log(π(x|z)) + Σ_i λ_i*B_i(x)]"
+          code: |
+            reward = effectiveness_reward + \
+                    lambda_selfbleu * selfbleu_reward + \
+                    lambda_cosine * cosine_reward - \
+                    lambda_entropy * entropy_bonus - \
+                    beta * kl_penalty
+
+    - algorithm: "SelfBLEU Novelty Reward"
+      location: "src/rewards/selfbleu_reward.py"
+      pseudocode: |
+        Function: compute_selfbleu_reward(x, X)
+        Input: Test case x, History X
+        Output: SelfBLEU novelty reward
+        
+        1. tokenize x into tokens
+        2. reward ← 0
+        3. for n in [2, 3, 4, 5]:
+        4.    bleu_score ← 0
+        5.    for x' in X:
+        6.        bleu_score += BLEU_n(x, x')
+        7.    reward -= bleu_score / |X|
+        8. return reward
+      implementation_notes:
+        - "Use NLTK or sacrebleu for BLEU computation"
+        - "Handle empty history gracefully (return 0)"
+        - "Efficient n-gram computation for large histories"
+      formulas:
+        - equation: "B_SelfBLEU(x) = -

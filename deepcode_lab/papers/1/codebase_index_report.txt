@@ -1,0 +1,1 @@
+{'status': 'skipped', 'reason': 'fast_mode_enabled', 'message': 'Codebase intelligence orchestration skipped for optimized processing'}
