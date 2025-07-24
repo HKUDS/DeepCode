@@ -65,5 +65,5 @@ run_indexer_with_filtering.py
 memory-bank/
 
 # config files
-*.mcp_agent.config.yaml
-*.mcp_agent.secrets.yaml
+mcp_agent.config.yaml
+mcp_agent.secrets.yaml
