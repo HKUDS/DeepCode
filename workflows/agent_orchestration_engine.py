@@ -1180,6 +1180,172 @@ async def execute_multi_agent_research_pipeline(
     except Exception as e:
         print(f"Error in execute_multi_agent_research_pipeline: {e}")
         raise e
+    
+async def execute_technique_based_planning_pipeline(
+    input_source: dict[str, Optional[str]],
+    logger,
+    progress_callback: Optional[Callable] = None,
+    enable_indexing: bool = True,
+) -> str:
+    """
+    Execute the complete intelligent multi-agent orchestration pipeline for implementing technique items.
+
+    This workflow is quite similar to the execute_multi_agent_research_pipeline, but with core focus on dealing with complex technique documnets.
+
+    Args:
+        input_source: technique input source (file path, URL, or preprocessed analysis), and user requirement
+        logger: Logger instance for comprehensive workflow intelligence tracking
+        progress_callback: Progress callback function for real-time monitoring
+        enable_indexing: Whether to enable advanced intelligence analysis (default: True)
+
+    Returns:
+        str: The comprehensive pipeline execution result with status and outcomes
+    """
+    try:
+        # Phase 0: Workspace Setup
+        if progress_callback:
+            progress_callback(5, "🔄 Setting up workspace for file processing...")
+
+        print("🚀 Initializing intelligent multi-agent research orchestration system")
+
+        # Setup local workspace directory
+        workspace_dir = os.path.join(os.getcwd(), "deepcode_lab")
+        os.makedirs(workspace_dir, exist_ok=True)
+
+        print("📁 Working environment: local")
+        print(f"📂 Workspace directory: {workspace_dir}")
+        print("✅ Workspace status: ready")
+
+        # Log intelligence functionality status
+        if enable_indexing:
+            print("🧠 Advanced intelligence analysis enabled - comprehensive workflow")
+        else:
+            print("⚡ Optimized mode - advanced intelligence analysis disabled")
+
+        # Phase 1: Input Processing and Validation
+        input_source = await _process_input_source(input_source, logger)
+        user_query= input_source.get("user_query", None)
+        if not user_query:
+            raise ValueError("User query is required for technique-based planning")
+        input_source = input_source['file'] if input_source['file'] is not None else input_source['url']
+
+        # Phase 2: Research Analysis and Resource Processing (if needed)
+        if isinstance(input_source, str) and (
+            input_source.endswith((".pdf", ".docx", ".txt", ".html", ".md"))
+            or input_source.startswith(("http", "file://"))
+        ):
+            (
+                analysis_result,
+                download_result,
+            ) = await orchestrate_research_analysis_agent(
+                input_source, logger, progress_callback
+            )
+        else:
+            download_result = input_source  # Use input directly if already processed
+
+        # Phase 3: Workspace Infrastructure Synthesis
+        if progress_callback:
+            progress_callback(
+                40, "🏗️ Synthesizing intelligent workspace infrastructure..."
+            )
+
+        dir_info = await synthesize_workspace_infrastructure_agent(
+            download_result, logger, workspace_dir
+        )
+        await asyncio.sleep(30)
+
+        # Phase 4: Code Planning Orchestration
+        await orchestrate_code_planning_agent(dir_info, logger, progress_callback)
+
+        # Phase 5: Reference Intelligence (only when indexing is enabled)
+        if enable_indexing:
+            reference_result = await orchestrate_reference_intelligence_agent(
+                dir_info, logger, progress_callback
+            )
+        else:
+            print("🔶 Skipping reference intelligence analysis (fast mode enabled)")
+            # Create empty reference analysis result to maintain file structure consistency
+            reference_result = "Reference intelligence analysis skipped - fast mode enabled for optimized processing"
+            with open(dir_info["reference_path"], "w", encoding="utf-8") as f:
+                f.write(reference_result)
+
+        # Phase 6: Repository Acquisition Automation (optional)
+        if enable_indexing:
+            await automate_repository_acquisition_agent(
+                reference_result, dir_info, logger, progress_callback
+            )
+        else:
+            print("🔶 Skipping automated repository acquisition (fast mode enabled)")
+            # Create empty download result file to maintain file structure consistency
+            with open(dir_info["download_path"], "w", encoding="utf-8") as f:
+                f.write(
+                    "Automated repository acquisition skipped - fast mode enabled for optimized processing"
+                )
+
+        # Phase 7: Codebase Intelligence Orchestration (optional)
+        if enable_indexing:
+            index_result = await orchestrate_codebase_intelligence_agent(
+                dir_info, logger, progress_callback
+            )
+        else:
+            print("🔶 Skipping codebase intelligence orchestration (fast mode enabled)")
+            # Create a skipped indexing result
+            index_result = {
+                "status": "skipped",
+                "reason": "fast_mode_enabled",
+                "message": "Codebase intelligence orchestration skipped for optimized processing",
+            }
+            with open(dir_info["index_report_path"], "w", encoding="utf-8") as f:
+                f.write(str(index_result))
+
+        # Phase 8: Code Implementation Synthesis
+        implementation_result = await synthesize_code_implementation_agent(
+            dir_info, logger, progress_callback, enable_indexing
+        )
+
+        # Final Status Report
+        if enable_indexing:
+            pipeline_summary = (
+                f"Multi-agent research pipeline completed for {dir_info['paper_dir']}"
+            )
+        else:
+            pipeline_summary = f"Multi-agent research pipeline completed (fast mode) for {dir_info['paper_dir']}"
+
+        # Add indexing status to summary
+        if not enable_indexing:
+            pipeline_summary += (
+                "\n⚡ Fast mode: GitHub download and codebase indexing skipped"
+            )
+        elif index_result["status"] == "skipped":
+            pipeline_summary += f"\n🔶 Codebase indexing: {index_result['message']}"
+        elif index_result["status"] == "error":
+            pipeline_summary += (
+                f"\n❌ Codebase indexing failed: {index_result['message']}"
+            )
+        elif index_result["status"] == "success":
+            pipeline_summary += "\n✅ Codebase indexing completed successfully"
+
+        # Add implementation status to summary
+        if implementation_result["status"] == "success":
+            pipeline_summary += "\n🎉 Code implementation completed successfully!"
+            pipeline_summary += (
+                f"\n📁 Code generated in: {implementation_result['code_directory']}"
+            )
+            return pipeline_summary
+        elif implementation_result["status"] == "warning":
+            pipeline_summary += (
+                f"\n⚠️ Code implementation: {implementation_result['message']}"
+            )
+            return pipeline_summary
+        else:
+            pipeline_summary += (
+                f"\n❌ Code implementation failed: {implementation_result['message']}"
+            )
+            return pipeline_summary
+
+    except Exception as e:
+        print(f"Error in execute_multi_agent_research_pipeline: {e}")
+        raise e
 
 
 # Backward compatibility alias (deprecated)

@@ -20,18 +20,18 @@ mcp:
       # Use `npm i -g @modelcontextprotocol/server-brave-search` to install the server globally.
       # Use `npm -g root` to find the global node_modules path.`
       command: "node"
-      args: ["C:/Users/12344/AppData/Roaming/npm/node_modules/@modelcontextprotocol/server-brave-search/dist/index.js"]
+      args: [""]
       # command: "npx"
       # args: ["-y", "@modelcontextprotocol/server-brave-search"]
       env:
         # You can also place your BRAVE_API_KEY in the fastagent.secrets.yaml file.
-        BRAVE_API_KEY: "BSAjDNS-bvNz-RpHQ_poMwJGgF40Vnm"
+        BRAVE_API_KEY: ""
     filesystem:
       # On windows update the command and arguments to use `node` and the absolute path to the server.
       # Use `npm i -g @modelcontextprotocol/server-filesystem` to install the server globally.
       # Use `npm -g root` to find the global node_modules path.`
       command: "node"
-      args: ["C:/Users/12344/AppData/Roaming/npm/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js", "."]
+      args: ["", "."]
       # command: "npx"
       # args: ["-y", "@modelcontextprotocol/server-filesystem"]
     fetch:

@@ -13,6 +13,8 @@ from .agent_orchestration_engine import (
     paper_reference_analyzer,
     execute_multi_agent_research_pipeline,
     paper_code_preparation,  # Deprecated, for backward compatibility
+    execute_chat_based_planning_pipeline,
+    execute_technique_based_planning_pipeline,
 )
 
 from .code_implementation_workflow import CodeImplementationWorkflow
@@ -28,4 +30,6 @@ __all__ = [
     "paper_code_preparation",  # Deprecated, for backward compatibility
     # Code implementation workflows
     "CodeImplementationWorkflow",
+    "execute_chat_based_planning_pipeline",
+    "execute_technique_based_planning_pipeline",
 ]

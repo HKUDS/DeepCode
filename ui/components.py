@@ -1153,7 +1153,6 @@ def input_method_selector(task_counter: int) -> tuple[Optional[str | dict[str, O
     else:
         raise NotImplementedError
 
-    print(f"Input source: {input_source}, Input type: {input_type}")
     return input_source, input_type
 
 

@@ -22,6 +22,7 @@ from mcp_agent.app import MCPApp
 from workflows.agent_orchestration_engine import (
     execute_multi_agent_research_pipeline,
     execute_chat_based_planning_pipeline,
+    execute_technique_based_planning_pipeline,
 )
 
 
@@ -83,7 +84,7 @@ except Exception:
 
 
 async def process_input_async(
-    input_source: str,
+    input_source: str | dict,
     input_type: str,
     enable_indexing: bool = True,
     progress_callback=None,
@@ -123,6 +124,14 @@ async def process_input_async(
                 # Use chat-based planning pipeline for user requirements
                 repo_result = await execute_chat_based_planning_pipeline(
                     input_source,  # User's coding requirements
+                    logger,
+                    progress_callback,
+                    enable_indexing=enable_indexing,  # Pass indexing control parameter
+                )
+            elif input_type == "technique":
+                # Use technique-based research pipeline for techniques
+                repo_result = await execute_technique_based_planning_pipeline(
+                    input_source,
                     logger,
                     progress_callback,
                     enable_indexing=enable_indexing,  # Pass indexing control parameter
@@ -572,7 +581,7 @@ def update_session_state_with_result(result: Dict[str, Any], input_type: str):
         st.session_state.results = st.session_state.results[-50:]
 
 
-def cleanup_temp_file(input_source: str, input_type: str):
+def cleanup_temp_file(input_source: str | dict, input_type: str):
     """
     Cleanup temporary file
 
@@ -586,8 +595,14 @@ def cleanup_temp_file(input_source: str, input_type: str):
         except Exception:
             pass
 
+    if input_type == "technique" and input_source['file'] is not None and os.path.exists(input_source['file']):
+        try:
+            os.unlink(input_source)
+        except Exception:
+            pass
 
-def handle_start_processing_button(input_source: str, input_type: str):
+
+def handle_start_processing_button(input_source: str | dict, input_type: str):
     """
     Handle start processing button click
 
