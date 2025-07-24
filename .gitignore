@@ -25,6 +25,8 @@ site/
 *.logfire
 *.coverage/
 log/
+logs/
+deepcode_lab/
 
 # Caches
 .cache/
