@@ -222,7 +222,8 @@ class CodebaseIndexWorkflow:
                 for line in preview_lines:
                     self.logger.info(f"   {line}")
                 if len(file_tree.split("\n")) > 8:
-                    self.logger.info(f"   ... 还有 {len(file_tree.split('\n')) - 8} 行")
+                    remaining_lines = len(file_tree.split("\n")) - 8
+                    self.logger.info(f"   ... 还有 {remaining_lines} 行")
                 return file_tree
             else:
                 self.logger.warning("⚠️ 无法从初始计划中提取文件树")
