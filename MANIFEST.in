@@ -1,0 +1,19 @@
+include README.md
+include LICENSE
+include requirements.txt
+include __init__.py
+include *.png
+include *.yaml
+recursive-include config *.yaml
+recursive-include prompts *
+recursive-include schema *
+recursive-include ui *.py
+recursive-include cli *.py
+recursive-include utils *.py
+recursive-include tools *.py
+recursive-include workflows *.py
+global-exclude *.pyc
+global-exclude .git*
+global-exclude .history*
+global-exclude .ruff_cache*
+global-exclude __pycache__*

@@ -1,0 +1,12 @@
+aiofiles>=0.8.0
+aiohttp>=3.8.0
+anthropic
+asyncio-mqtt
+docling
+mcp-agent
+mcp-server-git
+nest_asyncio
+pathlib2
+PyPDF2>=2.0.0
+reportlab>=3.5.0
+streamlit
