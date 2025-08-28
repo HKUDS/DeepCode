@@ -6,7 +6,7 @@ Contains all reusable UI components
 
 import streamlit as st
 import sys
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime
 import json
 
@@ -791,9 +791,238 @@ def url_input_component(task_counter: int) -> Optional[str]:
     return None
 
 
+def requirement_analysis_mode_selector(task_counter: int) -> str:
+    """
+    Requirement analysis mode selector
+    
+    Args:
+        task_counter: Task counter
+        
+    Returns:
+        Selected mode ("direct" or "guided")
+    """
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                border-radius: 10px;
+                padding: 15px;
+                margin-bottom: 15px;
+                border-left: 4px solid #00ff88;">
+        <h4 style="color: white; margin: 0 0 10px 0; font-size: 1.1rem;">
+            🎯 Choose Your Input Mode
+        </h4>
+        <p style="color: #e0f7fa; margin: 0; font-size: 0.9rem;">
+            Select how you'd like to provide your requirements
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    mode = st.radio(
+        "Input mode:",
+        ["🚀 Direct Input", "🧠 Guided Analysis"],
+        index=0 if st.session_state.get("requirement_analysis_mode", "direct") == "direct" else 1,
+        horizontal=True,
+        help="Direct: Enter requirements directly. Guided: AI asks questions to help you clarify needs.",
+        key=f"req_mode_{task_counter}"
+    )
+    
+    return "direct" if mode.startswith("🚀") else "guided"
+
+
+def requirement_questions_component(questions: List[Dict], task_counter: int) -> Dict[str, str]:
+    """
+    Requirement questions display and answer collection component
+    
+    Args:
+        questions: Question list
+        task_counter: Task counter
+        
+    Returns:
+        User answer dictionary
+    """
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 50%, #fecfef 100%);
+                border-radius: 10px;
+                padding: 15px;
+                margin-bottom: 20px;
+                border-left: 4px solid #ff6b6b;">
+        <h4 style="color: #2d3748; margin: 0 0 10px 0; font-size: 1.1rem;">
+            📝 Help Us Understand Your Needs Better
+        </h4>
+        <p style="color: #4a5568; margin: 0; font-size: 0.9rem;">
+            Please answer the following questions to help us generate better code. You can skip any question.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    answers = {}
+    
+    for i, question in enumerate(questions):
+        with st.expander(f"📋 {question.get('category', 'Question')} - {question.get('importance', 'Medium')} Priority", expanded=i < 3):
+            st.markdown(f"**{question['question']}**")
+            
+            if question.get('hint'):
+                st.info(f"💡 {question['hint']}")
+            
+            answer = st.text_area(
+                "Your answer:",
+                placeholder="Enter your answer here, or leave blank to skip...",
+                height=80,
+                key=f"answer_{i}_{task_counter}"
+            )
+            
+            if answer and answer.strip():
+                answers[str(i)] = answer.strip()
+    
+    st.markdown("---")
+    st.info(f"📊 You've answered {len(answers)} out of {len(questions)} questions.")
+    
+    return answers
+
+
+def requirement_summary_component(summary: str, task_counter: int) -> bool:
+    """
+    Requirement summary display and confirmation component
+    
+    Args:
+        summary: Requirement summary document
+        task_counter: Task counter
+        
+    Returns:
+        Whether user confirms requirements
+    """
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+                border-radius: 10px;
+                padding: 15px;
+                margin-bottom: 20px;
+                border-left: 4px solid #38b2ac;">
+        <h4 style="color: #2d3748; margin: 0 0 10px 0; font-size: 1.1rem;">
+            📋 Detailed Requirements Summary
+        </h4>
+        <p style="color: #4a5568; margin: 0; font-size: 0.9rem;">
+            Based on your input, here's the detailed requirements document we've generated.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Display requirement summary
+    with st.expander("📖 View Detailed Requirements", expanded=True):
+        st.markdown(summary)
+    
+    # Confirmation options
+    st.markdown("### 🎯 Next Steps")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("✅ Looks Good, Proceed", type="primary", use_container_width=True, key=f"confirm_{task_counter}"):
+            # Mark requirements as confirmed, prepare to enter code generation
+            st.session_state.requirements_confirmed = True
+            return True
+    
+    with col2:
+        if st.button("✏️ Edit Requirements", type="secondary", use_container_width=True, key=f"edit_{task_counter}"):
+            # Enter editing mode
+            st.session_state.requirement_analysis_step = "editing"
+            st.session_state.edit_feedback = ""
+            st.rerun()
+    
+    with col3:
+        if st.button("🔄 Start Over", use_container_width=True, key=f"restart_{task_counter}"):
+            # Complete reset
+            st.session_state.requirement_analysis_mode = "direct"
+            st.session_state.requirement_analysis_step = "input"
+            st.session_state.generated_questions = []
+            st.session_state.user_answers = {}
+            st.session_state.detailed_requirements = ""
+            st.rerun()
+    
+    return False
+
+
+def requirement_editing_component(current_requirements: str, task_counter: int) -> bool:
+    """
+    Interactive requirement editing component
+    
+    Args:
+        current_requirements: Current requirement document content
+        task_counter: Task counter
+        
+    Returns:
+        Whether editing is completed
+    """
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #ffeaa7 0%, #fab1a0 100%);
+                border-radius: 10px;
+                padding: 15px;
+                margin-bottom: 20px;
+                border-left: 4px solid #e17055;">
+        <h4 style="color: #2d3748; margin: 0 0 10px 0; font-size: 1.1rem;">
+            ✏️ Edit Requirements Document
+        </h4>
+        <p style="color: #4a5568; margin: 0; font-size: 0.9rem;">
+            Review the current requirements and tell us how you'd like to modify them.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Display current requirements
+    st.markdown("### 📋 Current Requirements")
+    with st.expander("📖 View Current Requirements Document", expanded=True):
+        st.markdown(current_requirements)
+    
+    # Ask for modification feedback
+    st.markdown("### 💭 How would you like to modify the requirements?")
+    st.markdown("Please describe your changes, additions, or corrections:")
+    
+    edit_feedback = st.text_area(
+        "Your modification request:",
+        value=st.session_state.edit_feedback,
+        placeholder="For example:\n- Add user authentication feature\n- Change database from MySQL to PostgreSQL",
+        height=120,
+        key=f"edit_feedback_{task_counter}"
+    )
+    
+    # Update session state
+    st.session_state.edit_feedback = edit_feedback
+    
+    # Action buttons
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("🔄 Apply Changes", type="primary", use_container_width=True, key=f"apply_edit_{task_counter}"):
+            if edit_feedback.strip():
+                # Start requirement modification process
+                st.session_state.requirements_editing = True
+                st.info("🔄 Processing your modification request...")
+                return True
+            else:
+                st.warning("Please provide your modification request first.")
+    
+    with col2:
+        if st.button("↩️ Back to Summary", type="secondary", use_container_width=True, key=f"back_summary_{task_counter}"):
+            # Go back to summary view
+            st.session_state.requirement_analysis_step = "summary"
+            st.session_state.edit_feedback = ""
+            st.rerun()
+    
+    with col3:
+        if st.button("🔄 Start Over", use_container_width=True, key=f"restart_edit_{task_counter}"):
+            # Complete reset
+            st.session_state.requirement_analysis_mode = "direct"
+            st.session_state.requirement_analysis_step = "input"
+            st.session_state.generated_questions = []
+            st.session_state.user_answers = {}
+            st.session_state.detailed_requirements = ""
+            st.session_state.edit_feedback = ""
+            st.rerun()
+    
+    return False
+
+
 def chat_input_component(task_counter: int) -> Optional[str]:
     """
-    Chat input component for coding requirements
+    Enhanced chat input component with requirement analysis support
 
     Args:
         task_counter: Task counter
@@ -801,6 +1030,20 @@ def chat_input_component(task_counter: int) -> Optional[str]:
     Returns:
         User coding requirements or None
     """
+    # Select input mode
+    selected_mode = requirement_analysis_mode_selector(task_counter)
+    
+    # Update requirement analysis mode
+    st.session_state.requirement_analysis_mode = selected_mode
+    
+    if selected_mode == "direct":
+        return _direct_input_component(task_counter)
+    else:
+        return _guided_analysis_component(task_counter)
+
+
+def _direct_input_component(task_counter: int) -> Optional[str]:
+    """Direct input mode component"""
     st.markdown(
         """
     <div style="background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
@@ -809,10 +1052,10 @@ def chat_input_component(task_counter: int) -> Optional[str]:
                 margin-bottom: 20px;
                 border-left: 4px solid #4dd0e1;">
         <h4 style="color: white; margin: 0 0 10px 0; font-size: 1.1rem;">
-            💬 Describe Your Coding Requirements
+            🚀 Direct Input Mode
         </h4>
         <p style="color: #e0f7fa; margin: 0; font-size: 0.9rem;">
-            Tell us what you want to build. Our AI will analyze your requirements and generate a comprehensive implementation plan.
+            Describe your coding requirements directly. Our AI will analyze and generate a comprehensive implementation plan.
         </p>
     </div>
     """,
@@ -852,7 +1095,7 @@ def chat_input_component(task_counter: int) -> Optional[str]:
 The system should be scalable and production-ready, with proper error handling and documentation.""",
         height=200,
         help="Describe what you want to build, including functionality, technologies, and any specific requirements",
-        key=f"chat_input_{task_counter}",
+        key=f"direct_input_{task_counter}",
     )
 
     if user_input and len(user_input.strip()) > 20:  # Minimum length check
@@ -871,7 +1114,7 @@ The system should be scalable and production-ready, with proper error handling a
                 user_input,
                 height=100,
                 disabled=True,
-                key=f"preview_{task_counter}",
+                key=f"direct_preview_{task_counter}",
             )
 
         return user_input.strip()
@@ -882,6 +1125,171 @@ The system should be scalable and production-ready, with proper error handling a
         )
         return None
 
+    return None
+
+
+def _guided_analysis_component(task_counter: int) -> Optional[str]:
+    """Guided analysis mode component"""
+    
+    # Check if requirements are confirmed, if confirmed return detailed requirements directly
+    if st.session_state.get("requirements_confirmed", False):
+        detailed_requirements = st.session_state.get("detailed_requirements", "")
+        if detailed_requirements:
+            # Clear confirmation flag to avoid duplicate processing
+            st.session_state.requirements_confirmed = False
+            st.success("🎉 Requirement analysis completed! Preparing code generation...")
+            return detailed_requirements
+    
+    st.markdown(
+        """
+    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                border-radius: 10px;
+                padding: 15px;
+                margin-bottom: 20px;
+                border-left: 4px solid #00ff88;">
+        <h4 style="color: white; margin: 0 0 10px 0; font-size: 1.1rem;">
+            🧠 Guided Analysis Mode
+        </h4>
+        <p style="color: #e0f7fa; margin: 0; font-size: 0.9rem;">
+            Let our AI guide you through a series of questions to better understand your requirements.
+        </p>
+    </div>
+    """,
+        unsafe_allow_html=True,
+    )
+    
+    # Check current step
+    current_step = st.session_state.get("requirement_analysis_step", "input")
+    
+    if current_step == "input":
+        return _guided_input_step(task_counter)
+    elif current_step == "questions":
+        return _guided_questions_step(task_counter)
+    elif current_step == "summary":
+        return _guided_summary_step(task_counter)
+    elif current_step == "editing":
+        return _guided_editing_step(task_counter)
+    else:
+        # Reset to initial state
+        st.session_state.requirement_analysis_step = "input"
+        st.rerun()
+
+
+def _guided_input_step(task_counter: int) -> Optional[str]:
+    """Initial input step for guided mode"""
+    st.markdown("### 📝 Step 1: Tell us your basic idea")
+    
+    user_input = st.text_area(
+        "What would you like to build? (Brief description is fine)",
+        placeholder="Example: A web app for sentiment analysis of social media posts",
+        height=120,
+        help="Don't worry about details - we'll ask specific questions next!",
+        key=f"guided_input_{task_counter}",
+    )
+    
+    if user_input and len(user_input.strip()) > 10:
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            st.info(f"📝 Initial idea captured: {len(user_input.split())} words")
+        
+        with col2:
+            if st.button("🚀 Generate Questions", type="primary", use_container_width=True):
+                # Save initial input and enter question generation step
+                st.session_state.initial_requirement = user_input.strip()
+                st.session_state.requirement_analysis_step = "questions"
+                st.rerun()
+    
+    elif user_input and len(user_input.strip()) <= 10:
+        st.warning("⚠️ Please provide at least a brief description (more than 10 characters)")
+    
+    return None
+
+
+def _guided_questions_step(task_counter: int) -> Optional[str]:
+    """Question answering step for guided mode"""
+    st.markdown("### 🤔 Step 2: Answer questions to refine your requirements")
+    
+    # Display initial requirements
+    with st.expander("📋 Your Initial Idea", expanded=False):
+        st.write(st.session_state.get("initial_requirement", ""))
+    
+    # Check if questions have been generated
+    if not st.session_state.get("generated_questions"):
+        st.info("🔄 Generating personalized questions for your project...")
+        
+        # Async call needed here, but we show placeholder in UI first
+        if st.button("🎯 Generate Questions Now", type="primary"):
+            st.session_state.questions_generating = True
+            st.rerun()
+        return None
+    
+    # Display questions and collect answers
+    questions = st.session_state.generated_questions
+    answers = requirement_questions_component(questions, task_counter)
+    st.session_state.user_answers = answers
+    
+    # Continue button
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        if st.button("📋 Generate Detailed Requirements", type="primary", use_container_width=True):
+            st.session_state.requirement_analysis_step = "summary"
+            st.rerun()
+    
+    with col1:
+        if st.button("⬅️ Back", use_container_width=True):
+            st.session_state.requirement_analysis_step = "input"
+            st.rerun()
+    
+    return None
+
+
+def _guided_summary_step(task_counter: int) -> Optional[str]:
+    """Requirement summary step for guided mode"""
+    st.markdown("### 📋 Step 3: Review and confirm your detailed requirements")
+    
+    # Check if detailed requirements have been generated
+    if not st.session_state.get("detailed_requirements"):
+        st.info("🔄 Generating detailed requirements based on your answers...")
+        
+        if st.button("📋 Generate Requirements Now", type="primary"):
+            st.session_state.requirements_generating = True
+            st.rerun()
+        return None
+    
+    # Display requirement summary and get confirmation
+    summary = st.session_state.detailed_requirements
+    confirmed = requirement_summary_component(summary, task_counter)
+    
+    if confirmed:
+        # Return detailed requirements as final input
+        return summary
+    
+    return None
+
+
+def _guided_editing_step(task_counter: int) -> Optional[str]:
+    """Requirement editing step for guided mode"""
+    st.markdown("### ✏️ Step 4: Edit your requirements")
+    
+    # Get current requirements
+    current_requirements = st.session_state.get("detailed_requirements", "")
+    if not current_requirements:
+        st.error("No requirements found to edit. Please start over.")
+        st.session_state.requirement_analysis_step = "input"
+        st.rerun()
+        return None
+    
+    # Show editing component
+    editing_requested = requirement_editing_component(current_requirements, task_counter)
+    
+    if editing_requested:
+        # User has provided editing feedback, trigger requirement modification
+        st.session_state.requirements_editing = True
+        st.rerun()
+        return None
+    
     return None
 
 

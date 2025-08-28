@@ -13,6 +13,10 @@ RECENT UPDATES (针对论文代码复现优化):
 - PAPER_ALGORITHM_ANALYSIS_PROMPT: 专注算法提取，明确实现优先级
 - PAPER_CONCEPT_ANALYSIS_PROMPT: 专注系统架构，突出概念到代码的映射
 - CODE_PLANNING_PROMPT: 整合前两者输出，生成高质量复现计划
+
+NEW: 用户需求分析相关提示词
+- REQUIREMENT_QUESTION_GENERATION_PROMPT: 基于初始需求生成引导性问题
+- REQUIREMENT_SUMMARY_PROMPT: 基于问答生成详细需求文档
 """
 
 # Paper to Code Workflow Prompts

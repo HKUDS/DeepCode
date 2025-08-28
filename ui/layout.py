@@ -18,6 +18,7 @@ from .handlers import (
     initialize_session_state,
     handle_start_processing_button,
     handle_error_display,
+    handle_guided_mode_processing,
 )
 from .styles import get_main_styles
 
@@ -62,8 +63,19 @@ def render_main_content():
 
 def render_input_interface():
     """Render input interface"""
-    # Get input source and type
-    input_source, input_type = input_method_selector(st.session_state.task_counter)
+    # 处理引导模式的异步操作
+    handle_guided_mode_processing()
+    
+    # Check if user is in guided analysis workflow
+    if (st.session_state.get("requirement_analysis_mode") == "guided" and 
+        st.session_state.get("requirement_analysis_step") in ["questions", "summary", "editing"]):
+        # User is in guided analysis workflow, show chat input directly
+        from .components import chat_input_component
+        input_source = chat_input_component(st.session_state.task_counter)
+        input_type = "chat" if input_source else None
+    else:
+        # Normal flow: show input method selector
+        input_source, input_type = input_method_selector(st.session_state.task_counter)
 
     # Processing button
     if input_source and not st.session_state.processing:
@@ -75,7 +87,7 @@ def render_input_interface():
         st.warning("⚠️ Do not refresh the page or close the browser during processing.")
 
     elif not input_source:
-        st.info("👆 Please upload a file or enter a URL to start processing.")
+        st.info("👆 Please upload a file, enter a URL, or describe your coding requirements to start processing.")
 
 
 def render_sidebar():
