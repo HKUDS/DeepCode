@@ -5,6 +5,7 @@ asyncio-mqtt
 docling
 mcp-agent
 mcp-server-git
+openapi
 nest_asyncio
 pathlib2
 PyPDF2>=2.0.0
