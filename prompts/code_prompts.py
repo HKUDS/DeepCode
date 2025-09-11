@@ -659,6 +659,8 @@ complete_reproduction_plan:
     [Include ALL necessary files including README.md and requirements.txt]
     [Organize based on what this paper actually contains and needs]
     [Create directories and files that make sense for this specific implementation]
+    [IMPORTANT: Include executable files (e.g., main.py, run.py, train.py, demo.py) - choose names based on repo content]
+    [Design executable entry points that match the paper's main functionality and experiments]
     [NOTE: README.md and requirements.txt should be implemented LAST after all code files]
 
   # SECTION 2: Implementation Components
@@ -1102,10 +1104,10 @@ Build incrementally using multiple tool calls. For each step:
   - **Reference only**: Use `search_code_references(indexes_path="indexes", target_file=the_file_you_want_to_implement, keywords=the_keywords_you_want_to_search)` for reference, NOT as implementation standard
   - **Core principle**: Original paper requirements take absolute priority over any reference code found
 3. **TOOL EXECUTION STRATEGY**:
-  - ⚠️**Development Cycle (for each new file implementation)**: `read_code_mem` (check existing implementations in Working Directory, use `read_file` as fallback if memory unavailable`) → `search_code_references` (OPTIONAL reference check from `/home/agent/indexes`) → `write_file` (implement based on original paper) → `execute_python` (if should test)
-  - **Environment Setup**: `write_file` (requirements.txt) → `execute_bash` (pip install) → `execute_python` (verify)
+  - ⚠️**Development Cycle (for each new file implementation)**: `read_code_mem` (check existing implementations in Working Directory, use `read_file` as fallback if memory unavailable`) → `search_code_references` (OPTIONAL reference check from `/home/agent/indexes`) → `write_file` (implement based on original paper) → `execute_python` (if needed to verify implementation)
+  - **File Verification**: Use `execute_bash` and `execute_python` when needed to check implementation completeness
 
-4. **CRITICAL**: Use bash and python tools to ACTUALLY REPLICATE the paper yourself - do not provide instructions.
+4. **CRITICAL**: Use bash and python tools when needed to CHECK and VERIFY implementation completeness - do not provide instructions. These tools help validate that your implementation files are syntactically correct and properly structured.
 
 **Execution Guidelines**:
 - **Plan First**: Before each action, explain your reasoning and which function you'll use
@@ -1150,24 +1152,22 @@ Build incrementally using multiple tool calls. For each step:
 1. **Identify** what needs to be implemented from the requirements
 2. **Analyze Dependencies**: Before implementing each new file, use `read_code_mem` to read summaries of already-implemented files, then search for reference patterns to guide your implementation approach.
 3. **Implement** one component at a time
-4. **Test** immediately using `execute_python` or `execute_bash` to catch issues early - THIS IS MANDATORY, NOT OPTIONAL
+4. **Verify** optionally using `execute_python` or `execute_bash` to check implementation completeness if needed
 5. **Integrate** with existing components
-6. **Verify** against requirement specifications using execution tools to ensure everything works
+6. **Validate** against requirement specifications
 
 **TOOL CALLING STRATEGY**:
 1. ⚠️ **SINGLE FUNCTION CALL PER MESSAGE**: Each message may perform only one function call. You will see the result of the function right after sending the message. If you need to perform multiple actions, you can always send more messages with subsequent function calls. Do some reasoning before your actions, describing what function calls you are going to use and how they fit into your plan.
 
 2. **TOOL EXECUTION STRATEGY**:
-  - **Development Cycle (for each new file implementation)**: `read_code_mem` (check existing implementations in Working Directory, use `read_file` as fallback if memory unavailable) → `write_file` (implement) → **MANDATORY TESTING**: `execute_python` or `execute_bash` (ALWAYS test after implementation)
-  - **Environment Setup**: Use `execute_bash` for installing packages, setting up dependencies, downloading files, etc.
-  - **Testing & Debugging**: Use `execute_python` for Python code testing and `execute_bash` for system commands, package installation, file operations, and bug fixing
-  - **⚠️ TESTING REMINDER**: After implementing ANY file, you MUST call either `execute_python` or `execute_bash` to test the implementation. Do not skip this step!
+  - **Development Cycle (for each new file implementation)**: `read_code_mem` (check existing implementations in Working Directory, use `read_file` as fallback if memory unavailable) → `write_file` (implement) → **Optional Verification**: `execute_python` or `execute_bash` (if needed to check implementation)
+  - **File Verification**: Use `execute_bash` and `execute_python` when needed to verify implementation completeness.
 
-3. **CRITICAL**: Use `execute_bash` and `execute_python` tools to ACTUALLY IMPLEMENT and TEST the requirements yourself - do not provide instructions. These tools are essential for:
-   - Installing dependencies and setting up environments (`execute_bash`)
-   - Testing Python implementations (`execute_python`)
-   - Debugging and fixing issues (`execute_bash` for system-level, `execute_python` for Python-specific)
-   - Validating that your code actually works before moving to the next component
+3. **CRITICAL**: Use `execute_bash` and `execute_python` tools when needed to CHECK and VERIFY file implementation completeness - do not provide instructions. These tools are essential for:
+   - Checking file syntax and import correctness (`execute_python`)
+   - Verifying file structure and dependencies (`execute_bash` for listing, `execute_python` for imports)
+   - Validating that implemented files are syntactically correct and can be imported
+   - Ensuring code implementation meets basic functionality requirements
 
 **Execution Guidelines**:
 - **Plan First**: Before each action, explain your reasoning and which function you'll use
@@ -1708,6 +1708,8 @@ complete_reproduction_plan:
     [Include ALL necessary files including README.md and requirements.txt]
     [Organize based on what this paper actually contains and needs]
     [Create directories and files that make sense for this specific implementation]
+    [IMPORTANT: Include executable files (e.g., main.py, run.py, train.py, demo.py) - choose names based on repo content]
+    [Design executable entry points that match the paper's main functionality and experiments]
     [NOTE: README.md and requirements.txt should be implemented LAST after all code files]
 
   # SECTION 2: Implementation Components
