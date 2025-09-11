@@ -177,18 +177,16 @@ async def read_file(
 
 
 @mcp.tool()
-async def read_multiple_files(
-    file_requests: str, max_files: int = 5
-) -> str:
+async def read_multiple_files(file_requests: str, max_files: int = 5) -> str:
     """
     Read multiple files in a single operation (for batch reading)
-    
+
     Args:
         file_requests: JSON string with file requests, e.g.,
                       '{"file1.py": {}, "file2.py": {"start_line": 1, "end_line": 10}}'
                       or simple array: '["file1.py", "file2.py"]'
         max_files: Maximum number of files to read in one operation (default: 5)
-    
+
     Returns:
         JSON string of operation results for all files
     """
@@ -197,13 +195,17 @@ async def read_multiple_files(
         try:
             requests_data = json.loads(file_requests)
         except json.JSONDecodeError as e:
-            return json.dumps({
-                "status": "error",
-                "message": f"Invalid JSON format for file_requests: {str(e)}",
-                "operation_type": "multi_file",
-                "timestamp": datetime.now().isoformat(),
-            }, ensure_ascii=False, indent=2)
-        
+            return json.dumps(
+                {
+                    "status": "error",
+                    "message": f"Invalid JSON format for file_requests: {str(e)}",
+                    "operation_type": "multi_file",
+                    "timestamp": datetime.now().isoformat(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+
         # Normalize requests format
         if isinstance(requests_data, list):
             # Convert simple array to dict format
@@ -211,29 +213,41 @@ async def read_multiple_files(
         elif isinstance(requests_data, dict):
             normalized_requests = requests_data
         else:
-            return json.dumps({
-                "status": "error",
-                "message": "file_requests must be a JSON object or array",
-                "operation_type": "multi_file",
-                "timestamp": datetime.now().isoformat(),
-            }, ensure_ascii=False, indent=2)
-        
+            return json.dumps(
+                {
+                    "status": "error",
+                    "message": "file_requests must be a JSON object or array",
+                    "operation_type": "multi_file",
+                    "timestamp": datetime.now().isoformat(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+
         # Validate input
         if len(normalized_requests) == 0:
-            return json.dumps({
-                "status": "error",
-                "message": "No files provided for reading",
-                "operation_type": "multi_file",
-                "timestamp": datetime.now().isoformat(),
-            }, ensure_ascii=False, indent=2)
-        
+            return json.dumps(
+                {
+                    "status": "error",
+                    "message": "No files provided for reading",
+                    "operation_type": "multi_file",
+                    "timestamp": datetime.now().isoformat(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+
         if len(normalized_requests) > max_files:
-            return json.dumps({
-                "status": "error",
-                "message": f"Too many files provided ({len(normalized_requests)}), maximum is {max_files}",
-                "operation_type": "multi_file",
-                "timestamp": datetime.now().isoformat(),
-            }, ensure_ascii=False, indent=2)
+            return json.dumps(
+                {
+                    "status": "error",
+                    "message": f"Too many files provided ({len(normalized_requests)}), maximum is {max_files}",
+                    "operation_type": "multi_file",
+                    "timestamp": datetime.now().isoformat(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
 
         # Process each file
         results = {
@@ -249,7 +263,7 @@ async def read_multiple_files(
                 "total_size_bytes": 0,
                 "total_lines": 0,
                 "files_not_found": 0,
-            }
+            },
         }
 
         # Process each file individually
@@ -299,7 +313,8 @@ async def read_multiple_files(
                     "size_bytes": size_bytes,
                     "start_line": start_line,
                     "end_line": end_line,
-                    "line_range_applied": start_line is not None or end_line is not None,
+                    "line_range_applied": start_line is not None
+                    or end_line is not None,
                 }
 
                 # Update summary
@@ -332,27 +347,31 @@ async def read_multiple_files(
                     "start_line": options.get("start_line"),
                     "end_line": options.get("end_line"),
                 }
-                
+
                 results["summary"]["failed"] += 1
-                
+
                 # Log individual file error
                 log_operation(
-                    "read_file_multi_error", 
+                    "read_file_multi_error",
                     {
-                        "file_path": file_path, 
+                        "file_path": file_path,
                         "error": str(file_error),
                         "batch_operation": True,
-                    }
+                    },
                 )
 
         # Determine overall status
         if results["summary"]["failed"] > 0:
             if results["summary"]["successful"] > 0:
                 results["status"] = "partial_success"
-                results["message"] = f"Read {results['summary']['successful']} files successfully, {results['summary']['failed']} failed"
+                results["message"] = (
+                    f"Read {results['summary']['successful']} files successfully, {results['summary']['failed']} failed"
+                )
             else:
                 results["status"] = "failed"
-                results["message"] = f"All {results['summary']['failed']} files failed to read"
+                results["message"] = (
+                    f"All {results['summary']['failed']} files failed to read"
+                )
 
         # Log overall operation
         log_operation(
@@ -454,57 +473,91 @@ async def write_file(
 
 @mcp.tool()
 async def write_multiple_files(
-    file_implementations: str, create_dirs: bool = True, create_backup: bool = False, max_files: int = 5
+    file_implementations,
+    create_dirs: bool = True,
+    create_backup: bool = False,
+    max_files: int = 5,
 ) -> str:
     """
     Write multiple files in a single operation (for batch implementation)
-    
+
     Args:
-        file_implementations: JSON string mapping file paths to content, e.g., 
+        file_implementations: Dictionary or JSON string mapping file paths to content, e.g.,
+                            {"file1.py": "content1", "file2.py": "content2"} or
                             '{"file1.py": "content1", "file2.py": "content2"}'
         create_dirs: Whether to create directories if they don't exist
         create_backup: Whether to create backup files if they already exist
         max_files: Maximum number of files to write in one operation (default: 5)
-    
+
     Returns:
         JSON string of operation results for all files
     """
     try:
-        # Parse the file implementations
-        try:
-            files_dict = json.loads(file_implementations)
-        except json.JSONDecodeError as e:
-            return json.dumps({
-                "status": "error",
-                "message": f"Invalid JSON format for file_implementations: {str(e)}",
-                "operation_type": "multi_file",
-                "timestamp": datetime.now().isoformat(),
-            }, ensure_ascii=False, indent=2)
-        
-        # Validate input
+        # Robust input parsing - support both dict and JSON string
+        if isinstance(file_implementations, dict):
+            files_dict = file_implementations
+        elif isinstance(file_implementations, str):
+            try:
+                files_dict = json.loads(file_implementations)
+            except json.JSONDecodeError as e:
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "message": f"Invalid JSON format for file_implementations: {str(e)}",
+                        "operation_type": "multi_file",
+                        "timestamp": datetime.now().isoformat(),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+        else:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "message": f"file_implementations must be a dictionary or JSON string, got {type(file_implementations)}",
+                    "operation_type": "multi_file",
+                    "timestamp": datetime.now().isoformat(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+
+        # Validate parsed data
         if not isinstance(files_dict, dict):
-            return json.dumps({
-                "status": "error", 
-                "message": "file_implementations must be a JSON object mapping file paths to content",
-                "operation_type": "multi_file",
-                "timestamp": datetime.now().isoformat(),
-            }, ensure_ascii=False, indent=2)
-        
+            return json.dumps(
+                {
+                    "status": "error",
+                    "message": "file_implementations must represent a dictionary mapping file paths to content",
+                    "operation_type": "multi_file",
+                    "timestamp": datetime.now().isoformat(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+
         if len(files_dict) == 0:
-            return json.dumps({
-                "status": "error",
-                "message": "No files provided for writing",
-                "operation_type": "multi_file", 
-                "timestamp": datetime.now().isoformat(),
-            }, ensure_ascii=False, indent=2)
-        
+            return json.dumps(
+                {
+                    "status": "error",
+                    "message": "No files provided for writing",
+                    "operation_type": "multi_file",
+                    "timestamp": datetime.now().isoformat(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+
         if len(files_dict) > max_files:
-            return json.dumps({
-                "status": "error",
-                "message": f"Too many files provided ({len(files_dict)}), maximum is {max_files}",
-                "operation_type": "multi_file",
-                "timestamp": datetime.now().isoformat(),
-            }, ensure_ascii=False, indent=2)
+            return json.dumps(
+                {
+                    "status": "error",
+                    "message": f"Too many files provided ({len(files_dict)}), maximum is {max_files}",
+                    "operation_type": "multi_file",
+                    "timestamp": datetime.now().isoformat(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
 
         # Process each file
         results = {
@@ -520,7 +573,7 @@ async def write_multiple_files(
                 "total_size_bytes": 0,
                 "total_lines": 0,
                 "backups_created": 0,
-            }
+            },
         }
 
         # Process each file individually
@@ -590,27 +643,31 @@ async def write_multiple_files(
                     "lines_written": 0,
                     "backup_created": False,
                 }
-                
+
                 results["summary"]["failed"] += 1
-                
+
                 # Log individual file error
                 log_operation(
-                    "write_file_multi_error", 
+                    "write_file_multi_error",
                     {
-                        "file_path": file_path, 
+                        "file_path": file_path,
                         "error": str(file_error),
                         "batch_operation": True,
-                    }
+                    },
                 )
 
         # Determine overall status
         if results["summary"]["failed"] > 0:
             if results["summary"]["successful"] > 0:
                 results["status"] = "partial_success"
-                results["message"] = f"Processed {results['summary']['successful']} files successfully, {results['summary']['failed']} failed"
+                results["message"] = (
+                    f"Processed {results['summary']['successful']} files successfully, {results['summary']['failed']} failed"
+                )
             else:
                 results["status"] = "failed"
-                results["message"] = f"All {results['summary']['failed']} files failed to write"
+                results["message"] = (
+                    f"All {results['summary']['failed']} files failed to write"
+                )
 
         # Log overall operation
         log_operation(
@@ -636,6 +693,7 @@ async def write_multiple_files(
         }
         log_operation("write_multiple_files_error", {"error": str(e)})
         return json.dumps(result, ensure_ascii=False, indent=2)
+
 
 # ==================== Code Execution Tools ====================
 

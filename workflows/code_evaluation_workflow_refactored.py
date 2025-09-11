@@ -10,7 +10,6 @@ import logging
 import os
 import time
 import yaml
-from pathlib import Path
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, asdict
 from enum import Enum
@@ -20,28 +19,35 @@ from mcp_agent.agents.agent import Agent
 
 # Local imports
 import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from prompts.evaluation_prompts import (
     ORCHESTRATOR_AGENT_PROMPT,
-    CODE_ANALYZER_AGENT_PROMPT, 
-    ENV_SETUP_AGENT_PROMPT,
-    CODE_REVISE_AGENT_PROMPT
+    CODE_ANALYZER_AGENT_PROMPT,
+    CODE_REVISE_AGENT_PROMPT,
 )
 from utils.llm_utils import get_preferred_llm_class, get_default_models
 
 # Import Memory Agent for code summaries
-from agents.memory_agent_concise_multi import ConciseMemoryAgent
+from workflows.agents.memory_agent_concise_multi import ConciseMemoryAgent
 
 # Import the specialized agents
-from agents.sandbox_agent import SandboxAgent, SandboxExecutionResult, SandboxState
-from agents.analyzer_agent import AnalyzerAgent, StaticAnalysisResult, ErrorAnalysisResult
-from agents.revision_agent import RevisionAgent, CodeRevisionResult
+from workflows.agents.sandbox_agent import (
+    SandboxAgent,
+)
+from workflows.agents.analyzer_agent import (
+    AnalyzerAgent,
+    StaticAnalysisResult,
+    ErrorAnalysisResult,
+)
+from workflows.agents.revision_agent import RevisionAgent, CodeRevisionResult
 
 
 class EvaluationPhase(Enum):
     """Evaluation workflow phases"""
+
     INITIALIZED = "initialized"
-    ANALYZING = "analyzing" 
+    ANALYZING = "analyzing"
     REVISING = "revising"
     STATIC_ANALYSIS = "static_analysis"
     ERROR_ANALYSIS = "error_analysis"
@@ -52,9 +58,10 @@ class EvaluationPhase(Enum):
 @dataclass
 class CodeAnalysisResult:
     """Code analysis results structure"""
+
     repo_type: str  # academic/engineering/library/application
     languages: List[str]
-    frameworks: List[str] 
+    frameworks: List[str]
     dependencies: Dict[str, Any]
     structure_summary: str
     quality_issues: List[str]
@@ -63,9 +70,10 @@ class CodeAnalysisResult:
     confidence_score: float
 
 
-@dataclass 
+@dataclass
 class EvaluationState:
     """Shared state across all agents"""
+
     phase: EvaluationPhase
     repo_path: str
     docs_path: str
@@ -80,7 +88,7 @@ class EvaluationState:
     all_files_to_implement: List[str] = None
     errors: List[str] = None
     warnings: List[str] = None
-    
+
     def __post_init__(self):
         if self.errors is None:
             self.errors = []
@@ -92,7 +100,7 @@ class EvaluationState:
     def to_dict(self) -> Dict[str, Any]:
         """Convert state to dictionary for serialization"""
         result = asdict(self)
-        result['phase'] = self.phase.value
+        result["phase"] = self.phase.value
         return result
 
     def add_error(self, error: str):
@@ -100,43 +108,45 @@ class EvaluationState:
         self.errors.append(f"[{time.strftime('%H:%M:%S')}] {error}")
 
     def add_warning(self, warning: str):
-        """Add warning to state"""  
+        """Add warning to state"""
         self.warnings.append(f"[{time.strftime('%H:%M:%S')}] {warning}")
 
 
 class CodeEvaluationWorkflow:
     """
     Multi-Agent Code Evaluation Workflow Manager
-    
+
     REFACTORED: Clean orchestrator using separated agent modules
     """
 
-    def __init__(self, config_path: str = "mcp_agent.secrets.yaml", max_files_per_batch: int = 3):
+    def __init__(
+        self, config_path: str = "mcp_agent.secrets.yaml", max_files_per_batch: int = 3
+    ):
         """Initialize workflow with configuration"""
         self.config_path = config_path
         self.api_config = self._load_api_config()
         self.default_models = get_default_models("mcp_agent.config.yaml")
         self.logger = self._create_logger()
         self.max_files_per_batch = max_files_per_batch
-        
+
         # Configuration for agents
         self.config = {
-            'max_files_per_batch': max_files_per_batch,
-            'api_config': self.api_config,
-            'default_models': self.default_models
+            "max_files_per_batch": max_files_per_batch,
+            "api_config": self.api_config,
+            "default_models": self.default_models,
         }
-        
+
         # MCP Agent instances
         self.orchestrator = None
         self.code_analyzer_mcp = None
         self.code_revise_mcp = None
-        
+
         # Specialized agent instances
         self.analyzer_agent = None
         self.revision_agent = None
         self.sandbox_agent = None
         self.memory_agent = None
-        
+
         # Shared state
         self.evaluation_state = None
 
@@ -152,20 +162,20 @@ class CodeEvaluationWorkflow:
         """Create and configure logger"""
         logger = logging.getLogger(__name__)
         logger.setLevel(logging.INFO)
-        
+
         # Check if handlers already exist to avoid duplicates
         if not logger.handlers:
             # Create console handler
             console_handler = logging.StreamHandler()
             console_handler.setLevel(logging.INFO)
-            
+
             # Create simple formatter (just the message, no timestamp)
-            formatter = logging.Formatter('%(message)s')
+            formatter = logging.Formatter("%(message)s")
             console_handler.setFormatter(formatter)
-            
+
             # Add handler to logger
             logger.addHandler(console_handler)
-        
+
         return logger
 
     async def run_evaluation(
@@ -173,39 +183,47 @@ class CodeEvaluationWorkflow:
         repo_path: str,
         docs_path: str,
         memory_path: str,
-        workspace_dir: Optional[str] = None
+        workspace_dir: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Run complete evaluation workflow using specialized agents
-        
+
         Args:
             repo_path: Path to repository to evaluate
             docs_path: Path to reproduction documentation
             memory_path: Path to memory file for code summaries
             workspace_dir: Working directory for evaluation (auto-created if None)
-            
+
         Returns:
             Comprehensive evaluation results
         """
         try:
             # Initialize workspace and state
             if workspace_dir is None:
-                workspace_dir = os.path.join(os.path.abspath(repo_path), ".evaluation", f"run_{int(time.time())}")
-            
+                # Place .evaluation alongside the repository directory (same level as repo_path)
+                repo_abs = os.path.abspath(repo_path)
+                parent_dir = os.path.dirname(repo_abs)
+                repo_name = os.path.basename(repo_abs)
+                workspace_dir = os.path.join(
+                    parent_dir, f".{repo_name}.evaluation", f"run_{int(time.time())}"
+                )
+
             os.makedirs(workspace_dir, exist_ok=True)
             self.logger.info(f"🎯 Workspace: {workspace_dir}")
-            
+
             self.evaluation_state = EvaluationState(
                 phase=EvaluationPhase.INITIALIZED,
                 repo_path=os.path.abspath(repo_path),
-                docs_path=os.path.abspath(docs_path), 
+                docs_path=os.path.abspath(docs_path),
                 memory_path=os.path.abspath(memory_path),
                 workspace_dir=workspace_dir,
-                start_time=time.time()
+                start_time=time.time(),
             )
 
             self.logger.info("=" * 80)
-            self.logger.info("🚀 STARTING REFACTORED MULTI-AGENT CODE EVALUATION WORKFLOW")
+            self.logger.info(
+                "🚀 STARTING REFACTORED MULTI-AGENT CODE EVALUATION WORKFLOW"
+            )
             self.logger.info("=" * 80)
             self.logger.info(f"📂 Repository: {repo_path}")
             self.logger.info(f"📄 Documentation: {docs_path}")
@@ -218,64 +236,90 @@ class CodeEvaluationWorkflow:
             await self._initialize_agents()
 
             # PHASE 1: Analysis and Revision Report Generation (ANALYZER AGENT)
-            self.logger.info("🔍 Phase 1: Repository Analysis & Revision Report Generation")
+            self.logger.info(
+                "🔍 Phase 1: Repository Analysis & Revision Report Generation"
+            )
             self.evaluation_state.phase = EvaluationPhase.ANALYZING
             await self.analyzer_agent.run_analysis_and_generate_revision_reports()
 
             # Verify that revision reports were generated
             if not self.evaluation_state.revision_report:
-                raise Exception("Analyzer Agent failed to generate revision reports - cannot proceed to revision phase")
-            
-            self.logger.info("✅ Analysis phase completed - revision reports generated by Analyzer Agent")
+                raise Exception(
+                    "Analyzer Agent failed to generate revision reports - cannot proceed to revision phase"
+                )
+
+            self.logger.info(
+                "✅ Analysis phase completed - revision reports generated by Analyzer Agent"
+            )
 
             # PHASE 2: Multi-File Code Revision Execution (REVISION AGENT)
             self.logger.info("🔧 Phase 2: Enhanced Multi-File Code Revision Execution")
             self.evaluation_state.phase = EvaluationPhase.REVISING
-            
-            revision_completed = await self.revision_agent.run_iterative_multi_file_revision_execution()
-            
+
+            revision_completed = (
+                await self.revision_agent.run_iterative_multi_file_revision_execution()
+            )
+
             if not revision_completed:
                 self.logger.error("No files need to be revised")
-            
+
             self.logger.info("✅ Enhanced multi-file revision phase completed")
-            
+
             # PHASE 3: Static Analysis and Automatic Fixes (ANALYZER AGENT)
             self.logger.info("🔍 Phase 3: Static Analysis and Code Quality Fixes")
             self.evaluation_state.phase = EvaluationPhase.STATIC_ANALYSIS
-            
-            static_analysis_completed = await self.analyzer_agent.run_static_analysis_phase()
-            
+
+            static_analysis_completed = (
+                await self.analyzer_agent.run_static_analysis_phase()
+            )
+
             if not static_analysis_completed:
-                self.logger.warning("⚠️ Static analysis phase failed but continuing to error analysis")
-                
+                self.logger.warning(
+                    "⚠️ Static analysis phase failed but continuing to error analysis"
+                )
+
             self.logger.info("✅ Static analysis phase completed")
-            
+
             # SANDBOX SETUP: Create sandbox environment
-            self.logger.info("🏗️ Sandbox Setup: Creating isolated environment for project execution")
+            self.logger.info(
+                "🏗️ Sandbox Setup: Creating isolated environment for project execution"
+            )
             sandbox_setup_completed = await self._setup_sandbox_environment()
-            
+
             if not sandbox_setup_completed:
-                self.logger.warning("⚠️ Sandbox setup failed but continuing with limited Phase 4")
-                
+                self.logger.warning(
+                    "⚠️ Sandbox setup failed but continuing with limited Phase 4"
+                )
+
             self.logger.info("✅ Sandbox setup completed")
-            
+
             # PHASE 4: Iterative Error Analysis and Remediation (REVISION AGENT + SANDBOX AGENT)
-            self.logger.info("🔬 Phase 4: Iterative Error Analysis and Targeted Remediation with Sandbox")
+            self.logger.info(
+                "🔬 Phase 4: Iterative Error Analysis and Targeted Remediation with Sandbox"
+            )
             self.evaluation_state.phase = EvaluationPhase.ERROR_ANALYSIS
-            
-            error_analysis_completed = await self.revision_agent.run_iterative_error_analysis_phase(self.sandbox_agent)
-            
+
+            error_analysis_completed = (
+                await self.revision_agent.run_iterative_error_analysis_phase(
+                    self.sandbox_agent
+                )
+            )
+
             if not error_analysis_completed:
-                self.logger.warning("⚠️ Iterative error analysis phase failed but continuing to final evaluation")
-                
+                self.logger.warning(
+                    "⚠️ Iterative error analysis phase failed but continuing to final evaluation"
+                )
+
             self.logger.info("✅ Iterative error analysis phase completed")
-            
+
             # PHASE 5: Final Evaluation
             self.logger.info("📊 Phase 5: Final Evaluation")
             self.evaluation_state.phase = EvaluationPhase.COMPLETED
             results = await self._generate_final_report()
 
-            self.logger.info("✅ Refactored multi-agent evaluation workflow completed successfully")
+            self.logger.info(
+                "✅ Refactored multi-agent evaluation workflow completed successfully"
+            )
             return results
 
         except Exception as e:
@@ -283,12 +327,12 @@ class CodeEvaluationWorkflow:
             if self.evaluation_state:
                 self.evaluation_state.phase = EvaluationPhase.FAILED
                 self.evaluation_state.add_error(str(e))
-            
+
             return {
                 "status": "error",
                 "message": str(e),
                 "repo_path": repo_path,
-                "docs_path": docs_path
+                "docs_path": docs_path,
             }
         finally:
             await self._cleanup_agents()
@@ -298,33 +342,35 @@ class CodeEvaluationWorkflow:
         try:
             # Initialize MCP Agents first
             await self._initialize_mcp_agents()
-            
+
             # Initialize Memory Agent
             await self._initialize_memory_agent()
-            
+
             # Initialize Specialized Agents
             self.analyzer_agent = AnalyzerAgent(
                 logger=self.logger,
                 evaluation_state=self.evaluation_state,
                 mcp_analyzer_agent=self.code_analyzer_mcp,
-                config=self.config
+                config=self.config,
             )
-            
+
             self.revision_agent = RevisionAgent(
                 logger=self.logger,
                 evaluation_state=self.evaluation_state,
                 mcp_revision_agent=self.code_revise_mcp,
                 memory_agent=self.memory_agent,
-                config=self.config
+                config=self.config,
             )
-            
+
             # Patch the LLM communication methods into the agents
             self.analyzer_agent._initialize_llm_client = self._initialize_llm_client
             self.analyzer_agent._call_llm_with_tools = self._call_llm_with_tools
             self.revision_agent._initialize_llm_client = self._initialize_llm_client
             self.revision_agent._call_llm_with_tools = self._call_llm_with_tools
 
-            self.logger.info("🤖 All agents initialized successfully with specialized architecture")
+            self.logger.info(
+                "🤖 All agents initialized successfully with specialized architecture"
+            )
 
         except Exception as e:
             self.logger.error(f"Failed to initialize agents: {e}")
@@ -336,7 +382,14 @@ class CodeEvaluationWorkflow:
         self.orchestrator = Agent(
             name="EvaluationOrchestrator",
             instruction=ORCHESTRATOR_AGENT_PROMPT,
-            server_names=["code-evaluation"]
+            server_names=[
+                "core-evaluation",
+                "lsp-tools",
+                "static-analysis",
+                "error-analysis",
+                "revision-tools",
+                "sandbox-tools",
+            ],
         )
         await self.orchestrator.__aenter__()
         await self.orchestrator.attach_llm(get_preferred_llm_class(self.config_path))
@@ -344,19 +397,38 @@ class CodeEvaluationWorkflow:
         # Initialize Code Analyzer Agent
         self.logger.info("🔬 Initializing Code Analyzer MCP Agent")
         self.code_analyzer_mcp = Agent(
-            name="CodeAnalyzer", 
+            name="CodeAnalyzer",
             instruction=CODE_ANALYZER_AGENT_PROMPT,
-            server_names=["code-evaluation", "filesystem"]
+            server_names=[
+                "core-evaluation",
+                "lsp-tools",
+                "static-analysis",
+                "error-analysis",
+                "revision-tools",
+                "sandbox-tools",
+                "code-implementation",
+                "filesystem",
+            ],
         )
         await self.code_analyzer_mcp.__aenter__()
-        await self.code_analyzer_mcp.attach_llm(get_preferred_llm_class(self.config_path))
+        await self.code_analyzer_mcp.attach_llm(
+            get_preferred_llm_class(self.config_path)
+        )
 
         # Initialize Code Revise Agent
         self.logger.info("⚙️ Initializing Code Revise MCP Agent")
         self.code_revise_mcp = Agent(
             name="CodeRevise",
-            instruction=CODE_REVISE_AGENT_PROMPT, 
-            server_names=["code-implementation", "code-evaluation"]
+            instruction=CODE_REVISE_AGENT_PROMPT,
+            server_names=[
+                "code-implementation",
+                "core-evaluation",
+                "lsp-tools",
+                "static-analysis",
+                "error-analysis",
+                "revision-tools",
+                "sandbox-tools",
+            ],
         )
         await self.code_revise_mcp.__aenter__()
         await self.code_revise_mcp.attach_llm(get_preferred_llm_class(self.config_path))
@@ -367,7 +439,7 @@ class CodeEvaluationWorkflow:
             # Read initial plan content
             with open(self.evaluation_state.docs_path, "r", encoding="utf-8") as f:
                 initial_plan_content = f.read()
-            
+
             memory_path = os.path.dirname(self.evaluation_state.memory_path)
             # Initialize memory agent with multi-file support
             self.memory_agent = ConciseMemoryAgent(
@@ -375,11 +447,13 @@ class CodeEvaluationWorkflow:
                 logger=self.logger,
                 target_directory=memory_path,
                 default_models=self.default_models,
-                max_files_per_batch=self.max_files_per_batch
+                max_files_per_batch=self.max_files_per_batch,
             )
-            
-            self.logger.info(f"✅ Memory Agent initialized with multi-file support (max {self.max_files_per_batch} files per batch)")
-            
+
+            self.logger.info(
+                f"✅ Memory Agent initialized with multi-file support (max {self.max_files_per_batch} files per batch)"
+            )
+
         except Exception as e:
             self.logger.error(f"Failed to initialize Memory Agent: {e}")
             raise
@@ -388,45 +462,60 @@ class CodeEvaluationWorkflow:
         """Setup sandbox environment for isolated project execution"""
         try:
             self.logger.info("🏗️ Setting up sandbox environment for project execution")
-            
+
             # Initialize sandbox agent
-            self.sandbox_agent = SandboxAgent(self.logger, self.evaluation_state.workspace_dir)
-            
+            self.sandbox_agent = SandboxAgent(
+                self.logger, self.evaluation_state.workspace_dir
+            )
+
             # Extract project name from repo path
             repo_name = os.path.basename(self.evaluation_state.repo_path)
             if not repo_name:
                 repo_name = "generate_code"
-            
+
             # Create sandbox environment
             self.logger.info(f"📁 Creating sandbox for project: {repo_name}")
             sandbox_state = self.sandbox_agent.create_sandbox_environment(
-                self.evaluation_state.repo_path, 
-                repo_name
+                self.evaluation_state.repo_path, repo_name
             )
-            
+
             # Setup environment
-            self.logger.info(f"🔧 Setting up {sandbox_state.project_language} environment")
+            self.logger.info(
+                f"🔧 Setting up {sandbox_state.project_language} environment"
+            )
             env_setup_success = self.sandbox_agent.setup_environment()
-            
+
             if env_setup_success:
                 self.logger.info("✅ Environment setup completed successfully")
             else:
-                self.logger.warning("⚠️ Environment setup failed, continuing with basic setup")
-            
+                self.logger.warning(
+                    "⚠️ Environment setup failed, continuing with basic setup"
+                )
+
             # Analyze README and extract execution commands
             self.logger.info("📖 Analyzing README for execution commands")
-            execution_commands = self.sandbox_agent.analyze_readme_and_execution_commands()
-            
-            self.logger.info(f"🎯 Sandbox environment ready:")
+            execution_commands = (
+                self.sandbox_agent.analyze_readme_and_execution_commands()
+            )
+
+            self.logger.info("🎯 Sandbox environment ready:")
             self.logger.info(f"   📂 Sandbox path: {sandbox_state.sandbox_path}")
-            self.logger.info(f"   🎯 Main code directory: {sandbox_state.main_code_directory}")
-            self.logger.info(f"   🔤 Project language: {sandbox_state.project_language}")
+            self.logger.info(
+                f"   🎯 Main code directory: {sandbox_state.main_code_directory}"
+            )
+            self.logger.info(
+                f"   🔤 Project language: {sandbox_state.project_language}"
+            )
             self.logger.info(f"   🏃 Execution commands: {execution_commands}")
-            self.logger.info(f"   🔧 Environment setup: {sandbox_state.environment_setup}")
-            self.logger.info(f"   📦 Dependencies installed: {sandbox_state.dependencies_installed}")
-            
+            self.logger.info(
+                f"   🔧 Environment setup: {sandbox_state.environment_setup}"
+            )
+            self.logger.info(
+                f"   📦 Dependencies installed: {sandbox_state.dependencies_installed}"
+            )
+
             return True
-            
+
         except Exception as e:
             self.logger.error(f"❌ Sandbox setup failed: {e}")
             return False
@@ -435,49 +524,76 @@ class CodeEvaluationWorkflow:
         """Generate comprehensive evaluation report"""
         try:
             evaluation_time = time.time() - self.evaluation_state.start_time
-            
+
             # Get memory agent statistics for final report
             memory_stats = None
             if self.memory_agent:
                 all_files = self.evaluation_state.all_files_to_implement
                 implemented_files = self._get_current_implemented_files()
-                
+
                 memory_stats = self.memory_agent.get_memory_statistics(
-                    all_files=all_files,
-                    implemented_files=implemented_files
+                    all_files=all_files, implemented_files=implemented_files
                 )
-            
+
             # Analyze batch operations
             batch_analysis = {}
-            if self.evaluation_state.code_revision and self.evaluation_state.code_revision.batch_operations:
+            if (
+                self.evaluation_state.code_revision
+                and self.evaluation_state.code_revision.batch_operations
+            ):
                 batch_ops = self.evaluation_state.code_revision.batch_operations
                 batch_analysis = {
                     "total_batches": len(batch_ops),
-                    "successful_batches": len([b for b in batch_ops if b.get("status") == "completed"]),
-                    "failed_batches": len([b for b in batch_ops if b.get("status") == "failed"]),
-                    "average_batch_size": sum(b.get("batch_size", 0) for b in batch_ops) / len(batch_ops) if batch_ops else 0,
-                    "tools_used": list(set([tool for b in batch_ops for tool in b.get("tools_used", [])])),
+                    "successful_batches": len(
+                        [b for b in batch_ops if b.get("status") == "completed"]
+                    ),
+                    "failed_batches": len(
+                        [b for b in batch_ops if b.get("status") == "failed"]
+                    ),
+                    "average_batch_size": sum(b.get("batch_size", 0) for b in batch_ops)
+                    / len(batch_ops)
+                    if batch_ops
+                    else 0,
+                    "tools_used": list(
+                        set(
+                            [
+                                tool
+                                for b in batch_ops
+                                for tool in b.get("tools_used", [])
+                            ]
+                        )
+                    ),
                 }
-            
+
             report = {
                 "status": "success",
                 "evaluation_id": f"eval_{int(self.evaluation_state.start_time)}",
                 "repository": {
                     "path": self.evaluation_state.repo_path,
                     "documentation": self.evaluation_state.docs_path,
-                    "memory_file": self.evaluation_state.memory_path
+                    "memory_file": self.evaluation_state.memory_path,
                 },
                 "timing": {
                     "total_time_seconds": evaluation_time,
-                    "started_at": time.strftime('%Y-%m-%d %H:%M:%S', 
-                                             time.localtime(self.evaluation_state.start_time)),
-                    "completed_at": time.strftime('%Y-%m-%d %H:%M:%S')
+                    "started_at": time.strftime(
+                        "%Y-%m-%d %H:%M:%S",
+                        time.localtime(self.evaluation_state.start_time),
+                    ),
+                    "completed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 },
                 "phase_results": {
-                    "code_analysis": asdict(self.evaluation_state.code_analysis) if self.evaluation_state.code_analysis else None,
-                    "code_revision": asdict(self.evaluation_state.code_revision) if self.evaluation_state.code_revision else None,
-                    "static_analysis": asdict(self.evaluation_state.static_analysis) if self.evaluation_state.static_analysis else None,
-                    "error_analysis": asdict(self.evaluation_state.error_analysis) if self.evaluation_state.error_analysis else None,
+                    "code_analysis": asdict(self.evaluation_state.code_analysis)
+                    if self.evaluation_state.code_analysis
+                    else None,
+                    "code_revision": asdict(self.evaluation_state.code_revision)
+                    if self.evaluation_state.code_revision
+                    else None,
+                    "static_analysis": asdict(self.evaluation_state.static_analysis)
+                    if self.evaluation_state.static_analysis
+                    else None,
+                    "error_analysis": asdict(self.evaluation_state.error_analysis)
+                    if self.evaluation_state.error_analysis
+                    else None,
                     "revision_report": self.evaluation_state.revision_report,
                 },
                 "multi_file_implementation": {
@@ -485,44 +601,101 @@ class CodeEvaluationWorkflow:
                     "memory_agent_enabled": self.memory_agent is not None,
                     "memory_statistics": memory_stats,
                     "batch_analysis": batch_analysis,
-                    "completion_rate": self.evaluation_state.code_revision.completion_rate if self.evaluation_state.code_revision else 0.0,
-                    "total_tasks": self.evaluation_state.code_revision.total_tasks if self.evaluation_state.code_revision else 0,
-                    "tasks_completed": len(self.evaluation_state.code_revision.tasks_completed) if self.evaluation_state.code_revision else 0,
-                    "tasks_failed": len(self.evaluation_state.code_revision.tasks_failed) if self.evaluation_state.code_revision else 0,
+                    "completion_rate": self.evaluation_state.code_revision.completion_rate
+                    if self.evaluation_state.code_revision
+                    else 0.0,
+                    "total_tasks": self.evaluation_state.code_revision.total_tasks
+                    if self.evaluation_state.code_revision
+                    else 0,
+                    "tasks_completed": len(
+                        self.evaluation_state.code_revision.tasks_completed
+                    )
+                    if self.evaluation_state.code_revision
+                    else 0,
+                    "tasks_failed": len(
+                        self.evaluation_state.code_revision.tasks_failed
+                    )
+                    if self.evaluation_state.code_revision
+                    else 0,
                     "multi_file_batching_enabled": True,
-                    "all_files_count": len(self.evaluation_state.all_files_to_implement),
-                    "files_implemented_count": len(self._get_current_implemented_files()),
+                    "all_files_count": len(
+                        self.evaluation_state.all_files_to_implement
+                    ),
+                    "files_implemented_count": len(
+                        self._get_current_implemented_files()
+                    ),
                 },
                 "overall_assessment": {
-                    "implementation_completeness": "high" if self.evaluation_state.code_revision and self.evaluation_state.code_revision.revision_success else "low",
-                    "code_quality": "good" if self.evaluation_state.code_analysis and self.evaluation_state.code_analysis.confidence_score > 0.7 else "needs_improvement",
-                    "documentation_quality": "adequate" if self.evaluation_state.code_analysis and self.evaluation_state.code_analysis.documentation_completeness > 0.6 else "insufficient",
-                    "project_health": self.evaluation_state.code_revision.final_project_health if self.evaluation_state.code_revision else "unknown",
-                    "multi_file_success": self.evaluation_state.code_revision.completion_rate >= 75.0 if self.evaluation_state.code_revision else False,
-                    "batch_efficiency": batch_analysis.get("successful_batches", 0) / max(batch_analysis.get("total_batches", 1), 1) * 100,
-                    "static_analysis_success": self.evaluation_state.static_analysis.analysis_success if self.evaluation_state.static_analysis else False,
-                    "syntax_quality": "good" if self.evaluation_state.static_analysis and self.evaluation_state.static_analysis.syntax_errors_found == 0 else "needs_fixing",
-                    "formatting_quality": "good" if self.evaluation_state.static_analysis and self.evaluation_state.static_analysis.formatting_fixes_applied > 0 else "unchanged",
-                    "error_analysis_success": self.evaluation_state.error_analysis.analysis_success if self.evaluation_state.error_analysis else False,
-                    "remediation_quality": "excellent" if self.evaluation_state.error_analysis and self.evaluation_state.error_analysis.remediation_success_rate > 80 else "good" if self.evaluation_state.error_analysis and self.evaluation_state.error_analysis.remediation_success_rate > 60 else "needs_improvement",
-                    "runtime_stability": "stable" if self.evaluation_state.error_analysis and self.evaluation_state.error_analysis.critical_errors_found == 0 else "unstable",
+                    "implementation_completeness": "high"
+                    if self.evaluation_state.code_revision
+                    and self.evaluation_state.code_revision.revision_success
+                    else "low",
+                    "code_quality": "good"
+                    if self.evaluation_state.code_analysis
+                    and self.evaluation_state.code_analysis.confidence_score > 0.7
+                    else "needs_improvement",
+                    "documentation_quality": "adequate"
+                    if self.evaluation_state.code_analysis
+                    and self.evaluation_state.code_analysis.documentation_completeness
+                    > 0.6
+                    else "insufficient",
+                    "project_health": self.evaluation_state.code_revision.final_project_health
+                    if self.evaluation_state.code_revision
+                    else "unknown",
+                    "multi_file_success": self.evaluation_state.code_revision.completion_rate
+                    >= 75.0
+                    if self.evaluation_state.code_revision
+                    else False,
+                    "batch_efficiency": batch_analysis.get("successful_batches", 0)
+                    / max(batch_analysis.get("total_batches", 1), 1)
+                    * 100,
+                    "static_analysis_success": self.evaluation_state.static_analysis.analysis_success
+                    if self.evaluation_state.static_analysis
+                    else False,
+                    "syntax_quality": "good"
+                    if self.evaluation_state.static_analysis
+                    and self.evaluation_state.static_analysis.syntax_errors_found == 0
+                    else "needs_fixing",
+                    "formatting_quality": "good"
+                    if self.evaluation_state.static_analysis
+                    and self.evaluation_state.static_analysis.formatting_fixes_applied
+                    > 0
+                    else "unchanged",
+                    "error_analysis_success": self.evaluation_state.error_analysis.analysis_success
+                    if self.evaluation_state.error_analysis
+                    else False,
+                    "remediation_quality": "excellent"
+                    if self.evaluation_state.error_analysis
+                    and self.evaluation_state.error_analysis.remediation_success_rate
+                    > 80
+                    else "good"
+                    if self.evaluation_state.error_analysis
+                    and self.evaluation_state.error_analysis.remediation_success_rate
+                    > 60
+                    else "needs_improvement",
+                    "runtime_stability": "stable"
+                    if self.evaluation_state.error_analysis
+                    and self.evaluation_state.error_analysis.critical_errors_found == 0
+                    else "unstable",
                 },
                 "issues_found": {
                     "errors": self.evaluation_state.errors,
-                    "warnings": self.evaluation_state.warnings
+                    "warnings": self.evaluation_state.warnings,
                 },
-                "recommendations": self._generate_recommendations()
+                "recommendations": self._generate_recommendations(),
             }
 
             # Save report
             repo_parent_dir = os.path.dirname(self.evaluation_state.repo_path)
-            report_path = os.path.join(repo_parent_dir, "evaluation_report_refactored.json")
+            report_path = os.path.join(
+                repo_parent_dir, "evaluation_report_refactored.json"
+            )
             safe_report = self._make_json_safe(report)
             with open(report_path, "w", encoding="utf-8") as f:
                 json.dump(safe_report, f, indent=2, ensure_ascii=False)
 
             self.logger.info(f"📊 Refactored evaluation report saved to: {report_path}")
-            
+
             return safe_report
 
         except Exception as e:
@@ -532,34 +705,47 @@ class CodeEvaluationWorkflow:
     def _generate_recommendations(self) -> List[str]:
         """Generate dynamic recommendations based on results"""
         recommendations = []
-        
+
         if self.evaluation_state.code_revision:
             revision = self.evaluation_state.code_revision
             if revision.completion_rate >= 90:
-                recommendations.append(f"Excellent completion rate: {revision.completion_rate:.1f}% of tasks completed successfully")
+                recommendations.append(
+                    f"Excellent completion rate: {revision.completion_rate:.1f}% of tasks completed successfully"
+                )
             elif revision.completion_rate >= 75:
-                recommendations.append(f"Good completion rate: {revision.completion_rate:.1f}% of tasks completed successfully")
+                recommendations.append(
+                    f"Good completion rate: {revision.completion_rate:.1f}% of tasks completed successfully"
+                )
             else:
-                recommendations.append(f"Review failed tasks: {len(revision.tasks_failed)} tasks need attention")
-        
+                recommendations.append(
+                    f"Review failed tasks: {len(revision.tasks_failed)} tasks need attention"
+                )
+
         if self.evaluation_state.static_analysis:
             static = self.evaluation_state.static_analysis
             if static.analysis_success and static.total_issues_found > 0:
-                recommendations.append(f"Static analysis found {static.total_issues_found} code quality issues")
-        
+                recommendations.append(
+                    f"Static analysis found {static.total_issues_found} code quality issues"
+                )
+
         if self.evaluation_state.error_analysis:
             error_analysis = self.evaluation_state.error_analysis
-            if error_analysis.analysis_success and error_analysis.critical_errors_found > 0:
-                recommendations.append(f"URGENT: Address {error_analysis.critical_errors_found} critical runtime errors")
-        
+            if (
+                error_analysis.analysis_success
+                and error_analysis.critical_errors_found > 0
+            ):
+                recommendations.append(
+                    f"URGENT: Address {error_analysis.critical_errors_found} critical runtime errors"
+                )
+
         return recommendations
 
     def _get_current_implemented_files(self) -> List[str]:
         """Get current list of implemented files from revision state"""
         if self.evaluation_state.code_revision:
             return (
-                self.evaluation_state.code_revision.files_created + 
-                self.evaluation_state.code_revision.files_modified
+                self.evaluation_state.code_revision.files_created
+                + self.evaluation_state.code_revision.files_modified
             )
         return []
 
@@ -569,13 +755,17 @@ class CodeEvaluationWorkflow:
             if obj is None or isinstance(obj, (str, int, float, bool)):
                 return obj
             if isinstance(obj, dict):
-                return {str(self._make_json_safe(k)): self._make_json_safe(v) for k, v in obj.items()}
+                return {
+                    str(self._make_json_safe(k)): self._make_json_safe(v)
+                    for k, v in obj.items()
+                }
             if isinstance(obj, (list, tuple)):
                 return [self._make_json_safe(v) for v in obj]
             if isinstance(obj, set):
                 return [self._make_json_safe(v) for v in obj]
             try:
                 from dataclasses import is_dataclass, asdict as dc_asdict
+
                 if is_dataclass(obj):
                     return self._make_json_safe(dc_asdict(obj))
             except Exception:
@@ -782,13 +972,13 @@ class CodeEvaluationWorkflow:
     async def _cleanup_agents(self):
         """Clean up agent resources"""
         self.logger.info("🧹 Starting agent cleanup process...")
-        
+
         agents = [
             ("Orchestrator", self.orchestrator),
-            ("Code Analyzer MCP", self.code_analyzer_mcp), 
-            ("Code Revise MCP", self.code_revise_mcp)
+            ("Code Analyzer MCP", self.code_analyzer_mcp),
+            ("Code Revise MCP", self.code_revise_mcp),
         ]
-        
+
         for agent_name, agent in agents:
             if agent:
                 try:
@@ -804,11 +994,11 @@ class CodeEvaluationWorkflow:
         self.code_revise_mcp = None
         self.analyzer_agent = None
         self.revision_agent = None
-        
+
         # Other agents don't need async cleanup
         if self.memory_agent:
             self.logger.info("🧹 Memory Agent: No cleanup needed")
-        
+
         if self.sandbox_agent:
             self.logger.info("🧹 Sandbox Agent: No cleanup needed")
 
@@ -819,30 +1009,30 @@ class CodeEvaluationWorkflow:
 async def main(repo_path=None, docs_path=None, memory_path=None, max_files_per_batch=3):
     """
     Run the refactored multi-agent evaluation workflow
-    
+
     Args:
         repo_path: Path to repository to evaluate
-        docs_path: Path to reproduction documentation  
+        docs_path: Path to reproduction documentation
         memory_path: Path to memory file for code summaries
         max_files_per_batch: Maximum files per batch for multi-file processing
     """
     workflow = CodeEvaluationWorkflow(max_files_per_batch=max_files_per_batch)
-    
+
     # Use provided paths or default example paths
     if repo_path is None:
         repo_path = "/Users/lizongwei/Reasearch/DeepCode_Base/DeepCode_eval_init/deepcode_lab/papers/1/generate_code"
     if docs_path is None:
-        docs_path = "/Users/lizongwei/Reasearch/DeepCode_Base/DeepCode_eval_init/deepcode_lab/papers/1/generate_codeinitial_plan.txt"
+        docs_path = "/Users/lizongwei/Reasearch/DeepCode_Base/DeepCode_eval_init/deepcode_lab/papers/1/initial_plan.txt"
     if memory_path is None:
         memory_path = "/Users/lizongwei/Reasearch/DeepCode_Base/DeepCode_eval_init/deepcode_lab/papers/1/generate_code/implement_code_summary.md"
-    
-    print(f"🚀 Starting Refactored Code Evaluation Workflow")
+
+    print("🚀 Starting Refactored Code Evaluation Workflow")
     print(f"📂 Repository: {repo_path}")
     print(f"📄 Documentation: {docs_path}")
     print(f"🧠 Memory Path: {memory_path}")
     print(f"📦 Max files per batch: {max_files_per_batch}")
     print("=" * 80)
-    
+
     results = await workflow.run_evaluation(repo_path, docs_path, memory_path)
     print(json.dumps(results, indent=2))
     return results
@@ -851,40 +1041,43 @@ async def main(repo_path=None, docs_path=None, memory_path=None, max_files_per_b
 def run_evaluation(repo_path, docs_path, memory_path, max_files_per_batch=3):
     """
     Synchronous wrapper for running evaluation workflow
-    
+
     Args:
         repo_path: Path to repository to evaluate
         docs_path: Path to reproduction documentation
         memory_path: Path to memory file for code summaries
         max_files_per_batch: Maximum files per batch for multi-file processing
-        
+
     Returns:
         Evaluation results dictionary
     """
     import asyncio
+
     return asyncio.run(main(repo_path, docs_path, memory_path, max_files_per_batch))
 
 
 if __name__ == "__main__":
     import sys
     import asyncio
-    
+
     # Parse command line arguments
     if len(sys.argv) >= 4:
         repo_path = sys.argv[1]
-        docs_path = sys.argv[2] 
+        docs_path = sys.argv[2]
         memory_path = sys.argv[3]
         max_files_per_batch = int(sys.argv[4]) if len(sys.argv) > 4 else 3
-        
-        print(f"📋 Using command line arguments:")
+
+        print("📋 Using command line arguments:")
         print(f"   Repository: {repo_path}")
         print(f"   Documentation: {docs_path}")
         print(f"   Memory: {memory_path}")
         print(f"   Max files per batch: {max_files_per_batch}")
-        
+
         asyncio.run(main(repo_path, docs_path, memory_path, max_files_per_batch))
     else:
-        print("📋 Usage: python code_evaluation_workflow_refactored.py <repo_path> <docs_path> <memory_path> [max_files_per_batch]")
+        print(
+            "📋 Usage: python code_evaluation_workflow_refactored.py <repo_path> <docs_path> <memory_path> [max_files_per_batch]"
+        )
         print("📋 Or run without arguments to use default example paths")
         print()
         asyncio.run(main())

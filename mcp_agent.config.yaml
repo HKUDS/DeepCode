@@ -80,12 +80,6 @@ mcp:
       env:
         PYTHONPATH: "."
       description: "Code reference indexer server - Provides intelligent code reference search from indexed repositories"
-    code-evaluation:
-      command: "python"
-      args: ["tools/code_evaluation_server.py"]
-      env:
-        PYTHONPATH: "."
-      description: "Code evaluation server - Provides comprehensive repository analysis and quality assessment"
     docker-management:
       command: "python"
       args: ["tools/docker_management_server.py"]
@@ -104,6 +98,42 @@ mcp:
       env:
         PYTHONPATH: "."
       description: "Document segmentation server - Provides intelligent document analysis and segmented reading to optimize token usage"
+    core-evaluation:
+      command: "python"
+      args: ["tools/evaluation/core_evaluation_server.py"]
+      env:
+        PYTHONPATH: "."
+      description: "Core code evaluation server - Provides basic repository analysis and evaluation tools including structure analysis, dependency detection, and quality assessment"
+    error-analysis:
+      command: "python"
+      args: ["tools/evaluation/error_analysis_server.py"]
+      env:
+        PYTHONPATH: "."
+      description: "Error analysis server - Provides error analysis and remediation tools for code debugging including traceback parsing and suspect file identification"
+    lsp-tools:
+      command: "python"
+      args: ["tools/evaluation/lsp_tools_server.py"]
+      env:
+        PYTHONPATH: "."
+      description: "LSP tools server - Provides LSP-based tools for advanced code analysis including symbol resolution, diagnostics, and code fixes"
+    revision-tools:
+      command: "python"
+      args: ["tools/evaluation/revision_tools_server.py"]
+      env:
+        PYTHONPATH: "."
+      description: "Revision tools server - Provides tools for detecting empty files, missing files, and generating revision reports for project completeness assessment"
+    sandbox-tools:
+      command: "python"
+      args: ["tools/evaluation/sandbox_tools_server.py"]
+      env:
+        PYTHONPATH: "."
+      description: "Sandbox tools server - Provides sandbox execution tools for isolated project testing and code validation"
+    static-analysis:
+      command: "python"
+      args: ["tools/evaluation/static_analysis_server.py"]
+      env:
+        PYTHONPATH: "."
+      description: "Static analysis server - Provides static analysis tools for code quality assessment including linting, formatting, and code quality metrics"
 
 openai:
   # Secrets (API keys, etc.) are stored in an mcp_agent.secrets.yaml file which can be gitignored

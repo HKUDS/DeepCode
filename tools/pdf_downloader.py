@@ -109,10 +109,10 @@ async def perform_document_conversion(
         try:
             with open(file_path, "rb") as f:
                 header = f.read(8)
-                is_pdf_file = header.startswith(b'%PDF')
+                is_pdf_file = header.startswith(b"%PDF")
         except Exception:
             is_pdf_file = file_path.lower().endswith(".pdf")
-    
+
     if is_pdf_file and PYPDF2_AVAILABLE:
         try:
             simple_converter = SimplePdfConverter()

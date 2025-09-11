@@ -190,8 +190,10 @@ class FileProcessor:
             # Check if file is actually a PDF by reading the first few bytes
             with open(file_path, "rb") as f:
                 header = f.read(8)
-                if header.startswith(b'%PDF'):
-                    raise IOError(f"File {file_path} is a PDF file, not a text file. Please convert it to markdown format or use PDF processing tools.")
+                if header.startswith(b"%PDF"):
+                    raise IOError(
+                        f"File {file_path} is a PDF file, not a text file. Please convert it to markdown format or use PDF processing tools."
+                    )
 
             # Read file content
             # Note: Using async with would be better for large files
@@ -202,7 +204,9 @@ class FileProcessor:
             return content
 
         except UnicodeDecodeError as e:
-            raise IOError(f"Error reading file {file_path}: File encoding is not UTF-8. Original error: {str(e)}")
+            raise IOError(
+                f"Error reading file {file_path}: File encoding is not UTF-8. Original error: {str(e)}"
+            )
         except Exception as e:
             raise IOError(f"Error reading file {file_path}: {str(e)}")
 

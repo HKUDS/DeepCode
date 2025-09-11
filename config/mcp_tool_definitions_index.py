@@ -42,9 +42,17 @@ class MCPToolDefinitions:
     @staticmethod
     def get_code_evaluation_tools() -> List[Dict[str, Any]]:
         """
-        获取代码评估相关的工具定义
-        Get tool definitions for code evaluation
+        获取代码评估相关的工具定义（遗留兼容性）
+        Get tool definitions for code evaluation (legacy compatibility)
+        Note: Individual tools are now organized by server type (core-evaluation, error-analysis, etc.)
         """
+        # Return empty list as tools are now organized by specific servers
+        # Use specific server tool sets instead: core-evaluation, error-analysis, etc.
+        return []
+
+    @staticmethod
+    def get_core_evaluation_tools() -> List[Dict[str, Any]]:
+        """获取核心评估工具定义"""
         return [
             MCPToolDefinitions._get_analyze_repo_structure_tool(),
             MCPToolDefinitions._get_detect_dependencies_tool(),
@@ -52,9 +60,55 @@ class MCPToolDefinitions:
             MCPToolDefinitions._get_evaluate_documentation_tool(),
             MCPToolDefinitions._get_check_reproduction_readiness_tool(),
             MCPToolDefinitions._get_generate_evaluation_summary_tool(),
+        ]
+
+    @staticmethod
+    def get_error_analysis_tools() -> List[Dict[str, Any]]:
+        """获取错误分析工具定义"""
+        return [
+            MCPToolDefinitions._get_parse_error_traceback_tool(),
+            MCPToolDefinitions._get_analyze_import_dependencies_tool(),
+            MCPToolDefinitions._get_generate_error_analysis_report_tool(),
+            MCPToolDefinitions._get_generate_precise_code_fixes_tool(),
+            MCPToolDefinitions._get_apply_code_fixes_with_diff_tool(),
+        ]
+
+    @staticmethod
+    def get_lsp_tools() -> List[Dict[str, Any]]:
+        """获取LSP工具定义"""
+        return [
+            MCPToolDefinitions._get_setup_lsp_servers_tool(),
+            MCPToolDefinitions._get_lsp_find_symbol_references_tool(),
+            MCPToolDefinitions._get_lsp_get_diagnostics_tool(),
+            MCPToolDefinitions._get_lsp_get_code_actions_tool(),
+            MCPToolDefinitions._get_lsp_generate_code_fixes_tool(),
+            MCPToolDefinitions._get_lsp_apply_workspace_edit_tool(),
+        ]
+
+    @staticmethod
+    def get_revision_tools() -> List[Dict[str, Any]]:
+        """获取修订工具定义"""
+        return [
             MCPToolDefinitions._get_detect_empty_files_tool(),
             MCPToolDefinitions._get_detect_missing_files_tool(),
             MCPToolDefinitions._get_generate_code_revision_report_tool(),
+        ]
+
+    @staticmethod
+    def get_sandbox_tools() -> List[Dict[str, Any]]:
+        """获取沙盒工具定义"""
+        return [
+            MCPToolDefinitions._get_execute_in_sandbox_tool(),
+            MCPToolDefinitions._get_run_code_validation_tool(),
+        ]
+
+    @staticmethod
+    def get_static_analysis_tools() -> List[Dict[str, Any]]:
+        """获取静态分析工具定义"""
+        return [
+            MCPToolDefinitions._get_perform_static_analysis_tool(),
+            MCPToolDefinitions._get_auto_fix_formatting_tool(),
+            MCPToolDefinitions._get_generate_static_issues_report_tool(),
         ]
 
     @staticmethod
@@ -82,7 +136,7 @@ class MCPToolDefinitions:
                 "required": ["file_path"],
             },
         }
-    
+
     @staticmethod
     def _get_read_multiple_files_tool() -> Dict[str, Any]:
         """批量读取多个文件工具定义"""
@@ -94,7 +148,7 @@ class MCPToolDefinitions:
                 "properties": {
                     "file_requests": {
                         "type": "string",
-                        "description": "JSON string with file requests, e.g., '{\"file1.py\": {}, \"file2.py\": {\"start_line\": 1, \"end_line\": 10}}' or simple array '[\"file1.py\", \"file2.py\"]'",
+                        "description": 'JSON string with file requests, e.g., \'{"file1.py": {}, "file2.py": {"start_line": 1, "end_line": 10}}\' or simple array \'["file1.py", "file2.py"]\'',
                     },
                     "max_files": {
                         "type": "integer",
@@ -169,8 +223,18 @@ class MCPToolDefinitions:
                 "type": "object",
                 "properties": {
                     "file_implementations": {
-                        "type": "string",
-                        "description": "JSON string mapping file paths to content, e.g., '{\"file1.py\": \"content1\", \"file2.py\": \"content2\"}'",
+                        "oneOf": [
+                            {
+                                "type": "object",
+                                "description": "Dictionary mapping file paths to content",
+                                "additionalProperties": {"type": "string"},
+                            },
+                            {
+                                "type": "string",
+                                "description": "JSON string mapping file paths to content",
+                            },
+                        ],
+                        "description": 'Dictionary or JSON string mapping file paths to content, e.g., {"file1.py": "content1", "file2.py": "content2"} or \'{"file1.py": "content1", "file2.py": "content2"}\'',
                     },
                     "create_dirs": {
                         "type": "boolean",
@@ -405,10 +469,13 @@ class MCPToolDefinitions:
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "repo_path": {"type": "string", "description": "Path to the repository to analyze"}
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Path to the repository to analyze",
+                    }
                 },
-                "required": ["repo_path"]
-            }
+                "required": ["repo_path"],
+            },
         }
 
     @staticmethod
@@ -419,10 +486,13 @@ class MCPToolDefinitions:
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "repo_path": {"type": "string", "description": "Path to the repository"}
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Path to the repository",
+                    }
                 },
-                "required": ["repo_path"]
-            }
+                "required": ["repo_path"],
+            },
         }
 
     @staticmethod
@@ -433,10 +503,13 @@ class MCPToolDefinitions:
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "repo_path": {"type": "string", "description": "Path to the repository"}
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Path to the repository",
+                    }
                 },
-                "required": ["repo_path"]
-            }
+                "required": ["repo_path"],
+            },
         }
 
     @staticmethod
@@ -447,11 +520,17 @@ class MCPToolDefinitions:
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "repo_path": {"type": "string", "description": "Path to the repository"},
-                    "docs_path": {"type": "string", "description": "Optional path to external documentation"}
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Path to the repository",
+                    },
+                    "docs_path": {
+                        "type": "string",
+                        "description": "Optional path to external documentation",
+                    },
                 },
-                "required": ["repo_path"]
-            }
+                "required": ["repo_path"],
+            },
         }
 
     @staticmethod
@@ -462,26 +541,51 @@ class MCPToolDefinitions:
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "repo_path": {"type": "string", "description": "Path to the repository"},
-                    "docs_path": {"type": "string", "description": "Optional path to reproduction documentation"}
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Path to the repository",
+                    },
+                    "docs_path": {
+                        "type": "string",
+                        "description": "Optional path to reproduction documentation",
+                    },
                 },
-                "required": ["repo_path"]
-            }
+                "required": ["repo_path"],
+            },
         }
 
     @staticmethod
     def _get_generate_evaluation_summary_tool() -> Dict[str, Any]:
         return {
             "name": "generate_evaluation_summary",
-            "description": "Generate comprehensive evaluation summary combining all analysis results",
+            "description": "Generate comprehensive evaluation summary from conversation analysis results (avoids duplicate tool calls)",
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "repo_path": {"type": "string", "description": "Path to the repository"},
-                    "docs_path": {"type": "string", "description": "Optional path to reproduction documentation"}
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Path to the repository",
+                    },
+                    "docs_path": {
+                        "type": "string",
+                        "description": "Optional path to reproduction documentation",
+                    },
+                    "conversation_data": {
+                        "oneOf": [
+                            {
+                                "type": "string",
+                                "description": "JSON string containing analysis results",
+                            },
+                            {
+                                "type": "object",
+                                "description": "Dictionary containing analysis results",
+                            },
+                        ],
+                        "description": "Optional analysis results from previous tool calls in conversation",
+                    },
                 },
-                "required": ["repo_path"]
-            }
+                "required": ["repo_path"],
+            },
         }
 
     @staticmethod
@@ -492,10 +596,13 @@ class MCPToolDefinitions:
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "repo_path": {"type": "string", "description": "Path to the repository to analyze"}
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Path to the repository to analyze",
+                    }
                 },
-                "required": ["repo_path"]
-            }
+                "required": ["repo_path"],
+            },
         }
 
     @staticmethod
@@ -506,25 +613,47 @@ class MCPToolDefinitions:
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "repo_path": {"type": "string", "description": "Path to the repository to analyze"}
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Path to the repository to analyze",
+                    }
                 },
-                "required": ["repo_path"]
-            }
+                "required": ["repo_path"],
+            },
         }
 
     @staticmethod
     def _get_generate_code_revision_report_tool() -> Dict[str, Any]:
         return {
             "name": "generate_code_revision_report",
-            "description": "Generate comprehensive code revision report combining empty files, missing files, and quality analysis",
+            "description": "Generate comprehensive code revision report from conversation analysis results (avoids duplicate tool calls)",
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "repo_path": {"type": "string", "description": "Path to the repository to analyze"},
-                    "docs_path": {"type": "string", "description": "Optional path to documentation"}
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Path to the repository to analyze",
+                    },
+                    "docs_path": {
+                        "type": "string",
+                        "description": "Optional path to documentation",
+                    },
+                    "conversation_data": {
+                        "oneOf": [
+                            {
+                                "type": "string",
+                                "description": "JSON string containing analysis results",
+                            },
+                            {
+                                "type": "object",
+                                "description": "Dictionary containing analysis results",
+                            },
+                        ],
+                        "description": "Optional analysis results from previous tool calls in conversation",
+                    },
                 },
-                "required": ["repo_path"]
-            }
+                "required": ["repo_path"],
+            },
         }
 
     @staticmethod
@@ -536,9 +665,12 @@ class MCPToolDefinitions:
         return {
             "code_implementation": "代码实现相关工具集 / Code implementation tool set",
             "code_evaluation": "代码评估相关工具集 / Code evaluation tool set",
-            # 可以在这里添加更多工具集
-            # "data_analysis": "数据分析工具集 / Data analysis tool set",
-            # "web_scraping": "网页爬取工具集 / Web scraping tool set",
+            "core-evaluation": "核心评估工具集 / Core evaluation tool set",
+            "error-analysis": "错误分析工具集 / Error analysis tool set",
+            "lsp-tools": "LSP工具集 / LSP tools set",
+            "revision-tools": "修订工具集 / Revision tools set",
+            "sandbox-tools": "沙盒工具集 / Sandbox tools set",
+            "static-analysis": "静态分析工具集 / Static analysis tool set",
         }
 
     @staticmethod
@@ -550,6 +682,12 @@ class MCPToolDefinitions:
         tool_sets = {
             "code_implementation": MCPToolDefinitions.get_code_implementation_tools(),
             "code_evaluation": MCPToolDefinitions.get_code_evaluation_tools(),
+            "core-evaluation": MCPToolDefinitions.get_core_evaluation_tools(),
+            "error-analysis": MCPToolDefinitions.get_error_analysis_tools(),
+            "lsp-tools": MCPToolDefinitions.get_lsp_tools(),
+            "revision-tools": MCPToolDefinitions.get_revision_tools(),
+            "sandbox-tools": MCPToolDefinitions.get_sandbox_tools(),
+            "static-analysis": MCPToolDefinitions.get_static_analysis_tools(),
         }
 
         return tool_sets.get(tool_set_name, [])
@@ -564,6 +702,389 @@ class MCPToolDefinitions:
         for tool_set_name in MCPToolDefinitions.get_available_tool_sets().keys():
             all_tools.extend(MCPToolDefinitions.get_tool_set(tool_set_name))
         return all_tools
+
+    # ==================== ERROR ANALYSIS TOOLS ====================
+
+    @staticmethod
+    def _get_parse_error_traceback_tool() -> Dict[str, Any]:
+        """解析错误回溯工具定义"""
+        return {
+            "name": "parse_error_traceback",
+            "description": "Parse error traceback to extract structured error information",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "traceback_text": {
+                        "type": "string",
+                        "description": "Raw traceback/error text from execution",
+                    },
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Repository path for context",
+                    },
+                },
+                "required": ["traceback_text", "repo_path"],
+            },
+        }
+
+    @staticmethod
+    def _get_analyze_import_dependencies_tool() -> Dict[str, Any]:
+        """分析导入依赖工具定义"""
+        return {
+            "name": "analyze_import_dependencies",
+            "description": "Analyze import dependencies and build import graph",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {"type": "string", "description": "Repository path"},
+                    "target_file": {
+                        "type": "string",
+                        "description": "Optional specific file to analyze (if None, analyzes all files)",
+                    },
+                },
+                "required": ["repo_path"],
+            },
+        }
+
+    @staticmethod
+    def _get_generate_error_analysis_report_tool() -> Dict[str, Any]:
+        """生成错误分析报告工具定义"""
+        return {
+            "name": "generate_error_analysis_report",
+            "description": "Generate comprehensive error analysis report with suspect files and remediation suggestions",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "traceback_text": {
+                        "type": "string",
+                        "description": "Raw error traceback from execution",
+                    },
+                    "repo_path": {"type": "string", "description": "Repository path"},
+                    "execution_context": {
+                        "type": "string",
+                        "description": "Optional context about what was being executed",
+                    },
+                },
+                "required": ["traceback_text", "repo_path"],
+            },
+        }
+
+    @staticmethod
+    def _get_generate_precise_code_fixes_tool() -> Dict[str, Any]:
+        """生成精确代码修复工具定义"""
+        return {
+            "name": "generate_precise_code_fixes",
+            "description": "Generate precise code fixes based on error analysis report",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "error_analysis_report": {
+                        "type": "string",
+                        "description": "JSON string containing error analysis results",
+                    },
+                    "target_files": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional list of specific files to target",
+                    },
+                    "fix_strategy": {
+                        "type": "string",
+                        "description": "Strategy for fixes (targeted, comprehensive, conservative)",
+                        "default": "targeted",
+                    },
+                },
+                "required": ["error_analysis_report"],
+            },
+        }
+
+    @staticmethod
+    def _get_apply_code_fixes_with_diff_tool() -> Dict[str, Any]:
+        """应用代码修复工具定义"""
+        return {
+            "name": "apply_code_fixes_with_diff",
+            "description": "Apply code fixes with diff generation and validation",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "fixes_json": {
+                        "type": "string",
+                        "description": "JSON string containing fixes from generate_precise_code_fixes",
+                    },
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Repository path for validation",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": "If True, only generate diffs without applying changes",
+                        "default": False,
+                    },
+                },
+                "required": ["fixes_json", "repo_path"],
+            },
+        }
+
+    # ==================== LSP TOOLS ====================
+
+    @staticmethod
+    def _get_setup_lsp_servers_tool() -> Dict[str, Any]:
+        """设置LSP服务器工具定义"""
+        return {
+            "name": "setup_lsp_servers",
+            "description": "Set up LSP servers for detected languages in repository",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {"type": "string", "description": "Repository path"}
+                },
+                "required": ["repo_path"],
+            },
+        }
+
+    @staticmethod
+    def _get_lsp_find_symbol_references_tool() -> Dict[str, Any]:
+        """LSP查找符号引用工具定义"""
+        return {
+            "name": "lsp_find_symbol_references",
+            "description": "Find symbol references using actual LSP",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {"type": "string", "description": "Repository path"},
+                    "symbol_name": {
+                        "type": "string",
+                        "description": "Symbol name to search for",
+                    },
+                    "language": {
+                        "type": "string",
+                        "description": "Programming language",
+                        "default": "python",
+                    },
+                },
+                "required": ["repo_path", "symbol_name"],
+            },
+        }
+
+    @staticmethod
+    def _get_lsp_get_diagnostics_tool() -> Dict[str, Any]:
+        """LSP获取诊断信息工具定义"""
+        return {
+            "name": "lsp_get_diagnostics",
+            "description": "Get LSP diagnostics for files",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {"type": "string", "description": "Repository path"},
+                    "file_path": {
+                        "type": "string",
+                        "description": "Optional specific file path (if None, gets diagnostics for all open files)",
+                    },
+                },
+                "required": ["repo_path"],
+            },
+        }
+
+    @staticmethod
+    def _get_lsp_get_code_actions_tool() -> Dict[str, Any]:
+        """LSP获取代码操作工具定义"""
+        return {
+            "name": "lsp_get_code_actions",
+            "description": "Get LSP code actions for a range in a file",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {"type": "string", "description": "Repository path"},
+                    "file_path": {"type": "string", "description": "File path"},
+                    "start_line": {
+                        "type": "integer",
+                        "description": "Start line number (0-based)",
+                    },
+                    "end_line": {
+                        "type": "integer",
+                        "description": "End line number (0-based)",
+                    },
+                },
+                "required": ["repo_path", "file_path", "start_line", "end_line"],
+            },
+        }
+
+    @staticmethod
+    def _get_lsp_generate_code_fixes_tool() -> Dict[str, Any]:
+        """LSP生成代码修复工具定义"""
+        return {
+            "name": "lsp_generate_code_fixes",
+            "description": "Generate LSP-based code fixes for a range in a file",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {"type": "string", "description": "Repository path"},
+                    "file_path": {"type": "string", "description": "File path to fix"},
+                    "start_line": {
+                        "type": "integer",
+                        "description": "Start line number (0-based)",
+                    },
+                    "end_line": {
+                        "type": "integer",
+                        "description": "End line number (0-based)",
+                    },
+                    "error_context": {
+                        "type": "string",
+                        "description": "Optional error context to help generate fixes",
+                    },
+                },
+                "required": ["repo_path", "file_path", "start_line", "end_line"],
+            },
+        }
+
+    @staticmethod
+    def _get_lsp_apply_workspace_edit_tool() -> Dict[str, Any]:
+        """LSP应用工作空间编辑工具定义"""
+        return {
+            "name": "lsp_apply_workspace_edit",
+            "description": "Apply LSP workspace edit to files",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {"type": "string", "description": "Repository path"},
+                    "workspace_edit": {
+                        "type": "string",
+                        "description": "JSON string containing LSP WorkspaceEdit",
+                    },
+                },
+                "required": ["repo_path", "workspace_edit"],
+            },
+        }
+
+    # ==================== SANDBOX TOOLS ====================
+
+    @staticmethod
+    def _get_execute_in_sandbox_tool() -> Dict[str, Any]:
+        """沙盒执行工具定义"""
+        return {
+            "name": "execute_in_sandbox",
+            "description": "Execute command in sandbox environment",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {"type": "string", "description": "Repository path"},
+                    "command": {"type": "string", "description": "Command to execute"},
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Execution timeout in seconds",
+                        "default": 30,
+                    },
+                    "capture_output": {
+                        "type": "boolean",
+                        "description": "Whether to capture stdout/stderr",
+                        "default": True,
+                    },
+                },
+                "required": ["repo_path", "command"],
+            },
+        }
+
+    @staticmethod
+    def _get_run_code_validation_tool() -> Dict[str, Any]:
+        """运行代码验证工具定义"""
+        return {
+            "name": "run_code_validation",
+            "description": "Run code validation in sandbox environment",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {"type": "string", "description": "Repository path"},
+                    "test_command": {
+                        "type": "string",
+                        "description": "Optional test command (defaults to common test patterns)",
+                    },
+                },
+                "required": ["repo_path"],
+            },
+        }
+
+    # ==================== STATIC ANALYSIS TOOLS ====================
+
+    @staticmethod
+    def _get_perform_static_analysis_tool() -> Dict[str, Any]:
+        """执行静态分析工具定义"""
+        return {
+            "name": "perform_static_analysis",
+            "description": "Perform comprehensive static analysis on repository with automatic fixes",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Path to the repository to analyze",
+                    },
+                    "auto_fix": {
+                        "type": "boolean",
+                        "description": "Whether to automatically apply formatting fixes",
+                        "default": True,
+                    },
+                    "languages": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional list of languages to analyze (if None, auto-detect all)",
+                    },
+                },
+                "required": ["repo_path"],
+            },
+        }
+
+    @staticmethod
+    def _get_auto_fix_formatting_tool() -> Dict[str, Any]:
+        """自动修复格式工具定义"""
+        return {
+            "name": "auto_fix_formatting",
+            "description": "Automatically fix formatting issues in repository files",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Path to the repository",
+                    },
+                    "languages": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional list of languages to format (if None, auto-detect all)",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": "If True, only report what would be fixed without making changes",
+                        "default": False,
+                    },
+                },
+                "required": ["repo_path"],
+            },
+        }
+
+    @staticmethod
+    def _get_generate_static_issues_report_tool() -> Dict[str, Any]:
+        """生成静态分析问题报告工具定义"""
+        return {
+            "name": "generate_static_issues_report",
+            "description": "Generate structured JSON report of static analysis issues",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Path to the repository",
+                    },
+                    "severity_filter": {
+                        "type": "string",
+                        "description": "Optional filter by severity (error, warning, info)",
+                    },
+                    "language_filter": {
+                        "type": "string",
+                        "description": "Optional filter by programming language",
+                    },
+                },
+                "required": ["repo_path"],
+            },
+        }
 
 
 # 便捷访问函数

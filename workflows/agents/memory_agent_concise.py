@@ -1072,10 +1072,10 @@ class ConciseMemoryAgent:
 **For NEW file implementation:**
 1. **You need to call read_code_mem(already_implemented_file_path)** to understand existing implementations and dependencies - agent should choose relevant ALREADY IMPLEMENTED file paths for reference, NOT the new file you want to create
 2. Write_file can be used to implement the new component
-3. Finally: Use execute_python or execute_bash for testing (if needed)
+3. OPTIONALLY: Use execute_python or execute_bash if meet some specific requirements (if needed)
 
 **When all files implemented:**
-1. **Use execute_python or execute_bash** to test the complete implementation"""
+1. **Use execute_python or execute_bash** to test the complete implementation (if needed)"""
 
             # # Append Next Steps information if available (even when no tool results)
             # if self.current_next_steps.strip():

@@ -117,7 +117,6 @@ class ConciseMemoryAgent:
         logger.setLevel(logging.INFO)
         return logger
 
-
     async def create_multi_code_implementation_summary(
         self,
         client,
@@ -144,9 +143,11 @@ class ConciseMemoryAgent:
             # Validate input
             if not file_implementations:
                 raise ValueError("No file implementations provided")
-            
+
             if len(file_implementations) > self.max_files_per_batch:
-                raise ValueError(f"Too many files provided ({len(file_implementations)}), max is {self.max_files_per_batch}")
+                raise ValueError(
+                    f"Too many files provided ({len(file_implementations)}), max is {self.max_files_per_batch}"
+                )
 
             # Create prompt for LLM summary of multiple files
             summary_prompt = self._create_multi_code_summary_prompt(
@@ -161,14 +162,16 @@ class ConciseMemoryAgent:
             llm_summary = llm_response.get("content", "")
 
             # Extract sections for each file and next steps
-            multi_sections = self._extract_multi_summary_sections(llm_summary, file_implementations.keys())
+            multi_sections = self._extract_multi_summary_sections(
+                llm_summary, file_implementations.keys()
+            )
 
             # Format and save summary for each file (WITHOUT Next Steps)
             all_formatted_summaries = []
-            
+
             for file_path in file_implementations.keys():
                 file_sections = multi_sections.get("files", {}).get(file_path, {})
-                
+
                 # Format summary with ONLY Implementation Progress and Dependencies for file saving
                 file_summary_content = ""
                 if file_sections.get("core_purpose"):
@@ -176,17 +179,23 @@ class ConciseMemoryAgent:
                 if file_sections.get("public_interface"):
                     file_summary_content += file_sections["public_interface"] + "\n\n"
                 if file_sections.get("internal_dependencies"):
-                    file_summary_content += file_sections["internal_dependencies"] + "\n\n"
+                    file_summary_content += (
+                        file_sections["internal_dependencies"] + "\n\n"
+                    )
                 if file_sections.get("external_dependencies"):
-                    file_summary_content += file_sections["external_dependencies"] + "\n\n"
+                    file_summary_content += (
+                        file_sections["external_dependencies"] + "\n\n"
+                    )
                 if file_sections.get("implementation_notes"):
-                    file_summary_content += file_sections["implementation_notes"] + "\n\n"
+                    file_summary_content += (
+                        file_sections["implementation_notes"] + "\n\n"
+                    )
 
                 # Create the formatted summary for file saving (WITHOUT Next Steps)
                 formatted_summary = self._format_code_implementation_summary(
                     file_path, file_summary_content.strip(), files_implemented
                 )
-                
+
                 all_formatted_summaries.append(formatted_summary)
 
                 # Save to implement_code_summary.md (append mode) - ONLY Implementation Progress and Dependencies
@@ -195,8 +204,10 @@ class ConciseMemoryAgent:
             # Combine all summaries for return
             combined_summary = "\n".join(all_formatted_summaries)
 
-            self.logger.info(f"Created and saved multi-file code summaries for {len(file_implementations)} files")
-            
+            self.logger.info(
+                f"Created and saved multi-file code summaries for {len(file_implementations)} files"
+            )
+
             return combined_summary
 
         except Exception as e:
@@ -209,7 +220,10 @@ class ConciseMemoryAgent:
             )
 
     def _create_multi_code_summary_prompt(
-        self, file_implementations: Dict[str, str], files_implemented: int, implemented_files: List[str]
+        self,
+        file_implementations: Dict[str, str],
+        files_implemented: int,
+        implemented_files: List[str],
     ) -> str:
         """
         Create prompt for LLM to generate multi-file code implementation summary
@@ -232,7 +246,13 @@ class ConciseMemoryAgent:
         )
 
         unimplemented_files_list = (
-            "\n".join([f"- {file}" for file in implemented_files if file not in file_implementations.keys()])
+            "\n".join(
+                [
+                    f"- {file}"
+                    for file in implemented_files
+                    if file not in file_implementations.keys()
+                ]
+            )
             if len(implemented_files) != len(file_implementations.keys())
             else "- All files are implemented"
         )
@@ -307,7 +327,9 @@ class ConciseMemoryAgent:
 
         return prompt
 
-    def _extract_multi_summary_sections(self, llm_summary: str, file_paths: List[str]) -> Dict[str, Any]:
+    def _extract_multi_summary_sections(
+        self, llm_summary: str, file_paths: List[str]
+    ) -> Dict[str, Any]:
         """
         Extract different sections from LLM-generated multi-file summary
         """
@@ -317,7 +339,7 @@ class ConciseMemoryAgent:
 
         try:
             # Convert dict_keys to list if needed
-            if hasattr(file_paths, 'keys'):
+            if hasattr(file_paths, "keys"):
                 file_paths = list(file_paths)
             elif not isinstance(file_paths, list):
                 file_paths = list(file_paths)
@@ -339,35 +361,45 @@ class ConciseMemoryAgent:
                     continue
 
                 # File header detection
-                if ("**file:" in line_lower or "file:" in line_lower) and "**" in original_line:
+                if (
+                    "**file:" in line_lower or "file:" in line_lower
+                ) and "**" in original_line:
                     # Save previous section
                     if current_file and current_section and current_content:
                         if current_file not in file_sections:
                             file_sections[current_file] = {}
-                        file_sections[current_file][current_section] = "\n".join(current_content).strip()
-                    
+                        file_sections[current_file][current_section] = "\n".join(
+                            current_content
+                        ).strip()
+
                     # Extract file path
                     file_header = original_line.lower()
                     if "**file:" in file_header:
-                        file_header = original_line[original_line.lower().find("file:") + 5:]
+                        file_header = original_line[
+                            original_line.lower().find("file:") + 5 :
+                        ]
                         if "**" in file_header:
-                            file_header = file_header[:file_header.find("**")]
+                            file_header = file_header[: file_header.find("**")]
                     else:
-                        file_header = original_line[original_line.lower().find("file:") + 5:]
-                    
+                        file_header = original_line[
+                            original_line.lower().find("file:") + 5 :
+                        ]
+
                     file_header = file_header.strip()
                     current_file = None
-                    
+
                     # File matching
                     for file_path in file_paths:
-                        file_name = file_path.split('/')[-1]
-                        if (file_path in file_header or 
-                            file_header in file_path or 
-                            file_name in file_header or 
-                            file_header in file_name):
+                        file_name = file_path.split("/")[-1]
+                        if (
+                            file_path in file_header
+                            or file_header in file_path
+                            or file_name in file_header
+                            or file_header in file_name
+                        ):
                             current_file = file_path
                             break
-                    
+
                     current_section = None
                     current_content = []
                     continue
@@ -375,12 +407,14 @@ class ConciseMemoryAgent:
                 # Section detection within files
                 if current_file:
                     section_matched = False
-                    
+
                     if "core purpose" in line_lower and "**" in original_line:
                         if current_section and current_content:
                             if current_file not in file_sections:
                                 file_sections[current_file] = {}
-                            file_sections[current_file][current_section] = "\n".join(current_content).strip()
+                            file_sections[current_file][current_section] = "\n".join(
+                                current_content
+                            ).strip()
                         current_section = "core_purpose"
                         current_content = []
                         section_matched = True
@@ -388,23 +422,33 @@ class ConciseMemoryAgent:
                         if current_section and current_content:
                             if current_file not in file_sections:
                                 file_sections[current_file] = {}
-                            file_sections[current_file][current_section] = "\n".join(current_content).strip()
+                            file_sections[current_file][current_section] = "\n".join(
+                                current_content
+                            ).strip()
                         current_section = "public_interface"
                         current_content = []
                         section_matched = True
-                    elif "internal dependencies" in line_lower and "**" in original_line:
+                    elif (
+                        "internal dependencies" in line_lower and "**" in original_line
+                    ):
                         if current_section and current_content:
                             if current_file not in file_sections:
                                 file_sections[current_file] = {}
-                            file_sections[current_file][current_section] = "\n".join(current_content).strip()
+                            file_sections[current_file][current_section] = "\n".join(
+                                current_content
+                            ).strip()
                         current_section = "internal_dependencies"
                         current_content = []
                         section_matched = True
-                    elif "external dependencies" in line_lower and "**" in original_line:
+                    elif (
+                        "external dependencies" in line_lower and "**" in original_line
+                    ):
                         if current_section and current_content:
                             if current_file not in file_sections:
                                 file_sections[current_file] = {}
-                            file_sections[current_file][current_section] = "\n".join(current_content).strip()
+                            file_sections[current_file][current_section] = "\n".join(
+                                current_content
+                            ).strip()
                         current_section = "external_dependencies"
                         current_content = []
                         section_matched = True
@@ -412,39 +456,56 @@ class ConciseMemoryAgent:
                         if current_section and current_content:
                             if current_file not in file_sections:
                                 file_sections[current_file] = {}
-                            file_sections[current_file][current_section] = "\n".join(current_content).strip()
+                            file_sections[current_file][current_section] = "\n".join(
+                                current_content
+                            ).strip()
                         current_section = "implementation_notes"
                         current_content = []
                         section_matched = True
-                    
+
                     # If no section header matched, add to current content
                     if not section_matched and current_section:
                         current_content.append(line)
-                
 
             # Save the final section
             if current_file and current_section and current_content:
                 if current_file not in file_sections:
                     file_sections[current_file] = {}
-                file_sections[current_file][current_section] = "\n".join(current_content).strip()
+                file_sections[current_file][current_section] = "\n".join(
+                    current_content
+                ).strip()
 
             # Build final result
             for file_path in file_paths:
                 sections = file_sections.get(file_path, {})
                 result["files"][file_path] = {}
                 if "core_purpose" in sections:
-                    result["files"][file_path]["core_purpose"] = "**Core Purpose**:\n" + sections['core_purpose']
+                    result["files"][file_path]["core_purpose"] = (
+                        "**Core Purpose**:\n" + sections["core_purpose"]
+                    )
                 if "public_interface" in sections:
-                    result["files"][file_path]["public_interface"] = "**Public Interface**:\n" + sections['public_interface']
+                    result["files"][file_path]["public_interface"] = (
+                        "**Public Interface**:\n" + sections["public_interface"]
+                    )
                 if "implementation_notes" in sections:
-                    result["files"][file_path]["implementation_notes"] = "**Implementation Notes**:\n" + sections['implementation_notes']
+                    result["files"][file_path]["implementation_notes"] = (
+                        "**Implementation Notes**:\n" + sections["implementation_notes"]
+                    )
                 if "internal_dependencies" in sections:
-                    result["files"][file_path]["internal_dependencies"] = "**Internal Dependencies**:\n" + sections['internal_dependencies']
+                    result["files"][file_path]["internal_dependencies"] = (
+                        "**Internal Dependencies**:\n"
+                        + sections["internal_dependencies"]
+                    )
                 if "external_dependencies" in sections:
-                    result["files"][file_path]["external_dependencies"] = "**External Dependencies**:\n" + sections['external_dependencies'] 
+                    result["files"][file_path]["external_dependencies"] = (
+                        "**External Dependencies**:\n"
+                        + sections["external_dependencies"]
+                    )
 
-            self.logger.info(f"📋 Extracted multi-file sections for {len(result['files'])} files")
-            
+            self.logger.info(
+                f"📋 Extracted multi-file sections for {len(result['files'])} files"
+            )
+
         except Exception as e:
             self.logger.error(f"Failed to extract multi-file summary sections: {e}")
             self.logger.error(f"📋 file_paths type: {type(file_paths)}")
@@ -456,7 +517,7 @@ class ConciseMemoryAgent:
                     "public_interface": "**Public Interface**: Public interface need manual review.",
                     "internal_dependencies": "**Internal Dependencies**: Internal dependencies need manual review.",
                     "external_dependencies": "**External Dependencies**: External dependencies need manual review.",
-                    "implementation_notes": "**Implementation Notes**: Implementation notes need manual review."
+                    "implementation_notes": "**Implementation Notes**: Implementation notes need manual review.",
                 }
 
         return result
@@ -503,8 +564,8 @@ class ConciseMemoryAgent:
         """
         # Create fallback summaries for each file
         fallback_summaries = []
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
         for file_path in file_implementations.keys():
             fallback_summary = f"""# Code Implementation Summary
 **Generated**: {timestamp}
@@ -543,9 +604,7 @@ class ConciseMemoryAgent:
 
                 # Add clear separator between implementations
                 f.write("\n" + "=" * 80 + "\n")
-                f.write(
-                    f"## IMPLEMENTATION File {file_path}\n"
-                )
+                f.write(f"## IMPLEMENTATION File {file_path}\n")
                 f.write("=" * 80 + "\n\n")
 
                 # Write the new summary
@@ -712,7 +771,9 @@ class ConciseMemoryAgent:
         if all_files is None:
             all_files = []
 
-        self.logger.info(f"🎯 Using CONCISE memory mode for revision - Clear slate after write_multiple_files")
+        self.logger.info(
+            "🎯 Using CONCISE memory mode for revision - Clear slate after write_multiple_files"
+        )
 
         concise_messages = []
 
@@ -733,7 +794,10 @@ class ConciseMemoryAgent:
 
         # Read initial plan and memory content
         initial_plan_content = self.initial_plan
-        memory_content = self._read_code_knowledge_base() or "No previous implementation memory available"
+        memory_content = (
+            self._read_code_knowledge_base()
+            or "No previous implementation memory available"
+        )
 
         files_to_implement = file_batch
         file_list = "\n".join([f"- {file_path}" for file_path in files_to_implement])
@@ -746,7 +810,7 @@ class ConciseMemoryAgent:
 
     MANDATORY JSON FORMAT REQUIREMENTS:
     1. Use write_multiple_files tool
-    2. Parameter name: "file_implementations" 
+    2. Parameter name: "file_implementations"
     3. Value must be a VALID JSON string with ESCAPED newlines
     4. Use \\n for newlines, \\t for tabs, \\" for quotes
     5. NO literal newlines in the JSON string
@@ -781,73 +845,88 @@ class ConciseMemoryAgent:
         concise_messages.append({"role": "user", "content": task_message})
 
         # Debug output for files to implement
-        print(f"✅ Files to implement:")
+        print("✅ Files to implement:")
         for file_path in files_to_implement:
             print(f"{file_path}")
 
         return concise_messages
 
-    def _calculate_message_statistics(self, messages: List[Dict[str, Any]], label: str) -> Dict[str, Any]:
+    def _calculate_message_statistics(
+        self, messages: List[Dict[str, Any]], label: str
+    ) -> Dict[str, Any]:
         """
         Calculate statistics for a message list
-        
+
         Args:
             messages: List of messages to analyze
             label: Label for logging
-            
+
         Returns:
             Dictionary with statistics
         """
         total_chars = 0
         total_words = 0
-        
+
         for msg in messages:
             content = msg.get("content", "")
             total_chars += len(content)
             total_words += len(content.split())
-        
+
         # Estimate tokens (rough approximation: ~4 characters per token)
         estimated_tokens = total_chars // 4
-        
+
         stats = {
             "message_count": len(messages),
             "total_characters": total_chars,
             "total_words": total_words,
             "estimated_tokens": estimated_tokens,
-            "summary": f"{len(messages)} msgs, {total_chars:,} chars, ~{estimated_tokens:,} tokens"
+            "summary": f"{len(messages)} msgs, {total_chars:,} chars, ~{estimated_tokens:,} tokens",
         }
-        
+
         return stats
 
-    def _calculate_memory_savings(self, original_stats: Dict[str, Any], optimized_stats: Dict[str, Any]) -> Dict[str, Any]:
+    def _calculate_memory_savings(
+        self, original_stats: Dict[str, Any], optimized_stats: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """
         Calculate memory savings between original and optimized messages
-        
+
         Args:
             original_stats: Statistics for original messages
             optimized_stats: Statistics for optimized messages
-            
+
         Returns:
             Dictionary with savings calculations
         """
-        messages_saved = original_stats["message_count"] - optimized_stats["message_count"]
-        chars_saved = original_stats["total_characters"] - optimized_stats["total_characters"]
-        tokens_saved_estimate = original_stats["estimated_tokens"] - optimized_stats["estimated_tokens"]
-        
+        messages_saved = (
+            original_stats["message_count"] - optimized_stats["message_count"]
+        )
+        chars_saved = (
+            original_stats["total_characters"] - optimized_stats["total_characters"]
+        )
+        tokens_saved_estimate = (
+            original_stats["estimated_tokens"] - optimized_stats["estimated_tokens"]
+        )
+
         # Calculate percentages (avoid division by zero)
-        messages_saved_percent = (messages_saved / max(original_stats["message_count"], 1)) * 100
-        chars_saved_percent = (chars_saved / max(original_stats["total_characters"], 1)) * 100
-        tokens_saved_percent = (tokens_saved_estimate / max(original_stats["estimated_tokens"], 1)) * 100
-        
+        messages_saved_percent = (
+            messages_saved / max(original_stats["message_count"], 1)
+        ) * 100
+        chars_saved_percent = (
+            chars_saved / max(original_stats["total_characters"], 1)
+        ) * 100
+        tokens_saved_percent = (
+            tokens_saved_estimate / max(original_stats["estimated_tokens"], 1)
+        ) * 100
+
         return {
             "messages_saved": messages_saved,
             "chars_saved": chars_saved,
             "tokens_saved_estimate": tokens_saved_estimate,
             "messages_saved_percent": messages_saved_percent,
             "chars_saved_percent": chars_saved_percent,
-            "tokens_saved_percent": tokens_saved_percent
+            "tokens_saved_percent": tokens_saved_percent,
         }
-
 
     def _read_code_knowledge_base(self) -> Optional[str]:
         """
@@ -884,9 +963,7 @@ class ConciseMemoryAgent:
             import re
 
             # Pattern to match the start of implementation sections
-            section_pattern = (
-                r"={80}\s*\n## IMPLEMENTATION File .+?"
-            )
+            section_pattern = r"={80}\s*\n## IMPLEMENTATION File .+?"
 
             # Find all implementation section starts
             matches = list(re.finditer(section_pattern, content))
@@ -1016,10 +1093,12 @@ class ConciseMemoryAgent:
         else:
             return str(tool_result)
 
-    def get_memory_statistics(self, all_files: List[str] = None, implemented_files: List[str] = None) -> Dict[str, Any]:
+    def get_memory_statistics(
+        self, all_files: List[str] = None, implemented_files: List[str] = None
+    ) -> Dict[str, Any]:
         """
         Get memory agent statistics for multi-file operations
-        
+
         Args:
             all_files: List of all files that should be implemented (from workflow)
             implemented_files: List of all implemented files (from workflow)
@@ -1028,10 +1107,10 @@ class ConciseMemoryAgent:
             all_files = []
         if implemented_files is None:
             implemented_files = []
-            
+
         # Calculate unimplemented files from workflow data
         unimplemented_files = [f for f in all_files if f not in implemented_files]
-        
+
         return {
             "last_write_multiple_files_detected": self.last_write_multiple_files_detected,
             "should_clear_memory_next": self.should_clear_memory_next,
@@ -1063,11 +1142,13 @@ class ConciseMemoryAgent:
         """
         Record multi-file implementation (for compatibility with workflow)
         NOTE: This method doesn't track files internally - workflow manages file tracking
-        
+
         Args:
             file_implementations: Dictionary mapping file_path to implementation_content
         """
-        self.logger.info(f"📝 Recorded multi-file implementation batch: {len(file_implementations)} files")
+        self.logger.info(
+            f"📝 Recorded multi-file implementation batch: {len(file_implementations)} files"
+        )
         # Note: We don't track files internally anymore - workflow handles this
 
     # ===== ENHANCED MEMORY SYNCHRONIZATION METHODS (Phase 4+) =====
@@ -1079,11 +1160,11 @@ class ConciseMemoryAgent:
         revised_file_path: str,
         diff_content: str,
         new_content: str,
-        revision_type: str = "targeted_fix"
+        revision_type: str = "targeted_fix",
     ) -> str:
         """
         Synchronize memory for a single revised file with diff information
-        
+
         Args:
             client: LLM client instance
             client_type: Type of LLM client ("anthropic" or "openai")
@@ -1091,114 +1172,132 @@ class ConciseMemoryAgent:
             diff_content: Unified diff showing changes made
             new_content: Complete new content of the file
             revision_type: Type of revision ("targeted_fix", "comprehensive_revision", etc.)
-            
+
         Returns:
             Updated memory summary for the revised file
         """
         try:
-            self.logger.info(f"🔄 Synchronizing memory for revised file: {revised_file_path}")
-            
+            self.logger.info(
+                f"🔄 Synchronizing memory for revised file: {revised_file_path}"
+            )
+
             # Create revision-specific summary prompt
             revision_prompt = self._create_file_revision_summary_prompt(
                 revised_file_path, diff_content, new_content, revision_type
             )
-            
+
             summary_messages = [{"role": "user", "content": revision_prompt}]
-            
+
             # Get LLM-generated revision summary
             llm_response = await self._call_llm_for_summary(
                 client, client_type, summary_messages
             )
             llm_summary = llm_response.get("content", "")
-            
+
             # Extract summary sections
             revision_sections = self._extract_revision_summary_sections(llm_summary)
-            
+
             # Format revision summary
             formatted_summary = self._format_file_revision_summary(
                 revised_file_path, revision_sections, diff_content, revision_type
             )
-            
+
             # Save the revision summary (replace old summary)
             await self._save_revised_file_summary(formatted_summary, revised_file_path)
-            
-            self.logger.info(f"✅ Memory synchronized for revised file: {revised_file_path}")
-            
+
+            self.logger.info(
+                f"✅ Memory synchronized for revised file: {revised_file_path}"
+            )
+
             return formatted_summary
-            
+
         except Exception as e:
-            self.logger.error(f"Failed to synchronize memory for revised file {revised_file_path}: {e}")
-            
+            self.logger.error(
+                f"Failed to synchronize memory for revised file {revised_file_path}: {e}"
+            )
+
             # Fallback to simple revision summary
-            return self._create_fallback_revision_summary(revised_file_path, revision_type)
+            return self._create_fallback_revision_summary(
+                revised_file_path, revision_type
+            )
 
     async def synchronize_multiple_revised_files(
-        self,
-        client,
-        client_type: str,
-        revision_results: List[Dict[str, Any]]
+        self, client, client_type: str, revision_results: List[Dict[str, Any]]
     ) -> Dict[str, str]:
         """
         Synchronize memory for multiple revised files based on revision results
-        
+
         Args:
             client: LLM client instance
             client_type: Type of LLM client
             revision_results: List of revision results with file paths, diffs, and new content
-            
+
         Returns:
             Dictionary mapping file paths to updated memory summaries
         """
         try:
-            self.logger.info(f"🔄 Synchronizing memory for {len(revision_results)} revised files")
-            
+            self.logger.info(
+                f"🔄 Synchronizing memory for {len(revision_results)} revised files"
+            )
+
             synchronized_summaries = {}
-            
+
             for revision_result in revision_results:
                 file_path = revision_result.get("file_path", "")
                 diff_content = revision_result.get("diff", "")
                 new_content = revision_result.get("new_content", "")
                 revision_type = revision_result.get("revision_type", "targeted_fix")
-                
+
                 if file_path and revision_result.get("success", False):
                     summary = await self.synchronize_revised_file_memory(
-                        client, client_type, file_path, diff_content, new_content, revision_type
+                        client,
+                        client_type,
+                        file_path,
+                        diff_content,
+                        new_content,
+                        revision_type,
                     )
                     synchronized_summaries[file_path] = summary
                 else:
-                    self.logger.warning(f"⚠️ Skipping memory sync for failed revision: {file_path}")
-            
-            self.logger.info(f"✅ Memory synchronized for {len(synchronized_summaries)} successfully revised files")
-            
+                    self.logger.warning(
+                        f"⚠️ Skipping memory sync for failed revision: {file_path}"
+                    )
+
+            self.logger.info(
+                f"✅ Memory synchronized for {len(synchronized_summaries)} successfully revised files"
+            )
+
             return synchronized_summaries
-            
+
         except Exception as e:
-            self.logger.error(f"Failed to synchronize memory for multiple revised files: {e}")
+            self.logger.error(
+                f"Failed to synchronize memory for multiple revised files: {e}"
+            )
             return {}
 
     def _create_file_revision_summary_prompt(
-        self,
-        file_path: str,
-        diff_content: str,
-        new_content: str,
-        revision_type: str
+        self, file_path: str, diff_content: str, new_content: str, revision_type: str
     ) -> str:
         """
         Create prompt for LLM to generate file revision summary
-        
+
         Args:
             file_path: Path of the revised file
             diff_content: Unified diff showing changes
             new_content: Complete new content of the file
             revision_type: Type of revision performed
-            
+
         Returns:
             Prompt for LLM revision summarization
         """
         # Truncate content if too long for prompt
-        content_preview = new_content[:2000] + "..." if len(new_content) > 2000 else new_content
-        diff_preview = diff_content[:1000] + "..." if len(diff_content) > 1000 else diff_content
-        
+        content_preview = (
+            new_content[:2000] + "..." if len(new_content) > 2000 else new_content
+        )
+        diff_preview = (
+            diff_content[:1000] + "..." if len(diff_content) > 1000 else diff_content
+        )
+
         prompt = f"""You are an expert code revision summarizer. A file has been REVISED with targeted changes. Create a structured summary of the revision.
 
 **File Revised**: {file_path}
@@ -1216,7 +1315,7 @@ class ConciseMemoryAgent:
 
 **Required Summary Format:**
 
-**Revision Summary**: 
+**Revision Summary**:
 - Brief description of what was changed and why
 
 **Changes Made**:
@@ -1252,10 +1351,10 @@ class ConciseMemoryAgent:
     def _extract_revision_summary_sections(self, llm_summary: str) -> Dict[str, str]:
         """
         Extract different sections from LLM-generated revision summary
-        
+
         Args:
             llm_summary: Raw LLM response containing revision summary
-            
+
         Returns:
             Dictionary with extracted sections
         """
@@ -1264,27 +1363,27 @@ class ConciseMemoryAgent:
             "changes_made": "",
             "impact_assessment": "",
             "quality_improvements": "",
-            "post_revision_status": ""
+            "post_revision_status": "",
         }
-        
+
         try:
             lines = llm_summary.split("\n")
             current_section = None
             current_content = []
-            
+
             for line in lines:
                 line_lower = line.lower().strip()
                 original_line = line.strip()
-                
+
                 # Skip empty lines
                 if not original_line:
                     if current_section:
                         current_content.append(line)
                     continue
-                
+
                 # Section detection
                 section_matched = False
-                
+
                 if "revision summary" in line_lower and "**" in original_line:
                     if current_section and current_content:
                         sections[current_section] = "\n".join(current_content).strip()
@@ -1315,26 +1414,34 @@ class ConciseMemoryAgent:
                     current_section = "post_revision_status"
                     current_content = []
                     section_matched = True
-                
+
                 # If no section header matched, add to current content
                 if not section_matched and current_section:
                     current_content.append(line)
-            
+
             # Save the final section
             if current_section and current_content:
                 sections[current_section] = "\n".join(current_content).strip()
-            
-            self.logger.info(f"📋 Extracted {len([s for s in sections.values() if s])} revision summary sections")
-            
+
+            self.logger.info(
+                f"📋 Extracted {len([s for s in sections.values() if s])} revision summary sections"
+            )
+
         except Exception as e:
             self.logger.error(f"Failed to extract revision summary sections: {e}")
             # Provide fallback content
             sections["revision_summary"] = "File revision completed"
-            sections["changes_made"] = "Targeted changes applied based on error analysis"
-            sections["impact_assessment"] = "Changes should improve code functionality and reduce errors"
-            sections["quality_improvements"] = "Code quality enhanced through targeted fixes"
+            sections["changes_made"] = (
+                "Targeted changes applied based on error analysis"
+            )
+            sections["impact_assessment"] = (
+                "Changes should improve code functionality and reduce errors"
+            )
+            sections["quality_improvements"] = (
+                "Code quality enhanced through targeted fixes"
+            )
             sections["post_revision_status"] = "File functionality updated and improved"
-        
+
         return sections
 
     def _format_file_revision_summary(
@@ -1342,29 +1449,37 @@ class ConciseMemoryAgent:
         file_path: str,
         revision_sections: Dict[str, str],
         diff_content: str,
-        revision_type: str
+        revision_type: str,
     ) -> str:
         """
         Format the revision summary into the final structure
-        
+
         Args:
             file_path: Path of the revised file
             revision_sections: Extracted sections from LLM summary
             diff_content: Unified diff content
             revision_type: Type of revision performed
-            
+
         Returns:
             Formatted revision summary
         """
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
+
         # Format sections with fallbacks
-        revision_summary = revision_sections.get("revision_summary", "File revision completed")
+        revision_summary = revision_sections.get(
+            "revision_summary", "File revision completed"
+        )
         changes_made = revision_sections.get("changes_made", "Targeted changes applied")
-        impact_assessment = revision_sections.get("impact_assessment", "Changes should improve functionality")
-        quality_improvements = revision_sections.get("quality_improvements", "Code quality enhanced")
-        post_revision_status = revision_sections.get("post_revision_status", "File updated successfully")
-        
+        impact_assessment = revision_sections.get(
+            "impact_assessment", "Changes should improve functionality"
+        )
+        quality_improvements = revision_sections.get(
+            "quality_improvements", "Code quality enhanced"
+        )
+        post_revision_status = revision_sections.get(
+            "post_revision_status", "File updated successfully"
+        )
+
         formatted_summary = f"""# File Revision Summary (UPDATED)
 **Generated**: {timestamp}
 **File Revised**: {file_path}
@@ -1396,19 +1511,21 @@ class ConciseMemoryAgent:
 """
         return formatted_summary
 
-    def _create_fallback_revision_summary(self, file_path: str, revision_type: str) -> str:
+    def _create_fallback_revision_summary(
+        self, file_path: str, revision_type: str
+    ) -> str:
         """
         Create fallback revision summary when LLM is unavailable
-        
+
         Args:
             file_path: Path of the revised file
             revision_type: Type of revision performed
-            
+
         Returns:
             Fallback revision summary
         """
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
         fallback_summary = f"""# File Revision Summary (UPDATED)
 **Generated**: {timestamp}
 **File Revised**: {file_path}
@@ -1445,7 +1562,7 @@ File has been revised with targeted changes. LLM summary generation failed.
     async def _save_revised_file_summary(self, revision_summary: str, file_path: str):
         """
         Save or update the revision summary for a file (replaces old summary)
-        
+
         Args:
             revision_summary: New revision summary content
             file_path: Path of the file for which the summary was generated
@@ -1454,28 +1571,35 @@ File has been revised with targeted changes. LLM summary generation failed.
             # For revised files, we replace the existing summary rather than append
             # Read existing content to find and replace the specific file's summary
             file_exists = os.path.exists(self.code_summary_path)
-            
+
             if file_exists:
                 with open(self.code_summary_path, "r", encoding="utf-8") as f:
                     existing_content = f.read()
-                
+
                 # Look for existing summary for this file and replace it
                 import re
-                
+
                 # Pattern to match existing implementation section for this file
                 file_pattern = re.escape(file_path)
                 section_pattern = rf"={80}\s*\n## IMPLEMENTATION File {file_pattern}\n={80}.*?(?=\n={80}|\Z)"
-                
+
                 # Check if this file already has a summary
                 if re.search(section_pattern, existing_content, re.DOTALL):
                     # Replace existing summary
                     new_section = f"\n{'=' * 80}\n## IMPLEMENTATION File {file_path} (REVISED)\n{'=' * 80}\n\n{revision_summary}\n\n"
-                    updated_content = re.sub(section_pattern, new_section.strip(), existing_content, flags=re.DOTALL)
-                    
+                    updated_content = re.sub(
+                        section_pattern,
+                        new_section.strip(),
+                        existing_content,
+                        flags=re.DOTALL,
+                    )
+
                     with open(self.code_summary_path, "w", encoding="utf-8") as f:
                         f.write(updated_content)
-                    
-                    self.logger.info(f"Updated existing summary for revised file: {file_path}")
+
+                    self.logger.info(
+                        f"Updated existing summary for revised file: {file_path}"
+                    )
                 else:
                     # Append new summary for this file
                     with open(self.code_summary_path, "a", encoding="utf-8") as f:
@@ -1484,12 +1608,14 @@ File has been revised with targeted changes. LLM summary generation failed.
                         f.write("=" * 80 + "\n\n")
                         f.write(revision_summary)
                         f.write("\n\n")
-                    
-                    self.logger.info(f"Appended new summary for revised file: {file_path}")
+
+                    self.logger.info(
+                        f"Appended new summary for revised file: {file_path}"
+                    )
             else:
                 # Create new file with header
                 os.makedirs(os.path.dirname(self.code_summary_path), exist_ok=True)
-                
+
                 with open(self.code_summary_path, "w", encoding="utf-8") as f:
                     f.write("# Code Implementation Progress Summary\n")
                     f.write("*Accumulated implementation progress for all files*\n\n")
@@ -1498,44 +1624,52 @@ File has been revised with targeted changes. LLM summary generation failed.
                     f.write("=" * 80 + "\n\n")
                     f.write(revision_summary)
                     f.write("\n\n")
-                
-                self.logger.info(f"Created new summary file with revised file: {file_path}")
-            
-        except Exception as e:
-            self.logger.error(f"Failed to save revised file summary for {file_path}: {e}")
 
-    def get_revision_memory_statistics(self, revised_files: List[str]) -> Dict[str, Any]:
+                self.logger.info(
+                    f"Created new summary file with revised file: {file_path}"
+                )
+
+        except Exception as e:
+            self.logger.error(
+                f"Failed to save revised file summary for {file_path}: {e}"
+            )
+
+    def get_revision_memory_statistics(
+        self, revised_files: List[str]
+    ) -> Dict[str, Any]:
         """
         Get memory statistics for revised files
-        
+
         Args:
             revised_files: List of file paths that have been revised
-            
+
         Returns:
             Dictionary with revision memory statistics
         """
         try:
             total_revisions = len(revised_files)
-            
+
             # Count how many files have updated summaries
             summaries_updated = 0
             if os.path.exists(self.code_summary_path):
                 with open(self.code_summary_path, "r", encoding="utf-8") as f:
                     content = f.read()
-                
+
                 for file_path in revised_files:
                     if f"File {file_path} (REVISED)" in content:
                         summaries_updated += 1
-            
+
             return {
                 "total_revised_files": total_revisions,
                 "summaries_updated": summaries_updated,
-                "memory_sync_rate": (summaries_updated / total_revisions * 100) if total_revisions > 0 else 0,
+                "memory_sync_rate": (summaries_updated / total_revisions * 100)
+                if total_revisions > 0
+                else 0,
                 "revised_files_list": revised_files.copy(),
                 "memory_summary_path": self.code_summary_path,
-                "revision_memory_mode": "active"
+                "revision_memory_mode": "active",
             }
-            
+
         except Exception as e:
             self.logger.error(f"Failed to get revision memory statistics: {e}")
             return {
@@ -1544,5 +1678,5 @@ File has been revised with targeted changes. LLM summary generation failed.
                 "memory_sync_rate": 0,
                 "revised_files_list": revised_files.copy(),
                 "memory_summary_path": self.code_summary_path,
-                "revision_memory_mode": "error"
+                "revision_memory_mode": "error",
             }

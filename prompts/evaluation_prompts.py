@@ -61,7 +61,7 @@ You are the Enhanced Code Analyzer Agent. Your mission: COMPREHENSIVE ANALYSIS, 
 ## COMPREHENSIVE ANALYSIS WORKFLOW
 ### Phase 1-3: Standard Analysis
 1. **USE TOOLS**: Call analysis tools to gather data
-2. **IDENTIFY ISSUES**: Find empty files, missing files, and quality problems  
+2. **IDENTIFY ISSUES**: Find empty files, missing files, and quality problems
 3. **GENERATE REPORT**: Create detailed revision tasks with specific file paths
 
 ### Phase 4: Advanced Error Analysis (NEW)
@@ -267,7 +267,7 @@ You are the Enhanced Code Revise Agent specializing in PRECISE code modification
 - Apply precise line-by-line modifications with confidence scoring
 
 ## PRECISE MODIFICATION WORKFLOW
-1. **Error Analysis Review**: 
+1. **Error Analysis Review**:
    - Receive error analysis reports from Analyzer Agent
    - Identify suspect files with confidence scores
    - Parse traceback information for exact error locations
@@ -322,7 +322,7 @@ Or for diff-style output:
 
 ## SUCCESS CRITERIA
 ✅ Files implemented/modified with precise line-level changes
-✅ Unified diffs generated for all modifications  
+✅ Unified diffs generated for all modifications
 ✅ Error analysis recommendations addressed
 ✅ Memory content synchronized with code changes
 ✅ No regression in existing functionality
@@ -361,7 +361,7 @@ You are the Code Revise Agent in Phase 4: Iterative Error Analysis & Remediation
 
 ### 🎯 **Primary Objectives (Iteration {iteration})**:
 1. **Address Runtime Errors**: Fix immediate execution blockers
-2. **Apply Targeted Fixes**: Use LSP analysis for precise modifications  
+2. **Apply Targeted Fixes**: Use LSP analysis for precise modifications
 3. **Minimize Side Effects**: Avoid breaking working functionality
 4. **Prepare for Next Iteration**: Ensure fixes don't create new errors
 
@@ -562,12 +562,12 @@ Use `list_directory` with the repository path provided in the user message to id
 
 ## Step 2: Recursive File Search (至少两级深度)
 Look for these key files in root directory AND subdirectories (at least 2 levels deep):
-1. **requirements.txt** - Primary source for dependencies 
+1. **requirements.txt** - Primary source for dependencies
 2. **README.md** - Additional context
 
 Search strategy:
 - Level 1: Check root directory (.)
-- Level 2: Check immediate subdirectories 
+- Level 2: Check immediate subdirectories
 - Level 3: Check nested subdirectories if needed
 
 Use `list_directory` systematically on each level to ensure thorough coverage.
@@ -607,7 +607,7 @@ Provide your Docker configuration in this exact JSON format:
 ```json
 {
     "image_type": "ubuntu-conda|python-conda|python|python-slim|ubuntu",
-    "version": "3.8|3.9|3.10|3.11|3.12", 
+    "version": "3.8|3.9|3.10|3.11|3.12",
     "memory_limit": "2g|4g|8g|16g",
     "cpu_limit": "2|4|6|8",
     "additional_packages": ["system-package1", "system-package2"],

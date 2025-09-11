@@ -59,7 +59,7 @@ class MCPToolDefinitions:
                 "required": ["file_path"],
             },
         }
-    
+
     @staticmethod
     def _get_read_multiple_files_tool() -> Dict[str, Any]:
         """批量读取多个文件工具定义"""
@@ -71,7 +71,7 @@ class MCPToolDefinitions:
                 "properties": {
                     "file_requests": {
                         "type": "string",
-                        "description": "JSON string with file requests, e.g., '{\"file1.py\": {}, \"file2.py\": {\"start_line\": 1, \"end_line\": 10}}' or simple array '[\"file1.py\", \"file2.py\"]'",
+                        "description": 'JSON string with file requests, e.g., \'{"file1.py": {}, "file2.py": {"start_line": 1, "end_line": 10}}\' or simple array \'["file1.py", "file2.py"]\'',
                     },
                     "max_files": {
                         "type": "integer",
@@ -135,7 +135,7 @@ class MCPToolDefinitions:
                 "required": ["file_path", "content"],
             },
         }
-    
+
     @staticmethod
     def _get_write_multiple_files_tool() -> Dict[str, Any]:
         """批量写入多个文件工具定义"""
@@ -147,7 +147,7 @@ class MCPToolDefinitions:
                 "properties": {
                     "file_implementations": {
                         "type": "string",
-                        "description": "JSON string mapping file paths to content, e.g., '{\"file1.py\": \"content1\", \"file2.py\": \"content2\"}'",
+                        "description": 'JSON string mapping file paths to content, e.g., \'{"file1.py": "content1", "file2.py": "content2"}\'',
                     },
                     "create_dirs": {
                         "type": "boolean",
