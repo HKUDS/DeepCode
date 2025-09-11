@@ -182,7 +182,7 @@ def main():
             "run",
             str(streamlit_app_path),
             "--server.port",
-            "8501",
+            "8508",
             "--server.address",
             "localhost",
             "--browser.gatherUsageStats",
