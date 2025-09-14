@@ -30,8 +30,8 @@ class MCPToolDefinitions:
             MCPToolDefinitions._get_read_code_mem_tool(),
             MCPToolDefinitions._get_write_file_tool(),
             MCPToolDefinitions._get_write_multiple_files_tool(),
-            MCPToolDefinitions._get_execute_python_tool(),
-            MCPToolDefinitions._get_execute_bash_tool(),
+            # MCPToolDefinitions._get_execute_python_tool(),
+            # MCPToolDefinitions._get_execute_bash_tool(),
         ]
 
     @staticmethod
