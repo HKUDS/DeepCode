@@ -12,6 +12,7 @@ import asyncio
 import logging
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, asdict
+from collections import defaultdict
 
 # Import MCP modules
 from mcp.server.fastmcp import FastMCP
@@ -68,6 +69,7 @@ class LSPClient:
         self.request_id = 0
         self.response_futures = {}
         self.initialized = False
+        self.diagnostics_storage = {}  # Store diagnostics by file URI
         self.logger = logging.getLogger(__name__ + ".LSPClient")
         
     async def start(self):
@@ -230,8 +232,33 @@ class LSPClient:
             # Notification from server
             method = message.get("method")
             if method == "textDocument/publishDiagnostics":
-                # Handle diagnostics
-                pass
+                # Handle diagnostics notification
+                await self._handle_diagnostics(message.get("params", {}))
+                
+    async def _handle_diagnostics(self, params: Dict[str, Any]):
+        """Handle diagnostics notification from LSP server"""
+        try:
+            uri = params.get("uri", "")
+            diagnostics_data = params.get("diagnostics", [])
+            
+            # Convert to LSPDiagnostic objects
+            diagnostics = []
+            for diag_data in diagnostics_data:
+                diagnostic = LSPDiagnostic(
+                    range=diag_data.get("range", {}),
+                    severity=diag_data.get("severity", 1),
+                    code=diag_data.get("code"),
+                    message=diag_data.get("message", ""),
+                    source=diag_data.get("source")
+                )
+                diagnostics.append(diagnostic)
+            
+            # Store diagnostics for this file
+            self.diagnostics_storage[uri] = diagnostics
+            self.logger.debug(f"Stored {len(diagnostics)} diagnostics for {uri}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to handle diagnostics: {e}")
     
     async def open_document(self, file_path: str) -> bool:
         """Open a document in the LSP server"""
@@ -255,11 +282,25 @@ class LSPClient:
             self.logger.error(f"Failed to open document {file_path}: {e}")
             return False
     
-    async def get_diagnostics(self, file_path: str) -> List[LSPDiagnostic]:
+    async def get_diagnostics(self, file_path: str, wait_timeout: float = 2.0) -> List[LSPDiagnostic]:
         """Get diagnostics for a file"""
-        # Diagnostics are sent via notifications, we'd need to store them
-        # For now, return empty list
-        return []
+        try:
+            # Convert file path to URI
+            file_uri = f"file://{os.path.abspath(file_path)}"
+            
+            # Wait a bit for diagnostics to arrive if file was just opened
+            initial_count = len(self.diagnostics_storage.get(file_uri, []))
+            if initial_count == 0 and wait_timeout > 0:
+                await asyncio.sleep(wait_timeout)
+            
+            # Return stored diagnostics for this file
+            diagnostics = self.diagnostics_storage.get(file_uri, [])
+            self.logger.debug(f"Retrieved {len(diagnostics)} diagnostics for {file_path}")
+            return diagnostics
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get diagnostics for {file_path}: {e}")
+            return []
     
     async def get_symbols(self, file_path: str) -> List[LSPSymbol]:
         """Get document symbols"""
@@ -664,8 +705,15 @@ async def lsp_get_diagnostics(repo_path: str, file_path: Optional[str] = None) -
             languages_detected = detect_repository_languages(repo_path)
             file_language = None
             
+            # Check if file_path is relative or absolute
+            if not os.path.isabs(file_path):
+                file_path = os.path.join(repo_path, file_path)
+            
+            # Find the relative path for language detection
+            rel_file_path = os.path.relpath(file_path, repo_path)
+            
             for lang, files in languages_detected.items():
-                if file_path in files:
+                if rel_file_path in files or file_path in files:
                     file_language = lang
                     break
             
@@ -673,7 +721,14 @@ async def lsp_get_diagnostics(repo_path: str, file_path: Optional[str] = None) -
                 client = lsp_manager.get_client(file_language)
                 if client:
                     await client.open_document(file_path)
-                    file_diagnostics = await client.get_diagnostics(file_path)
+                    # Send didSave notification to trigger diagnostics
+                    await client._send_notification("textDocument/didSave", {
+                        "textDocument": {
+                            "uri": f"file://{os.path.abspath(file_path)}"
+                        }
+                    })
+                    # Wait longer for diagnostics to be received
+                    file_diagnostics = await client.get_diagnostics(file_path, wait_timeout=5.0)
                     diagnostics.extend([
                         {
                             "file_path": file_path,
@@ -738,13 +793,7 @@ async def lsp_get_code_actions(repo_path: str, file_path: str, start_line: int, 
         lsp_manager = await get_or_create_lsp_manager(repo_path)
         
         # Determine file language
-        languages_detected = detect_repository_languages(repo_path)
-        file_language = None
-        
-        for lang, files in languages_detected.items():
-            if file_path in files:
-                file_language = lang
-                break
+        file_language = _determine_file_language(repo_path, file_path)
         
         if not file_language:
             return json.dumps({
@@ -826,13 +875,7 @@ async def lsp_generate_code_fixes(
         lsp_manager = await get_or_create_lsp_manager(repo_path)
         
         # Determine file language
-        languages_detected = detect_repository_languages(repo_path)
-        file_language = None
-        
-        for lang, files in languages_detected.items():
-            if file_path in files:
-                file_language = lang
-                break
+        file_language = _determine_file_language(repo_path, file_path)
         
         if not file_language:
             return json.dumps({
@@ -1133,6 +1176,26 @@ def _is_language_file(file_path: str, language: str) -> bool:
         'csharp': ['.cs']
     }
     return ext in language_extensions.get(language, [])
+
+def _determine_file_language(repo_path: str, file_path: str) -> Optional[str]:
+    """Determine the programming language of a file"""
+    # Check if file_path is relative or absolute
+    if not os.path.isabs(file_path):
+        abs_file_path = os.path.join(repo_path, file_path)
+    else:
+        abs_file_path = file_path
+    
+    # Find the relative path for language detection
+    rel_file_path = os.path.relpath(abs_file_path, repo_path)
+    
+    # Detect languages in repository
+    languages_detected = detect_repository_languages(repo_path)
+    
+    for lang, files in languages_detected.items():
+        if rel_file_path in files or abs_file_path in files:
+            return lang
+    
+    return None
 
 
 # Run the server

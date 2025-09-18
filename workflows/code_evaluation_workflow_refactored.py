@@ -42,6 +42,9 @@ from workflows.agents.analyzer_agent import (
 )
 from workflows.agents.revision_agent import RevisionAgent, CodeRevisionResult
 
+# Import Checkpoint Manager
+from workflows.checkpoint_manager import CheckpointManager
+
 
 class EvaluationPhase(Enum):
     """Evaluation workflow phases"""
@@ -146,6 +149,9 @@ class CodeEvaluationWorkflow:
         self.revision_agent = None
         self.sandbox_agent = None
         self.memory_agent = None
+        
+        # Checkpoint manager (initialized when repo_path is known)
+        self.checkpoint_manager = None
 
         # Shared state
         self.evaluation_state = None
@@ -184,41 +190,69 @@ class CodeEvaluationWorkflow:
         docs_path: str,
         memory_path: str,
         workspace_dir: Optional[str] = None,
+        resume_from_checkpoint: bool = True,
+        force_restart: bool = False,
     ) -> Dict[str, Any]:
         """
-        Run complete evaluation workflow using specialized agents
+        Run complete evaluation workflow using specialized agents with checkpoint support
 
         Args:
             repo_path: Path to repository to evaluate
             docs_path: Path to reproduction documentation
             memory_path: Path to memory file for code summaries
             workspace_dir: Working directory for evaluation (auto-created if None)
+            resume_from_checkpoint: Whether to attempt resuming from checkpoint
+            force_restart: Force restart from beginning, ignoring checkpoints
 
         Returns:
             Comprehensive evaluation results
         """
         try:
-            # Initialize workspace and state
-            if workspace_dir is None:
-                # Place .evaluation alongside the repository directory (same level as repo_path)
-                repo_abs = os.path.abspath(repo_path)
-                parent_dir = os.path.dirname(repo_abs)
-                repo_name = os.path.basename(repo_abs)
-                workspace_dir = os.path.join(
-                    parent_dir, f".{repo_name}.evaluation", f"run_{int(time.time())}"
+            # Initialize checkpoint manager
+            self.checkpoint_manager = CheckpointManager(repo_path, self.logger)
+            
+            # Check for existing checkpoint and determine resume strategy
+            resume_phase = None
+            if resume_from_checkpoint and not force_restart:
+                checkpoint_data = self.checkpoint_manager.load_checkpoint()
+                if checkpoint_data:
+                    self.evaluation_state, agent_states, metadata = checkpoint_data
+                    recommendation = self.checkpoint_manager.get_resume_recommendation()
+                    if recommendation:
+                        resume_phase, reason = recommendation
+                        self.logger.info(f"🔄 CHECKPOINT RECOVERY ENABLED")
+                        self.logger.info(f"   Resuming from: {resume_phase.value}")
+                        self.logger.info(f"   Reason: {reason}")
+                        self.logger.info(f"   Last checkpoint: {metadata.timestamp}")
+                    
+                    # Update workspace_dir if needed
+                    if workspace_dir is None:
+                        workspace_dir = self.evaluation_state.workspace_dir
+                else:
+                    self.logger.info("🆕 No valid checkpoint found, starting fresh")
+            
+            # Initialize workspace and state (if not resumed from checkpoint)
+            if not resume_phase:
+                if workspace_dir is None:
+                    # Place .evaluation alongside the repository directory (same level as repo_path)
+                    repo_abs = os.path.abspath(repo_path)
+                    parent_dir = os.path.dirname(repo_abs)
+                    repo_name = os.path.basename(repo_abs)
+                    workspace_dir = os.path.join(
+                        parent_dir, f".{repo_name}.evaluation", f"run_{int(time.time())}"
+                    )
+
+                os.makedirs(workspace_dir, exist_ok=True)
+                self.logger.info(f"🎯 Workspace: {workspace_dir}")
+
+                self.evaluation_state = EvaluationState(
+                    phase=EvaluationPhase.INITIALIZED,
+                    repo_path=os.path.abspath(repo_path),
+                    docs_path=os.path.abspath(docs_path),
+                    memory_path=os.path.abspath(memory_path),
+                    workspace_dir=workspace_dir,
+                    start_time=time.time(),
                 )
-
-            os.makedirs(workspace_dir, exist_ok=True)
-            self.logger.info(f"🎯 Workspace: {workspace_dir}")
-
-            self.evaluation_state = EvaluationState(
-                phase=EvaluationPhase.INITIALIZED,
-                repo_path=os.path.abspath(repo_path),
-                docs_path=os.path.abspath(docs_path),
-                memory_path=os.path.abspath(memory_path),
-                workspace_dir=workspace_dir,
-                start_time=time.time(),
-            )
 
             self.logger.info("=" * 80)
             self.logger.info(
@@ -235,91 +269,100 @@ class CodeEvaluationWorkflow:
             # Initialize all agents
             await self._initialize_agents()
 
-            # PHASE 1: Analysis and Revision Report Generation (ANALYZER AGENT)
-            self.logger.info(
-                "🔍 Phase 1: Repository Analysis & Revision Report Generation"
-            )
-            self.evaluation_state.phase = EvaluationPhase.ANALYZING
-            await self.analyzer_agent.run_analysis_and_generate_revision_reports()
+            # Execute phases based on resume point
+            if not resume_phase or resume_phase == EvaluationPhase.ANALYZING:
+                # PHASE 1: Analysis and Revision Report Generation (ANALYZER AGENT)
+                self.logger.info("🔍 Phase 1: Repository Analysis & Revision Report Generation")
+                self.checkpoint_manager.log_phase_start(EvaluationPhase.ANALYZING)
+                self.evaluation_state.phase = EvaluationPhase.ANALYZING
+                await self.analyzer_agent.run_analysis_and_generate_revision_reports()
 
-            # Verify that revision reports were generated
-            if not self.evaluation_state.revision_report:
-                raise Exception(
-                    "Analyzer Agent failed to generate revision reports - cannot proceed to revision phase"
+                # Verify that revision reports were generated
+                if not self.evaluation_state.revision_report:
+                    raise Exception(
+                        "Analyzer Agent failed to generate revision reports - cannot proceed to revision phase"
+                    )
+
+                self.logger.info("✅ Analysis phase completed - revision reports generated by Analyzer Agent")
+                # Save checkpoint after phase 1
+                self.checkpoint_manager.save_checkpoint(self.evaluation_state, EvaluationPhase.ANALYZING)
+
+            if not resume_phase or resume_phase in [EvaluationPhase.ANALYZING, EvaluationPhase.REVISING]:
+                # PHASE 2: Multi-File Code Revision Execution (REVISION AGENT)
+                self.logger.info("🔧 Phase 2: Enhanced Multi-File Code Revision Execution")
+                self.checkpoint_manager.log_phase_start(EvaluationPhase.REVISING)
+                self.evaluation_state.phase = EvaluationPhase.REVISING
+
+                revision_completed = (
+                    await self.revision_agent.run_iterative_multi_file_revision_execution()
                 )
 
-            self.logger.info(
-                "✅ Analysis phase completed - revision reports generated by Analyzer Agent"
-            )
+                if not revision_completed:
+                    self.logger.error("No files need to be revised")
 
-            # PHASE 2: Multi-File Code Revision Execution (REVISION AGENT)
-            self.logger.info("🔧 Phase 2: Enhanced Multi-File Code Revision Execution")
-            self.evaluation_state.phase = EvaluationPhase.REVISING
+                self.logger.info("✅ Enhanced multi-file revision phase completed")
+                # Save checkpoint after phase 2
+                self.checkpoint_manager.save_checkpoint(self.evaluation_state, EvaluationPhase.REVISING)
 
-            revision_completed = (
-                await self.revision_agent.run_iterative_multi_file_revision_execution()
-            )
+            if not resume_phase or resume_phase in [EvaluationPhase.ANALYZING, EvaluationPhase.REVISING, EvaluationPhase.STATIC_ANALYSIS]:
+                # PHASE 3: Static Analysis and Automatic Fixes (ANALYZER AGENT)
+                self.logger.info("🔍 Phase 3: Static Analysis and Code Quality Fixes")
+                self.checkpoint_manager.log_phase_start(EvaluationPhase.STATIC_ANALYSIS)
+                self.evaluation_state.phase = EvaluationPhase.STATIC_ANALYSIS
 
-            if not revision_completed:
-                self.logger.error("No files need to be revised")
-
-            self.logger.info("✅ Enhanced multi-file revision phase completed")
-
-            # PHASE 3: Static Analysis and Automatic Fixes (ANALYZER AGENT)
-            self.logger.info("🔍 Phase 3: Static Analysis and Code Quality Fixes")
-            self.evaluation_state.phase = EvaluationPhase.STATIC_ANALYSIS
-
-            static_analysis_completed = (
-                await self.analyzer_agent.run_static_analysis_phase()
-            )
-
-            if not static_analysis_completed:
-                self.logger.warning(
-                    "⚠️ Static analysis phase failed but continuing to error analysis"
+                static_analysis_completed = (
+                    await self.analyzer_agent.run_static_analysis_phase()
                 )
 
-            self.logger.info("✅ Static analysis phase completed")
+                if not static_analysis_completed:
+                    self.logger.warning(
+                        "⚠️ Static analysis phase failed but continuing to error analysis"
+                    )
 
-            # SANDBOX SETUP: Create sandbox environment
-            self.logger.info(
-                "🏗️ Sandbox Setup: Creating isolated environment for project execution"
-            )
-            sandbox_setup_completed = await self._setup_sandbox_environment()
+                self.logger.info("✅ Static analysis phase completed")
+                # Save checkpoint after phase 3
+                self.checkpoint_manager.save_checkpoint(self.evaluation_state, EvaluationPhase.STATIC_ANALYSIS)
 
-            if not sandbox_setup_completed:
-                self.logger.warning(
-                    "⚠️ Sandbox setup failed but continuing with limited Phase 4"
+            # SANDBOX SETUP: Create sandbox environment (if needed)
+            if not hasattr(self, 'sandbox_agent') or self.sandbox_agent is None:
+                self.logger.info("🏗️ Sandbox Setup: Creating isolated environment for project execution")
+                sandbox_setup_completed = await self._setup_sandbox_environment()
+
+                if not sandbox_setup_completed:
+                    self.logger.warning("⚠️ Sandbox setup failed but continuing with limited Phase 4")
+
+                self.logger.info("✅ Sandbox setup completed")
+
+            if not resume_phase or resume_phase in [EvaluationPhase.ANALYZING, EvaluationPhase.REVISING, EvaluationPhase.STATIC_ANALYSIS, EvaluationPhase.ERROR_ANALYSIS]:
+                # PHASE 4: Iterative Error Analysis and Remediation (REVISION AGENT + SANDBOX AGENT)
+                self.logger.info("🔬 Phase 4: Iterative Error Analysis and Targeted Remediation with Sandbox")
+                self.checkpoint_manager.log_phase_start(EvaluationPhase.ERROR_ANALYSIS)
+                self.evaluation_state.phase = EvaluationPhase.ERROR_ANALYSIS
+
+                error_analysis_completed = (
+                    await self.revision_agent.run_iterative_error_analysis_phase(
+                        self.sandbox_agent
+                    )
                 )
 
-            self.logger.info("✅ Sandbox setup completed")
+                if not error_analysis_completed:
+                    self.logger.warning(
+                        "⚠️ Iterative error analysis phase failed but continuing to final evaluation"
+                    )
 
-            # PHASE 4: Iterative Error Analysis and Remediation (REVISION AGENT + SANDBOX AGENT)
-            self.logger.info(
-                "🔬 Phase 4: Iterative Error Analysis and Targeted Remediation with Sandbox"
-            )
-            self.evaluation_state.phase = EvaluationPhase.ERROR_ANALYSIS
-
-            error_analysis_completed = (
-                await self.revision_agent.run_iterative_error_analysis_phase(
-                    self.sandbox_agent
-                )
-            )
-
-            if not error_analysis_completed:
-                self.logger.warning(
-                    "⚠️ Iterative error analysis phase failed but continuing to final evaluation"
-                )
-
-            self.logger.info("✅ Iterative error analysis phase completed")
+                self.logger.info("✅ Iterative error analysis phase completed")
+                # Save checkpoint after phase 4
+                self.checkpoint_manager.save_checkpoint(self.evaluation_state, EvaluationPhase.ERROR_ANALYSIS)
 
             # PHASE 5: Final Evaluation
             self.logger.info("📊 Phase 5: Final Evaluation")
             self.evaluation_state.phase = EvaluationPhase.COMPLETED
             results = await self._generate_final_report()
 
-            self.logger.info(
-                "✅ Refactored multi-agent evaluation workflow completed successfully"
-            )
+            # Save final checkpoint
+            self.checkpoint_manager.save_checkpoint(self.evaluation_state, EvaluationPhase.COMPLETED)
+
+            self.logger.info("✅ Refactored multi-agent evaluation workflow completed successfully")
             return results
 
         except Exception as e:
@@ -336,6 +379,20 @@ class CodeEvaluationWorkflow:
             }
         finally:
             await self._cleanup_agents()
+    
+    def get_checkpoint_summary(self) -> Dict[str, Any]:
+        """Get summary of checkpoint status"""
+        if self.checkpoint_manager:
+            return self.checkpoint_manager.get_checkpoint_summary()
+        return {"status": "checkpoint_manager_not_initialized"}
+    
+    def clear_checkpoints(self):
+        """Clear all checkpoints for this repository"""
+        if self.checkpoint_manager:
+            self.checkpoint_manager.clear_checkpoints()
+            self.logger.info("🗑️ All checkpoints cleared")
+        else:
+            self.logger.warning("⚠️ Checkpoint manager not initialized")
 
     async def _initialize_agents(self):
         """Initialize all MCP agents and specialized agents"""
@@ -1006,34 +1063,60 @@ class CodeEvaluationWorkflow:
 
 
 # Entry point for testing
-async def main(repo_path=None, docs_path=None, memory_path=None, max_files_per_batch=3):
+async def main(repo_path=None, docs_path=None, memory_path=None, max_files_per_batch=3, resume_from_checkpoint=True, force_restart=False, show_checkpoint_status=False, clear_checkpoints=False):
     """
-    Run the refactored multi-agent evaluation workflow
+    Run the refactored multi-agent evaluation workflow with checkpoint support
 
     Args:
         repo_path: Path to repository to evaluate
         docs_path: Path to reproduction documentation
         memory_path: Path to memory file for code summaries
         max_files_per_batch: Maximum files per batch for multi-file processing
+        resume_from_checkpoint: Whether to attempt resuming from checkpoint
+        force_restart: Force restart from beginning, ignoring checkpoints
+        show_checkpoint_status: Show checkpoint status and exit
+        clear_checkpoints: Clear all checkpoints and exit
     """
     workflow = CodeEvaluationWorkflow(max_files_per_batch=max_files_per_batch)
 
     # Use provided paths or default example paths
     if repo_path is None:
-        repo_path = "D:/Project_codes/DeepCode_docker/deepcode_lab/papers/1/generate_code"
+        repo_path = "/Users/lizongwei/Reasearch/DeepCode_Base/DeepCode_eval_init/deepcode_lab/papers/1/generate_code"
     if docs_path is None:
-        docs_path = "D:/Project_codes/DeepCode_docker/deepcode_lab/papers/1/initial_plan.txt"
+        docs_path = "/Users/lizongwei/Reasearch/DeepCode_Base/DeepCode_eval_init/deepcode_lab/papers/1/initial_plan.txt"
     if memory_path is None:
-        memory_path = "D:/Project_codes/DeepCode_docker/deepcode_lab/papers/1/generate_code/implement_code_summary.md"
+        memory_path = "/Users/lizongwei/Reasearch/DeepCode_Base/DeepCode_eval_init/deepcode_lab/papers/1/generate_code/implement_code_summary.md"
+
+    # Initialize checkpoint manager for utility functions
+    from workflows.checkpoint_manager import CheckpointManager
+    checkpoint_manager = CheckpointManager(repo_path)
+
+    # Handle checkpoint utility commands
+    if clear_checkpoints:
+        checkpoint_manager.clear_checkpoints()
+        print("✅ Checkpoints cleared successfully")
+        return {"status": "checkpoints_cleared"}
+
+    if show_checkpoint_status:
+        summary = checkpoint_manager.get_checkpoint_summary()
+        print("📊 Checkpoint Status:")
+        print(json.dumps(summary, indent=2))
+        return summary
 
     print("🚀 Starting Refactored Code Evaluation Workflow")
     print(f"📂 Repository: {repo_path}")
     print(f"📄 Documentation: {docs_path}")
     print(f"🧠 Memory Path: {memory_path}")
     print(f"📦 Max files per batch: {max_files_per_batch}")
+    print(f"🔄 Resume from checkpoint: {resume_from_checkpoint}")
+    print(f"🔄 Force restart: {force_restart}")
     print("=" * 80)
 
-    results = await workflow.run_evaluation(repo_path, docs_path, memory_path)
+    results = await workflow.run_evaluation(
+        repo_path, docs_path, memory_path, 
+        resume_from_checkpoint=resume_from_checkpoint, 
+        force_restart=force_restart
+    )
     print(json.dumps(results, indent=2))
     return results
 

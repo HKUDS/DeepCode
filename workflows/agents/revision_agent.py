@@ -113,8 +113,11 @@ class RevisionAgent:
 
             # Set up workspace for the Code Revise Agent
             try:
+                tool_name = "set_workspace"
+                tool_input = {"workspace_path": self.evaluation_state.repo_path}
+                self.logger.info(self._format_tool_info(tool_name, tool_input))
                 workspace_setup_result = await self.mcp_revision_agent.call_tool(
-                    "set_workspace", {"workspace_path": self.evaluation_state.repo_path}
+                    tool_name, tool_input
                 )
                 self.logger.info(
                     f"✅ Code Revise Agent workspace configured: {self.evaluation_state.repo_path}"
@@ -185,12 +188,15 @@ class RevisionAgent:
 
             # Step 0: Set up LSP servers for the repository
             self.logger.info("🚀 Setting up LSP servers for enhanced analysis")
+            tool_name = "setup_lsp_servers"
+            tool_input = {"repo_path": self.evaluation_state.repo_path}
+            self.logger.info(self._format_tool_info(tool_name, tool_input))
             lsp_setup_result = await self.mcp_revision_agent.call_tool(
-                "setup_lsp_servers", {"repo_path": self.evaluation_state.repo_path}
+                tool_name, tool_input
             )
             self.logger.info("✅ LSP servers initialized")
 
-            max_iterations = 15
+            max_iterations = 50
             iteration = 0
             project_running = False
 
@@ -735,7 +741,7 @@ Available tools for this batch: {available_tool_names}"""
 
                         # Execute the tool call through Code Revise Agent
                         try:
-                            self.logger.info(f"🔧 Executing tool: {tool_name}")
+                            self.logger.info(self._format_tool_info(tool_name, tool_input))
                             tool_result = await self.mcp_revision_agent.call_tool(
                                 tool_name, tool_input
                             )
@@ -915,12 +921,14 @@ Please call the appropriate tools now."""
 
                 # Step 1: Get LSP diagnostics and apply fixes
                 try:
+                    tool_name = "lsp_get_diagnostics"
+                    tool_input = {
+                        "repo_path": self.evaluation_state.repo_path,
+                        "file_path": file_path,
+                    }
+                    self.logger.info(self._format_tool_info(tool_name, tool_input))
                     diagnostics_result = await self.mcp_revision_agent.call_tool(
-                        "lsp_get_diagnostics",
-                        {
-                            "repo_path": self.evaluation_state.repo_path,
-                            "file_path": file_path,
-                        },
+                        tool_name, tool_input
                     )
 
                     if diagnostics_result:
@@ -937,15 +945,17 @@ Please call the appropriate tools now."""
                                 function_name = context.get("function_name", "")
 
                                 # Step 3: Generate precise code fixes using LSP
+                                tool_name_fixes = "lsp_generate_code_fixes"
+                                tool_input_fixes = {
+                                    "repo_path": self.evaluation_state.repo_path,
+                                    "file_path": file_path,
+                                    "start_line": max(0, line_num - 2),
+                                    "end_line": line_num + 2,
+                                    "error_context": f"Function: {function_name}, Error: {context.get('code_line', '')}",
+                                }
+                                self.logger.info(self._format_tool_info(tool_name_fixes, tool_input_fixes))
                                 fixes_result = await self.mcp_revision_agent.call_tool(
-                                    "lsp_generate_code_fixes",
-                                    {
-                                        "repo_path": self.evaluation_state.repo_path,
-                                        "file_path": file_path,
-                                        "start_line": max(0, line_num - 2),
-                                        "end_line": line_num + 2,
-                                        "error_context": f"Function: {function_name}, Error: {context.get('code_line', '')}",
-                                    },
+                                    tool_name_fixes, tool_input_fixes
                                 )
 
                                 if fixes_result:
@@ -964,14 +974,16 @@ Please call the appropriate tools now."""
                                         ]:  # Apply top fix
                                             if fix_proposal.get("edit"):
                                                 # Apply LSP workspace edit
+                                                tool_name_edit = "lsp_apply_workspace_edit"
+                                                tool_input_edit = {
+                                                    "repo_path": self.evaluation_state.repo_path,
+                                                    "workspace_edit": json.dumps(
+                                                        fix_proposal["edit"]
+                                                    ),
+                                                }
+                                                self.logger.info(self._format_tool_info(tool_name_edit, tool_input_edit))
                                                 edit_result = await self.mcp_revision_agent.call_tool(
-                                                    "lsp_apply_workspace_edit",
-                                                    {
-                                                        "repo_path": self.evaluation_state.repo_path,
-                                                        "workspace_edit": json.dumps(
-                                                            fix_proposal["edit"]
-                                                        ),
-                                                    },
+                                                    tool_name_edit, tool_input_edit
                                                 )
 
                                                 if edit_result:
@@ -1018,13 +1030,15 @@ Please call the appropriate tools now."""
                 ):
                     try:
                         # Use generate_precise_code_fixes for fallback
+                        tool_name_precise = "generate_precise_code_fixes"
+                        tool_input_precise = {
+                            "error_analysis_report": json.dumps(error_report),
+                            "target_files": [file_path],
+                            "fix_strategy": "targeted",
+                        }
+                        self.logger.info(self._format_tool_info(tool_name_precise, tool_input_precise))
                         precise_fixes_result = await self.mcp_revision_agent.call_tool(
-                            "generate_precise_code_fixes",
-                            {
-                                "error_analysis_report": json.dumps(error_report),
-                                "target_files": [file_path],
-                                "fix_strategy": "targeted",
-                            },
+                            tool_name_precise, tool_input_precise
                         )
 
                         if precise_fixes_result:
@@ -1034,13 +1048,15 @@ Please call the appropriate tools now."""
                             precise_fixes_data = json.loads(precise_fixes_content)
                             if precise_fixes_data.get("status") == "success":
                                 # Apply the generated fixes
+                                tool_name_apply = "apply_code_fixes_with_diff"
+                                tool_input_apply = {
+                                    "fixes_json": precise_fixes_content,
+                                    "repo_path": self.evaluation_state.repo_path,
+                                    "dry_run": False,
+                                }
+                                self.logger.info(self._format_tool_info(tool_name_apply, tool_input_apply))
                                 apply_fixes_result = await self.mcp_revision_agent.call_tool(
-                                    "apply_code_fixes_with_diff",
-                                    {
-                                        "fixes_json": precise_fixes_content,
-                                        "repo_path": self.evaluation_state.repo_path,
-                                        "dry_run": False,
-                                    },
+                                    tool_name_apply, tool_input_apply
                                 )
 
                                 if apply_fixes_result:
@@ -1218,7 +1234,7 @@ Start by analyzing the error, then decide on the fixing strategy, and finally im
     ) -> dict:
         """Execute the multi-iteration conversation with agent for error fixing"""
         messages = [{"role": "user", "content": user_message}]
-        max_iterations = 8
+        max_iterations = 50
         agent_iteration = 0
         fixing_completed = False
 
@@ -1321,6 +1337,7 @@ Start by analyzing the error, then decide on the fixing strategy, and finally im
             )
 
             try:
+                self.logger.info(self._format_tool_info(tool_name, tool_input))
                 tool_result = await self.mcp_revision_agent.call_tool(
                     tool_name, tool_input
                 )
@@ -1756,6 +1773,7 @@ Use the available tools effectively and explain your approach."""
             )
 
             try:
+                self.logger.info(self._format_tool_info(tool_name, tool_input))
                 tool_result = await self.mcp_revision_agent.call_tool(
                     tool_name, tool_input
                 )
@@ -1925,6 +1943,7 @@ Use the available tools effectively and explain your approach."""
             )
 
             try:
+                self.logger.info(self._format_tool_info(tool_name, tool_input))
                 tool_result = await self.mcp_revision_agent.call_tool(
                     tool_name, tool_input
                 )
@@ -2504,6 +2523,28 @@ Use the available tools effectively and explain your approach."""
             self.logger.warning(
                 f"⚠️ Failed to update evaluation state with LSP results: {e}"
             )
+
+    def _format_tool_info(self, tool_name: str, tool_input: dict) -> str:
+        """Format tool call information for logging"""
+        try:
+            # Convert tool_input to string representation
+            if isinstance(tool_input, dict):
+                # Get a readable string representation, truncate long values
+                input_str = ""
+                for key, value in tool_input.items():
+                    value_str = str(value)
+                    if len(value_str) > 50:
+                        value_str = value_str[:50] + "..."
+                    input_str += f"{key}={value_str}, "
+                input_str = input_str.rstrip(", ")
+                if len(input_str) > 100:
+                    input_str = input_str[:100] + "..."
+            else:
+                input_str = str(tool_input)[:50] + "..." if len(str(tool_input)) > 50 else str(tool_input)
+            
+            return f"🔧 [TOOL CALL] {tool_name} | Input: {input_str}"
+        except Exception as e:
+            return f"🔧 [TOOL CALL] {tool_name} | Input: <formatting error: {str(e)}>"
 
     # ==================== Placeholder Methods ====================
     # These would be implemented by the main workflow or passed in

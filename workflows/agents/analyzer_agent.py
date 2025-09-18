@@ -345,6 +345,7 @@ Begin your analysis now."""
                             f"🔄 Enhanced {tool_name} with conversation data from {len(analysis_result['analysis_data'])} previous analyses"
                         )
 
+                self.logger.info(self._format_tool_info(tool_name, tool_input))
                 tool_result = await self.mcp_analyzer_agent.call_tool(
                     tool_name, tool_input
                 )
@@ -650,8 +651,11 @@ Begin your analysis now."""
             self.logger.info(
                 "🔧 Setting up LSP servers for comprehensive error analysis"
             )
+            tool_name = "setup_lsp_servers"
+            tool_input = {"repo_path": self.evaluation_state.repo_path}
+            self.logger.info(self._format_tool_info(tool_name, tool_input))
             lsp_setup_result = await self.mcp_analyzer_agent.call_tool(
-                "setup_lsp_servers", {"repo_path": self.evaluation_state.repo_path}
+                tool_name, tool_input
             )
 
             lsp_setup_content = self._extract_tool_result_content(lsp_setup_result)
@@ -668,13 +672,15 @@ Begin your analysis now."""
 
             # Step 2: Apply automatic formatting fixes (optimized - no redundant error detection)
             self.logger.info("🎨 Step 2: Applying automatic formatting fixes")
+            tool_name_format = "auto_fix_formatting"
+            tool_input_format = {
+                "repo_path": self.evaluation_state.repo_path,
+                "languages": None,  # Auto-detect all languages
+                "dry_run": False,  # Apply actual fixes
+            }
+            self.logger.info(self._format_tool_info(tool_name_format, tool_input_format))
             format_result = await self.mcp_analyzer_agent.call_tool(
-                "auto_fix_formatting",
-                {
-                    "repo_path": self.evaluation_state.repo_path,
-                    "languages": None,  # Auto-detect all languages
-                    "dry_run": False,  # Apply actual fixes
-                },
+                tool_name_format, tool_input_format
             )
 
             format_content = self._extract_tool_result_content(format_result)
@@ -699,12 +705,14 @@ Begin your analysis now."""
             self.logger.info(
                 "🔍 Step 3: Running comprehensive LSP diagnostics analysis"
             )
+            tool_name_diag = "lsp_get_diagnostics"
+            tool_input_diag = {
+                "repo_path": self.evaluation_state.repo_path,
+                "file_path": None,  # Analyze all files
+            }
+            self.logger.info(self._format_tool_info(tool_name_diag, tool_input_diag))
             lsp_diagnostics_result = await self.mcp_analyzer_agent.call_tool(
-                "lsp_get_diagnostics",
-                {
-                    "repo_path": self.evaluation_state.repo_path,
-                    "file_path": None,  # Analyze all files
-                },
+                tool_name_diag, tool_input_diag
             )
 
             diagnostics_content = self._extract_tool_result_content(
@@ -744,15 +752,17 @@ Begin your analysis now."""
                             )
 
                             # Generate targeted code fixes using LSP
+                            tool_name_lsp_fix = "lsp_generate_code_fixes"
+                            tool_input_lsp_fix = {
+                                "repo_path": self.evaluation_state.repo_path,
+                                "file_path": file_path,
+                                "start_line": 1,
+                                "end_line": -1,  # Entire file
+                                "error_context": f"Fix {error_count} LSP diagnostic errors",
+                            }
+                            self.logger.info(self._format_tool_info(tool_name_lsp_fix, tool_input_lsp_fix))
                             fix_result = await self.mcp_analyzer_agent.call_tool(
-                                "lsp_generate_code_fixes",
-                                {
-                                    "repo_path": self.evaluation_state.repo_path,
-                                    "file_path": file_path,
-                                    "start_line": 1,
-                                    "end_line": -1,  # Entire file
-                                    "error_context": f"Fix {error_count} LSP diagnostic errors",
-                                },
+                                tool_name_lsp_fix, tool_input_lsp_fix
                             )
 
                             fix_content = self._extract_tool_result_content(fix_result)
@@ -768,14 +778,16 @@ Begin your analysis now."""
                                 # Apply the workspace edit if available
                                 workspace_edit = fix_data.get("workspace_edit")
                                 if workspace_edit:
+                                    tool_name_apply = "lsp_apply_workspace_edit"
+                                    tool_input_apply = {
+                                        "repo_path": self.evaluation_state.repo_path,
+                                        "workspace_edit": json.dumps(
+                                            workspace_edit
+                                        ),
+                                    }
+                                    self.logger.info(self._format_tool_info(tool_name_apply, tool_input_apply))
                                     apply_result = await self.mcp_analyzer_agent.call_tool(
-                                        "lsp_apply_workspace_edit",
-                                        {
-                                            "repo_path": self.evaluation_state.repo_path,
-                                            "workspace_edit": json.dumps(
-                                                workspace_edit
-                                            ),
-                                        },
+                                        tool_name_apply, tool_input_apply
                                     )
 
                                     apply_content = self._extract_tool_result_content(
@@ -807,13 +819,15 @@ Begin your analysis now."""
                     "⚠️ LSP diagnostics analysis failed, falling back to basic static analysis"
                 )
                 # Fallback: Use basic static analysis if LSP completely fails
+                tool_name_basic = "perform_static_analysis"
+                tool_input_basic = {
+                    "repo_path": self.evaluation_state.repo_path,
+                    "auto_fix": True,
+                    "languages": None,
+                }
+                self.logger.info(self._format_tool_info(tool_name_basic, tool_input_basic))
                 basic_analysis_result = await self.mcp_analyzer_agent.call_tool(
-                    "perform_static_analysis",
-                    {
-                        "repo_path": self.evaluation_state.repo_path,
-                        "auto_fix": True,
-                        "languages": None,
-                    },
+                    tool_name_basic, tool_input_basic
                 )
 
                 basic_content = self._extract_tool_result_content(basic_analysis_result)
@@ -831,9 +845,11 @@ Begin your analysis now."""
 
             # Step 5: Final validation of fixes
             self.logger.info("✅ Step 5: Final validation of preliminary error fixes")
+            tool_name_final = "lsp_get_diagnostics"
+            tool_input_final = {"repo_path": self.evaluation_state.repo_path, "file_path": None}
+            self.logger.info(self._format_tool_info(tool_name_final, tool_input_final))
             final_validation_result = await self.mcp_analyzer_agent.call_tool(
-                "lsp_get_diagnostics",
-                {"repo_path": self.evaluation_state.repo_path, "file_path": None},
+                tool_name_final, tool_input_final
             )
 
             final_content = self._extract_tool_result_content(final_validation_result)
@@ -980,45 +996,84 @@ Begin your analysis now."""
                 analysis_task="README accuracy verification and update"
             )}
 
-ROLE: README Accuracy Verifier
-- Use only code_implementation tools.
-- Goal: verify README commands/paths/instructions match the actual repo, then update README.
+# ROLE AND OBJECTIVE
+You are a README Accuracy Verifier and Enhancer. Your primary objective is to:
+1. Locate and analyze existing README files in the repository
+2. Verify that all commands, paths, and instructions are accurate and functional
+3. Enhance the README content with missing critical information if needed
+4. Only make changes when improvements are genuinely required
 
-ALLOWED TOOLS: {[tool.get("name", "") for tool in tools]}
+## AVAILABLE TOOLS
+Use only these code_implementation tools: {[tool.get("name", "") for tool in tools]}
 
-DISCOVERY RULES (use exact paths):
-1) Call get_file_structure with directory="." to enumerate files. Parse the returned JSON recursively.
-2) Treat every item with type=="file" and name matching case-insensitive patterns: README.md, README.MD, README.rst, README.txt as README candidates.
-3) For each candidate, capture its "path" exactly as returned (this path is workspace-relative).
+## STEP-BY-STEP METHODOLOGY
 
-PATH RULES (critical):
-- When calling read_file or write_file, use the README "path" exactly as discovered from get_file_structure.
-- Do NOT construct absolute paths. Do NOT guess directories.
-- The code-implementation server workspace equals the repository root, so the discovered "path" is already correct.
+### Phase 1: README Discovery
+**Think step by step:**
+1. **Primary Discovery**: Call `get_file_structure` with directory="." to scan the entire repository
+2. **Parse Results**: Look for files matching these patterns (case-insensitive): README.md, README.MD, README.rst, README.txt, readme.md, readme.txt
+3. **Fallback Discovery**: If get_file_structure fails or returns no README files after 2 attempts, use `execute_bash` with commands like:
+   - `find . -name "README*" -type f`
+   - `find . -name "readme*" -type f`
+   - `ls -la` (to check root directory)
+4. **Path Capture**: Record the exact "path" for each README candidate as returned by the tools
 
-WRITE RULES:
-- If updating an existing README, write back to the SAME path.
-- If multiple READMEs exist, prefer (in order): repo-root README.*, otherwise the shallowest path (fewest separators).
-- If no README exists, create "README.md" at repo root (path: README.md).
+### Phase 2: Content Analysis
+**For each README found, systematically verify:**
+1. **Installation Commands**: Check if referenced scripts, package managers, or setup files exist
+2. **Execution Commands**: Verify that entry points, main scripts, or executable files are present
+3. **Dependencies**: Cross-reference with requirements.txt, package.json, setup.py, or similar files
+4. **File Paths**: Ensure all referenced files and directories actually exist
+5. **Configuration**: Validate that mentioned config files, environment variables, or settings are accurate
 
-WORKFLOW (minimal and strict):
-1) Locate README files: call get_file_structure and extract candidate README paths.
-2) Parse commands (install/run/test), file paths, configs and prerequisites.
-3) Verify each item by reading repo files and structure (no guessing):
-   - referenced scripts/commands exist
-   - module/entry points exist
-   - config paths/files exist
-   - dependency names match requirements.txt (if present)
-4) If inaccuracies exist, produce corrected README content.
-5) Write the improved README with write_file (preserve valid sections).
+### Phase 3: Enhancement Assessment
+**Determine if README needs improvement by checking for:**
+- Missing installation instructions for detected package managers
+- Absent usage examples when main entry points exist
+- Incomplete dependency information
+- Outdated or broken command references
+- Missing project description or purpose
+- Lack of basic usage documentation
 
-TERMINATION:
-- Updated README written successfully, or
-- No changes needed (explicitly stated), or
-- Max 8 iterations.
+### Phase 4: Implementation
+**Only if improvements are needed:**
+1. **Preserve Valid Content**: Keep all accurate and useful existing information
+2. **Enhance Missing Sections**: Add only genuinely helpful information based on actual code structure
+3. **Fix Inaccuracies**: Correct any commands, paths, or instructions that don't match reality
+4. **Write Back**: Use `write_file` with the exact path discovered in Phase 1
 
+## CRITICAL GUIDELINES
+
+### Path Handling (ESSENTIAL):
+- Use README paths EXACTLY as discovered from tools
+- Never construct absolute paths or guess directories
+- The workspace root equals the repository root
+- If multiple READMEs exist, prioritize: repo-root README.* > shallowest path
+
+### Quality Standards:
+- Only make changes that add genuine value
+- Preserve the original tone and style when possible
+- Ensure all suggested commands actually work
+- Test command accuracy by checking file existence
+
+### Decision Framework:
+Ask yourself before making changes:
+1. "Does this README accurately reflect the current codebase?"
+2. "Are there missing critical instructions that would help users?"
+3. "Do all commands and paths actually work?"
+4. "Would these changes genuinely improve user experience?"
+
+## SUCCESS CRITERIA
+- All commands in README are verified as functional
+- Critical missing information has been added (if any)
+- No unnecessary changes made to already-accurate content
+- README provides clear, actionable guidance for users
+
+## REPOSITORY CONTEXT
 Repository: {self.evaluation_state.repo_path}
-Focus: accurate README reflecting real code and usage."""
+Focus: Create a README that accurately reflects the real codebase and provides genuine value to users.
+
+Remember: Think through each step methodically. Only improve what genuinely needs improvement."""
 
             # Create initial user message
             user_message = f"""Verify README accuracy for this repository and update it if needed.
@@ -1048,7 +1103,7 @@ Start by listing detected README files and the checks you will perform."""
 
             # Execute conversation loop
             messages = [{"role": "user", "content": user_message}]
-            max_iterations = 30
+            max_iterations = 50
             iteration = 0
             task_completed = False
 
@@ -1207,6 +1262,7 @@ Start by listing detected README files and the checks you will perform."""
             )
 
             try:
+                self.logger.info(self._format_tool_info(tool_name, tool_input))
                 tool_result = await self.mcp_analyzer_agent.call_tool(
                     tool_name, tool_input
                 )
@@ -1300,54 +1356,91 @@ Start by listing detected README files and the checks you will perform."""
                 analysis_task="Executable script generation and testing"
             )}
 
-EXECUTABLE SCRIPT GENERATION SPECIALIST MODE:
-You are now an Executable Script Generation Specialist. Your mission is to:
+# ROLE AND OBJECTIVE
+You are an Executable Script Generation and Enhancement Specialist. Your primary mission is to:
+1. **Analyze** the repository comprehensively to understand its true functionality and structure
+2. **Understand** file relationships and dependencies to create meaningful execution paths
+3. **Create or enhance** executable scripts that demonstrate the project's capabilities effectively
+4. **Only make changes** when genuine improvements to executability are needed
 
-1. ANALYZE the repository structure and understand the project's main functionality
-2. IDENTIFY the entry points and main execution paths
-3. CREATE executable scripts that can run the entire repository successfully
-4. GENERATE test data if needed for demonstration and validation
-5. ENSURE the scripts are robust and handle common execution scenarios
+## AVAILABLE TOOLS
+Use these code_implementation tools strategically: {[tool.get("name", "") for tool in tools]}
 
-CRITICAL ANALYSIS AREAS:
-- Main entry points (main.py, __main__.py, app.py, etc.)
-- Configuration files and their requirements
-- Dependencies and environment setup needs
-- Input data requirements and formats
-- Expected outputs and behaviors
-- Error handling and edge cases
+## STEP-BY-STEP METHODOLOGY
 
-AVAILABLE TOOLS:
-{[tool.get("name", "") for tool in tools]}
+### Phase 1: Deep Repository Analysis
+**Think step by step:**
+1. **Primary Structure Discovery**: Use `get_file_structure` to map the complete repository structure
+2. **Code Relationship Analysis**: Use `read_multiple_files` to understand connections between key files
+3. **Dependency Investigation**: Read requirements.txt, setup.py, package.json, or similar files to understand dependencies
+4. **Entry Point Detection**: Look for main execution files (main.py, app.py, run.py, __main__.py, etc.)
+5. **Configuration Analysis**: Identify config files and their impact on execution
 
-SCRIPT GENERATION WORKFLOW:
-1. Analyze repository structure and identify main components
-2. Examine configuration files, requirements, and dependencies
-3. Understand the main execution flow and entry points
-4. Create executable scripts (run.py, demo.py, test_runner.py, etc.)
-5. Generate sample/test data if the project requires input data
-6. Create comprehensive execution scripts with proper error handling
-7. Write documentation for how to use the executable scripts
+### Phase 2: Execution Path Understanding
+**For each potential execution path, systematically analyze:**
+1. **Input Requirements**: What data, parameters, or configurations does it need?
+2. **Processing Flow**: How does the code flow from input to output?
+3. **Output Generation**: What does the code produce and where?
+4. **Error Scenarios**: What can go wrong and how to handle it?
+5. **Dependencies**: What external libraries or files are required?
 
-SCRIPT REQUIREMENTS:
-- Must be able to run the repository end-to-end
-- Include proper error handling and logging
-- Generate or use appropriate test data
-- Provide clear usage instructions
-- Handle different execution scenarios (train, test, demo, etc.)
-- Include dependency checks and environment validation
+### Phase 3: Script Assessment and Enhancement
+**Determine if executable scripts need improvement by checking:**
+- Are there missing entry points that would help users run the project?
+- Do existing scripts handle common execution scenarios properly?
+- Are there missing demonstration or testing scripts?
+- Do scripts lack proper error handling or user guidance?
+- Are there opportunities to create wrapper scripts for complex workflows?
+- Would utility scripts improve the user experience significantly?
 
-TERMINATION CONDITIONS:
-- You have analyzed the repository structure thoroughly
-- You have identified main execution paths and entry points
-- You have created functional executable scripts
-- You have generated appropriate test data (if needed)
-- You have tested the scripts work correctly
-- You indicate the task is "complete" or "finished" in your response
-- Maximum 15 iterations reached
+### Phase 4: Implementation (Only When Beneficial)
+**Only if genuine improvements are needed:**
+1. **Preserve Existing Scripts**: Keep all functional existing executable files unchanged unless they have clear issues
+2. **Enhance Strategically**: Only add scripts that provide genuine value based on the project's actual structure
+3. **Create Meaningful Examples**: Generate test data or examples that actually work with the codebase
+4. **Document Clearly**: Ensure new scripts have clear usage instructions
 
+## CRITICAL GUIDELINES
+
+### Analysis-First Approach:
+- **Read Before Writing**: Thoroughly understand the existing codebase before creating anything new
+- **Respect Existing Architecture**: Work with the project's existing patterns and structure
+- **Understand File Relationships**: Use `read_multiple_files` to understand how components interact
+- **Trace Execution Flows**: Follow imports and function calls to understand the actual execution paths
+
+### Enhancement Strategy:
+- **Value-Driven Changes**: Only create scripts that solve real usability problems
+- **Preserve Working Code**: Never modify existing functional entry points unless clearly broken
+- **Complementary Addition**: Add scripts that complement existing functionality
+- **Test-Driven Approach**: If creating test data, ensure it works with the actual code
+
+### Quality Standards:
+- **Functional Verification**: Test that new scripts actually work with the existing codebase
+- **Error Handling**: Include proper error checking and meaningful error messages
+- **Documentation**: Provide clear usage instructions and examples
+- **Dependency Awareness**: Ensure scripts handle missing dependencies gracefully
+
+### Decision Framework:
+**Before creating or modifying executable scripts, ask:**
+1. "Does this repository actually need additional executable scripts?"
+2. "Are there existing entry points that already serve this purpose?"
+3. "Would this script provide genuine value to users of this project?"
+4. "Can I verify that this script actually works with the existing codebase?"
+5. "Am I respecting the project's existing architecture and patterns?"
+
+## SUCCESS CRITERIA
+- Repository structure and execution flows are thoroughly understood
+- File relationships and dependencies are mapped and documented
+- Only genuinely valuable executable enhancements are created
+- All new scripts are tested and functional with the existing codebase
+- Existing functional scripts are preserved and respected
+- Clear documentation is provided for any new executable components
+
+## REPOSITORY CONTEXT
 Repository: {self.evaluation_state.repo_path}
-Focus: Create robust, comprehensive executable scripts that demonstrate the project's functionality."""
+Focus: Understand the repository deeply, then create or enhance executable scripts only when they provide genuine value to users.
+
+Remember: **Analysis first, enhancement second.** Understand before you create. Respect the existing codebase structure and only add value where it's genuinely needed."""
 
             # Create initial user message
             user_message = f"""Please create executable scripts and test data for this repository.
@@ -1378,7 +1471,7 @@ Start by examining the repository structure, main files, and understanding what 
 
             # Execute conversation loop
             messages = [{"role": "user", "content": user_message}]
-            max_iterations = 30
+            max_iterations = 60
             iteration = 0
             task_completed = False
 
@@ -1542,6 +1635,7 @@ Start by examining the repository structure, main files, and understanding what 
             )
 
             try:
+                self.logger.info(self._format_tool_info(tool_name, tool_input))
                 tool_result = await self.mcp_analyzer_agent.call_tool(
                     tool_name, tool_input
                 )
@@ -1638,6 +1732,28 @@ Start by examining the repository structure, main files, and understanding what 
                 return f"🔧 {tool_name}: {tool_result_content[:100]}..."
         except Exception:
             return f"🔧 {tool_name}: Tool executed successfully"
+
+    def _format_tool_info(self, tool_name: str, tool_input: dict) -> str:
+        """Format tool call information for logging"""
+        try:
+            # Convert tool_input to string representation
+            if isinstance(tool_input, dict):
+                # Get a readable string representation, truncate long values
+                input_str = ""
+                for key, value in tool_input.items():
+                    value_str = str(value)
+                    if len(value_str) > 100:
+                        value_str = value_str[:100] + "..."
+                    input_str += f"{key}={value_str}, "
+                input_str = input_str.rstrip(", ")
+                if len(input_str) > 100:
+                    input_str = input_str[:100] + "..."
+            else:
+                input_str = str(tool_input)[:50] + "..." if len(str(tool_input)) > 50 else str(tool_input)
+            
+            return f"🔧 [TOOL CALL] {tool_name} | Input: {input_str}"
+        except Exception as e:
+            return f"🔧 [TOOL CALL] {tool_name} | Input: <formatting error: {str(e)}>"
 
     def _safe_parse_json(self, content, context_name="unknown"):
         """Safely parse JSON content"""
