@@ -138,9 +138,6 @@ DeepCode/
 * **CallToolResult error** → Fixed via `sitecustomize.py` monkeypatch
 * **Server not found** → Remove unused servers in config
 * **Noisy logs** → Change `logger.level` to `warning` in config
-
-```
-
 ---
 
 ```
