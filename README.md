@@ -9,14 +9,14 @@ It extends the base system with important modifications to support building **la
   - Extended `overall_seconds` to 3h (10800).
   - Per-tool timeouts increased for resilience.
   - Stable filesystem roots for dynamic project folders.
-- Integration tested with **Claude, OpenAI, and Brave Search** credentials.
-- Verified ability to continuously implement files in large projects (`credimax-ctp-portal` style apps).
+- Integration tested with **Claude and Brave Search** credentials.
+- Verified ability to continuously implement files in large projects.
 - Logging improved for debugging and stability.
 
 ## 🚀 Usage
 1. Clone this fork:
    ```bash
-   git clone https://github.com/<your-username>/deepcode-fork.git
+   git clone https://github.com/alitawash/deepcode-fork.git
    cd deepcode-fork
    ```
 
