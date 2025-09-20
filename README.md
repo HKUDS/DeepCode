@@ -1,127 +1,47 @@
-# DeepCode – Private AI Code Implementation Framework
+# DeepCode (Forked)
 
-## 📖 Description  
-DeepCode is a private AI-assisted code generation framework using MCP with Claude, OpenAI, and Brave APIs. It creates large-scale application codebases without timeouts through segmented workflows and smart memory management.
+This repository is a **fork** of the original DeepCode project.  
+It extends the base system with important modifications to support building **large application codebases without timeouts**.
 
----
+## 🔧 Additions in This Fork
+- Removed timeouts to allow long-running code generation sessions.
+- Improved `mcp_agent.config.yaml` with:
+  - Extended `overall_seconds` to 3h (10800).
+  - Per-tool timeouts increased for resilience.
+  - Stable filesystem roots for dynamic project folders.
+- Integration tested with **Claude, OpenAI, and Brave Search** credentials.
+- Verified ability to continuously implement files in large projects (`credimax-ctp-portal` style apps).
+- Logging improved for debugging and stability.
 
-## 🚀 Features
-- Automated file tree creation & scaffolding  
-- Segmented workflow to avoid timeouts  
-- Smart memory management for large projects  
-- Cross-model support: Claude, OpenAI, Brave Search  
-- Persistent project outputs per run  
+## 🚀 Usage
+1. Clone this fork:
+   ```bash
+   git clone https://github.com/<your-username>/deepcode-fork.git
+   cd deepcode-fork
+   ```
 
----
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-## 📦 Installation
+3. Add your credentials in `mcp_agent.secrets.yaml`:
+   - **Anthropic API Key** (Claude)
+   - **OpenAI API Key** (if used)
+   - **Brave API Key** (for search)
 
-### 1. Clone repository
-```bash
-git clone <your-private-repo-url> deepcode
-cd deepcode
+4. Start DeepCode:
+   ```bash
+   python deepcode.py
+   ```
+
+## 📂 Example Project Path
+When you run, DeepCode creates new project folders under:
 ```
-
-### 2. Create virtual environment
-```bash
-python3.11 -m venv deepcode311
-source deepcode311/bin/activate
-pip install -r requirements.txt
+/Users/<you>/Desktop/Projects/deepcode/DeepCode/deepcode_lab/papers/chat_project_<id>/generate_code
 ```
+This fork ensures they remain fully writable and persistent for large projects.
 
-### 3. Setup secrets
-Create and edit `mcp_agent.secrets.yaml`:
-```yaml
-anthropic:
-  api_key: "<your-claude-key>"
-
-openai:
-  api_key: "<your-openai-key>"
-  base_url: "https://api.openai.com/v1"
-
-brave:
-  api_key: "<your-brave-api-key>"
-```
-⚠️ Never commit this file.
-
----
-
-## ⚙️ Configuration
-Main config: `mcp_agent.config.yaml`
-
-Example snippet:
-```yaml
-default_search_server: "brave"
-planning_mode: "segmented"
-
-document_segmentation:
-  enabled: true
-  size_threshold_chars: 12000
-
-mcp:
-  servers:
-    code-implementation:
-      command: "python"
-      args: ["tools/code_implementation_server.py"]
-      env: { PYTHONPATH: "." }
-
-    filesystem:
-      command: "npx"
-      args:
-        [
-          "-y",
-          "@modelcontextprotocol/server-filesystem",
-          "--stdio",
-          "--allow-write",
-          "--root", "/Users/<your-user>/Desktop/Projects/deepcode/DeepCode/deepcode_lab",
-          "--root", "/Users/<your-user>/Desktop/Projects"
-        ]
-```
-
----
-
-## ▶️ Running DeepCode
-Start a workflow:
-```bash
-(deepcode311) python deepcode.py
-```
-
-You’ll see mode selection:
-```
-1. Test Code Reference Indexer
-2. Run Full Implementation Workflow
-3. Run Pure Code Implementation
-4. Test Read Tools
-```
-
-- Use **Mode 3** for normal project generation.  
-- Output appears under:  
-  ```
-  deepcode_lab/papers/chat_project_<id>/generate_code
-  ```
-
----
-
-## 📂 Project Layout
-```
-DeepCode/
-├── deepcode.py
-├── mcp_agent.config.yaml
-├── mcp_agent.secrets.yaml   # 🔑 private
-├── tools/
-├── workflows/
-├── prompts/
-└── deepcode_lab/
-    └── papers/
-        └── chat_project_<id>/
-            ├── initial_plan.txt
-            └── generate_code/
-```
-
----
-
-## 🔧 Troubleshooting
-- **Timeouts** → Segmented workflows prevent hangs  
-- **CallToolResult error** → Fixed via `sitecustomize.py` monkeypatch  
-- **Server not found** → Remove unused servers in config  
-- **Noisy logs** → Change `logger.level` to `warning` in config  
+## 📜 License
+This project inherits the original license.  
+All modifications in this fork are released under the same terms.
