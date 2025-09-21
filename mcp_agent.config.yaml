@@ -1,102 +1,127 @@
 $schema: ./schema/mcp-agent.config.schema.json
 
-# Default search server configuration
-# Options: "brave" or "bocha-mcp"
+# Use Brave for web lookups (key comes from secrets)
 default_search_server: "brave"
 
-# Planning mode configuration
-# Options: "segmented" or "traditional"
-# segmented: Breaks down large tasks to avoid token truncation (recommended)
-# traditional: Uses parallel agents but may hit token limits
-planning_mode: "traditional"
+# Keep plans resilient by chunking long specs
+planning_mode: "segmented"
 
-# Document segmentation configuration
 document_segmentation:
-  enabled: false  # Whether to use intelligent document segmentation
-  size_threshold_chars: 50000  # Document size threshold (in characters) to trigger segmentation
-  # If document size > threshold and enabled=true, use segmentation workflow
-  # If document size <= threshold or enabled=false, use traditional full-document reading
+  enabled: true
+  size_threshold_chars: 12000   # smaller chunks reduce long stalls
 
 execution_engine: asyncio
+
 logger:
   transports: [console, file]
   level: info
   progress_display: true
   path_settings:
     path_pattern: "logs/mcp-agent-{unique_id}.jsonl"
-    unique_id: "timestamp" # Options: "timestamp" or "session_id"
+    unique_id: "timestamp"
     timestamp_format: "%Y%m%d_%H%M%S"
 
-
+# -------- Timeouts (runner-level) ----------
+# IMPORTANT: overall_seconds: 0 means "do not enforce a wall-clock timeout".
+# Your workflow code must read this (or MCP_RUN_TIMEOUT) to fully disable the 2444s stop.
+# Use per_tool_call_seconds for long file writes.
+timeouts:
+  overall_seconds: 0           # <= 0 disables wall-clock stop (with patched workflow)
+  per_tool_call_seconds: 1200  # up to 20 minutes per tool call
+  idle_heartbeat_seconds: 60   # send heartbeats so long runs aren't treated as idle
+  finalization_seconds: 1200   # plenty of time to write final report
 
 mcp:
   servers:
     brave:
-      # On windows replace the command and args line to use `node` and the absolute path to the server.
-      # Use `npm i -g @modelcontextprotocol/server-brave-search` to install the server globally.
-      # Use `npm -g root` to find the global node_modules path.`
-      # command: "node"
-      # args: ["c:/Program Files/nodejs/node_modules/@modelcontextprotocol/server-brave-search/dist/index.js"]
       command: "npx"
       args: ["-y", "@modelcontextprotocol/server-brave-search"]
       env:
-        # You can also place your BRAVE_API_KEY in the fastagent.secrets.yaml file.
+        # Provided via mcp_agent.secrets.yaml (brave.api_key). Placeholder here is fine.
         BRAVE_API_KEY: ""
+
     filesystem:
-      # On windows update the command and arguments to use `node` and the absolute path to the server.
-      # Use `npm i -g @modelcontextprotocol/server-filesystem` to install the server globally.
-      # Use `npm -g root` to find the global node_modules path.`
-      # command: "node"
-      # args: ["c:/Program Files/nodejs/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js","."]
       command: "npx"
-      args: ["-y", "@modelcontextprotocol/server-filesystem"]
+      args:
+        [
+          "-y",
+          "@modelcontextprotocol/server-filesystem",
+          "--stdio",
+          "--allow-write",
+
+          # ✅ Stable ancestors that cover ALL changing paths:
+          # DeepCode lab (covers every papers/chat_project_* workspace)
+          "--root", "/Users/alitawash/Desktop/Projects/deepcode/DeepCode/deepcode_lab",
+
+          # Parent projects folder (covers any credimax-ctp-portal* or other outputs)
+          "--root", "/Users/alitawash/Desktop/Projects"
+        ]
+      description: "Filesystem server with stable ancestor roots for DeepCode & portal outputs"
+
     fetch:
       command: "uvx"
       args: ["mcp-server-fetch"]
+
     github-downloader:
       command: "python"
       args: ["tools/git_command.py"]
       env:
         PYTHONPATH: "."
+
     file-downloader:
       command: "python"
       args: ["tools/pdf_downloader.py"]
       env:
         PYTHONPATH: "."
+
     command-executor:
       command: "python"
       args: ["tools/command_executor.py"]
       env:
         PYTHONPATH: "."
+        # If command executor also enforces a wall clock, these envs make it no-op:
+        MCP_RUN_TIMEOUT: "0"
+        MCP_ENFORCE_TIMEOUT: "false"
+
     code-implementation:
       command: "python"
       args: ["tools/code_implementation_server.py"]
       env:
         PYTHONPATH: "."
-      description: "Paper code reproduction tool server - provides file operations, code execution, search and other functions"
+        # These are read by your patched workflow (or safely ignored if not present):
+        MCP_RUN_TIMEOUT: "0"       # disable wall-clock stop in cooperating code
+        MCP_ENFORCE_TIMEOUT: "false"
+        # Optional per-segment cap if the server itself reads it:
+        # CODE_IMPLEMENTATION_TIMEOUT_SECS: "900"
+
+    # ✅ Enabled: cross-reference indexer to analyze symbol references/usages
     code-reference-indexer:
       command: "python"
       args: ["tools/code_reference_indexer.py"]
       env:
         PYTHONPATH: "."
-      description: "Code reference indexer server - Provides intelligent code reference search from indexed repositories"
+      description: "Builds and serves a symbol/reference index for the workspace"
+
     bocha-mcp:
       command: "python3"
       args: ["tools/bocha_search_server.py"]
       env:
         PYTHONPATH: "."
-        BOCHA_API_KEY: ""
+        BOCHA_API_KEY: ""  # provided via secrets if/when used
+
     document-segmentation:
       command: "python"
       args: ["tools/document_segmentation_server.py"]
       env:
         PYTHONPATH: "."
-      description: "Document segmentation server - Provides intelligent document analysis and segmented reading to optimize token usage"
+      description: "Document segmentation server for token-efficient reading"
 
 openai:
-  # Secrets (API keys, etc.) are stored in an mcp_agent.secrets.yaml file which can be gitignored
-  #  default_model: "o3-mini"
+  # You’re using Anthropic as the default; leave this unless you switch models.
   default_model: "anthropic/claude-3.5-sonnet"
-
+  # If your runner supports ceilings, you can uncomment:
+  # max_input_tokens: 60000
+  # max_output_tokens: 2048
 
 anthropic:
+  # Keys live in mcp_agent.secrets.yaml

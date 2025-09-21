@@ -10,3 +10,5 @@ pathlib2
 PyPDF2>=2.0.0
 reportlab>=3.5.0
 streamlit
+openai
+watchdog

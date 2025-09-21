@@ -37,6 +37,54 @@ from utils.llm_utils import get_preferred_llm_class, get_default_models
 # DialogueLogger removed - no longer needed
 
 
+def _safe_tool_payload(tool_result_obj: Any) -> Dict[str, Any]:
+    """
+    Normalize an MCP tool result (CallToolResult / dict / JSON string / other)
+    into a Python dict so downstream code can do .get(...) safely.
+    """
+    if hasattr(tool_result_obj, "content"):
+        payload = tool_result_obj.content
+    else:
+        payload = tool_result_obj
+
+    if isinstance(payload, list):
+        try:
+            texts = []
+            for blk in payload:
+                txt = None
+                if hasattr(blk, "text"):
+                    txt = blk.text
+                elif isinstance(blk, dict):
+                    txt = blk.get("text")
+                if txt:
+                    texts.append(txt)
+            payload = "\n".join(texts) if texts else payload
+        except Exception:
+            pass
+
+    if isinstance(payload, str):
+        try:
+            return json.loads(payload)
+        except Exception:
+            return {"status": "raw", "message": payload}
+
+    if isinstance(payload, dict):
+        return payload
+
+    try:
+        return json.loads(str(payload))
+    except Exception:
+        return {"status": "unknown", "payload": str(payload)}
+
+
+def _stringify_tool_result_for_echo(tool_result_obj: Any) -> str:
+    data = _safe_tool_payload(tool_result_obj)
+    try:
+        return json.dumps(data, ensure_ascii=False, indent=2)
+    except Exception:
+        return str(data)
+
+
 class CodeImplementationWorkflowWithIndex:
     """
     Paper Code Implementation Workflow Manager with Code Reference Indexer
@@ -72,7 +120,6 @@ class CodeImplementationWorkflowWithIndex:
     def _create_logger(self) -> logging.Logger:
         """Create and configure logger"""
         logger = logging.getLogger(__name__)
-        # Don't add handlers to child loggers - let them propagate to root
         logger.setLevel(logging.INFO)
         return logger
 
@@ -102,7 +149,6 @@ class CodeImplementationWorkflowWithIndex:
         enable_read_tools: bool = True,
     ):
         """Run complete workflow - Main public interface"""
-        # Set the read tools configuration
         self.enable_read_tools = enable_read_tools
 
         try:
@@ -111,7 +157,6 @@ class CodeImplementationWorkflowWithIndex:
             if target_directory is None:
                 target_directory = str(Path(plan_file_path).parent)
 
-            # Calculate code directory for workspace alignment
             code_directory = os.path.join(target_directory, "generate_code")
 
             self.logger.info("=" * 80)
@@ -127,7 +172,6 @@ class CodeImplementationWorkflowWithIndex:
 
             results = {}
 
-            # Check if file tree exists
             if self._check_file_tree_exists(target_directory):
                 self.logger.info("File tree exists, skipping creation")
                 results["file_tree"] = "Already exists, skipped creation"
@@ -137,14 +181,11 @@ class CodeImplementationWorkflowWithIndex:
                     plan_content, target_directory
                 )
 
-            # Code implementation
             if pure_code_mode:
                 self.logger.info("Starting pure code implementation...")
                 results["code_implementation"] = await self.implement_code_pure(
                     plan_content, target_directory, code_directory
                 )
-            else:
-                pass
 
             self.logger.info("Workflow execution successful")
 
@@ -159,7 +200,6 @@ class CodeImplementationWorkflowWithIndex:
 
         except Exception as e:
             self.logger.error(f"Workflow execution failed: {e}")
-
             return {"status": "error", "message": str(e), "plan_file": plan_file_path}
         finally:
             await self._cleanup_mcp_agent()
@@ -210,7 +250,6 @@ Requirements:
         """Pure code implementation - focus on code writing without testing"""
         self.logger.info("Starting pure code implementation (no testing)...")
 
-        # Use provided code_directory or calculate it (for backwards compatibility)
         if code_directory is None:
             code_directory = os.path.join(target_directory, "generate_code")
 
@@ -229,28 +268,6 @@ Requirements:
             system_message = PURE_CODE_IMPLEMENTATION_SYSTEM_PROMPT_INDEX
             messages = []
 
-            #             implementation_message = f"""**TASK: Implement Research Paper Reproduction Code**
-
-            # You are implementing a complete, working codebase that reproduces the core algorithms, experiments, and methods described in a research paper. Your goal is to create functional code that can replicate the paper's key results and contributions.
-
-            # **What you need to do:**
-            # - Analyze the paper content and reproduction plan to understand requirements
-            # - Implement all core algorithms mentioned in the main body of the paper
-            # - Create the necessary components following the planned architecture
-            # - Test each component to ensure functionality
-            # - Integrate components into a cohesive, executable system
-            # - Focus on reproducing main contributions rather than appendix-only experiments
-
-            # **RESOURCES:**
-            # - **Paper & Reproduction Plan**: `{target_directory}/` (contains .md paper files and initial_plan.txt with detailed implementation guidance)
-            # - **Reference Code Indexes**: `{target_directory}/indexes/` (JSON files with implementation patterns from related codebases)
-            # - **Implementation Directory**: `{code_directory}/` (your working directory for all code files)
-
-            # **CURRENT OBJECTIVE:**
-            # Start by reading the reproduction plan (`{target_directory}/initial_plan.txt`) to understand the implementation strategy, then examine the paper content to identify the first priority component to implement. Use the search_code tool to find relevant reference implementations from the indexes directory (`{target_directory}/indexes/*.json`) before coding.
-
-            # ---
-            # **START:** Review the plan above and begin implementation."""
             implementation_message = f"""**Task: Implement code based on the following reproduction plan**
 
 **Code Reproduction Plan:**
@@ -259,7 +276,6 @@ Requirements:
 **Working Directory:** {code_directory}
 
 **Current Objective:** Begin implementation by analyzing the plan structure, examining the current project layout, and implementing the first foundation file according to the plan's priority order."""
-
             messages.append({"role": "user", "content": implementation_message})
 
             result = await self._pure_code_implementation_loop(
@@ -293,15 +309,18 @@ Requirements:
         max_iterations = 500
         iteration = 0
         start_time = time.time()
-        max_time = 2400  # 40 minutes
+        _env_limit = os.getenv("DEEPCODE_TIME_LIMIT_SECONDS")
+        max_time = (
+            int(_env_limit)
+            if (_env_limit and _env_limit.isdigit() and int(_env_limit) > 0)
+            else None
+        )
 
-        # Initialize specialized agents
         code_agent = CodeImplementationAgent(
             self.mcp_agent, self.logger, self.enable_read_tools
         )
         memory_agent = ConciseMemoryAgent(plan_content, self.logger, target_directory)
 
-        # Log read tools configuration
         read_tools_status = "ENABLED" if self.enable_read_tools else "DISABLED"
         self.logger.info(
             f"🔧 Read tools (read_file, read_code_mem): {read_tools_status}"
@@ -311,94 +330,70 @@ Requirements:
                 "🚫 No read mode: read_file and read_code_mem tools will be skipped"
             )
 
-        # Connect code agent with memory agent for summary generation
-        # Note: Concise memory agent doesn't need LLM client for summary generation
         code_agent.set_memory_agent(memory_agent, client, client_type)
-
-        # Initialize memory agent with iteration 0
         memory_agent.start_new_round(iteration=0)
 
         while iteration < max_iterations:
             iteration += 1
             elapsed_time = time.time() - start_time
 
-            if elapsed_time > max_time:
+            if max_time and elapsed_time > max_time:
                 self.logger.warning(f"Time limit reached: {elapsed_time:.2f}s")
                 break
-
-            # # Test simplified memory approach if we have files implemented
-            # if iteration == 5 and code_agent.get_files_implemented_count() > 0:
-            #     self.logger.info("🧪 Testing simplified memory approach...")
-            #     test_results = await memory_agent.test_simplified_memory_approach()
-            #     self.logger.info(f"Memory test results: {test_results}")
-
-            # self.logger.info(f"Pure code implementation iteration {iteration}: generating code")
 
             messages = self._validate_messages(messages)
             current_system_message = code_agent.get_system_prompt()
 
-            # Round logging removed
-
-            # Call LLM
             response = await self._call_llm_with_tools(
                 client, client_type, current_system_message, messages, tools
             )
 
-            response_content = response.get("content", "").strip()
+            response_content = (response.get("content") or "").strip()
             if not response_content:
                 response_content = "Continue implementing code files..."
 
             messages.append({"role": "assistant", "content": response_content})
 
-            # Handle tool calls
             if response.get("tool_calls"):
                 tool_results = await code_agent.execute_tool_calls(
                     response["tool_calls"]
                 )
 
-                # Record essential tool results in concise memory agent
                 for tool_call, tool_result in zip(response["tool_calls"], tool_results):
+                    tr = tool_result.get("result")
+                    normalized = _safe_tool_payload(tr)
                     memory_agent.record_tool_result(
                         tool_name=tool_call["name"],
                         tool_input=tool_call["input"],
-                        tool_result=tool_result.get("result"),
+                        tool_result=normalized,
                     )
 
-                # NEW LOGIC: Check if write_file was called and trigger memory optimization immediately
-
-                # Determine guidance based on results
                 has_error = self._check_tool_results_for_errors(tool_results)
                 files_count = code_agent.get_files_implemented_count()
 
-                if has_error:
-                    guidance = self._generate_error_guidance()
-                else:
-                    guidance = self._generate_success_guidance(files_count)
+                guidance = (
+                    self._generate_error_guidance()
+                    if has_error
+                    else self._generate_success_guidance(files_count)
+                )
 
                 compiled_response = self._compile_user_response(tool_results, guidance)
                 messages.append({"role": "user", "content": compiled_response})
 
-                # NEW LOGIC: Apply memory optimization immediately after write_file detection
                 if memory_agent.should_trigger_memory_optimization(
                     messages, code_agent.get_files_implemented_count()
                 ):
-                    # Memory optimization triggered
-
-                    # Apply concise memory optimization
                     files_implemented_count = code_agent.get_files_implemented_count()
                     current_system_message = code_agent.get_system_prompt()
                     messages = memory_agent.apply_memory_optimization(
                         current_system_message, messages, files_implemented_count
                     )
 
-                    # Memory optimization completed
-
             else:
                 files_count = code_agent.get_files_implemented_count()
                 no_tools_guidance = self._generate_no_tools_guidance(files_count)
                 messages.append({"role": "user", "content": no_tools_guidance})
 
-            # Check for analysis loop and provide corrective guidance
             if code_agent.is_in_analysis_loop():
                 analysis_loop_guidance = code_agent.get_analysis_loop_guidance()
                 messages.append({"role": "user", "content": analysis_loop_guidance})
@@ -406,17 +401,11 @@ Requirements:
                     "Analysis loop detected and corrective guidance provided"
                 )
 
-            # Record file implementations in memory agent (for the current round)
             for file_info in code_agent.get_implementation_summary()["completed_files"]:
                 memory_agent.record_file_implementation(file_info["file"])
 
-            # REMOVED: Old memory optimization logic - now happens immediately after write_file
-            # Memory optimization is now triggered immediately after write_file detection
-
-            # Start new round for next iteration, sync with workflow iteration
             memory_agent.start_new_round(iteration=iteration)
 
-            # Check completion
             if any(
                 keyword in response_content.lower()
                 for keyword in [
@@ -429,12 +418,10 @@ Requirements:
                 self.logger.info("Code implementation declared complete")
                 break
 
-            # Emergency trim if too long
             if len(messages) > 50:
                 self.logger.warning(
                     "Emergency message trim - applying concise memory optimization"
                 )
-
                 current_system_message = code_agent.get_system_prompt()
                 files_implemented_count = code_agent.get_files_implemented_count()
                 messages = memory_agent.apply_memory_optimization(
@@ -461,7 +448,6 @@ Requirements:
                 get_preferred_llm_class(self.config_path)
             )
 
-            # Set workspace to the target code directory
             workspace_result = await self.mcp_agent.call_tool(
                 "set_workspace", {"workspace_path": code_directory}
             )
@@ -492,17 +478,14 @@ Requirements:
 
     async def _initialize_llm_client(self):
         """Initialize LLM client (Anthropic or OpenAI) based on API key availability"""
-        # Check which API has available key and try that first
         anthropic_key = self.api_config.get("anthropic", {}).get("api_key", "")
         openai_key = self.api_config.get("openai", {}).get("api_key", "")
 
-        # Try Anthropic API first if key is available
         if anthropic_key and anthropic_key.strip():
             try:
                 from anthropic import AsyncAnthropic
 
                 client = AsyncAnthropic(api_key=anthropic_key)
-                # Test connection with default model from config
                 await client.messages.create(
                     model=self.default_models["anthropic"],
                     max_tokens=20,
@@ -515,12 +498,9 @@ Requirements:
             except Exception as e:
                 self.logger.warning(f"Anthropic API unavailable: {e}")
 
-        # Try OpenAI API if Anthropic failed or key not available
         if openai_key and openai_key.strip():
             try:
                 from openai import AsyncOpenAI
-
-                # Handle custom base_url if specified
                 openai_config = self.api_config.get("openai", {})
                 base_url = openai_config.get("base_url")
 
@@ -529,8 +509,6 @@ Requirements:
                 else:
                     client = AsyncOpenAI(api_key=openai_key)
 
-                # Test connection with default model from config
-                # Try max_tokens first, fallback to max_completion_tokens if unsupported
                 try:
                     await client.chat.completions.create(
                         model=self.default_models["openai"],
@@ -539,7 +517,6 @@ Requirements:
                     )
                 except Exception as e:
                     if "max_tokens" in str(e) and "max_completion_tokens" in str(e):
-                        # Retry with max_completion_tokens for models that require it
                         await client.chat.completions.create(
                             model=self.default_models["openai"],
                             max_completion_tokens=20,
@@ -635,7 +612,6 @@ Requirements:
         openai_messages = [{"role": "system", "content": system_message}]
         openai_messages.extend(messages)
 
-        # Try max_tokens first, fallback to max_completion_tokens if unsupported
         try:
             response = await client.chat.completions.create(
                 model=self.default_models["openai"],
@@ -646,7 +622,6 @@ Requirements:
             )
         except Exception as e:
             if "max_tokens" in str(e) and "max_completion_tokens" in str(e):
-                # Retry with max_completion_tokens for models that require it
                 response = await client.chat.completions.create(
                     model=self.default_models["openai"],
                     messages=openai_messages,
@@ -695,24 +670,20 @@ Requirements:
         """Check tool results for errors"""
         for result in tool_results:
             try:
-                if hasattr(result["result"], "content") and result["result"].content:
-                    content_text = result["result"].content[0].text
-                    parsed_result = json.loads(content_text)
-                    if parsed_result.get("status") == "error":
-                        return True
-                elif isinstance(result["result"], str):
-                    if "error" in result["result"].lower():
-                        return True
-            except (json.JSONDecodeError, AttributeError, IndexError):
-                result_str = str(result["result"])
-                if "error" in result_str.lower():
+                tr = result.get("result")
+                parsed = _safe_tool_payload(tr)
+                if isinstance(parsed, dict) and parsed.get("status") == "error":
                     return True
+                as_str = _stringify_tool_result_for_echo(tr).lower()
+                if "error" in as_str:
+                    return True
+            except Exception:
+                continue
         return False
 
     # ==================== 6. User Interaction and Feedback (Interaction Layer) ====================
 
     def _generate_success_guidance(self, files_count: int) -> str:
-        """Generate concise success guidance for continuing implementation"""
         return f"""✅ File implementation completed successfully!
 
 📊 **Progress Status:** {files_count} files implemented
@@ -730,7 +701,6 @@ Requirements:
 💡 **Key Point:** Always verify completion status before continuing with new file creation."""
 
     def _generate_error_guidance(self) -> str:
-        """Generate error guidance for handling issues"""
         return """❌ Error detected during file implementation.
 
 🔧 **Action Required:**
@@ -748,7 +718,6 @@ Requirements:
 💡 **Remember:** Always verify if all planned files are implemented before continuing with new file creation."""
 
     def _generate_no_tools_guidance(self, files_count: int) -> str:
-        """Generate concise guidance when no tools are called"""
         return f"""⚠️ No tool calls detected in your response.
 
 📊 **Current Progress:** {files_count} files implemented
@@ -766,21 +735,18 @@ Requirements:
 🚨 **Critical:** Always verify completion status first, then use appropriate tools - not just explanations!"""
 
     def _compile_user_response(self, tool_results: List[Dict], guidance: str) -> str:
-        """Compile tool results and guidance into a single user response"""
         response_parts = []
-
         if tool_results:
             response_parts.append("🔧 **Tool Execution Results:**")
             for tool_result in tool_results:
                 tool_name = tool_result["tool_name"]
                 result_content = tool_result["result"]
+                shown = _stringify_tool_result_for_echo(result_content)
                 response_parts.append(
-                    f"```\nTool: {tool_name}\nResult: {result_content}\n```"
+                    f"```\nTool: {tool_name}\nResult:\n{shown}\n```"
                 )
-
         if guidance:
             response_parts.append("\n" + guidance)
-
         return "\n\n".join(response_parts)
 
     # ==================== 7. Reporting and Output (Output Layer) ====================
@@ -803,21 +769,19 @@ Requirements:
                 history_result = await self.mcp_agent.call_tool(
                     "get_operation_history", {"last_n": 30}
                 )
-                history_data = (
-                    json.loads(history_result)
-                    if isinstance(history_result, str)
-                    else history_result
-                )
+                history_data = _safe_tool_payload(history_result)
             else:
                 history_data = {"total_operations": 0, "history": []}
 
             write_operations = 0
             files_created = []
-            if "history" in history_data:
+            if isinstance(history_data, dict) and "history" in history_data:
                 for item in history_data["history"]:
-                    if item.get("action") == "write_file":
+                    if isinstance(item, dict) and item.get("action") == "write_file":
                         write_operations += 1
-                        file_path = item.get("details", {}).get("file_path", "unknown")
+                        file_path = (
+                            (item.get("details") or {}).get("file_path") or "unknown"
+                        )
                         files_created.append(file_path)
 
             report = f"""
@@ -886,7 +850,6 @@ Requirements:
 
 async def main():
     """Main function for running the workflow"""
-    # Configure root logger carefully to avoid duplicates
     root_logger = logging.getLogger()
     if not root_logger.handlers:
         handler = logging.StreamHandler()
@@ -906,29 +869,6 @@ async def main():
     print("3. Run Implementation with Pure Code Mode")
     print("4. Test Read Tools Configuration")
 
-    # mode_choice = input("Enter choice (1-4, default: 3): ").strip()
-
-    # For testing purposes, we'll run the test first
-    # if mode_choice == "4":
-    #     print("Testing Read Tools Configuration...")
-
-    #     # Create a test workflow normally
-    #     test_workflow = CodeImplementationWorkflow()
-
-    #     # Create a mock code agent for testing
-    #     print("\n🧪 Testing with read tools DISABLED:")
-    #     test_agent_disabled = CodeImplementationAgent(None, enable_read_tools=False)
-    #     await test_agent_disabled.test_read_tools_configuration()
-
-    #     print("\n🧪 Testing with read tools ENABLED:")
-    #     test_agent_enabled = CodeImplementationAgent(None, enable_read_tools=True)
-    #     await test_agent_enabled.test_read_tools_configuration()
-
-    #     print("✅ Read tools configuration testing completed!")
-    #     return
-
-    # print("Running Code Reference Indexer Integration Test...")
-
     test_success = True
     if test_success:
         print("\n" + "=" * 60)
@@ -936,11 +876,9 @@ async def main():
         print("🔧 Three-step process successfully merged into ONE tool")
         print("=" * 60)
 
-        # Ask if user wants to continue with actual workflow
         print("\nContinuing with workflow execution...")
 
         plan_file = "/Users/lizongwei/Reasearch/DeepCode_Base/DeepCode/deepcode_lab/papers/1/initial_plan.txt"
-        # plan_file = "/data2/bjdwhzzh/project-hku/Code-Agent2.0/Code-Agent/deepcode-mcp/agent_folders/papers/1/initial_plan.txt"
         target_directory = (
             "/Users/lizongwei/Reasearch/DeepCode_Base/DeepCode/deepcode_lab/papers/1/"
         )
@@ -952,15 +890,9 @@ async def main():
         mode_name = "Pure Code Implementation Mode with Memory Agent Architecture + Code Reference Indexer"
         print(f"Using: {mode_name}")
 
-        # Configure read tools - modify this parameter to enable/disable read tools
-        enable_read_tools = (
-            True  # Set to False to disable read_file and read_code_mem tools
-        )
+        enable_read_tools = True
         read_tools_status = "ENABLED" if enable_read_tools else "DISABLED"
         print(f"🔧 Read tools (read_file, read_code_mem): {read_tools_status}")
-
-        # NOTE: To test without read tools, change the line above to:
-        # enable_read_tools = False
 
         result = await workflow.run_workflow(
             plan_file,
