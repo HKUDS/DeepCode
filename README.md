@@ -42,6 +42,10 @@ When you run, DeepCode creates new project folders under:
 ```
 This fork ensures they remain fully writable and persistent for large projects.
 
+## 📘 Additional Guides
+- [Creating a New App via DeepCode's Chat Workflow](NEW_APP_WORKFLOW.md) — includes a Speckit-inspired enterprise prompt blueprint to capture fully integrated builds.
+- [Enterprise Application Prompt Guide](ENTERPRISE_APP_PROMPT_GUIDE.md) — mirrors GitHub Speckit's spec rigor with templates, examples, and tips for large-scale DeepCode deliveries.
+
 ## 📜 License
-This project inherits the original license.  
+This project inherits the original license.
 All modifications in this fork are released under the same terms.
