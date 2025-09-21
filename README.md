@@ -42,8 +42,7 @@ When you run, DeepCode creates new project folders under:
 ```
 This fork ensures they remain fully writable and persistent for large projects.
 
-## 📘 Additional Guides
-- [Creating a New App via DeepCode's Chat Workflow](NEW_APP_WORKFLOW.md)
+
 
 ## 📜 License
 This project inherits the original license.
