@@ -94,11 +94,13 @@ mcp:
         # Optional per-segment cap if the server itself reads it:
         # CODE_IMPLEMENTATION_TIMEOUT_SECS: "900"
 
-    # Re-enable if you need xrefs; leave off during heavy "implement" runs to avoid context bloat.
-    # code-reference-indexer:
-    #   command: "python"
-    #   args: ["tools/code_reference_indexer.py"]
-    #   env: { PYTHONPATH: "." }
+    # ✅ Enabled: cross-reference indexer to analyze symbol references/usages
+    code-reference-indexer:
+      command: "python"
+      args: ["tools/code_reference_indexer.py"]
+      env:
+        PYTHONPATH: "."
+      description: "Builds and serves a symbol/reference index for the workspace"
 
     bocha-mcp:
       command: "python3"
