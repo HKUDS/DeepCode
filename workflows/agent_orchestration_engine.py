@@ -331,16 +331,851 @@ async def run_resource_processor(analysis_result: str, logger) -> str:
         )
 
 
+class MultiTurnCodeAnalysisWorkflow:
+    """
+    Multi-turn conversation workflow controller for code analysis agents.
+    
+    Replaces the MCP ParallelLLM approach with individual multi-turn conversations
+    for each analysis agent, similar to revision agent pattern.
+    """
+    
+    def __init__(self, paper_dir: str, logger, use_segmentation: bool, agent_config: dict, prompts: dict):
+        self.paper_dir = paper_dir
+        self.logger = logger
+        self.use_segmentation = use_segmentation
+        self.agent_config = agent_config
+        self.prompts = prompts
+        
+        # Initialize API configuration and models
+        self._load_configurations()
+    
+    def _load_configurations(self):
+        """Load API configurations and default models"""
+        import yaml
+        import os
+        from utils.llm_utils import get_default_models
+        
+        # Load API configuration
+        config_path = "mcp_agent.secrets.yaml"
+        try:
+            if os.path.exists(config_path):
+                with open(config_path, "r", encoding="utf-8") as f:
+                    self.api_config = yaml.safe_load(f) or {}
+            else:
+                self.logger.warning(f"API config file {config_path} not found")
+                self.api_config = {}
+        except Exception as e:
+            self.logger.error(f"Error loading API config: {e}")
+            self.api_config = {}
+        
+        # Load default models
+        self.default_models = get_default_models()
+    
+    async def execute_sequential_analysis_workflows(self) -> str:
+        """
+        Execute analysis workflows in proper sequence:
+        1. ConceptAnalysisAgent and AlgorithmAnalysisAgent run in parallel
+        2. CodePlannerAgent runs after the first two complete, using their outputs
+        
+        Returns:
+            str: Integrated analysis result from all agents
+        """
+        import asyncio
+        
+        self.logger.info("🚀 Starting sequential multi-turn analysis workflows")
+        
+        # Phase 1: Run ConceptAnalysisAgent and AlgorithmAnalysisAgent in parallel
+        self.logger.info("📊 Phase 1: Running ConceptAnalysisAgent and AlgorithmAnalysisAgent in parallel")
+        
+        try:
+            concept_result, algorithm_result = await asyncio.gather(
+                self._execute_concept_analysis_workflow(),
+                self._execute_algorithm_analysis_workflow(),
+                return_exceptions=True
+            )
+        except Exception as e:
+            self.logger.error(f"Error in Phase 1 parallel execution: {e}")
+            return f"Error in Phase 1 analysis execution: {e}"
+        
+        # Handle Phase 1 results
+        concept_analysis = self._handle_workflow_result(concept_result, "ConceptAnalysisAgent")
+        algorithm_analysis = self._handle_workflow_result(algorithm_result, "AlgorithmAnalysisAgent")
+        
+        self.logger.info("✅ Phase 1 completed - ConceptAnalysisAgent and AlgorithmAnalysisAgent finished")
+        
+        # Phase 2: Run CodePlannerAgent with outputs from Phase 1
+        self.logger.info("📋 Phase 2: Running CodePlannerAgent with Phase 1 outputs")
+        
+        try:
+            planning_result = await self._execute_code_planning_workflow_with_inputs(
+                concept_analysis, algorithm_analysis
+            )
+        except Exception as e:
+            self.logger.error(f"Error in Phase 2 execution: {e}")
+            planning_result = {
+                "success": False,
+                "error": str(e),
+                "content": f"CodePlannerAgent failed: {e}",
+                "iterations": 0
+            }
+        
+        # Combine all results
+        results = {
+            "concept_analysis": concept_analysis,
+            "algorithm_analysis": algorithm_analysis,
+            "code_planning": planning_result
+        }
+        
+        # Integrate results into final comprehensive analysis
+        integrated_result = self._integrate_analysis_results(results)
+        
+        self.logger.info("✅ All sequential analysis workflows completed")
+        return integrated_result
+    
+    def _handle_workflow_result(self, result, agent_name: str) -> dict:
+        """Handle workflow result, including exceptions"""
+        if isinstance(result, Exception):
+            self.logger.error(f"❌ {agent_name} workflow failed: {result}")
+            return {
+                "success": False,
+                "error": str(result),
+                "content": f"Agent {agent_name} failed to complete analysis",
+                "iterations": 0
+            }
+        return result
+    
+    async def _execute_concept_analysis_workflow(self) -> dict:
+        """Execute multi-turn conversation workflow for ConceptAnalysisAgent"""
+        return await self._execute_single_agent_workflow(
+            agent_name="ConceptAnalysisAgent",
+            agent_prompt=self.prompts["concept_analysis"],
+            server_names=self.agent_config["concept_analysis"],
+            task_description="Comprehensive system architecture and conceptual framework analysis",
+            tools=self._prepare_concept_analysis_tools()
+        )
+    
+    async def _execute_algorithm_analysis_workflow(self) -> dict:
+        """Execute multi-turn conversation workflow for AlgorithmAnalysisAgent"""
+        return await self._execute_single_agent_workflow(
+            agent_name="AlgorithmAnalysisAgent",
+            agent_prompt=self.prompts["algorithm_analysis"],
+            server_names=self.agent_config["algorithm_analysis"],
+            task_description="Complete algorithm extraction and technical detail analysis",
+            tools=self._prepare_algorithm_analysis_tools()
+        )
+    
+    async def _execute_code_planning_workflow(self) -> dict:
+        """Execute multi-turn conversation workflow for CodePlannerAgent (legacy method for compatibility)"""
+        return await self._execute_single_agent_workflow(
+            agent_name="CodePlannerAgent",
+            agent_prompt=self.prompts["code_planning"],
+            server_names=self.agent_config["code_planner"],
+            task_description="Integration of analysis results into comprehensive implementation plan",
+            tools=self._prepare_code_planning_tools()
+        )
+    
+    async def _execute_code_planning_workflow_with_inputs(self, concept_analysis: dict, algorithm_analysis: dict) -> dict:
+        """
+        Execute multi-turn conversation workflow for CodePlannerAgent with inputs from previous agents.
+        
+        CodePlannerAgent receives and integrates outputs from ConceptAnalysisAgent and AlgorithmAnalysisAgent.
+        """
+        try:
+            self.logger.info("🎯 Starting CodePlannerAgent workflow with Phase 1 inputs")
+            
+            # Initialize LLM client
+            client, client_type = await self._initialize_llm_client()
+            
+            # Prepare tools (only brave and filesystem)
+            tools = self._prepare_code_planning_tools_simplified()
+            
+            # Build enhanced system message with Phase 1 results
+            system_message = self._build_code_planner_system_message_with_inputs(
+                concept_analysis, algorithm_analysis, tools
+            )
+            
+            # Create initial user message with Phase 1 outputs
+            user_message = self._build_code_planner_user_message_with_inputs(
+                concept_analysis, algorithm_analysis
+            )
+            
+            # Initialize conversation tracking
+            agent_result = {
+                "agent_name": "CodePlannerAgent",
+                "task_description": "Integration of ConceptAnalysis and AlgorithmAnalysis results into comprehensive implementation plan",
+                "success": False,
+                "content": "",
+                "tools_used": [],
+                "reasoning_steps": [],
+                "iterations": 0,
+                "completion_details": None,
+                "error": None,
+                "phase1_inputs": {
+                    "concept_analysis_success": concept_analysis.get("success", False),
+                    "algorithm_analysis_success": algorithm_analysis.get("success", False),
+                    "total_phase1_iterations": concept_analysis.get("iterations", 0) + algorithm_analysis.get("iterations", 0)
+                }
+            }
+            
+            # Execute multi-turn conversation loop with increased iterations
+            messages = [{"role": "user", "content": user_message}]
+            max_iterations = 50  # Increased as requested
+            iteration = 0
+            analysis_completed = False
+            
+            while iteration < max_iterations and not analysis_completed:
+                iteration += 1
+                agent_result["iterations"] = iteration
+                
+                self.logger.info(f"🔄 CodePlannerAgent iteration {iteration}/{max_iterations}")
+                
+                # Call LLM with tools
+                response = await self._call_llm_with_tools(
+                    client, client_type, system_message, messages, tools
+                )
+                
+                # Process response and check for completion
+                analysis_completed = await self._process_agent_response(
+                    response, messages, agent_result, iteration
+                )
+                
+                # Check termination conditions
+                if analysis_completed:
+                    self.logger.info(f"✅ CodePlannerAgent completed planning in {iteration} iterations")
+                    agent_result["success"] = True
+                elif iteration >= max_iterations:
+                    self.logger.warning(f"⚠️ CodePlannerAgent reached maximum iterations ({max_iterations})")
+                    agent_result["error"] = "Reached maximum iterations without completion"
+                    break
+            
+            return agent_result
+            
+        except Exception as e:
+            self.logger.error(f"❌ CodePlannerAgent workflow failed: {e}")
+            return {
+                "agent_name": "CodePlannerAgent",
+                "task_description": "Integration of analysis results into comprehensive implementation plan",
+                "success": False,
+                "content": "",
+                "tools_used": [],
+                "reasoning_steps": [],
+                "iterations": 0,
+                "completion_details": None,
+                "error": str(e)
+            }
+    
+    async def _execute_single_agent_workflow(self, agent_name: str, agent_prompt: str, 
+                                           server_names: list, task_description: str, tools: list) -> dict:
+        """
+        Execute multi-turn conversation workflow for a single agent.
+        
+        This is the core method that implements the multi-turn conversation pattern
+        similar to revision agent's _execute_single_task_conversation.
+        """
+        try:
+            self.logger.info(f"🎯 Starting {agent_name} multi-turn workflow")
+            
+            # Initialize LLM client
+            client, client_type = await self._initialize_llm_client()
+            
+            # Prepare system message for the agent
+            system_message = self._build_agent_system_message(
+                agent_name, agent_prompt, task_description, tools
+            )
+            
+            # Create initial user message
+            user_message = self._build_initial_user_message(agent_name, task_description)
+            
+            # Initialize conversation tracking
+            agent_result = {
+                "agent_name": agent_name,
+                "task_description": task_description,
+                "success": False,
+                "content": "",
+                "tools_used": [],
+                "reasoning_steps": [],
+                "iterations": 0,
+                "completion_details": None,
+                "error": None
+            }
+            
+            # Execute multi-turn conversation loop
+            messages = [{"role": "user", "content": user_message}]
+            max_iterations = 50  # Increased as requested
+            iteration = 0
+            analysis_completed = False
+            
+            while iteration < max_iterations and not analysis_completed:
+                iteration += 1
+                agent_result["iterations"] = iteration
+                
+                self.logger.info(f"🔄 {agent_name} iteration {iteration}/{max_iterations}")
+                
+                # Call LLM with tools
+                response = await self._call_llm_with_tools(
+                    client, client_type, system_message, messages, tools
+                )
+                
+                # Process response and check for completion
+                analysis_completed = await self._process_agent_response(
+                    response, messages, agent_result, iteration
+                )
+                
+                # Check termination conditions
+                if analysis_completed:
+                    self.logger.info(f"✅ {agent_name} completed analysis in {iteration} iterations")
+                    agent_result["success"] = True
+                elif iteration >= max_iterations:
+                    self.logger.warning(f"⚠️ {agent_name} reached maximum iterations")
+                    agent_result["error"] = "Reached maximum iterations without completion"
+                    break
+            
+            return agent_result
+            
+        except Exception as e:
+            self.logger.error(f"❌ {agent_name} workflow failed: {e}")
+            return {
+                "agent_name": agent_name,
+                "task_description": task_description,
+                "success": False,
+                "content": "",
+                "tools_used": [],
+                "reasoning_steps": [],
+                "iterations": 0,
+                "completion_details": None,
+                "error": str(e)
+            }
+    
+    def _build_agent_system_message(self, agent_name: str, agent_prompt: str, 
+                                   task_description: str, tools: list) -> str:
+        """Build system message for the agent"""
+        segmentation_mode = 'Enabled' if self.use_segmentation else 'Disabled'
+        agent_area = agent_name.replace('Agent', '')
+        tool_names = [tool.get("name", "") for tool in tools]
+        
+        system_message = f"""{agent_prompt}
+
+MULTI-TURN ANALYSIS WORKFLOW:
+You are {agent_name} in a multi-turn conversation workflow. Your specific task is:
+
+{task_description}
+
+Paper Directory: {self.paper_dir}
+Segmentation Mode: {segmentation_mode}
+
+WORKFLOW INSTRUCTIONS:
+- Use available tools to thoroughly analyze the research paper
+- Focus on your expertise area: {agent_area}
+- Conduct comprehensive, iterative analysis
+- Use multiple tool calls to build complete understanding
+- Provide detailed, structured output suitable for integration
+
+TERMINATION CONDITIONS:
+- You have completed comprehensive analysis in your domain
+- You indicate analysis is "complete", "finished", or "done"
+- Maximum 15 iterations reached
+
+Available tools: {tool_names}"""
+        
+        return system_message
+    
+    def _build_initial_user_message(self, agent_name: str, task_description: str) -> str:
+        """Build initial user message for the agent"""
+        agent_type = agent_name.replace('Agent', '').lower()
+        
+        return f"""Please perform comprehensive {agent_type} analysis of the research paper in directory: {self.paper_dir}
+
+Your specific responsibilities:
+{task_description}
+
+Please start by examining the paper using appropriate tools and conduct thorough analysis.
+Use your expertise to extract all relevant information for your domain.
+
+Begin your analysis now."""
+    
+    async def _process_agent_response(self, response, messages, agent_result, iteration) -> bool:
+        """Process agent response and check for completion"""
+        try:
+            # Extract response content
+            response_content = response.get("content", "").strip()
+            agent_result["reasoning_steps"].append(f"Iteration {iteration}: {response_content[:300]}...")
+            
+            # Add response to conversation
+            messages.append({"role": "assistant", "content": response_content})
+            
+            # Store latest content
+            agent_result["content"] = response_content
+            
+            # Process tool calls if any
+            if response.get("tool_calls"):
+                tool_results = await self._execute_tool_calls(
+                    response["tool_calls"], agent_result, iteration
+                )
+                
+                # Add tool results to conversation
+                if tool_results:
+                    tool_summary = "Tool execution results:\\n" + "\\n".join(tool_results)
+                    messages.append({"role": "user", "content": tool_summary})
+                
+                # Add continuation prompt
+                continuation_prompt = """Please continue your analysis based on the tool results.
+If you have gathered sufficient information for comprehensive analysis, provide your final structured output.
+Otherwise, continue using tools to gather more information."""
+                messages.append({"role": "user", "content": continuation_prompt})
+            else:
+                # No tool calls - encourage tool usage or completion
+                if iteration < 3:
+                    messages.append({
+                        "role": "user",
+                        "content": "Please use the available tools to analyze the research paper. Start with examining the document structure and content."
+                    })
+                else:
+                    messages.append({
+                        "role": "user",
+                        "content": "Please provide your final analysis results if completed, or continue using tools to gather more information."
+                    })
+            
+            # Check for completion indicators
+            completion_indicators = [
+                "analysis complete", "analysis finished", "analysis done",
+                "comprehensive analysis complete", "final analysis",
+                "analysis is complete", "completed the analysis",
+                "finished analyzing", "analysis concluded"
+            ]
+            
+            if any(indicator in response_content.lower() for indicator in completion_indicators):
+                self.logger.info("🎯 Analysis completion detected in agent response")
+                agent_result["completion_details"] = "Agent indicated analysis completion"
+                return True
+            
+            # Check if substantial analysis has been provided
+            if len(response_content) > 2000 and iteration >= 5:
+                self.logger.info("🎯 Substantial analysis content detected")
+                agent_result["completion_details"] = "Substantial analysis content provided"
+                return True
+            
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Error processing agent response: {e}")
+            return False
+    
+    async def _execute_tool_calls(self, tool_calls, agent_result, iteration) -> list:
+        """Execute tool calls and return results"""
+        tool_results = []
+        
+        for tool_call in tool_calls:
+            tool_name = tool_call.get("name", "unknown")
+            tool_input = tool_call.get("input", {})
+            
+            # Track tool usage
+            if tool_name not in agent_result["tools_used"]:
+                agent_result["tools_used"].append(tool_name)
+            
+            self.logger.info(f"🔧 Executing tool: {tool_name}")
+            
+            # For now, simulate tool execution
+            # In production, this would integrate with actual MCP tools
+            tool_result = f"Tool {tool_name} executed with input: {str(tool_input)[:100]}..."
+            tool_results.append(tool_result)
+        
+        return tool_results
+    
+    def _prepare_concept_analysis_tools(self) -> list:
+        """Prepare tools for ConceptAnalysisAgent"""
+        try:
+            if self.use_segmentation:
+                return [
+                    {"name": "read_document_segments", "description": "Read document segments with intelligent filtering", "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}}},
+                    {"name": "analyze_document_structure", "description": "Analyze document structure and sections", "input_schema": {"type": "object", "properties": {"document_path": {"type": "string"}}}},
+                    {"name": "list_directory", "description": "List directory contents", "input_schema": {"type": "object", "properties": {"path": {"type": "string"}}}}
+                ]
+            else:
+                return [
+                    {"name": "read_file", "description": "Read complete files", "input_schema": {"type": "object", "properties": {"file_path": {"type": "string"}}}},
+                    {"name": "list_directory", "description": "List directory contents", "input_schema": {"type": "object", "properties": {"path": {"type": "string"}}}},
+                    {"name": "get_file_info", "description": "Get file information", "input_schema": {"type": "object", "properties": {"file_path": {"type": "string"}}}}
+                ]
+        except Exception as e:
+            self.logger.warning(f"Error preparing concept analysis tools: {e}")
+            return []
+    
+    def _prepare_algorithm_analysis_tools(self) -> list:
+        """Prepare tools for AlgorithmAnalysisAgent"""
+        try:
+            tools = self._prepare_concept_analysis_tools()  # Base tools
+            
+            # Add search capabilities for algorithm extraction
+            if self.use_segmentation:
+                tools.extend([
+                    {"name": "search_algorithms", "description": "Search for algorithm sections in document", "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}}},
+                    {"name": "extract_formulas", "description": "Extract mathematical formulas and equations", "input_schema": {"type": "object", "properties": {"document_path": {"type": "string"}}}}
+                ])
+            
+            # Add search server tools if configured
+            for server in self.agent_config.get("algorithm_analysis", []):
+                if server in ["brave", "bocha-mcp"]:
+                    tools.append({
+                        "name": f"search_{server}",
+                        "description": f"Search using {server} for additional algorithm information",
+                        "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}}
+                    })
+            
+            return tools
+        except Exception as e:
+            self.logger.warning(f"Error preparing algorithm analysis tools: {e}")
+            return []
+    
+    def _prepare_code_planning_tools(self) -> list:
+        """Prepare tools for CodePlannerAgent (legacy method for compatibility)"""
+        try:
+            tools = self._prepare_algorithm_analysis_tools()  # Include all previous tools
+            
+            # Add planning-specific tools
+            tools.extend([
+                {"name": "create_file_structure", "description": "Create project file structure", "input_schema": {"type": "object", "properties": {"structure": {"type": "string"}}}},
+                {"name": "plan_implementation", "description": "Plan implementation strategy", "input_schema": {"type": "object", "properties": {"requirements": {"type": "string"}}}},
+                {"name": "validate_requirements", "description": "Validate implementation requirements", "input_schema": {"type": "object", "properties": {"requirements": {"type": "string"}}}}
+            ])
+            
+            return tools
+        except Exception as e:
+            self.logger.warning(f"Error preparing code planning tools: {e}")
+            return []
+    
+    def _prepare_code_planning_tools_simplified(self) -> list:
+        """Prepare simplified tools for CodePlannerAgent (only brave and filesystem)"""
+        try:
+            tools = []
+            
+            # Only include brave and filesystem tools as requested
+            tools.extend([
+                # Filesystem tools
+                {"name": "read_file", "description": "Read complete files", "input_schema": {"type": "object", "properties": {"file_path": {"type": "string"}}}},
+                {"name": "list_directory", "description": "List directory contents", "input_schema": {"type": "object", "properties": {"path": {"type": "string"}}}},
+                {"name": "get_file_info", "description": "Get file information", "input_schema": {"type": "object", "properties": {"file_path": {"type": "string"}}}},
+                
+                # Brave search tool
+                {"name": "search_brave", "description": "Search using Brave for additional implementation information", "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}}},
+                
+                # Planning-specific tools
+                {"name": "create_file_structure", "description": "Create project file structure", "input_schema": {"type": "object", "properties": {"structure": {"type": "string"}}}},
+                {"name": "plan_implementation", "description": "Plan implementation strategy", "input_schema": {"type": "object", "properties": {"requirements": {"type": "string"}}}},
+                {"name": "validate_requirements", "description": "Validate implementation requirements", "input_schema": {"type": "object", "properties": {"requirements": {"type": "string"}}}}
+            ])
+            
+            return tools
+        except Exception as e:
+            self.logger.warning(f"Error preparing simplified code planning tools: {e}")
+            return []
+    
+    def _build_code_planner_system_message_with_inputs(self, concept_analysis: dict, algorithm_analysis: dict, tools: list) -> str:
+        """Build system message for CodePlannerAgent with Phase 1 inputs"""
+        tool_names = [tool.get("name", "") for tool in tools]
+        
+        # Extract success status and content from Phase 1
+        concept_success = concept_analysis.get("success", False)
+        algorithm_success = algorithm_analysis.get("success", False)
+        concept_content = concept_analysis.get("content", "No concept analysis available")
+        algorithm_content = algorithm_analysis.get("content", "No algorithm analysis available")
+        
+        system_message = f"""{self.prompts["code_planning"]}
+
+PHASE 2 - CODE PLANNING WITH PHASE 1 INPUTS:
+You are CodePlannerAgent in a multi-turn conversation workflow. You are receiving outputs from Phase 1 agents and must integrate them into a comprehensive implementation plan.
+
+PHASE 1 ANALYSIS RESULTS:
+
+=== ConceptAnalysisAgent Output (Status: {'✅ Success' if concept_success else '❌ Failed'}) ===
+{concept_content}
+
+=== AlgorithmAnalysisAgent Output (Status: {'✅ Success' if algorithm_success else '❌ Failed'}) ===
+{algorithm_content}
+
+YOUR TASK:
+Integrate the above analysis results into a comprehensive, detailed implementation plan that includes:
+1. Complete system architecture based on concept analysis
+2. All algorithms and technical details from algorithm analysis  
+3. Detailed file structure and implementation roadmap
+4. Step-by-step implementation strategy
+
+Paper Directory: {self.paper_dir}
+Segmentation Mode: {'Enabled' if self.use_segmentation else 'Disabled'}
+
+WORKFLOW INSTRUCTIONS:
+- Analyze and synthesize the Phase 1 outputs above
+- Use available tools (brave search, filesystem) to gather additional information if needed
+- Create a comprehensive implementation plan
+- Focus on practical, actionable implementation details
+- Provide structured output suitable for code implementation
+
+TERMINATION CONDITIONS:
+- You have created a comprehensive implementation plan integrating both Phase 1 outputs
+- You indicate planning is "complete", "finished", or "done"
+- Maximum 50 iterations reached
+
+Available tools: {tool_names}"""
+        
+        return system_message
+    
+    def _build_code_planner_user_message_with_inputs(self, concept_analysis: dict, algorithm_analysis: dict) -> str:
+        """Build initial user message for CodePlannerAgent with Phase 1 inputs"""
+        
+        concept_status = "✅ Successful" if concept_analysis.get("success", False) else "❌ Failed"
+        algorithm_status = "✅ Successful" if algorithm_analysis.get("success", False) else "❌ Failed"
+        
+        return f"""You are CodePlannerAgent. Please integrate the Phase 1 analysis results into a comprehensive implementation plan.
+
+PHASE 1 RESULTS SUMMARY:
+- ConceptAnalysisAgent: {concept_status} ({concept_analysis.get('iterations', 0)} iterations)
+- AlgorithmAnalysisAgent: {algorithm_status} ({algorithm_analysis.get('iterations', 0)} iterations)
+
+The detailed outputs from both agents are provided in your system message above.
+
+YOUR MISSION:
+Create a comprehensive code implementation plan that synthesizes:
+1. The conceptual framework and system architecture from ConceptAnalysisAgent
+2. The algorithms, formulas, and technical details from AlgorithmAnalysisAgent
+3. Additional research using brave search if needed
+4. A practical, step-by-step implementation roadmap
+
+Please start by analyzing the Phase 1 outputs and then create your comprehensive implementation plan.
+
+Begin your integration and planning process now."""
+    
+    def _integrate_analysis_results(self, results: dict) -> str:
+        """Integrate results from all agents into final comprehensive plan"""
+        try:
+            self.logger.info("🔄 Integrating analysis results from all agents")
+            
+            concept_result = results.get("concept_analysis", {})
+            algorithm_result = results.get("algorithm_analysis", {})
+            planning_result = results.get("code_planning", {})
+            
+            # Helper function for success status
+            def success_status(result):
+                return '✅ Success' if result.get('success') else '❌ Failed'
+            
+            # Create integrated result
+            integrated_result = f"""# Comprehensive Code Analysis and Implementation Plan
+
+## Agent Analysis Summary
+- ConceptAnalysisAgent: {success_status(concept_result)} ({concept_result.get('iterations', 0)} iterations)
+- AlgorithmAnalysisAgent: {success_status(algorithm_result)} ({algorithm_result.get('iterations', 0)} iterations)
+- CodePlannerAgent: {success_status(planning_result)} ({planning_result.get('iterations', 0)} iterations)
+
+## 1. Conceptual Framework Analysis
+{concept_result.get('content', 'Analysis not available')}
+
+## 2. Algorithm and Technical Details
+{algorithm_result.get('content', 'Analysis not available')}
+
+## 3. Implementation Plan and Strategy
+{planning_result.get('content', 'Analysis not available')}
+
+## Integration Summary
+Paper Directory: {self.paper_dir}
+Segmentation Mode: {'Enabled' if self.use_segmentation else 'Disabled'}
+Total Agent Iterations: {concept_result.get('iterations', 0) + algorithm_result.get('iterations', 0) + planning_result.get('iterations', 0)}
+Overall Success: {'✅ All agents completed successfully' if all(r.get('success', False) for r in results.values()) else '⚠️ Some agents encountered issues'}
+"""
+            
+            self.logger.info("✅ Analysis results integration completed")
+            return integrated_result
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error integrating analysis results: {e}")
+            return f"Error integrating analysis results: {e}"
+    
+    # ==================== LLM Communication Methods ====================
+    
+    async def _initialize_llm_client(self):
+        """Initialize LLM client (Anthropic or OpenAI) based on API key availability"""
+        anthropic_key = self.api_config.get("anthropic", {}).get("api_key", "")
+        openai_key = self.api_config.get("openai", {}).get("api_key", "")
+        
+        # Try Anthropic API first if key is available
+        if anthropic_key and anthropic_key.strip():
+            try:
+                from anthropic import AsyncAnthropic
+                
+                client = AsyncAnthropic(api_key=anthropic_key)
+                # Test connection
+                await client.messages.create(
+                    model=self.default_models["anthropic"],
+                    max_tokens=20,
+                    messages=[{"role": "user", "content": "test"}],
+                )
+                self.logger.info(f"Using Anthropic API with model: {self.default_models['anthropic']}")
+                return client, "anthropic"
+            except Exception as e:
+                self.logger.warning(f"Anthropic API unavailable: {e}")
+        
+        # Try OpenAI API if Anthropic failed or key not available
+        if openai_key and openai_key.strip():
+            try:
+                from openai import AsyncOpenAI
+                
+                openai_config = self.api_config.get("openai", {})
+                base_url = openai_config.get("base_url")
+                
+                if base_url:
+                    client = AsyncOpenAI(api_key=openai_key, base_url=base_url)
+                else:
+                    client = AsyncOpenAI(api_key=openai_key)
+                
+                # Test connection
+                try:
+                    await client.chat.completions.create(
+                        model=self.default_models["openai"],
+                        max_tokens=20,
+                        messages=[{"role": "user", "content": "test"}],
+                    )
+                except Exception as e:
+                    if "max_tokens" in str(e) and "max_completion_tokens" in str(e):
+                        await client.chat.completions.create(
+                            model=self.default_models["openai"],
+                            max_completion_tokens=20,
+                            messages=[{"role": "user", "content": "test"}],
+                        )
+                    else:
+                        raise
+                
+                self.logger.info(f"Using OpenAI API with model: {self.default_models['openai']}")
+                if base_url:
+                    self.logger.info(f"Using custom base URL: {base_url}")
+                return client, "openai"
+            except Exception as e:
+                self.logger.warning(f"OpenAI API unavailable: {e}")
+        
+        raise ValueError("No available LLM API - please check your API keys in configuration")
+    
+    async def _call_llm_with_tools(self, client, client_type, system_message, messages, tools, max_tokens=8192):
+        """Call LLM with tools"""
+        try:
+            if client_type == "anthropic":
+                return await self._call_anthropic_with_tools(client, system_message, messages, tools, max_tokens)
+            elif client_type == "openai":
+                return await self._call_openai_with_tools(client, system_message, messages, tools, max_tokens)
+            else:
+                raise ValueError(f"Unsupported client type: {client_type}")
+        except Exception as e:
+            self.logger.error(f"LLM call failed: {e}")
+            raise
+    
+    async def _call_anthropic_with_tools(self, client, system_message, messages, tools, max_tokens):
+        """Call Anthropic API"""
+        validated_messages = self._validate_messages(messages)
+        if not validated_messages:
+            validated_messages = [{"role": "user", "content": "Please continue with analysis"}]
+        
+        try:
+            response = await client.messages.create(
+                model=self.default_models["anthropic"],
+                system=system_message,
+                messages=validated_messages,
+                tools=tools,
+                max_tokens=max_tokens,
+                temperature=0.2,
+            )
+        except Exception as e:
+            self.logger.error(f"Anthropic API call failed: {e}")
+            raise
+        
+        content = ""
+        tool_calls = []
+        
+        for block in response.content:
+            if block.type == "text":
+                content += block.text
+            elif block.type == "tool_use":
+                tool_calls.append({"id": block.id, "name": block.name, "input": block.input})
+        
+        return {"content": content, "tool_calls": tool_calls}
+    
+    async def _call_openai_with_tools(self, client, system_message, messages, tools, max_tokens):
+        """Call OpenAI API"""
+        # Convert tools to OpenAI format
+        openai_tools = []
+        for tool in tools:
+            openai_tools.append({
+                "type": "function",
+                "function": {
+                    "name": tool["name"],
+                    "description": tool["description"],
+                    "parameters": tool["input_schema"],
+                },
+            })
+        
+        validated_messages = self._validate_messages(messages)
+        if not validated_messages:
+            validated_messages = [{"role": "user", "content": "Please continue with analysis"}]
+        
+        # Add system message to the beginning
+        full_messages = [{"role": "system", "content": system_message}] + validated_messages
+        
+        try:
+            try:
+                response = await client.chat.completions.create(
+                    model=self.default_models["openai"],
+                    messages=full_messages,
+                    tools=openai_tools if openai_tools else None,
+                    max_tokens=max_tokens,
+                    temperature=0.2,
+                )
+            except Exception as e:
+                if "max_tokens" in str(e) and "max_completion_tokens" in str(e):
+                    response = await client.chat.completions.create(
+                        model=self.default_models["openai"],
+                        messages=full_messages,
+                        tools=openai_tools if openai_tools else None,
+                        max_completion_tokens=max_tokens,
+                        temperature=0.2,
+                    )
+                else:
+                    raise
+        except Exception as e:
+            self.logger.error(f"OpenAI API call failed: {e}")
+            raise
+        
+        content = response.choices[0].message.content or ""
+        tool_calls = []
+        
+        if response.choices[0].message.tool_calls:
+            import json
+            for tool_call in response.choices[0].message.tool_calls:
+                tool_calls.append({
+                    "id": tool_call.id,
+                    "name": tool_call.function.name,
+                    "input": json.loads(tool_call.function.arguments)
+                })
+        
+        return {"content": content, "tool_calls": tool_calls}
+    
+    def _validate_messages(self, messages):
+        """Validate and clean messages for LLM API"""
+        validated = []
+        for msg in messages:
+            if msg.get("role") in ["user", "assistant"] and msg.get("content"):
+                validated.append({
+                    "role": msg["role"],
+                    "content": str(msg["content"])
+                })
+        return validated
+
+
 async def run_code_analyzer(
     paper_dir: str, logger, use_segmentation: bool = True
 ) -> str:
     """
-    Run the adaptive code analysis workflow using multiple agents for comprehensive code planning.
+    Run the adaptive code analysis workflow using multiple agents with multi-turn conversation workflows.
 
-    This function orchestrates three specialized agents with adaptive configuration:
+    This function orchestrates three specialized agents with individual multi-turn conversation workflows:
     - ConceptAnalysisAgent: Analyzes system architecture and conceptual framework
     - AlgorithmAnalysisAgent: Extracts algorithms, formulas, and technical details
     - CodePlannerAgent: Integrates outputs into a comprehensive implementation plan
+
+    Each agent runs in its own multi-turn conversation workflow, similar to revision agent pattern.
 
     Args:
         paper_dir: Directory path containing the research paper and related resources
@@ -360,48 +1195,18 @@ async def run_code_analyzer(
     )
     print(f"   Agent configurations: {agent_config}")
 
-    concept_analysis_agent = Agent(
-        name="ConceptAnalysisAgent",
-        instruction=prompts["concept_analysis"],
-        server_names=agent_config["concept_analysis"],
-    )
-    algorithm_analysis_agent = Agent(
-        name="AlgorithmAnalysisAgent",
-        instruction=prompts["algorithm_analysis"],
-        server_names=agent_config["algorithm_analysis"],
-    )
-    code_planner_agent = Agent(
-        name="CodePlannerAgent",
-        instruction=prompts["code_planning"],
-        server_names=agent_config["code_planner"],
+    # Initialize multi-turn workflow controller
+    workflow_controller = MultiTurnCodeAnalysisWorkflow(
+        paper_dir=paper_dir,
+        logger=logger,
+        use_segmentation=use_segmentation,
+        agent_config=agent_config,
+        prompts=prompts
     )
 
-    code_aggregator_agent = ParallelLLM(
-        fan_in_agent=code_planner_agent,
-        fan_out_agents=[concept_analysis_agent, algorithm_analysis_agent],
-        llm_factory=get_preferred_llm_class(),
-    )
-
-    # Set appropriate token output limit for Claude models (max 8192)
-    enhanced_params = RequestParams(
-        max_tokens=8192,  # Adjusted to Claude 3.5 Sonnet's actual limit
-        temperature=0.3,
-    )
-
-    # Concise message for multi-agent paper analysis and code planning
-    message = f"""Analyze the research paper in directory: {paper_dir}
-
-Please locate and analyze the markdown (.md) file containing the research paper. Based on your analysis, generate a comprehensive code reproduction plan that includes:
-
-1. Complete system architecture and component breakdown
-2. All algorithms, formulas, and implementation details
-3. Detailed file structure and implementation roadmap
-
-The goal is to create a reproduction plan detailed enough for independent implementation."""
-
-    result = await code_aggregator_agent.generate_str(
-        message=message, request_params=enhanced_params
-    )
+    # Execute sequential multi-turn conversations: Phase 1 (parallel) + Phase 2 (sequential)
+    result = await workflow_controller.execute_sequential_analysis_workflows()
+    
     print(f"Code analysis result: {result}")
     return result
 

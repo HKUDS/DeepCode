@@ -35,10 +35,10 @@ mcp:
       # On windows replace the command and args line to use `node` and the absolute path to the server.
       # Use `npm i -g @modelcontextprotocol/server-brave-search` to install the server globally.
       # Use `npm -g root` to find the global node_modules path.`
-      # command: "node"
-      # args: ["c:/Users/LEGION/AppData/Roaming/npm/node_modules/@modelcontextprotocol/server-brave-search/dist/index.js"]
-      command: "npx"
-      args: ["-y", "@modelcontextprotocol/server-brave-search"]
+      command: "node"
+      args: ["c:/Users/LEGION/AppData/Roaming/npm/node_modules/@modelcontextprotocol/server-brave-search/dist/index.js"]
+      # command: "npx"
+      # args: ["-y", "@modelcontextprotocol/server-brave-search"]
       env:
         # You can also place your BRAVE_API_KEY in the fastagent.secrets.yaml file.
         BRAVE_API_KEY: ""
@@ -46,10 +46,10 @@ mcp:
       # On windows update the command and arguments to use `node` and the absolute path to the server.
       # Use `npm i -g @modelcontextprotocol/server-filesystem` to install the server globally.
       # Use `npm -g root` to find the global node_modules path.`
-      # command: "node"
-      # args: ["c:/Users/LEGION/AppData/Roaming/npm/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js","."]
-      command: "npx"
-      args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
+      command: "node"
+      args: ["c:/Users/LEGION/AppData/Roaming/npm/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js","."]
+      # command: "npx"
+      # args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
     fetch:
       command: "uvx"
       args: ["mcp-server-fetch"]
