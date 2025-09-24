@@ -1135,9 +1135,9 @@ def _guided_analysis_component(task_counter: int) -> Optional[str]:
     if st.session_state.get("requirements_confirmed", False):
         detailed_requirements = st.session_state.get("detailed_requirements", "")
         if detailed_requirements:
-            # Clear confirmation flag to avoid duplicate processing
-            st.session_state.requirements_confirmed = False
-            st.success("🎉 Requirement analysis completed! Preparing code generation...")
+            # Show confirmation message and return requirements for processing
+            st.success("🎉 Requirement analysis completed! Starting code generation...")
+            st.info("🔄 Automatically proceeding to code generation based on your confirmed requirements.")
             return detailed_requirements
     
     st.markdown(

@@ -341,7 +341,9 @@ Current Requirements Document:
 User's Modification Requests:
 {modification_feedback}
 
-Please generate an updated requirement document that incorporates the user's requested changes while maintaining the same structure and format:
+CRITICAL REQUIREMENT: You MUST generate a complete, well-structured requirement document regardless of how complete or incomplete the user's modification requests are. Even if the user only provides minimal or unclear feedback, you must still produce a comprehensive requirement document following the exact format below.
+
+Generate an updated requirement document that incorporates any reasonable interpretation of the user's requested changes while maintaining the EXACT structure and format:
 
 ## Project Overview
 Brief description of project's core goals and value proposition
@@ -365,11 +367,14 @@ Recommended technical design including:
 - Expected user scale and performance requirements
 - Scalability considerations and constraints
 
-Requirements: 
-1. Carefully incorporate all user requested changes
-2. Maintain consistency and coherence in the document
-3. Ensure the modified requirements are technically feasible
-4. Keep the same professional structure and format"""
+MANDATORY REQUIREMENTS: 
+1. ALWAYS return a complete document with ALL sections above, regardless of user input completeness
+2. If user feedback is unclear or incomplete, make reasonable assumptions based on the current requirements
+3. Incorporate any clear user requests while filling in missing details intelligently
+4. Maintain consistency and coherence throughout the document
+5. Ensure all technical suggestions are feasible and practical
+6. NEVER return an incomplete or partial document - always provide full sections
+7. Keep the same professional structure and format in all cases"""
 
             from mcp_agent.workflows.llm.augmented_llm import RequestParams
             

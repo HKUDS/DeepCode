@@ -77,8 +77,17 @@ def render_input_interface():
         # Normal flow: show input method selector
         input_source, input_type = input_method_selector(st.session_state.task_counter)
 
-    # Processing button
-    if input_source and not st.session_state.processing:
+    # Processing button - Check if requirements are confirmed for guided mode
+    requirements_confirmed = st.session_state.get("requirements_confirmed", False)
+    
+    # For guided mode, if requirements are confirmed, automatically start processing
+    if (st.session_state.get("requirement_analysis_mode") == "guided" and 
+        requirements_confirmed and input_source and not st.session_state.processing):
+        # Automatically start processing for confirmed requirements
+        st.session_state.requirements_confirmed = False  # Clear flag to prevent re-processing
+        handle_start_processing_button(input_source, input_type)
+    elif input_source and not st.session_state.processing and not requirements_confirmed:
+        # Only show Start Processing button if requirements are not already confirmed
         if st.button("🚀 Start Processing", type="primary", use_container_width=True):
             handle_start_processing_button(input_source, input_type)
 
