@@ -18,6 +18,7 @@ from .handlers import (
     initialize_session_state,
     handle_start_processing_button,
     handle_error_display,
+    handle_guided_mode_processing,
 )
 from .styles import get_main_styles
 
@@ -62,11 +63,31 @@ def render_main_content():
 
 def render_input_interface():
     """Render input interface"""
-    # Get input source and type
-    input_source, input_type = input_method_selector(st.session_state.task_counter)
+    # 处理引导模式的异步操作
+    handle_guided_mode_processing()
+    
+    # Check if user is in guided analysis workflow
+    if (st.session_state.get("requirement_analysis_mode") == "guided" and 
+        st.session_state.get("requirement_analysis_step") in ["questions", "summary", "editing"]):
+        # User is in guided analysis workflow, show chat input directly
+        from .components import chat_input_component
+        input_source = chat_input_component(st.session_state.task_counter)
+        input_type = "chat" if input_source else None
+    else:
+        # Normal flow: show input method selector
+        input_source, input_type = input_method_selector(st.session_state.task_counter)
 
-    # Processing button
-    if input_source and not st.session_state.processing:
+    # Processing button - Check if requirements are confirmed for guided mode
+    requirements_confirmed = st.session_state.get("requirements_confirmed", False)
+    
+    # For guided mode, if requirements are confirmed, automatically start processing
+    if (st.session_state.get("requirement_analysis_mode") == "guided" and 
+        requirements_confirmed and input_source and not st.session_state.processing):
+        # Automatically start processing for confirmed requirements
+        st.session_state.requirements_confirmed = False  # Clear flag to prevent re-processing
+        handle_start_processing_button(input_source, input_type)
+    elif input_source and not st.session_state.processing and not requirements_confirmed:
+        # Only show Start Processing button if requirements are not already confirmed
         if st.button("🚀 Start Processing", type="primary", use_container_width=True):
             handle_start_processing_button(input_source, input_type)
 
@@ -75,7 +96,7 @@ def render_input_interface():
         st.warning("⚠️ Do not refresh the page or close the browser during processing.")
 
     elif not input_source:
-        st.info("👆 Please upload a file or enter a URL to start processing.")
+        st.info("👆 Please upload a file, enter a URL, or describe your coding requirements to start processing.")
 
 
 def render_sidebar():
