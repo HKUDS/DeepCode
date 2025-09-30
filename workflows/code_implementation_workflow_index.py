@@ -118,7 +118,6 @@ class CodeImplementationWorkflowWithIndex:
     """
 
     # ==================== 1. Class Initialization and Configuration (Infrastructure Layer) ====================
-
     def __init__(self, config_path: str = "mcp_agent.secrets.yaml"):
         """Initialize workflow with configuration"""
         self.config_path = config_path
@@ -602,7 +601,7 @@ Requirements:
                 # Test connection with default model from config
                 await client.chat.completions.create(
                     model=self.default_models["openai"],
-                    max_tokens=10,
+                    max_tokens=16,
                     messages=[{"role": "user", "content": "test"}],
                 )
                 self.logger.info(

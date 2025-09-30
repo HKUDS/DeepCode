@@ -1,0 +1,15 @@
+{"level":"INFO","timestamp":"2025-09-24T19:11:24.427446","namespace":"mcp_agent.core.context","message":"Configuring logger with level: info"}
+{"level":"INFO","timestamp":"2025-09-24T19:11:24.434014","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"command-executor: Up and running with a persistent connection!"}
+{"level":"INFO","timestamp":"2025-09-24T19:11:24.435992","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"github-downloader: Up and running with a persistent connection!"}
+{"level":"INFO","timestamp":"2025-09-24T19:11:24.612046","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"file-downloader: Up and running with a persistent connection!"}
+{"level":"INFO","timestamp":"2025-09-24T19:11:24.631317","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"filesystem: Up and running with a persistent connection!"}
+{"level":"INFO","timestamp":"2025-09-24T19:11:28.537580","namespace":"mcp_agent.mcp.mcp_aggregator.demo","message":"Requesting tool call","data":{"data":{"progress_action":"Calling Tool","tool_name":"execute_single_command","server_name":"command-executor","agent_name":"demo"}}}
+{"level":"INFO","timestamp":"2025-09-24T19:11:28.599204","namespace":"mcp_agent.mcp.mcp_aggregator.demo","message":"Requesting tool call","data":{"data":{"progress_action":"Calling Tool","tool_name":"list_directory","server_name":"filesystem","agent_name":"demo"}}}
+{"level":"INFO","timestamp":"2025-09-24T19:11:28.602346","namespace":"mcp_agent.mcp.mcp_aggregator.demo","message":"Last aggregator closing, shutting down all persistent connections..."}
+{"level":"INFO","timestamp":"2025-09-24T19:11:28.602346","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"Disconnecting all persistent server connections..."}
+{"level":"INFO","timestamp":"2025-09-24T19:11:28.602346","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"command-executor: Requesting shutdown..."}
+{"level":"INFO","timestamp":"2025-09-24T19:11:28.602346","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"github-downloader: Requesting shutdown..."}
+{"level":"INFO","timestamp":"2025-09-24T19:11:28.602346","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"file-downloader: Requesting shutdown..."}
+{"level":"INFO","timestamp":"2025-09-24T19:11:28.602346","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"filesystem: Requesting shutdown..."}
+{"level":"INFO","timestamp":"2025-09-24T19:11:28.602346","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"All persistent server connections signaled to disconnect."}
+{"level":"INFO","timestamp":"2025-09-24T19:11:28.602346","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"Disconnecting all persistent server connections..."}

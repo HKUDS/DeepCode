@@ -344,8 +344,8 @@ async def git_clone(
 
 # 主程序入口
 if __name__ == "__main__":
-    print("🚀 GitHub Repository Downloader MCP Tool")
-    print("📝 Starting server with FastMCP...")
+    print(" GitHub Repository Downloader MCP Tool")
+    print(" Starting server with FastMCP...")
     print("\nAvailable tools:")
     print("  • download_github_repo - Download repos from natural language")
     print("  • parse_github_urls - Extract GitHub URLs from text")

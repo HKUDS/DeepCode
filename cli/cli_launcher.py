@@ -50,7 +50,7 @@ def check_dependencies():
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
 
-    if importlib.util.find_spec("workflows.agent_orchestration_engine") is not None:
+    if importlib.util.find_spec("workflows_cli.agent_orchestration_engine") is not None:
         print("✅ Workflow modules are available")
     else:
         print("⚠️  Workflow modules may not be properly configured")

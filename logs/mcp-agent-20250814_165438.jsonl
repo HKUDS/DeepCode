@@ -1,0 +1,3 @@
+{"level":"INFO","timestamp":"2025-08-14T16:54:38.993434","namespace":"mcp_agent.core.context","message":"Configuring logger with level: info"}
+{"level":"INFO","timestamp":"2025-08-14T16:54:38.998209","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"command-executor: Up and running with a persistent connection!"}
+{"level":"INFO","timestamp":"2025-08-14T16:54:47.515744","namespace":"mcp_agent.mcp.mcp_aggregator.e2e","message":"Requesting tool call","data":{"data":{"progress_action":"Calling Tool","tool_name":"execute_single_command","server_name":"command-executor","agent_name":"e2e"}}}

@@ -31,7 +31,7 @@ class ConciseMemoryAgent:
 
     Core Philosophy:
     - Preserve essential context (system prompt + initial plan)
-    - After first file generation, use clean slate approach
+    - After first file generation, use clean slate approach ，打扫屋子再请客
     - Keep only current round tool results from all essential MCP tools
     - Remove conversational clutter and previous tool calls
 
@@ -109,10 +109,10 @@ class ConciseMemoryAgent:
         return logger
 
     def _parse_phase_structure(self) -> Dict[str, List[str]]:
-        """Parse implementation phases from initial plan"""
+        """Parse implementation phases from initial plan解析实施阶段"""
         try:
             phases = {}
-            lines = self.initial_plan.split("\n")
+            lines = self.initial_plan.split("\n")#分行
             current_phase = None
 
             for line in lines:

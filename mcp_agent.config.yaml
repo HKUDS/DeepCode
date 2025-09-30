@@ -15,17 +15,17 @@ logger:
 
 mcp:
   servers:
-    brave:
+      #brave:
       # On windows replace the command and args line to use `node` and the absolute path to the server.
       # Use `npm i -g @modelcontextprotocol/server-brave-search` to install the server globally.
       # Use `npm -g root` to find the global node_modules path.`
       # command: "node"
       # args: ["c:/Program Files/nodejs/node_modules/@modelcontextprotocol/server-brave-search/dist/index.js"]
-      command: "npx"
-      args: ["-y", "@modelcontextprotocol/server-brave-search"]
-      env:
+     # command: "npx"
+      #args: ["-y", "@modelcontextprotocol/server-brave-search"]
+      #env:
         # You can also place your BRAVE_API_KEY in the fastagent.secrets.yaml file.
-        BRAVE_API_KEY: ""
+        #BRAVE_API_KEY: ""
     filesystem:
       # On windows update the command and arguments to use `node` and the absolute path to the server.
       # Use `npm i -g @modelcontextprotocol/server-filesystem` to install the server globally.
@@ -33,23 +33,27 @@ mcp:
       # command: "node"
       # args: ["c:/Program Files/nodejs/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js","."]
       command: "npx"
-      args: ["-y", "@modelcontextprotocol/server-filesystem"]
+      args: ["-y", "@modelcontextprotocol/server-filesystem","D:/PythonProjects/DeepCode-main"]
     fetch:
       command: "uvx"
-      args: ["mcp-server-fetch"]
+      args: [“-m”,"mcp-server-fetch"]
     github-downloader:
       command: "python"
       args: ["tools/git_command.py"]
       env:
         PYTHONPATH: "."
+        PYTHONIOENCODING: "utf-8"
+        PYTHONUTF8: "1"
     file-downloader:
       command: "python"
-      args: ["tools/pdf_downloader.py"]
+      args: ["D:/PythonProjects/DeepCode-main/tools/pdf_downloader.py"]
       env:
         PYTHONPATH: "."
     command-executor:
       command: "python"
-      args: ["tools/command_executor.py"]
+      args:
+        - -u
+        - "tools/command_executor.py"
       env:
         PYTHONPATH: "."
     code-implementation:
@@ -68,7 +72,7 @@ mcp:
 openai:
   # Secrets (API keys, etc.) are stored in an mcp_agent.secrets.yaml file which can be gitignored
   #  default_model: "o3-mini"
-  default_model: "anthropic/claude-sonnet-4"
+  default_model: "o3-mini"
 
 
 anthropic:

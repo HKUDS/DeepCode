@@ -1,0 +1,12 @@
+{"level":"INFO","timestamp":"2025-08-14T17:53:59.994159","namespace":"mcp_agent.core.context","message":"Configuring logger with level: info"}
+{"level":"INFO","timestamp":"2025-08-14T17:54:00.001399","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"command-executor: Up and running with a persistent connection!"}
+{"level":"INFO","timestamp":"2025-08-14T17:54:00.004383","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"github-downloader: Up and running with a persistent connection!"}
+{"level":"INFO","timestamp":"2025-08-14T17:54:00.252023","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"file-downloader: Up and running with a persistent connection!"}
+{"level":"INFO","timestamp":"2025-08-14T17:54:04.895066","namespace":"mcp_agent.mcp.mcp_aggregator.demo","message":"Requesting tool call","data":{"data":{"progress_action":"Calling Tool","tool_name":"download_files","server_name":"file-downloader","agent_name":"demo"}}}
+{"level":"INFO","timestamp":"2025-08-14T17:54:09.380742","namespace":"mcp_agent.mcp.mcp_aggregator.demo","message":"Last aggregator closing, shutting down all persistent connections..."}
+{"level":"INFO","timestamp":"2025-08-14T17:54:09.381395","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"Disconnecting all persistent server connections..."}
+{"level":"INFO","timestamp":"2025-08-14T17:54:09.381395","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"command-executor: Requesting shutdown..."}
+{"level":"INFO","timestamp":"2025-08-14T17:54:09.381395","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"github-downloader: Requesting shutdown..."}
+{"level":"INFO","timestamp":"2025-08-14T17:54:09.381395","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"file-downloader: Requesting shutdown..."}
+{"level":"INFO","timestamp":"2025-08-14T17:54:09.381395","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"All persistent server connections signaled to disconnect."}
+{"level":"INFO","timestamp":"2025-08-14T17:54:09.381395","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"Disconnecting all persistent server connections..."}

@@ -59,12 +59,16 @@ def get_preferred_llm_class(config_path: str = "mcp_agent.secrets.yaml"):
             # Check for anthropic API key in config
             anthropic_config = config.get("anthropic", {})
             anthropic_key = anthropic_config.get("api_key", "")
+            openai_config = config.get("openai",{})
+            openai_key =openai_config.get("api_key","")
 
             if anthropic_key and anthropic_key.strip() and not anthropic_key == "":
                 # print("🤖 Using AnthropicAugmentedLLM (Anthropic API key found in config)")
                 return AnthropicAugmentedLLM
-            else:
+            elif openai_key and openai_key.strip() and not openai_key =="":
                 # print("🤖 Using OpenAIAugmentedLLM (Anthropic API key not configured)")
+                return OpenAIAugmentedLLM
+            else:#暂时不支持deepseek？
                 return OpenAIAugmentedLLM
         else:
             print(f"🤖 Config file {config_path} not found, using OpenAIAugmentedLLM")
@@ -111,7 +115,7 @@ class CodeImplementationWorkflow:
     Paper Code Implementation Workflow Manager
 
     Uses standard MCP architecture:
-    1. Connect to code-implementation server via MCP client
+    1. Connect to codeimplementa-tion server via MCP client
     2. Use MCP protocol for tool calls
     3. Support workspace management and operation history tracking
     """
@@ -209,7 +213,7 @@ class CodeImplementationWorkflow:
             if pure_code_mode:
                 self.logger.info("Starting pure code implementation...")
                 results["code_implementation"] = await self.implement_code_pure(
-                    plan_content, target_directory, code_directory
+                    plan_content, target_directory, code_directory#implementcodepure是第二重要的方法
                 )
             else:
                 pass
@@ -247,7 +251,7 @@ class CodeImplementationWorkflow:
         async with structure_agent:
             creator = await structure_agent.attach_llm(
                 get_preferred_llm_class(self.config_path)
-            )
+            )#返回的是mcp里面的llm类型
 
             message = f"""Analyze the following implementation plan and generate shell commands to create the file tree structure.
 
@@ -382,7 +386,7 @@ Requirements:
         # Connect code agent with memory agent for summary generation
         # Note: Concise memory agent doesn't need LLM client for summary generation
         code_agent.set_memory_agent(memory_agent, client, client_type)
-
+#
         # Initialize memory agent with iteration 0
         memory_agent.start_new_round(iteration=0)
 
@@ -558,11 +562,13 @@ Requirements:
             finally:
                 self.mcp_agent = None
 
-    async def _initialize_llm_client(self):
+    async def _initialize_llm_client(self):#这里没起来
         """Initialize LLM client (Anthropic or OpenAI) based on API key availability"""
         # Check which API has available key and try that first
         anthropic_key = self.api_config.get("anthropic", {}).get("api_key", "")
         openai_key = self.api_config.get("openai", {}).get("api_key", "")
+        print(f'open_ai key:{openai_key}')
+        print(f'anthropic:{anthropic_key}')
 
         # Try Anthropic API first if key is available
         if anthropic_key and anthropic_key.strip():
@@ -600,7 +606,7 @@ Requirements:
                 # Test connection with default model from config
                 await client.chat.completions.create(
                     model=self.default_models["openai"],
-                    max_tokens=10,
+                    max_tokens=16,
                     messages=[{"role": "user", "content": "test"}],
                 )
                 self.logger.info(
@@ -717,7 +723,7 @@ Requirements:
 
     # ==================== 5. Tools and Utility Methods (Utility Layer) ====================
 
-    def _validate_messages(self, messages: List[Dict]) -> List[Dict]:
+    def _validate_messages(self, messages: List[Dict]) -> List[Dict]:#检查并清洗得到的message格式正确
         """Validate and clean message list"""
         valid_messages = []
         for msg in messages:
@@ -730,7 +736,7 @@ Requirements:
                 self.logger.warning(f"Skipping empty message: {msg}")
         return valid_messages
 
-    def _prepare_mcp_tool_definitions(self) -> List[Dict[str, Any]]:
+    def _prepare_mcp_tool_definitions(self) -> List[Dict[str, Any]]:#返回mcp工具
         """Prepare tool definitions in Anthropic API standard format"""
         return get_mcp_tools("code_implementation")
 
@@ -754,7 +760,7 @@ Requirements:
 
     # ==================== 6. User Interaction and Feedback (Interaction Layer) ====================
 
-    def _generate_success_guidance(self, files_count: int) -> str:
+    def _generate_success_guidance(self, files_count: int) -> str:#提示词工程
         """Generate concise success guidance for continuing implementation"""
         return f"""✅ File implementation completed successfully!
 

@@ -1,0 +1,11 @@
+{"level":"INFO","timestamp":"2025-08-08T15:57:45.592992","namespace":"mcp_agent.core.context","message":"Configuring logger with level: info"}
+{"level":"INFO","timestamp":"2025-08-08T15:57:45.599276","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"github-downloader: Up and running with a persistent connection!"}
+{"level":"INFO","timestamp":"2025-08-08T15:57:45.601273","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"file-downloader: Up and running with a persistent connection!"}
+{"level":"ERROR","timestamp":"2025-08-08T15:57:49.757730","namespace":"mcp_agent.mcp.mcp_aggregator.demo","message":"Error: Tool 'fetch' not found"}
+{"level":"ERROR","timestamp":"2025-08-08T15:57:49.757730","namespace":"mcp_agent.mcp.mcp_aggregator.demo","message":"Error: Tool 'run_command' not found"}
+{"level":"INFO","timestamp":"2025-08-08T15:57:49.757730","namespace":"mcp_agent.mcp.mcp_aggregator.demo","message":"Last aggregator closing, shutting down all persistent connections..."}
+{"level":"INFO","timestamp":"2025-08-08T15:57:49.757730","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"Disconnecting all persistent server connections..."}
+{"level":"INFO","timestamp":"2025-08-08T15:57:49.757730","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"github-downloader: Requesting shutdown..."}
+{"level":"INFO","timestamp":"2025-08-08T15:57:49.757730","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"file-downloader: Requesting shutdown..."}
+{"level":"INFO","timestamp":"2025-08-08T15:57:49.757730","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"All persistent server connections signaled to disconnect."}
+{"level":"INFO","timestamp":"2025-08-08T15:57:49.757730","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"Disconnecting all persistent server connections..."}

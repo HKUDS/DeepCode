@@ -134,7 +134,7 @@ class CodeImplementationAgent:
         Get the system prompt for code implementation
         获取代码实现的系统提示词
         """
-        return GENERAL_CODE_IMPLEMENTATION_SYSTEM_PROMPT
+        return GENERAL_CODE_IMPLEMENTATION_SYSTEM_PROMPT#预定义的常量
 
     def set_memory_agent(self, memory_agent, llm_client=None, llm_client_type=None):
         """

@@ -16,7 +16,7 @@ Core Features:
 - Multi-agent coordination with intelligent task distribution
 - Local environment automation for seamless deployment
 - Real-time progress monitoring with comprehensive error handling
-- Adaptive workflow optimization based on processing requirements
+- Adaptive workflow optimization based on processing requirements#是否需要执行全部步骤
 - Advanced intelligence analysis with configurable performance modes
 
 Architecture:
@@ -30,8 +30,10 @@ import asyncio
 import json
 import os
 import re
+from dataclasses import asdict
+
 import yaml
-from typing import Callable, Dict, Optional, Tuple
+from typing import Callable, Dict, Optional, Tuple, List
 
 # MCP Agent imports
 from mcp_agent.agents.agent import Agent
@@ -39,7 +41,6 @@ from mcp_agent.workflows.llm.augmented_llm_anthropic import AnthropicAugmentedLL
 from mcp_agent.workflows.llm.augmented_llm_openai import OpenAIAugmentedLLM
 from mcp_agent.workflows.llm.augmented_llm import RequestParams
 from mcp_agent.workflows.parallel.parallel_llm import ParallelLLM
-
 # Local imports
 from prompts.code_prompts import (
     PAPER_INPUT_ANALYZER_PROMPT,
@@ -55,6 +56,9 @@ from workflows.code_implementation_workflow import CodeImplementationWorkflow
 from workflows.code_implementation_workflow_index import (
     CodeImplementationWorkflowWithIndex,
 )
+from workflows.userinloop import  _prompt_user_to_select_route, \
+    _run_code_analyzer_for_selected_route, _generate_route_options, _generate_route_options_for_chat, \
+    run_chat_planning_agent,run_user_in_loop
 
 # Environment configuration
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"  # Prevent .pyc file generation
@@ -166,7 +170,6 @@ def extract_clean_json(llm_output: str) -> str:
 
     # If all methods fail, return original output
     return llm_output
-
 
 async def run_research_analyzer(prompt_text: str, logger) -> str:
     """
@@ -588,21 +591,11 @@ async def orchestrate_reference_intelligence_agent(
 
     return reference_result
 
-
+"""
 async def orchestrate_code_planning_agent(
     dir_info: Dict[str, str], logger, progress_callback: Optional[Callable] = None
 ):
-    """
-    Orchestrate intelligent code planning with automated design analysis.
 
-    This agent autonomously generates optimal code reproduction plans and implementation
-    strategies using AI-driven code analysis and planning principles.
-
-    Args:
-        dir_info: Workspace infrastructure metadata
-        logger: Logger instance for planning tracking
-        progress_callback: Progress callback function for monitoring
-    """
     if progress_callback:
         progress_callback(40, "🏗️ Synthesizing intelligent code architecture...")
 
@@ -614,6 +607,53 @@ async def orchestrate_code_planning_agent(
         with open(initial_plan_path, "w", encoding="utf-8") as f:
             f.write(initial_plan_result)
         print(f"Initial plan saved to {initial_plan_path}")
+"""
+async def orchestrate_code_planning_agent(
+    dir_info: Dict[str, str], logger, progress_callback: Optional[Callable] = None
+):
+    """
+        Orchestrate intelligent code planning with automated design analysis.
+
+        This agent autonomously generates optimal code reproduction plans and implementation
+        strategies using AI-driven code analysis and planning principles.
+
+        Args:
+            dir_info: Workspace infrastructure metadata
+            logger: Logger instance for planning tracking
+            progress_callback: Progress callback function for monitoring
+        """
+    if progress_callback:
+        progress_callback(40, "🏗️ Synthesizing intelligent code architecture...")
+
+    initial_plan_path = dir_info["initial_plan_path"]
+    paper_dir = dir_info["paper_dir"]
+
+    if not os.path.exists(initial_plan_path):
+        # 1) 先生成多路线
+        route_opts = await _generate_route_options(paper_dir, logger)
+
+        # 2) 用户选择（非交互环境可改成默认选 1）
+        try:
+            selected_idx = _prompt_user_to_select_route(route_opts)
+        except Exception:
+            selected_idx = 0
+            print("⚠️ 交互选择不可用，默认选择路线 #1")
+
+        selected = route_opts.options[selected_idx]
+
+        # 3) 持久化路线选项与选择结果，便于排错与回溯
+        os.makedirs(paper_dir, exist_ok=True)
+        with open(os.path.join(paper_dir, "route_options.json"), "w", encoding="utf-8") as f:
+            json.dump({"task_brief": route_opts.task_brief, "options": [asdict(o) for o in route_opts.options]},
+                      f, ensure_ascii=False, indent=2)
+        with open(os.path.join(paper_dir, "selected_route.json"), "w", encoding="utf-8") as f:
+            json.dump(asdict(selected), f, ensure_ascii=False, indent=2)
+
+        # 4) 严格按所选路线生成“最终实现计划”，写入 initial_plan.txt
+        final_plan = await _run_code_analyzer_for_selected_route(paper_dir, selected, logger)
+        with open(initial_plan_path, "w", encoding="utf-8") as f:
+            f.write(final_plan)
+        print(f"Initial plan (selected route) saved to {initial_plan_path}")
 
 
 async def automate_repository_acquisition_agent(
@@ -902,117 +942,9 @@ async def synthesize_code_implementation_agent(
         return {"status": "error", "message": str(e)}
 
 
-async def run_chat_planning_agent(user_input: str, logger) -> str:
-    """
-    Run the chat-based planning agent for user-provided coding requirements.
-
-    This agent transforms user's coding description into a comprehensive implementation plan
-    that can be directly used for code generation. It handles both academic and engineering
-    requirements with intelligent context adaptation.
-
-    Args:
-        user_input: User's coding requirements and description
-        logger: Logger instance for logging information
-
-    Returns:
-        str: Comprehensive implementation plan in YAML format
-    """
-    try:
-        print("💬 Starting chat-based planning agent...")
-        print(f"Input length: {len(user_input) if user_input else 0}")
-        print(f"Input preview: {user_input[:200] if user_input else 'None'}...")
-
-        if not user_input or user_input.strip() == "":
-            raise ValueError(
-                "Empty or None user_input provided to run_chat_planning_agent"
-            )
-
-        # Create the chat planning agent
-        chat_planning_agent = Agent(
-            name="ChatPlanningAgent",
-            instruction=CHAT_AGENT_PLANNING_PROMPT,
-            server_names=[
-                "brave"
-            ],  # Add tools if needed for web search or other capabilities
-        )
-
-        async with chat_planning_agent:
-            print("chat_planning: Connected to server, calling list_tools...")
-            try:
-                tools = await chat_planning_agent.list_tools()
-                print(
-                    "Tools available:",
-                    tools.model_dump() if hasattr(tools, "model_dump") else str(tools),
-                )
-            except Exception as e:
-                print(f"Failed to list tools: {e}")
-
-            try:
-                planner = await chat_planning_agent.attach_llm(
-                    get_preferred_llm_class()
-                )
-                print("✅ LLM attached successfully")
-            except Exception as e:
-                print(f"❌ Failed to attach LLM: {e}")
-                raise
-
-            # Set higher token output for comprehensive planning
-            planning_params = RequestParams(
-                max_tokens=8192,  # Higher token limit for detailed plans
-                temperature=0.2,  # Lower temperature for more structured output
-            )
-
-            print(
-                f"🔄 Making LLM request with params: max_tokens={planning_params.max_tokens}, temperature={planning_params.temperature}"
-            )
-
-            # Format the input message for the agent
-            formatted_message = f"""Please analyze the following coding requirements and generate a comprehensive implementation plan:
-
-User Requirements:
-{user_input}
-
-Please provide a detailed implementation plan that covers all aspects needed for successful development."""
-
-            try:
-                raw_result = await planner.generate_str(
-                    message=formatted_message, request_params=planning_params
-                )
-
-                print("✅ Planning request completed")
-                print(f"Raw result type: {type(raw_result)}")
-                print(f"Raw result length: {len(raw_result) if raw_result else 0}")
-
-                if not raw_result:
-                    print("❌ CRITICAL: raw_result is empty or None!")
-                    raise ValueError("Chat planning agent returned empty result")
-
-            except Exception as e:
-                print(f"❌ Planning generation failed: {e}")
-                print(f"Exception type: {type(e)}")
-                raise
-
-            # Log to SimpleLLMLogger
-            if hasattr(logger, "log_response"):
-                logger.log_response(
-                    raw_result, model="ChatPlanningAgent", agent="ChatPlanningAgent"
-                )
-
-            if not raw_result or raw_result.strip() == "":
-                print("❌ CRITICAL: Planning result is empty!")
-                raise ValueError("Chat planning agent produced empty output")
-
-            print("🎯 Chat planning completed successfully")
-            print(f"Planning result preview: {raw_result[:500]}...")
-
-            return raw_result
-
-    except Exception as e:
-        print(f"❌ run_chat_planning_agent failed: {e}")
-        print(f"Exception details: {type(e).__name__}: {str(e)}")
-        raise
 
 
+#核心工作流
 async def execute_multi_agent_research_pipeline(
     input_source: str,
     logger,
@@ -1055,7 +987,7 @@ async def execute_multi_agent_research_pipeline(
         print("✅ Workspace status: ready")
 
         # Log intelligence functionality status
-        if enable_indexing:
+        if enable_indexing:#考虑是否需要走完八个步骤
             print("🧠 Advanced intelligence analysis enabled - comprehensive workflow")
         else:
             print("⚡ Optimized mode - advanced intelligence analysis disabled")
@@ -1256,7 +1188,19 @@ async def execute_chat_based_planning_pipeline(
             )
 
         print("🧠 Running chat-based planning agent...")
-        planning_result = await run_chat_planning_agent(user_input, logger)
+        if True:
+            # 1) 生成多路线
+            selected, route_opts, history_text = await run_user_in_loop(user_input, logger, interactive=True)
+
+            # chat 模式：按选中路线生成最终实现计划（建议这里也禁用 server 注入）
+            planning_result = await run_chat_planning_agent(user_input, selected, logger)
+
+
+
+
+
+            #final_plan = await _run_code_analyzer_for_selected_route(user_input, selected, logger)
+
 
         # Phase 2: Workspace Infrastructure Synthesis
         if progress_callback:
@@ -1274,8 +1218,16 @@ async def execute_chat_based_planning_pipeline(
 
         # Use workspace directory
         chat_paper_dir = os.path.join(workspace_dir, "papers", paper_name)
-
         os.makedirs(chat_paper_dir, exist_ok=True)
+
+        #save the routeoptions
+        route_dir = os.path.join(chat_paper_dir, "route_dir")
+        os.makedirs(route_dir, exist_ok=True)
+        with open(os.path.join(route_dir, "route_options.json"), "w", encoding="utf-8") as f:
+            json.dump({"task_brief": route_opts.task_brief, "options": [asdict(o) for o in route_opts.options]},
+                      f, ensure_ascii=False, indent=2)
+        with open(os.path.join(route_dir, "selected_route.json"), "w", encoding="utf-8") as f:
+            json.dump(asdict(selected), f, ensure_ascii=False, indent=2)
 
         # Create a synthetic markdown file with user requirements
         markdown_content = f"""# User Coding Requirements
@@ -1306,7 +1258,6 @@ The following implementation plan was generated by the AI chat planning agent:
 
         print(f"💾 Created chat project workspace: {chat_paper_dir}")
         print(f"📄 Saved requirements to: {markdown_file_path}")
-
         # Create a download result that matches FileProcessor expectations
         synthetic_download_result = json.dumps(
             {
@@ -1334,7 +1285,8 @@ The following implementation plan was generated by the AI chat planning agent:
         initial_plan_path = dir_info["initial_plan_path"]
         with open(initial_plan_path, "w", encoding="utf-8") as f:
             f.write(planning_result)
-        print(f"💾 Implementation plan saved to {initial_plan_path}")
+        print(f"plan(selected route) saved to {initial_plan_path}")
+
 
         # Phase 4: Code Implementation Synthesis (same as Phase 8 in original pipeline)
         if progress_callback:

@@ -1,0 +1,5 @@
+{"level":"INFO","timestamp":"2025-09-24T17:00:40.142217","namespace":"mcp_agent.core.context","message":"Configuring logger with level: info"}
+{"level":"INFO","timestamp":"2025-09-24T17:00:40.145221","namespace":"mcp_agent.cli_agent_orchestration","message":"MCPApp initialized","data":{"data":{"progress_action":"Running","target":"cli_agent_orchestration","agent_name":"mcp_application_loop","session_id":"02bc44e1-9649-4649-a99d-b2e4fc4046cc"}}}
+{"level":"INFO","timestamp":"2025-09-24T17:01:54.280716","namespace":"mcp_agent.core.context","message":"Configuring logger with level: info"}
+{"level":"INFO","timestamp":"2025-09-24T17:01:54.280716","namespace":"mcp_agent.cli_agent_orchestration","message":"MCPApp initialized","data":{"data":{"progress_action":"Running","target":"cli_agent_orchestration","agent_name":"mcp_application_loop","session_id":"03ddd991-a071-412f-853e-89e75568be07"}}}
+{"level":"INFO","timestamp":"2025-09-24T17:01:55.431799","namespace":"mcp_agent.cli_agent_orchestration","message":"MCPApp cleanup","data":{"data":{"progress_action":"Finished","target":"cli_agent_orchestration","agent_name":"mcp_application_loop"}}}

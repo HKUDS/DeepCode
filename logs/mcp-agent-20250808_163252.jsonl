@@ -1,0 +1,5 @@
+{"level":"INFO","timestamp":"2025-08-08T16:32:52.842306","namespace":"mcp_agent.core.context","message":"Configuring logger with level: info"}
+{"level":"INFO","timestamp":"2025-08-08T16:32:52.847815","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"command-executor: Up and running with a persistent connection!"}
+{"level":"INFO","timestamp":"2025-08-08T16:32:52.849389","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"github-downloader: Up and running with a persistent connection!"}
+{"level":"INFO","timestamp":"2025-08-08T16:32:53.069732","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"file-downloader: Up and running with a persistent connection!"}
+{"level":"INFO","timestamp":"2025-08-08T16:32:57.071952","namespace":"mcp_agent.mcp.mcp_aggregator.demo","message":"Requesting tool call","data":{"data":{"progress_action":"Calling Tool","tool_name":"execute_single_command","server_name":"command-executor","agent_name":"demo"}}}

@@ -24,7 +24,7 @@ if parent_dir not in sys.path:
 
 # 导入MCP应用和工作流
 
-from cli.workflows import CLIWorkflowAdapter
+from cli.workflows_cli import CLIWorkflowAdapter
 from cli.cli_interface import CLIInterface, Colors
 
 

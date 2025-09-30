@@ -950,7 +950,7 @@ def results_display_component(result: Dict[str, Any], task_counter: int):
 
     # Display overall status
     if result.get("status") == "success":
-        st.success("🎉 **All workflows completed successfully!**")
+        st.success("🎉 **All workflows_cli completed successfully!**")
     else:
         st.error("❌ **Processing encountered errors**")
 

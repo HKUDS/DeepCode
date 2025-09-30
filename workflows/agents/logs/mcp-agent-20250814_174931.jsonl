@@ -1,0 +1,2 @@
+{"level":"INFO","timestamp":"2025-08-14T17:49:31.894620","namespace":"mcp_agent.core.context","message":"Configuring logger with level: info"}
+{"level":"INFO","timestamp":"2025-08-14T17:49:58.562022","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"filesystem: Up and running with a persistent connection!"}

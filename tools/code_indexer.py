@@ -427,7 +427,7 @@ class CodeIndexer:
                 # Test connection with default model from config
                 await client.chat.completions.create(
                     model=self.default_models["openai"],
-                    max_tokens=10,
+                    max_tokens=16,
                     messages=[{"role": "user", "content": "test"}],
                 )
                 self.logger.info(

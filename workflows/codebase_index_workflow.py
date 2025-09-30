@@ -31,7 +31,7 @@ sys.path.append(str(Path(__file__).parent.parent / "tools"))
 from tools.code_indexer import CodeIndexer
 
 
-class CodebaseIndexWorkflow:
+class CodebaseIndexWorkflow:#先把整仓压缩成结构化索引，再按需查询局部片段
     """代码库索引工作流类 / Codebase Index Workflow Class"""
 
     def __init__(self, logger=None):

@@ -13,7 +13,7 @@ Features:
 - Image extraction and preservation
 - Multi-format support with fallback options
 """
-
+#其实是用的多组正则化+规则化启发
 import os
 import re
 import aiohttp

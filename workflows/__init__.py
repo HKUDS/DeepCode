@@ -18,7 +18,7 @@ from .agent_orchestration_engine import (
 from .code_implementation_workflow import CodeImplementationWorkflow
 
 __all__ = [
-    # Initial workflows
+    # Initial workflows_cli
     "run_research_analyzer",
     "run_resource_processor",
     "run_code_analyzer",
@@ -26,6 +26,6 @@ __all__ = [
     "paper_reference_analyzer",
     "execute_multi_agent_research_pipeline",  # Main multi-agent pipeline function
     "paper_code_preparation",  # Deprecated, for backward compatibility
-    # Code implementation workflows
+    # Code implementation workflows_cli
     "CodeImplementationWorkflow",
 ]

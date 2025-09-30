@@ -1,0 +1,10 @@
+{"level":"INFO","timestamp":"2025-08-14T17:24:04.801168","namespace":"mcp_agent.core.context","message":"Configuring logger with level: info"}
+{"level":"INFO","timestamp":"2025-08-14T17:24:04.808173","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"command-executor: Up and running with a persistent connection!"}
+{"level":"INFO","timestamp":"2025-08-14T17:24:11.942842","namespace":"mcp_agent.mcp.mcp_aggregator.e2e","message":"Requesting tool call","data":{"data":{"progress_action":"Calling Tool","tool_name":"execute_single_command","server_name":"command-executor","agent_name":"e2e"}}}
+{"level":"ERROR","timestamp":"2025-08-14T17:24:12.486620","namespace":"mcp_agent.executor.executor","message":"Error executing task: Failed to deserialize the JSON body into the target type: messages[3]: invalid type: sequence, expected a string at line 1 column 1211"}
+{"level":"ERROR","timestamp":"2025-08-14T17:24:12.486620","namespace":"mcp_agent.workflows.llm.augmented_llm_openai.e2e","message":"Error: Failed to deserialize the JSON body into the target type: messages[3]: invalid type: sequence, expected a string at line 1 column 1211"}
+{"level":"INFO","timestamp":"2025-08-14T17:24:12.486620","namespace":"mcp_agent.mcp.mcp_aggregator.e2e","message":"Last aggregator closing, shutting down all persistent connections..."}
+{"level":"INFO","timestamp":"2025-08-14T17:24:12.486620","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"Disconnecting all persistent server connections..."}
+{"level":"INFO","timestamp":"2025-08-14T17:24:12.486620","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"command-executor: Requesting shutdown..."}
+{"level":"INFO","timestamp":"2025-08-14T17:24:12.486620","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"All persistent server connections signaled to disconnect."}
+{"level":"INFO","timestamp":"2025-08-14T17:24:12.486620","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"Disconnecting all persistent server connections..."}

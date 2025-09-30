@@ -1,0 +1,7 @@
+{"level":"INFO","timestamp":"2025-08-08T15:10:44.114468","namespace":"mcp_agent.core.context","message":"Configuring logger with level: info"}
+{"level":"ERROR","timestamp":"2025-08-08T15:10:44.122570","namespace":"mcp_agent.mcp.mcp_aggregator.demo","message":"Error loading server data: Server 'local' not found in registry.. Attempting to continue"}
+{"level":"WARNING","timestamp":"2025-08-08T15:10:44.124554","namespace":"mcp_agent.mcp.mcp_aggregator.demo","message":"Error getting capabilities for server 'local': Server 'local' not found in registry."}
+{"level":"WARNING","timestamp":"2025-08-08T15:10:44.125555","namespace":"mcp_agent.mcp.mcp_aggregator.demo","message":"Error getting capabilities for server 'local': Server 'local' not found in registry."}
+{"level":"INFO","timestamp":"2025-08-08T15:10:44.125555","namespace":"mcp_agent.mcp.mcp_aggregator.demo","message":"Last aggregator closing, shutting down all persistent connections..."}
+{"level":"INFO","timestamp":"2025-08-08T15:10:44.125555","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"Disconnecting all persistent server connections..."}
+{"level":"INFO","timestamp":"2025-08-08T15:10:44.126558","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"Disconnecting all persistent server connections..."}

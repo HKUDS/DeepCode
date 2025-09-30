@@ -856,7 +856,7 @@ CRITICAL: You must actually execute the shell commands using the available tools
 
 # Sliding Window and Summary Agent Prompts / 滑动窗口和总结代理提示词
 
-CONVERSATION_SUMMARY_PROMPT = """You are a conversation summarization specialist for code implementation workflows with ROLE-AWARE summarization capabilities.
+CONVERSATION_SUMMARY_PROMPT = """You are a conversation summarization specialist for code implementation workflows_cli with ROLE-AWARE summarization capabilities.
 
 CRITICAL ROLE AWARENESS:
 🎯 **USER MESSAGES**: Contain instructions, tool results, file feedback, and implementation guidance

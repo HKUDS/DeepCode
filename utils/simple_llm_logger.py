@@ -52,7 +52,7 @@ class SimpleLLMLogger:
                 "log_level": "basic",
                 "log_directory": "logs/llm_responses",
                 "filename_pattern": "llm_responses_{timestamp}.jsonl",
-                "include_models": ["claude-sonnet-4", "gpt-4", "o3-mini"],
+                "include_models": ["claude-sonnet-4", "gpt-4", "o3-mini","deepseek"],
                 "min_response_length": 50,
             }
         }

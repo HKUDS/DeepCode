@@ -1,0 +1,10 @@
+{"level":"INFO","timestamp":"2025-09-23T22:32:19.082826","namespace":"mcp_agent.core.context","message":"Configuring logger with level: info"}
+{"level":"INFO","timestamp":"2025-09-23T22:32:19.085826","namespace":"mcp_agent.cli_agent_orchestration","message":"MCPApp initialized","data":{"data":{"progress_action":"Running","target":"cli_agent_orchestration","agent_name":"mcp_application_loop","session_id":"c8df97a2-6f79-4e8b-9d76-cf5c1a31ea95"}}}
+{"level":"INFO","timestamp":"2025-09-23T22:32:33.235707","namespace":"mcp_agent.core.context","message":"Configuring logger with level: info"}
+{"level":"INFO","timestamp":"2025-09-23T22:32:33.236679","namespace":"mcp_agent.cli_agent_orchestration","message":"MCPApp initialized","data":{"data":{"progress_action":"Running","target":"cli_agent_orchestration","agent_name":"mcp_application_loop","session_id":"1227ca7e-c670-4619-b686-5018bd130d80"}}}
+{"level":"INFO","timestamp":"2025-09-23T22:32:33.985520","namespace":"mcp_agent.cli_agent_orchestration","message":"MCPApp cleanup","data":{"data":{"progress_action":"Finished","target":"cli_agent_orchestration","agent_name":"mcp_application_loop"}}}
+{"level":"ERROR","timestamp":"2025-09-23T22:32:33.989519","namespace":"mcp_agent.mcp.mcp_aggregator.ChatPlanningAgent","message":"Error loading server data: Server 'brave' not found in registry.. Attempting to continue"}
+{"level":"INFO","timestamp":"2025-09-23T22:33:13.666075","namespace":"mcp_agent.mcp.mcp_aggregator.ChatPlanningAgent","message":"Last aggregator closing, shutting down all persistent connections..."}
+{"level":"INFO","timestamp":"2025-09-23T22:33:13.666075","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"Disconnecting all persistent server connections..."}
+{"level":"INFO","timestamp":"2025-09-23T22:33:13.666075","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"Disconnecting all persistent server connections..."}
+{"level":"INFO","timestamp":"2025-09-23T22:33:14.173398","namespace":"mcp_agent.mcp.mcp_aggregator.ChatPlanningAgent","message":"Connection manager successfully closed and removed from context"}

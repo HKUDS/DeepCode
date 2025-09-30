@@ -6,11 +6,34 @@ DeepCode CLI - Open-Source Code Agent
 🧬 Data Intelligence Lab @ HKU
 ⚡ Revolutionizing Research Reproducibility through Multi-Agent Architecture
 """
-
+import json
 import os
 import sys
 import asyncio
 import argparse
+from dataclasses import dataclass, asdict
+from typing import List
+@dataclass
+class RouteOption:
+    id: str
+    title: str
+    summary: str
+    key_steps: List[str]
+    required_tools: List[str]
+    risk_notes: str
+    success_criteria: List[str]
+    when_to_prefer: str
+
+@dataclass
+class RouteOptions:
+    task_brief: str
+    options: List[RouteOption]
+
+    def to_json(self) -> str:
+        return json.dumps({
+            "task_brief": self.task_brief,
+            "options": [asdict(o) for o in self.options]
+        }, ensure_ascii=False, indent=2)
 
 # 禁止生成.pyc文件
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"

@@ -1,0 +1,21 @@
+{"level":"INFO","timestamp":"2025-09-26T12:23:07.543526","namespace":"mcp_agent.core.context","message":"Configuring logger with level: info"}
+{"level":"INFO","timestamp":"2025-09-26T12:23:07.546124","namespace":"mcp_agent.cli_agent_orchestration","message":"MCPApp initialized","data":{"data":{"progress_action":"Running","target":"cli_agent_orchestration","agent_name":"mcp_application_loop","session_id":"7c279dec-3cf0-42e6-9ceb-351f08cf769f"}}}
+{"level":"INFO","timestamp":"2025-09-26T12:23:20.060816","namespace":"mcp_agent.core.context","message":"Configuring logger with level: info"}
+{"level":"INFO","timestamp":"2025-09-26T12:23:20.061815","namespace":"mcp_agent.cli_agent_orchestration","message":"MCPApp initialized","data":{"data":{"progress_action":"Running","target":"cli_agent_orchestration","agent_name":"mcp_application_loop","session_id":"73df3290-14f2-4c15-9aa1-8282817babde"}}}
+{"level":"INFO","timestamp":"2025-09-26T12:24:16.665424","namespace":"mcp_agent.mcp.mcp_aggregator.RoutePlannerAgent","message":"Last aggregator closing, shutting down all persistent connections..."}
+{"level":"INFO","timestamp":"2025-09-26T12:24:16.665424","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"Disconnecting all persistent server connections..."}
+{"level":"INFO","timestamp":"2025-09-26T12:24:16.665424","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"Disconnecting all persistent server connections..."}
+{"level":"INFO","timestamp":"2025-09-26T12:24:16.669431","namespace":"mcp_agent.cli_agent_orchestration","message":"MCPApp cleanup","data":{"data":{"progress_action":"Finished","target":"cli_agent_orchestration","agent_name":"mcp_application_loop"}}}
+{"level":"INFO","timestamp":"2025-09-26T12:24:17.181162","namespace":"mcp_agent.mcp.mcp_aggregator.RoutePlannerAgent","message":"Connection manager successfully closed and removed from context"}
+{"level":"INFO","timestamp":"2025-09-26T12:24:46.114764","namespace":"mcp_agent.mcp.mcp_aggregator.ChatPlanningAgent","message":"Last aggregator closing, shutting down all persistent connections..."}
+{"level":"INFO","timestamp":"2025-09-26T12:24:46.114764","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"Disconnecting all persistent server connections..."}
+{"level":"INFO","timestamp":"2025-09-26T12:24:46.115841","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"Disconnecting all persistent server connections..."}
+{"level":"INFO","timestamp":"2025-09-26T12:24:46.647369","namespace":"mcp_agent.mcp.mcp_aggregator.ChatPlanningAgent","message":"Connection manager successfully closed and removed from context"}
+{"level":"INFO","timestamp":"2025-09-26T12:24:59.700549","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"command-executor: Up and running with a persistent connection!"}
+{"level":"ERROR","timestamp":"2025-09-26T12:25:17.761056","namespace":"mcp_agent.executor.executor","message":"Error executing task: Request timed out."}
+{"level":"ERROR","timestamp":"2025-09-26T12:25:17.761056","namespace":"mcp_agent.workflows.llm.augmented_llm_openai.StructureGeneratorAgent","message":"Error: Request timed out."}
+{"level":"INFO","timestamp":"2025-09-26T12:25:17.761056","namespace":"mcp_agent.mcp.mcp_aggregator.StructureGeneratorAgent","message":"Last aggregator closing, shutting down all persistent connections..."}
+{"level":"INFO","timestamp":"2025-09-26T12:25:17.762042","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"Disconnecting all persistent server connections..."}
+{"level":"INFO","timestamp":"2025-09-26T12:25:17.762042","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"command-executor: Requesting shutdown..."}
+{"level":"INFO","timestamp":"2025-09-26T12:25:17.762042","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"All persistent server connections signaled to disconnect."}
+{"level":"INFO","timestamp":"2025-09-26T12:25:17.762042","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"Disconnecting all persistent server connections..."}

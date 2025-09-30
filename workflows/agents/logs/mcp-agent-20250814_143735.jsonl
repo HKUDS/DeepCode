@@ -1,0 +1,3 @@
+{"level":"INFO","timestamp":"2025-08-14T14:37:35.266862","namespace":"mcp_agent.core.context","message":"Configuring logger with level: info"}
+{"level":"INFO","timestamp":"2025-08-14T14:37:35.271975","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"filesystem: Up and running with a persistent connection!"}
+{"level":"ERROR","timestamp":"2025-08-14T14:37:35.271975","namespace":"mcp_agent.mcp.mcp_aggregator.ConceptAnalysisAgent","message":"Error loading server data: Server 'brave' not found in registry.. Attempting to continue"}

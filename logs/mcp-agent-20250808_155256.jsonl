@@ -1,0 +1,19 @@
+{"level":"INFO","timestamp":"2025-08-08T15:52:56.188254","namespace":"mcp_agent.core.context","message":"Configuring logger with level: info"}
+{"level":"INFO","timestamp":"2025-08-08T15:52:56.196516","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"fetch: Up and running with a persistent connection!"}
+{"level":"INFO","timestamp":"2025-08-08T15:52:56.358482","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"command-executor: Up and running with a persistent connection!"}
+{"level":"INFO","timestamp":"2025-08-08T15:52:56.370587","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"file-downloader: Up and running with a persistent connection!"}
+{"level":"ERROR","timestamp":"2025-08-08T15:52:56.382629","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"fetch: Lifecycle task encountered an error: [WinError 2] \u7cfb\u7edf\u627e\u4e0d\u5230\u6307\u5b9a\u7684\u6587\u4ef6\u3002","data":{"exc_info":true,"data":{"progress_action":"Error","server_name":"fetch"}}}
+{"level":"ERROR","timestamp":"2025-08-08T15:53:00.674339","namespace":"mcp_agent.mcp.mcp_aggregator.demo","message":"Error loading server data: MCP Server: 'fetch': Failed to initialize with error: '[WinError 2] \u7cfb\u7edf\u627e\u4e0d\u5230\u6307\u5b9a\u7684\u6587\u4ef6\u3002'. Check mcp_agent.config.yaml. Attempting to continue"}
+{"level":"INFO","timestamp":"2025-08-08T15:53:00.675323","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"fetch: Server exists but is unhealthy, recreating..."}
+{"level":"INFO","timestamp":"2025-08-08T15:53:00.676343","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"fetch: Up and running with a persistent connection!"}
+{"level":"ERROR","timestamp":"2025-08-08T15:53:00.874149","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"fetch: Lifecycle task encountered an error: [WinError 2] \u7cfb\u7edf\u627e\u4e0d\u5230\u6307\u5b9a\u7684\u6587\u4ef6\u3002","data":{"exc_info":true,"data":{"progress_action":"Error","server_name":"fetch"}}}
+{"level":"WARNING","timestamp":"2025-08-08T15:53:00.875147","namespace":"mcp_agent.mcp.mcp_aggregator.demo","message":"Error getting capabilities for server 'fetch': MCP Server: 'fetch': Failed to initialize with error: '[WinError 2] \u7cfb\u7edf\u627e\u4e0d\u5230\u6307\u5b9a\u7684\u6587\u4ef6\u3002'. Check mcp_agent.config.yaml"}
+{"level":"ERROR","timestamp":"2025-08-08T15:53:00.878145","namespace":"mcp_agent.mcp.mcp_aggregator.demo","message":"Error: Tool 'fetch' not found"}
+{"level":"ERROR","timestamp":"2025-08-08T15:53:00.878145","namespace":"mcp_agent.mcp.mcp_aggregator.demo","message":"Error: Tool 'run_command' not found"}
+{"level":"INFO","timestamp":"2025-08-08T15:53:00.879673","namespace":"mcp_agent.mcp.mcp_aggregator.demo","message":"Last aggregator closing, shutting down all persistent connections..."}
+{"level":"INFO","timestamp":"2025-08-08T15:53:00.879673","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"Disconnecting all persistent server connections..."}
+{"level":"INFO","timestamp":"2025-08-08T15:53:00.879673","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"command-executor: Requesting shutdown..."}
+{"level":"INFO","timestamp":"2025-08-08T15:53:00.879673","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"file-downloader: Requesting shutdown..."}
+{"level":"INFO","timestamp":"2025-08-08T15:53:00.879673","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"fetch: Requesting shutdown..."}
+{"level":"INFO","timestamp":"2025-08-08T15:53:00.879673","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"All persistent server connections signaled to disconnect."}
+{"level":"INFO","timestamp":"2025-08-08T15:53:00.879673","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"Disconnecting all persistent server connections..."}

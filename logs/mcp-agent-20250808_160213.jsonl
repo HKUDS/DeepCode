@@ -1,0 +1,13 @@
+{"level":"INFO","timestamp":"2025-08-08T16:02:13.843159","namespace":"mcp_agent.core.context","message":"Configuring logger with level: info"}
+{"level":"INFO","timestamp":"2025-08-08T16:02:13.848159","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"github-downloader: Up and running with a persistent connection!"}
+{"level":"INFO","timestamp":"2025-08-08T16:02:13.850158","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"file-downloader: Up and running with a persistent connection!"}
+{"level":"ERROR","timestamp":"2025-08-08T16:02:17.670748","namespace":"mcp_agent.mcp.mcp_aggregator.demo","message":"Error loading server data: Server 'command_executor' not found in registry.. Attempting to continue"}
+{"level":"WARNING","timestamp":"2025-08-08T16:02:17.675404","namespace":"mcp_agent.mcp.mcp_aggregator.demo","message":"Error getting capabilities for server 'command_executor': Server 'command_executor' not found in registry."}
+{"level":"WARNING","timestamp":"2025-08-08T16:02:17.677295","namespace":"mcp_agent.mcp.mcp_aggregator.demo","message":"Error getting capabilities for server 'command_executor': Server 'command_executor' not found in registry."}
+{"level":"ERROR","timestamp":"2025-08-08T16:02:17.678314","namespace":"mcp_agent.mcp.mcp_aggregator.demo","message":"Error: Tool 'run_command' not found"}
+{"level":"INFO","timestamp":"2025-08-08T16:02:17.678314","namespace":"mcp_agent.mcp.mcp_aggregator.demo","message":"Last aggregator closing, shutting down all persistent connections..."}
+{"level":"INFO","timestamp":"2025-08-08T16:02:17.678314","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"Disconnecting all persistent server connections..."}
+{"level":"INFO","timestamp":"2025-08-08T16:02:17.678314","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"github-downloader: Requesting shutdown..."}
+{"level":"INFO","timestamp":"2025-08-08T16:02:17.678314","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"file-downloader: Requesting shutdown..."}
+{"level":"INFO","timestamp":"2025-08-08T16:02:17.678314","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"All persistent server connections signaled to disconnect."}
+{"level":"INFO","timestamp":"2025-08-08T16:02:17.678314","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"Disconnecting all persistent server connections..."}

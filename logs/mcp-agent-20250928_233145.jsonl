@@ -1,0 +1,9 @@
+{"level":"INFO","timestamp":"2025-09-28T23:31:45.564140","namespace":"mcp_agent.core.context","message":"Configuring logger with level: info"}
+{"level":"INFO","timestamp":"2025-09-28T23:31:45.566148","namespace":"mcp_agent.cli_agent_orchestration","message":"MCPApp initialized","data":{"data":{"progress_action":"Running","target":"cli_agent_orchestration","agent_name":"mcp_application_loop","session_id":"c65014de-0695-4c05-a3f9-16a3b42ed49a"}}}
+{"level":"INFO","timestamp":"2025-09-28T23:31:55.845410","namespace":"mcp_agent.core.context","message":"Configuring logger with level: info"}
+{"level":"INFO","timestamp":"2025-09-28T23:31:55.845914","namespace":"mcp_agent.cli_agent_orchestration","message":"MCPApp initialized","data":{"data":{"progress_action":"Running","target":"cli_agent_orchestration","agent_name":"mcp_application_loop","session_id":"aabdb370-755a-4c59-a687-aa2a5b1275d1"}}}
+{"level":"INFO","timestamp":"2025-09-28T23:31:56.632225","namespace":"mcp_agent.workflows.llm.augmented_llm_openai.RoutePlannerAgent","message":"Using reasoning model 'o3-mini' with 'medium' reasoning effort"}
+{"level":"INFO","timestamp":"2025-09-28T23:32:14.567491","namespace":"mcp_agent.mcp.mcp_aggregator.RoutePlannerAgent","message":"Last aggregator closing, shutting down all persistent connections..."}
+{"level":"INFO","timestamp":"2025-09-28T23:32:14.567491","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"Disconnecting all persistent server connections..."}
+{"level":"INFO","timestamp":"2025-09-28T23:32:14.568492","namespace":"mcp_agent.mcp.mcp_connection_manager","message":"Disconnecting all persistent server connections..."}
+{"level":"INFO","timestamp":"2025-09-28T23:32:14.571491","namespace":"mcp_agent.cli_agent_orchestration","message":"MCPApp cleanup","data":{"data":{"progress_action":"Finished","target":"cli_agent_orchestration","agent_name":"mcp_application_loop"}}}
