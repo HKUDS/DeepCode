@@ -59,7 +59,7 @@ class MCPToolDefinitions:
 
     @staticmethod
     def _get_read_file_tool() -> Dict[str, Any]:
-        """读取文件工具定义"""
+        
         return {
             "name": "read_file",
             "description": "Read file content, supports specifying line number range",
@@ -129,7 +129,7 @@ class MCPToolDefinitions:
 
     @staticmethod
     def _get_write_file_tool() -> Dict[str, Any]:
-        """写入文件工具定义"""
+        
         return {
             "name": "write_file",
             "description": "Write content to file",
@@ -196,7 +196,7 @@ class MCPToolDefinitions:
 
     @staticmethod
     def _get_execute_python_tool() -> Dict[str, Any]:
-        """Python执行工具定义"""
+       
         return {
             "name": "execute_python",
             "description": "Execute Python code and return output",
@@ -607,14 +607,12 @@ class MCPToolDefinitions:
 
 # 便捷访问函数
 def get_mcp_tools(tool_set: str = "code_implementation") -> List[Dict[str, Any]]:
-    """
-    便捷函数：获取MCP工具定义
+    
     Convenience function: Get MCP tool definitions
 
     Args:
         tool_set: 工具集名称 (默认: "code_implementation")
 
     Returns:
-        工具定义列表
     """
     return MCPToolDefinitions.get_tool_set(tool_set)
