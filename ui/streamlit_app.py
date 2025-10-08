@@ -7,9 +7,6 @@ Streamlit Web Interface Main Application File
 import os
 import sys
 
-# os.environ['https_proxy'] = 'http://127.0.0.1:7890'
-# os.environ['http_proxy'] = 'http://127.0.0.1:7890'
-
 # Disable .pyc file generation
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 
