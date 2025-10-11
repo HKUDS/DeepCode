@@ -62,10 +62,11 @@ class MCPEvaluationToolDefinitions:
         return [
             MCPEvaluationToolDefinitions._get_analyze_repo_structure_tool(),
             MCPEvaluationToolDefinitions._get_detect_dependencies_tool(),
-            MCPEvaluationToolDefinitions._get_assess_code_quality_tool(),
+            # MCPEvaluationToolDefinitions._get_assess_code_quality_tool(),
             MCPEvaluationToolDefinitions._get_evaluate_documentation_tool(),
             MCPEvaluationToolDefinitions._get_check_reproduction_readiness_tool(),
             MCPEvaluationToolDefinitions._get_generate_evaluation_summary_tool(),
+            MCPEvaluationToolDefinitions._get_read_file_tool(),
         ]
 
     @staticmethod

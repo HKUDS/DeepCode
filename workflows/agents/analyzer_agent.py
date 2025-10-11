@@ -140,7 +140,7 @@ Available analysis tools:
 
 CRITICAL INSTRUCTIONS:
 - Start with basic repository analysis (analyze_repo_structure, detect_dependencies)
-- Based on findings, use appropriate specialized tools (assess_code_quality, evaluate_documentation, etc.)
+- Based on findings, use appropriate specialized tools (evaluate_documentation, etc.)
 - Generate revision reports using generate_code_revision_report
 - Create final summary using generate_evaluation_summary
 - Use multiple tools in sequence to build comprehensive understanding
@@ -509,14 +509,6 @@ Begin your analysis now."""
                 self.logger.info(f"✅ Added {len(revision_tools)} revision tools")
             except Exception as e:
                 self.logger.warning(f"⚠️ Could not load revision tools: {e}")
-
-            # Static analysis tools
-            try:
-                static_tools = get_evaluation_mcp_tools("static-analysis")
-                analyzer_tools.extend(static_tools)
-                self.logger.info(f"✅ Added {len(static_tools)} static analysis tools")
-            except Exception as e:
-                self.logger.warning(f"⚠️ Could not load static analysis tools: {e}")
 
             if not analyzer_tools:
                 self.logger.error("❌ No analyzer tools loaded! Using fallback")

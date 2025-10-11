@@ -1557,32 +1557,16 @@ Start by analyzing the error, then decide on the fixing strategy, and finally im
             task_system_message = f"""{CODE_REVISE_AGENT_PROMPT.format(
                 repo_path=self.evaluation_state.repo_path,
                 docs_path=self.evaluation_state.docs_path,
-                memory_path=self.evaluation_state.memory_path,
-                revision_report_summary=json.dumps(revision_report_data, indent=2)
+                memory_path=self.evaluation_state.memory_path
             )}
 
-SINGLE TASK FOCUSED MODE:
-You are now in single task focused mode. Your ONLY task is to:
-
-CURRENT TASK: {task_id}
-DESCRIPTION: {task_description}
-PRIORITY: {task_priority}
+## CURRENT TASK
+Task: {task_id} - {task_description}
+Priority: {task_priority}
 
 Task Details: {json.dumps(task, indent=2)}
 
-CRITICAL INSTRUCTIONS:
-- Focus ONLY on this specific task
-- Use appropriate implementation tools for this task type
-- Use write_multiple_files for efficient multi-file implementation if needed
-- Use read_multiple_files to understand existing code structure
-- Always explain your approach for this specific task
-- Be thorough but focused
-
-TERMINATION CONDITIONS:
-- This specific task has been completed successfully
-- You have made the necessary changes for this task
-- You indicate task is "complete", "finished", or "done" in your response
-- Maximum 8 iterations reached for this task
+**IMPORTANT**: Before implementing, review Documentation Path to understand the reproduction plan.
 
 Available tools: {[tool.get("name", "") for tool in tools]}"""
 

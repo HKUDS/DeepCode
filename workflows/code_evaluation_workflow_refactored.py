@@ -1081,11 +1081,11 @@ async def main(repo_path=None, docs_path=None, memory_path=None, max_files_per_b
 
     # Use provided paths or default example paths
     if repo_path is None:
-        repo_path = "/Users/lizongwei/Reasearch/DeepCode_Base/DeepCode_eval_init/deepcode_lab/papers/1/generate_code"
+        repo_path = "d:/Project_codes/DeepCode_docker/deepcode_lab/papers/4/generate_code"
     if docs_path is None:
-        docs_path = "/Users/lizongwei/Reasearch/DeepCode_Base/DeepCode_eval_init/deepcode_lab/papers/1/initial_plan.txt"
+        docs_path = "d:/Project_codes/DeepCode_docker/deepcode_lab/papers/4/initial_plan.txt"
     if memory_path is None:
-        memory_path = "/Users/lizongwei/Reasearch/DeepCode_Base/DeepCode_eval_init/deepcode_lab/papers/1/generate_code/implement_code_summary.md"
+        memory_path = "d:/Project_codes/DeepCode_docker/deepcode_lab/papers/4/generate_code/implement_code_summary.md"
 
     # Initialize checkpoint manager for utility functions
     from workflows.checkpoint_manager import CheckpointManager
