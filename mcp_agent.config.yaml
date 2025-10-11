@@ -1,0 +1,114 @@
+$schema: ./schema/mcp-agent.config.schema.json
+
+# Default search server configuration
+# Options: "brave" or "bocha-mcp"
+default_search_server: "brave"
+
+# Planning mode configuration
+# Options: "segmented" or "traditional"
+# segmented: Breaks down large tasks to avoid token truncation (recommended)
+# traditional: Uses parallel agents but may hit token limits
+planning_mode: "traditional"
+
+# Document segmentation configuration
+document_segmentation:
+  enabled: false  # Whether to use intelligent document segmentation
+  size_threshold_chars: 50000  # Document size threshold (in characters) to trigger segmentation
+  # If document size > threshold and enabled=true, use segmentation workflow
+  # If document size <= threshold or enabled=false, use traditional full-document reading
+
+execution_engine: asyncio
+logger:
+  transports: [console, file]
+  level: info
+  progress_display: true
+  path_settings:
+    path_pattern: "logs/mcp-agent-{unique_id}.jsonl"
+    unique_id: "timestamp" # Options: "timestamp" or "session_id"
+    timestamp_format: "%Y%m%d_%H%M%S"
+
+
+
+mcp:
+  servers:
+    brave:
+      # On windows replace the command and args line to use `node` and the absolute path to the server.
+      # Use `npm i -g @modelcontextprotocol/server-brave-search` to install the server globally.
+      # Use `npm -g root` to find the global node_modules path.`
+      # command: "node"
+      # args: ["c:/Program Files/nodejs/node_modules/@modelcontextprotocol/server-brave-search/dist/index.js"]
+      command: "npx"
+      args: ["-y", "@modelcontextprotocol/server-brave-search"]
+      env:
+        # You can also place your BRAVE_API_KEY in the fastagent.secrets.yaml file.
+        BRAVE_API_KEY: ""
+    filesystem:
+      # On windows update the command and arguments to use `node` and the absolute path to the server.
+      # Use `npm i -g @modelcontextprotocol/server-filesystem` to install the server globally.
+      # Use `npm -g root` to find the global node_modules path.`
+      # command: "node"
+      # args: ["c:/Program Files/nodejs/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js","."]
+      command: "npx"
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
+    fetch:
+      command: "uvx"
+      args: ["mcp-server-fetch"]
+    github-downloader:
+      command: "python"
+      args: ["tools/git_command.py"]
+      env:
+        PYTHONPATH: "."
+    file-downloader:
+      command: "python"
+      args: ["tools/pdf_downloader.py"]
+      env:
+        PYTHONPATH: "."
+    command-executor:
+      command: "python"
+      args: ["tools/command_executor.py"]
+      env:
+        PYTHONPATH: "."
+    code-implementation:
+      command: "python"
+      args: ["tools/code_implementation_server.py"]
+      env:
+        PYTHONPATH: "."
+      description: "Paper code reproduction tool server - provides file operations, code execution, search and other functions"
+    code-reference-indexer:
+      command: "python"
+      args: ["tools/code_reference_indexer.py"]
+      env:
+        PYTHONPATH: "."
+      description: "Code reference indexer server - Provides intelligent code reference search from indexed repositories"
+    code-evaluation:
+      command: "python"
+      args: ["tools/code_evaluation_server.py"]
+      env:
+        PYTHONPATH: "."
+      description: "Code evaluation server - Provides comprehensive repository analysis and quality assessment"
+    docker-management:
+      command: "python"
+      args: ["tools/docker_management_server.py"]
+      env:
+        PYTHONPATH: "."
+      description: "Docker management server - Provides containerized environment management for safe code execution"
+    bocha-mcp:
+      command: "python"
+      args: ["tools/bocha_search_server.py"]
+      env:
+        PYTHONPATH: "."
+        BOCHA_API_KEY: ""
+    document-segmentation:
+      command: "python"
+      args: ["tools/document_segmentation_server.py"]
+      env:
+        PYTHONPATH: "."
+      description: "Document segmentation server - Provides intelligent document analysis and segmented reading to optimize token usage"
+
+openai:
+  # Secrets (API keys, etc.) are stored in an mcp_agent.secrets.yaml file which can be gitignored
+  #  default_model: "o3-mini"
+  default_model: "anthropic/claude-sonnet-4"
+
+
+anthropic:
