@@ -851,8 +851,9 @@ async def move_local_file(source_path: str, destination: str) -> Dict[str, Any]:
         if parent_dir:
             os.makedirs(parent_dir, exist_ok=True)
 
-        # 执行移动操作
-        shutil.move(source_path, destination)
+        # 执行复制操作
+        shutil.copy2(source_path, destination)
+        os.chmod(destination, 0o777)
 
         # 计算操作时间
         duration = (datetime.now() - start_time).total_seconds()
