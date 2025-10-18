@@ -68,3 +68,5 @@ memory-bank/
 /logs
 mcp_agent.config.yaml
 mcp_agent.secrets.yaml
+mcp_agent.config.yaml
+mcp_agent.secrets.yaml
