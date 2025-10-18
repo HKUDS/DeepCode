@@ -614,10 +614,97 @@ Requirements:
 
         return {"content": content, "tool_calls": tool_calls}
 
+    def _repair_truncated_json(self, json_str: str, tool_name: str = "") -> dict:
+        """
+        Advanced JSON repair for truncated or malformed JSON from LLM responses.
+
+        Handles:
+        - Missing closing braces/brackets
+        - Truncated string values
+        - Missing required fields
+        - Trailing commas
+        """
+        import re
+
+        # Step 1: Try basic fixes first
+        fixed = json_str.strip()
+
+        # Remove trailing commas
+        fixed = re.sub(r",\s*}", "}", fixed)
+        fixed = re.sub(r",\s*]", "]", fixed)
+
+        try:
+            return json.loads(fixed)
+        except json.JSONDecodeError as e:
+            print("   🔧 Attempting advanced JSON repair...")
+
+            # Step 2: Check for truncation issues
+            if e.msg == "Expecting value":
+                # Likely truncated - try to close open structures
+                fixed = self._close_json_structures(fixed)
+                try:
+                    return json.loads(fixed)
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    pass
+
+            # Step 3: Try to extract partial valid JSON
+            if e.msg.startswith("Expecting") and e.pos:
+                # Truncate at error position and try to close
+                truncated = fixed[: e.pos]
+                closed = self._close_json_structures(truncated)
+                try:
+                    partial = json.loads(closed)
+                    print("   ✅ Extracted partial JSON successfully")
+                    return partial
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    pass
+
+            # Step 4: Tool-specific defaults for critical tools
+            if tool_name == "write_file":
+                # For write_file, try to extract at least file_path
+                file_path_match = re.search(r'"file_path"\s*:\s*"([^"]*)"', fixed)
+                if file_path_match:
+                    print("   ⚠️  write_file JSON truncated, using minimal structure")
+                    return {
+                        "file_path": file_path_match.group(1),
+                        "content": "",  # Empty content is better than crashing
+                    }
+
+            # Step 5: Last resort - return error indicator
+            print("   ❌ JSON repair failed completely")
+            return None
+
+    def _close_json_structures(self, json_str: str) -> str:
+        """
+        Intelligently close unclosed JSON structures.
+        Counts braces and brackets to determine what needs closing.
+        """
+        # Count open structures
+        open_braces = json_str.count("{") - json_str.count("}")
+        open_brackets = json_str.count("[") - json_str.count("]")
+
+        # Check if we're in the middle of a string
+        quote_count = json_str.count('"')
+        in_string = (quote_count % 2) != 0
+
+        result = json_str
+
+        # Close string if needed
+        if in_string:
+            result += '"'
+
+        # Close brackets first (inner structures)
+        result += "]" * open_brackets
+
+        # Close braces
+        result += "}" * open_braces
+
+        return result
+
     async def _call_openai_with_tools(
         self, client, system_message, messages, tools, max_tokens
     ):
-        """Call OpenAI API"""
+        """Call OpenAI API with robust JSON error handling"""
         openai_tools = []
         for tool in tools:
             openai_tools.append(
@@ -661,13 +748,46 @@ Requirements:
         tool_calls = []
         if message.tool_calls:
             for tool_call in message.tool_calls:
-                tool_calls.append(
-                    {
-                        "id": tool_call.id,
-                        "name": tool_call.function.name,
-                        "input": json.loads(tool_call.function.arguments),
-                    }
-                )
+                try:
+                    # Attempt to parse tool call arguments
+                    parsed_input = json.loads(tool_call.function.arguments)
+                    tool_calls.append(
+                        {
+                            "id": tool_call.id,
+                            "name": tool_call.function.name,
+                            "input": parsed_input,
+                        }
+                    )
+                except json.JSONDecodeError as e:
+                    # Detailed JSON parsing error logging
+                    print("\n❌ JSON Parsing Error in tool call:")
+                    print(f"   Tool: {tool_call.function.name}")
+                    print(f"   Error: {e}")
+                    print("   Raw arguments (first 500 chars):")
+                    print(f"   {tool_call.function.arguments[:500]}")
+                    print(f"   Error position: line {e.lineno}, column {e.colno}")
+                    print(
+                        f"   Problem at: ...{tool_call.function.arguments[max(0, e.pos-50):e.pos+50]}..."
+                    )
+
+                    # Attempt advanced JSON repair
+                    repaired = self._repair_truncated_json(
+                        tool_call.function.arguments, tool_call.function.name
+                    )
+
+                    if repaired:
+                        print("   ✅ JSON repaired successfully")
+                        tool_calls.append(
+                            {
+                                "id": tool_call.id,
+                                "name": tool_call.function.name,
+                                "input": repaired,
+                            }
+                        )
+                    else:
+                        # Skip this tool call if repair failed
+                        print("   ⚠️  Skipping unrepairable tool call")
+                        continue
 
         return {"content": content, "tool_calls": tool_calls}
 
@@ -691,18 +811,45 @@ Requirements:
         return get_mcp_tools("code_implementation")
 
     def _check_tool_results_for_errors(self, tool_results: List[Dict]) -> bool:
-        """Check tool results for errors"""
+        """Check tool results for errors with JSON repair capability"""
         for result in tool_results:
             try:
                 if hasattr(result["result"], "content") and result["result"].content:
                     content_text = result["result"].content[0].text
-                    parsed_result = json.loads(content_text)
-                    if parsed_result.get("status") == "error":
-                        return True
+
+                    # First attempt: try direct JSON parsing
+                    try:
+                        parsed_result = json.loads(content_text)
+                        if parsed_result.get("status") == "error":
+                            return True
+                    except json.JSONDecodeError as e:
+                        # JSON parsing failed - try to repair
+                        print("\n⚠️  JSON parsing failed in tool result check:")
+                        print(f"   Error: {e}")
+                        print(
+                            f"   Position: line {e.lineno}, column {e.colno}, char {e.pos}"
+                        )
+                        print(f"   Content length: {len(content_text)} chars")
+                        print(f"   First 300 chars: {content_text[:300]}")
+
+                        # Attempt to repair the JSON
+                        repaired = self._repair_truncated_json(content_text)
+                        if repaired:
+                            print("   ✅ Tool result JSON repaired successfully")
+                            if repaired.get("status") == "error":
+                                return True
+                        else:
+                            # Fallback: check for "error" keyword in text
+                            if "error" in content_text.lower():
+                                return True
+
                 elif isinstance(result["result"], str):
                     if "error" in result["result"].lower():
                         return True
-            except (json.JSONDecodeError, AttributeError, IndexError):
+
+            except (AttributeError, IndexError) as e:
+                # Unexpected result structure
+                print(f"\n⚠️  Unexpected result structure: {type(e).__name__}: {e}")
                 result_str = str(result["result"])
                 if "error" in result_str.lower():
                     return True
@@ -719,8 +866,7 @@ Requirements:
 🎯 **Next Action:** Check if ALL files from the reproduction plan are implemented.
 
 ⚡ **Decision Process:**
-1. **If ALL files are implemented:** Use `execute_python` or `execute_bash` to test the complete implementation, then respond "**implementation complete**" to end the conversation
-2. **If MORE files need implementation:** Continue with dependency-aware workflow:
+1. **If MORE files need implementation:** Continue with dependency-aware workflow:
    - **Start with `read_code_mem`** to understand existing implementations and dependencies
    - **Then `write_file`** to implement the new component
    - **Finally: Test** if needed
@@ -753,8 +899,7 @@ Requirements:
 🚨 **Action Required:** You must use tools. **FIRST check if ALL files from the reproduction plan are implemented:**
 
 ⚡ **Decision Process:**
-1. **If ALL files are implemented:** Use `execute_python` or `execute_bash` to test the complete implementation, then respond "**implementation complete**" to end the conversation
-2. **If MORE files need implementation:** Follow the development cycle:
+1. **If MORE files need implementation:** Follow the development cycle:
    - **Start with `read_code_mem`** to understand existing implementations
    - **Then `write_file`** to implement the new component
    - **Finally: Test** if needed
@@ -935,11 +1080,9 @@ async def main():
         # Ask if user wants to continue with actual workflow
         print("\nContinuing with workflow execution...")
 
-        plan_file = "/Users/lizongwei/Reasearch/DeepCode_Base/DeepCode/deepcode_lab/papers/1/initial_plan.txt"
+        plan_file = "/Users/lizongwei/Desktop/DeepCode_Project/workbase/DeepCode_papertest/deepcode_lab/papers/3/initial_plan.txt"
         # plan_file = "/data2/bjdwhzzh/project-hku/Code-Agent2.0/Code-Agent/deepcode-mcp/agent_folders/papers/1/initial_plan.txt"
-        target_directory = (
-            "/Users/lizongwei/Reasearch/DeepCode_Base/DeepCode/deepcode_lab/papers/1/"
-        )
+        target_directory = "/Users/lizongwei/Desktop/DeepCode_Project/workbase/DeepCode_papertest/deepcode_lab/papers/3/"
         print("Implementation Mode Selection:")
         print("1. Pure Code Implementation Mode (Recommended)")
         print("2. Iterative Implementation Mode")

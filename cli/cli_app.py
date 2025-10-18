@@ -37,8 +37,7 @@ class CLIApp:
         self.app = None  # Will be initialized by workflow adapter
         self.logger = None
         self.context = None
-        # Document segmentation configuration
-        self.segmentation_config = {"enabled": True, "size_threshold_chars": 50000}
+        # Document segmentation will be managed by CLI interface
 
     async def initialize_mcp_app(self):
         """初始化MCP应用 - 使用工作流适配器"""
@@ -49,50 +48,10 @@ class CLIApp:
         """清理MCP应用 - 使用工作流适配器"""
         await self.workflow_adapter.cleanup_mcp_app()
 
-    def update_segmentation_config(self):
-        """Update document segmentation configuration in mcp_agent.config.yaml"""
-        import yaml
-        import os
-
-        config_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "mcp_agent.config.yaml",
-        )
-
-        try:
-            # Read current config
-            with open(config_path, "r", encoding="utf-8") as f:
-                config = yaml.safe_load(f)
-
-            # Update document segmentation settings
-            if "document_segmentation" not in config:
-                config["document_segmentation"] = {}
-
-            config["document_segmentation"]["enabled"] = self.segmentation_config[
-                "enabled"
-            ]
-            config["document_segmentation"]["size_threshold_chars"] = (
-                self.segmentation_config["size_threshold_chars"]
-            )
-
-            # Write updated config
-            with open(config_path, "w", encoding="utf-8") as f:
-                yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
-
-            self.cli.print_status(
-                "📄 Document segmentation configuration updated", "success"
-            )
-
-        except Exception as e:
-            self.cli.print_status(
-                f"⚠️ Failed to update segmentation config: {str(e)}", "warning"
-            )
-
     async def process_input(self, input_source: str, input_type: str):
         """处理输入源（URL或文件）- 使用升级版智能体编排引擎"""
         try:
-            # Update segmentation configuration before processing
-            self.update_segmentation_config()
+            # Document segmentation configuration is managed by CLI interface
 
             self.cli.print_separator()
             self.cli.print_status(
@@ -281,19 +240,8 @@ class CLIApp:
                     self.cli.show_history()
 
                 elif choice in ["c", "config", "configure"]:
-                    # Sync current segmentation config from CLI interface
-                    self.segmentation_config["enabled"] = self.cli.segmentation_enabled
-                    self.segmentation_config["size_threshold_chars"] = (
-                        self.cli.segmentation_threshold
-                    )
-
+                    # Show configuration menu - all settings managed by CLI interface
                     self.cli.show_configuration_menu()
-
-                    # Sync back from CLI interface after configuration changes
-                    self.segmentation_config["enabled"] = self.cli.segmentation_enabled
-                    self.segmentation_config["size_threshold_chars"] = (
-                        self.cli.segmentation_threshold
-                    )
 
                 else:
                     self.cli.print_status(

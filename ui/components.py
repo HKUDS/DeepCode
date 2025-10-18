@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Streamlit UI Components Module
 
@@ -6,19 +7,36 @@ Contains all reusable UI components
 
 import streamlit as st
 import sys
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime
 import json
 
 
 def display_header():
-    """Display application header"""
+    """Display modern, compact application header"""
     st.markdown(
         """
-    <div class="main-header">
-        <h1>🧬 DeepCode</h1>
-        <h3>OPEN-SOURCE CODE AGENT</h3>
-        <p>⚡ DATA INTELLIGENCE LAB @ HKU • REVOLUTIONIZING RESEARCH REPRODUCIBILITY ⚡</p>
+    <div class="modern-header">
+        <div class="header-content">
+            <div class="logo-section">
+                <div class="logo-animation">
+                    <div class="dna-helix">
+                        <div class="helix-strand strand-1"></div>
+                        <div class="helix-strand strand-2"></div>
+                    </div>
+                    <span class="logo-text">◊ DeepCode</span>
+                </div>
+                <div class="tagline">
+                    <span class="highlight">AI Research Engine</span>
+                    <span class="separator">•</span>
+                    <span class="org">Data Intelligence Lab @ HKU</span>
+                </div>
+            </div>
+            <div class="status-badge">
+                <span class="status-dot"></span>
+                <span class="status-text">ONLINE</span>
+            </div>
+        </div>
     </div>
     """,
         unsafe_allow_html=True,
@@ -26,368 +44,62 @@ def display_header():
 
 
 def display_features():
-    """Display DeepCode AI Agent capabilities"""
-    # AI Agent core capabilities display area - updated to match README content
+    """Display DeepCode AI capabilities with world-class, futuristic design"""
+
+    # Capability Matrix
     st.markdown(
         """
-    <div class="ai-capabilities-section">
-        <div class="neural-network">
-            <div class="neuron pulse-1"></div>
-            <div class="neuron pulse-2"></div>
-            <div class="neuron pulse-3"></div>
+        <div class="capability-matrix">
+            <div class="capability-node research-node">
+                <div class="node-core">
+                    <div class="core-pulse"></div>
+                    <div class="core-label">RESEARCH</div>
+                </div>
+                <div class="node-description">
+                    <h3>Paper2Code&Text2Code</h3>
+                    <p>Neural document processing and algorithmic synthesis</p>
+                </div>
+                <div class="node-metrics">
+                    <span class="metric">Multi-Agents</span>
+                </div>
+            </div>
+
+
         </div>
-        <h2 class="capabilities-title">🧠 Open Agentic Coding Platform</h2>
-        <p class="capabilities-subtitle">Advancing Code Generation with Multi-Agent Systems</p>
-    </div>
     """,
         unsafe_allow_html=True,
     )
 
-    # Core functionality modules - Vertical Layout
+    # Processing Pipeline
     st.markdown(
         """
-    <div class="feature-card-vertical primary">
-        <div class="card-glow-vertical"></div>
-        <div class="feature-header">
-            <div class="feature-logo-container">
-                <div class="ai-brain-logo">
-                    <div class="brain-node node-1"></div>
-                    <div class="brain-node node-2"></div>
-                    <div class="brain-node node-3"></div>
-                    <div class="brain-connection conn-1"></div>
-                    <div class="brain-connection conn-2"></div>
-                </div>
-                <div class="feature-icon-large">🚀</div>
+        <div class="processing-pipeline">
+            <div class="pipeline-stage stage-requirements">
+                <div class="stage-core">REQUIREMENTS</div>
+                <div class="stage-description">Input Requirements</div>
             </div>
-            <div class="feature-header-content">
-                <h3 class="feature-title-large">Paper2Code: Research-to-Production Pipeline</h3>
-                <p class="feature-subtitle">Automated Implementation of Complex Algorithms</p>
+            <div class="pipeline-flow">
+                <div class="flow-particle"></div>
             </div>
-            <div class="feature-stats">
-                <div class="stat-item">
-                    <span class="stat-number typing-number">Multi-Modal</span>
-                    <span class="stat-label">Analysis</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-number typing-number">Production</span>
-                    <span class="stat-label">Ready</span>
-                </div>
+            <div class="pipeline-stage stage-planning">
+                <div class="stage-core">PLANNING</div>
+                <div class="stage-description">Design & Planning</div>
             </div>
-        </div>
-        <div class="feature-content">
-            <div class="content-left">
-                <p class="feature-description-large">Multi-modal document analysis engine that extracts algorithmic logic and mathematical models from academic papers, generating optimized implementations with proper data structures while preserving computational complexity characteristics.</p>
-                <div class="feature-flow">
-                    <div class="flow-step active">
-                        <div class="flow-icon">📄</div>
-                        <span>Document Parsing</span>
-                    </div>
-                    <div class="flow-arrow">→</div>
-                    <div class="flow-step active">
-                        <div class="flow-icon">🧠</div>
-                        <span>Algorithm Extraction</span>
-                    </div>
-                    <div class="flow-arrow">→</div>
-                    <div class="flow-step active">
-                        <div class="flow-icon">⚡</div>
-                        <span>Code Synthesis</span>
-                    </div>
-                    <div class="flow-arrow">→</div>
-                    <div class="flow-step active">
-                        <div class="flow-icon">✅</div>
-                        <span>Quality Assurance</span>
-                    </div>
-                </div>
+            <div class="pipeline-flow">
+                <div class="flow-particle"></div>
             </div>
-            <div class="content-right">
-                <div class="code-simulation">
-                    <div class="code-header">
-                        <span class="code-lang">Python</span>
-                        <div class="code-status generating">Generating...</div>
-                    </div>
-                    <div class="code-lines">
-                        <div class="code-line typing">import torch</div>
-                        <div class="code-line typing delay-1">import torch.nn as nn</div>
-                        <div class="code-line typing delay-2">class ResearchAlgorithm(nn.Module):</div>
-                        <div class="code-line typing delay-3">    def __init__(self, config):</div>
-                        <div class="code-line typing delay-4">        super().__init__()</div>
-                    </div>
-                </div>
+            <div class="pipeline-stage stage-implementation">
+                <div class="stage-core">IMPLEMENTATION</div>
+                <div class="stage-description">Code Implementation</div>
+            </div>
+            <div class="pipeline-flow">
+                <div class="flow-particle"></div>
+            </div>
+            <div class="pipeline-stage stage-validation">
+                <div class="stage-core">VALIDATION</div>
+                <div class="stage-description">Validation & Refinement</div>
             </div>
         </div>
-    </div>
-    """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        """
-    <div class="feature-card-vertical secondary">
-        <div class="card-glow-vertical"></div>
-        <div class="feature-header">
-            <div class="feature-logo-container">
-                <div class="multi-agent-logo">
-                    <div class="agent-node agent-1">🎨</div>
-                    <div class="agent-node agent-2">💻</div>
-                    <div class="agent-node agent-3">⚡</div>
-                    <div class="agent-connection conn-12"></div>
-                    <div class="agent-connection conn-23"></div>
-                    <div class="agent-connection conn-13"></div>
-                </div>
-                <div class="feature-icon-large">🎨</div>
-            </div>
-            <div class="feature-header-content">
-                <h3 class="feature-title-large">Text2Web: Automated Prototyping Engine</h3>
-                <p class="feature-subtitle">Natural Language to Front-End Code Synthesis</p>
-            </div>
-            <div class="feature-stats">
-                <div class="stat-item">
-                    <span class="stat-number typing-number">Intelligent</span>
-                    <span class="stat-label">Scaffolding</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-number typing-number">Scalable</span>
-                    <span class="stat-label">Architecture</span>
-                </div>
-            </div>
-        </div>
-        <div class="feature-content">
-            <div class="content-left">
-                <p class="feature-description-large">Context-aware code generation using fine-tuned language models. Intelligent scaffolding system generating complete application structures including frontend components, maintaining architectural consistency across modules.</p>
-                <div class="agent-grid">
-                    <div class="agent-card active">
-                        <div class="agent-avatar">📝</div>
-                        <h4>Intent Understanding</h4>
-                        <p>Semantic analysis of requirements</p>
-                    </div>
-                    <div class="agent-card active">
-                        <div class="agent-avatar">🎨</div>
-                        <h4>UI Architecture</h4>
-                        <p>Component design & structure</p>
-                    </div>
-                    <div class="agent-card active">
-                        <div class="agent-avatar">💻</div>
-                        <h4>Code Generation</h4>
-                        <p>Functional interface creation</p>
-                    </div>
-                    <div class="agent-card active">
-                        <div class="agent-avatar">✨</div>
-                        <h4>Quality Assurance</h4>
-                        <p>Automated testing & validation</p>
-                    </div>
-                </div>
-            </div>
-            <div class="content-right">
-                <div class="collaboration-viz">
-                    <div class="collaboration-center">
-                        <div class="center-node">🎯</div>
-                        <span>Web Application</span>
-                    </div>
-                    <div class="collaboration-agents">
-                        <div class="collab-agent agent-pos-1">
-                            <div class="pulse-ring"></div>
-                            📝
-                        </div>
-                        <div class="collab-agent agent-pos-2">
-                            <div class="pulse-ring"></div>
-                            🏗️
-                        </div>
-                        <div class="collab-agent agent-pos-3">
-                            <div class="pulse-ring"></div>
-                            ⚙️
-                        </div>
-                        <div class="collab-agent agent-pos-4">
-                            <div class="pulse-ring"></div>
-                            🧪
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        """
-    <div class="feature-card-vertical accent">
-        <div class="card-glow-vertical"></div>
-        <div class="feature-header">
-            <div class="feature-logo-container">
-                <div class="future-logo">
-                    <div class="orbit orbit-1">
-                        <div class="orbit-node">⚙️</div>
-                    </div>
-                    <div class="orbit orbit-2">
-                        <div class="orbit-node">🔧</div>
-                    </div>
-                    <div class="orbit-center">🚀</div>
-                </div>
-                <div class="feature-icon-large">⚙️</div>
-            </div>
-            <div class="feature-header-content">
-                <h3 class="feature-title-large">Text2Backend: Scalable Architecture Generator</h3>
-                <p class="feature-subtitle">Intelligent Server-Side Development</p>
-            </div>
-            <div class="feature-stats">
-                <div class="stat-item">
-                    <span class="stat-number typing-number">Database</span>
-                    <span class="stat-label">Integration</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-number typing-number">API</span>
-                    <span class="stat-label">Endpoints</span>
-                </div>
-            </div>
-        </div>
-        <div class="feature-content">
-            <div class="content-left">
-                <p class="feature-description-large">Generates efficient, scalable backend systems with database schemas, API endpoints, and microservices architecture. Uses dependency analysis to ensure scalable architecture from initial generation with comprehensive testing.</p>
-                <div class="vision-demo">
-                    <div class="demo-input">
-                        <div class="input-icon">💬</div>
-                        <div class="input-text typing">"Build a scalable e-commerce API with user authentication and payment processing"</div>
-                    </div>
-                    <div class="demo-arrow">⬇️</div>
-                    <div class="demo-output">
-                        <div class="output-items">
-                            <div class="output-item">🏗️ Microservices Architecture</div>
-                            <div class="output-item">🔒 Authentication & Security</div>
-                            <div class="output-item">🗄️ Database Schema Design</div>
-                            <div class="output-item">📊 API Documentation & Testing</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="content-right">
-                <div class="future-timeline">
-                    <div class="timeline-item completed">
-                        <div class="timeline-marker">✅</div>
-                        <div class="timeline-content">
-                            <h4>API Design</h4>
-                            <p>RESTful endpoints</p>
-                        </div>
-                    </div>
-                    <div class="timeline-item completed">
-                        <div class="timeline-marker">✅</div>
-                        <div class="timeline-content">
-                            <h4>Database Layer</h4>
-                            <p>Schema & relationships</p>
-                        </div>
-                    </div>
-                    <div class="timeline-item active">
-                        <div class="timeline-marker">🔄</div>
-                        <div class="timeline-content">
-                            <h4>Security Layer</h4>
-                            <p>Authentication & authorization</p>
-                        </div>
-                    </div>
-                    <div class="timeline-item future">
-                        <div class="timeline-marker">🚀</div>
-                        <div class="timeline-content">
-                            <h4>Deployment</h4>
-                            <p>CI/CD integration</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        """
-    <div class="feature-card-vertical tech">
-        <div class="card-glow-vertical"></div>
-        <div class="feature-header">
-            <div class="feature-logo-container">
-                <div class="opensource-logo">
-                    <div class="github-stars">
-                        <div class="star star-1">📄</div>
-                        <div class="star star-2">🤖</div>
-                        <div class="star star-3">⚡</div>
-                    </div>
-                    <div class="community-nodes">
-                        <div class="community-node">🧠</div>
-                        <div class="community-node">🔍</div>
-                        <div class="community-node">⚙️</div>
-                    </div>
-                </div>
-                <div class="feature-icon-large">🎯</div>
-            </div>
-            <div class="feature-header-content">
-                <h3 class="feature-title-large">CodeRAG Integration System</h3>
-                <p class="feature-subtitle">Advanced Multi-Agent Orchestration</p>
-            </div>
-            <div class="feature-stats">
-                <div class="stat-item">
-                    <span class="stat-number typing-number">Global</span>
-                    <span class="stat-label">Code Analysis</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-number typing-number">Intelligent</span>
-                    <span class="stat-label">Orchestration</span>
-                </div>
-            </div>
-        </div>
-        <div class="feature-content">
-            <div class="content-left">
-                <p class="feature-description-large">Advanced retrieval-augmented generation combining semantic vector embeddings with graph-based dependency analysis. Central orchestrating agent coordinates specialized agents with dynamic task planning and intelligent memory management.</p>
-                <div class="community-features">
-                    <div class="community-feature">
-                        <div class="feature-icon-small">🧠</div>
-                        <div class="feature-text">
-                            <h4>Intelligent Orchestration</h4>
-                            <p>Central decision-making with dynamic planning algorithms</p>
-                        </div>
-                    </div>
-                    <div class="community-feature">
-                        <div class="feature-icon-small">🔍</div>
-                        <div class="feature-text">
-                            <h4>CodeRAG System</h4>
-                            <p>Semantic analysis with dependency graph mapping</p>
-                        </div>
-                    </div>
-                    <div class="community-feature">
-                        <div class="feature-icon-small">⚡</div>
-                        <div class="feature-text">
-                            <h4>Quality Assurance</h4>
-                            <p>Automated testing, validation, and documentation</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="content-right">
-                <div class="tech-ecosystem">
-                    <div class="ecosystem-center">
-                        <div class="center-logo">🧠</div>
-                        <span>Multi-Agent Engine</span>
-                    </div>
-                    <div class="ecosystem-ring">
-                        <div class="ecosystem-item item-1">
-                            <div class="item-icon">🎯</div>
-                            <span>Central Orchestration</span>
-                        </div>
-                        <div class="ecosystem-item item-2">
-                            <div class="item-icon">📝</div>
-                            <span>Intent Understanding</span>
-                        </div>
-                        <div class="ecosystem-item item-3">
-                            <div class="item-icon">🔍</div>
-                            <span>Code Mining & Indexing</span>
-                        </div>
-                        <div class="ecosystem-item item-4">
-                            <div class="item-icon">🧬</div>
-                            <span>Code Generation</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
     """,
         unsafe_allow_html=True,
     )
@@ -791,9 +503,283 @@ def url_input_component(task_counter: int) -> Optional[str]:
     return None
 
 
+def requirement_analysis_mode_selector(task_counter: int) -> str:
+    """
+    Requirement analysis mode selector
+
+    Args:
+        task_counter: Task counter
+
+    Returns:
+        Selected mode ("direct" or "guided")
+    """
+    st.markdown(
+        """
+    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                border-radius: 10px;
+                padding: 15px;
+                margin-bottom: 15px;
+                border-left: 4px solid #00ff88;">
+        <h4 style="color: white; margin: 0 0 10px 0; font-size: 1.1rem;">
+            🎯 Choose Your Input Mode
+        </h4>
+        <p style="color: #e0f7fa; margin: 0; font-size: 0.9rem;">
+            Select how you'd like to provide your requirements
+        </p>
+    </div>
+    """,
+        unsafe_allow_html=True,
+    )
+
+    mode = st.radio(
+        "Input mode:",
+        ["🚀 Direct Input", "🧠 Guided Analysis"],
+        index=0
+        if st.session_state.get("requirement_analysis_mode", "direct") == "direct"
+        else 1,
+        horizontal=True,
+        help="Direct: Enter requirements directly. Guided: AI asks questions to help you clarify needs.",
+        key=f"req_mode_{task_counter}",
+    )
+
+    return "direct" if mode.startswith("🚀") else "guided"
+
+
+def requirement_questions_component(
+    questions: List[Dict], task_counter: int
+) -> Dict[str, str]:
+    """
+    Requirement questions display and answer collection component
+
+    Args:
+        questions: Question list
+        task_counter: Task counter
+
+    Returns:
+        User answer dictionary
+    """
+    st.markdown(
+        """
+    <div style="background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 50%, #fecfef 100%);
+                border-radius: 10px;
+                padding: 15px;
+                margin-bottom: 20px;
+                border-left: 4px solid #ff6b6b;">
+        <h4 style="color: #2d3748; margin: 0 0 10px 0; font-size: 1.1rem;">
+            📝 Help Us Understand Your Needs Better
+        </h4>
+        <p style="color: #4a5568; margin: 0; font-size: 0.9rem;">
+            Please answer the following questions to help us generate better code. You can skip any question.
+        </p>
+    </div>
+    """,
+        unsafe_allow_html=True,
+    )
+
+    answers = {}
+
+    for i, question in enumerate(questions):
+        with st.expander(
+            f"📋 {question.get('category', 'Question')} - {question.get('importance', 'Medium')} Priority",
+            expanded=i < 3,
+        ):
+            st.markdown(f"**{question['question']}**")
+
+            if question.get("hint"):
+                st.info(f"💡 {question['hint']}")
+
+            answer = st.text_area(
+                "Your answer:",
+                placeholder="Enter your answer here, or leave blank to skip...",
+                height=80,
+                key=f"answer_{i}_{task_counter}",
+            )
+
+            if answer and answer.strip():
+                answers[str(i)] = answer.strip()
+
+    st.markdown("---")
+    st.info(f"📊 You've answered {len(answers)} out of {len(questions)} questions.")
+
+    return answers
+
+
+def requirement_summary_component(summary: str, task_counter: int) -> bool:
+    """
+    Requirement summary display and confirmation component
+
+    Args:
+        summary: Requirement summary document
+        task_counter: Task counter
+
+    Returns:
+        Whether user confirms requirements
+    """
+    st.markdown(
+        """
+    <div style="background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+                border-radius: 10px;
+                padding: 15px;
+                margin-bottom: 20px;
+                border-left: 4px solid #38b2ac;">
+        <h4 style="color: #2d3748; margin: 0 0 10px 0; font-size: 1.1rem;">
+            📋 Detailed Requirements Summary
+        </h4>
+        <p style="color: #4a5568; margin: 0; font-size: 0.9rem;">
+            Based on your input, here's the detailed requirements document we've generated.
+        </p>
+    </div>
+    """,
+        unsafe_allow_html=True,
+    )
+
+    # Display requirement summary
+    with st.expander("📖 View Detailed Requirements", expanded=True):
+        st.markdown(summary)
+
+    # Confirmation options
+    st.markdown("### 🎯 Next Steps")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        if st.button(
+            "✅ Looks Good, Proceed",
+            type="primary",
+            use_container_width=True,
+            key=f"confirm_{task_counter}",
+        ):
+            # Mark requirements as confirmed, prepare to enter code generation
+            st.session_state.requirements_confirmed = True
+            return True
+
+    with col2:
+        if st.button(
+            "✏️ Edit Requirements",
+            type="secondary",
+            use_container_width=True,
+            key=f"edit_{task_counter}",
+        ):
+            # Enter editing mode
+            st.session_state.requirement_analysis_step = "editing"
+            st.session_state.edit_feedback = ""
+            st.rerun()
+
+    with col3:
+        if st.button(
+            "🔄 Start Over", use_container_width=True, key=f"restart_{task_counter}"
+        ):
+            # Complete reset
+            st.session_state.requirement_analysis_mode = "direct"
+            st.session_state.requirement_analysis_step = "input"
+            st.session_state.generated_questions = []
+            st.session_state.user_answers = {}
+            st.session_state.detailed_requirements = ""
+            st.rerun()
+
+    return False
+
+
+def requirement_editing_component(current_requirements: str, task_counter: int) -> bool:
+    """
+    Interactive requirement editing component
+
+    Args:
+        current_requirements: Current requirement document content
+        task_counter: Task counter
+
+    Returns:
+        Whether editing is completed
+    """
+    st.markdown(
+        """
+    <div style="background: linear-gradient(135deg, #ffeaa7 0%, #fab1a0 100%);
+                border-radius: 10px;
+                padding: 15px;
+                margin-bottom: 20px;
+                border-left: 4px solid #e17055;">
+        <h4 style="color: #2d3748; margin: 0 0 10px 0; font-size: 1.1rem;">
+            ✏️ Edit Requirements Document
+        </h4>
+        <p style="color: #4a5568; margin: 0; font-size: 0.9rem;">
+            Review the current requirements and tell us how you'd like to modify them.
+        </p>
+    </div>
+    """,
+        unsafe_allow_html=True,
+    )
+
+    # Display current requirements
+    st.markdown("### 📋 Current Requirements")
+    with st.expander("📖 View Current Requirements Document", expanded=True):
+        st.markdown(current_requirements)
+
+    # Ask for modification feedback
+    st.markdown("### 💭 How would you like to modify the requirements?")
+    st.markdown("Please describe your changes, additions, or corrections:")
+
+    edit_feedback = st.text_area(
+        "Your modification request:",
+        value=st.session_state.edit_feedback,
+        placeholder="For example:\n- Add user authentication feature\n- Change database from MySQL to PostgreSQL",
+        height=120,
+        key=f"edit_feedback_{task_counter}",
+    )
+
+    # Update session state
+    st.session_state.edit_feedback = edit_feedback
+
+    # Action buttons
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        if st.button(
+            "🔄 Apply Changes",
+            type="primary",
+            use_container_width=True,
+            key=f"apply_edit_{task_counter}",
+        ):
+            if edit_feedback.strip():
+                # Start requirement modification process
+                st.session_state.requirements_editing = True
+                st.info("🔄 Processing your modification request...")
+                return True
+            else:
+                st.warning("Please provide your modification request first.")
+
+    with col2:
+        if st.button(
+            "↩️ Back to Summary",
+            type="secondary",
+            use_container_width=True,
+            key=f"back_summary_{task_counter}",
+        ):
+            # Go back to summary view
+            st.session_state.requirement_analysis_step = "summary"
+            st.session_state.edit_feedback = ""
+            st.rerun()
+
+    with col3:
+        if st.button(
+            "🔄 Start Over",
+            use_container_width=True,
+            key=f"restart_edit_{task_counter}",
+        ):
+            # Complete reset
+            st.session_state.requirement_analysis_mode = "direct"
+            st.session_state.requirement_analysis_step = "input"
+            st.session_state.generated_questions = []
+            st.session_state.user_answers = {}
+            st.session_state.detailed_requirements = ""
+            st.session_state.edit_feedback = ""
+            st.rerun()
+
+    return False
+
+
 def chat_input_component(task_counter: int) -> Optional[str]:
     """
-    Chat input component for coding requirements
+    Enhanced chat input component with requirement analysis support
 
     Args:
         task_counter: Task counter
@@ -801,6 +787,20 @@ def chat_input_component(task_counter: int) -> Optional[str]:
     Returns:
         User coding requirements or None
     """
+    # Select input mode
+    selected_mode = requirement_analysis_mode_selector(task_counter)
+
+    # Update requirement analysis mode
+    st.session_state.requirement_analysis_mode = selected_mode
+
+    if selected_mode == "direct":
+        return _direct_input_component(task_counter)
+    else:
+        return _guided_analysis_component(task_counter)
+
+
+def _direct_input_component(task_counter: int) -> Optional[str]:
+    """Direct input mode component"""
     st.markdown(
         """
     <div style="background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
@@ -809,10 +809,10 @@ def chat_input_component(task_counter: int) -> Optional[str]:
                 margin-bottom: 20px;
                 border-left: 4px solid #4dd0e1;">
         <h4 style="color: white; margin: 0 0 10px 0; font-size: 1.1rem;">
-            💬 Describe Your Coding Requirements
+            🚀 Direct Input Mode
         </h4>
         <p style="color: #e0f7fa; margin: 0; font-size: 0.9rem;">
-            Tell us what you want to build. Our AI will analyze your requirements and generate a comprehensive implementation plan.
+            Describe your coding requirements directly. Our AI will analyze and generate a comprehensive implementation plan.
         </p>
     </div>
     """,
@@ -852,7 +852,7 @@ def chat_input_component(task_counter: int) -> Optional[str]:
 The system should be scalable and production-ready, with proper error handling and documentation.""",
         height=200,
         help="Describe what you want to build, including functionality, technologies, and any specific requirements",
-        key=f"chat_input_{task_counter}",
+        key=f"direct_input_{task_counter}",
     )
 
     if user_input and len(user_input.strip()) > 20:  # Minimum length check
@@ -871,7 +871,7 @@ The system should be scalable and production-ready, with proper error handling a
                 user_input,
                 height=100,
                 disabled=True,
-                key=f"preview_{task_counter}",
+                key=f"direct_preview_{task_counter}",
             )
 
         return user_input.strip()
@@ -880,6 +880,183 @@ The system should be scalable and production-ready, with proper error handling a
         st.warning(
             "⚠️ Please provide more detailed requirements (at least 20 characters)"
         )
+        return None
+
+    return None
+
+
+def _guided_analysis_component(task_counter: int) -> Optional[str]:
+    """Guided analysis mode component"""
+
+    # Check if requirements are confirmed, if confirmed return detailed requirements directly
+    if st.session_state.get("requirements_confirmed", False):
+        detailed_requirements = st.session_state.get("detailed_requirements", "")
+        if detailed_requirements:
+            # Show confirmation message and return requirements for processing
+            st.success("🎉 Requirement analysis completed! Starting code generation...")
+            st.info(
+                "🔄 Automatically proceeding to code generation based on your confirmed requirements."
+            )
+            return detailed_requirements
+
+    st.markdown(
+        """
+    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                border-radius: 10px;
+                padding: 15px;
+                margin-bottom: 20px;
+                border-left: 4px solid #00ff88;">
+        <h4 style="color: white; margin: 0 0 10px 0; font-size: 1.1rem;">
+            🧠 Guided Analysis Mode
+        </h4>
+        <p style="color: #e0f7fa; margin: 0; font-size: 0.9rem;">
+            Let our AI guide you through a series of questions to better understand your requirements.
+        </p>
+    </div>
+    """,
+        unsafe_allow_html=True,
+    )
+
+    # Check current step
+    current_step = st.session_state.get("requirement_analysis_step", "input")
+
+    if current_step == "input":
+        return _guided_input_step(task_counter)
+    elif current_step == "questions":
+        return _guided_questions_step(task_counter)
+    elif current_step == "summary":
+        return _guided_summary_step(task_counter)
+    elif current_step == "editing":
+        return _guided_editing_step(task_counter)
+    else:
+        # Reset to initial state
+        st.session_state.requirement_analysis_step = "input"
+        st.rerun()
+
+
+def _guided_input_step(task_counter: int) -> Optional[str]:
+    """Initial input step for guided mode"""
+    st.markdown("### 📝 Step 1: Tell us your basic idea")
+
+    user_input = st.text_area(
+        "What would you like to build? (Brief description is fine)",
+        placeholder="Example: A web app for sentiment analysis of social media posts",
+        height=120,
+        help="Don't worry about details - we'll ask specific questions next!",
+        key=f"guided_input_{task_counter}",
+    )
+
+    if user_input and len(user_input.strip()) > 10:
+        col1, col2 = st.columns([3, 1])
+
+        with col1:
+            st.info(f"📝 Initial idea captured: {len(user_input.split())} words")
+
+        with col2:
+            if st.button(
+                "🚀 Generate Questions", type="primary", use_container_width=True
+            ):
+                # Save initial input and enter question generation step
+                st.session_state.initial_requirement = user_input.strip()
+                st.session_state.requirement_analysis_step = "questions"
+                st.rerun()
+
+    elif user_input and len(user_input.strip()) <= 10:
+        st.warning(
+            "⚠️ Please provide at least a brief description (more than 10 characters)"
+        )
+
+    return None
+
+
+def _guided_questions_step(task_counter: int) -> Optional[str]:
+    """Question answering step for guided mode"""
+    st.markdown("### 🤔 Step 2: Answer questions to refine your requirements")
+
+    # Display initial requirements
+    with st.expander("📋 Your Initial Idea", expanded=False):
+        st.write(st.session_state.get("initial_requirement", ""))
+
+    # Check if questions have been generated
+    if not st.session_state.get("generated_questions"):
+        st.info("🔄 Generating personalized questions for your project...")
+
+        # Async call needed here, but we show placeholder in UI first
+        if st.button("🎯 Generate Questions Now", type="primary"):
+            st.session_state.questions_generating = True
+            st.rerun()
+        return None
+
+    # Display questions and collect answers
+    questions = st.session_state.generated_questions
+    answers = requirement_questions_component(questions, task_counter)
+    st.session_state.user_answers = answers
+
+    # Continue button
+    col1, col2, col3 = st.columns([1, 2, 1])
+
+    with col2:
+        if st.button(
+            "📋 Generate Detailed Requirements",
+            type="primary",
+            use_container_width=True,
+        ):
+            st.session_state.requirement_analysis_step = "summary"
+            st.rerun()
+
+    with col1:
+        if st.button("⬅️ Back", use_container_width=True):
+            st.session_state.requirement_analysis_step = "input"
+            st.rerun()
+
+    return None
+
+
+def _guided_summary_step(task_counter: int) -> Optional[str]:
+    """Requirement summary step for guided mode"""
+    st.markdown("### 📋 Step 3: Review and confirm your detailed requirements")
+
+    # Check if detailed requirements have been generated
+    if not st.session_state.get("detailed_requirements"):
+        st.info("🔄 Generating detailed requirements based on your answers...")
+
+        if st.button("📋 Generate Requirements Now", type="primary"):
+            st.session_state.requirements_generating = True
+            st.rerun()
+        return None
+
+    # Display requirement summary and get confirmation
+    summary = st.session_state.detailed_requirements
+    confirmed = requirement_summary_component(summary, task_counter)
+
+    if confirmed:
+        # Return detailed requirements as final input
+        return summary
+
+    return None
+
+
+def _guided_editing_step(task_counter: int) -> Optional[str]:
+    """Requirement editing step for guided mode"""
+    st.markdown("### ✏️ Step 4: Edit your requirements")
+
+    # Get current requirements
+    current_requirements = st.session_state.get("detailed_requirements", "")
+    if not current_requirements:
+        st.error("No requirements found to edit. Please start over.")
+        st.session_state.requirement_analysis_step = "input"
+        st.rerun()
+        return None
+
+    # Show editing component
+    editing_requested = requirement_editing_component(
+        current_requirements, task_counter
+    )
+
+    if editing_requested:
+        # User has provided editing feedback, trigger requirement modification
+        st.session_state.requirements_editing = True
+        st.rerun()
         return None
 
     return None

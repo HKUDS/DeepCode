@@ -62,6 +62,128 @@ from workflows.agents.document_segmentation_agent import prepare_document_segmen
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"  # Prevent .pyc file generation
 
 
+def _assess_output_completeness(text: str) -> float:
+    """
+    精准评估YAML格式实现计划的完整性
+
+    基于CODE_PLANNING_PROMPT_TRADITIONAL的实际要求：
+    1. 检查5个必需的YAML sections是否都存在
+    2. 验证YAML结构的完整性（开始和结束标记）
+    3. 检查最后一行是否被截断
+    4. 验证最小合理长度
+
+    Returns:
+        float: 完整性分数 (0.0-1.0)，越高表示越完整
+    """
+    if not text or len(text.strip()) < 500:
+        return 0.0
+
+    score = 0.0
+    text_lower = text.lower()
+
+    # 1. 检查5个必需的YAML sections (权重: 0.5 - 最重要)
+    # 这是prompt明确要求的5个sections
+    required_sections = [
+        "file_structure:",
+        "implementation_components:",
+        "validation_approach:",
+        "environment_setup:",
+        "implementation_strategy:",
+    ]
+
+    sections_found = sum(1 for section in required_sections if section in text_lower)
+    section_score = sections_found / len(required_sections)
+    score += section_score * 0.5
+
+    print(f"   📋 Required sections: {sections_found}/{len(required_sections)}")
+
+    # 2. 检查YAML结构完整性 (权重: 0.2)
+    has_yaml_start = any(
+        marker in text
+        for marker in ["```yaml", "complete_reproduction_plan:", "paper_info:"]
+    )
+    has_yaml_end = any(
+        marker in text[-500:]
+        for marker in ["```", "implementation_strategy:", "validation_approach:"]
+    )
+
+    if has_yaml_start and has_yaml_end:
+        score += 0.2
+    elif has_yaml_start:
+        score += 0.1
+
+    # 3. 检查最后一行完整性 (权重: 0.15)
+    lines = text.strip().split("\n")
+    if lines:
+        last_line = lines[-1].strip()
+        # YAML的最后一行通常是缩进的内容行或结束标记
+        if (
+            last_line.endswith(("```", ".", ":", "]", "}"))
+            or last_line.startswith(("-", "*", " "))  # YAML列表项或缩进内容
+            or (
+                len(last_line) < 100 and not last_line.endswith(",")
+            )  # 短行且不是被截断的
+        ):
+            score += 0.15
+        else:
+            # 长行且没有合适的结尾，很可能被截断
+            print(f"   ⚠️  Last line suspicious: '{last_line[-50:]}'")
+
+    # 4. 检查合理的最小长度 (权重: 0.15)
+    # 一个完整的5-section计划应该至少8000字符
+    length = len(text)
+    if length >= 10000:
+        score += 0.15
+    elif length >= 5000:
+        score += 0.10
+    elif length >= 2000:
+        score += 0.05
+
+    print(f"   📏 Content length: {length} chars")
+
+    return min(score, 1.0)
+
+
+def _adjust_params_for_retry(params: RequestParams, retry_count: int) -> RequestParams:
+    """
+    激进的token增长策略以确保完整输出
+
+    策略说明：
+    - 第1次重试：大幅增加到40000 tokens（确保有足够空间输出完整YAML）
+    - 第2次重试：进一步增加到60000 tokens（处理极端情况）
+    - 降低temperature提高稳定性和可预测性
+
+    为什么需要这么多tokens？
+    - ParallelLLM的fan_out agents会生成长篇分析结果（各5000+ tokens）
+    - fan_in agent接收这些结果作为输入context
+    - 需要输出包含5个详细sections的完整YAML（10000+ tokens）
+    - 因此需要为OUTPUT预留充足的token空间
+    """
+    # 激进的token增长策略
+    if retry_count == 0:
+        # 第一次重试：直接跳到40K，确保有足够输出空间
+        new_max_tokens = 40000
+    elif retry_count == 1:
+        # 第二次重试：进一步增加到60K
+        new_max_tokens = 60000
+    else:
+        # 第三次及以上：使用最大限制
+        new_max_tokens = 80000
+
+    # 随着重试次数增加，降低temperature以获得更一致、更可预测的输出
+    new_temperature = max(params.temperature - (retry_count * 0.15), 0.05)
+
+    print(f"🔧 Adjusting parameters for retry {retry_count + 1}:")
+    print(f"   Token limit: {params.maxTokens} → {new_max_tokens}")
+    print(f"   Temperature: {params.temperature:.2f} → {new_temperature:.2f}")
+    print("   💡 Strategy: Ensure sufficient output space for complete 5-section YAML")
+
+    return RequestParams(
+        maxTokens=new_max_tokens,  # 注意：使用 camelCase
+        temperature=new_temperature,
+    )
+
+
 def get_default_search_server(config_path: str = "mcp_agent.config.yaml"):
     """
     Get the default search server from configuration.
@@ -230,12 +352,12 @@ async def run_research_analyzer(prompt_text: str, logger) -> str:
 
             # Set higher token output for research analysis
             analysis_params = RequestParams(
-                max_tokens=6144,
+                maxTokens=6144,  # 使用 camelCase
                 temperature=0.3,
             )
 
             print(
-                f"🔄 Making LLM request with params: max_tokens={analysis_params.max_tokens}, temperature={analysis_params.temperature}"
+                f"🔄 Making LLM request with params: maxTokens={analysis_params.maxTokens}, temperature={analysis_params.temperature}"
             )
 
             try:
@@ -322,7 +444,7 @@ async def run_resource_processor(analysis_result: str, logger) -> str:
 
         # Set higher token output for resource processing
         processor_params = RequestParams(
-            max_tokens=4096,
+            maxTokens=4096,  # 使用 camelCase
             temperature=0.2,
         )
 
@@ -382,10 +504,23 @@ async def run_code_analyzer(
         llm_factory=get_preferred_llm_class(),
     )
 
-    # Set appropriate token output limit for Claude models (max 8192)
+    # Advanced token management system with dynamic scaling
+    # 关键优化：ParallelLLM需要为输出预留充足空间
+    # fan_in agent会接收fan_out agents的完整输出作为context，然后需要生成完整YAML
+    if use_segmentation:
+        # 分段模式：输入已优化，但仍需大量输出空间
+        max_tokens_limit = 30000  # 充足的输出空间确保5个sections完整生成
+        temperature = 0.2  # 稍微降低temperature以提高一致性
+        print("🧠 Using SEGMENTED mode: max_tokens=30000 for complete YAML output")
+    else:
+        # 传统模式：需要更多输出空间应对长篇分析结果
+        max_tokens_limit = 30000  # 足够的空间确保完整输出
+        temperature = 0.3
+        print("🧠 Using TRADITIONAL mode: max_tokens=30000 for complete YAML output")
+
     enhanced_params = RequestParams(
-        max_tokens=8192,  # Adjusted to Claude 3.5 Sonnet's actual limit
-        temperature=0.3,
+        maxTokens=max_tokens_limit,  # 注意：使用 camelCase 而不是 snake_case
+        temperature=temperature,
     )
 
     # Concise message for multi-agent paper analysis and code planning
@@ -399,10 +534,44 @@ Please locate and analyze the markdown (.md) file containing the research paper.
 
 The goal is to create a reproduction plan detailed enough for independent implementation."""
 
-    result = await code_aggregator_agent.generate_str(
-        message=message, request_params=enhanced_params
-    )
-    print(f"Code analysis result: {result}")
+    # 智能输出完整性检查和重试机制
+    max_retries = 3
+    retry_count = 0
+
+    while retry_count < max_retries:
+        try:
+            print(
+                f"🚀 Attempting code analysis (attempt {retry_count + 1}/{max_retries})"
+            )
+            result = await code_aggregator_agent.generate_str(
+                message=message, request_params=enhanced_params
+            )
+
+            # 检查输出完整性的高级指标
+            completeness_score = _assess_output_completeness(result)
+            print(f"📊 Output completeness score: {completeness_score:.2f}/1.0")
+
+            if completeness_score >= 0.8:  # 输出被认为是完整的
+                print(
+                    f"✅ Code analysis completed successfully (length: {len(result)} chars)"
+                )
+                return result
+            else:
+                print(
+                    f"⚠️ Output appears truncated (score: {completeness_score:.2f}), retrying with enhanced parameters..."
+                )
+                # 动态调整参数进行重试
+                enhanced_params = _adjust_params_for_retry(enhanced_params, retry_count)
+                retry_count += 1
+
+        except Exception as e:
+            print(f"❌ Error in code analysis attempt {retry_count + 1}: {e}")
+            retry_count += 1
+            if retry_count >= max_retries:
+                raise
+
+    # 如果所有重试都失败，返回最后一次的结果
+    print(f"⚠️ Returning potentially incomplete result after {max_retries} attempts")
     return result
 
 
@@ -432,7 +601,7 @@ async def github_repo_download(search_result: str, paper_dir: str, logger) -> st
 
         # Set higher token output for GitHub download
         github_params = RequestParams(
-            max_tokens=4096,
+            maxTokens=4096,  # 使用 camelCase
             temperature=0.1,
         )
 
@@ -1131,12 +1300,12 @@ async def run_chat_planning_agent(user_input: str, logger) -> str:
 
             # Set higher token output for comprehensive planning
             planning_params = RequestParams(
-                max_tokens=8192,  # Higher token limit for detailed plans
+                maxTokens=8192,  # 使用 camelCase - Higher token limit for detailed plans
                 temperature=0.2,  # Lower temperature for more structured output
             )
 
             print(
-                f"🔄 Making LLM request with params: max_tokens={planning_params.max_tokens}, temperature={planning_params.temperature}"
+                f"🔄 Making LLM request with params: maxTokens={planning_params.maxTokens}, temperature={planning_params.temperature}"
             )
 
             # Format the input message for the agent

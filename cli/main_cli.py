@@ -230,18 +230,16 @@ async def main():
             print(
                 f"\n{Colors.MAGENTA}📄 Document segmentation disabled - using traditional processing{Colors.ENDC}"
             )
-            app.segmentation_config = {
-                "enabled": False,
-                "size_threshold_chars": args.segmentation_threshold,
-            }
+            app.cli.segmentation_enabled = False
+            app.cli.segmentation_threshold = args.segmentation_threshold
+            app.cli._save_segmentation_config()
         else:
             print(
                 f"\n{Colors.BLUE}📄 Smart document segmentation enabled (threshold: {args.segmentation_threshold} chars){Colors.ENDC}"
             )
-            app.segmentation_config = {
-                "enabled": True,
-                "size_threshold_chars": args.segmentation_threshold,
-            }
+            app.cli.segmentation_enabled = True
+            app.cli.segmentation_threshold = args.segmentation_threshold
+            app.cli._save_segmentation_config()
 
         # 检查是否为直接处理模式
         if args.file or args.url or args.chat:

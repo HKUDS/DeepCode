@@ -40,9 +40,67 @@ class CLIInterface:
         self.is_running = True
         self.processing_history = []
         self.enable_indexing = True  # Default configuration
-        self.segmentation_enabled = True  # Default to smart segmentation
-        self.segmentation_threshold = 50000  # Default threshold
 
+        # Load segmentation config from the same source as UI
+        self._load_segmentation_config()
+
+        # Initialize tkinter availability
+        self._init_tkinter()
+
+    def _load_segmentation_config(self):
+        """Load segmentation configuration from mcp_agent.config.yaml"""
+        try:
+            from utils.llm_utils import get_document_segmentation_config
+
+            seg_config = get_document_segmentation_config()
+            self.segmentation_enabled = seg_config.get("enabled", True)
+            self.segmentation_threshold = seg_config.get("size_threshold_chars", 50000)
+        except Exception as e:
+            print(f"⚠️ Warning: Failed to load segmentation config: {e}")
+            # Fall back to defaults
+            self.segmentation_enabled = True
+            self.segmentation_threshold = 50000
+
+    def _save_segmentation_config(self):
+        """Save segmentation configuration to mcp_agent.config.yaml"""
+        import yaml
+        import os
+
+        # Get the project root directory (where mcp_agent.config.yaml is located)
+        current_file = os.path.abspath(__file__)
+        cli_dir = os.path.dirname(current_file)  # cli directory
+        project_root = os.path.dirname(cli_dir)  # project root
+        config_path = os.path.join(project_root, "mcp_agent.config.yaml")
+
+        try:
+            # Read current config
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = yaml.safe_load(f)
+
+            # Update document segmentation settings
+            if "document_segmentation" not in config:
+                config["document_segmentation"] = {}
+
+            config["document_segmentation"]["enabled"] = self.segmentation_enabled
+            config["document_segmentation"]["size_threshold_chars"] = (
+                self.segmentation_threshold
+            )
+
+            # Write updated config
+            with open(config_path, "w", encoding="utf-8") as f:
+                yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
+
+            print(
+                f"{Colors.OKGREEN}✅ Document segmentation configuration updated{Colors.ENDC}"
+            )
+
+        except Exception as e:
+            print(
+                f"{Colors.WARNING}⚠️ Failed to update segmentation config: {str(e)}{Colors.ENDC}"
+            )
+
+    def _init_tkinter(self):
+        """Initialize tkinter availability check"""
         # Check tkinter availability for file dialogs
         self.tkinter_available = True
         try:
@@ -765,6 +823,8 @@ class CLIInterface:
             elif choice in ["s", "segmentation"]:
                 current_state = getattr(self, "segmentation_enabled", True)
                 self.segmentation_enabled = not current_state
+                # Save the configuration to file
+                self._save_segmentation_config()
                 seg_mode = (
                     "📄 Smart Segmentation"
                     if self.segmentation_enabled

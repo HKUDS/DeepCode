@@ -146,8 +146,81 @@ def print_banner():
     print(banner)
 
 
+def launch_paper_test(paper_name: str, fast_mode: bool = False):
+    """Launch paper testing mode"""
+    try:
+        print("\n🧪 Launching Paper Test Mode")
+        print(f"📄 Paper: {paper_name}")
+        print(f"⚡ Fast mode: {'enabled' if fast_mode else 'disabled'}")
+        print("=" * 60)
+
+        # Run the test setup
+        setup_cmd = [sys.executable, "test_paper.py", paper_name]
+        if fast_mode:
+            setup_cmd.append("--fast")
+
+        result = subprocess.run(setup_cmd, check=True)
+
+        if result.returncode == 0:
+            print("\n✅ Paper test setup completed successfully!")
+            print("📁 Files are ready in deepcode_lab/papers/")
+            print("\n💡 Next steps:")
+            print("   1. Install MCP dependencies: pip install -r requirements.txt")
+            print(
+                f"   2. Run full pipeline: python -m workflows.paper_test_engine --paper {paper_name}"
+                + (" --fast" if fast_mode else "")
+            )
+
+    except subprocess.CalledProcessError as e:
+        print(f"\n❌ Paper test setup failed: {e}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n❌ Unexpected error: {e}")
+        sys.exit(1)
+
+
 def main():
     """Main function"""
+    # Parse command line arguments
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "test" and len(sys.argv) >= 3:
+            # Paper testing mode: python deepcode.py test rice [--fast]
+            paper_name = sys.argv[2]
+            fast_mode = "--fast" in sys.argv or "-f" in sys.argv
+
+            print_banner()
+            launch_paper_test(paper_name, fast_mode)
+            return
+        elif sys.argv[1] in ["--help", "-h", "help"]:
+            print_banner()
+            print("""
+🔧 Usage:
+   python deepcode.py                    - Launch web interface
+   python deepcode.py test <paper>       - Test paper reproduction
+   python deepcode.py test <paper> --fast - Test paper (fast mode)
+
+📄 Examples:
+   python deepcode.py test rice          - Test RICE paper reproduction
+   python deepcode.py test rice --fast   - Test RICE paper (fast mode)
+
+📁 Available papers:""")
+
+            # List available papers
+            papers_dir = "papers"
+            if os.path.exists(papers_dir):
+                for item in os.listdir(papers_dir):
+                    item_path = os.path.join(papers_dir, item)
+                    if os.path.isdir(item_path):
+                        paper_md = os.path.join(item_path, "paper.md")
+                        addendum_md = os.path.join(item_path, "addendum.md")
+                        status = "✅" if os.path.exists(paper_md) else "❌"
+                        addendum_status = "📄" if os.path.exists(addendum_md) else "➖"
+                        print(f"   {status} {item} {addendum_status}")
+            print(
+                "\n   Legend: ✅ = paper.md exists, 📄 = addendum.md exists, ➖ = no addendum"
+            )
+            return
+
     print_banner()
 
     # Check dependencies
@@ -182,7 +255,7 @@ def main():
             "run",
             str(streamlit_app_path),
             "--server.port",
-            "8501",
+            "8503",
             "--server.address",
             "localhost",
             "--browser.gatherUsageStats",
