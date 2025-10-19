@@ -191,9 +191,21 @@ class FileProcessor:
             with open(file_path, "rb") as f:
                 header = f.read(8)
                 if header.startswith(b"%PDF"):
-                    raise IOError(
-                        f"File {file_path} is a PDF file, not a text file. Please convert it to markdown format or use PDF processing tools."
-                    )
+                    # Try to convert PDF to markdown automatically
+                    try:
+                        from tools.pdf_downloader import SimplePdfConverter
+                        converter = SimplePdfConverter()
+                        conversion_result = converter.convert_pdf_to_markdown(file_path)
+                        
+                        if conversion_result["success"]:
+                            # Use the converted markdown file instead
+                            file_path = conversion_result["output_file"]
+                        else:
+                            raise IOError(f"PDF conversion failed: {conversion_result['error']}")
+                    except Exception as conv_error:
+                        raise IOError(
+                            f"File {file_path} is a PDF file, not a text file. PDF conversion failed: {str(conv_error)}"
+                        )
 
             # Read file content
             # Note: Using async with would be better for large files

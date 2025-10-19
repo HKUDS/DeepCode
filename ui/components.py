@@ -395,7 +395,9 @@ def file_input_component(task_counter: int) -> Optional[str]:
             # Check if file is already PDF
             if file_ext == "pdf":
                 st.info("📑 File is already in PDF format, no conversion needed.")
-                return original_file_path
+                # Return JSON structure with paper_path for consistency
+                import json
+                return json.dumps({"paper_path": original_file_path})
 
             # Convert to PDF
             with st.spinner(f"🔄 Converting {file_ext.upper()} to PDF..."):
@@ -451,7 +453,9 @@ def file_input_component(task_counter: int) -> Optional[str]:
                         f"📑 **PDF File:** {Path(pdf_path).name} ({format_file_size(pdf_size)})"
                     )
 
-                    return str(pdf_path)
+                    # Return JSON structure with paper_path for consistency
+                    import json
+                    return json.dumps({"paper_path": str(pdf_path)})
 
                 except Exception as e:
                     st.error(f"❌ PDF conversion failed: {str(e)}")
