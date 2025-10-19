@@ -342,6 +342,13 @@ def file_input_component(task_counter: int) -> Optional[str]:
     Returns:
         PDF file path or None
     """
+    # Check if we already have a converted file in session state for this task
+    cache_key = f"converted_file_{task_counter}"
+    if cache_key in st.session_state and st.session_state[cache_key]:
+        cached_result = st.session_state[cache_key]
+        st.info(f"📁 Using previously uploaded file: {cached_result.get('folder', 'Unknown')}")
+        return cached_result.get('json_result')
+    
     uploaded_file = st.file_uploader(
         "Upload research paper file",
         type=[
@@ -397,7 +404,17 @@ def file_input_component(task_counter: int) -> Optional[str]:
                 st.info("📑 File is already in PDF format, no conversion needed.")
                 # Return JSON structure with paper_path for consistency
                 import json
-                return json.dumps({"paper_path": original_file_path})
+                json_result = json.dumps({"paper_path": original_file_path})
+                
+                # Cache the result
+                cache_key = f"converted_file_{task_counter}"
+                st.session_state[cache_key] = {
+                    "json_result": json_result,
+                    "folder": os.path.basename(os.path.dirname(original_file_path)),
+                    "pdf_path": original_file_path
+                }
+                
+                return json_result
 
             # Check if PDF already exists next to the original file
             original_dir = os.path.dirname(original_file_path)
@@ -421,7 +438,19 @@ def file_input_component(task_counter: int) -> Optional[str]:
                 
                 # Return JSON structure with paper_path
                 import json
-                return json.dumps({"paper_path": str(pdf_path)})
+                json_result = json.dumps({"paper_path": str(pdf_path)})
+                
+                # Cache the result
+                cache_key = f"converted_file_{task_counter}"
+                pdf_dir = os.path.dirname(pdf_path)
+                folder_name = os.path.basename(pdf_dir)
+                st.session_state[cache_key] = {
+                    "json_result": json_result,
+                    "folder": folder_name,
+                    "pdf_path": str(pdf_path)
+                }
+                
+                return json_result
             
             # Convert to PDF if no existing PDF found
             with st.spinner(f"🔄 Converting {file_ext.upper()} to PDF..."):
@@ -485,7 +514,17 @@ def file_input_component(task_counter: int) -> Optional[str]:
 
                     # Return JSON structure with paper_path for consistency
                     import json
-                    return json.dumps({"paper_path": str(pdf_path)})
+                    json_result = json.dumps({"paper_path": str(pdf_path)})
+                    
+                    # Cache the result to prevent re-conversion on UI rerun
+                    cache_key = f"converted_file_{task_counter}"
+                    st.session_state[cache_key] = {
+                        "json_result": json_result,
+                        "folder": folder_name,
+                        "pdf_path": str(pdf_path)
+                    }
+                    
+                    return json_result
 
                 except Exception as e:
                     st.error(f"❌ PDF conversion failed: {str(e)}")

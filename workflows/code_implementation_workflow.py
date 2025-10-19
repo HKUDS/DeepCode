@@ -387,8 +387,12 @@ Requirements:
 
                 # Record essential tool results in concise memory agent
                 for tool_call, tool_result in zip(response["tool_calls"], tool_results):
-                    # Record progress for successful tool calls
-                    if tool_result.get("success", False):
+                    # Check if tool actually failed
+                    # Only count as error if isError flag is True
+                    is_error = tool_result.get("isError", False)
+                    
+                    if not is_error:
+                        # Tool succeeded
                         self.loop_detector.record_success()
                         
                         # Track file completion
@@ -397,7 +401,8 @@ Requirements:
                             self.progress_tracker.complete_file(filename)
                             print(f"✅ File completed: {filename}")
                     else:
-                        self.loop_detector.record_error(f"Tool {tool_call['name']} failed")
+                        # Tool actually failed
+                        self.loop_detector.record_error(f"Tool {tool_call['name']} failed: {tool_result.get('result', '')[:100]}")
                     
                     memory_agent.record_tool_result(
                         tool_name=tool_call["name"],
