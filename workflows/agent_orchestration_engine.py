@@ -545,11 +545,11 @@ The goal is to create a reproduction plan detailed enough for independent implem
                 message=message, request_params=enhanced_params
             )
 
-            # 检查输出完整性的高级指标
+            # Advanced metrics for checking output completeness
             completeness_score = _assess_output_completeness(result)
             print(f"📊 Output completeness score: {completeness_score:.2f}/1.0")
 
-            if completeness_score >= 0.8:  # 输出被认为是完整的
+            if completeness_score >= 0.8:  # Output is considered complete
                 print(
                     f"✅ Code analysis completed successfully (length: {len(result)} chars)"
                 )
@@ -558,7 +558,7 @@ The goal is to create a reproduction plan detailed enough for independent implem
                 print(
                     f"⚠️ Output appears truncated (score: {completeness_score:.2f}), retrying with enhanced parameters..."
                 )
-                # 动态调整参数进行重试
+                # Dynamically adjust parameters for retry
                 enhanced_params = _adjust_params_for_retry(enhanced_params, retry_count)
                 retry_count += 1
 
@@ -568,7 +568,7 @@ The goal is to create a reproduction plan detailed enough for independent implem
             if retry_count >= max_retries:
                 raise
 
-    # 如果所有重试都失败，返回最后一次的结果
+    # If all retries fail, return the last result
     print(f"⚠️ Returning potentially incomplete result after {max_retries} attempts")
     return result
 
@@ -599,7 +599,7 @@ async def github_repo_download(search_result: str, paper_dir: str, logger) -> st
 
         # Set higher token output for GitHub download
         github_params = RequestParams(
-            maxTokens=4096,  # 使用 camelCase
+            maxTokens=4096,  # Using camelCase
             temperature=0.1,
         )
 
@@ -1381,7 +1381,7 @@ async def run_chat_planning_agent(user_input: str, logger) -> str:
 
             # Set higher token output for comprehensive planning
             planning_params = RequestParams(
-                maxTokens=8192,  # 使用 camelCase - Higher token limit for detailed plans
+                maxTokens=8192,  # Using camelCase - Higher token limit for detailed plans
                 temperature=0.2,  # Lower temperature for more structured output
             )
 

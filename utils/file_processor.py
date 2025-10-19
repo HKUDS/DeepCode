@@ -43,7 +43,7 @@ class FileProcessor:
                 try:
                     info_dict = json.loads(file_info)
                 except json.JSONDecodeError:
-                    # 尝试从文本中提取JSON
+                    # Try to extract JSON from text
                     info_dict = FileProcessor.extract_json_from_text(file_info)
                     if not info_dict:
                         # If not JSON and doesn't look like a file path, raise error
@@ -290,7 +290,7 @@ class FileProcessor:
             Dict: The structured content with sections and standardized text
         """
         try:
-            # 首先尝试从字符串中提取markdown文件路径
+            # First try to extract markdown file path from string
             if isinstance(file_input, str):
                 import re
 
@@ -310,7 +310,7 @@ class FileProcessor:
                 else:
                     # Extract the relative part and combine with base_dir
                     paper_name = os.path.basename(paper_dir)
-                    # 保持原始目录名不变，不做任何替换
+                    # Keep original directory name unchanged, no replacements
                     paper_dir = os.path.join(base_dir, "papers", paper_name)
 
                 # Ensure the directory exists
@@ -322,12 +322,12 @@ class FileProcessor:
             # Get the actual file path
             file_path = None
             if isinstance(file_input, str):
-                # 尝试解析为JSON（处理下载结果）
+                # Try to parse as JSON (handle download results)
                 try:
                     parsed_json = json.loads(file_input)
                     if isinstance(parsed_json, dict) and "paper_path" in parsed_json:
                         file_path = parsed_json.get("paper_path")
-                        # 如果文件不存在，尝试查找markdown文件
+                        # If file doesn't exist, try to find markdown file
                         if file_path and not os.path.exists(file_path):
                             paper_dir = os.path.dirname(file_path)
                             if os.path.isdir(paper_dir):
@@ -339,11 +339,11 @@ class FileProcessor:
                     else:
                         raise ValueError("Invalid JSON format: missing paper_path")
                 except json.JSONDecodeError:
-                    # 尝试从文本中提取JSON（处理包含额外文本的下载结果）
+                    # Try to extract JSON from text (handle download results with extra text)
                     extracted_json = cls.extract_json_from_text(file_input)
                     if extracted_json and "paper_path" in extracted_json:
                         file_path = extracted_json.get("paper_path")
-                        # 如果文件不存在，尝试查找markdown文件
+                        # If file doesn't exist, try to find markdown file
                         if file_path and not os.path.exists(file_path):
                             paper_dir = os.path.dirname(file_path)
                             if os.path.isdir(paper_dir):
@@ -353,7 +353,7 @@ class FileProcessor:
                                         f"No markdown file found in directory: {paper_dir}"
                                     )
                     else:
-                        # 不是JSON，按文件路径处理
+                        # Not JSON, handle as file path
                         # Check if it's a file path (existing or not)
                         if file_input.endswith(
                             (".md", ".pdf", ".txt", ".docx", ".doc", ".html", ".htm")
