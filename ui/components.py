@@ -399,7 +399,31 @@ def file_input_component(task_counter: int) -> Optional[str]:
                 import json
                 return json.dumps({"paper_path": original_file_path})
 
-            # Convert to PDF
+            # Check if PDF already exists next to the original file
+            original_dir = os.path.dirname(original_file_path)
+            base_name = os.path.splitext(os.path.basename(original_file_path))[0]
+            potential_pdf = os.path.join(original_dir, f"{base_name}.pdf")
+            
+            if os.path.exists(potential_pdf):
+                st.info(f"📑 Found existing PDF: {os.path.basename(potential_pdf)} - using it instead of converting")
+                pdf_path = potential_pdf
+                
+                # Clean up uploaded temp file
+                try:
+                    os.unlink(original_file_path)
+                except Exception:
+                    pass
+                
+                # Display PDF info
+                pdf_size = Path(pdf_path).stat().st_size
+                st.success("✅ Using existing PDF file!")
+                st.info(f"📑 **PDF File:** {Path(pdf_path).name} ({format_file_size(pdf_size)})")
+                
+                # Return JSON structure with paper_path
+                import json
+                return json.dumps({"paper_path": str(pdf_path)})
+            
+            # Convert to PDF if no existing PDF found
             with st.spinner(f"🔄 Converting {file_ext.upper()} to PDF..."):
                 try:
                     converter = PDFConverter()
@@ -437,8 +461,9 @@ def file_input_component(task_counter: int) -> Optional[str]:
                             pass
                         return None
 
-                    # Perform conversion
-                    pdf_path = converter.convert_to_pdf(original_file_path)
+                    # Perform conversion - Save to temp location first, pipeline will organize it properly
+                    # Use None for output_dir to let converter create temp folder
+                    pdf_path = converter.convert_to_pdf(original_file_path, output_dir=None)
 
                     # Clean up original file
                     try:
@@ -449,9 +474,14 @@ def file_input_component(task_counter: int) -> Optional[str]:
                     # Display conversion result
                     pdf_size = Path(pdf_path).stat().st_size
                     st.success("✅ Successfully converted to PDF!")
+                    
+                    # Show the organized folder location, not just the temp filename
+                    pdf_dir = os.path.dirname(pdf_path)
+                    folder_name = os.path.basename(pdf_dir)
                     st.info(
                         f"📑 **PDF File:** {Path(pdf_path).name} ({format_file_size(pdf_size)})"
                     )
+                    st.info(f"📁 **Saved to project folder:** `{folder_name}`")
 
                     # Return JSON structure with paper_path for consistency
                     import json

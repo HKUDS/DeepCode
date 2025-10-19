@@ -101,7 +101,15 @@ class PDFConverter:
             if output_dir:
                 base_output_dir = Path(output_dir)
             else:
-                base_output_dir = doc_path.parent / "pdf_output"
+                # Generate unique folder name with timestamp to avoid conflicts
+                import time
+                timestamp = int(time.time())
+                folder_name = f"paper_{timestamp}"
+                
+                # Save to workspace instead of temp directory
+                workspace_base = Path(os.getcwd()) / "deepcode_lab" / "papers"
+                workspace_base.mkdir(parents=True, exist_ok=True)
+                base_output_dir = workspace_base / folder_name
 
             base_output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -285,6 +293,10 @@ class PDFConverter:
                 # Copy PDF to final output directory
                 final_pdf_path = base_output_dir / f"{name_without_suff}.pdf"
                 shutil.copy2(pdf_path, final_pdf_path)
+                
+                print(f"✅ PDF saved to: {final_pdf_path}")
+                print(f"   File size: {final_pdf_path.stat().st_size} bytes")
+                print(f"   Parent folder: {base_output_dir}")
 
                 return final_pdf_path
 
@@ -339,7 +351,15 @@ class PDFConverter:
             if output_dir:
                 base_output_dir = Path(output_dir)
             else:
-                base_output_dir = text_path.parent / "pdf_output"
+                # Generate unique folder name with timestamp to avoid conflicts
+                import time
+                timestamp = int(time.time())
+                folder_name = f"paper_{timestamp}"
+                
+                # Save to workspace instead of temp directory
+                workspace_base = Path(os.getcwd()) / "deepcode_lab" / "papers"
+                workspace_base.mkdir(parents=True, exist_ok=True)
+                base_output_dir = workspace_base / folder_name
 
             base_output_dir.mkdir(parents=True, exist_ok=True)
             pdf_path = base_output_dir / f"{text_path.stem}.pdf"
@@ -493,6 +513,10 @@ class PDFConverter:
                     f"PDF conversion failed for {text_path.name} - generated PDF is empty or corrupted."
                 )
 
+            print(f"✅ PDF saved to: {pdf_path}")
+            print(f"   File size: {pdf_path.stat().st_size} bytes")
+            print(f"   Parent folder: {base_output_dir}")
+            
             return pdf_path
 
         except Exception as e:
