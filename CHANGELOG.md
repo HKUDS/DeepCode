@@ -14,15 +14,18 @@ All notable changes to DeepCode will be documented in this file.
 - **File Progress Tracking**: Shows files completed/total with estimated time remaining
 
 ### Fixed
+- **Critical: False Error Detection**: Fixed overly aggressive error detection that was marking successful operations as failures, causing premature abort and empty file generation
+- **Critical: Empty File Generation**: Files now contain actual code instead of being empty (2-byte files)
 - **Unique Folder Naming**: Each project run now creates `paper_{timestamp}` folders instead of reusing `pdf_output`
 - **PDF Save Location**: PDFs now save to `deepcode_lab/papers/` instead of system temp directory
-- **Duplicate Folder Prevention**: System detects and reuses existing `paper_{timestamp}` folders instead of creating duplicates
-- **Token Limit Compliance**: Fixed `max_tokens` to respect model limits (e.g., gpt-4o-mini's 16,384 token limit)
+- **Duplicate Folder Prevention**: Added session state caching to prevent duplicate folder creation on UI reruns
+- **Token Limit Compliance**: Fixed `max_tokens` to respect model limits dynamically (e.g., gpt-4o-mini's 16,384 token limit)
 - **Empty Plan Detection**: System now fails early with clear error messages when initial plan is empty or invalid
 - **Process Hanging**: Fixed infinite loops and hanging on errors - process now exits cleanly
 - **Token Cost Tracking**: Restored accurate token usage and cost display (was showing $0.0000)
 - **PDF to Markdown Conversion**: Fixed automatic conversion and file location handling
 - **Document Segmentation**: Properly uses configured 50K character threshold from `mcp_agent.config.yaml`
+- **Error Propagation**: Abort mechanism now properly stops process after 10 consecutive real errors
 
 ### Changed
 - **Model-Aware Token Management**: Token limits now adapt automatically based on configured model instead of hardcoded values
@@ -51,8 +54,17 @@ All notable changes to DeepCode will be documented in this file.
 - None - all changes are backward compatible
 
 ### Known Issues
+- Terminal may show trailing "Calling Tool..." line after completion (cosmetic display artifact - process completes successfully)
 - Some Chinese comments remain in non-critical files (cli, tools) - translation in progress
 - tiktoken package optional warning (doesn't affect functionality)
+
+### Success Metrics
+- ✅ Complete end-to-end workflow: DOCX upload → PDF conversion → Markdown → Segmentation → Planning → Code generation
+- ✅ Files generated with actual code content (15+ files with proper implementation)
+- ✅ Single folder per project run (no duplicates)
+- ✅ Dynamic token management working across different models
+- ✅ Accurate cost tracking per model
+- ✅ Clean process termination with proper error handling
 
 ---
 
