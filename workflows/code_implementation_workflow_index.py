@@ -18,6 +18,7 @@ import os
 import sys
 import time
 import yaml
+from utils.loop_detector import LoopDetector, ProgressTracker
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
@@ -60,6 +61,8 @@ class CodeImplementationWorkflowWithIndex:
         self.enable_read_tools = (
             True  # Default value, will be overridden by run_workflow parameter
         )
+        self.loop_detector = LoopDetector()
+        self.progress_tracker = ProgressTracker()
 
     def _load_api_config(self) -> Dict[str, Any]:
         """Load API configuration from YAML file"""
@@ -452,8 +455,8 @@ Requirements:
         try:
             self.mcp_agent = Agent(
                 name="CodeImplementationAgent",
-                instruction="You are a code implementation assistant, using MCP tools to implement paper code replication.",
-                server_names=["code-implementation", "code-reference-indexer"],
+                instruction="You are a code implementation assistant, using MCP tools to implement paper code replication. For large documents, use document-segmentation tools to read content in smaller chunks to avoid token limits.",
+                server_names=["code-implementation", "code-reference-indexer", "document-segmentation"],
             )
 
             await self.mcp_agent.__aenter__()
@@ -582,7 +585,7 @@ Requirements:
     async def _call_anthropic_with_tools(
         self, client, system_message, messages, tools, max_tokens
     ):
-        """Call Anthropic API"""
+        """Call Anthropic API with token limit management"""
         validated_messages = self._validate_messages(messages)
         if not validated_messages:
             validated_messages = [
@@ -613,7 +616,34 @@ Requirements:
                     {"id": block.id, "name": block.name, "input": block.input}
                 )
 
-        return {"content": content, "tool_calls": tool_calls}
+        # Extract token usage and calculate cost
+        token_usage = {}
+        cost = 0.0
+        
+        if hasattr(response, 'usage') and response.usage:
+            token_usage = {
+                "input_tokens": response.usage.input_tokens,
+                "output_tokens": response.usage.output_tokens,
+                "total_tokens": response.usage.input_tokens + response.usage.output_tokens
+            }
+            
+            # Use dynamic cost calculation based on current model
+            from utils.model_limits import calculate_token_cost
+            cost = calculate_token_cost(
+                response.usage.input_tokens,
+                response.usage.output_tokens,
+                model_name=self.default_models.get("anthropic")
+            )
+            
+            print(f"💰 Tokens: {token_usage['total_tokens']} (${cost:.4f})")
+            self.logger.info(f"Token usage: {token_usage['input_tokens']} input + {token_usage['output_tokens']} output = {token_usage['total_tokens']} total (${cost:.4f})")
+
+        return {
+            "content": content, 
+            "tool_calls": tool_calls,
+            "token_usage": token_usage,
+            "cost": cost
+        }
 
     def _repair_truncated_json(self, json_str: str, tool_name: str = "") -> dict:
         """
@@ -790,7 +820,34 @@ Requirements:
                         print("   ⚠️  Skipping unrepairable tool call")
                         continue
 
-        return {"content": content, "tool_calls": tool_calls}
+        # Extract token usage and calculate cost
+        token_usage = {}
+        cost = 0.0
+        
+        if hasattr(response, 'usage') and response.usage:
+            token_usage = {
+                "prompt_tokens": response.usage.prompt_tokens,
+                "completion_tokens": response.usage.completion_tokens,
+                "total_tokens": response.usage.total_tokens
+            }
+            
+            # Use dynamic cost calculation based on current model
+            from utils.model_limits import calculate_token_cost
+            cost = calculate_token_cost(
+                response.usage.prompt_tokens,
+                response.usage.completion_tokens,
+                model_name=self.default_models.get("openai")
+            )
+            
+            print(f"💰 Tokens: {token_usage['total_tokens']} (${cost:.4f})")
+            self.logger.info(f"Token usage: {token_usage['prompt_tokens']} prompt + {token_usage['completion_tokens']} completion = {token_usage['total_tokens']} total (${cost:.4f})")
+
+        return {
+            "content": content, 
+            "tool_calls": tool_calls,
+            "token_usage": token_usage,
+            "cost": cost
+        }
 
     # ==================== 5. Tools and Utility Methods (Utility Layer) ====================
 

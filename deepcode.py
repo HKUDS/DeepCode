@@ -50,6 +50,7 @@ def check_dependencies():
     try:
         import subprocess
         import platform
+        import os
 
         subprocess_kwargs = {
             "capture_output": True,
@@ -58,25 +59,56 @@ def check_dependencies():
         }
 
         if platform.system() == "Windows":
-            subprocess_kwargs["creationflags"] = 0x08000000  # Hide console window
+            subprocess_kwargs["creationflags"] = 0x08000000
+            # Also configure startupinfo to hide window
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+            subprocess_kwargs["startupinfo"] = startupinfo
 
         # Try different LibreOffice commands
         libreoffice_found = False
-        for cmd in ["libreoffice", "soffice"]:
-            try:
-                result = subprocess.run([cmd, "--version"], **subprocess_kwargs)
-                if result.returncode == 0:
-                    print(
-                        "✅ LibreOffice is installed (for Office document conversion)"
-                    )
+        
+        # On Windows, try standard installation paths first
+        # Just check if file exists to avoid window/hanging issues
+        if platform.system() == "Windows":
+            possible_paths = [
+                r"C:\Program Files\LibreOffice\program\soffice.exe",
+                r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
+            ]
+            
+            # Also check PROGRAMFILES environment variables
+            program_files = os.environ.get("PROGRAMFILES")
+            program_files_x86 = os.environ.get("PROGRAMFILES(X86)")
+            
+            if program_files:
+                possible_paths.append(os.path.join(program_files, "LibreOffice", "program", "soffice.exe"))
+            if program_files_x86:
+                possible_paths.append(os.path.join(program_files_x86, "LibreOffice", "program", "soffice.exe"))
+            
+            for path in possible_paths:
+                if os.path.exists(path):
+                    print("✅ LibreOffice is installed (for Office document conversion)")
                     libreoffice_found = True
                     break
-            except (
-                subprocess.CalledProcessError,
-                FileNotFoundError,
-                subprocess.TimeoutExpired,
-            ):
-                continue
+        
+        # Try standard commands if not found via Windows paths (non-Windows systems)
+        if not libreoffice_found and platform.system() != "Windows":
+            for cmd in ["libreoffice", "soffice"]:
+                try:
+                    result = subprocess.run([cmd, "--version"], **subprocess_kwargs)
+                    if result.returncode == 0:
+                        print(
+                            "✅ LibreOffice is installed (for Office document conversion)"
+                        )
+                        libreoffice_found = True
+                        break
+                except (
+                    subprocess.CalledProcessError,
+                    FileNotFoundError,
+                    subprocess.TimeoutExpired,
+                ):
+                    continue
 
         if not libreoffice_found:
             missing_system_deps.append("LibreOffice")
