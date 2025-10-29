@@ -342,6 +342,13 @@ def file_input_component(task_counter: int) -> Optional[str]:
     Returns:
         PDF file path or None
     """
+    # Check if we already have a converted file in session state for this task
+    cache_key = f"converted_file_{task_counter}"
+    if cache_key in st.session_state and st.session_state[cache_key]:
+        cached_result = st.session_state[cache_key]
+        st.info(f"📁 Using previously uploaded file: {cached_result.get('folder', 'Unknown')}")
+        return cached_result.get('json_result')
+    
     uploaded_file = st.file_uploader(
         "Upload research paper file",
         type=[
@@ -395,9 +402,57 @@ def file_input_component(task_counter: int) -> Optional[str]:
             # Check if file is already PDF
             if file_ext == "pdf":
                 st.info("📑 File is already in PDF format, no conversion needed.")
-                return original_file_path
+                # Return JSON structure with paper_path for consistency
+                import json
+                json_result = json.dumps({"paper_path": original_file_path})
+                
+                # Cache the result
+                cache_key = f"converted_file_{task_counter}"
+                st.session_state[cache_key] = {
+                    "json_result": json_result,
+                    "folder": os.path.basename(os.path.dirname(original_file_path)),
+                    "pdf_path": original_file_path
+                }
+                
+                return json_result
 
-            # Convert to PDF
+            # Check if PDF already exists next to the original file
+            original_dir = os.path.dirname(original_file_path)
+            base_name = os.path.splitext(os.path.basename(original_file_path))[0]
+            potential_pdf = os.path.join(original_dir, f"{base_name}.pdf")
+            
+            if os.path.exists(potential_pdf):
+                st.info(f"📑 Found existing PDF: {os.path.basename(potential_pdf)} - using it instead of converting")
+                pdf_path = potential_pdf
+                
+                # Clean up uploaded temp file
+                try:
+                    os.unlink(original_file_path)
+                except Exception:
+                    pass
+                
+                # Display PDF info
+                pdf_size = Path(pdf_path).stat().st_size
+                st.success("✅ Using existing PDF file!")
+                st.info(f"📑 **PDF File:** {Path(pdf_path).name} ({format_file_size(pdf_size)})")
+                
+                # Return JSON structure with paper_path
+                import json
+                json_result = json.dumps({"paper_path": str(pdf_path)})
+                
+                # Cache the result
+                cache_key = f"converted_file_{task_counter}"
+                pdf_dir = os.path.dirname(pdf_path)
+                folder_name = os.path.basename(pdf_dir)
+                st.session_state[cache_key] = {
+                    "json_result": json_result,
+                    "folder": folder_name,
+                    "pdf_path": str(pdf_path)
+                }
+                
+                return json_result
+            
+            # Convert to PDF if no existing PDF found
             with st.spinner(f"🔄 Converting {file_ext.upper()} to PDF..."):
                 try:
                     converter = PDFConverter()
@@ -435,8 +490,9 @@ def file_input_component(task_counter: int) -> Optional[str]:
                             pass
                         return None
 
-                    # Perform conversion
-                    pdf_path = converter.convert_to_pdf(original_file_path)
+                    # Perform conversion - Save to temp location first, pipeline will organize it properly
+                    # Use None for output_dir to let converter create temp folder
+                    pdf_path = converter.convert_to_pdf(original_file_path, output_dir=None)
 
                     # Clean up original file
                     try:
@@ -447,11 +503,28 @@ def file_input_component(task_counter: int) -> Optional[str]:
                     # Display conversion result
                     pdf_size = Path(pdf_path).stat().st_size
                     st.success("✅ Successfully converted to PDF!")
+                    
+                    # Show the organized folder location, not just the temp filename
+                    pdf_dir = os.path.dirname(pdf_path)
+                    folder_name = os.path.basename(pdf_dir)
                     st.info(
                         f"📑 **PDF File:** {Path(pdf_path).name} ({format_file_size(pdf_size)})"
                     )
+                    st.info(f"📁 **Saved to project folder:** `{folder_name}`")
 
-                    return str(pdf_path)
+                    # Return JSON structure with paper_path for consistency
+                    import json
+                    json_result = json.dumps({"paper_path": str(pdf_path)})
+                    
+                    # Cache the result to prevent re-conversion on UI rerun
+                    cache_key = f"converted_file_{task_counter}"
+                    st.session_state[cache_key] = {
+                        "json_result": json_result,
+                        "folder": folder_name,
+                        "pdf_path": str(pdf_path)
+                    }
+                    
+                    return json_result
 
                 except Exception as e:
                     st.error(f"❌ PDF conversion failed: {str(e)}")
