@@ -7,6 +7,8 @@ Specialized in executing LLM-generated shell commands to create file tree struct
 """
 
 import subprocess
+import shlex
+import shlex
 from pathlib import Path
 from typing import List, Dict
 from mcp.server.models import InitializationOptions
@@ -148,7 +150,7 @@ async def execute_command_batch(
         for i, command in enumerate(command_lines, 1):
             try:
                 # 执行命令 / Execute command
-                result = subprocess.run(
+                result = subprocess.run(shlex.split(command), capture_output=True, text=True, check=True)
                     command,
                     shell=True,
                     cwd=working_directory,
