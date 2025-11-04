@@ -113,65 +113,30 @@ async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent
         ]
 
 
-async def execute_command_batch(
-    commands: str, working_directory: str
-) -> list[types.TextContent]:
-    """
-    执行多个shell命令 / Execute multiple shell commands
+    def execute_command(self, command: str, timeout: int = 60) -> Tuple[int, str, str]:
+        """
+        Executes a command and returns the exit code, stdout, and stderr.
+        """
+        if not command.strip():
+            return 1, "", "Empty command."
 
-    Args:
-        commands: 命令列表，每行一个命令 / Command list, one command per line
-        working_directory: 工作目录 / Working directory
-
-    Returns:
-        执行结果 / Execution results
-    """
-    try:
-        # 确保工作目录存在 / Ensure working directory exists
-        Path(working_directory).mkdir(parents=True, exist_ok=True)
-
-        # 分割命令行 / Split command lines
-        command_lines = [
-            cmd.strip() for cmd in commands.strip().split("\n") if cmd.strip()
-        ]
-
-        if not command_lines:
-            return [
-                types.TextContent(
-                    type="text", text="没有提供有效命令 / No valid commands provided"
-                )
-            ]
-
-        results = []
-        stats = {"successful": 0, "failed": 0, "timeout": 0}
-
-        for i, command in enumerate(command_lines, 1):
-            try:
-                # 执行命令 / Execute command
-                result = subprocess.run(
-                    command,
-                    shell=True,
-                    cwd=working_directory,
-                    capture_output=True,
-                    text=True,
-                    timeout=30,  # 30秒超时
-                )
-
-                if result.returncode == 0:
-                    results.append(f"✅ Command {i}: {command}")
-                    if result.stdout.strip():
-                        results.append(f"   输出 / Output: {result.stdout.strip()}")
-                    stats["successful"] += 1
-                else:
-                    results.append(f"❌ Command {i}: {command}")
-                    if result.stderr.strip():
-                        results.append(f"   错误 / Error: {result.stderr.strip()}")
-                    stats["failed"] += 1
-
-            except subprocess.TimeoutExpired:
-                results.append(f"⏱️ Command {i} 超时 / timeout: {command}")
-                stats["timeout"] += 1
-            except Exception as e:
+        try:
+            command_args = shlex.split(command)
+            result = subprocess.run(
+                command_args,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+                cwd=self.work_dir,
+            )
+            return result.returncode, result.stdout, result.stderr
+        except subprocess.TimeoutExpired as e:
+            return -1, str(e), "TimeoutExpired"
+        except FileNotFoundError as e:
+            return -1, str(e), "FileNotFoundError"
+        except Exception as e:
+            return -1, str(e), "Exception"
                 results.append(f"💥 Command {i} 异常 / exception: {command} - {str(e)}")
                 stats["failed"] += 1
 
