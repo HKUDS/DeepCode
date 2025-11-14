@@ -444,13 +444,55 @@ async def run_resource_processor(analysis_result: str, logger) -> str:
 
         # Set higher token output for resource processing
         processor_params = RequestParams(
-            maxTokens=4096,  # 使用 camelCase
+            maxTokens=4096,
             temperature=0.2,
         )
 
-        return await processor.generate_str(
-            message=analysis_result, request_params=processor_params
-        )
+        try:
+            raw_result = await processor.generate_str(
+                message=analysis_result,
+                request_params=processor_params,
+            )
+            print("✅ Resource processor response received")
+            print(f"Raw processor result type: {type(raw_result)}")
+            print(
+                f"Raw processor result length: "
+                f"{len(raw_result) if raw_result else 0}"
+            )
+        except Exception as e:
+            print(f"❌ Resource processor failed: {e}")
+            raise
+
+        try:
+            clean_result = extract_clean_json(raw_result)
+            print(f"Cleaned processor result: {clean_result}")
+
+            if hasattr(logger, "log_response"):
+                logger.log_response(
+                    clean_result,
+                    model="ResourceProcessor",
+                    agent="ResourceProcessorAgent",
+                )
+
+            if not clean_result or clean_result.strip() == "":
+                raise ValueError("Resource processor returned empty output")
+
+            json.loads(clean_result)
+            print("✅ Resource processor output validated as JSON")
+            return clean_result
+
+        except json.JSONDecodeError as e:
+            print("❌ Resource processor output is not valid JSON")
+            print(f"Original output: {raw_result}")
+            raise ValueError(
+                "ResourceProcessorAgent returned non-JSON output. "
+                "Ensure the agent replies with the exact JSON schema defined "
+                "in PAPER_DOWNLOADER_PROMPT."
+            ) from e
+        except Exception as e:
+            print(f"❌ Failed to process resource processor output: {e}")
+            print(f"Original output: {raw_result}")
+            raise
 
 
 async def run_code_analyzer(
