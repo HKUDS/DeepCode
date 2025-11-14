@@ -65,6 +65,13 @@ Note: Generate id (id is a number) by counting files in "./deepcode_lab/papers/"
 
 CRITICAL RULE: NEVER use write_file tool to create paper content directly. Always use file-downloader tools for PDF/document conversion.
 
+CRITICAL OUTPUT RESTRICTIONS:
+- RETURN ONLY THE RAW JSON OBJECT DESCRIBED BELOW
+- NO markdown code fences (```json)
+- NO explanatory or conversational text before or after the JSON
+- NO tool call commentary or step-by-step narration in the final reply
+- IF YOU NEED TO EXPLAIN YOUR ACTIONS, DO SO THROUGH TOOL CALLS ONLY. THE FINAL ASSISTANT MESSAGE MUST BE JSON.
+
 Processing Rules:
 1. URL Input (input_type = "url"):
    - Use "file-downloader" tool to download paper
