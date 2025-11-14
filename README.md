@@ -724,6 +724,8 @@ python cli/main_cli.py
   <img src="https://img.shields.io/badge/Mode-Interactive_Terminal-9b59b6?style=flat-square&logo=terminal&logoColor=white" alt="CLI Mode" />
 </div>
 
+> Running on cloud GPU boxes like AutoDL? Follow the step-by-step deployment checklist in `docs/autodl_cli_guide.md`.
+
 ### 🎯 **Step 3: Generate Code**
 
 1. **📄 Input**: Upload your research paper, provide requirements, or paste a URL
