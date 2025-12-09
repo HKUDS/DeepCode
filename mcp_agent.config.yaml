@@ -22,7 +22,7 @@ mcp:
       - tools/bocha_search_server.py
       command: python3
       env:
-        BOCHA_API_KEY: ''
+        BOCHA_API_KEY: 'sk-8b88f2733a6546df9b5981974ac79ffb'
         PYTHONPATH: .
     brave:
       # macos and linux should use this
@@ -32,12 +32,12 @@ mcp:
       command: npx
 
       # windows should use this
-      # args:
-      # # please use the correct path for your system
-      # - C:/Users/LEGION/AppData/Roaming/npm/node_modules/@modelcontextprotocol/server-brave-search/dist/index.js
-      # command: node
+      args:
+      # please use the correct path for your system
+      - C:/Users/Administrator/AppData/Roaming/npm/node_modules/@modelcontextprotocol/server-brave-search/dist/index.js
+      command: node
       env:
-        BRAVE_API_KEY: ''
+        BRAVE_API_KEY: 'BSAZRVBHl1BOewYVhEelJP84VFYuyVD'
     filesystem:
       # macos and linux should use this
       args:
@@ -47,11 +47,11 @@ mcp:
       command: npx
 
       # windows should use this
-      # args:
-      # # please use the correct path for your system
-      # - C:/Users/LEGION/AppData/Roaming/npm/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js
-      # - .
-      # command: node
+      args:
+      # please use the correct path for your system
+      - C:/Users/Administrator/AppData/Roaming/npm/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js
+      - .
+      command: node
 
 
     code-implementation:
@@ -106,13 +106,8 @@ mcp:
 llm_provider: "google"  # 设置为 "google", "anthropic", 或 "openai"
 
 openai:
-  base_max_tokens: 40000
-  # default_model: google/gemini-2.5-pro
-  default_model: anthropic/claude-sonnet-4.5
-  # default_model: openai/gpt-oss-120b
-  # default_model: deepseek/deepseek-v3.2-exp
-  # default_model: moonshotai/kimi-k2-thinking
-  reasoning_effort: low  # Only for thinking models
+  base_max_tokens: 20000
+  default_model: gemini-2.5-pro-preview-06-05-c
   max_tokens_policy: adaptive
   retry_max_tokens: 32768
 

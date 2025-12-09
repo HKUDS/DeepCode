@@ -24,6 +24,7 @@ import tempfile
 import shutil
 import logging
 from datetime import datetime
+from tools.sandbox import Sandbox
 
 # Set standard output encoding to UTF-8
 if sys.stdout.encoding != "utf-8":
@@ -51,6 +52,7 @@ mcp = FastMCP("code-implementation-server")
 WORKSPACE_DIR = None
 OPERATION_HISTORY = []
 CURRENT_FILES = {}
+SANDBOX_INSTANCE = None
 
 
 def initialize_workspace(workspace_dir: str = None):
@@ -850,6 +852,38 @@ async def execute_bash(command: str, timeout: int = 30) -> str:
 
 
 @mcp.tool()
+async def run_code_in_sandbox(code: str) -> str:
+   """
+   Execute Python code in a secure sandbox and return the result.
+
+   Args:
+       code: The Python code to execute.
+
+   Returns:
+       A JSON string containing the execution result, including stdout, stderr,
+       and any return value from the code.
+   """
+   global SANDBOX_INSTANCE
+   if SANDBOX_INSTANCE is None:
+       SANDBOX_INSTANCE = Sandbox()
+
+   try:
+       # Ensure the sandbox is connected
+       await SANDBOX_INSTANCE.connect()
+       
+       result = await SANDBOX_INSTANCE.run_code(code)
+       log_operation("run_code_in_sandbox", {"code_length": len(code), "status": "success"})
+       return json.dumps(result, ensure_ascii=False, indent=2)
+   except Exception as e:
+       logger.error(f"Error running code in sandbox: {e}")
+       log_operation("run_code_in_sandbox_error", {"code_length": len(code), "error": str(e)})
+       return json.dumps({
+           "status": "error",
+           "message": f"An unexpected error occurred: {str(e)}",
+       }, ensure_ascii=False, indent=2)
+
+
+@mcp.tool()
 async def read_code_mem(file_paths: List[str]) -> str:
     """
     Check if file summaries exist in implement_code_summary.md for multiple files
@@ -1499,6 +1533,9 @@ def main():
     print("  • write_file          - Write file contents / Write file contents")
     print("  • execute_python      - Execute Python code / Execute Python code")
     print("  • execute_bash        - Execute bash command / Execute bash commands")
+    print("  • run_code_in_sandbox - Execute Python code in a secure sandbox / 在安全沙箱中执行Python代码")
+    print("  • run_shell_in_sandbox - Execute shell command in sandbox / 在沙箱中执行Shell命令")
+    print("  • compile_project     - Compile project in sandbox / 在沙箱中编译项目")
     print("  • search_code         - Search code patterns / Search code patterns")
     print("  • get_file_structure  - Get file structure / Get file structure")
     print("  • set_workspace       - Set workspace / Set workspace")
@@ -1512,6 +1549,66 @@ def main():
     # Start server
     mcp.run()
 
+
+
+@mcp.tool()
+async def run_shell_in_sandbox(command: str) -> str:
+    """
+    Execute a shell command in the secure sandbox.
+    
+    Args:
+        command: The shell command to execute.
+        
+    Returns:
+        JSON string containing the execution result (stdout, stderr).
+    """
+    global SANDBOX_INSTANCE
+    if SANDBOX_INSTANCE is None:
+        SANDBOX_INSTANCE = Sandbox()
+        
+    try:
+        result = await SANDBOX_INSTANCE.run_shell_command(command)
+        log_operation("run_shell_in_sandbox", {"command": command, "status": result["status"]})
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Error running shell command in sandbox: {e}")
+        log_operation("run_shell_in_sandbox_error", {"command": command, "error": str(e)})
+        return json.dumps({
+            "status": "error",
+            "message": f"An unexpected error occurred: {str(e)}",
+        }, ensure_ascii=False, indent=2)
+
+@mcp.tool()
+async def compile_project(project_path: str = None) -> str:
+    """
+    Compile the project in the sandbox to check for errors.
+    
+    Args:
+        project_path: Path to the project directory (optional, defaults to WORKSPACE_DIR)
+        
+    Returns:
+        JSON string of compilation result
+    """
+    global SANDBOX_INSTANCE
+    if SANDBOX_INSTANCE is None:
+        SANDBOX_INSTANCE = Sandbox()
+        
+    try:
+        target_path = project_path if project_path else str(WORKSPACE_DIR)
+        # Ensure path is absolute
+        if not os.path.isabs(target_path):
+             target_path = str((Path.cwd() / target_path).resolve())
+             
+        result = await SANDBOX_INSTANCE.compile_project(target_path)
+        log_operation("compile_project", {"project_path": target_path, "status": result["status"]})
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Error compiling project: {e}")
+        log_operation("compile_project_error", {"error": str(e)})
+        return json.dumps({
+            "status": "error",
+            "message": f"An unexpected error occurred: {str(e)}",
+        }, ensure_ascii=False, indent=2)
 
 if __name__ == "__main__":
     main()

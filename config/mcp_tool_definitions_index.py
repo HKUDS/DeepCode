@@ -37,6 +37,7 @@ class MCPToolDefinitions:
             # MCPToolDefinitions._get_file_structure_tool(),
             # MCPToolDefinitions._get_set_workspace_tool(),
             # MCPToolDefinitions._get_operation_history_tool(),
+            MCPToolDefinitions._get_run_code_in_sandbox_tool(),
         ]
 
     @staticmethod
@@ -375,6 +376,24 @@ class MCPToolDefinitions:
                     }
                 },
                 "required": ["workspace_path"],
+            },
+        }
+
+    @staticmethod
+    def _get_run_code_in_sandbox_tool() -> Dict[str, Any]:
+        """在沙箱中运行Python代码的工具定义"""
+        return {
+            "name": "run_code_in_sandbox",
+            "description": "Execute Python code in a secure sandbox and return the result.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "The Python code to execute in the sandbox."
+                    }
+                },
+                "required": ["code"],
             },
         }
 
