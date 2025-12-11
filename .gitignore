@@ -14,7 +14,6 @@ venv/
 *.env*
 .env_example
 
-
 # Build / Distribution
 dist/
 build/
@@ -26,6 +25,7 @@ site/
 *.logfire
 *.coverage/
 log/
+logs/
 
 # Caches
 .cache/
@@ -51,6 +51,10 @@ rag_storage/
 examples/input/
 examples/output/
 deepcode-mcp/agent_folders
+deepcode_lab/papers/
+
+# Secrets & Config
+mcp_agent.secrets.yaml
 
 # Miscellaneous
 .DS_Store
