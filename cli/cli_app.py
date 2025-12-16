@@ -10,8 +10,11 @@ DeepCode - CLI Application Main Program
 import os
 import sys
 import asyncio
+import shutil
 import time
 import json
+
+import click
 
 # 禁止生成.pyc文件
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -26,6 +29,14 @@ if parent_dir not in sys.path:
 
 from cli.workflows import CLIWorkflowAdapter
 from cli.cli_interface import CLIInterface, Colors
+
+
+def _cleanup_pycache(base_path: str) -> None:
+    """Recursively remove __pycache__ directories under base_path."""
+    for root, dirs, _ in os.walk(base_path, topdown=False):
+        for d in dirs:
+            if d == "__pycache__":
+                shutil.rmtree(os.path.join(root, d), ignore_errors=True)
 
 
 class CLIApp:
@@ -263,12 +274,11 @@ class CLIApp:
             await self.cleanup_mcp_app()
 
 
-async def main():
-    """主函数"""
+async def _run_interactive_session() -> None:
+    """Run the interactive CLI session (async helper)."""
     start_time = time.time()
 
     try:
-        # 创建并运行CLI应用
         app = CLIApp()
         await app.run_interactive_session()
 
@@ -279,22 +289,39 @@ async def main():
     finally:
         end_time = time.time()
         print(
-            f"\n{Colors.BOLD}{Colors.CYAN}⏱️  Total runtime: {end_time - start_time:.2f} seconds{Colors.ENDC}"
+            f"\n{Colors.BOLD}{Colors.CYAN}⏱️  Total runtime: "
+            f"{end_time - start_time:.2f} seconds{Colors.ENDC}"
         )
 
-        # 清理缓存文件
         print(f"{Colors.YELLOW}🧹 Cleaning up cache files...{Colors.ENDC}")
-        if os.name == "nt":  # Windows
-            os.system(
-                "powershell -Command \"Get-ChildItem -Path . -Filter '__pycache__' -Recurse -Directory | Remove-Item -Recurse -Force\" 2>nul"
-            )
-        else:  # Unix/Linux/macOS
-            os.system('find . -type d -name "__pycache__" -exec rm -r {} + 2>/dev/null')
+        _cleanup_pycache(parent_dir)
 
         print(
             f"{Colors.OKGREEN}✨ Goodbye! Thanks for using DeepCode CLI! ✨{Colors.ENDC}"
         )
 
 
+# ---------------------------------------------------------------------------
+# Click command group
+# ---------------------------------------------------------------------------
+
+@click.group(invoke_without_command=True)
+@click.pass_context
+def main(ctx: click.Context) -> None:
+    """
+    DeepCode CLI - Intelligent Code Agent by Data Intelligence Lab @ HKU.
+
+    When invoked without a sub-command, starts the interactive session.
+    """
+    if ctx.invoked_subcommand is None:
+        asyncio.run(_run_interactive_session())
+
+
+@main.command("run")
+def run_cmd() -> None:
+    """Start the interactive DeepCode session (same as invoking without a command)."""
+    asyncio.run(_run_interactive_session())
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
