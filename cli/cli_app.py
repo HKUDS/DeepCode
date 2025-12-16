@@ -10,11 +10,8 @@ DeepCode - CLI Application Main Program
 import os
 import sys
 import asyncio
-import shutil
 import time
 import json
-
-import click
 
 # 禁止生成.pyc文件
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -29,14 +26,6 @@ if parent_dir not in sys.path:
 
 from cli.workflows import CLIWorkflowAdapter
 from cli.cli_interface import CLIInterface, Colors
-
-
-def _cleanup_pycache(base_path: str) -> None:
-    """Recursively remove __pycache__ directories under base_path."""
-    for root, dirs, _ in os.walk(base_path, topdown=False):
-        for d in dirs:
-            if d == "__pycache__":
-                shutil.rmtree(os.path.join(root, d), ignore_errors=True)
 
 
 class CLIApp:
@@ -143,37 +132,26 @@ class CLIApp:
         print(f"{Colors.BOLD}{Colors.OKCYAN}📊 ANALYSIS PHASE RESULTS:{Colors.ENDC}")
         self.cli.print_separator("─", 79, Colors.CYAN)
 
-        # 尝试解析并格式化分析结果
+        # Results are pre-truncated by workflow_adapter, so display directly
+        # Only attempt JSON parsing/formatting for structured data
         try:
             if analysis_result.strip().startswith("{"):
                 parsed_analysis = json.loads(analysis_result)
                 print(json.dumps(parsed_analysis, indent=2, ensure_ascii=False))
             else:
-                print(
-                    analysis_result[:1000] + "..."
-                    if len(analysis_result) > 1000
-                    else analysis_result
-                )
+                print(analysis_result)
         except Exception:
-            print(
-                analysis_result[:1000] + "..."
-                if len(analysis_result) > 1000
-                else analysis_result
-            )
+            print(analysis_result)
 
         print(f"\n{Colors.BOLD}{Colors.PURPLE}📥 DOWNLOAD PHASE RESULTS:{Colors.ENDC}")
         self.cli.print_separator("─", 79, Colors.PURPLE)
-        print(
-            download_result[:1000] + "..."
-            if len(download_result) > 1000
-            else download_result
-        )
+        print(download_result)
 
         print(
             f"\n{Colors.BOLD}{Colors.GREEN}⚙️  IMPLEMENTATION PHASE RESULTS:{Colors.ENDC}"
         )
         self.cli.print_separator("─", 79, Colors.GREEN)
-        print(repo_result[:1000] + "..." if len(repo_result) > 1000 else repo_result)
+        print(repo_result)
 
         # 尝试提取生成的代码目录信息
         if "Code generated in:" in repo_result:
@@ -274,11 +252,12 @@ class CLIApp:
             await self.cleanup_mcp_app()
 
 
-async def _run_interactive_session() -> None:
-    """Run the interactive CLI session (async helper)."""
+async def main():
+    """主函数"""
     start_time = time.time()
 
     try:
+        # 创建并运行CLI应用
         app = CLIApp()
         await app.run_interactive_session()
 
@@ -289,39 +268,22 @@ async def _run_interactive_session() -> None:
     finally:
         end_time = time.time()
         print(
-            f"\n{Colors.BOLD}{Colors.CYAN}⏱️  Total runtime: "
-            f"{end_time - start_time:.2f} seconds{Colors.ENDC}"
+            f"\n{Colors.BOLD}{Colors.CYAN}⏱️  Total runtime: {end_time - start_time:.2f} seconds{Colors.ENDC}"
         )
 
+        # 清理缓存文件
         print(f"{Colors.YELLOW}🧹 Cleaning up cache files...{Colors.ENDC}")
-        _cleanup_pycache(parent_dir)
+        if os.name == "nt":  # Windows
+            os.system(
+                "powershell -Command \"Get-ChildItem -Path . -Filter '__pycache__' -Recurse -Directory | Remove-Item -Recurse -Force\" 2>nul"
+            )
+        else:  # Unix/Linux/macOS
+            os.system('find . -type d -name "__pycache__" -exec rm -r {} + 2>/dev/null')
 
         print(
             f"{Colors.OKGREEN}✨ Goodbye! Thanks for using DeepCode CLI! ✨{Colors.ENDC}"
         )
 
 
-# ---------------------------------------------------------------------------
-# Click command group
-# ---------------------------------------------------------------------------
-
-@click.group(invoke_without_command=True)
-@click.pass_context
-def main(ctx: click.Context) -> None:
-    """
-    DeepCode CLI - Intelligent Code Agent by Data Intelligence Lab @ HKU.
-
-    When invoked without a sub-command, starts the interactive session.
-    """
-    if ctx.invoked_subcommand is None:
-        asyncio.run(_run_interactive_session())
-
-
-@main.command("run")
-def run_cmd() -> None:
-    """Start the interactive DeepCode session (same as invoking without a command)."""
-    asyncio.run(_run_interactive_session())
-
-
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

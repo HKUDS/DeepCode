@@ -10,6 +10,25 @@ import os
 from typing import Callable, Dict, Any
 from mcp_agent.app import MCPApp
 
+# Default truncation limit for CLI display
+CLI_DISPLAY_TRUNCATE_LIMIT = 1000
+
+
+def truncate_for_display(text: str, limit: int = CLI_DISPLAY_TRUNCATE_LIMIT) -> str:
+    """
+    Truncate text for CLI display, adding ellipsis if truncated.
+
+    Args:
+        text: The text to truncate
+        limit: Maximum length before truncation
+
+    Returns:
+        Truncated text with '...' suffix if it exceeded the limit
+    """
+    if len(text) > limit:
+        return text[:limit] + "..."
+    return text
+
 
 class CLIWorkflowAdapter:
     """
@@ -20,6 +39,37 @@ class CLIWorkflowAdapter:
     - Optimized error handling for CLI environments
     - Streamlined interface for command-line usage
     - Integration with the latest agent orchestration engine
+
+    Usage Examples:
+
+    File-based Input:
+        >>> adapter = CLIWorkflowAdapter(cli_interface=cli)
+        >>> await adapter.initialize_mcp_app()
+        >>> result = await adapter.process_input_with_orchestration(
+        ...     input_source="/path/to/file.py",
+        ...     input_type="file",
+        ...     enable_indexing=True
+        ... )
+        >>> await adapter.cleanup_mcp_app()
+
+    Chat-based Input:
+        >>> adapter = CLIWorkflowAdapter(cli_interface=cli)
+        >>> await adapter.initialize_mcp_app()
+        >>> result = await adapter.process_input_with_orchestration(
+        ...     input_source="Implement a user authentication system",
+        ...     input_type="chat",
+        ...     enable_indexing=True
+        ... )
+        >>> await adapter.cleanup_mcp_app()
+
+    Without CLI Interface (graceful fallback):
+        >>> adapter = CLIWorkflowAdapter()  # No cli_interface provided
+        >>> await adapter.initialize_mcp_app()
+        >>> result = await adapter.execute_full_pipeline(
+        ...     input_source="/path/to/file.py",
+        ...     enable_indexing=True
+        ... )
+        >>> await adapter.cleanup_mcp_app()
     """
 
     def __init__(self, cli_interface=None):
@@ -308,11 +358,17 @@ class CLIWorkflowAdapter:
                     input_source, enable_indexing=enable_indexing
                 )
 
+            # Truncate results at source to avoid passing large strings around
+            repo_result = pipeline_result.get("result", "")
             return {
                 "status": pipeline_result["status"],
-                "analysis_result": "Integrated into agent orchestration pipeline",
-                "download_result": "Integrated into agent orchestration pipeline",
-                "repo_result": pipeline_result.get("result", ""),
+                "analysis_result": truncate_for_display(
+                    "Integrated into agent orchestration pipeline"
+                ),
+                "download_result": truncate_for_display(
+                    "Integrated into agent orchestration pipeline"
+                ),
+                "repo_result": truncate_for_display(repo_result),
                 "pipeline_mode": pipeline_result.get("pipeline_mode", "comprehensive"),
                 "error": pipeline_result.get("error"),
             }
@@ -324,7 +380,7 @@ class CLIWorkflowAdapter:
 
             return {
                 "status": "error",
-                "error": error_msg,
+                "error": truncate_for_display(error_msg),
                 "analysis_result": "",
                 "download_result": "",
                 "repo_result": "",
