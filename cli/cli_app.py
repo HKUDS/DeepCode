@@ -12,6 +12,7 @@ import sys
 import asyncio
 import time
 import json
+import click
 
 # 禁止生成.pyc文件
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -23,7 +24,6 @@ if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
 # 导入MCP应用和工作流
-
 from cli.workflows import CLIWorkflowAdapter
 from cli.cli_interface import CLIInterface, Colors
 
@@ -31,12 +31,14 @@ from cli.cli_interface import CLIInterface, Colors
 class CLIApp:
     """CLI应用主类 - 升级版智能体编排引擎"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.cli = CLIInterface()
         self.workflow_adapter = CLIWorkflowAdapter(cli_interface=self.cli)
         self.app = None  # Will be initialized by workflow adapter
         self.logger = None
-        self.context = None
+        # Context for storing last run metadata (input_source, input_type, error_flag)
+        # 同时用于 /retry-last 聊天命令
+        self.context = {"last_input": None}
         # Document segmentation will be managed by CLI interface
 
     async def initialize_mcp_app(self):
@@ -49,7 +51,12 @@ class CLIApp:
         await self.workflow_adapter.cleanup_mcp_app()
 
     async def process_input(self, input_source: str, input_type: str):
-        """处理输入源（URL或文件）- 使用升级版智能体编排引擎"""
+        """处理输入源（URL或文件/聊天）- 使用升级版智能体编排引擎
+
+        同时在 ``self.context["last_input"]`` 中记录最近一次运行的
+        ``(input_source, input_type, error_flag)`` 信息，供 /retry-last 使用。
+        """
+
         try:
             # Document segmentation configuration is managed by CLI interface
 
@@ -68,7 +75,10 @@ class CLIApp:
                 enable_indexing=self.cli.enable_indexing,
             )
 
-            if result["status"] == "success":
+            # 标记本次运行是否出错
+            error_flag = result.get("status") != "success"
+
+            if not error_flag:
                 # 显示完成状态
                 final_stage = 8 if self.cli.enable_indexing else 5
                 self.cli.display_processing_stages(
@@ -94,9 +104,18 @@ class CLIApp:
             # 添加到历史记录
             self.cli.add_to_history(input_source, result)
 
+            # 在上下文中记录最近一次运行的输入信息
+            if self.context is None or not isinstance(self.context, dict):
+                self.context = {"last_input": None}
+            self.context["last_input"] = {
+                "input_source": input_source,
+                "input_type": input_type,
+                "error": error_flag,
+            }
+
             return result
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             error_msg = str(e)
             self.cli.print_error_box("Agent Orchestration Error", error_msg)
             self.cli.print_status(f"Error during orchestration: {error_msg}", "error")
@@ -104,6 +123,15 @@ class CLIApp:
             # 添加错误到历史记录
             error_result = {"status": "error", "error": error_msg}
             self.cli.add_to_history(input_source, error_result)
+
+            # 在上下文中记录最近一次失败运行的信息
+            if self.context is None or not isinstance(self.context, dict):
+                self.context = {"last_input": None}
+            self.context["last_input"] = {
+                "input_source": input_source,
+                "input_type": input_type,
+                "error": True,
+            }
 
             return error_result
 
@@ -143,7 +171,7 @@ class CLIApp:
                     if len(analysis_result) > 1000
                     else analysis_result
                 )
-        except Exception:
+        except Exception:  # noqa: BLE001
             print(
                 analysis_result[:1000] + "..."
                 if len(analysis_result) > 1000
@@ -233,8 +261,43 @@ class CLIApp:
 
                 elif choice in ["t", "chat", "text"]:
                     chat_input = self.cli.get_chat_input()
-                    if chat_input:
-                        await self.process_input(chat_input, "chat")
+                    if not chat_input:
+                        # 用户取消或未提供输入
+                        continue
+
+                    # 处理聊天命令（以 "/" 开头）
+                    if chat_input.strip() == "/retry-last":
+                        last = None
+                        if isinstance(self.context, dict):
+                            last = self.context.get("last_input")
+
+                        if not last:
+                            self.cli.print_status(
+                                "No previous run available to retry.", "warning"
+                            )
+                        elif not last.get("error"):
+                            self.cli.print_status(
+                                "Last run was successful; nothing to retry.", "info"
+                            )
+                        else:
+                            source = last.get("input_source")
+                            input_type = last.get("input_type", "chat")
+                            if not source:
+                                self.cli.print_status(
+                                    "Previous failed run has no input source to retry.",
+                                    "error",
+                                )
+                            else:
+                                self.cli.print_status(
+                                    "Retrying last failed input...", "processing"
+                                )
+                                await self.process_input(source, input_type)
+
+                        # 处理完命令后继续主循环
+                        continue
+
+                    # 普通聊天输入 - 直接作为 chat 类型处理
+                    await self.process_input(chat_input, "chat")
 
                 elif choice in ["h", "history"]:
                     self.cli.show_history()
@@ -256,15 +319,15 @@ class CLIApp:
 
         except KeyboardInterrupt:
             print(f"\n{Colors.WARNING}⚠️  Process interrupted by user{Colors.ENDC}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"\n{Colors.FAIL}❌ Unexpected error: {str(e)}{Colors.ENDC}")
         finally:
             # 清理资源
             await self.cleanup_mcp_app()
 
 
-async def main():
-    """主函数"""
+async def run_interactive_cli():
+    """Run the interactive CLI session"""
     start_time = time.time()
 
     try:
@@ -274,7 +337,7 @@ async def main():
 
     except KeyboardInterrupt:
         print(f"\n{Colors.WARNING}⚠️  Application interrupted by user{Colors.ENDC}")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"\n{Colors.FAIL}❌ Application error: {str(e)}{Colors.ENDC}")
     finally:
         end_time = time.time()
@@ -296,5 +359,76 @@ async def main():
         )
 
 
+@click.group(invoke_without_command=True)
+@click.pass_context
+@click.version_option(version="1.0.0", prog_name="DeepCode")
+def cli(ctx):
+    """
+    DeepCode - Open-Source Code Agent by Data Intelligence Lab @ HKU
+
+    🧬 Revolutionizing research reproducibility through collaborative AI
+    ⚡ Transform research papers into working code automatically
+    """
+    # If no subcommand is provided, run the interactive session by default
+    if ctx.invoked_subcommand is None:
+        asyncio.run(run_interactive_cli())
+
+
+@cli.command()
+def run():
+    """Run the interactive DeepCode CLI session"""
+    asyncio.run(run_interactive_cli())
+
+
+@cli.command()
+def config():
+    """Show or modify DeepCode configuration settings"""
+    click.echo(f"{Colors.BOLD}{Colors.CYAN}⚙️  DeepCode Configuration{Colors.ENDC}")
+    click.echo(f"{Colors.YELLOW}Configuration management coming soon!{Colors.ENDC}")
+    click.echo("\nPlanned features:")
+    click.echo("  • View current configuration")
+    click.echo("  • Set default processing mode (comprehensive/optimized)")
+    click.echo("  • Configure API keys and endpoints")
+    click.echo("  • Manage workspace settings")
+
+
+@cli.command()
+@click.option('--cache', is_flag=True, help='Clean Python cache files (__pycache__)')
+@click.option('--logs', is_flag=True, help='Clean log files')
+@click.option('--all', 'clean_all', is_flag=True, help='Clean all temporary files')
+def clean(cache, logs, clean_all):
+    """Clean temporary files and caches"""
+    click.echo(f"{Colors.BOLD}{Colors.CYAN}🧹 DeepCode Cleanup Utility{Colors.ENDC}")
+
+    if not (cache or logs or clean_all):
+        click.echo(f"{Colors.WARNING}No cleanup options specified. Use --help for options.{Colors.ENDC}")
+        return
+
+    if clean_all or cache:
+        click.echo(f"\n{Colors.YELLOW}Cleaning Python cache files...{Colors.ENDC}")
+        if os.name == "nt":  # Windows
+            os.system(
+                "powershell -Command \"Get-ChildItem -Path . -Filter '__pycache__' -Recurse -Directory | Remove-Item -Recurse -Force\" 2>nul"
+            )
+        else:  # Unix/Linux/macOS
+            os.system('find . -type d -name "__pycache__" -exec rm -r {} + 2>/dev/null')
+        click.echo(f"{Colors.OKGREEN}✓ Cache files cleaned{Colors.ENDC}")
+
+    if clean_all or logs:
+        click.echo(f"\n{Colors.YELLOW}Cleaning log files...{Colors.ENDC}")
+        log_dirs = ["logs", "cli/logs"]
+        for log_dir in log_dirs:
+            if os.path.exists(log_dir):
+                import shutil
+                try:
+                    shutil.rmtree(log_dir)
+                    os.makedirs(log_dir, exist_ok=True)
+                    click.echo(f"{Colors.OKGREEN}✓ Cleaned {log_dir}{Colors.ENDC}")
+                except Exception as e:
+                    click.echo(f"{Colors.FAIL}✗ Failed to clean {log_dir}: {e}{Colors.ENDC}")
+
+    click.echo(f"\n{Colors.OKGREEN}✨ Cleanup complete!{Colors.ENDC}")
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    cli()

@@ -7,7 +7,10 @@ with enhanced progress reporting, error handling, and CLI-specific optimizations
 """
 
 import os
-from typing import Callable, Dict, Any
+from datetime import datetime
+from typing import Any, Callable, Dict
+
+import httpx
 from mcp_agent.app import MCPApp
 
 
@@ -94,8 +97,7 @@ class CLIWorkflowAdapter:
                     )
 
     def create_cli_progress_callback(self) -> Callable:
-        """
-        Create CLI-optimized progress callback function.
+        """Create CLI-optimized progress callback function.
 
         Returns:
             Callable: Progress callback function
@@ -126,11 +128,46 @@ class CLIWorkflowAdapter:
 
         return progress_callback
 
+    async def _send_pipeline_webhook_notification(
+        self,
+        input_source: str,
+        enable_indexing: bool,
+        pipeline_mode: str,
+        result: Dict[str, Any],
+    ) -> None:
+        """Send an optional webhook notification when a pipeline run completes.
+
+        The webhook URL is configured via the ``PIPELINE_WEBHOOK_URL`` environment
+        variable. If it is not set, this method is a no-op.
+        """
+        webhook_url = os.getenv("PIPELINE_WEBHOOK_URL")
+        if not webhook_url:
+            return
+
+        payload: Dict[str, Any] = {
+            "event": "pipeline.completed",
+            "status": result.get("status", "unknown"),
+            "pipeline_mode": pipeline_mode,
+            "input_source": input_source,
+            "enable_indexing": enable_indexing,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+        }
+        if "error" in result:
+            payload["error"] = result["error"]
+
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                await client.post(webhook_url, json=payload)
+        except Exception as exc:  # Webhook failures must not break the CLI flow
+            if self.logger:
+                self.logger.warning(
+                    f"Webhook notification failed for {webhook_url}: {exc}"
+                )
+
     async def execute_full_pipeline(
         self, input_source: str, enable_indexing: bool = True
     ) -> Dict[str, Any]:
-        """
-        Execute the complete intelligent multi-agent research orchestration pipeline.
+        """Execute the complete intelligent multi-agent research orchestration pipeline.
 
         Args:
             input_source: Research input source (file path, URL, or preprocessed analysis)
@@ -139,6 +176,8 @@ class CLIWorkflowAdapter:
         Returns:
             dict: Comprehensive pipeline execution result
         """
+        pipeline_mode = "comprehensive" if enable_indexing else "optimized"
+        response: Dict[str, Any]
         try:
             # Import the latest agent orchestration engine
             from workflows.agent_orchestration_engine import (
@@ -150,9 +189,9 @@ class CLIWorkflowAdapter:
 
             # Display pipeline start
             if self.cli_interface:
-                mode = "comprehensive" if enable_indexing else "optimized"
                 self.cli_interface.print_status(
-                    f"🚀 Starting {mode} agent orchestration pipeline...", "processing"
+                    f"🚀 Starting {pipeline_mode} agent orchestration pipeline...",
+                    "processing",
                 )
                 self.cli_interface.display_processing_stages(0)
 
@@ -172,22 +211,31 @@ class CLIWorkflowAdapter:
                     "complete",
                 )
 
-            return {
+            response = {
                 "status": "success",
                 "result": result,
-                "pipeline_mode": "comprehensive" if enable_indexing else "optimized",
+                "pipeline_mode": pipeline_mode,
             }
-
         except Exception as e:
             error_msg = f"Pipeline execution failed: {str(e)}"
             if self.cli_interface:
                 self.cli_interface.print_status(error_msg, "error")
 
-            return {
+            response = {
                 "status": "error",
                 "error": error_msg,
-                "pipeline_mode": "comprehensive" if enable_indexing else "optimized",
+                "pipeline_mode": pipeline_mode,
             }
+
+        # Notify external systems (if configured) that the pipeline has completed
+        await self._send_pipeline_webhook_notification(
+            input_source=input_source,
+            enable_indexing=enable_indexing,
+            pipeline_mode=pipeline_mode,
+            result=response,
+        )
+
+        return response
 
     async def execute_chat_pipeline(self, user_input: str) -> Dict[str, Any]:
         """
