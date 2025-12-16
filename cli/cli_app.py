@@ -12,7 +12,6 @@ import sys
 import asyncio
 import time
 import json
-import click
 
 # 禁止生成.pyc文件
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -161,36 +160,25 @@ class CLIApp:
         self.cli.print_separator("─", 79, Colors.CYAN)
 
         # 尝试解析并格式化分析结果
+        # Note: Results are already truncated at source in workflow_adapter
         try:
             if analysis_result.strip().startswith("{"):
                 parsed_analysis = json.loads(analysis_result)
                 print(json.dumps(parsed_analysis, indent=2, ensure_ascii=False))
             else:
-                print(
-                    analysis_result[:1000] + "..."
-                    if len(analysis_result) > 1000
-                    else analysis_result
-                )
+                print(analysis_result)
         except Exception:  # noqa: BLE001
-            print(
-                analysis_result[:1000] + "..."
-                if len(analysis_result) > 1000
-                else analysis_result
-            )
+            print(analysis_result)
 
         print(f"\n{Colors.BOLD}{Colors.PURPLE}📥 DOWNLOAD PHASE RESULTS:{Colors.ENDC}")
         self.cli.print_separator("─", 79, Colors.PURPLE)
-        print(
-            download_result[:1000] + "..."
-            if len(download_result) > 1000
-            else download_result
-        )
+        print(download_result)
 
         print(
             f"\n{Colors.BOLD}{Colors.GREEN}⚙️  IMPLEMENTATION PHASE RESULTS:{Colors.ENDC}"
         )
         self.cli.print_separator("─", 79, Colors.GREEN)
-        print(repo_result[:1000] + "..." if len(repo_result) > 1000 else repo_result)
+        print(repo_result)
 
         # 尝试提取生成的代码目录信息
         if "Code generated in:" in repo_result:
@@ -326,8 +314,8 @@ class CLIApp:
             await self.cleanup_mcp_app()
 
 
-async def run_interactive_cli():
-    """Run the interactive CLI session"""
+async def main():
+    """主函数"""
     start_time = time.time()
 
     try:
@@ -359,76 +347,5 @@ async def run_interactive_cli():
         )
 
 
-@click.group(invoke_without_command=True)
-@click.pass_context
-@click.version_option(version="1.0.0", prog_name="DeepCode")
-def cli(ctx):
-    """
-    DeepCode - Open-Source Code Agent by Data Intelligence Lab @ HKU
-
-    🧬 Revolutionizing research reproducibility through collaborative AI
-    ⚡ Transform research papers into working code automatically
-    """
-    # If no subcommand is provided, run the interactive session by default
-    if ctx.invoked_subcommand is None:
-        asyncio.run(run_interactive_cli())
-
-
-@cli.command()
-def run():
-    """Run the interactive DeepCode CLI session"""
-    asyncio.run(run_interactive_cli())
-
-
-@cli.command()
-def config():
-    """Show or modify DeepCode configuration settings"""
-    click.echo(f"{Colors.BOLD}{Colors.CYAN}⚙️  DeepCode Configuration{Colors.ENDC}")
-    click.echo(f"{Colors.YELLOW}Configuration management coming soon!{Colors.ENDC}")
-    click.echo("\nPlanned features:")
-    click.echo("  • View current configuration")
-    click.echo("  • Set default processing mode (comprehensive/optimized)")
-    click.echo("  • Configure API keys and endpoints")
-    click.echo("  • Manage workspace settings")
-
-
-@cli.command()
-@click.option('--cache', is_flag=True, help='Clean Python cache files (__pycache__)')
-@click.option('--logs', is_flag=True, help='Clean log files')
-@click.option('--all', 'clean_all', is_flag=True, help='Clean all temporary files')
-def clean(cache, logs, clean_all):
-    """Clean temporary files and caches"""
-    click.echo(f"{Colors.BOLD}{Colors.CYAN}🧹 DeepCode Cleanup Utility{Colors.ENDC}")
-
-    if not (cache or logs or clean_all):
-        click.echo(f"{Colors.WARNING}No cleanup options specified. Use --help for options.{Colors.ENDC}")
-        return
-
-    if clean_all or cache:
-        click.echo(f"\n{Colors.YELLOW}Cleaning Python cache files...{Colors.ENDC}")
-        if os.name == "nt":  # Windows
-            os.system(
-                "powershell -Command \"Get-ChildItem -Path . -Filter '__pycache__' -Recurse -Directory | Remove-Item -Recurse -Force\" 2>nul"
-            )
-        else:  # Unix/Linux/macOS
-            os.system('find . -type d -name "__pycache__" -exec rm -r {} + 2>/dev/null')
-        click.echo(f"{Colors.OKGREEN}✓ Cache files cleaned{Colors.ENDC}")
-
-    if clean_all or logs:
-        click.echo(f"\n{Colors.YELLOW}Cleaning log files...{Colors.ENDC}")
-        log_dirs = ["logs", "cli/logs"]
-        for log_dir in log_dirs:
-            if os.path.exists(log_dir):
-                import shutil
-                try:
-                    shutil.rmtree(log_dir)
-                    os.makedirs(log_dir, exist_ok=True)
-                    click.echo(f"{Colors.OKGREEN}✓ Cleaned {log_dir}{Colors.ENDC}")
-                except Exception as e:
-                    click.echo(f"{Colors.FAIL}✗ Failed to clean {log_dir}: {e}{Colors.ENDC}")
-
-    click.echo(f"\n{Colors.OKGREEN}✨ Cleanup complete!{Colors.ENDC}")
-
-
 if __name__ == "__main__":
-    cli()
+    asyncio.run(main())

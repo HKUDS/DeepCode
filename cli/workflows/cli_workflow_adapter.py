@@ -25,6 +25,9 @@ class CLIWorkflowAdapter:
     - Integration with the latest agent orchestration engine
     """
 
+    # Maximum length for result strings to avoid building giant strings
+    MAX_RESULT_LENGTH = 1000
+
     def __init__(self, cli_interface=None):
         """
         Initialize CLI workflow adapter.
@@ -36,6 +39,24 @@ class CLIWorkflowAdapter:
         self.app = None
         self.logger = None
         self.context = None
+
+    @staticmethod
+    def _truncate_result(result: str, max_length: int = MAX_RESULT_LENGTH) -> str:
+        """
+        Truncate result string at source to avoid building giant strings.
+
+        Args:
+            result: Result string to truncate
+            max_length: Maximum length (default: 1000)
+
+        Returns:
+            Truncated string with ellipsis if needed
+        """
+        if not result:
+            return ""
+        if len(result) <= max_length:
+            return result
+        return result[:max_length] + "..."
 
     async def initialize_mcp_app(self) -> Dict[str, Any]:
         """
@@ -356,11 +377,15 @@ class CLIWorkflowAdapter:
                     input_source, enable_indexing=enable_indexing
                 )
 
+            # Truncate repo_result at source to avoid building giant strings
+            raw_result = pipeline_result.get("result", "")
+            truncated_result = self._truncate_result(raw_result)
+
             return {
                 "status": pipeline_result["status"],
                 "analysis_result": "Integrated into agent orchestration pipeline",
                 "download_result": "Integrated into agent orchestration pipeline",
-                "repo_result": pipeline_result.get("result", ""),
+                "repo_result": truncated_result,
                 "pipeline_mode": pipeline_result.get("pipeline_mode", "comprehensive"),
                 "error": pipeline_result.get("error"),
             }
