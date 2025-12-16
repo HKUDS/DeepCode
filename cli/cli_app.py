@@ -132,26 +132,37 @@ class CLIApp:
         print(f"{Colors.BOLD}{Colors.OKCYAN}📊 ANALYSIS PHASE RESULTS:{Colors.ENDC}")
         self.cli.print_separator("─", 79, Colors.CYAN)
 
-        # Results are pre-truncated by workflow_adapter, so display directly
-        # Only attempt JSON parsing/formatting for structured data
+        # 尝试解析并格式化分析结果
         try:
             if analysis_result.strip().startswith("{"):
                 parsed_analysis = json.loads(analysis_result)
                 print(json.dumps(parsed_analysis, indent=2, ensure_ascii=False))
             else:
-                print(analysis_result)
+                print(
+                    analysis_result[:1000] + "..."
+                    if len(analysis_result) > 1000
+                    else analysis_result
+                )
         except Exception:
-            print(analysis_result)
+            print(
+                analysis_result[:1000] + "..."
+                if len(analysis_result) > 1000
+                else analysis_result
+            )
 
         print(f"\n{Colors.BOLD}{Colors.PURPLE}📥 DOWNLOAD PHASE RESULTS:{Colors.ENDC}")
         self.cli.print_separator("─", 79, Colors.PURPLE)
-        print(download_result)
+        print(
+            download_result[:1000] + "..."
+            if len(download_result) > 1000
+            else download_result
+        )
 
         print(
             f"\n{Colors.BOLD}{Colors.GREEN}⚙️  IMPLEMENTATION PHASE RESULTS:{Colors.ENDC}"
         )
         self.cli.print_separator("─", 79, Colors.GREEN)
-        print(repo_result)
+        print(repo_result[:1000] + "..." if len(repo_result) > 1000 else repo_result)
 
         # 尝试提取生成的代码目录信息
         if "Code generated in:" in repo_result:
@@ -244,7 +255,8 @@ class CLIApp:
                         self.cli.print_status("Session ended by user", "info")
 
         except KeyboardInterrupt:
-            print(f"\n{Colors.WARNING}⚠️  Process interrupted by user{Colors.ENDC}")
+            # Re-raise to let main() handle it uniformly
+            raise
         except Exception as e:
             print(f"\n{Colors.FAIL}❌ Unexpected error: {str(e)}{Colors.ENDC}")
         finally:
