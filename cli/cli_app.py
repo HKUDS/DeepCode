@@ -39,6 +39,7 @@ class CLIApp:
         # 同时用于 /retry-last 聊天命令
         self.context = {"last_input": None}
         # Document segmentation will be managed by CLI interface
+        self._interrupt_handled = False  # Track if KeyboardInterrupt was already handled
 
     async def initialize_mcp_app(self):
         """初始化MCP应用 - 使用工作流适配器"""
@@ -160,25 +161,36 @@ class CLIApp:
         self.cli.print_separator("─", 79, Colors.CYAN)
 
         # 尝试解析并格式化分析结果
-        # Note: Results are already truncated at source in workflow_adapter
         try:
             if analysis_result.strip().startswith("{"):
                 parsed_analysis = json.loads(analysis_result)
                 print(json.dumps(parsed_analysis, indent=2, ensure_ascii=False))
             else:
-                print(analysis_result)
+                print(
+                    analysis_result[:1000] + "..."
+                    if len(analysis_result) > 1000
+                    else analysis_result
+                )
         except Exception:  # noqa: BLE001
-            print(analysis_result)
+            print(
+                analysis_result[:1000] + "..."
+                if len(analysis_result) > 1000
+                else analysis_result
+            )
 
         print(f"\n{Colors.BOLD}{Colors.PURPLE}📥 DOWNLOAD PHASE RESULTS:{Colors.ENDC}")
         self.cli.print_separator("─", 79, Colors.PURPLE)
-        print(download_result)
+        print(
+            download_result[:1000] + "..."
+            if len(download_result) > 1000
+            else download_result
+        )
 
         print(
             f"\n{Colors.BOLD}{Colors.GREEN}⚙️  IMPLEMENTATION PHASE RESULTS:{Colors.ENDC}"
         )
         self.cli.print_separator("─", 79, Colors.GREEN)
-        print(repo_result)
+        print(repo_result[:1000] + "..." if len(repo_result) > 1000 else repo_result)
 
         # 尝试提取生成的代码目录信息
         if "Code generated in:" in repo_result:
@@ -306,7 +318,11 @@ class CLIApp:
                         self.cli.print_status("Session ended by user", "info")
 
         except KeyboardInterrupt:
-            print(f"\n{Colors.WARNING}⚠️  Process interrupted by user{Colors.ENDC}")
+            if not self._interrupt_handled:
+                self._interrupt_handled = True
+                print(
+                    f"\n{Colors.WARNING}⚠️  Process interrupted by user{Colors.ENDC}"
+                )
         except Exception as e:  # noqa: BLE001
             print(f"\n{Colors.FAIL}❌ Unexpected error: {str(e)}{Colors.ENDC}")
         finally:
@@ -317,6 +333,7 @@ class CLIApp:
 async def main():
     """主函数"""
     start_time = time.time()
+    app = None
 
     try:
         # 创建并运行CLI应用
@@ -324,7 +341,11 @@ async def main():
         await app.run_interactive_session()
 
     except KeyboardInterrupt:
-        print(f"\n{Colors.WARNING}⚠️  Application interrupted by user{Colors.ENDC}")
+        # Only print if not already handled by run_interactive_session
+        if app is None or not app._interrupt_handled:
+            print(
+                f"\n{Colors.WARNING}⚠️  Application interrupted by user{Colors.ENDC}"
+            )
     except Exception as e:  # noqa: BLE001
         print(f"\n{Colors.FAIL}❌ Application error: {str(e)}{Colors.ENDC}")
     finally:
