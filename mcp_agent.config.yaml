@@ -112,6 +112,9 @@ openai:
   # default_model: openai/gpt-oss-120b
   # default_model: deepseek/deepseek-v3.2-exp
   # default_model: moonshotai/kimi-k2-thinking
+# For local OpenAI-compatible servers (e.g., LM Studio), set the base URL (should include /v1) and default model name. Example:
+  # base_url: "http://localhost:1234/v1"
+  # default_model: unsloth/Qwen3-30B-A3B-Thinking-2507-GGUF
   reasoning_effort: low  # Only for thinking models
   max_tokens_policy: adaptive
   retry_max_tokens: 32768
