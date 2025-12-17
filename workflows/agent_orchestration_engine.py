@@ -56,6 +56,7 @@ from utils.llm_utils import (
     should_use_document_segmentation,
     get_adaptive_agent_config,
     get_adaptive_prompts,
+    get_default_models,
     get_token_limits,
 )
 from workflows.agents.document_segmentation_agent import prepare_document_segments
@@ -63,6 +64,142 @@ from workflows.agents.requirement_analysis_agent import RequirementAnalysisAgent
 
 # Environment configuration
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"  # Prevent .pyc file generation
+
+
+def _normalize_openai_base_url(base_url: str) -> str:
+    if not base_url:
+        return base_url
+    base_url = base_url.strip().rstrip("/")
+    if base_url.endswith("/v1"):
+        return base_url
+    return f"{base_url}/v1"
+
+
+def _load_openai_connection_settings(
+    secrets_path: str = "mcp_agent.secrets.yaml",
+    config_path: str = "mcp_agent.config.yaml",
+) -> Dict[str, str]:
+    """Load OpenAI-compatible connection settings from secrets/config.
+
+    LM Studio uses an OpenAI-compatible API. The OpenAI SDK requires a non-empty api_key
+    even if the server doesn't enforce auth.
+    """
+    api_key = ""
+    base_url = ""
+
+    try:
+        if os.path.exists(secrets_path):
+            with open(secrets_path, "r", encoding="utf-8") as f:
+                secrets = yaml.safe_load(f) or {}
+            openai_secrets = (secrets.get("openai") or {})
+            api_key = (openai_secrets.get("api_key") or "").strip() or api_key
+            base_url = (openai_secrets.get("base_url") or "").strip() or base_url
+    except Exception:
+        # Secrets parsing errors shouldn't crash unrelated workflows.
+        pass
+
+    try:
+        if os.path.exists(config_path):
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = yaml.safe_load(f) or {}
+            openai_cfg = (config.get("openai") or {})
+            base_url = (openai_cfg.get("base_url") or "").strip() or base_url
+    except Exception:
+        pass
+
+    base_url = _normalize_openai_base_url(base_url) if base_url else ""
+    return {"api_key": api_key, "base_url": base_url}
+
+
+def _strip_thinking(text: str) -> str:
+    if not text:
+        return text
+    if "</think>" in text:
+        return text.split("</think>")[-1].strip()
+    # Best-effort fallback for models that emit an opening tag but no close.
+    stripped = text.lstrip()
+    if stripped.startswith("<think>"):
+        # If the model didn't close the tag, keep the tail after the last blank line.
+        parts = text.split("\n\n")
+        return parts[-1].strip() if parts else text.strip()
+    return text.strip()
+
+
+def _extract_yaml_from_fences(text: str) -> str:
+    """If the model wrapped YAML in a Markdown fence, return only the fenced YAML."""
+    if not text:
+        return text
+    pattern = r"```(?:yaml)?\s*\n(.*?)\n```"
+    m = re.search(pattern, text, flags=re.DOTALL | re.IGNORECASE)
+    if m:
+        return (m.group(1) or "").strip()
+    return text.strip()
+
+
+async def _direct_openai_chat_plan(
+    *,
+    model: str,
+    system_prompt: str,
+    user_message: str,
+    max_tokens: int,
+    temperature: float,
+    logger=None,
+) -> str:
+    from openai import AsyncOpenAI
+
+    settings = _load_openai_connection_settings()
+    api_key = settings.get("api_key") or ""
+    base_url = settings.get("base_url") or ""
+
+    if not api_key:
+        raise ValueError(
+            "OpenAI-compatible api_key is empty. Set openai.api_key in mcp_agent.secrets.yaml (LM Studio accepts a placeholder)."
+        )
+    if not base_url:
+        raise ValueError(
+            "OpenAI-compatible base_url is not configured. Set openai.base_url in mcp_agent.secrets.yaml or mcp_agent.config.yaml (example: http://HOST:PORT/v1)."
+        )
+
+    if logger:
+        try:
+            logger.info(f"Using OpenAI-compatible base_url: {base_url}")
+        except Exception:
+            pass
+
+    client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+    # Prefill with a closing think tag to encourage thinking models to finish with a clean final answer.
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_message},
+        {"role": "assistant", "content": "</think>\n"},
+    ]
+
+    try:
+        resp = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+    except Exception as e:
+        # Some OpenAI-compatible servers/models require max_completion_tokens.
+        if "max_tokens" in str(e) and "max_completion_tokens" in str(e):
+            resp = await client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                max_completion_tokens=max_tokens,
+            )
+        else:
+            raise
+
+    content = None
+    try:
+        content = resp.choices[0].message.content
+    except Exception:
+        content = None
+
+    return _extract_yaml_from_fences(_strip_thinking(content or ""))
 
 
 def _assess_output_completeness(text: str) -> float:
@@ -1589,7 +1726,26 @@ async def run_chat_planning_agent(user_input: str, logger) -> str:
                 print("✅ LLM attached successfully")
             except Exception as e:
                 print(f"❌ Failed to attach LLM: {e}")
-                raise
+                # Fallback: call the OpenAI-compatible endpoint directly (e.g., LM Studio)
+                try:
+                    models = get_default_models("mcp_agent.config.yaml")
+                    model_name = models.get("openai")
+                except Exception:
+                    model_name = None
+
+                model_name = model_name or "gpt-4o-mini"
+                fallback = await _direct_openai_chat_plan(
+                    model=model_name,
+                    system_prompt=CHAT_AGENT_PLANNING_PROMPT,
+                    user_message=user_input,
+                    max_tokens=8192,
+                    temperature=0.2,
+                    logger=logger,
+                )
+                if not fallback:
+                    raise
+                print("✅ Fallback planning (direct OpenAI-compatible) succeeded")
+                return fallback
 
             # Set higher token output for comprehensive planning
             planning_params = RequestParams(
@@ -1625,7 +1781,26 @@ Please provide a detailed implementation plan that covers all aspects needed for
             except Exception as e:
                 print(f"❌ Planning generation failed: {e}")
                 print(f"Exception type: {type(e)}")
-                raise
+                # Fallback: call the OpenAI-compatible endpoint directly (e.g., LM Studio)
+                try:
+                    models = get_default_models("mcp_agent.config.yaml")
+                    model_name = models.get("openai")
+                except Exception:
+                    model_name = None
+
+                model_name = model_name or "gpt-4o-mini"
+                fallback = await _direct_openai_chat_plan(
+                    model=model_name,
+                    system_prompt=CHAT_AGENT_PLANNING_PROMPT,
+                    user_message=formatted_message,
+                    max_tokens=planning_params.maxTokens,
+                    temperature=planning_params.temperature,
+                    logger=logger,
+                )
+                if not fallback:
+                    raise
+                print("✅ Fallback planning (direct OpenAI-compatible) succeeded")
+                raw_result = fallback
 
             # Log to SimpleLLMLogger
             if hasattr(logger, "log_response"):
@@ -1636,6 +1811,9 @@ Please provide a detailed implementation plan that covers all aspects needed for
             if not raw_result or raw_result.strip() == "":
                 print("❌ CRITICAL: Planning result is empty!")
                 raise ValueError("Chat planning agent produced empty output")
+
+            # Clean up thinking tags / markdown fences to keep downstream plan parsing stable.
+            raw_result = _extract_yaml_from_fences(_strip_thinking(raw_result))
 
             print("🎯 Chat planning completed successfully")
             print(f"Planning result preview: {raw_result[:500]}...")
