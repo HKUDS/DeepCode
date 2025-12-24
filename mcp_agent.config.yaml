@@ -1,5 +1,4 @@
 $schema: ./schema/mcp-agent.config.schema.json
-anthropic: null
 default_search_server: brave
 document_segmentation:
   enabled: false
@@ -101,9 +100,9 @@ mcp:
       env:
         PYTHONPATH: .
 # LLM Provider Priority (选择使用哪个LLM / Choose which LLM to use)
-# Options: "anthropic", "google", "openai"
+# Options: "anthropic", "google", "openai", "openrouter"
 # If not set or provider unavailable, will fallback to first available provider
-llm_provider: "google"  # 设置为 "google", "anthropic", 或 "openai"
+llm_provider: "google"  # 设置为 "google", "anthropic", "openai", 或 "openrouter"
 
 openai:
   base_max_tokens: 40000
@@ -122,5 +121,13 @@ google:
 
 anthropic:
   default_model: "claude-sonnet-4.5"
+
+# Configuration for OpenRouter (unified LLM gateway)
+openrouter:
+  base_url: "https://openrouter.ai/api/v1"
+  default_model: "anthropic/claude-sonnet-4"  # Use provider/model format
+  base_max_tokens: 40000
+  max_tokens_policy: adaptive
+  retry_max_tokens: 32768
 
 planning_mode: traditional

@@ -456,6 +456,36 @@
       "title": "OpenAISettings",
       "type": "object"
     },
+    "OpenRouterSettings": {
+      "additionalProperties": true,
+      "description": "Settings for using OpenRouter as a unified LLM gateway.",
+      "properties": {
+        "api_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Api Key"
+        },
+        "base_url": {
+          "default": "https://openrouter.ai/api/v1",
+          "title": "Base Url",
+          "type": "string"
+        },
+        "default_model": {
+          "default": "anthropic/claude-sonnet-4",
+          "title": "Default Model",
+          "type": "string"
+        }
+      },
+      "title": "OpenRouterSettings",
+      "type": "object"
+    },
     "AzureSettings": {
       "additionalProperties": true,
       "description": "Settings for using Azure models in the MCP Agent application.",
@@ -743,6 +773,37 @@
       ],
       "default": null,
       "description": "Settings for using OpenAI models in the MCP Agent application"
+    },
+    "openrouter": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/OpenRouterSettings"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Settings for using OpenRouter as a unified LLM gateway"
+    },
+    "llm_provider": {
+      "anyOf": [
+        {
+          "enum": [
+            "anthropic",
+            "google",
+            "openai",
+            "openrouter"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "LLM Provider",
+      "description": "Preferred LLM provider to use. Options: anthropic, google, openai, openrouter"
     },
     "azure": {
       "anyOf": [
