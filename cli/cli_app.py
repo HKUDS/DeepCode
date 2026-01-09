@@ -455,7 +455,8 @@ class CLIApp:
                         self.cli.print_status("Session ended by user", "info")
 
         except KeyboardInterrupt:
-            print(f"\n{Colors.WARNING}⚠️  Process interrupted by user{Colors.ENDC}")
+            # Re-raise to let main() handle it uniformly
+            raise
         except Exception as e:
             print(f"\n{Colors.FAIL}❌ Unexpected error: {str(e)}{Colors.ENDC}")
         finally:
