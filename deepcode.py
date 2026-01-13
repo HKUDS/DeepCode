@@ -116,14 +116,18 @@ def check_dependencies():
     return True
 
 
+import shutil
+
 def cleanup_cache():
     """Clean up Python cache files"""
     try:
         print("🧹 Cleaning up cache files...")
-        # Clean up __pycache__ directories
-        os.system('find . -type d -name "__pycache__" -exec rm -r {} + 2>/dev/null')
-        # Clean up .pyc files
-        os.system('find . -name "*.pyc" -delete 2>/dev/null')
+        for root, dirs, files in os.walk("."):
+            if "__pycache__" in dirs:
+                shutil.rmtree(os.path.join(root, "__pycache__"))
+            for file in files:
+                if file.endswith(".pyc"):
+                    os.remove(os.path.join(root, file))
         print("✅ Cache cleanup completed")
     except Exception as e:
         print(f"⚠️  Cache cleanup failed: {e}")
