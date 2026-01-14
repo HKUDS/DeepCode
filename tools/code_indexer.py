@@ -611,12 +611,20 @@ class CodeIndexer:
         add_to_tree(repo_path)
         return "\n".join(tree_lines)
 
-    def _generate_directory_tree(self, repo_path: Path, max_depth: int = 3) -> str:
-        """Generate directory-only tree structure (no files) for large repos"""
+    def _generate_directory_tree(self, repo_path: Path, max_depth: int = 2, max_dirs: int = 100) -> str:
+        """Generate directory-only tree structure (no files) for large repos
+
+        Args:
+            repo_path: Path to repository
+            max_depth: Maximum directory depth to traverse (reduced for large repos)
+            max_dirs: Maximum number of directories to include
+        """
         tree_lines = []
+        dir_count = 0
 
         def add_dirs(current_path: Path, prefix: str = "", depth: int = 0):
-            if depth > max_depth:
+            nonlocal dir_count
+            if depth > max_depth or dir_count > max_dirs:
                 return
             try:
                 dirs = sorted([
@@ -624,16 +632,22 @@ class CodeIndexer:
                     if item.is_dir()
                     and not item.name.startswith(".")
                     and item.name not in self.skip_directories
-                ])
+                ])[:30]  # Limit dirs per level
+
                 for i, item in enumerate(dirs):
+                    if dir_count > max_dirs:
+                        tree_lines.append(f"{prefix}... ({len(dirs) - i} more directories)")
+                        return
+                    dir_count += 1
                     is_last = i == len(dirs) - 1
                     current_prefix = "└── " if is_last else "├── "
-                    # Count files in this directory
+                    # Quick file count (only immediate children, not recursive)
                     try:
-                        file_count = sum(1 for f in item.rglob("*") if f.is_file() and f.suffix.lower() in self.supported_extensions)
-                        tree_lines.append(f"{prefix}{current_prefix}{item.name}/ ({file_count} files)")
+                        file_count = sum(1 for f in item.iterdir() if f.is_file() and f.suffix.lower() in self.supported_extensions)
+                        line = f"{prefix}{current_prefix}{item.name}/ ({file_count} code files)"
                     except:
-                        tree_lines.append(f"{prefix}{current_prefix}{item.name}/")
+                        line = f"{prefix}{current_prefix}{item.name}/"
+                    tree_lines.append(line)
                     extension_prefix = "    " if is_last else "│   "
                     add_dirs(item, prefix + extension_prefix, depth + 1)
             except (PermissionError, Exception):
@@ -641,6 +655,10 @@ class CodeIndexer:
 
         tree_lines.append(f"{repo_path.name}/")
         add_dirs(repo_path)
+
+        if dir_count > max_dirs:
+            self.logger.warning(f"Directory tree truncated at {dir_count} directories (max: {max_dirs})")
+
         return "\n".join(tree_lines)
 
     def _generate_filtered_file_tree(self, repo_path: Path, target_dirs: List[str], max_files_per_dir: int = 50) -> str:
@@ -715,8 +733,8 @@ class CodeIndexer:
         if tree_size > max_tree_size:
             self.logger.info(f"File tree too large ({tree_size} chars), using two-pass directory filtering...")
 
-            # Pass 1: Generate and analyze directory structure only
-            dir_tree = self._generate_directory_tree(repo_path, max_depth=4)
+            # Pass 1: Generate and analyze directory structure only (limited depth and count)
+            dir_tree = self._generate_directory_tree(repo_path)  # Uses defaults: max_depth=2, max_dirs=100
             self.logger.info(f"Generated directory tree ({len(dir_tree)} chars)")
 
             relevant_dirs = await self._filter_directories_first(repo_path, dir_tree)
