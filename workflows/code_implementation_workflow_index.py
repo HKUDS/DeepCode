@@ -214,6 +214,27 @@ Requirements:
 
         self.logger.info(f"🎯 Using code directory (MCP workspace): {code_directory}")
 
+        # Calculate indexes path (project_root/deepcode_lab/indexes)
+        project_root = Path(__file__).parent.parent
+        self.indexes_path = str(project_root / "deepcode_lab" / "indexes")
+
+        # Check if indexes exist
+        indexes_dir = Path(self.indexes_path)
+        if indexes_dir.exists():
+            index_files = list(indexes_dir.glob("*.json"))
+            if index_files:
+                self.logger.info(f"📚 Reference indexes path: {self.indexes_path}")
+                self.logger.info(f"📊 Found {len(index_files)} index files: {[f.name for f in index_files]}")
+                self.indexes_available = True
+            else:
+                self.logger.warning(f"⚠️ Indexes directory exists but is empty: {self.indexes_path}")
+                self.logger.warning("   Run 'python tools/run_reference_indexer.py' to create indexes")
+                self.indexes_available = False
+        else:
+            self.logger.warning(f"⚠️ Indexes directory not found: {self.indexes_path}")
+            self.logger.warning("   Create directory and run 'python tools/run_reference_indexer.py'")
+            self.indexes_available = False
+
         if not os.path.exists(code_directory):
             self.logger.warning(
                 f"Code directory does not exist, creating it: {code_directory}"
@@ -226,7 +247,11 @@ Requirements:
             await self._initialize_mcp_agent(code_directory)
 
             tools = self._prepare_mcp_tool_definitions()
-            system_message = PURE_CODE_IMPLEMENTATION_SYSTEM_PROMPT_INDEX
+            # Substitute indexes path placeholder in system prompt
+            system_message = PURE_CODE_IMPLEMENTATION_SYSTEM_PROMPT_INDEX.replace(
+                "{INDEXES_PATH}", self.indexes_path
+            )
+            self.logger.info(f"📚 System prompt configured with indexes path: {self.indexes_path}")
             messages = []
 
             #             implementation_message = f"""**TASK: Implement Research Paper Reproduction Code**

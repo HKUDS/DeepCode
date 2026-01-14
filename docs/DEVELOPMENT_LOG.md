@@ -221,7 +221,48 @@ logger:
 
 ---
 
-## 6. 향후 개선 사항
+## 6. 인덱스 기반 코드 생성 통합 (2026-01-14 추가)
+
+### 변경 내용
+
+1. **프롬프트 업데이트** (`prompts/code_prompts.py`)
+   - `{INDEXES_PATH}` 플레이스홀더 추가
+   - 하드코딩된 경로 (`/home/agent/indexes`) 제거
+
+2. **워크플로우 업데이트** (`workflows/code_implementation_workflow_index.py`)
+   - 프로젝트 루트 기준 인덱스 경로 자동 계산
+   - 인덱스 파일 존재 여부 확인 및 경고 로그
+   - 시스템 프롬프트에 인덱스 경로 자동 대입
+
+### 사용 방법
+
+```bash
+# 1. 인덱스 생성 (deepcode_lab/reference_code/에 코드베이스 추가 후)
+python tools/run_reference_indexer.py --verbose
+
+# 2. 인덱싱 활성화하여 CLI 실행
+python cli/main_cli.py --enable-indexing --simple
+
+# 3. chat 모드에서 코드 생성 요청
+# Agent가 자동으로 search_code_references 도구를 사용하여 참조 코드 검색
+```
+
+### 인덱스 위치
+
+- **인덱스 파일**: `deepcode_lab/indexes/*.json`
+- **참조 코드베이스**: `deepcode_lab/reference_code/`
+
+### 주의사항
+
+인덱스가 없으면 경고가 표시되지만 워크플로우는 계속 실행됩니다:
+```
+⚠️ Indexes directory exists but is empty: /path/to/deepcode_lab/indexes
+   Run 'python tools/run_reference_indexer.py' to create indexes
+```
+
+---
+
+## 7. 향후 개선 사항
 
 1. **증분 인덱싱**: 변경된 파일만 재인덱싱
 2. **인덱스 캐싱**: 인덱스 로드 시간 단축
@@ -230,7 +271,7 @@ logger:
 
 ---
 
-## 7. 테스트 방법
+## 8. 테스트 방법
 
 ### 인덱싱 테스트
 ```bash

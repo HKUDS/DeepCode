@@ -1123,11 +1123,11 @@ Build incrementally using multiple tool calls. For each step:
 1. ⚠️ **SINGLE FUNCTION CALL PER MESSAGE**: Each message may perform only one function call. You will see the result of the function right after sending the message. If you need to perform multiple actions, you can always send more messages with subsequent function calls. Do some reasoning before your actions, describing what function calls you are going to use and how they fit into your plan.
 
 2. **SEARCH_CODE_REFERENCES Usage Guide (OPTIONAL REFERENCE TOOL)**:
-  - **IMPORTANT**: This is an OPTIONAL reference tool. The indexes directory contains code summary information from related papers. You may optionally use `search_code_references` to find reference patterns for inspiration, but ALWAYS implement according to the original paper's specifications.
-  - **Reference only**: Use `search_code_references(indexes_path="indexes", target_file=the_file_you_want_to_implement, keywords=the_keywords_you_want_to_search)` for reference, NOT as implementation standard
-  - **Core principle**: Original paper requirements take absolute priority over any reference code found
+  - **IMPORTANT**: This is an OPTIONAL reference tool. The indexes directory contains code summary information from related codebases. You may optionally use `search_code_references` to find reference patterns for inspiration, but ALWAYS implement according to the original specifications.
+  - **Reference only**: Use `search_code_references(indexes_path="{INDEXES_PATH}", target_file=the_file_you_want_to_implement, keywords=the_keywords_you_want_to_search)` for reference, NOT as implementation standard
+  - **Core principle**: Original requirements take absolute priority over any reference code found
 3. **TOOL EXECUTION STRATEGY**:
-  - ⚠️**Development Cycle (for each new file implementation)**: `search_code_references` (OPTIONAL reference check from `/home/agent/indexes`) → `write_file` (implement based on original paper)
+  - ⚠️**Development Cycle (for each new file implementation)**: `search_code_references` (OPTIONAL reference check from `{INDEXES_PATH}`) → `write_file` (implement based on original requirements)
 
 **Execution Guidelines**:
 - **Plan First**: Before each action, explain your reasoning and which function you'll use
