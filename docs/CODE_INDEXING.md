@@ -43,6 +43,301 @@ DeepCode의 Code Indexing 시스템은 참조 코드베이스를 분석하여 Kn
 - `search_code_references()` - 관련 코드 검색
 - `get_indexes_overview()` - 인덱스 개요 조회
 
+---
+
+## LLM Indexing Process (상세)
+
+CodeIndexer는 4단계의 LLM 호출을 통해 인덱스를 생성합니다.
+
+### 전체 플로우
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                         CodeIndexer LLM Pipeline                                │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  Reference Code          Target Structure                                       │
+│  (deepcode_lab/          (tree 형태의                                           │
+│   reference_code/)        프로젝트 구조)                                         │
+│         │                       │                                               │
+│         └───────────┬───────────┘                                               │
+│                     ↓                                                           │
+│  ┌─────────────────────────────────────────────────────────────────────────┐   │
+│  │ Step 1: Directory Filtering (대용량 레포 전용)                          │   │
+│  │ "어떤 디렉토리가 target과 관련있나?"                                     │   │
+│  └─────────────────────────────────────────────────────────────────────────┘   │
+│                     ↓                                                           │
+│  ┌─────────────────────────────────────────────────────────────────────────┐   │
+│  │ Step 2: File Pre-filtering                                              │   │
+│  │ "어떤 파일이 target 구현에 도움이 될까?"                                 │   │
+│  └─────────────────────────────────────────────────────────────────────────┘   │
+│                     ↓                                                           │
+│  ┌─────────────────────────────────────────────────────────────────────────┐   │
+│  │ Step 3: File Analysis (파일별 반복)                                     │   │
+│  │ "이 파일의 함수, 개념, 의존성은?"                                        │   │
+│  └─────────────────────────────────────────────────────────────────────────┘   │
+│                     ↓                                                           │
+│  ┌─────────────────────────────────────────────────────────────────────────┐   │
+│  │ Step 4: Relationship Analysis (파일별 반복)                             │   │
+│  │ "이 파일이 target의 어떤 파일 구현에 도움이 될까?"                       │   │
+│  └─────────────────────────────────────────────────────────────────────────┘   │
+│                     ↓                                                           │
+│              JSON Index 생성                                                    │
+│                                                                                 │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### Step 1: Directory Filtering (대용량 레포 전용)
+
+**함수**: `_filter_directories_first()`
+
+**목적**: 파일 트리가 50KB 초과 시 먼저 관련 디렉토리만 식별
+
+**프롬프트**:
+```
+You are a code analysis expert. Analyze this repository's DIRECTORY
+structure and identify which directories are most likely to contain
+code relevant to the target project.
+
+Target Project Structure:
+{target_structure}
+
+Repository Directory Structure:
+{dir_tree}
+
+Return ONLY a JSON object with the most relevant directories (max 10):
+{
+    "relevant_directories": ["dir1", "dir2/subdir", "dir3"],
+    "reasoning": "brief explanation"
+}
+```
+
+**LLM 응답 예시**:
+```json
+{
+    "relevant_directories": ["src/models", "src/utils", "core"],
+    "reasoning": "These directories contain ML model implementations and utilities"
+}
+```
+
+---
+
+### Step 2: File Pre-filtering
+
+**함수**: `pre_filter_files()`
+
+**목적**: 파일 트리에서 target 구현에 관련있는 파일만 선별
+
+**프롬프트**:
+```
+You are a code analysis expert. Please analyze the following code
+repository file tree based on the target project structure and filter
+out files that may be relevant to the target project.
+
+Target Project Structure:
+{target_structure}
+
+Code Repository File Tree:
+{file_tree}
+
+Please analyze which files might be helpful for implementing the
+target project structure, including:
+- Core algorithm implementation files (GCN, recommendation systems, etc.)
+- Data processing and preprocessing files
+- Loss functions and evaluation metric files
+- Configuration and utility files
+- Test files
+- Documentation files
+
+Please return the filtering results in JSON format:
+{
+    "relevant_files": [
+        {
+            "file_path": "file path relative to repository root",
+            "relevance_reason": "why this file is relevant",
+            "confidence": 0.0-1.0,
+            "expected_contribution": "expected contribution to target"
+        }
+    ],
+    "summary": {
+        "total_files_analyzed": "...",
+        "relevant_files_count": "...",
+        "filtering_strategy": "explanation of filtering strategy"
+    }
+}
+
+Only return files with confidence > 0.3.
+```
+
+**LLM 응답 예시**:
+```json
+{
+    "relevant_files": [
+        {
+            "file_path": "src/models/gcn.py",
+            "relevance_reason": "GCN implementation matching target architecture",
+            "confidence": 0.9,
+            "expected_contribution": "Core GCN encoder implementation"
+        },
+        {
+            "file_path": "src/utils/metrics.py",
+            "relevance_reason": "Evaluation metrics for recommendation",
+            "confidence": 0.7,
+            "expected_contribution": "NDCG, Recall metric implementations"
+        }
+    ],
+    "summary": {
+        "total_files_analyzed": "150",
+        "relevant_files_count": "12",
+        "filtering_strategy": "Selected files implementing ML models and utilities"
+    }
+}
+```
+
+---
+
+### Step 3: File Analysis
+
+**함수**: `analyze_file()`
+
+**목적**: 각 파일의 내용을 분석하여 구조화된 요약 생성
+
+**프롬프트**:
+```
+Analyze this code file and provide a structured summary:
+
+File: {file_name}
+Content:
+```
+{file_content}
+```
+
+Please provide analysis in this JSON format:
+{
+    "file_type": "description of what type of file this is",
+    "main_functions": ["list", "of", "main", "functions", "or", "classes"],
+    "key_concepts": ["important", "concepts", "algorithms", "patterns"],
+    "dependencies": ["external", "libraries", "or", "imports"],
+    "summary": "2-3 sentence summary of what this file does"
+}
+
+Focus on the core functionality and potential reusability.
+```
+
+**LLM 응답 예시**:
+```json
+{
+    "file_type": "Python module - Graph Convolutional Network implementation",
+    "main_functions": ["GCNLayer", "GCNEncoder", "forward", "aggregate"],
+    "key_concepts": ["graph convolution", "message passing", "node embedding"],
+    "dependencies": ["torch", "torch_geometric", "numpy"],
+    "summary": "Implements a Graph Convolutional Network encoder with customizable layers. Supports various aggregation methods and includes dropout regularization."
+}
+```
+
+---
+
+### Step 4: Relationship Analysis
+
+**함수**: `find_relationships()`
+
+**목적**: 분석된 파일과 target 구조 간의 관계 매핑
+
+**프롬프트**:
+```
+Analyze the relationship between this existing code file and the
+target project structure.
+
+Existing File Analysis:
+- Path: {file_path}
+- Type: {file_type}
+- Functions: {main_functions}
+- Concepts: {key_concepts}
+- Summary: {file_summary}
+
+Target Project Structure:
+{target_structure}
+
+Available relationship types (with priority weights):
+- direct_match (1.0): Direct implementation match
+- partial_match (0.8): Partial functionality match
+- reference (0.6): Reference or utility function
+- utility (0.4): General utility or helper
+
+Identify potential relationships and provide analysis in this JSON format:
+{
+    "relationships": [
+        {
+            "target_file_path": "path/in/target/structure",
+            "relationship_type": "direct_match|partial_match|reference|utility",
+            "confidence_score": 0.0-1.0,
+            "helpful_aspects": ["specific", "aspects", "that", "help"],
+            "potential_contributions": ["how", "this", "contributes"],
+            "usage_suggestions": "detailed suggestion on how to use this file"
+        }
+    ]
+}
+```
+
+**LLM 응답 예시**:
+```json
+{
+    "relationships": [
+        {
+            "target_file_path": "src/core/gcn.py",
+            "relationship_type": "direct_match",
+            "confidence_score": 0.92,
+            "helpful_aspects": ["GCN architecture", "layer implementation", "aggregation"],
+            "potential_contributions": ["Core encoder structure", "Message passing logic"],
+            "usage_suggestions": "Use as primary reference for implementing GCN encoder. Adapt layer configuration for target requirements."
+        },
+        {
+            "target_file_path": "src/models/encoder.py",
+            "relationship_type": "partial_match",
+            "confidence_score": 0.65,
+            "helpful_aspects": ["embedding generation", "forward pass"],
+            "potential_contributions": ["Embedding layer patterns"],
+            "usage_suggestions": "Reference for embedding layer design patterns."
+        }
+    ]
+}
+```
+
+---
+
+### Relationship Types (관계 유형)
+
+| 유형 | 가중치 | 설명 | 예시 |
+|------|--------|------|------|
+| `direct_match` | 1.0 | 직접적인 구현 매칭 | GCN 파일 → target GCN |
+| `partial_match` | 0.8 | 부분적 기능 매칭 | 일부 함수만 관련 |
+| `reference` | 0.6 | 참조용 코드 | 비슷한 패턴의 다른 모델 |
+| `utility` | 0.4 | 범용 유틸리티 | 공통 헬퍼 함수 |
+
+---
+
+### LLM 호출 횟수 계산
+
+```
+Total LLM Calls =
+    1 (directory filtering, if large repo)
+  + 1 (file pre-filtering)
+  + N (file analysis, N = filtered file count)
+  + N (relationship analysis)
+
+예: 파일 100개 → 약 202회 LLM 호출
+예: 파일 500개 → 약 1,002회 LLM 호출
+```
+
+**비용 절감 팁**:
+- `--mock` 옵션으로 먼저 테스트
+- 불필요한 파일 사전 정리
+- `min_confidence_score` 높이기 (기본 0.3)
+
+---
+
 ## Quick Start
 
 ### Step 1: Clone Reference Repositories
