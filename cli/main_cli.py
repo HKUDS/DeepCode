@@ -160,6 +160,18 @@ def parse_arguments():
         "--verbose", "-v", action="store_true", help="Enable verbose output"
     )
 
+    parser.add_argument(
+        "--simple", "--compat",
+        action="store_true",
+        help="Enable simple/compatibility mode (disables ANSI colors for PTY compatibility)"
+    )
+
+    parser.add_argument(
+        "--enable-indexing",
+        action="store_true",
+        help="Enable codebase indexing for code generation (uses pre-indexed references)"
+    )
+
     return parser.parse_args()
 
 
@@ -246,6 +258,12 @@ async def main():
     # 解析命令行参数
     args = parse_arguments()
 
+    # Handle simple/compatibility mode early (before any ANSI output)
+    if args.simple:
+        os.environ["DEEPCODE_CLI_SIMPLE"] = "1"
+        # Reinitialize Colors class with simple mode
+        Colors.enable_simple_mode()
+
     # 显示横幅
     print_enhanced_banner()
 
@@ -260,8 +278,13 @@ async def main():
         # 创建CLI应用
         app = CLIApp()
 
-        # 设置配置 - 默认禁用索引功能以加快处理速度
-        if args.optimized:
+        # Handle indexing mode based on arguments
+        if args.enable_indexing:
+            app.cli.enable_indexing = True
+            print(
+                f"\n{Colors.GREEN}🗂️  Indexing mode enabled - will use pre-indexed code references{Colors.ENDC}"
+            )
+        elif args.optimized:
             app.cli.enable_indexing = False
             print(
                 f"\n{Colors.YELLOW}⚡ Optimized mode enabled - indexing disabled{Colors.ENDC}"

@@ -11,25 +11,74 @@ from typing import Optional
 
 
 class Colors:
-    """ANSI color codes for terminal styling"""
+    """ANSI color codes for terminal styling with compatibility mode support"""
 
-    HEADER = "\033[95m"
-    OKBLUE = "\033[94m"
-    OKCYAN = "\033[96m"
-    OKGREEN = "\033[92m"
-    WARNING = "\033[93m"
-    FAIL = "\033[91m"
-    ENDC = "\033[0m"
-    BOLD = "\033[1m"
-    UNDERLINE = "\033[4m"
+    # Check for simple/compatibility mode via environment variable
+    # Set DEEPCODE_CLI_SIMPLE=1 or DEEPCODE_NO_COLOR=1 to disable ANSI codes
+    _simple_mode = os.environ.get("DEEPCODE_CLI_SIMPLE", "0") == "1" or \
+                   os.environ.get("DEEPCODE_NO_COLOR", "0") == "1" or \
+                   os.environ.get("NO_COLOR", "") != "" or \
+                   not os.isatty(1)  # Also disable if not a TTY
+
+    @classmethod
+    def _code(cls, ansi_code: str) -> str:
+        """Return ANSI code or empty string based on mode"""
+        return "" if cls._simple_mode else ansi_code
+
+    # Standard ANSI codes - will be empty in simple mode
+    HEADER = "" if _simple_mode else "\033[95m"
+    OKBLUE = "" if _simple_mode else "\033[94m"
+    OKCYAN = "" if _simple_mode else "\033[96m"
+    OKGREEN = "" if _simple_mode else "\033[92m"
+    WARNING = "" if _simple_mode else "\033[93m"
+    FAIL = "" if _simple_mode else "\033[91m"
+    ENDC = "" if _simple_mode else "\033[0m"
+    BOLD = "" if _simple_mode else "\033[1m"
+    UNDERLINE = "" if _simple_mode else "\033[4m"
 
     # Gradient colors
-    PURPLE = "\033[35m"
-    MAGENTA = "\033[95m"
-    BLUE = "\033[34m"
-    CYAN = "\033[36m"
-    GREEN = "\033[32m"
-    YELLOW = "\033[33m"
+    PURPLE = "" if _simple_mode else "\033[35m"
+    MAGENTA = "" if _simple_mode else "\033[95m"
+    BLUE = "" if _simple_mode else "\033[34m"
+    CYAN = "" if _simple_mode else "\033[36m"
+    GREEN = "" if _simple_mode else "\033[32m"
+    YELLOW = "" if _simple_mode else "\033[33m"
+
+    @classmethod
+    def is_simple_mode(cls) -> bool:
+        """Check if simple/compatibility mode is enabled"""
+        return cls._simple_mode
+
+    @classmethod
+    def enable_simple_mode(cls):
+        """Force enable simple mode (disables ANSI codes)"""
+        cls._simple_mode = True
+        cls._reset_colors()
+
+    @classmethod
+    def disable_simple_mode(cls):
+        """Force disable simple mode (enables ANSI codes)"""
+        cls._simple_mode = False
+        cls._reset_colors()
+
+    @classmethod
+    def _reset_colors(cls):
+        """Reset all color codes based on current mode"""
+        cls.HEADER = "" if cls._simple_mode else "\033[95m"
+        cls.OKBLUE = "" if cls._simple_mode else "\033[94m"
+        cls.OKCYAN = "" if cls._simple_mode else "\033[96m"
+        cls.OKGREEN = "" if cls._simple_mode else "\033[92m"
+        cls.WARNING = "" if cls._simple_mode else "\033[93m"
+        cls.FAIL = "" if cls._simple_mode else "\033[91m"
+        cls.ENDC = "" if cls._simple_mode else "\033[0m"
+        cls.BOLD = "" if cls._simple_mode else "\033[1m"
+        cls.UNDERLINE = "" if cls._simple_mode else "\033[4m"
+        cls.PURPLE = "" if cls._simple_mode else "\033[35m"
+        cls.MAGENTA = "" if cls._simple_mode else "\033[95m"
+        cls.BLUE = "" if cls._simple_mode else "\033[34m"
+        cls.CYAN = "" if cls._simple_mode else "\033[36m"
+        cls.GREEN = "" if cls._simple_mode else "\033[32m"
+        cls.YELLOW = "" if cls._simple_mode else "\033[33m"
 
 
 class CLIInterface:
@@ -42,6 +91,13 @@ class CLIInterface:
         self.enable_indexing = (
             False  # Default configuration (matching UI: fast mode by default)
         )
+
+        # Check for simple/compatibility mode
+        self.simple_mode = Colors.is_simple_mode()
+        if self.simple_mode:
+            print("[DeepCode CLI - Compatibility Mode Enabled]")
+            print("  (ANSI colors disabled for terminal compatibility)")
+            print("")
 
         # Load segmentation config from the same source as UI
         self._load_segmentation_config()
@@ -183,15 +239,33 @@ class CLIInterface:
         )
 
     def create_menu(self):
-        """Create enhanced interactive menu"""
+        """Create enhanced interactive menu with simple mode support"""
         # Display current configuration
-        pipeline_mode = "🧠 COMPREHENSIVE" if self.enable_indexing else "⚡ OPTIMIZED"
-        index_status = "✅ Enabled" if self.enable_indexing else "🔶 Disabled"
-        segmentation_mode = (
-            "📄 SMART" if self.segmentation_enabled else "📋 TRADITIONAL"
-        )
+        pipeline_mode = "COMPREHENSIVE" if self.enable_indexing else "OPTIMIZED"
+        index_status = "Enabled" if self.enable_indexing else "Disabled"
+        segmentation_mode = "SMART" if self.segmentation_enabled else "TRADITIONAL"
 
-        menu = f"""
+        # Use simple menu for compatibility mode
+        if self.simple_mode:
+            simple_menu = f"""
+========================================
+        DeepCode CLI - MAIN MENU
+========================================
+
+  [U] Process URL         [F] Upload File
+  [T] Chat Input          [R] Requirement Analysis
+  [C] Configure           [H] History
+  [Q] Quit
+
+----------------------------------------
+  Pipeline Mode: {pipeline_mode}
+  Codebase Indexing: {index_status}
+  Document Processing: {segmentation_mode}
+----------------------------------------
+"""
+            print(simple_menu)
+        else:
+            menu = f"""
 {Colors.BOLD}{Colors.CYAN}╔═══════════════════════════════════════════════════════════════════════════════╗
 ║                                MAIN MENU                                      ║
 ╠═══════════════════════════════════════════════════════════════════════════════╣
@@ -199,9 +273,9 @@ class CLIInterface:
 ║  {Colors.BLUE}🧠 [R] Req. Analysis    {Colors.CYAN}│  {Colors.OKCYAN}⚙️  [C] Configure        {Colors.CYAN}│  {Colors.YELLOW}📊 [H] History{Colors.CYAN}    ║
 ║  {Colors.FAIL}❌ [Q] Quit{Colors.CYAN}                                                                 ║
 ║                                                                               ║
-║  {Colors.BOLD}🤖 Current Pipeline Mode: {pipeline_mode}{Colors.CYAN}                          ║
+║  {Colors.BOLD}🤖 Current Pipeline Mode: 🧠 {pipeline_mode}{Colors.CYAN}                          ║
 ║  {Colors.BOLD}🗂️  Codebase Indexing: {index_status}{Colors.CYAN}                                    ║
-║  {Colors.BOLD}📄 Document Processing: {segmentation_mode}{Colors.CYAN}                               ║
+║  {Colors.BOLD}📄 Document Processing: 📄 {segmentation_mode}{Colors.CYAN}                               ║
 ║                                                                               ║
 ║  {Colors.YELLOW}📝 URL Processing:{Colors.CYAN}                                                         ║
 ║  {Colors.YELLOW}   ▶ Enter research paper URL (arXiv, IEEE, ACM, etc.)                    {Colors.CYAN}║
@@ -224,12 +298,23 @@ class CLIInterface:
 ║  {Colors.OKCYAN}   ▶ Multi-agent coordination with progress tracking                     {Colors.CYAN}║
 ╚═══════════════════════════════════════════════════════════════════════════════╝{Colors.ENDC}
 """
-        print(menu)
+            print(menu)
 
     def get_user_input(self):
-        """Get user input with styled prompt"""
-        print(f"\n{Colors.BOLD}{Colors.OKCYAN}➤ Your choice: {Colors.ENDC}", end="")
-        return input().strip().lower()
+        """Get user input with styled prompt and flush for better compatibility"""
+        if self.simple_mode:
+            # Simple mode: plain text prompt with explicit flush
+            print("\nYour choice: ", end="", flush=True)
+        else:
+            print(f"\n{Colors.BOLD}{Colors.OKCYAN}➤ Your choice: {Colors.ENDC}", end="", flush=True)
+
+        try:
+            user_input = input().strip().lower()
+            return user_input
+        except EOFError:
+            return "q"
+        except KeyboardInterrupt:
+            return "q"
 
     def upload_file_gui(self) -> Optional[str]:
         """Enhanced file upload interface with better error handling"""
