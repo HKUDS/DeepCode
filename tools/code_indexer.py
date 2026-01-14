@@ -611,8 +611,126 @@ class CodeIndexer:
         add_to_tree(repo_path)
         return "\n".join(tree_lines)
 
+    def _generate_directory_tree(self, repo_path: Path, max_depth: int = 3) -> str:
+        """Generate directory-only tree structure (no files) for large repos"""
+        tree_lines = []
+
+        def add_dirs(current_path: Path, prefix: str = "", depth: int = 0):
+            if depth > max_depth:
+                return
+            try:
+                dirs = sorted([
+                    item for item in current_path.iterdir()
+                    if item.is_dir()
+                    and not item.name.startswith(".")
+                    and item.name not in self.skip_directories
+                ])
+                for i, item in enumerate(dirs):
+                    is_last = i == len(dirs) - 1
+                    current_prefix = "└── " if is_last else "├── "
+                    # Count files in this directory
+                    try:
+                        file_count = sum(1 for f in item.rglob("*") if f.is_file() and f.suffix.lower() in self.supported_extensions)
+                        tree_lines.append(f"{prefix}{current_prefix}{item.name}/ ({file_count} files)")
+                    except:
+                        tree_lines.append(f"{prefix}{current_prefix}{item.name}/")
+                    extension_prefix = "    " if is_last else "│   "
+                    add_dirs(item, prefix + extension_prefix, depth + 1)
+            except (PermissionError, Exception):
+                pass
+
+        tree_lines.append(f"{repo_path.name}/")
+        add_dirs(repo_path)
+        return "\n".join(tree_lines)
+
+    def _generate_filtered_file_tree(self, repo_path: Path, target_dirs: List[str], max_files_per_dir: int = 50) -> str:
+        """Generate file tree for specific directories only"""
+        tree_lines = [f"{repo_path.name}/"]
+
+        for target_dir in target_dirs:
+            dir_path = repo_path / target_dir.strip("/")
+            if not dir_path.exists():
+                continue
+
+            tree_lines.append(f"├── {target_dir}/")
+            try:
+                files = sorted([
+                    f for f in dir_path.rglob("*")
+                    if f.is_file() and f.suffix.lower() in self.supported_extensions
+                ])[:max_files_per_dir]
+
+                for i, f in enumerate(files):
+                    rel_path = f.relative_to(dir_path)
+                    is_last = i == len(files) - 1
+                    prefix = "│   └── " if is_last else "│   ├── "
+                    tree_lines.append(f"{prefix}{rel_path}")
+            except Exception:
+                pass
+
+        return "\n".join(tree_lines)
+
+    async def _filter_directories_first(self, repo_path: Path, dir_tree: str) -> List[str]:
+        """First pass: identify relevant directories from directory tree"""
+        filter_prompt = f"""
+        You are a code analysis expert. Analyze this repository's DIRECTORY structure and identify which directories are most likely to contain code relevant to the target project.
+
+        Target Project Structure:
+        {self.target_structure}
+
+        Repository Directory Structure:
+        {dir_tree}
+
+        Return ONLY a JSON object with the most relevant directories (max 10):
+        {{
+            "relevant_directories": ["dir1", "dir2/subdir", "dir3"],
+            "reasoning": "brief explanation"
+        }}
+        """
+
+        try:
+            llm_response = await self._call_llm(
+                filter_prompt,
+                system_prompt="You are a code analysis expert. Return only valid JSON.",
+                max_tokens=1000,
+            )
+            match = re.search(r"\{.*\}", llm_response, re.DOTALL)
+            if match:
+                data = json.loads(match.group(0))
+                return data.get("relevant_directories", [])
+        except Exception as e:
+            self.logger.warning(f"Directory filtering failed: {e}")
+        return []
+
     async def pre_filter_files(self, repo_path: Path, file_tree: str) -> List[str]:
-        """Use LLM to pre-filter relevant files based on target structure"""
+        """Use LLM to pre-filter relevant files based on target structure
+
+        For large repositories (>50KB tree or >5000 files), uses two-pass filtering:
+        1. First identify relevant directories
+        2. Then analyze files within those directories
+        """
+        # Check if file tree is too large (roughly estimate tokens: 1 token ≈ 4 chars)
+        tree_size = len(file_tree)
+        max_tree_size = 50000  # ~12,500 tokens, safe for most models
+
+        if tree_size > max_tree_size:
+            self.logger.info(f"File tree too large ({tree_size} chars), using two-pass directory filtering...")
+
+            # Pass 1: Generate and analyze directory structure only
+            dir_tree = self._generate_directory_tree(repo_path, max_depth=4)
+            self.logger.info(f"Generated directory tree ({len(dir_tree)} chars)")
+
+            relevant_dirs = await self._filter_directories_first(repo_path, dir_tree)
+
+            if not relevant_dirs:
+                self.logger.warning("No relevant directories identified, will analyze top-level only")
+                relevant_dirs = [d.name for d in repo_path.iterdir() if d.is_dir() and not d.name.startswith(".")][:5]
+
+            self.logger.info(f"Identified {len(relevant_dirs)} relevant directories: {relevant_dirs}")
+
+            # Pass 2: Generate filtered file tree for relevant directories
+            file_tree = self._generate_filtered_file_tree(repo_path, relevant_dirs)
+            self.logger.info(f"Generated filtered file tree ({len(file_tree)} chars)")
+
         filter_prompt = f"""
         You are a code analysis expert. Please analyze the following code repository file tree based on the target project structure and filter out files that may be relevant to the target project.
 
