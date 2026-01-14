@@ -11,26 +11,26 @@
 **증상:**
 - 프롬프트 입력창이 깜빡임
 - 키보드 입력이 화면에 표시되지 않음
+- "Tokens | usage 0 tokens | $0.0000" 라인이 표시되며 입력을 방해
 - 메뉴가 깨져서 보임
 
 **원인:**
 - Code Server, VS Code 웹 터미널 등 PTY 에뮬레이션 제한
 - ANSI 이스케이프 코드 호환성 문제
+- mcp_agent의 Rich 콘솔 진행률 표시가 터미널 입력과 충돌
 
 **해결 방법:**
 
 ```bash
-# 방법 1: 호환성 모드로 실행 (권장)
+# 권장: 호환성 모드로 실행
+# (ANSI 코드 비활성화 + mcp_agent 콘솔 로거 자동 비활성화)
 python cli/main_cli.py --simple
-
-# 방법 2: 환경 변수 설정
-export DEEPCODE_CLI_SIMPLE=1
-python cli/main_cli.py
-
-# 방법 3: NO_COLOR 표준 사용
-export NO_COLOR=1
-python cli/main_cli.py
 ```
+
+**참고:** `--simple` 옵션은 자동으로 다음을 수행합니다:
+1. ANSI 색상 코드 비활성화
+2. mcp_agent.config.yaml의 console 로거를 일시적으로 비활성화
+3. 종료 시 원본 설정 복원
 
 ### 2. 메뉴 색상이 표시되지 않음
 

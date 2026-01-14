@@ -169,7 +169,59 @@ python cli/main_cli.py --simple
 
 ---
 
-## 5. 향후 개선 사항
+## 5. CLI Simple Mode 개선 (2026-01-14 추가)
+
+### 문제점
+`--simple` 모드에서도 "Tokens | usage 0 tokens | $0.0000" 라인이 표시되며 터미널 입력을 방해함.
+
+### 원인 분석
+1. mcp_agent 라이브러리가 Rich 콘솔을 사용하여 진행률 표시
+2. `progress_display: false` 설정만으로는 콘솔 출력이 완전히 비활성화되지 않음
+3. 환경변수 방식은 mcp_agent가 YAML 파일에서 설정을 읽기 때문에 작동하지 않음
+
+### 해결 방법
+Simple mode 실행 시 `mcp_agent.config.yaml` 파일을 동적으로 수정:
+
+```python
+def disable_mcp_console_logger():
+    """Simple mode에서 콘솔 로거 비활성화"""
+    # 1. 원본 config 백업
+    # 2. logger.type을 'file'로 변경
+    # 3. logger.transports에서 'console' 제거
+    # 4. progress_display: false 설정
+```
+
+### 변경 내용
+
+**파일:** `cli/main_cli.py`
+- `disable_mcp_console_logger()` 함수 추가
+- `restore_mcp_config()` 함수 추가 (종료 시 원본 복원)
+- main() 함수에서 simple mode 시 config 수정/복원 로직 추가
+
+### 설정 변경 내용
+
+Simple mode 실행 시 config가 다음과 같이 변경됨:
+
+```yaml
+# Before (original)
+logger:
+  type: console
+  transports:
+    - console
+    - file
+  progress_display: false
+
+# After (simple mode)
+logger:
+  type: file
+  transports:
+    - file
+  progress_display: false
+```
+
+---
+
+## 6. 향후 개선 사항
 
 1. **증분 인덱싱**: 변경된 파일만 재인덱싱
 2. **인덱스 캐싱**: 인덱스 로드 시간 단축
@@ -178,7 +230,7 @@ python cli/main_cli.py --simple
 
 ---
 
-## 6. 테스트 방법
+## 7. 테스트 방법
 
 ### 인덱싱 테스트
 ```bash
@@ -188,9 +240,12 @@ python tools/run_reference_indexer.py --mock --verbose
 
 ### CLI 테스트
 ```bash
-# 호환성 모드 테스트
-DEEPCODE_CLI_SIMPLE=1 python cli/main_cli.py
+# 호환성 모드 테스트 (console 로거 자동 비활성화)
+python cli/main_cli.py --simple
 
 # 인덱싱 활성화 테스트
 python cli/main_cli.py --enable-indexing --simple
+
+# 환경변수 방식 (config 수정 방식으로 대체됨)
+# DEEPCODE_CLI_SIMPLE=1 python cli/main_cli.py
 ```

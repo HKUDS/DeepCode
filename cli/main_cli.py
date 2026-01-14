@@ -11,6 +11,8 @@ import os
 import sys
 import asyncio
 import argparse
+import yaml
+import shutil
 
 # 禁止生成.pyc文件
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -23,6 +25,74 @@ if parent_dir not in sys.path:
 
 # 导入CLI应用
 from cli.cli_app import CLIApp, Colors
+
+
+# Global variable to track config backup for restoration
+_config_backup_path = None
+
+
+def disable_mcp_console_logger():
+    """
+    Disable console logger in mcp_agent.config.yaml for simple/compatibility mode.
+    This prevents Rich console progress display from interfering with terminal input.
+
+    Returns:
+        bool: True if config was modified, False otherwise
+    """
+    global _config_backup_path
+
+    config_path = os.path.join(parent_dir, "mcp_agent.config.yaml")
+    if not os.path.exists(config_path):
+        return False
+
+    try:
+        # Backup original config
+        _config_backup_path = config_path + ".backup"
+        shutil.copy2(config_path, _config_backup_path)
+
+        # Read config
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+
+        # Modify logger settings to disable console
+        if 'logger' not in config:
+            config['logger'] = {}
+
+        # Set type to 'file' only (no console)
+        config['logger']['type'] = 'file'
+        # Remove console from transports, keep only file
+        if 'transports' in config['logger']:
+            config['logger']['transports'] = [t for t in config['logger']['transports'] if t != 'console']
+            if not config['logger']['transports']:
+                config['logger']['transports'] = ['file']
+        else:
+            config['logger']['transports'] = ['file']
+        # Ensure progress_display is disabled
+        config['logger']['progress_display'] = False
+
+        # Write modified config
+        with open(config_path, 'w', encoding='utf-8') as f:
+            yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+        return True
+    except Exception as e:
+        print(f"Warning: Could not modify mcp_agent config: {e}")
+        return False
+
+
+def restore_mcp_config():
+    """
+    Restore original mcp_agent.config.yaml from backup.
+    """
+    global _config_backup_path
+
+    if _config_backup_path and os.path.exists(_config_backup_path):
+        try:
+            config_path = os.path.join(parent_dir, "mcp_agent.config.yaml")
+            shutil.move(_config_backup_path, config_path)
+            _config_backup_path = None
+        except Exception as e:
+            print(f"Warning: Could not restore mcp_agent config: {e}")
 
 
 def print_enhanced_banner():
@@ -261,6 +331,11 @@ async def main():
     # Handle simple/compatibility mode early (before any ANSI output)
     if args.simple:
         os.environ["DEEPCODE_CLI_SIMPLE"] = "1"
+        os.environ["NO_COLOR"] = "1"
+        # Disable mcp_agent console logger by modifying config file
+        # This is necessary because mcp_agent reads config from file, not env vars
+        if disable_mcp_console_logger():
+            print("Simple mode: Console logger disabled for PTY compatibility")
         # Reinitialize Colors class with simple mode
         Colors.enable_simple_mode()
 
@@ -354,6 +429,9 @@ async def main():
     except Exception as e:
         print(f"\n{Colors.FAIL}❌ Application errors: {str(e)}{Colors.ENDC}")
         sys.exit(1)
+    finally:
+        # Restore original config if it was modified for simple mode
+        restore_mcp_config()
 
 
 if __name__ == "__main__":
