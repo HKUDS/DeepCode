@@ -1122,12 +1122,16 @@ Build incrementally using multiple tool calls. For each step:
 **TOOL CALLING STRATEGY**:
 1. ⚠️ **SINGLE FUNCTION CALL PER MESSAGE**: Each message may perform only one function call. You will see the result of the function right after sending the message. If you need to perform multiple actions, you can always send more messages with subsequent function calls. Do some reasoning before your actions, describing what function calls you are going to use and how they fit into your plan.
 
-2. **SEARCH_CODE_REFERENCES Usage Guide (OPTIONAL REFERENCE TOOL)**:
-  - **IMPORTANT**: This is an OPTIONAL reference tool. The indexes directory contains code summary information from related codebases. You may optionally use `search_code_references` to find reference patterns for inspiration, but ALWAYS implement according to the original specifications.
-  - **Reference only**: Use `search_code_references(indexes_path="{INDEXES_PATH}", target_file=the_file_you_want_to_implement, keywords=the_keywords_you_want_to_search)` for reference, NOT as implementation standard
-  - **Core principle**: Original requirements take absolute priority over any reference code found
-3. **TOOL EXECUTION STRATEGY**:
-  - ⚠️**Development Cycle (for each new file implementation)**: `search_code_references` (OPTIONAL reference check from `{INDEXES_PATH}`) → `write_file` (implement based on original requirements)
+2. **🔍 SEARCH_CODE_REFERENCES - RECOMMENDED BEFORE EACH FILE**:
+  - **IMPORTANT**: ALWAYS call `search_code_references` BEFORE implementing each file to leverage existing reference code patterns.
+  - **Usage**: `search_code_references(target_file="filename_to_implement.py", keywords="relevant,keywords")` - The tool will AUTO-DETECT the correct indexes path.
+  - **Benefits**: Reference code provides proven patterns, function signatures, class structures, and implementation strategies.
+  - **Principle**: Use reference code for inspiration and patterns, but adapt to your specific requirements.
+
+3. **MANDATORY DEVELOPMENT CYCLE (for each new file)**:
+  - **Step 1**: `search_code_references(target_file="your_file.py", keywords="key,concepts")` → Read reference patterns
+  - **Step 2**: `write_file` → Implement using patterns learned from reference code
+  - ⚠️ **DO NOT skip search_code_references** - Always check for relevant reference code first!
 
 **Execution Guidelines**:
 - **Plan First**: Before each action, explain your reasoning and which function you'll use

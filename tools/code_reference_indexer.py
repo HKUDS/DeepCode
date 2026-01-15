@@ -331,17 +331,33 @@ def format_reference_output(
 # ==================== MCP Tool Definitions ====================
 
 
+def _find_default_indexes_path() -> str:
+    """Find the default indexes path relative to the project root."""
+    # Try to find deepcode_lab/indexes relative to this file's location
+    current_file = Path(__file__).resolve()
+    project_root = current_file.parent.parent  # tools/ -> project_root
+    default_path = project_root / "deepcode_lab" / "indexes"
+    if default_path.exists():
+        return str(default_path)
+    # Fallback: check common locations
+    for root_candidate in [Path.cwd(), Path.home() / "DeepCode"]:
+        candidate = root_candidate / "deepcode_lab" / "indexes"
+        if candidate.exists():
+            return str(candidate)
+    return str(default_path)  # Return default even if doesn't exist
+
+
 @mcp.tool()
 async def search_code_references(
-    indexes_path: str, target_file: str, keywords: str = "", max_results: int = 10
+    target_file: str, indexes_path: str = "", keywords: str = "", max_results: int = 10
 ) -> str:
     """
     **UNIFIED TOOL**: Search relevant reference code from index files for target file implementation.
     This tool combines directory setup, index loading, and searching in a single call.
 
     Args:
-        indexes_path: Path to the indexes directory containing JSON index files
-        target_file: Target file path (file to be implemented)
+        target_file: Target file path (file to be implemented) - REQUIRED
+        indexes_path: Path to indexes directory (optional - auto-detected if empty or invalid)
         keywords: Search keywords, comma-separated
         max_results: Maximum number of results to return
 
@@ -349,16 +365,25 @@ async def search_code_references(
         Formatted reference code information JSON string
     """
     try:
-        # Step 1: Load index files from specified directory
-        logger.info(f"Loading index files from: {indexes_path}")
-        index_cache = load_index_files_from_directory(indexes_path)
+        # Step 1: Determine correct indexes path
+        # If provided path doesn't contain indexes, use default
+        actual_indexes_path = indexes_path
+        if not indexes_path or not Path(indexes_path).exists() or not list(Path(indexes_path).glob("*.json")):
+            default_path = _find_default_indexes_path()
+            logger.info(f"Provided indexes_path '{indexes_path}' invalid or empty, using default: {default_path}")
+            actual_indexes_path = default_path
+
+        # Step 2: Load index files from determined directory
+        logger.info(f"Loading index files from: {actual_indexes_path}")
+        index_cache = load_index_files_from_directory(actual_indexes_path)
 
         if not index_cache:
             result = {
                 "status": "error",
-                "message": f"No index files found or failed to load from: {indexes_path}",
+                "message": f"No index files found or failed to load from: {actual_indexes_path}",
                 "target_file": target_file,
-                "indexes_path": indexes_path,
+                "indexes_path": actual_indexes_path,
+                "original_path_provided": indexes_path,
             }
             return json.dumps(result, ensure_ascii=False, indent=2)
 
@@ -383,7 +408,7 @@ async def search_code_references(
         result = {
             "status": "success",
             "target_file": target_file,
-            "indexes_path": indexes_path,
+            "indexes_path": actual_indexes_path,
             "keywords_used": keyword_list,
             "total_references_found": len(relevant_refs),
             "total_relationships_found": len(relationships),
@@ -403,7 +428,7 @@ async def search_code_references(
             "status": "error",
             "message": f"Failed to search reference code: {str(e)}",
             "target_file": target_file,
-            "indexes_path": indexes_path,
+            "indexes_path": indexes_path if indexes_path else "auto-detect failed",
         }
         return json.dumps(result, ensure_ascii=False, indent=2)
 
