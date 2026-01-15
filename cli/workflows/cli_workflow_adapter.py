@@ -386,9 +386,13 @@ class CLIWorkflowAdapter:
             return {"status": "success", "result": result, "pipeline_mode": "chat"}
 
         except Exception as e:
+            import traceback
+            full_traceback = traceback.format_exc()
             error_msg = f"Chat pipeline execution failed: {str(e)}"
             if self.cli_interface:
                 self.cli_interface.print_status(error_msg, "error")
+                # Print full traceback for debugging
+                print(f"\n{'='*60}\nFull traceback:\n{full_traceback}\n{'='*60}\n")
 
             return {"status": "error", "error": error_msg, "pipeline_mode": "chat"}
 
