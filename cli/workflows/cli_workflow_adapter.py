@@ -19,11 +19,13 @@ import os
 import sys
 from typing import Callable, Dict, Any
 
-# Ensure project root is in sys.path for lazy imports
+# Ensure project root is FIRST in sys.path to avoid cli/workflows/ shadowing root workflows/
 _current_dir = os.path.dirname(os.path.abspath(__file__))
 _project_root = os.path.dirname(os.path.dirname(_current_dir))
-if _project_root not in sys.path:
-    sys.path.insert(0, _project_root)
+# Remove if already exists and re-insert at position 0 to ensure it's first
+if _project_root in sys.path:
+    sys.path.remove(_project_root)
+sys.path.insert(0, _project_root)
 
 from mcp_agent.app import MCPApp
 
