@@ -331,6 +331,31 @@ class CLIWorkflowAdapter:
             dict: Chat pipeline execution result
         """
         try:
+            # Debug: Check sys.path and workflows directory
+            import sys
+            import os
+            print(f"\n[DEBUG] sys.path: {sys.path[:5]}...")  # First 5 entries
+            print(f"[DEBUG] _project_root: {_project_root}")
+            workflows_path = os.path.join(_project_root, "workflows")
+            print(f"[DEBUG] workflows path exists: {os.path.exists(workflows_path)}")
+            agent_orch_path = os.path.join(workflows_path, "agent_orchestration_engine.py")
+            print(f"[DEBUG] agent_orchestration_engine.py exists: {os.path.exists(agent_orch_path)}")
+
+            # Try to import step by step to see where it fails
+            try:
+                import workflows
+                print(f"[DEBUG] workflows package imported: {workflows.__file__}")
+            except Exception as e1:
+                print(f"[DEBUG] Failed to import workflows package: {e1}")
+
+            try:
+                from workflows import agent_orchestration_engine
+                print(f"[DEBUG] agent_orchestration_engine imported: {agent_orchestration_engine.__file__}")
+            except Exception as e2:
+                print(f"[DEBUG] Failed to import agent_orchestration_engine: {e2}")
+                import traceback
+                traceback.print_exc()
+
             # Import the chat-based pipeline
             from workflows.agent_orchestration_engine import (
                 execute_chat_based_planning_pipeline,
