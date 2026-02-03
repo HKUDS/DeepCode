@@ -35,7 +35,7 @@
 </p> -->
 <p>
   <a href="https://github.com/HKUDS/DeepCode/stargazers"><img src='https://img.shields.io/github/stars/HKUDS/DeepCode?color=00d9ff&style=for-the-badge&logo=star&logoColor=white&labelColor=1a1a2e' /></a>
-  <a href='https://arxiv.org/abs/2512.07921'><img src="https://img.shields.io/badge/Paper-arXiv-orange?style=for-the-badge&logo=arxiv&logoColor=white&labelColor=1a1a2e"></a> 
+  <a href='https://arxiv.org/abs/2512.07921'><img src="https://img.shields.io/badge/Paper-arXiv-orange?style=for-the-badge&logo=arxiv&logoColor=white&labelColor=1a1a2e"></a>
   <img src="https://img.shields.io/badge/🐍Python-3.13-4ecdc4?style=for-the-badge&logo=python&logoColor=white&labelColor=1a1a2e">
   <!-- <a href="https://pypi.org/project/deepcode-hku/"><img src="https://img.shields.io/pypi/v/deepcode-hku.svg?style=for-the-badge&logo=pypi&logoColor=white&labelColor=1a1a2e&color=ff6b6b"></a> -->
 </p>
@@ -883,7 +883,7 @@ We're continuously enhancing DeepCode with exciting new features:
 ---
 
 <div align="left">
-  
+
 ### 📖 **Citation**
 
 
@@ -891,13 +891,13 @@ If you find DeepCode useful in your research or applications, please kindly cite
 
 ```
 @misc{li2025deepcodeopenagenticcoding,
-      title={DeepCode: Open Agentic Coding}, 
+      title={DeepCode: Open Agentic Coding},
       author={Zongwei Li and Zhonghang Li and Zirui Guo and Xubin Ren and Chao Huang},
       year={2025},
       eprint={2512.07921},
       archivePrefix={arXiv},
       primaryClass={cs.SE},
-      url={https://arxiv.org/abs/2512.07921}, 
+      url={https://arxiv.org/abs/2512.07921},
 }
 ```
 

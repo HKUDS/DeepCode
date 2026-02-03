@@ -690,23 +690,17 @@ async def run_code_analyzer(
     prompts = get_adaptive_prompts(use_segmentation)
 
     if paper_content:
+        # When paper content is already loaded, agents don't need search tools
         agent_config = {
             "concept_analysis": [],
-            "algorithm_analysis": ["brave"],
-            "code_planner": [
-                "brave"
-            ],  # Empty list instead of None - code planner doesn't need tools when paper content is provided
+            "algorithm_analysis": search_server_names,
+            "code_planner": search_server_names,
         }
-        # agent_config = {
-        #     "concept_analysis": [],
-        #     "algorithm_analysis": [],
-        #     "code_planner": [],  # Empty list instead of None - code planner doesn't need tools when paper content is provided
-        # }
     else:
         agent_config = {
             "concept_analysis": ["filesystem"],
-            "algorithm_analysis": ["brave", "filesystem"],
-            "code_planner": ["brave", "filesystem"],
+            "algorithm_analysis": search_server_names + ["filesystem"],
+            "code_planner": search_server_names + ["filesystem"],
         }
 
     print(f"   Agent configurations: {agent_config}")

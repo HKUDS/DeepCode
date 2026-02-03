@@ -9,10 +9,94 @@ import os
 import yaml
 from typing import Any, Type, Dict, Tuple
 
-# Import LLM classes
-from mcp_agent.workflows.llm.augmented_llm_anthropic import AnthropicAugmentedLLM
-from mcp_agent.workflows.llm.augmented_llm_openai import OpenAIAugmentedLLM
-from mcp_agent.workflows.llm.augmented_llm_google import GoogleAugmentedLLM
+
+def get_api_keys(secrets_path: str = "mcp_agent.secrets.yaml") -> Dict[str, str]:
+    """
+    Get API keys from environment variables or secrets file.
+
+    Environment variables take precedence:
+    - GOOGLE_API_KEY or GEMINI_API_KEY
+    - ANTHROPIC_API_KEY
+    - OPENAI_API_KEY
+
+    Args:
+        secrets_path: Path to the secrets YAML file
+
+    Returns:
+        Dict with 'google', 'anthropic', 'openai' keys
+    """
+    secrets = {}
+    if os.path.exists(secrets_path):
+        with open(secrets_path, "r", encoding="utf-8") as f:
+            secrets = yaml.safe_load(f) or {}
+
+    return {
+        "google": (
+            os.environ.get("GOOGLE_API_KEY")
+            or os.environ.get("GEMINI_API_KEY")
+            or secrets.get("google", {}).get("api_key", "")
+        ).strip(),
+        "anthropic": (
+            os.environ.get("ANTHROPIC_API_KEY")
+            or secrets.get("anthropic", {}).get("api_key", "")
+        ).strip(),
+        "openai": (
+            os.environ.get("OPENAI_API_KEY")
+            or secrets.get("openai", {}).get("api_key", "")
+        ).strip(),
+    }
+
+
+def load_api_config(secrets_path: str = "mcp_agent.secrets.yaml") -> Dict[str, Any]:
+    """
+    Load API configuration with environment variable override.
+
+    Environment variables take precedence over YAML values:
+    - GOOGLE_API_KEY or GEMINI_API_KEY
+    - ANTHROPIC_API_KEY
+    - OPENAI_API_KEY
+
+    Args:
+        secrets_path: Path to the secrets YAML file
+
+    Returns:
+        Dict with provider configs including api_key values
+    """
+    # Load base config from YAML
+    config = {}
+    if os.path.exists(secrets_path):
+        with open(secrets_path, "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f) or {}
+
+    # Get keys with env var override
+    keys = get_api_keys(secrets_path)
+
+    # Merge into config structure
+    for provider, key in keys.items():
+        if key:
+            config.setdefault(provider, {})["api_key"] = key
+
+    return config
+
+
+def _get_llm_class(provider: str) -> Type[Any]:
+    """Lazily import and return the LLM class for a given provider."""
+    if provider == "anthropic":
+        from mcp_agent.workflows.llm.augmented_llm_anthropic import (
+            AnthropicAugmentedLLM,
+        )
+
+        return AnthropicAugmentedLLM
+    elif provider == "openai":
+        from mcp_agent.workflows.llm.augmented_llm_openai import OpenAIAugmentedLLM
+
+        return OpenAIAugmentedLLM
+    elif provider == "google":
+        from mcp_agent.workflows.llm.augmented_llm_google import GoogleAugmentedLLM
+
+        return GoogleAugmentedLLM
+    else:
+        raise ValueError(f"Unknown provider: {provider}")
 
 
 def get_preferred_llm_class(config_path: str = "mcp_agent.secrets.yaml") -> Type[Any]:
@@ -66,30 +150,30 @@ def get_preferred_llm_class(config_path: str = "mcp_agent.secrets.yaml") -> Type
         }
 
         # Try user's preferred provider first
-        if preferred_provider and preferred_provider in provider_map:
-            llm_class, api_key, class_name = provider_map[preferred_provider]
+        if preferred_provider and preferred_provider in provider_keys:
+            api_key, class_name = provider_keys[preferred_provider]
             if api_key:
                 print(f"🤖 Using {class_name} (user preference: {preferred_provider})")
-                return llm_class
+                return _get_llm_class(preferred_provider)
             else:
                 print(
                     f"⚠️ Preferred provider '{preferred_provider}' has no API key, checking alternatives..."
                 )
 
         # Fallback: try providers in order of availability
-        for provider, (llm_class, api_key, class_name) in provider_map.items():
+        for provider, (api_key, class_name) in provider_keys.items():
             if api_key:
                 print(f"🤖 Using {class_name} ({provider} API key found)")
-                return llm_class
+                return _get_llm_class(provider)
 
-        # No API keys found
-        print("⚠️ No API keys configured, falling back to OpenAIAugmentedLLM")
-        return OpenAIAugmentedLLM
+        # No API keys found - default to google
+        print("⚠️ No API keys configured, falling back to GoogleAugmentedLLM")
+        return _get_llm_class("google")
 
     except Exception as e:
         print(f"🤖 Error reading config file {config_path}: {e}")
-        print("🤖 Falling back to OpenAIAugmentedLLM")
-        return OpenAIAugmentedLLM
+        print("🤖 Falling back to GoogleAugmentedLLM")
+        return _get_llm_class("google")
 
 
 def get_token_limits(config_path: str = "mcp_agent.config.yaml") -> Tuple[int, int]:
@@ -140,7 +224,8 @@ def get_default_models(config_path: str = "mcp_agent.config.yaml"):
         config_path: Path to the configuration file
 
     Returns:
-        dict: Dictionary with 'anthropic', 'openai', and 'google' default models
+        dict: Dictionary with 'anthropic', 'openai', 'google' default models,
+              plus 'google_planning' and 'google_implementation' for phase-specific models
     """
     try:
         if os.path.exists(config_path):
@@ -160,6 +245,23 @@ def get_default_models(config_path: str = "mcp_agent.config.yaml"):
             google_model = google_config.get("default_model", "gemini-2.0-flash")
             openrouter_model = openrouter_config.get("default_model", "anthropic/claude-sonnet-4")
 
+            # Phase-specific models (fall back to default if not specified)
+            # Google
+            google_planning = google_config.get("planning_model", google_model)
+            google_implementation = google_config.get(
+                "implementation_model", google_model
+            )
+            # Anthropic
+            anthropic_planning = anthropic_config.get("planning_model", anthropic_model)
+            anthropic_implementation = anthropic_config.get(
+                "implementation_model", anthropic_model
+            )
+            # OpenAI
+            openai_planning = openai_config.get("planning_model", openai_model)
+            openai_implementation = openai_config.get(
+                "implementation_model", openai_model
+            )
+
             return {
                 "anthropic": anthropic_model,
                 "openai": openai_model,
@@ -168,19 +270,29 @@ def get_default_models(config_path: str = "mcp_agent.config.yaml"):
             }
         else:
             print(f"Config file {config_path} not found, using default models")
-            return {
-                "anthropic": "claude-sonnet-4-20250514",
-                "openai": "o3-mini",
-                "google": "gemini-2.0-flash",
-            }
+            return _get_fallback_models()
 
     except Exception as e:
         print(f"❌Error reading config file {config_path}: {e}")
-        return {
-            "anthropic": "claude-sonnet-4-20250514",
-            "openai": "o3-mini",
-            "google": "gemini-2.0-flash",
-        }
+        return _get_fallback_models()
+
+
+def _get_fallback_models():
+    """Return fallback model configuration when config file is unavailable."""
+    google = "gemini-2.0-flash"
+    anthropic = "claude-sonnet-4-20250514"
+    openai = "o3-mini"
+    return {
+        "google": google,
+        "google_planning": google,
+        "google_implementation": google,
+        "anthropic": anthropic,
+        "anthropic_planning": anthropic,
+        "anthropic_implementation": anthropic,
+        "openai": openai,
+        "openai_planning": openai,
+        "openai_implementation": openai,
+    }
 
 
 def get_document_segmentation_config(

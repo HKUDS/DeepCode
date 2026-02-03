@@ -17,7 +17,6 @@ import logging
 import os
 import sys
 import time
-import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
@@ -33,7 +32,7 @@ from prompts.code_prompts import (
 from workflows.agents import CodeImplementationAgent
 from workflows.agents.memory_agent_concise import ConciseMemoryAgent
 from config.mcp_tool_definitions import get_mcp_tools
-from utils.llm_utils import get_preferred_llm_class, get_default_models
+from utils.llm_utils import get_preferred_llm_class, get_default_models, load_api_config
 # DialogueLogger removed - no longer needed
 
 
@@ -61,10 +60,9 @@ class CodeImplementationWorkflow:
         )
 
     def _load_api_config(self) -> Dict[str, Any]:
-        """Load API configuration from YAML file"""
+        """Load API configuration with environment variable override."""
         try:
-            with open(self.config_path, "r", encoding="utf-8") as f:
-                return yaml.safe_load(f)
+            return load_api_config(self.config_path)
         except Exception as e:
             raise Exception(f"Failed to load API config: {e}")
 
@@ -682,8 +680,13 @@ Requirements:
             ]
 
         try:
+            # Use implementation-specific model for code generation
+            impl_model = self.default_models.get(
+                "anthropic_implementation", self.default_models["anthropic"]
+            )
+            self.logger.info(f"🔧 Code generation using model: {impl_model}")
             response = await client.messages.create(
-                model=self.default_models["anthropic"],
+                model=impl_model,
                 system=system_message,
                 messages=validated_messages,
                 tools=tools,
@@ -784,8 +787,13 @@ Requirements:
         try:
             # Google Gemini API call using the native SDK
             # client is google.genai.Client instance
+            # Use implementation-specific model for code generation
+            impl_model = self.default_models.get(
+                "google_implementation", self.default_models["google"]
+            )
+            self.logger.info(f"🔧 Code generation using model: {impl_model}")
             response = await client.aio.models.generate_content(
-                model=self.default_models["google"],
+                model=impl_model,
                 contents=gemini_messages,
                 config=config,
             )
@@ -1008,12 +1016,18 @@ Requirements:
         max_retries = 3
         retry_delay = 2  # seconds
 
+        # Use implementation-specific model for code generation
+        impl_model = self.default_models.get(
+            "openai_implementation", self.default_models["openai"]
+        )
+        self.logger.info(f"🔧 Code generation using model: {impl_model}")
+
         for attempt in range(max_retries):
             try:
                 # Try max_tokens first, fallback to max_completion_tokens if unsupported
                 try:
                     response = await client.chat.completions.create(
-                        model=self.default_models["openai"],
+                        model=impl_model,
                         messages=openai_messages,
                         tools=openai_tools if openai_tools else None,
                         max_tokens=max_tokens,
@@ -1023,7 +1037,7 @@ Requirements:
                     if "max_tokens" in str(e) and "max_completion_tokens" in str(e):
                         # Retry with max_completion_tokens for models that require it
                         response = await client.chat.completions.create(
-                            model=self.default_models["openai"],
+                            model=impl_model,
                             messages=openai_messages,
                             tools=openai_tools if openai_tools else None,
                             max_completion_tokens=max_tokens,
