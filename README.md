@@ -35,8 +35,9 @@
 </p> -->
 <p>
   <a href="https://github.com/HKUDS/DeepCode/stargazers"><img src='https://img.shields.io/github/stars/HKUDS/DeepCode?color=00d9ff&style=for-the-badge&logo=star&logoColor=white&labelColor=1a1a2e' /></a>
+  <a href='https://arxiv.org/abs/2512.07921'><img src="https://img.shields.io/badge/Paper-arXiv-orange?style=for-the-badge&logo=arxiv&logoColor=white&labelColor=1a1a2e"></a>
   <img src="https://img.shields.io/badge/🐍Python-3.13-4ecdc4?style=for-the-badge&logo=python&logoColor=white&labelColor=1a1a2e">
-  <a href="https://pypi.org/project/deepcode-hku/"><img src="https://img.shields.io/pypi/v/deepcode-hku.svg?style=for-the-badge&logo=pypi&logoColor=white&labelColor=1a1a2e&color=ff6b6b"></a>
+  <!-- <a href="https://pypi.org/project/deepcode-hku/"><img src="https://img.shields.io/pypi/v/deepcode-hku.svg?style=for-the-badge&logo=pypi&logoColor=white&labelColor=1a1a2e&color=ff6b6b"></a> -->
 </p>
 <p>
   <a href="https://discord.gg/yF2MmDJyGJ"><img src="https://img.shields.io/badge/💬Discord-Community-7289da?style=for-the-badge&logo=discord&logoColor=white&labelColor=1a1a2e"></a>
@@ -49,6 +50,15 @@
 <div align="center">
   <a href="#-quick-start" style="text-decoration: none;">
     <img src="https://img.shields.io/badge/Quick%20Start-Get%20Started%20Now-00d9ff?style=for-the-badge&logo=rocket&logoColor=white&labelColor=1a1a2e">
+  </a>
+</div>
+
+<div align="center" style="margin-top: 10px;">
+  <a href="README.md">
+    <img src="https://img.shields.io/badge/English-00d4ff?style=for-the-badge&logo=readme&logoColor=white&labelColor=1a1a2e" alt="English">
+  </a>
+  <a href="README_ZH.md">
+    <img src="https://img.shields.io/badge/中文-00d4ff?style=for-the-badge&logo=readme&logoColor=white&labelColor=1a1a2e" alt="中文">
   </a>
 </div>
 
@@ -133,13 +143,29 @@
 
 ## 📑 Table of Contents
 
+- [📰 News](#-news)
 - [🚀 Key Features](#-key-features)
 - [🏗️ Architecture](#️-architecture)
+- [📊 Experimental Results](#-experimental-results)
 - [🚀 Quick Start](#-quick-start)
 - [💡 Examples](#-examples)
   - [🎬 Live Demonstrations](#-live-demonstrations)
 - [⭐ Star History](#-star-history)
 - [📄 License](#-license)
+
+
+---
+
+## 📰 News
+
+🎉 **[2025-10] 🎉 [2025-10-28] DeepCode Achieves SOTA on PaperBench!**
+
+DeepCode sets new benchmarks on OpenAI's PaperBench Code-Dev across all categories:
+
+- 🏆 **Surpasses Human Experts**: **75.9%** (DeepCode) vs Top Machine Learning PhDs 72.4% (+3.5%).
+- 🥇 **Outperforms SOTA Commercial Code Agents**: **84.8%** (DeepCode) vs Leading Commercial Code Agents (+26.1%) (Cursor, Claude Code, and Codex).
+- 🔬 **Advances Scientific Coding**: **73.5%** (DeepCode) vs PaperCoder 51.1% (+22.4%).
+- 🚀 **Beats LLM Agents**: **73.5%** (DeepCode) vs best LLM frameworks 43.3% (+30.2%).
 
 ---
 
@@ -217,7 +243,58 @@
 
 <br/>
 
-### 🎯 **Autonomous Multi-Agent Workflow**
+---
+
+## 📊 Experimental Results
+
+<div align="center">
+    <img src='./assets/result_main02.jpg' /><br>
+</div>
+<br/>
+
+We evaluate **DeepCode** on the [*PaperBench*](https://openai.com/index/paperbench/) benchmark (released by OpenAI), a rigorous testbed requiring AI agents to independently reproduce 20 ICML 2024 papers from scratch. The benchmark comprises 8,316 gradable components assessed using SimpleJudge with hierarchical weighting.
+
+Our experiments compare DeepCode against four baseline categories: **(1) Human Experts**, **(2) State-of-the-Art Commercial Code Agents**, **(3) Scientific Code Agents**, and **(4) LLM-Based Agents**.
+
+### ① 🧠 Human Expert Performance (Top Machine Learning PhD)
+
+**DeepCode: 75.9% vs. Top Machine Learning PhD: 72.4% (+3.5%)**
+
+DeepCode achieves **75.9%** on the 3-paper human evaluation subset, **surpassing the best-of-3 human expert baseline (72.4%) by +3.5 percentage points**. This demonstrates that our framework not only matches but exceeds expert-level code reproduction capabilities, representing a significant milestone in autonomous scientific software engineering.
+
+### ② 💼 State-of-the-Art Commercial Code Agents
+
+**DeepCode: 84.8% vs. Best Commercial Agent: 58.7% (+26.1%)**
+
+On the 5-paper subset, DeepCode substantially outperforms leading commercial coding tools:
+- Cursor: 58.4%
+- Claude Code: 58.7%
+- Codex: 40.0%
+- **DeepCode: 84.8%**
+
+This represents a **+26.1% improvement** over the leading commercial code agent. All commercial agents utilize Claude Sonnet 4.5 or GPT-5 Codex-high, highlighting that **DeepCode's superior architecture**—rather than base model capability—drives this performance gap.
+
+### ③ 🔬 Scientific Code Agents
+
+**DeepCode: 73.5% vs. PaperCoder: 51.1% (+22.4%)**
+
+Compared to PaperCoder (**51.1%**), the state-of-the-art scientific code reproduction framework, DeepCode achieves **73.5%**, demonstrating a **+22.4% relative improvement**. This substantial margin validates our multi-module architecture combining planning, hierarchical task decomposition, code generation, and iterative debugging over simpler pipeline-based approaches.
+
+### ④ 🤖 LLM-Based Agents
+
+**DeepCode: 73.5% vs. Best LLM Agent: 43.3% (+30.2%)**
+
+DeepCode significantly outperforms all tested LLM agents:
+- Claude 3.5 Sonnet + IterativeAgent: 27.5%
+- o1 + IterativeAgent (36 hours): 42.4%
+- o1 BasicAgent: 43.3%
+- **DeepCode: 73.5%**
+
+The **+30.2% improvement** over the best-performing LLM agent demonstrates that sophisticated agent scaffolding, rather than extended inference time or larger models, is critical for complex code reproduction tasks.
+
+---
+
+### 🎯 **Autonomous Self-Orchestrating Multi-Agent Architecture**
 
 **The Challenges**:
 
@@ -445,6 +522,7 @@ Implementation Generation • Testing • Documentation
 
 ---
 
+
 ## 🚀 Quick Start
 
 
@@ -465,6 +543,14 @@ curl -O https://raw.githubusercontent.com/HKUDS/DeepCode/main/mcp_agent.secrets.
 # Edit mcp_agent.secrets.yaml with your API keys and base_url:
 # - openai: api_key, base_url (for OpenAI/custom endpoints)
 # - anthropic: api_key (for Claude models)
+# - google: api_key (for Gemini models)
+
+# 🤖 Select your preferred LLM provider (optional)
+# Edit mcp_agent.config.yaml to choose your LLM (line ~106):
+# - llm_provider: "google"    # Use Google Gemini models
+# - llm_provider: "anthropic" # Use Anthropic Claude models
+# - llm_provider: "openai"    # Use OpenAI/compatible models
+# Note: If not set or unavailable, will automatically fallback to first available provider
 
 # 🔑 Configure search API keys for web search (optional)
 # Edit mcp_agent.config.yaml to set your API keys:
@@ -501,6 +587,14 @@ uv pip install -r requirements.txt
 # Edit mcp_agent.secrets.yaml with your API keys and base_url:
 # - openai: api_key, base_url (for OpenAI/custom endpoints)
 # - anthropic: api_key (for Claude models)
+# - google: api_key (for Gemini models)
+
+# 🤖 Select your preferred LLM provider (optional)
+# Edit mcp_agent.config.yaml to choose your LLM (line ~106):
+# - llm_provider: "google"    # Use Google Gemini models
+# - llm_provider: "anthropic" # Use Anthropic Claude models
+# - llm_provider: "openai"    # Use OpenAI/compatible models
+# Note: If not set or unavailable, will automatically fallback to first available provider
 
 # 🔑 Configure search API keys for web search (optional)
 # Edit mcp_agent.config.yaml to set your API keys:
@@ -527,6 +621,14 @@ pip install -r requirements.txt
 # Edit mcp_agent.secrets.yaml with your API keys and base_url:
 # - openai: api_key, base_url (for OpenAI/custom endpoints)
 # - anthropic: api_key (for Claude models)
+# - google: api_key (for Gemini models)
+
+# 🤖 Select your preferred LLM provider (optional)
+# Edit mcp_agent.config.yaml to choose your LLM (line ~106):
+# - llm_provider: "google"    # Use Google Gemini models
+# - llm_provider: "anthropic" # Use Anthropic Claude models
+# - llm_provider: "openai"    # Use OpenAI/compatible models
+# Note: If not set or unavailable, will automatically fallback to first available provider
 
 # 🔑 Configure search API keys for web search (optional)
 # Edit mcp_agent.config.yaml to set your API keys:
@@ -778,14 +880,37 @@ We're continuously enhancing DeepCode with exciting new features:
 
 ---
 
+<div align="left">
+
+### 📖 **Citation**
+
+
+If you find DeepCode useful in your research or applications, please kindly cite:
+
+```
+@misc{li2025deepcodeopenagenticcoding,
+      title={DeepCode: Open Agentic Coding},
+      author={Zongwei Li and Zhonghang Li and Zirui Guo and Xubin Ren and Chao Huang},
+      year={2025},
+      eprint={2512.07921},
+      archivePrefix={arXiv},
+      primaryClass={cs.SE},
+      url={https://arxiv.org/abs/2512.07921},
+}
+```
+
+---
+
+
 ### 📄 **License**
+
+<div align="center">
 
 <img src="https://img.shields.io/badge/License-MIT-4ecdc4?style=for-the-badge&logo=opensourceinitiative&logoColor=white" alt="MIT License">
 
 **MIT License** - Copyright (c) 2025 Data Intelligence Lab, The University of Hong Kong
 
 ---
-
 
 
 <img src="https://visitor-badge.laobi.icu/badge?page_id=deepcode.readme&style=for-the-badge&color=00d4ff" alt="Visitors">

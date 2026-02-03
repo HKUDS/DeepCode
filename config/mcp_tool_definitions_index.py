@@ -25,12 +25,36 @@ class MCPToolDefinitions:
         Get tool definitions for code implementation
         """
         return [
-            MCPToolDefinitions._get_read_file_tool(),
-            MCPToolDefinitions._get_read_code_mem_tool(),
+            # MCPToolDefinitions._get_read_file_tool(),
+            # MCPToolDefinitions._get_read_multiple_files_tool(),
+            # MCPToolDefinitions._get_read_code_mem_tool(),
             MCPToolDefinitions._get_write_file_tool(),
-            MCPToolDefinitions._get_execute_python_tool(),
-            MCPToolDefinitions._get_execute_bash_tool(),
+            # MCPToolDefinitions._get_write_multiple_files_tool(),
+            # MCPToolDefinitions._get_execute_python_tool(),
+            # MCPToolDefinitions._get_execute_bash_tool(),
             MCPToolDefinitions._get_search_code_references_tool(),
+            # MCPToolDefinitions._get_search_code_tool(),
+            # MCPToolDefinitions._get_file_structure_tool(),
+            # MCPToolDefinitions._get_set_workspace_tool(),
+            # MCPToolDefinitions._get_operation_history_tool(),
+        ]
+
+    @staticmethod
+    def get_code_evaluation_tools() -> List[Dict[str, Any]]:
+        """
+        获取代码评估相关的工具定义
+        Get tool definitions for code evaluation
+        """
+        return [
+            MCPToolDefinitions._get_analyze_repo_structure_tool(),
+            MCPToolDefinitions._get_detect_dependencies_tool(),
+            MCPToolDefinitions._get_assess_code_quality_tool(),
+            MCPToolDefinitions._get_evaluate_documentation_tool(),
+            MCPToolDefinitions._get_check_reproduction_readiness_tool(),
+            MCPToolDefinitions._get_generate_evaluation_summary_tool(),
+            MCPToolDefinitions._get_detect_empty_files_tool(),
+            MCPToolDefinitions._get_detect_missing_files_tool(),
+            MCPToolDefinitions._get_generate_code_revision_report_tool(),
         ]
 
     @staticmethod
@@ -56,6 +80,31 @@ class MCPToolDefinitions:
                     },
                 },
                 "required": ["file_path"],
+            },
+        }
+
+    @staticmethod
+    def _get_read_multiple_files_tool() -> Dict[str, Any]:
+        """批量读取多个文件工具定义"""
+        return {
+            "name": "read_multiple_files",
+            "description": "Read multiple files in a single operation (for batch reading)",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "file_requests": {
+                        "type": "string",
+                        "description": 'JSON string with file requests, e.g., \'{"file1.py": {}, "file2.py": {"start_line": 1, "end_line": 10}}\' or simple array \'["file1.py", "file2.py"]\'',
+                    },
+                    "max_files": {
+                        "type": "integer",
+                        "description": "Maximum number of files to read in one operation",
+                        "default": 5,
+                        "minimum": 1,
+                        "maximum": 10,
+                    },
+                },
+                "required": ["file_requests"],
             },
         }
 
@@ -107,6 +156,41 @@ class MCPToolDefinitions:
                     },
                 },
                 "required": ["file_path", "content"],
+            },
+        }
+
+    @staticmethod
+    def _get_write_multiple_files_tool() -> Dict[str, Any]:
+        """批量写入多个文件工具定义"""
+        return {
+            "name": "write_multiple_files",
+            "description": "Write multiple files in a single operation (for batch implementation)",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "file_implementations": {
+                        "type": "string",
+                        "description": 'JSON string mapping file paths to content, e.g., \'{"file1.py": "content1", "file2.py": "content2"}\'',
+                    },
+                    "create_dirs": {
+                        "type": "boolean",
+                        "description": "Whether to create directories if they don't exist",
+                        "default": True,
+                    },
+                    "create_backup": {
+                        "type": "boolean",
+                        "description": "Whether to create backup files if they already exist",
+                        "default": False,
+                    },
+                    "max_files": {
+                        "type": "integer",
+                        "description": "Maximum number of files to write in one operation",
+                        "default": 5,
+                        "minimum": 1,
+                        "maximum": 10,
+                    },
+                },
+                "required": ["file_implementations"],
             },
         }
 
@@ -209,6 +293,56 @@ class MCPToolDefinitions:
         }
 
     @staticmethod
+    def _get_search_code_tool() -> Dict[str, Any]:
+        """代码搜索工具定义 - 在当前代码库中搜索模式"""
+        return {
+            "name": "search_code",
+            "description": "Search patterns in code files within the current repository",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "Search pattern",
+                    },
+                    "file_pattern": {
+                        "type": "string",
+                        "description": "File pattern (e.g., '*.py')",
+                        "default": "*.py",
+                    },
+                    "use_regex": {
+                        "type": "boolean",
+                        "description": "Whether to use regular expressions",
+                        "default": False,
+                    },
+                    "search_directory": {
+                        "type": "string",
+                        "description": "Specify search directory (optional)",
+                    },
+                },
+                "required": ["pattern"],
+            },
+        }
+
+    @staticmethod
+    def _get_operation_history_tool() -> Dict[str, Any]:
+        """操作历史工具定义"""
+        return {
+            "name": "get_operation_history",
+            "description": "Get operation history",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "last_n": {
+                        "type": "integer",
+                        "description": "Return the last N operations",
+                        "default": 10,
+                    },
+                },
+            },
+        }
+
+    @staticmethod
     def _get_get_indexes_overview_tool() -> Dict[str, Any]:
         """获取索引概览工具定义"""
         return {
@@ -262,6 +396,176 @@ class MCPToolDefinitions:
     #         }
     #     }
 
+    # Code evaluation tool definitions
+    @staticmethod
+    def _get_analyze_repo_structure_tool() -> Dict[str, Any]:
+        return {
+            "name": "analyze_repo_structure",
+            "description": "Perform comprehensive repository structure analysis",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Path to the repository to analyze",
+                    }
+                },
+                "required": ["repo_path"],
+            },
+        }
+
+    @staticmethod
+    def _get_detect_dependencies_tool() -> Dict[str, Any]:
+        return {
+            "name": "detect_dependencies",
+            "description": "Detect and analyze project dependencies across multiple languages",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Path to the repository",
+                    }
+                },
+                "required": ["repo_path"],
+            },
+        }
+
+    @staticmethod
+    def _get_assess_code_quality_tool() -> Dict[str, Any]:
+        return {
+            "name": "assess_code_quality",
+            "description": "Assess code quality metrics and identify potential issues",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Path to the repository",
+                    }
+                },
+                "required": ["repo_path"],
+            },
+        }
+
+    @staticmethod
+    def _get_evaluate_documentation_tool() -> Dict[str, Any]:
+        return {
+            "name": "evaluate_documentation",
+            "description": "Evaluate documentation completeness and quality",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Path to the repository",
+                    },
+                    "docs_path": {
+                        "type": "string",
+                        "description": "Optional path to external documentation",
+                    },
+                },
+                "required": ["repo_path"],
+            },
+        }
+
+    @staticmethod
+    def _get_check_reproduction_readiness_tool() -> Dict[str, Any]:
+        return {
+            "name": "check_reproduction_readiness",
+            "description": "Assess repository readiness for reproduction and validation",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Path to the repository",
+                    },
+                    "docs_path": {
+                        "type": "string",
+                        "description": "Optional path to reproduction documentation",
+                    },
+                },
+                "required": ["repo_path"],
+            },
+        }
+
+    @staticmethod
+    def _get_generate_evaluation_summary_tool() -> Dict[str, Any]:
+        return {
+            "name": "generate_evaluation_summary",
+            "description": "Generate comprehensive evaluation summary combining all analysis results",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Path to the repository",
+                    },
+                    "docs_path": {
+                        "type": "string",
+                        "description": "Optional path to reproduction documentation",
+                    },
+                },
+                "required": ["repo_path"],
+            },
+        }
+
+    @staticmethod
+    def _get_detect_empty_files_tool() -> Dict[str, Any]:
+        return {
+            "name": "detect_empty_files",
+            "description": "Detect empty files in the repository that may need implementation",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Path to the repository to analyze",
+                    }
+                },
+                "required": ["repo_path"],
+            },
+        }
+
+    @staticmethod
+    def _get_detect_missing_files_tool() -> Dict[str, Any]:
+        return {
+            "name": "detect_missing_files",
+            "description": "Detect missing essential files like main programs, tests, requirements, etc.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Path to the repository to analyze",
+                    }
+                },
+                "required": ["repo_path"],
+            },
+        }
+
+    @staticmethod
+    def _get_generate_code_revision_report_tool() -> Dict[str, Any]:
+        return {
+            "name": "generate_code_revision_report",
+            "description": "Generate comprehensive code revision report combining empty files, missing files, and quality analysis",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Path to the repository to analyze",
+                    },
+                    "docs_path": {
+                        "type": "string",
+                        "description": "Optional path to documentation",
+                    },
+                },
+                "required": ["repo_path"],
+            },
+        }
+
     @staticmethod
     def get_available_tool_sets() -> Dict[str, str]:
         """
@@ -270,6 +574,7 @@ class MCPToolDefinitions:
         """
         return {
             "code_implementation": "代码实现相关工具集 / Code implementation tool set",
+            "code_evaluation": "代码评估相关工具集 / Code evaluation tool set",
             # 可以在这里添加更多工具集
             # "data_analysis": "数据分析工具集 / Data analysis tool set",
             # "web_scraping": "网页爬取工具集 / Web scraping tool set",
@@ -283,6 +588,7 @@ class MCPToolDefinitions:
         """
         tool_sets = {
             "code_implementation": MCPToolDefinitions.get_code_implementation_tools(),
+            "code_evaluation": MCPToolDefinitions.get_code_evaluation_tools(),
         }
 
         return tool_sets.get(tool_set_name, [])

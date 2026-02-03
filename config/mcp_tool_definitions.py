@@ -25,11 +25,13 @@ class MCPToolDefinitions:
         Get tool definitions for code implementation
         """
         return [
-            MCPToolDefinitions._get_read_file_tool(),
-            MCPToolDefinitions._get_read_code_mem_tool(),
+            # MCPToolDefinitions._get_read_file_tool(),
+            # MCPToolDefinitions._get_read_multiple_files_tool(),
+            # MCPToolDefinitions._get_read_code_mem_tool(),
             MCPToolDefinitions._get_write_file_tool(),
-            MCPToolDefinitions._get_execute_python_tool(),
-            MCPToolDefinitions._get_execute_bash_tool(),
+            # MCPToolDefinitions._get_write_multiple_files_tool(),
+            # MCPToolDefinitions._get_execute_python_tool(),
+            # MCPToolDefinitions._get_execute_bash_tool(),
         ]
 
     @staticmethod
@@ -55,6 +57,31 @@ class MCPToolDefinitions:
                     },
                 },
                 "required": ["file_path"],
+            },
+        }
+
+    @staticmethod
+    def _get_read_multiple_files_tool() -> Dict[str, Any]:
+        """批量读取多个文件工具定义"""
+        return {
+            "name": "read_multiple_files",
+            "description": "Read multiple files in a single operation (for batch reading)",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "file_requests": {
+                        "type": "string",
+                        "description": 'JSON string with file requests, e.g., \'{"file1.py": {}, "file2.py": {"start_line": 1, "end_line": 10}}\' or simple array \'["file1.py", "file2.py"]\'',
+                    },
+                    "max_files": {
+                        "type": "integer",
+                        "description": "Maximum number of files to read in one operation",
+                        "default": 5,
+                        "minimum": 1,
+                        "maximum": 10,
+                    },
+                },
+                "required": ["file_requests"],
             },
         }
 
@@ -106,6 +133,41 @@ class MCPToolDefinitions:
                     },
                 },
                 "required": ["file_path", "content"],
+            },
+        }
+
+    @staticmethod
+    def _get_write_multiple_files_tool() -> Dict[str, Any]:
+        """批量写入多个文件工具定义"""
+        return {
+            "name": "write_multiple_files",
+            "description": "Write multiple files in a single operation (for batch implementation)",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "file_implementations": {
+                        "type": "string",
+                        "description": 'JSON string mapping file paths to content, e.g., \'{"file1.py": "content1", "file2.py": "content2"}\'',
+                    },
+                    "create_dirs": {
+                        "type": "boolean",
+                        "description": "Whether to create directories if they don't exist",
+                        "default": True,
+                    },
+                    "create_backup": {
+                        "type": "boolean",
+                        "description": "Whether to create backup files if they already exist",
+                        "default": False,
+                    },
+                    "max_files": {
+                        "type": "integer",
+                        "description": "Maximum number of files to write in one operation",
+                        "default": 5,
+                        "minimum": 1,
+                        "maximum": 10,
+                    },
+                },
+                "required": ["file_implementations"],
             },
         }
 

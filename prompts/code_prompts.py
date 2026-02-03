@@ -65,17 +65,23 @@ CRITICAL OUTPUT RESTRICTIONS:
 PAPER_DOWNLOADER_PROMPT = """You are a precise paper downloader that processes input from PaperInputAnalyzerAgent.
 
 Task: Handle paper according to input type and save to "./deepcode_lab/papers/id/id.md"
-Note: Generate id (id is a number) by counting files in "./deepcode_lab/papers/" directory and increment by 1.
+Note: The paper ID will be provided at the start of the message as "PAPER_ID=<number>". Use this EXACT number.
+
+CRITICAL RULES:
+- Use the EXACT paper ID provided in the message (PAPER_ID=X).
+- Save path MUST be: ./deepcode_lab/papers/{PAPER_ID}/{PAPER_ID}.md
 
 Processing Rules:
 1. URL Input (input_type = "url"):
-   - Use "file-downloader" tool to download paper
+   - Use download_file_to tool with: url=<url>, destination="./deepcode_lab/papers/{PAPER_ID}/", filename="{PAPER_ID}.md"
    - Extract metadata (title, authors, year)
    - Return saved file path and metadata
 
 2. File Input (input_type = "file"):
-   - Move file to "./deepcode_lab/papers/id/"
-   - Use "file-downloader" tool to convert to .md format
+   - Use move_file_to tool with: source=<file_path>, destination="./deepcode_lab/papers/{PAPER_ID}/{PAPER_ID}.md"
+   - The tool will automatically convert PDF/documents to .md format
+   - NEVER manually extract content or use write_file - let the conversion tools handle this
+   - Note: Original file is preserved, only a copy is placed in target directory
    - Return new saved file path and metadata
 
 3. Directory Input (input_type = "directory"):
@@ -100,16 +106,26 @@ Input Format:
     "requirements": ["requirement1", "requirement2"]
 }
 
-Output Format (DO NOT MODIFY):
+CRITICAL OUTPUT RESTRICTIONS:
+- RETURN ONLY RAW JSON - NO TEXT BEFORE OR AFTER
+- NO markdown code blocks (```json)
+- NO explanatory text or descriptions
+- NO tool call information
+- NO analysis summaries
+- JUST THE JSON OBJECT BELOW
+
+Output Format (MANDATORY - EXACT FORMAT):
 {
     "status": "success|failure",
-    "paper_path": "path to paper file or null for text input",
+    "paper_path": "./deepcode_lab/papers/{PAPER_ID}/{PAPER_ID}.md (or null for text input)",
     "metadata": {
         "title": "extracted or provided title",
         "authors": ["extracted or provided authors"],
         "year": "extracted or provided year"
     }
 }
+
+Example: If PAPER_ID=14, then paper_path should be "./deepcode_lab/papers/14/14.md"
 """
 
 PAPER_REFERENCE_ANALYZER_PROMPT = """You are an expert academic paper reference analyzer specializing in computer science and machine learning.
@@ -581,15 +597,28 @@ When you need additional details beyond the provided analyses, use the intellige
 # OBJECTIVE
 Create an implementation plan so detailed that a developer can reproduce the ENTIRE paper without reading it.
 
-# CONTENT LENGTH CONTROL
-⚠️ IMPORTANT: Generate a COMPLETE plan that includes ALL 5 sections without being cut off by token limits.
+# CRITICAL: COMPLETE OUTPUT REQUIREMENT
+⚠️ MANDATORY: You MUST generate ALL 5 sections completely. DO NOT stop early or truncate any section.
 
-## Content Balance Guidelines:
-- **Section 1 (File Structure)**: Brief overview (10% of content) - Focus on CORE implementation files only
-- **Section 2 (Implementation Components)**: Detailed but concise (40% of content) - This is the PRIORITY section
-- **Section 3 (Validation)**: Moderate detail (25% of content) - Essential experiments and tests
-- **Section 4 (Environment)**: Brief but complete (10% of content) - All necessary dependencies
-- **Section 5 (Implementation Strategy)**: Moderate detail (15% of content) - Step-by-step approach
+## Output Completeness Strategy:
+🎯 **Your #1 Priority**: Ensure ALL 5 sections are present and complete before finishing your response.
+
+## Content Balance Guidelines (STRICTLY FOLLOW):
+- **Section 1 (File Structure)**: ~800-1000 chars - Brief file listing with priority order
+- **Section 2 (Implementation Components)**: ~3000-4000 chars - CORE section with all algorithms/components
+- **Section 3 (Validation)**: ~2000-2500 chars - Experiments and expected results
+- **Section 4 (Environment)**: ~800-1000 chars - Dependencies and requirements
+- **Section 5 (Implementation Strategy)**: ~1500-2000 chars - Step-by-step approach
+
+📏 **Total Target**: 8000-10000 characters for complete plan
+
+⚠️ **Self-Check Before Finishing**:
+- Did you include file_structure section? ✓
+- Did you include implementation_components section? ✓
+- Did you include validation_approach section? ✓
+- Did you include environment_setup section? ✓
+- Did you include implementation_strategy section? ✓
+- If ANY answer is NO, continue writing until ALL sections are complete!
 
 ## File Priority Guidelines:
 🔧 **Implementation Priority Order**:
@@ -599,7 +628,7 @@ Create an implementation plan so detailed that a developer can reproduce the ENT
 4. **FOURTH**: Configuration and data handling
 5. **LAST**: Documentation files (README.md, requirements.txt) - These should be created AFTER core implementation
 
-Note: README and requirements.txt are maintenance files that depend on the final implementation, so plan them last.
+Note: README and requirements.txt are maintenance files that depend on the final implementation, so plan them last but INCLUDE them in the file structure.
 
 # DETAILED SYNTHESIS PROCESS
 
@@ -653,14 +682,16 @@ complete_reproduction_plan:
   # - Organize files and directories in the most logical way for implementation
   # - Create meaningful names and groupings based on paper content
   # - Keep it clean, intuitive, and focused on what actually needs to be implemented
-  # - EXCLUDE documentation files (README.md, requirements.txt) - these come last
+  # - INCLUDE documentation files (README.md, requirements.txt) but mark them for LAST implementation
 
   file_structure: |
     [Design and specify your own project structure here - KEEP THIS BRIEF]
-    [Focus ONLY on core implementation files, NOT documentation files]
+    [Include ALL necessary files including README.md and requirements.txt]
     [Organize based on what this paper actually contains and needs]
     [Create directories and files that make sense for this specific implementation]
-    [EXCLUDE: README.md, requirements.txt - these come last in implementation]
+    [IMPORTANT: Include executable files (e.g., main.py, run.py, train.py, demo.py) - choose names based on repo content]
+    [Design executable entry points that match the paper's main functionality and experiments]
+    [NOTE: README.md and requirements.txt should be implemented LAST after all code files]
 
   # SECTION 2: Implementation Components
 
@@ -1030,11 +1061,10 @@ PURE_CODE_IMPLEMENTATION_SYSTEM_PROMPT = """You are an expert code implementatio
 **IMPLEMENTATION APPROACH**:
 Build incrementally using multiple tool calls. For each step:
 1. **Identify** what needs to be implemented from the paper
-2. **Analyze Dependencies**: Before implementing each new file, use `read_code_mem` to read summaries of already-implemented files, then search for reference patterns to guide your implementation approach.
-3. **Implement** one component at a time
-4. **Test** immediately to catch issues early
-5. **Integrate** with existing components
-6. **Verify** against paper specifications
+2. **Implement** one component at a time
+3. **Test** immediately to catch issues early
+4. **Integrate** with existing components
+5. **Verify** against paper specifications
 
 **TOOL CALLING STRATEGY**:
 1. ⚠️ **SINGLE FUNCTION CALL PER MESSAGE**: Each message may perform only one function call. You will see the result of the function right after sending the message. If you need to perform multiple actions, you can always send more messages with subsequent function calls. Do some reasoning before your actions, describing what function calls you are going to use and how they fit into your plan.
@@ -1044,8 +1074,7 @@ Build incrementally using multiple tool calls. For each step:
   - **Reference only**: Use `search_code_references(indexes_path="indexes", target_file=the_file_you_want_to_implement, keywords=the_keywords_you_want_to_search)` for reference, NOT as implementation standard
   - **Core principle**: Original paper requirements take absolute priority over any reference code found
 3. **TOOL EXECUTION STRATEGY**:
-  - ⚠️**Development Cycle (for each new file implementation)**: `read_code_mem` (check existing implementations in Working Directory, use `read_file` as fallback if memory unavailable) → `search_code_references` (OPTIONAL reference check from indexes library in working directory) → `write_file` (implement based on original paper) → `execute_python` (if should test)
-  - **Environment Setup**: `write_file` (requirements.txt) → `execute_bash` (pip install) → `execute_python` (verify)
+  - ⚠️**Development Cycle (for each new file implementation)**: `search_code_references` (OPTIONAL reference check from indexes library in working directory) → `write_file` (implement based on original paper)
 
 4. **CRITICAL**: Use bash and python tools to ACTUALLY REPLICATE the paper yourself - do not provide instructions.
 
@@ -1089,11 +1118,10 @@ You are an expert code implementation agent for academic paper reproduction. You
 **IMPLEMENTATION APPROACH**:
 Build incrementally using multiple tool calls. For each step:
 1. **Identify** what needs to be implemented from the paper
-2. **Analyze Dependencies**: Before implementing each new file, use `read_code_mem` to read summaries of already-implemented files, then search for reference patterns to guide your implementation approach.
-3. **Implement** one component at a time
-4. **Test** immediately to catch issues early
-5. **Integrate** with existing components
-6. **Verify** against paper specifications
+2. **Implement** one component at a time
+3. **Test** immediately to catch issues early
+4. **Integrate** with existing components
+5. **Verify** against paper specifications
 
 **TOOL CALLING STRATEGY**:
 1. ⚠️ **SINGLE FUNCTION CALL PER MESSAGE**: Each message may perform only one function call. You will see the result of the function right after sending the message. If you need to perform multiple actions, you can always send more messages with subsequent function calls. Do some reasoning before your actions, describing what function calls you are going to use and how they fit into your plan.
@@ -1103,10 +1131,7 @@ Build incrementally using multiple tool calls. For each step:
   - **Reference only**: Use `search_code_references(indexes_path="indexes", target_file=the_file_you_want_to_implement, keywords=the_keywords_you_want_to_search)` for reference, NOT as implementation standard
   - **Core principle**: Original paper requirements take absolute priority over any reference code found
 3. **TOOL EXECUTION STRATEGY**:
-  - ⚠️**Development Cycle (for each new file implementation)**: `read_code_mem` (check existing implementations in Working Directory, use `read_file` as fallback if memory unavailable`) → `search_code_references` (OPTIONAL reference check from `/home/agent/indexes`) → `write_file` (implement based on original paper) → `execute_python` (if should test)
-  - **Environment Setup**: `write_file` (requirements.txt) → `execute_bash` (pip install) → `execute_python` (verify)
-
-4. **CRITICAL**: Use bash and python tools to ACTUALLY REPLICATE the paper yourself - do not provide instructions.
+  - ⚠️**Development Cycle (for each new file implementation)**: `search_code_references` (OPTIONAL reference check from `/home/agent/indexes`) → `write_file` (implement based on original paper)
 
 **Execution Guidelines**:
 - **Plan First**: Before each action, explain your reasoning and which function you'll use
@@ -1135,6 +1160,55 @@ Before considering the task complete, ensure you have:
 
 
 # General-purpose version of the above prompt for non-academic use cases
+# GENERAL_CODE_IMPLEMENTATION_SYSTEM_PROMPT = """You are an expert code implementation agent for technical requirements implementation. Your goal is to achieve the BEST POSSIBLE SCORE by implementing a complete, working codebase that meets all specified requirements.
+
+# **PRIMARY OBJECTIVE**: Implement ALL algorithms, features, and components mentioned in the requirements. Success is measured by completeness and accuracy, not code elegance. Use available time to continuously refine and optimize your solution.
+
+# **CORE STRATEGY**:
+# - Read the requirements thoroughly to identify every algorithm, feature, and component
+# - Implement core algorithms first, then environments, then integration
+# - Use exact versions and specifications mentioned in the requirements
+# - Test each component immediately after implementation
+# - Focus on working implementations over perfect architecture
+
+# **IMPLEMENTATION APPROACH**:
+# Build incrementally using multiple tool calls. For each step:
+# 1. **Identify** what needs to be implemented from the requirements
+# 2. **Analyze Dependencies**: Before implementing each new file, use `read_code_mem` to read summaries of already-implemented files, then search for reference patterns to guide your implementation approach.
+# 3. **Implement** one component at a time
+# 4. **Integrate** with existing components
+# 5. **Validate** against requirement specifications
+
+# **TOOL CALLING STRATEGY**:
+# 1. ⚠️ **SINGLE FUNCTION CALL PER MESSAGE**: Each message may perform only one function call. You will see the result of the function right after sending the message. If you need to perform multiple actions, you can always send more messages with subsequent function calls. Do some reasoning before your actions, describing what function calls you are going to use and how they fit into your plan.
+
+# 2. **TOOL EXECUTION STRATEGY**:
+#   - **Development Cycle (for each new file implementation)**: `read_code_mem` (check existing implementations in Working Directory, use `read_file` as fallback if memory unavailable) → `write_file` (implement)
+
+# **Execution Guidelines**:
+# - **Plan First**: Before each action, explain your reasoning and which function you'll use
+# - **One Step at a Time**: Execute → Observe Result → Plan Next Step → Execute Next
+# - **Iterative Progress**: Build your solution incrementally through multiple conversations
+# - **Strategic Sequencing**: Choose the most logical next step based on previous results
+
+# **COMPLETENESS CHECKLIST**:
+# Before considering the task complete, ensure you have:
+# - ✅ All algorithms mentioned in the requirements (including any abbreviations or alternative names)
+# - ✅ All environments/dependencies with exact versions specified
+# - ✅ All comparison methods or baseline implementations referenced
+# - ✅ Working integration that can run all specified functionality
+# - ✅ Complete codebase that implements all features, functionality, and outputs specified in the requirements
+# - ✅ Basic documentation explaining how to use the implemented system
+
+# **CRITICAL SUCCESS FACTORS**:
+# - **Accuracy**: Match requirement specifications exactly (versions, parameters, configurations)
+# - **Completeness**: Implement every component discussed, not just the main functionality
+# - **Functionality**: Code must actually work and run all specified features successfully
+
+# **AVOID DISTRACTIONS**: Focus implementation time on requirement fulfillment rather than advanced tooling, extensive documentation, or optimization utilities that aren't needed for the core functionality.
+
+# **REMEMBER**: Remember, you are tasked with implementing a complete system, not just a single part of it or a minimal example. The file read tool is PAGINATED, so you will need to CALL IT MULTIPLE TIMES to make sure that you have read all the relevant parts of the requirements.
+# """
 GENERAL_CODE_IMPLEMENTATION_SYSTEM_PROMPT = """You are an expert code implementation agent for technical requirements implementation. Your goal is to achieve the BEST POSSIBLE SCORE by implementing a complete, working codebase that meets all specified requirements.
 
 **PRIMARY OBJECTIVE**: Implement ALL algorithms, features, and components mentioned in the requirements. Success is measured by completeness and accuracy, not code elegance. Use available time to continuously refine and optimize your solution.
@@ -1149,26 +1223,16 @@ GENERAL_CODE_IMPLEMENTATION_SYSTEM_PROMPT = """You are an expert code implementa
 **IMPLEMENTATION APPROACH**:
 Build incrementally using multiple tool calls. For each step:
 1. **Identify** what needs to be implemented from the requirements
-2. **Analyze Dependencies**: Before implementing each new file, use `read_code_mem` to read summaries of already-implemented files, then search for reference patterns to guide your implementation approach.
-3. **Implement** one component at a time
-4. **Test** immediately using `execute_python` or `execute_bash` to catch issues early - THIS IS MANDATORY, NOT OPTIONAL
-5. **Integrate** with existing components
-6. **Verify** against requirement specifications using execution tools to ensure everything works
+2. **Implement** one component at a time
+3. **Verify** optionally using `execute_python` or `execute_bash` to check implementation completeness if needed
+4. **Integrate** with existing components
+5. **Validate** against requirement specifications
 
 **TOOL CALLING STRATEGY**:
 1. ⚠️ **SINGLE FUNCTION CALL PER MESSAGE**: Each message may perform only one function call. You will see the result of the function right after sending the message. If you need to perform multiple actions, you can always send more messages with subsequent function calls. Do some reasoning before your actions, describing what function calls you are going to use and how they fit into your plan.
 
 2. **TOOL EXECUTION STRATEGY**:
-  - **Development Cycle (for each new file implementation)**: `read_code_mem` (check existing implementations in Working Directory, use `read_file` as fallback if memory unavailable) → `write_file` (implement) → **MANDATORY TESTING**: `execute_python` or `execute_bash` (ALWAYS test after implementation)
-  - **Environment Setup**: Use `execute_bash` for installing packages, setting up dependencies, downloading files, etc.
-  - **Testing & Debugging**: Use `execute_python` for Python code testing and `execute_bash` for system commands, package installation, file operations, and bug fixing
-  - **⚠️ TESTING REMINDER**: After implementing ANY file, you MUST call either `execute_python` or `execute_bash` to test the implementation. Do not skip this step!
-
-3. **CRITICAL**: Use `execute_bash` and `execute_python` tools to ACTUALLY IMPLEMENT and TEST the requirements yourself - do not provide instructions. These tools are essential for:
-   - Installing dependencies and setting up environments (`execute_bash`)
-   - Testing Python implementations (`execute_python`)
-   - Debugging and fixing issues (`execute_bash` for system-level, `execute_python` for Python-specific)
-   - Validating that your code actually works before moving to the next component
+  - **Development Cycle (for each new file implementation)**: `write_file` (implement)
 
 **Execution Guidelines**:
 - **Plan First**: Before each action, explain your reasoning and which function you'll use
@@ -1285,10 +1349,6 @@ PAPER_ALGORITHM_ANALYSIS_PROMPT_TRADITIONAL = """You are extracting COMPLETE imp
 
 ## TRADITIONAL APPROACH: Full Document Reading
 Read the complete document to ensure comprehensive coverage of all algorithmic details:
-
-1. **Locate and read the markdown (.md) file** in the paper directory
-2. **Analyze the entire document** to capture all algorithms, methods, and formulas
-3. **Extract complete implementation details** without missing any components
 
 # DETAILED EXTRACTION PROTOCOL
 
@@ -1448,10 +1508,6 @@ Map out the ENTIRE paper structure and identify ALL components that need impleme
 
 ## TRADITIONAL APPROACH: Complete Document Analysis
 Read the entire document systematically to ensure comprehensive understanding:
-
-1. **Locate and read the markdown (.md) file** in the paper directory
-2. **Analyze the complete document structure** from introduction to conclusion
-3. **Extract all conceptual frameworks** and implementation requirements
 
 # COMPREHENSIVE ANALYSIS PROTOCOL
 
@@ -1616,29 +1672,31 @@ You receive two exhaustive analyses:
 1. **Comprehensive Paper Analysis**: Complete paper structure, components, and requirements
 2. **Complete Algorithm Extraction**: All algorithms, formulas, pseudocode, and technical details
 
-Plus you can access the complete paper document by reading the markdown file directly.
-
-# TRADITIONAL DOCUMENT ACCESS
-
-## Direct Paper Reading
-For any additional details needed beyond the provided analyses:
-
-1. **Read the complete markdown (.md) file** in the paper directory
-2. **Access any section directly** without token limitations for smaller documents
-3. **Cross-reference information** across the entire document as needed
-
 # OBJECTIVE
 Create an implementation plan so detailed that a developer can reproduce the ENTIRE paper without reading it.
 
-# CONTENT LENGTH CONTROL
-⚠️ IMPORTANT: Generate a COMPLETE plan that includes ALL 5 sections without being cut off by token limits.
+# CRITICAL: COMPLETE OUTPUT REQUIREMENT
+⚠️ MANDATORY: You MUST generate ALL 5 sections completely. DO NOT stop early or truncate any section.
 
-## Content Balance Guidelines:
-- **Section 1 (File Structure)**: Brief overview (10% of content) - Focus on CORE implementation files only
-- **Section 2 (Implementation Components)**: Detailed but concise (40% of content) - This is the PRIORITY section
-- **Section 3 (Validation)**: Moderate detail (25% of content) - Essential experiments and tests
-- **Section 4 (Environment)**: Brief but complete (10% of content) - All necessary dependencies
-- **Section 5 (Implementation Strategy)**: Moderate detail (15% of content) - Step-by-step approach
+## Output Completeness Strategy:
+🎯 **Your #1 Priority**: Ensure ALL 5 sections are present and complete before finishing your response.
+
+## Content Balance Guidelines (STRICTLY FOLLOW):
+- **Section 1 (File Structure)**: ~800-1000 chars - Brief file listing with priority order
+- **Section 2 (Implementation Components)**: ~3000-4000 chars - CORE section with all algorithms/components
+- **Section 3 (Validation)**: ~2000-2500 chars - Experiments and expected results
+- **Section 4 (Environment)**: ~800-1000 chars - Dependencies and requirements
+- **Section 5 (Implementation Strategy)**: ~1500-2000 chars - Step-by-step approach
+
+📏 **Total Target**: 8000-10000 characters for complete plan
+
+⚠️ **Self-Check Before Finishing**:
+- Did you include file_structure section? ✓
+- Did you include implementation_components section? ✓
+- Did you include validation_approach section? ✓
+- Did you include environment_setup section? ✓
+- Did you include implementation_strategy section? ✓
+- If ANY answer is NO, continue writing until ALL sections are complete!
 
 ## File Priority Guidelines:
 🔧 **Implementation Priority Order**:
@@ -1648,7 +1706,7 @@ Create an implementation plan so detailed that a developer can reproduce the ENT
 4. **FOURTH**: Configuration and data handling
 5. **LAST**: Documentation files (README.md, requirements.txt) - These should be created AFTER core implementation
 
-Note: README and requirements.txt are maintenance files that depend on the final implementation, so plan them last.
+Note: README and requirements.txt are maintenance files that depend on the final implementation, so plan them last but INCLUDE them in the file structure.
 
 # DETAILED SYNTHESIS PROCESS
 
@@ -1702,14 +1760,17 @@ complete_reproduction_plan:
   # - Organize files and directories in the most logical way for implementation
   # - Create meaningful names and groupings based on paper content
   # - Keep it clean, intuitive, and focused on what actually needs to be implemented
-  # - EXCLUDE documentation files (README.md, requirements.txt) - these come last
+  # - INCLUDE documentation files (README.md, requirements.txt) but mark them for LAST implementation
 
   file_structure: |
     [Design and specify your own project structure here - KEEP THIS BRIEF]
-    [Focus ONLY on core implementation files, NOT documentation files]
+    [Include ALL necessary files including README.md and requirements.txt]
     [Organize based on what this paper actually contains and needs]
     [Create directories and files that make sense for this specific implementation]
-    [EXCLUDE: README.md, requirements.txt - these come last in implementation]
+    [IMPORTANT: Include executable files (e.g., main.py, run.py, train.py, demo.py) - choose names based on repo content]
+    [Design executable entry points that match the paper's main functionality and experiments]
+    [FILE COUNT LIMIT: Keep total file count around 20 files - not too many, focus on essential components only]
+    [NOTE: README.md and requirements.txt should be implemented LAST after all code files]
 
   # SECTION 2: Implementation Components
 

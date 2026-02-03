@@ -46,6 +46,7 @@ class ConciseMemoryAgent:
         logger: Optional[logging.Logger] = None,
         target_directory: Optional[str] = None,
         default_models: Optional[Dict[str, str]] = None,
+        code_directory: Optional[str] = None,
     ):
         """
         Initialize Concise Memory Agent
@@ -55,6 +56,7 @@ class ConciseMemoryAgent:
             logger: Logger instance
             target_directory: Target directory for saving summaries
             default_models: Default models configuration from workflow
+            code_directory: Generated code directory path (e.g., target_directory/generate_code)
         """
         self.logger = logger or self._create_default_logger()
         self.initial_plan = initial_plan_content
@@ -62,7 +64,8 @@ class ConciseMemoryAgent:
         # Store default models configuration
         self.default_models = default_models or {
             "anthropic": "claude-sonnet-4-20250514",
-            "openai": "gpt-4o",
+            "openai": "o3-mini",
+            "google": "gemini-2.0-flash",
         }
 
         # Memory state tracking - new logic: trigger after each write_file
@@ -75,14 +78,19 @@ class ConciseMemoryAgent:
         # Parse phase structure from initial plan
         self.phase_structure = self._parse_phase_structure()
 
-        # Extract all files from file structure in initial plan
-        self.all_files_list = self._extract_all_files_from_plan()
-
         # Memory configuration
         if target_directory:
             self.save_path = target_directory
         else:
             self.save_path = "./deepcode_lab/papers/1/"
+
+        # Store code directory for file extraction
+        self.code_directory = code_directory or os.path.join(
+            self.save_path, "generate_code"
+        )
+
+        # Extract all files - prioritize generated directory over plan parsing
+        self.all_files_list = self._extract_all_files()
 
         # Code summary file path
         self.code_summary_path = os.path.join(
@@ -101,6 +109,7 @@ class ConciseMemoryAgent:
         self.logger.info(
             f"Concise Memory Agent initialized with target directory: {self.save_path}"
         )
+        self.logger.info(f"Code directory: {self.code_directory}")
         self.logger.info(f"Code summary will be saved to: {self.code_summary_path}")
         # self.logger.info(f"🤖 Using models - Anthropic: {self.default_models['anthropic']}, OpenAI: {self.default_models['openai']}")
         self.logger.info(
@@ -146,6 +155,151 @@ class ConciseMemoryAgent:
             self.logger.warning(f"Failed to parse phase structure: {e}")
             return {}
 
+    def _extract_all_files(self) -> List[str]:
+        """
+        Extract all code files - prioritizes generated directory over plan parsing
+
+        Strategy:
+        1. First try to extract from the generated code directory (reliable)
+        2. Fall back to plan parsing if directory doesn't exist yet
+
+        Returns:
+            List of all file paths that should be implemented
+        """
+        # Try extracting from generated directory first (more reliable)
+        if os.path.exists(self.code_directory):
+            files_from_dir = self._extract_files_from_generated_directory()
+            if files_from_dir:
+                self.logger.info(
+                    f"📁 Extracted {len(files_from_dir)} files from generated directory"
+                )
+                return files_from_dir
+
+        # Fall back to plan parsing
+        self.logger.info(
+            "📁 Generated directory not found, extracting from plan (less reliable)"
+        )
+        return self._extract_all_files_from_plan()
+
+    def _extract_files_from_generated_directory(self) -> List[str]:
+        """
+        Extract all code files from the generated code directory
+        This is more reliable than parsing the LLM-generated plan
+
+        Returns:
+            List of relative file paths within the code directory
+        """
+        code_files = []
+
+        # Define code file extensions to track
+        code_extensions = {
+            ".py",
+            ".js",
+            ".ts",
+            ".jsx",
+            ".tsx",
+            ".vue",
+            ".html",
+            ".css",
+            ".scss",
+            ".sass",
+            ".less",
+            ".json",
+            ".yaml",
+            ".yml",
+            ".toml",
+            ".xml",
+            ".ini",
+            ".cfg",
+            ".md",
+            ".rst",
+            ".txt",
+            ".sh",
+            ".bash",
+            ".zsh",
+            ".bat",
+            ".ps1",
+            ".cmd",
+            ".c",
+            ".cpp",
+            ".h",
+            ".hpp",
+            ".cc",
+            ".cxx",
+            ".java",
+            ".kt",
+            ".scala",
+            ".go",
+            ".rs",
+            ".php",
+            ".rb",
+            ".pl",
+            ".lua",
+            ".r",
+            ".sql",
+        }
+
+        # Files and directories to exclude
+        exclude_patterns = {
+            "__pycache__",
+            ".pyc",
+            "node_modules",
+            ".git",
+            ".vscode",
+            ".idea",
+            "dist",
+            "build",
+            "output",
+            ".egg-info",
+            "venv",
+            ".venv",
+            "env",
+            ".env",
+        }
+
+        try:
+            for root, dirs, files in os.walk(self.code_directory):
+                # Filter out excluded directories
+                dirs[:] = [
+                    d
+                    for d in dirs
+                    if d not in exclude_patterns and not d.startswith(".")
+                ]
+
+                for file in files:
+                    # Skip hidden files and excluded patterns
+                    if file.startswith("."):
+                        continue
+
+                    # Check if file has a code extension
+                    has_code_ext = any(
+                        file.lower().endswith(ext) for ext in code_extensions
+                    )
+                    if not has_code_ext:
+                        continue
+
+                    # Get full path and convert to relative path
+                    full_path = os.path.join(root, file)
+                    relative_path = os.path.relpath(full_path, self.code_directory)
+
+                    # Normalize path separators
+                    relative_path = relative_path.replace(os.sep, "/")
+
+                    code_files.append(relative_path)
+
+            # Sort for consistency
+            code_files = sorted(code_files)
+
+            if code_files:
+                self.logger.info(f"📄 Found {len(code_files)} code files in directory")
+                self.logger.info(f"📄 Sample files: {code_files[:3]}...")
+
+            return code_files
+
+        except Exception as e:
+            self.logger.error(f"Failed to extract files from directory: {e}")
+            return []
+
     def _extract_all_files_from_plan(self) -> List[str]:
         """
         Extract all file paths from the file_structure section in initial plan
@@ -186,89 +340,305 @@ class ConciseMemoryAgent:
             return []
 
     def _extract_from_tree_structure(self, lines: List[str]) -> List[str]:
-        """Extract files from tree structure format - only from file_structure section"""
+        """
+        Extract files from tree structure format - Advanced algorithm with multi-strategy approach
+
+        Strategy:
+        1. Precise indentation-based depth calculation
+        2. Smart directory vs file detection using multiple heuristics
+        3. Robust path stack management with depth tracking
+        4. Fallback to regex pattern matching if tree parsing fails
+        """
         files = []
         in_file_structure = False
-        path_stack = []
 
-        for line in lines:
-            # Check if we're in the file_structure section
+        # Enhanced path tracking: store (depth, name) pairs
+        path_stack = []  # [(depth, dir_name), ...]
+        root_dir = None
+
+        # Track the base indentation of tree structure
+        base_indent = None
+
+        for line_num, line in enumerate(lines):
+            # === Section Boundary Detection ===
             if "file_structure:" in line or "file_structure |" in line:
                 in_file_structure = True
                 continue
-            # Check for end of file_structure section (next YAML key)
-            elif (
+
+            # End of file_structure section (next YAML key without indentation)
+            if (
                 in_file_structure
                 and line.strip()
                 and not line.startswith(" ")
                 and ":" in line
             ):
-                # This looks like a new YAML section, stop parsing
                 break
-            elif not in_file_structure:
+
+            if not in_file_structure:
                 continue
 
             if not line.strip():
                 continue
 
-            # Skip lines that look like YAML keys (contain ":" but not file paths)
-            if ":" in line and not ("." in line and "/" in line):
+            # Skip YAML comments and keys that are clearly not files
+            stripped = line.strip()
+            if stripped.startswith("#") or (
+                stripped.endswith(":") and "/" not in stripped
+            ):
                 continue
 
-            # Only process lines that look like file tree structure
-            if not any(
-                char in line for char in ["├", "└", "│", "-"]
-            ) and not line.startswith("    "):
+            # === Root Directory Detection ===
+            # Pattern: "project-name/" at minimal indentation, no tree chars
+            if stripped.endswith("/") and not any(
+                c in line for c in ["├", "└", "│", "─"]
+            ):
+                indent = len(line) - len(line.lstrip())
+                if indent <= 4:  # Root level
+                    root_dir = stripped.rstrip("/")
+                    path_stack = []
+                    base_indent = None
+                    self.logger.debug(f"🌳 Detected root directory: {root_dir}")
+                    continue
+
+            # === Tree Structure Line Detection ===
+            has_tree_chars = any(c in line for c in ["├", "└", "│", "─"])
+            if not has_tree_chars:
                 continue
 
-            # Remove tree characters and get the clean name
-            clean_line = line
-            for char in ["├──", "└──", "│", "─", "├", "└"]:
-                clean_line = clean_line.replace(char, "")
-            clean_line = clean_line.strip()
+            # === Calculate Precise Depth ===
+            # Method: Count the actual tree structure symbols to determine hierarchy
+            indent = len(line) - len(line.lstrip())
 
-            if not clean_line or ":" in clean_line:
-                continue
+            # Set base indent on first tree line
+            if base_indent is None:
+                base_indent = indent
 
-            # Calculate indentation level by counting spaces/tree chars
-            indent_level = 0
-            for char in line:
-                if char in [" ", "\t", "│", "├", "└", "─"]:
-                    indent_level += 1
+            # Count tree depth indicators
+            # Each "│   " or "    " block represents one level
+            # "├── " or "└── " marks the current item
+            tree_prefix = line[
+                : line.find("├")
+                if "├" in line
+                else line.find("└")
+                if "└" in line
+                else len(line)
+            ]
+
+            # Count depth by analyzing tree prefix structure
+            # Pattern: "    │   │   ├── filename" -> depth 3
+            # Pattern: "    ├── filename" -> depth 1
+            # Pattern: "    │   ├── filename" -> depth 2
+
+            depth = 0
+            i = 0
+            while i < len(tree_prefix):
+                # Look for pipe or tree junction
+                if i + 4 <= len(tree_prefix):
+                    chunk = tree_prefix[i : i + 4]
+                    if "│" in chunk or all(c == " " for c in chunk):
+                        depth += 1
+                        i += 4
+                    else:
+                        i += 1
                 else:
                     break
-            indent_level = max(
-                0, (indent_level - 4) // 4
-            )  # Normalize to directory levels
 
-            # Extract filename (remove comments)
-            if "#" in clean_line:
-                filename = clean_line.split("#")[0].strip()
-            else:
-                filename = clean_line.strip()
+            # Fallback: use relative indentation
+            if depth == 0:
+                depth = max(1, (indent - base_indent) // 4 + 1)
 
-            # Skip empty filenames
-            if not filename:
+            # === Clean and Extract Item Name ===
+            item_name = line
+            # Remove all tree characters
+            for pattern in ["├──", "└──", "│", "├", "└", "─"]:
+                item_name = item_name.replace(pattern, "")
+            item_name = item_name.strip()
+
+            # Remove inline comments
+            if "#" in item_name:
+                item_name = item_name.split("#")[0].strip()
+
+            if not item_name or ":" in item_name:
                 continue
 
-            # Update path stack based on indentation
-            if indent_level < len(path_stack):
-                path_stack = path_stack[:indent_level]
+            # === Smart Directory vs File Detection ===
+            is_directory = self._is_directory(item_name)
 
-            # If it's a directory (ends with / or no extension), add to path stack
-            if filename.endswith("/") or ("." not in filename and filename != ""):
-                directory_name = filename.rstrip("/")
-                if directory_name and ":" not in directory_name:
-                    path_stack.append(directory_name)
+            # === Update Path Stack ===
+            # Remove items deeper than current depth
+            path_stack = [(d, n) for d, n in path_stack if d < depth]
+
+            if is_directory:
+                dir_name = item_name.rstrip("/")
+                path_stack.append((depth, dir_name))
+                self.logger.debug(f"  {'  ' * depth}📁 {dir_name} (depth={depth})")
             else:
-                # It's a file, construct full path
-                if path_stack:
-                    full_path = "/".join(path_stack) + "/" + filename
-                else:
-                    full_path = filename
+                # Construct full file path
+                path_parts = [root_dir] if root_dir else []
+                path_parts.extend([name for _, name in path_stack])
+                path_parts.append(item_name)
+
+                full_path = "/".join(path_parts)
                 files.append(full_path)
+                self.logger.debug(f"  {'  ' * depth}📄 {full_path}")
 
         return files
+
+    def _is_directory(self, name: str) -> bool:
+        """
+        Advanced directory detection using multiple heuristics
+
+        Returns True if the name represents a directory, False if it's a file
+        """
+        # Rule 1: Explicit directory marker
+        if name.endswith("/"):
+            return True
+
+        # Rule 2: Has file extension -> definitely a file
+        basename = name.split("/")[-1]
+        if "." in basename:
+            # Check if it's a known file extension
+            known_extensions = [
+                ".py",
+                ".js",
+                ".ts",
+                ".jsx",
+                ".tsx",
+                ".vue",
+                ".html",
+                ".css",
+                ".scss",
+                ".sass",
+                ".json",
+                ".yaml",
+                ".yml",
+                ".xml",
+                ".toml",
+                ".md",
+                ".txt",
+                ".rst",
+                ".sh",
+                ".bat",
+                ".ps1",
+                ".c",
+                ".cpp",
+                ".h",
+                ".hpp",
+                ".java",
+                ".go",
+                ".rs",
+                ".sql",
+                ".db",
+                ".env",
+                ".gitignore",
+                ".dockerignore",
+                ".lock",
+                ".sum",
+                ".mod",
+            ]
+            if any(basename.lower().endswith(ext) for ext in known_extensions):
+                return False
+
+            # Has extension but not recognized -> might be config file, treat as file
+            if basename.count(".") == 1:
+                return False
+
+        # Rule 3: Known special files without extensions
+        special_files = [
+            "README",
+            "LICENSE",
+            "CHANGELOG",
+            "CONTRIBUTING",
+            "Makefile",
+            "Dockerfile",
+            "Vagrantfile",
+            "requirements.txt",
+            "setup.py",
+            "setup.cfg",
+            "package.json",
+            "package-lock.json",
+            "Cargo.toml",
+            "go.mod",
+        ]
+        if basename in special_files or basename.upper() in special_files:
+            return False
+
+        # Rule 4: Common directory names (even without trailing /)
+        common_dirs = [
+            "src",
+            "lib",
+            "app",
+            "core",
+            "api",
+            "web",
+            "client",
+            "server",
+            "config",
+            "configs",
+            "settings",
+            "data",
+            "datasets",
+            "models",
+            "model",
+            "utils",
+            "helpers",
+            "common",
+            "shared",
+            "tests",
+            "test",
+            "testing",
+            "__tests__",
+            "docs",
+            "documentation",
+            "scripts",
+            "bin",
+            "tools",
+            "assets",
+            "static",
+            "public",
+            "resources",
+            "components",
+            "views",
+            "pages",
+            "routes",
+            "services",
+            "controllers",
+            "handlers",
+            "middleware",
+            "middlewares",
+            "types",
+            "interfaces",
+            "schemas",
+            "experiments",
+            "notebooks",
+            "dist",
+            "build",
+            "output",
+            "node_modules",
+            "vendor",
+            "packages",
+            "__pycache__",
+            ".git",
+            ".vscode",
+            "training",
+            "evaluation",
+            "inference",
+        ]
+        if basename.lower() in common_dirs:
+            return True
+
+        # Rule 5: Plural forms often indicate directories
+        if basename.endswith("s") and len(basename) > 3:
+            singular = basename[:-1]
+            if singular in common_dirs:
+                return True
+
+        # Rule 6: Python package indicators
+        if basename == "__init__.py":
+            return False  # This is a file
+
+        # Default: if no extension and not a known file, likely a directory
+        return "." not in basename
 
     def _extract_from_simple_list(self, lines: List[str]) -> List[str]:
         """Extract files from simple list format (- filename)"""
@@ -291,98 +661,246 @@ class ConciseMemoryAgent:
         return files
 
     def _extract_from_plan_content(self, lines: List[str]) -> List[str]:
-        """Extract files from anywhere in the plan content"""
+        """
+        Advanced fallback extraction: Extract files from anywhere in the plan content
+        Uses multiple regex patterns and intelligent filtering
+        """
         files = []
-
-        # Look for common file patterns
         import re
 
-        file_patterns = [
-            r"([a-zA-Z0-9_\-/]+\.[a-zA-Z0-9]+)",  # filename.ext
-            r'"([a-zA-Z0-9_\-/]+\.[a-zA-Z0-9]+)"',  # "filename.ext"
-        ]
+        # === Pattern 1: Standard file paths ===
+        # Matches: path/to/file.py, src/model/apt_layer.py
+        pattern1 = r"([a-zA-Z0-9_\-]+(?:/[a-zA-Z0-9_\-]+)+\.[a-zA-Z0-9]+)"
+
+        # === Pattern 2: Quoted file paths ===
+        # Matches: "path/to/file.py", 'src/utils.py'
+        pattern2 = r'["\']([a-zA-Z0-9_\-]+(?:/[a-zA-Z0-9_\-]+)+\.[a-zA-Z0-9]+)["\']'
+
+        # === Pattern 3: File paths with special characters ===
+        # Matches: data/data_loader.py, __init__.py paths
+        pattern3 = r"([a-zA-Z0-9_\-]+(?:/[a-zA-Z0-9_\-]+)*/__init__\.py)"
+        pattern4 = r"([a-zA-Z0-9_\-]+(?:/[a-zA-Z0-9_\-]+)+\.(?:py|js|ts|jsx|tsx|html|css|md|txt|json|yaml|yml|xml|sql|sh|bat))"
+
+        # === Pattern 5: Backtick-wrapped paths (in code blocks) ===
+        pattern5 = r"`([a-zA-Z0-9_\-]+(?:/[a-zA-Z0-9_\-]+)+\.[a-zA-Z0-9]+)`"
+
+        all_patterns = [pattern1, pattern2, pattern3, pattern4, pattern5]
+
+        # Collect all potential matches
+        potential_files = set()
 
         for line in lines:
-            for pattern in file_patterns:
+            # Skip comment-only lines
+            stripped = line.strip()
+            if stripped.startswith("#") and not ("/" in stripped and "." in stripped):
+                continue
+
+            # Apply all patterns
+            for pattern in all_patterns:
                 matches = re.findall(pattern, line)
-                for match in matches:
-                    # Only include if it looks like a code file (exclude media files)
-                    if "/" in match and any(
-                        ext in match
-                        for ext in [
-                            ".py",
-                            ".js",
-                            ".html",
-                            ".css",
-                            ".md",
-                            ".txt",
-                            ".json",
-                            ".yaml",
-                            ".yml",
-                            ".xml",
-                            ".sql",
-                            ".sh",
-                            ".ts",
-                            ".jsx",
-                            ".tsx",
-                        ]
-                    ):
-                        files.append(match)
+                potential_files.update(matches)
 
-        return files
-
-    def _clean_and_validate_files(self, files: List[str]) -> List[str]:
-        """Clean and validate extracted file paths - only keep code files"""
-        cleaned_files = []
-
-        # Define code file extensions we want to track
-        code_extensions = [
+        # === Filter and validate matches ===
+        code_extensions = {
             ".py",
             ".js",
-            ".html",
-            ".css",
-            ".md",
-            ".txt",
-            ".json",
-            ".yaml",
-            ".yml",
-            ".xml",
-            ".sql",
-            ".sh",
-            ".bat",
-            ".dockerfile",
-            ".env",
-            ".gitignore",
             ".ts",
             ".jsx",
             ".tsx",
             ".vue",
-            ".php",
-            ".rb",
-            ".go",
-            ".rs",
-            ".cpp",
+            ".html",
+            ".css",
+            ".scss",
+            ".sass",
+            ".less",
+            ".json",
+            ".yaml",
+            ".yml",
+            ".toml",
+            ".xml",
+            ".ini",
+            ".cfg",
+            ".md",
+            ".rst",
+            ".txt",
+            ".sh",
+            ".bash",
+            ".zsh",
+            ".bat",
+            ".ps1",
+            ".cmd",
             ".c",
+            ".cpp",
             ".h",
             ".hpp",
+            ".cc",
+            ".cxx",
             ".java",
             ".kt",
-            ".swift",
-            ".dart",
-        ]
+            ".scala",
+            ".go",
+            ".rs",
+            ".php",
+            ".rb",
+            ".pl",
+            ".lua",
+            ".r",
+            ".sql",
+            ".db",
+            ".dockerfile",
+            ".env",
+            ".gitignore",
+            ".lock",
+            ".sum",
+            ".mod",
+        }
+
+        for file_path in potential_files:
+            # Must have path separator
+            if "/" not in file_path:
+                continue
+
+            # Must have valid extension
+            has_valid_ext = any(
+                file_path.lower().endswith(ext) for ext in code_extensions
+            )
+            if not has_valid_ext:
+                continue
+
+            # Filter out obvious non-files
+            if any(
+                bad in file_path.lower()
+                for bad in [
+                    "http://",
+                    "https://",
+                    ".png",
+                    ".jpg",
+                    ".jpeg",
+                    ".gif",
+                    ".svg",
+                    ".ico",
+                ]
+            ):
+                continue
+
+            # Must not be too short (avoid false positives)
+            if len(file_path) < 5:
+                continue
+
+            # Path components should be reasonable
+            parts = file_path.split("/")
+            if any(len(part) == 0 for part in parts):
+                continue
+
+            files.append(file_path)
+
+        # Sort for consistency
+        files = sorted(list(set(files)))
+
+        return files
+
+    def _clean_and_validate_files(self, files: List[str]) -> List[str]:
+        """
+        Clean and validate extracted file paths - advanced filtering and deduplication
+
+        Features:
+        1. Remove duplicates while preserving order
+        2. Normalize paths (handle ../,  ./, double slashes)
+        3. Filter out non-code files
+        4. Smart deduplication (recognize same file with different path prefixes)
+        """
+        cleaned_files = []
+        seen_normalized = set()
+
+        # Define code file extensions we want to track
+        code_extensions = {
+            ".py",
+            ".js",
+            ".ts",
+            ".jsx",
+            ".tsx",
+            ".vue",
+            ".html",
+            ".css",
+            ".scss",
+            ".sass",
+            ".less",
+            ".json",
+            ".yaml",
+            ".yml",
+            ".toml",
+            ".xml",
+            ".ini",
+            ".cfg",
+            ".md",
+            ".rst",
+            ".txt",
+            ".sh",
+            ".bash",
+            ".zsh",
+            ".bat",
+            ".ps1",
+            ".cmd",
+            ".c",
+            ".cpp",
+            ".h",
+            ".hpp",
+            ".cc",
+            ".cxx",
+            ".java",
+            ".kt",
+            ".scala",
+            ".go",
+            ".rs",
+            ".php",
+            ".rb",
+            ".pl",
+            ".lua",
+            ".r",
+            ".sql",
+            ".db",
+            ".dockerfile",
+            ".env",
+            ".gitignore",
+            ".lock",
+            ".sum",
+            ".mod",
+        }
 
         for file_path in files:
-            # Clean the path
-            cleaned_path = file_path.strip().strip('"').strip("'")
+            # === Step 1: Basic Cleaning ===
+            cleaned_path = file_path.strip().strip('"').strip("'").strip("`")
 
-            # Skip if empty
             if not cleaned_path:
                 continue
 
-            # Skip directories (no file extension)
-            if "." not in cleaned_path.split("/")[-1]:
+            # Remove leading/trailing slashes
+            cleaned_path = cleaned_path.strip("/")
+
+            # === Step 2: Path Normalization ===
+            # Remove double slashes
+            while "//" in cleaned_path:
+                cleaned_path = cleaned_path.replace("//", "/")
+
+            # Handle relative paths (remove ./ prefix)
+            if cleaned_path.startswith("./"):
+                cleaned_path = cleaned_path[2:]
+
+            # === Step 3: Validate File Structure ===
+            # Must have filename (not just directory)
+            if not cleaned_path or "/" not in cleaned_path:
+                # Single file without path - only accept if it has extension
+                if "." not in cleaned_path:
+                    continue
+
+            # Extract basename
+            basename = cleaned_path.split("/")[-1]
+
+            # Skip directories (no file extension in basename)
+            if "." not in basename:
                 continue
 
+            # === Step 4: Extension Validation ===
             # Only include files with code extensions
             has_code_extension = any(
                 cleaned_path.lower().endswith(ext) for ext in code_extensions
@@ -390,21 +908,69 @@ class ConciseMemoryAgent:
             if not has_code_extension:
                 continue
 
+            # === Step 5: Filter Invalid Patterns ===
             # Skip files that look like YAML keys or config entries
-            if (
-                ":" in cleaned_path
-                and not cleaned_path.endswith(".yaml")
-                and not cleaned_path.endswith(".yml")
+            if ":" in cleaned_path and not any(
+                cleaned_path.endswith(ext) for ext in [".yaml", ".yml"]
             ):
                 continue
 
-            # Skip paths that contain invalid characters for file paths
-            if any(invalid_char in cleaned_path for invalid_char in ['"', "'", "|"]):
+            # Skip paths with invalid characters
+            if any(
+                char in cleaned_path for char in ['"', "'", "|", "<", ">", "*", "?"]
+            ):
                 continue
 
-            # Add to cleaned list if not already present
-            if cleaned_path not in cleaned_files:
-                cleaned_files.append(cleaned_path)
+            # Skip obvious build/temp artifacts
+            if any(
+                part in cleaned_path
+                for part in [
+                    "__pycache__",
+                    ".pyc",
+                    "node_modules",
+                    ".git/",
+                    "dist/build",
+                ]
+            ):
+                continue
+
+            # === Step 6: Smart Deduplication ===
+            # Normalize for comparison (lowercase, remove common prefixes)
+            normalized_for_comparison = cleaned_path.lower()
+
+            # Check if we've already seen this file (exact match)
+            if normalized_for_comparison in seen_normalized:
+                continue
+
+            # Check for duplicate with different path (e.g., "src/model/apt_layer.py" vs "model/apt_layer.py")
+            # Keep the longer (more specific) path
+            is_duplicate = False
+            paths_to_remove = []
+
+            for existing_normalized in seen_normalized:
+                # If current path is suffix of existing, it's a shorter version - skip it
+                if existing_normalized.endswith("/" + normalized_for_comparison):
+                    is_duplicate = True
+                    break
+
+                # If existing path is suffix of current, current is longer - replace existing
+                if normalized_for_comparison.endswith("/" + existing_normalized):
+                    paths_to_remove.append(existing_normalized)
+
+            if is_duplicate:
+                continue
+
+            # Remove shorter versions
+            for path_to_remove in paths_to_remove:
+                seen_normalized.discard(path_to_remove)
+                # Also remove from cleaned_files list
+                cleaned_files = [
+                    f for f in cleaned_files if f.lower() != path_to_remove
+                ]
+
+            # === Step 7: Add to Results ===
+            seen_normalized.add(normalized_for_comparison)
+            cleaned_files.append(cleaned_path)
 
         return sorted(cleaned_files)
 
@@ -473,10 +1039,16 @@ class ConciseMemoryAgent:
 
             # Format summary with only Implementation Progress and Dependencies for file saving
             file_summary_content = ""
-            if sections.get("implementation_progress"):
-                file_summary_content += sections["implementation_progress"] + "\n\n"
-            if sections.get("dependencies"):
-                file_summary_content += sections["dependencies"] + "\n\n"
+            if sections.get("core_purpose"):
+                file_summary_content += sections["core_purpose"] + "\n\n"
+            if sections.get("public_interface"):
+                file_summary_content += sections["public_interface"] + "\n\n"
+            if sections.get("internal_dependencies"):
+                file_summary_content += sections["internal_dependencies"] + "\n\n"
+            if sections.get("external_dependencies"):
+                file_summary_content += sections["external_dependencies"] + "\n\n"
+            if sections.get("implementation_notes"):
+                file_summary_content += sections["implementation_notes"] + "\n\n"
 
             # Create the formatted summary for file saving (without Next Steps)
             formatted_summary = self._format_code_implementation_summary(
@@ -545,12 +1117,25 @@ class ConciseMemoryAgent:
 
 **Required Summary Format:**
 
-**Implementation Progress**: List the code file completed in current round and core implementation ideas
-  Format: {{file_path}}: {{core implementation ideas}}
+**Core Purpose** (provide a general overview of the file's main responsibility):
+- {{1-2 sentence description of file's main responsibility}}
 
-**Dependencies**: According to the File Structure and initial plan, list functions that may be called by other files
-  Format: {{file_path}}: Function {{function_name}}: core ideas--{{ideas}}; Required parameters--{{params}}; Return parameters--{{returns}}
-  Required packages: {{packages}}
+**Public Interface** (what other files can use, if any):
+- Class {{ClassName}}: {{purpose}} | Key methods: {{method_names}} | Constructor params: {{params}}
+- Function {{function_name}}({{params}}): {{purpose}} -> {{return_type}}: {{purpose}}
+- Constants/Types: {{name}}: {{value/description}}
+
+**Internal Dependencies** (what this file imports/requires, if any):
+- From {{module/file}}: {{specific_imports}}
+- External packages: {{package_name}} - {{usage_context}}
+
+**External Dependencies** (what depends on this file, if any):
+- Expected to be imported by: {{likely_consumer_files}}
+- Key exports used elsewhere: {{main_interfaces}}
+
+**Implementation Notes**: (if any)
+- Architecture decisions: {{key_choices_made}}
+- Cross-File Relationships: {{how_files_work_together}}
 
 **Next Steps**: List the code file (ONLY ONE) that will be implemented in the next round (MUST choose from "Remaining Unimplemented Files" above)
   Format: Code will be implemented: {{file_path}}
@@ -560,7 +1145,6 @@ class ConciseMemoryAgent:
 - Be precise and concise
 - Focus on function interfaces that other files will need
 - Extract actual function signatures from the code
-- **CRITICAL: ONLY choose from the "Remaining Unimplemented Files" list above!**
 - **CRITICAL: For Next Steps, ONLY choose ONE file from the "Remaining Unimplemented Files" list above**
 - **NEVER suggest implementing a file that is already in the implemented files list**
 - Choose the next file based on logical dependencies and implementation order
@@ -570,6 +1154,14 @@ class ConciseMemoryAgent:
 
         return prompt
 
+    # TODO: The prompt is not good, need to be improved
+    # **Implementation Progress**: List the code file completed in current round and core implementation ideas
+    #   Format: {{file_path}}: {{core implementation ideas}}
+
+    # **Dependencies**: According to the File Structure and initial plan, list functions that may be called by other files
+    #   Format: {{file_path}}: Function {{function_name}}: core ideas--{{ideas}}; Required parameters--{{params}}; Return parameters--{{returns}}
+    #   Required packages: {{packages}}
+
     def _extract_summary_sections(self, llm_summary: str) -> Dict[str, str]:
         """
         Extract different sections from LLM-generated summary
@@ -578,9 +1170,17 @@ class ConciseMemoryAgent:
             llm_summary: Raw LLM-generated summary text
 
         Returns:
-            Dictionary with extracted sections: implementation_progress, dependencies, next_steps
+            Dictionary with extracted sections: core_purpose, public_interface, internal_dependencies,
+            external_dependencies, implementation_notes, next_steps
         """
-        sections = {"implementation_progress": "", "dependencies": "", "next_steps": ""}
+        sections = {
+            "core_purpose": "",
+            "public_interface": "",
+            "internal_dependencies": "",
+            "external_dependencies": "",
+            "implementation_notes": "",
+            "next_steps": "",
+        }
 
         try:
             lines = llm_summary.split("\n")
@@ -591,17 +1191,30 @@ class ConciseMemoryAgent:
                 line_lower = line.lower().strip()
 
                 # Check for section headers
-                if "implementation progress" in line_lower:
+                if "core purpose" in line_lower:
                     if current_section and current_content:
                         sections[current_section] = "\n".join(current_content).strip()
-                    current_section = "implementation_progress"
+                    current_section = "core_purpose"
                     current_content = [line]  # Include the header
-                elif (
-                    "dependencies" in line_lower and "implementation" not in line_lower
-                ):
+                elif "public interface" in line_lower:
                     if current_section and current_content:
                         sections[current_section] = "\n".join(current_content).strip()
-                    current_section = "dependencies"
+                    current_section = "public_interface"
+                    current_content = [line]  # Include the header
+                elif "internal dependencies" in line_lower:
+                    if current_section and current_content:
+                        sections[current_section] = "\n".join(current_content).strip()
+                    current_section = "internal_dependencies"
+                    current_content = [line]  # Include the header
+                elif "external dependencies" in line_lower:
+                    if current_section and current_content:
+                        sections[current_section] = "\n".join(current_content).strip()
+                    current_section = "external_dependencies"
+                    current_content = [line]  # Include the header
+                elif "implementation notes" in line_lower:
+                    if current_section and current_content:
+                        sections[current_section] = "\n".join(current_content).strip()
+                    current_section = "implementation_notes"
                     current_content = [line]  # Include the header
                 elif "next steps" in line_lower:
                     if current_section and current_content:
@@ -621,8 +1234,8 @@ class ConciseMemoryAgent:
 
         except Exception as e:
             self.logger.error(f"Failed to extract summary sections: {e}")
-            # Fallback: put everything in implementation_progress
-            sections["implementation_progress"] = llm_summary
+            # Fallback: put everything in core_purpose
+            sections["core_purpose"] = llm_summary
 
         return sections
 
@@ -642,6 +1255,25 @@ class ConciseMemoryAgent:
         """
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+        # # Create formatted list of implemented files
+        # implemented_files_list = (
+        #     "\n".join([f"- {file}" for file in self.implemented_files])
+        #     if self.implemented_files
+        #     else "- None yet"
+        # )
+
+        #         formatted_summary = f"""# Code Implementation Summary
+        # **All Previously Implemented Files:**
+        # {implemented_files_list}
+        # **Generated**: {timestamp}
+        # **File Implemented**: {file_path}
+        # **Total Files Implemented**: {files_implemented}
+
+        # {llm_summary}
+
+        # ---
+        # *Auto-generated by Memory Agent*
+        # """
         formatted_summary = f"""# Code Implementation Summary
 **Generated**: {timestamp}
 **File Implemented**: {file_path}
@@ -747,9 +1379,12 @@ class ConciseMemoryAgent:
             )
 
             content = ""
-            for block in response.content:
-                if block.type == "text":
-                    content += block.text
+            if response and hasattr(response, "content") and response.content:
+                for block in response.content:
+                    if block.type == "text":
+                        content += block.text
+            else:
+                self.logger.warning("Anthropic response is empty or malformed")
 
             return {"content": content}
 
@@ -781,7 +1416,60 @@ class ConciseMemoryAgent:
                 else:
                     raise
 
-            return {"content": response.choices[0].message.content or ""}
+            # Safely extract content from response
+            if response and hasattr(response, "choices") and response.choices:
+                return {"content": response.choices[0].message.content or ""}
+            else:
+                self.logger.warning("OpenAI response is empty or malformed")
+                return {"content": ""}
+
+        elif client_type == "google":
+            from google.genai import types
+
+            # Convert messages to Gemini format
+            system_instruction = "You are an expert code implementation summarizer. Create structured summaries of implemented code files that preserve essential information about functions, dependencies, and implementation approaches."
+
+            gemini_messages = []
+            for msg in summary_messages:
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+
+                # Convert role names: "assistant" -> "model"
+                if role == "assistant":
+                    role = "model"
+                elif role not in ["user", "model"]:
+                    role = "user"
+
+                gemini_messages.append(
+                    types.Content(role=role, parts=[types.Part.from_text(text=content)])
+                )
+
+            config = types.GenerateContentConfig(
+                max_output_tokens=5000,
+                temperature=0.2,
+                system_instruction=system_instruction,
+            )
+
+            response = await client.aio.models.generate_content(
+                model=self.default_models.get("google", "gemini-2.0-flash"),
+                contents=gemini_messages,
+                config=config,
+            )
+
+            # Extract content from Gemini response
+            content = ""
+            if response and hasattr(response, "candidates") and response.candidates:
+                candidate = response.candidates[0]
+                if hasattr(candidate, "content") and candidate.content:
+                    if hasattr(candidate.content, "parts") and candidate.content.parts:
+                        for part in candidate.content.parts:
+                            if hasattr(part, "text") and part.text:
+                                content += part.text
+
+            if not content:
+                self.logger.warning("Google response is empty or malformed")
+
+            return {"content": content}
 
         else:
             raise ValueError(f"Unsupported client type: {client_type}")
@@ -821,18 +1509,19 @@ class ConciseMemoryAgent:
         if tool_name == "write_file":
             self.last_write_file_detected = True
             self.should_clear_memory_next = True
+
             # self.logger.info(f"🔄 WRITE_FILE DETECTED: {file_path} - Memory will be cleared in next round")
 
         # Only record specific tools that provide essential information
         essential_tools = [
-            "read_code_mem",  # Read code summary from implement_code_summary.md
-            "read_file",  # Read file contents
+            # "read_code_mem",  # Read code summary from implement_code_summary.md
+            # "read_file",  # Read file contents
             "write_file",  # Write file contents (important for tracking implementations)
-            "execute_python",  # Execute Python code (for testing/validation)
+            # "execute_python",  # Execute Python code (for testing/validation)
             "execute_bash",  # Execute bash commands (for build/execution)
-            "search_code",  # Search code patterns
+            # "search_code",  # Search code patterns
             "search_reference_code",  # Search reference code (if available)
-            "get_file_structure",  # Get file structure (for understanding project layout)
+            # "get_file_structure",  # Get file structure (for understanding project layout)
         ]
 
         if tool_name in essential_tools:
@@ -889,6 +1578,15 @@ class ConciseMemoryAgent:
         # Get formatted file lists
         file_lists = self.get_formatted_files_lists()
         implemented_files_list = file_lists["implemented"]
+        unimplemented_files_list = file_lists["unimplemented"]
+
+        # Debug output for unimplemented files (clean format without dashes)
+        unimplemented_files = self.get_unimplemented_files()
+        print("✅ Unimplemented Files:")
+        for file_path in unimplemented_files:
+            print(f"{file_path}")
+        if self.current_next_steps.strip():
+            print(f"\n📋 {self.current_next_steps}")
 
         # 1. Add initial plan message (always preserved)
         initial_plan_message = {
@@ -905,22 +1603,19 @@ class ConciseMemoryAgent:
 
 **Current Status:** {files_implemented} files implemented
 
-**Objective:** Continue implementation by analyzing dependencies and implementing the next required file according to the plan's priority order.""",
+**Remaining Files to Implement:**
+{unimplemented_files_list}
+
+**IMPORTANT:** If the remaining files list shows "All files implemented!", you MUST reply with "All files implemented" to complete the task. Do NOT continue calling tools.
+
+**Objective:** {"Reply 'All files implemented' to finish" if not unimplemented_files else "Continue implementation by analyzing dependencies and implementing the next required file according to the plan's priority order."}""",
         }
 
         # Append Next Steps information if available
-        if self.current_next_steps.strip():
-            initial_plan_message["content"] += (
-                f"\n\n**Next Steps (from previous analysis):**\n{self.current_next_steps}"
-            )
-
-        # Debug output for unimplemented files (clean format without dashes)
-        unimplemented_files = self.get_unimplemented_files()
-        print("✅ Unimplemented Files:")
-        for file_path in unimplemented_files:
-            print(f"{file_path}")
-        if self.current_next_steps.strip():
-            print(f"\n📋 {self.current_next_steps}")
+        # if self.current_next_steps.strip():
+        #     initial_plan_message["content"] += (
+        #         f"\n\n**Next Steps (from previous analysis):**\n{self.current_next_steps}"
+        #     )
 
         concise_messages.append(initial_plan_message)
 
@@ -929,70 +1624,69 @@ class ConciseMemoryAgent:
             "role": "user",
             "content": f"""**Below is the Knowledge Base of the LATEST implemented code file:**
 {self._read_code_knowledge_base()}
-""",
+
+**Development Cycle - START HERE:**
+
+**FIRST - Check completion status:**
+- If "Remaining Files to Implement" above shows "All files implemented!", reply "All files implemented" immediately
+
+**For NEW file implementation (if remaining files exist):**
+1. `search_code_references` → OPTIONALLY search reference patterns for inspiration (use for reference only, original paper specs take priority)
+2. Write_file can be used to implement the new component
+
+**Remember:** Stop and declare completion when all files are done!""",
         }
+        if self.current_next_steps.strip():
+            knowledge_base_message["content"] += (
+                f"\n\n**Next Steps (from previous analysis):**\n{self.current_next_steps}"
+            )
         concise_messages.append(knowledge_base_message)
 
         # 3. Add current tool results (essential information for next file generation)
         if self.current_round_tool_results:
             tool_results_content = self._format_tool_results()
+
+            # # Append Next Steps information if available
+            # if self.current_next_steps.strip():
+            #     tool_results_content += f"\n\n**Next Steps (from previous analysis):**\n{self.current_next_steps}"
+
             tool_results_message = {
                 "role": "user",
                 "content": f"""**Current Tool Results:**
-{tool_results_content}
-
-**🚨 NEXT STEP: First determine if ALL files from the reproduction plan have been implemented:**
-
-**If ALL files are implemented (reproduction plan complete):**
-- Use `execute_python` or `execute_bash` to test the complete implementation
-- If testing successful, respond with "**implementation complete**" to end the conversation
-- Only use `read_code_mem` if debugging is needed during testing
-
-**If MORE files need to be implemented:**
-- #1. `read_code_mem` → Query summaries of relevant **already-implemented** files (agent should choose which implemented file paths to reference)(important!!!)
-- #2. `search_code_references` → OPTIONALLY search reference patterns for inspiration (use for reference only, original paper specs take priority)
-- #3. `write_file` → Create the complete code implementation based on original paper requirements
-- #4. `execute_python` or `execute_bash` → Test the partial implementation if needed
-
-**Remember:** Always check if all planned files are implemented before continuing with new file creation.""",
+{tool_results_content}""",
             }
             concise_messages.append(tool_results_message)
         else:
             # If no tool results yet, add guidance for next steps
-            guidance_message = {
-                "role": "user",
-                "content": f"""**Current Round:** {self.current_round}
+            guidance_content = f"""**Current Round:** {self.current_round}
 
 **Development Cycle - START HERE:**
 
-**FIRST: Check if ALL files from the reproduction plan are implemented**
-- If YES: Use `execute_python` or `execute_bash` for testing, then respond "**implementation complete**"
-- If NO: Continue with file implementation cycle below
-
 **For NEW file implementation:**
-1. **You can call read_code_mem(*already_implemented_file_path*)** to understand existing implementations and dependencies - agent should choose relevant ALREADY IMPLEMENTED file paths for reference, NOT the new file you want to create
-2. **Optionally use search_code_references** for reference patterns (OPTIONAL - for inspiration only, original paper specs take priority)
-3. Write_file can be used to implement the new component based on original paper requirements
-4. Finally: Use execute_python or execute_bash for testing (if needed)
+1. `search_code_references` → OPTIONALLY search reference patterns for inspiration (use for reference only, original paper specs take priority)
+2. Write_file can be used to implement the new component"""
 
-**For TESTING/COMPLETION phase (when all files implemented):**
-1. **➡️ FIRST: Use execute_python or execute_bash** to test the complete implementation
-2. **If successful: Respond with "implementation complete"** to end the conversation
-3. Only use read_code_mem if debugging is needed during testing""",
+            # # Append Next Steps information if available (even when no tool results)
+            # if self.current_next_steps.strip():
+            #     guidance_content += f"\n\n**Next Steps (from previous analysis):**\n{self.current_next_steps}"
+
+            guidance_message = {
+                "role": "user",
+                "content": guidance_content,
             }
             concise_messages.append(guidance_message)
         # **Available Essential Tools:** read_code_mem, write_file, execute_python, execute_bash
-        # **Remember:** Start with read_code_mem when implementing NEW files to understand existing code. When all files are implemented, focus on testing and completion. Implement according to the original paper's specifications - any reference code is for inspiration only."""
+        # **Remember:** Start with read_code_mem when implementing NEW files to understand existing code. When all files are implemented, focus on testing and completion. Implement according to the original paper's specifications - any reference code is for inspiration only.
         # self.logger.info(f"✅ Concise messages created: {len(concise_messages)} messages (original: {len(messages)})")
         return concise_messages
 
     def _read_code_knowledge_base(self) -> Optional[str]:
         """
         Read the implement_code_summary.md file as code knowledge base
-        Returns only the final/latest implementation entry, not all historical entries
+        Returns all content from the file
 
         Returns:
-            Content of the latest implementation entry if it exists, None otherwise
+            Full content of the file if it exists, None otherwise
         """
         try:
             if os.path.exists(self.code_summary_path):
@@ -1000,8 +1694,8 @@ class ConciseMemoryAgent:
                     content = f.read().strip()
 
                 if content:
-                    # Extract only the final/latest implementation entry
-                    return self._extract_latest_implementation_entry(content)
+                    # Return all content instead of just the latest entry
+                    return content
                 else:
                     return None
             else:
@@ -1212,15 +1906,94 @@ class ConciseMemoryAgent:
         """Get list of all files that should be implemented according to the plan"""
         return self.all_files_list.copy()
 
+    def refresh_files_list_from_directory(self) -> bool:
+        """
+        Refresh the files list by extracting from the generated directory
+        Useful when the directory structure has been updated after initialization
+
+        Returns:
+            True if successfully refreshed from directory, False if fell back to plan
+        """
+        if os.path.exists(self.code_directory):
+            files_from_dir = self._extract_files_from_generated_directory()
+            if files_from_dir:
+                old_count = len(self.all_files_list)
+                self.all_files_list = files_from_dir
+                new_count = len(self.all_files_list)
+                self.logger.info(
+                    f"🔄 Files list refreshed from directory: {old_count} → {new_count} files"
+                )
+                return True
+
+        self.logger.warning("Cannot refresh from directory, keeping current list")
+        return False
+
     def get_unimplemented_files(self) -> List[str]:
         """
         Get list of files that haven't been implemented yet
+        Uses fuzzy path matching to handle partial paths
 
         Returns:
             List of file paths that still need to be implemented
         """
-        implemented_set = set(self.implemented_files)
-        unimplemented = [f for f in self.all_files_list if f not in implemented_set]
+
+        # def is_implemented(plan_file: str) -> bool:
+        #     """Check if a file from plan is implemented (with fuzzy matching)"""
+        #     # Normalize paths for comparison
+        #     plan_file_normalized = plan_file.replace("\\", "/").strip("/")
+        #     plan_filename = plan_file_normalized.split("/")[-1]  # Extract filename
+
+        #     for impl_file in self.implemented_files:
+        #         impl_file_normalized = impl_file.replace("\\", "/").strip("/")
+        #         impl_filename = impl_file_normalized.split("/")[-1]  # Extract filename
+
+        #         # Strategy 1: Exact path match
+        #         if plan_file_normalized == impl_file_normalized:
+        #             return True
+
+        #         # Strategy 2: One path ends with the other (partial path match)
+        #         if plan_file_normalized.endswith(
+        #             impl_file_normalized
+        #         ) or impl_file_normalized.endswith(plan_file_normalized):
+        #             # Ensure match is at a path boundary (not middle of directory name)
+        #             if (
+        #                 plan_file_normalized.endswith("/" + impl_file_normalized)
+        #                 or impl_file_normalized.endswith("/" + plan_file_normalized)
+        #             ):
+        #                 return True
+
+        #         # Strategy 3: Same filename (fallback for different directory structures)
+        #         # Only match if filenames are identical and reasonably unique (length > 5)
+        #         if (plan_filename == impl_filename and len(plan_filename) > 5):
+        #             return True
+
+        #     return False
+        def is_implemented(plan_file: str) -> bool:
+            """Check if a file from plan is implemented (with fuzzy matching)"""
+            # Normalize paths for comparison
+            plan_file_normalized = plan_file.replace("\\", "/").strip("/")
+
+            for impl_file in self.implemented_files:
+                impl_file_normalized = impl_file.replace("\\", "/").strip("/")
+
+                # Check if plan_file ends with impl_file (partial path match)
+                # or impl_file ends with plan_file (reverse partial match)
+                if plan_file_normalized.endswith(
+                    impl_file_normalized
+                ) or impl_file_normalized.endswith(plan_file_normalized):
+                    # Ensure match is at a path boundary (not middle of directory name)
+                    if (
+                        plan_file_normalized.endswith("/" + impl_file_normalized)
+                        or plan_file_normalized == impl_file_normalized
+                        or impl_file_normalized.endswith("/" + plan_file_normalized)
+                    ):
+                        return True
+            return False
+
+        # unimplemented = [f for f in self.all_files_list if not is_implemented(f)]
+        # return unimplemented
+
+        unimplemented = [f for f in self.all_files_list if not is_implemented(f)]
         return unimplemented
 
     def get_formatted_files_lists(self) -> Dict[str, str]:
@@ -1317,7 +2090,7 @@ class ConciseMemoryAgent:
             if messages
             else 0
         )
-        self.logger.info(
+        print(
             f"🎯 CONCISE optimization applied: {len(messages)} → {len(optimized_messages)} messages ({compression_ratio:.1f}% compression)"
         )
 

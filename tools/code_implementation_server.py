@@ -177,6 +177,229 @@ async def read_file(
 
 
 @mcp.tool()
+async def read_multiple_files(file_requests: str, max_files: int = 5) -> str:
+    """
+    Read multiple files in a single operation (for batch reading)
+
+    Args:
+        file_requests: JSON string with file requests, e.g.,
+                      '{"file1.py": {}, "file2.py": {"start_line": 1, "end_line": 10}}'
+                      or simple array: '["file1.py", "file2.py"]'
+        max_files: Maximum number of files to read in one operation (default: 5)
+
+    Returns:
+        JSON string of operation results for all files
+    """
+    try:
+        # Parse the file requests
+        try:
+            requests_data = json.loads(file_requests)
+        except json.JSONDecodeError as e:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "message": f"Invalid JSON format for file_requests: {str(e)}",
+                    "operation_type": "multi_file",
+                    "timestamp": datetime.now().isoformat(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+
+        # Normalize requests format
+        if isinstance(requests_data, list):
+            # Convert simple array to dict format
+            normalized_requests = {file_path: {} for file_path in requests_data}
+        elif isinstance(requests_data, dict):
+            normalized_requests = requests_data
+        else:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "message": "file_requests must be a JSON object or array",
+                    "operation_type": "multi_file",
+                    "timestamp": datetime.now().isoformat(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+
+        # Validate input
+        if len(normalized_requests) == 0:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "message": "No files provided for reading",
+                    "operation_type": "multi_file",
+                    "timestamp": datetime.now().isoformat(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+
+        if len(normalized_requests) > max_files:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "message": f"Too many files provided ({len(normalized_requests)}), maximum is {max_files}",
+                    "operation_type": "multi_file",
+                    "timestamp": datetime.now().isoformat(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+
+        # Process each file
+        results = {
+            "status": "success",
+            "message": f"Successfully processed {len(normalized_requests)} files",
+            "operation_type": "multi_file",
+            "timestamp": datetime.now().isoformat(),
+            "files_processed": len(normalized_requests),
+            "files": {},
+            "summary": {
+                "successful": 0,
+                "failed": 0,
+                "total_size_bytes": 0,
+                "total_lines": 0,
+                "files_not_found": 0,
+            },
+        }
+
+        # Process each file individually
+        for file_path, options in normalized_requests.items():
+            try:
+                full_path = validate_path(file_path)
+                start_line = options.get("start_line")
+                end_line = options.get("end_line")
+
+                if not full_path.exists():
+                    results["files"][file_path] = {
+                        "status": "error",
+                        "message": f"File does not exist: {file_path}",
+                        "file_path": file_path,
+                        "content": "",
+                        "total_lines": 0,
+                        "size_bytes": 0,
+                        "start_line": start_line,
+                        "end_line": end_line,
+                    }
+                    results["summary"]["failed"] += 1
+                    results["summary"]["files_not_found"] += 1
+                    continue
+
+                with open(full_path, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+
+                # Handle line range
+                original_line_count = len(lines)
+                if start_line is not None or end_line is not None:
+                    start_idx = (start_line - 1) if start_line else 0
+                    end_idx = end_line if end_line else len(lines)
+                    lines = lines[start_idx:end_idx]
+
+                content = "".join(lines)
+                size_bytes = len(content.encode("utf-8"))
+                lines_count = len(lines)
+
+                # Record individual file result
+                results["files"][file_path] = {
+                    "status": "success",
+                    "message": f"File read successfully: {file_path}",
+                    "file_path": file_path,
+                    "content": content,
+                    "total_lines": lines_count,
+                    "original_total_lines": original_line_count,
+                    "size_bytes": size_bytes,
+                    "start_line": start_line,
+                    "end_line": end_line,
+                    "line_range_applied": start_line is not None
+                    or end_line is not None,
+                }
+
+                # Update summary
+                results["summary"]["successful"] += 1
+                results["summary"]["total_size_bytes"] += size_bytes
+                results["summary"]["total_lines"] += lines_count
+
+                # Log individual file operation
+                log_operation(
+                    "read_file_multi",
+                    {
+                        "file_path": file_path,
+                        "start_line": start_line,
+                        "end_line": end_line,
+                        "lines_read": lines_count,
+                        "size_bytes": size_bytes,
+                        "batch_operation": True,
+                    },
+                )
+
+            except Exception as file_error:
+                # Record individual file error
+                results["files"][file_path] = {
+                    "status": "error",
+                    "message": f"Failed to read file: {str(file_error)}",
+                    "file_path": file_path,
+                    "content": "",
+                    "total_lines": 0,
+                    "size_bytes": 0,
+                    "start_line": options.get("start_line"),
+                    "end_line": options.get("end_line"),
+                }
+
+                results["summary"]["failed"] += 1
+
+                # Log individual file error
+                log_operation(
+                    "read_file_multi_error",
+                    {
+                        "file_path": file_path,
+                        "error": str(file_error),
+                        "batch_operation": True,
+                    },
+                )
+
+        # Determine overall status
+        if results["summary"]["failed"] > 0:
+            if results["summary"]["successful"] > 0:
+                results["status"] = "partial_success"
+                results["message"] = (
+                    f"Read {results['summary']['successful']} files successfully, {results['summary']['failed']} failed"
+                )
+            else:
+                results["status"] = "failed"
+                results["message"] = (
+                    f"All {results['summary']['failed']} files failed to read"
+                )
+
+        # Log overall operation
+        log_operation(
+            "read_multiple_files",
+            {
+                "files_count": len(normalized_requests),
+                "successful": results["summary"]["successful"],
+                "failed": results["summary"]["failed"],
+                "total_size_bytes": results["summary"]["total_size_bytes"],
+                "status": results["status"],
+            },
+        )
+
+        return json.dumps(results, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        result = {
+            "status": "error",
+            "message": f"Failed to read multiple files: {str(e)}",
+            "operation_type": "multi_file",
+            "timestamp": datetime.now().isoformat(),
+            "files_processed": 0,
+        }
+        log_operation("read_multiple_files_error", {"error": str(e)})
+        return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+@mcp.tool()
 async def write_file(
     file_path: str, content: str, create_dirs: bool = True, create_backup: bool = False
 ) -> str:
@@ -245,6 +468,215 @@ async def write_file(
             "file_path": file_path,
         }
         log_operation("write_file_error", {"file_path": file_path, "error": str(e)})
+        return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+@mcp.tool()
+async def write_multiple_files(
+    file_implementations: str,
+    create_dirs: bool = True,
+    create_backup: bool = False,
+    max_files: int = 5,
+) -> str:
+    """
+    Write multiple files in a single operation (for batch implementation)
+
+    Args:
+        file_implementations: JSON string mapping file paths to content, e.g.,
+                            '{"file1.py": "content1", "file2.py": "content2"}'
+        create_dirs: Whether to create directories if they don't exist
+        create_backup: Whether to create backup files if they already exist
+        max_files: Maximum number of files to write in one operation (default: 5)
+
+    Returns:
+        JSON string of operation results for all files
+    """
+    try:
+        # Parse the file implementations
+        try:
+            files_dict = json.loads(file_implementations)
+        except json.JSONDecodeError as e:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "message": f"Invalid JSON format for file_implementations: {str(e)}",
+                    "operation_type": "multi_file",
+                    "timestamp": datetime.now().isoformat(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+
+        # Validate input
+        if not isinstance(files_dict, dict):
+            return json.dumps(
+                {
+                    "status": "error",
+                    "message": "file_implementations must be a JSON object mapping file paths to content",
+                    "operation_type": "multi_file",
+                    "timestamp": datetime.now().isoformat(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+
+        if len(files_dict) == 0:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "message": "No files provided for writing",
+                    "operation_type": "multi_file",
+                    "timestamp": datetime.now().isoformat(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+
+        if len(files_dict) > max_files:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "message": f"Too many files provided ({len(files_dict)}), maximum is {max_files}",
+                    "operation_type": "multi_file",
+                    "timestamp": datetime.now().isoformat(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+
+        # Process each file
+        results = {
+            "status": "success",
+            "message": f"Successfully processed {len(files_dict)} files",
+            "operation_type": "multi_file",
+            "timestamp": datetime.now().isoformat(),
+            "files_processed": len(files_dict),
+            "files": {},
+            "summary": {
+                "successful": 0,
+                "failed": 0,
+                "total_size_bytes": 0,
+                "total_lines": 0,
+                "backups_created": 0,
+            },
+        }
+
+        # Process each file individually
+        for file_path, content in files_dict.items():
+            try:
+                full_path = validate_path(file_path)
+
+                # Create directories (if needed)
+                if create_dirs:
+                    full_path.parent.mkdir(parents=True, exist_ok=True)
+
+                # Backup existing file (only when explicitly requested)
+                backup_created = False
+                if full_path.exists() and create_backup:
+                    backup_path = full_path.with_suffix(full_path.suffix + ".backup")
+                    shutil.copy2(full_path, backup_path)
+                    backup_created = True
+                    results["summary"]["backups_created"] += 1
+
+                # Write file
+                with open(full_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+
+                # Calculate file metrics
+                size_bytes = len(content.encode("utf-8"))
+                lines_count = len(content.split("\n"))
+
+                # Update current file record
+                CURRENT_FILES[file_path] = {
+                    "last_modified": datetime.now().isoformat(),
+                    "size_bytes": size_bytes,
+                    "lines": lines_count,
+                }
+
+                # Record individual file result
+                results["files"][file_path] = {
+                    "status": "success",
+                    "message": f"File written successfully: {file_path}",
+                    "size_bytes": size_bytes,
+                    "lines_written": lines_count,
+                    "backup_created": backup_created,
+                }
+
+                # Update summary
+                results["summary"]["successful"] += 1
+                results["summary"]["total_size_bytes"] += size_bytes
+                results["summary"]["total_lines"] += lines_count
+
+                # Log individual file operation
+                log_operation(
+                    "write_file_multi",
+                    {
+                        "file_path": file_path,
+                        "size_bytes": size_bytes,
+                        "lines": lines_count,
+                        "backup_created": backup_created,
+                        "batch_operation": True,
+                    },
+                )
+
+            except Exception as file_error:
+                # Record individual file error
+                results["files"][file_path] = {
+                    "status": "error",
+                    "message": f"Failed to write file: {str(file_error)}",
+                    "size_bytes": 0,
+                    "lines_written": 0,
+                    "backup_created": False,
+                }
+
+                results["summary"]["failed"] += 1
+
+                # Log individual file error
+                log_operation(
+                    "write_file_multi_error",
+                    {
+                        "file_path": file_path,
+                        "error": str(file_error),
+                        "batch_operation": True,
+                    },
+                )
+
+        # Determine overall status
+        if results["summary"]["failed"] > 0:
+            if results["summary"]["successful"] > 0:
+                results["status"] = "partial_success"
+                results["message"] = (
+                    f"Processed {results['summary']['successful']} files successfully, {results['summary']['failed']} failed"
+                )
+            else:
+                results["status"] = "failed"
+                results["message"] = (
+                    f"All {results['summary']['failed']} files failed to write"
+                )
+
+        # Log overall operation
+        log_operation(
+            "write_multiple_files",
+            {
+                "files_count": len(files_dict),
+                "successful": results["summary"]["successful"],
+                "failed": results["summary"]["failed"],
+                "total_size_bytes": results["summary"]["total_size_bytes"],
+                "status": results["status"],
+            },
+        )
+
+        return json.dumps(results, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        result = {
+            "status": "error",
+            "message": f"Failed to write multiple files: {str(e)}",
+            "operation_type": "multi_file",
+            "timestamp": datetime.now().isoformat(),
+            "files_processed": 0,
+        }
+        log_operation("write_multiple_files_error", {"error": str(e)})
         return json.dumps(result, ensure_ascii=False, indent=2)
 
 

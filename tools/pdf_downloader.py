@@ -103,7 +103,17 @@ async def perform_document_conversion(
     conversion_msg = ""
 
     # 首先尝试使用简单的PDF转换器（对于PDF文件）
-    if file_path.lower().endswith(".pdf") and PYPDF2_AVAILABLE:
+    # 检查文件是否实际为PDF（无论扩展名如何）
+    is_pdf_file = False
+    if PYPDF2_AVAILABLE:
+        try:
+            with open(file_path, "rb") as f:
+                header = f.read(8)
+                is_pdf_file = header.startswith(b"%PDF")
+        except Exception:
+            is_pdf_file = file_path.lower().endswith(".pdf")
+
+    if is_pdf_file and PYPDF2_AVAILABLE:
         try:
             simple_converter = SimplePdfConverter()
             conversion_result = simple_converter.convert_pdf_to_markdown(file_path)
@@ -167,7 +177,7 @@ def format_file_operation_result(
     格式化文件操作结果的共用逻辑
 
     Args:
-        operation: 操作类型 ("download" 或 "move")
+        operation: 操作类型 ("download", "copy", 或 "move")
         source: 源文件/URL
         destination: 目标路径
         result: 操作结果字典
@@ -178,7 +188,16 @@ def format_file_operation_result(
     """
     if result["success"]:
         size_mb = result["size"] / (1024 * 1024)
-        msg = f"[SUCCESS] Successfully {operation}d: {source}\n"
+
+        # 处理不同操作类型的动词形式
+        if operation == "copy":
+            operation_verb = "copied"
+        elif operation == "download":
+            operation_verb = "downloaded"
+        else:  # move
+            operation_verb = "moved"
+
+        msg = f"[SUCCESS] Successfully {operation_verb}: {source}\n"
 
         if operation == "download":
             msg += f"   File: {destination}\n"
@@ -186,10 +205,12 @@ def format_file_operation_result(
             msg += f"   Time: {result['duration']:.2f} seconds\n"
             speed_mb = result.get("speed", 0) / (1024 * 1024)
             msg += f"   Speed: {speed_mb:.2f} MB/s"
-        else:  # move
+        else:  # copy or move
             msg += f"   To: {destination}\n"
             msg += f"   Size: {size_mb:.2f} MB\n"
             msg += f"   Time: {result['duration']:.2f} seconds"
+            if operation == "copy":
+                msg += "\n   Note: Original file preserved"
 
         if conversion_msg:
             msg += conversion_msg
@@ -820,7 +841,7 @@ async def download_file(url: str, destination: str) -> Dict[str, Any]:
 
 
 async def move_local_file(source_path: str, destination: str) -> Dict[str, Any]:
-    """移动本地文件到目标位置"""
+    """复制本地文件到目标位置（保留原文件）"""
     start_time = datetime.now()
 
     try:
@@ -841,8 +862,8 @@ async def move_local_file(source_path: str, destination: str) -> Dict[str, Any]:
         if parent_dir:
             os.makedirs(parent_dir, exist_ok=True)
 
-        # 执行移动操作
-        shutil.move(source_path, destination)
+        # 执行复制操作（保留原文件，防止数据丢失）
+        shutil.copy2(source_path, destination)
 
         # 计算操作时间
         duration = (datetime.now() - start_time).total_seconds()
@@ -853,7 +874,7 @@ async def move_local_file(source_path: str, destination: str) -> Dict[str, Any]:
             "destination": destination,
             "size": source_size,
             "duration": duration,
-            "operation": "move",
+            "operation": "copy",  # 改为copy
         }
 
     except Exception as e:
@@ -861,7 +882,7 @@ async def move_local_file(source_path: str, destination: str) -> Dict[str, Any]:
             "success": False,
             "source": source_path,
             "destination": destination,
-            "error": f"Move error: {str(e)}",
+            "error": f"Copy error: {str(e)}",
         }
 
 
@@ -990,10 +1011,10 @@ async def download_files(instruction: str) -> str:
                 )
                 continue
 
-            # 执行移动
+            # 执行复制（保留原文件）
             result = await move_local_file(local_path, destination)
 
-            # 执行转换（如果成功移动）
+            # 执行转换（如果成功复制）
             conversion_msg = None
             if result["success"]:
                 conversion_msg = await perform_document_conversion(
@@ -1002,11 +1023,11 @@ async def download_files(instruction: str) -> str:
 
             # 格式化结果
             msg = format_file_operation_result(
-                "move", local_path, destination, result, conversion_msg
+                "copy", local_path, destination, result, conversion_msg
             )
 
         except Exception as e:
-            msg = f"[ERROR] Failed to move: {local_path}\n"
+            msg = f"[ERROR] Failed to copy: {local_path}\n"
             msg += f"   Error: {str(e)}"
 
         results.append(msg)
@@ -1077,8 +1098,25 @@ async def download_file_to(
         Status message about the download operation
     """
     # 确定文件名
+
+    url = URLExtractor.extract_urls(url)[0]
+
     if not filename:
         filename = URLExtractor.infer_filename_from_url(url)
+
+    if not filename:
+        filename = URLExtractor.infer_filename_from_url(url)
+    else:
+        name_source, extension_source = os.path.splitext(
+            os.path.basename(URLExtractor.infer_filename_from_url(url))
+        )
+        name_destination, extension_destination = os.path.splitext(
+            os.path.basename(filename)
+        )
+        if extension_source:
+            filename = name_destination + extension_source
+        else:
+            filename = name_destination + extension_destination
 
     # 确定完整路径
     if destination:
@@ -1158,15 +1196,18 @@ async def move_file_to(
     source: str, destination: Optional[str] = None, filename: Optional[str] = None
 ) -> str:
     """
-    Move a local file to a new location with detailed options.
+    Copy a local file to a new location (preserves original file).
+
+    Note: Despite the name "move_file_to", this tool COPIES the file to preserve the original.
+    This prevents data loss during file processing workflows.
 
     Args:
-        source: Source file path to move
+        source: Source file path to copy
         destination: Target directory or full file path (optional)
         filename: Specific filename to use (optional, ignored if destination is a full file path)
 
     Returns:
-        Status message about the move operation
+        Status message about the copy operation
     """
     # 展开源路径
     if source.startswith("~"):
@@ -1174,11 +1215,20 @@ async def move_file_to(
 
     # 检查源文件是否存在
     if not os.path.exists(source):
-        return format_error_message("Move aborted", f"Source file not found: {source}")
+        return format_error_message("Copy aborted", f"Source file not found: {source}")
 
     # 确定文件名
     if not filename:
         filename = os.path.basename(source)
+    else:
+        name_source, extension_source = os.path.splitext(os.path.basename(source))
+        name_destination, extension_destination = os.path.splitext(
+            os.path.basename(filename)
+        )
+        if extension_source:
+            filename = name_destination + extension_source
+        else:
+            filename = name_destination + extension_destination
 
     # 确定完整路径
     if destination:
@@ -1191,6 +1241,7 @@ async def move_file_to(
             target_path = destination
         else:  # 是目录
             target_path = os.path.join(destination, filename)
+
     else:
         target_path = filename
 
@@ -1202,26 +1253,26 @@ async def move_file_to(
     if os.path.exists(target_path):
         return f"[ERROR] Target file already exists: {target_path}"
 
-    # 显示移动信息
+    # 显示复制信息
     source_size_mb = os.path.getsize(source) / (1024 * 1024)
-    msg = "[INFO] Moving file:\n"
+    msg = "[INFO] Copying file (original preserved):\n"
     msg += f"   Source: {source}\n"
     msg += f"   Target: {target_path}\n"
     msg += f"   Size: {source_size_mb:.2f} MB\n"
     msg += "\n"
 
-    # 执行移动
+    # 执行复制（保留原文件）
     result = await move_local_file(source, target_path)
 
-    # 执行转换（如果成功移动）
+    # 执行转换（如果成功复制）
     conversion_msg = None
     if result["success"]:
         conversion_msg = await perform_document_conversion(
             target_path, extract_images=True
         )
 
-        # 添加移动信息前缀
-        info_msg = "[SUCCESS] File moved successfully!\n"
+        # 添加复制信息前缀
+        info_msg = "[SUCCESS] File copied successfully (original preserved)!\n"
         info_msg += f"   From: {source}\n"
         info_msg += f"   To: {target_path}\n"
         info_msg += f"   Duration: {result['duration']:.2f} seconds"
@@ -1231,7 +1282,7 @@ async def move_file_to(
 
         return msg + info_msg
     else:
-        return msg + f"[ERROR] Move failed!\n   Error: {result['error']}"
+        return msg + f"[ERROR] Copy failed!\n   Error: {result['error']}"
 
 
 # @mcp.tool()

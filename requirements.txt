@@ -3,9 +3,11 @@ aiohttp>=3.8.0
 anthropic
 asyncio-mqtt
 docling
+google-genai
 mcp-agent
 mcp-server-git
 nest_asyncio
+openai
 pathlib2
 PyPDF2>=2.0.0
 reportlab>=3.5.0

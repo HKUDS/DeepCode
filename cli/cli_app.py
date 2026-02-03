@@ -37,8 +37,7 @@ class CLIApp:
         self.app = None  # Will be initialized by workflow adapter
         self.logger = None
         self.context = None
-        # Document segmentation configuration
-        self.segmentation_config = {"enabled": True, "size_threshold_chars": 50000}
+        # Document segmentation will be managed by CLI interface
 
     async def initialize_mcp_app(self):
         """初始化MCP应用 - 使用工作流适配器"""
@@ -49,50 +48,189 @@ class CLIApp:
         """清理MCP应用 - 使用工作流适配器"""
         await self.workflow_adapter.cleanup_mcp_app()
 
-    def update_segmentation_config(self):
-        """Update document segmentation configuration in mcp_agent.config.yaml"""
-        import yaml
-        import os
-
-        config_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "mcp_agent.config.yaml",
-        )
-
+    async def process_requirement_analysis_non_interactive(self, initial_idea: str):
+        """处理需求分析工作流（非交互式，用于命令行参数） (NEW: matching UI version)"""
         try:
-            # Read current config
-            with open(config_path, "r", encoding="utf-8") as f:
-                config = yaml.safe_load(f)
-
-            # Update document segmentation settings
-            if "document_segmentation" not in config:
-                config["document_segmentation"] = {}
-
-            config["document_segmentation"]["enabled"] = self.segmentation_config[
-                "enabled"
-            ]
-            config["document_segmentation"]["size_threshold_chars"] = (
-                self.segmentation_config["size_threshold_chars"]
-            )
-
-            # Write updated config
-            with open(config_path, "w", encoding="utf-8") as f:
-                yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
-
+            self.cli.print_separator()
             self.cli.print_status(
-                "📄 Document segmentation configuration updated", "success"
+                "🧠 Starting requirement analysis workflow...", "info"
             )
+
+            # Step 1: Generate guiding questions
+            self.cli.print_status(
+                "🤖 Generating AI-guided questions to refine your requirements...",
+                "processing",
+            )
+
+            questions_result = (
+                await self.workflow_adapter.execute_requirement_analysis_workflow(
+                    user_input=initial_idea, analysis_mode="generate_questions"
+                )
+            )
+
+            if questions_result["status"] != "success":
+                self.cli.print_status(
+                    f"❌ Failed to generate questions: {questions_result.get('error', 'Unknown error')}",
+                    "error",
+                )
+                return questions_result
+
+            # Step 2: Display questions
+            questions_json = questions_result["result"]
+            self.cli.display_guiding_questions(questions_json)
+
+            # For non-interactive mode, we can't get user answers, so we provide a summary
+            self.cli.print_status(
+                "ℹ️  In non-interactive mode, using initial idea for implementation",
+                "info",
+            )
+            self.cli.print_status(
+                "💡 For guided analysis, please use interactive mode (python main_cli.py)",
+                "info",
+            )
+
+            # Proceed directly with the initial idea as the requirement
+            self.cli.print_status(
+                "🚀 Starting code implementation based on initial requirements...",
+                "processing",
+            )
+
+            implementation_result = await self.process_input(initial_idea, "chat")
+
+            return {
+                "status": "success",
+                "questions_generated": questions_result,
+                "implementation": implementation_result,
+            }
 
         except Exception as e:
+            error_msg = str(e)
+            self.cli.print_error_box("Requirement Analysis Error", error_msg)
             self.cli.print_status(
-                f"⚠️ Failed to update segmentation config: {str(e)}", "warning"
+                f"Error during requirement analysis: {error_msg}", "error"
             )
+
+            return {"status": "error", "error": error_msg}
+
+    async def process_requirement_analysis(self):
+        """处理需求分析工作流（交互式） (NEW: matching UI version)"""
+        try:
+            # Step 1: Get initial requirements from user
+            self.cli.print_separator()
+            self.cli.print_status(
+                "🧠 Starting requirement analysis workflow...", "info"
+            )
+
+            user_input = self.cli.get_requirement_analysis_input()
+
+            if not user_input:
+                self.cli.print_status("Requirement analysis cancelled", "warning")
+                return {"status": "cancelled"}
+
+            # Step 2: Generate guiding questions
+            self.cli.print_status(
+                "🤖 Generating AI-guided questions to refine your requirements...",
+                "processing",
+            )
+
+            questions_result = (
+                await self.workflow_adapter.execute_requirement_analysis_workflow(
+                    user_input=user_input, analysis_mode="generate_questions"
+                )
+            )
+
+            if questions_result["status"] != "success":
+                self.cli.print_status(
+                    f"❌ Failed to generate questions: {questions_result.get('error', 'Unknown error')}",
+                    "error",
+                )
+                return questions_result
+
+            # Step 3: Display questions and get user answers
+            questions_json = questions_result["result"]
+            self.cli.display_guiding_questions(questions_json)
+
+            # Ask if user wants to answer the questions
+            proceed = (
+                input(
+                    f"\n{Colors.BOLD}{Colors.YELLOW}Would you like to answer these questions? (y/n):{Colors.ENDC} "
+                )
+                .strip()
+                .lower()
+            )
+
+            if proceed != "y":
+                self.cli.print_status(
+                    "You can still use the initial requirements for chat input",
+                    "info",
+                )
+                return {"status": "partial", "initial_requirements": user_input}
+
+            user_answers = self.cli.get_question_answers(questions_json)
+
+            # Step 4: Generate requirement summary
+            self.cli.print_status(
+                "📄 Generating detailed requirement document...", "processing"
+            )
+
+            summary_result = (
+                await self.workflow_adapter.execute_requirement_analysis_workflow(
+                    user_input=user_input,
+                    analysis_mode="summarize_requirements",
+                    user_answers=user_answers,
+                )
+            )
+
+            if summary_result["status"] != "success":
+                self.cli.print_status(
+                    f"❌ Failed to generate summary: {summary_result.get('error', 'Unknown error')}",
+                    "error",
+                )
+                return summary_result
+
+            # Step 5: Display requirement summary
+            requirement_summary = summary_result["result"]
+            should_proceed = self.cli.display_requirement_summary(requirement_summary)
+
+            if should_proceed:
+                # Step 6: Proceed with chat-based implementation
+                self.cli.print_status(
+                    "🚀 Starting code implementation based on analyzed requirements...",
+                    "processing",
+                )
+
+                implementation_result = await self.process_input(
+                    requirement_summary, "chat"
+                )
+
+                return {
+                    "status": "success",
+                    "requirement_analysis": summary_result,
+                    "implementation": implementation_result,
+                }
+            else:
+                self.cli.print_status(
+                    "Requirement analysis completed. Implementation skipped.", "info"
+                )
+                return {
+                    "status": "success",
+                    "requirement_analysis": summary_result,
+                    "implementation": None,
+                }
+
+        except Exception as e:
+            error_msg = str(e)
+            self.cli.print_error_box("Requirement Analysis Error", error_msg)
+            self.cli.print_status(
+                f"Error during requirement analysis: {error_msg}", "error"
+            )
+
+            return {"status": "error", "error": error_msg}
 
     async def process_input(self, input_source: str, input_type: str):
         """处理输入源（URL或文件）- 使用升级版智能体编排引擎"""
         try:
-            # Update segmentation configuration before processing
-            self.update_segmentation_config()
+            # Document segmentation configuration is managed by CLI interface
 
             self.cli.print_separator()
             self.cli.print_status(
@@ -100,7 +238,10 @@ class CLIApp:
             )
 
             # 显示处理阶段（根据配置决定）
-            self.cli.display_processing_stages(0, self.cli.enable_indexing)
+            chat_mode = input_type == "chat"
+            self.cli.display_processing_stages(
+                0, self.cli.enable_indexing, chat_mode=chat_mode
+            )
 
             # 使用工作流适配器进行处理
             result = await self.workflow_adapter.process_input_with_orchestration(
@@ -111,9 +252,12 @@ class CLIApp:
 
             if result["status"] == "success":
                 # 显示完成状态
-                final_stage = 8 if self.cli.enable_indexing else 5
+                if chat_mode:
+                    final_stage = 4
+                else:
+                    final_stage = 8 if self.cli.enable_indexing else 5
                 self.cli.display_processing_stages(
-                    final_stage, self.cli.enable_indexing
+                    final_stage, self.cli.enable_indexing, chat_mode=chat_mode
                 )
                 self.cli.print_status(
                     "🎉 Agent orchestration completed successfully!", "complete"
@@ -277,31 +421,35 @@ class CLIApp:
                     if chat_input:
                         await self.process_input(chat_input, "chat")
 
+                elif choice in ["r", "req", "requirement", "requirements"]:
+                    # NEW: Requirement Analysis workflow
+                    await self.process_requirement_analysis()
+
                 elif choice in ["h", "history"]:
                     self.cli.show_history()
 
                 elif choice in ["c", "config", "configure"]:
-                    # Sync current segmentation config from CLI interface
-                    self.segmentation_config["enabled"] = self.cli.segmentation_enabled
-                    self.segmentation_config["size_threshold_chars"] = (
-                        self.cli.segmentation_threshold
-                    )
-
+                    # Show configuration menu - all settings managed by CLI interface
                     self.cli.show_configuration_menu()
-
-                    # Sync back from CLI interface after configuration changes
-                    self.segmentation_config["enabled"] = self.cli.segmentation_enabled
-                    self.segmentation_config["size_threshold_chars"] = (
-                        self.cli.segmentation_threshold
-                    )
 
                 else:
                     self.cli.print_status(
-                        "Invalid choice. Please select U, F, T, C, H, or Q.", "warning"
+                        "Invalid choice. Please select U, F, T, R, C, H, or Q.",
+                        "warning",
                     )
 
                 # 询问是否继续
-                if self.cli.is_running and choice in ["u", "f", "t", "chat", "text"]:
+                if self.cli.is_running and choice in [
+                    "u",
+                    "f",
+                    "t",
+                    "r",
+                    "chat",
+                    "text",
+                    "req",
+                    "requirement",
+                    "requirements",
+                ]:
                     if not self.cli.ask_continue():
                         self.cli.is_running = False
                         self.cli.print_status("Session ended by user", "info")

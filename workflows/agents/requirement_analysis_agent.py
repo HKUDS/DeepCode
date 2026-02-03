@@ -1,14 +1,14 @@
 """
 User Requirement Analysis Agent
 
-Responsible for analyzing user initial requirements, generating guiding questions, 
+Responsible for analyzing user initial requirements, generating guiding questions,
 and summarizing detailed requirement documents based on user responses.
 This Agent seamlessly integrates with existing chat workflows to provide more precise requirement understanding.
 """
 
 import json
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, List, Optional
 
 from mcp_agent.agents.agent import Agent
 from utils.llm_utils import get_preferred_llm_class
@@ -104,16 +104,16 @@ Requirement Summary Principles:
     async def generate_guiding_questions(self, user_input: str) -> List[Dict[str, str]]:
         """
         Generate guiding questions based on user initial requirements
-        
+
         Args:
             user_input: User's initial requirement description
-            
+
         Returns:
             List[Dict]: Question list, each question contains category, question, importance and other fields
         """
         try:
             self.logger.info("Starting to generate AI precise guiding questions")
-            
+
             # Build more precise prompt
             prompt = f"""Based on user's project requirements, generate precise guiding questions to help refine requirements.
 
@@ -134,78 +134,84 @@ Return format (pure JSON array, no other text):
 Requirements: Questions should be specific and practical, avoiding general discussions."""
 
             from mcp_agent.workflows.llm.augmented_llm import RequestParams
-            
+
             params = RequestParams(
                 max_tokens=3000,
-                temperature=0.5  # Lower temperature for more stable JSON output
+                temperature=0.5,  # Lower temperature for more stable JSON output
             )
 
-            self.logger.info(f"Calling LLM to generate precise questions, input length: {len(user_input)}")
-            
-            result = await self.llm.generate_str(
-                message=prompt,
-                request_params=params
+            self.logger.info(
+                f"Calling LLM to generate precise questions, input length: {len(user_input)}"
             )
-            
-            self.logger.info(f"LLM returned result length: {len(result) if result else 0}")
-            
+
+            result = await self.llm.generate_str(message=prompt, request_params=params)
+
+            self.logger.info(
+                f"LLM returned result length: {len(result) if result else 0}"
+            )
+
             if not result or not result.strip():
                 self.logger.error("LLM returned empty result")
                 raise ValueError("LLM returned empty result")
-            
+
             self.logger.info(f"LLM returned result: {result[:500]}...")
 
             # Clean result and extract JSON part
             result_cleaned = result.strip()
-            
+
             # Try to find JSON array
             import re
-            json_pattern = r'\[\s*\{.*?\}\s*\]'
+
+            json_pattern = r"\[\s*\{.*?\}\s*\]"
             json_match = re.search(json_pattern, result_cleaned, re.DOTALL)
-            
+
             if json_match:
                 json_str = json_match.group()
                 self.logger.info(f"Extracted JSON: {json_str[:200]}...")
             else:
                 # If complete JSON not found, try direct parsing
                 json_str = result_cleaned
-            
+
             # Parse JSON result
             try:
                 questions = json.loads(json_str)
                 if isinstance(questions, list) and len(questions) > 0:
-                    self.logger.info(f"✅ Successfully generated {len(questions)} AI precise guiding questions")
+                    self.logger.info(
+                        f"✅ Successfully generated {len(questions)} AI precise guiding questions"
+                    )
                     return questions
                 else:
                     raise ValueError("Returned result is not a valid question list")
-                    
+
             except json.JSONDecodeError as e:
                 self.logger.error(f"JSON parsing failed: {e}")
                 self.logger.error(f"Original result: {result}")
-                
+
                 # Try more lenient JSON extraction
-                lines = result.split('\n')
+                lines = result.split("\n")
                 json_lines = []
                 in_json = False
-                
+
                 for line in lines:
-                    if '[' in line:
+                    if "[" in line:
                         in_json = True
                     if in_json:
                         json_lines.append(line)
-                    if ']' in line and in_json:
+                    if "]" in line and in_json:
                         break
-                
+
                 if json_lines:
                     try:
-                        json_attempt = '\n'.join(json_lines)
+                        json_attempt = "\n".join(json_lines)
                         questions = json.loads(json_attempt)
                         if isinstance(questions, list) and len(questions) > 0:
-                            self.logger.info(f"✅ Generated {len(questions)} questions through lenient parsing")
+                            self.logger.info(
+                                f"✅ Generated {len(questions)} questions through lenient parsing"
+                            )
                             return questions
                     except Exception:
                         pass
-                
+
                 # If JSON parsing fails, raise an error
                 self.logger.error("JSON parsing completely failed")
                 raise ValueError("Failed to parse AI generated questions")
@@ -215,32 +221,32 @@ Requirements: Questions should be specific and practical, avoiding general discu
             # Re-raise the exception instead of falling back to default questions
             raise
 
-    async def summarize_detailed_requirements(self, 
-                                            initial_input: str, 
-                                            answers: Dict[str, str]) -> str:
+    async def summarize_detailed_requirements(
+        self, initial_input: str, answers: Dict[str, str]
+    ) -> str:
         """
         Generate detailed requirement document based on initial input and user answers
-        
+
         Args:
             initial_input: User's initial requirement description
             answers: User's answer dictionary {question_id: answer}
-            
+
         Returns:
             str: Detailed requirement document
         """
         try:
             self.logger.info("Starting to generate AI detailed requirement summary")
-            
+
             # Build answer content
             answers_text = ""
             if answers:
                 for question_id, answer in answers.items():
                     if answer and answer.strip():
                         answers_text += f"• {answer}\n"
-            
+
             if not answers_text:
                 answers_text = "User chose to skip questions, generating based on initial requirements"
-            
+
             prompt = f"""Based on user requirements and responses, generate a concise project requirement document.
 
 Initial Requirements: {initial_input}
@@ -275,24 +281,22 @@ Recommended technical design including:
 Requirements: Focus on what needs to be built and how to build it technically. Be concise but comprehensive - avoid unnecessary implementation details."""
 
             from mcp_agent.workflows.llm.augmented_llm import RequestParams
-            
-            params = RequestParams(
-                max_tokens=4000,
-                temperature=0.3
+
+            params = RequestParams(max_tokens=4000, temperature=0.3)
+
+            self.logger.info(
+                f"Calling LLM to generate requirement summary, initial requirement length: {len(initial_input)}"
             )
 
-            self.logger.info(f"Calling LLM to generate requirement summary, initial requirement length: {len(initial_input)}")
-            
-            result = await self.llm.generate_str(
-                message=prompt,
-                request_params=params
-            )
+            result = await self.llm.generate_str(message=prompt, request_params=params)
 
             if not result or not result.strip():
                 self.logger.error("LLM returned empty requirement summary")
                 raise ValueError("LLM returned empty requirement summary")
 
-            self.logger.info(f"✅ Requirement summary generation completed, length: {len(result)}")
+            self.logger.info(
+                f"✅ Requirement summary generation completed, length: {len(result)}"
+            )
             return result.strip()
 
         except Exception as e:
@@ -316,22 +320,22 @@ Core functionality needed: {initial_input}
 
 Note: Due to technical issues, this is a simplified requirement document. Manual supplementation of detailed information is recommended."""
 
-    async def modify_requirements(self, 
-                                current_requirements: str, 
-                                modification_feedback: str) -> str:
+    async def modify_requirements(
+        self, current_requirements: str, modification_feedback: str
+    ) -> str:
         """
         Modify existing requirement document based on user feedback
-        
+
         Args:
             current_requirements: Current requirement document content
             modification_feedback: User's modification requests and feedback
-            
+
         Returns:
             str: Modified requirement document
         """
         try:
             self.logger.info("Starting to modify requirements based on user feedback")
-            
+
             # Build modification prompt
             prompt = f"""Based on the current requirement document and user's modification requests, generate an updated requirement document.
 
@@ -367,7 +371,7 @@ Recommended technical design including:
 - Expected user scale and performance requirements
 - Scalability considerations and constraints
 
-MANDATORY REQUIREMENTS: 
+MANDATORY REQUIREMENTS:
 1. ALWAYS return a complete document with ALL sections above, regardless of user input completeness
 2. If user feedback is unclear or incomplete, make reasonable assumptions based on the current requirements
 3. Incorporate any clear user requests while filling in missing details intelligently
@@ -377,24 +381,22 @@ MANDATORY REQUIREMENTS:
 7. Keep the same professional structure and format in all cases"""
 
             from mcp_agent.workflows.llm.augmented_llm import RequestParams
-            
-            params = RequestParams(
-                max_tokens=4000,
-                temperature=0.3
+
+            params = RequestParams(max_tokens=4000, temperature=0.3)
+
+            self.logger.info(
+                f"Calling LLM to modify requirements, feedback length: {len(modification_feedback)}"
             )
 
-            self.logger.info(f"Calling LLM to modify requirements, feedback length: {len(modification_feedback)}")
-            
-            result = await self.llm.generate_str(
-                message=prompt,
-                request_params=params
-            )
+            result = await self.llm.generate_str(message=prompt, request_params=params)
 
             if not result or not result.strip():
                 self.logger.error("LLM returned empty modified requirements")
                 raise ValueError("LLM returned empty modified requirements")
 
-            self.logger.info(f"✅ Requirements modification completed, length: {len(result)}")
+            self.logger.info(
+                f"✅ Requirements modification completed, length: {len(result)}"
+            )
             return result.strip()
 
         except Exception as e:
