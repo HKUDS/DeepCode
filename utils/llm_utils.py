@@ -115,11 +115,19 @@ def get_preferred_llm_class(config_path: str = "mcp_agent.secrets.yaml") -> Type
         class: The preferred LLM class
     """
     try:
-        # Get API keys with environment variable override
-        keys = get_api_keys(config_path)
-        google_key = keys["google"]
-        anthropic_key = keys["anthropic"]
-        openai_key = keys["openai"]
+        # Read API keys from secrets file
+        if not os.path.exists(config_path):
+            print(f"🤖 Config file {config_path} not found, using OpenAIAugmentedLLM")
+            return OpenAIAugmentedLLM
+
+        with open(config_path, "r", encoding="utf-8") as f:
+            secrets = yaml.safe_load(f)
+
+        # Get API keys
+        anthropic_key = secrets.get("anthropic", {}).get("api_key", "").strip()
+        google_key = secrets.get("google", {}).get("api_key", "").strip()
+        openai_key = secrets.get("openai", {}).get("api_key", "").strip()
+        openrouter_key = secrets.get("openrouter", {}).get("api_key", "").strip()
 
         # Read user preference from main config
         main_config_path = "mcp_agent.config.yaml"
@@ -129,11 +137,16 @@ def get_preferred_llm_class(config_path: str = "mcp_agent.secrets.yaml") -> Type
                 main_config = yaml.safe_load(f)
                 preferred_provider = main_config.get("llm_provider", "").strip().lower()
 
-        # Map of providers to their keys and class names
-        provider_keys = {
-            "anthropic": (anthropic_key, "AnthropicAugmentedLLM"),
-            "google": (google_key, "GoogleAugmentedLLM"),
-            "openai": (openai_key, "OpenAIAugmentedLLM"),
+        # Map of providers to their classes and keys
+        provider_map = {
+            "anthropic": (
+                AnthropicAugmentedLLM,
+                anthropic_key,
+                "AnthropicAugmentedLLM",
+            ),
+            "google": (GoogleAugmentedLLM, google_key, "GoogleAugmentedLLM"),
+            "openai": (OpenAIAugmentedLLM, openai_key, "OpenAIAugmentedLLM"),
+            "openrouter": (OpenAIAugmentedLLM, openrouter_key, "OpenAIAugmentedLLM (OpenRouter)"),
         }
 
         # Try user's preferred provider first
@@ -223,12 +236,14 @@ def get_default_models(config_path: str = "mcp_agent.config.yaml"):
             anthropic_config = config.get("anthropic") or {}
             openai_config = config.get("openai") or {}
             google_config = config.get("google") or {}
+            openrouter_config = config.get("openrouter") or {}
 
             anthropic_model = anthropic_config.get(
                 "default_model", "claude-sonnet-4-20250514"
             )
             openai_model = openai_config.get("default_model", "o3-mini")
             google_model = google_config.get("default_model", "gemini-2.0-flash")
+            openrouter_model = openrouter_config.get("default_model", "anthropic/claude-sonnet-4")
 
             # Phase-specific models (fall back to default if not specified)
             # Google
@@ -251,12 +266,7 @@ def get_default_models(config_path: str = "mcp_agent.config.yaml"):
                 "anthropic": anthropic_model,
                 "openai": openai_model,
                 "google": google_model,
-                "google_planning": google_planning,
-                "google_implementation": google_implementation,
-                "anthropic_planning": anthropic_planning,
-                "anthropic_implementation": anthropic_implementation,
-                "openai_planning": openai_planning,
-                "openai_implementation": openai_implementation,
+                "openrouter": openrouter_model,
             }
         else:
             print(f"Config file {config_path} not found, using default models")
