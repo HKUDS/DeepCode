@@ -282,10 +282,25 @@ class FileProcessor:
             if isinstance(file_input, str):
                 import re
 
+                # Try to extract path from backticks first
                 file_path_match = re.search(r"`([^`]+\.md)`", file_input)
                 if file_path_match:
                     paper_path = file_path_match.group(1)
                     file_input = {"paper_path": paper_path}
+                else:
+                    # Try to extract from "Saved Path:" or similar patterns
+                    path_patterns = [
+                        r"[Ss]aved [Pp]ath[:\s]+([^\s\n]+\.md)",
+                        r"[Pp]aper [Pp]ath[:\s]+([^\s\n]+\.md)",
+                        r"[Ff]ile[:\s]+([^\s\n]+\.md)",
+                        r"[Oo]utput[:\s]+([^\s\n]+\.md)",
+                    ]
+                    for pattern in path_patterns:
+                        match = re.search(pattern, file_input)
+                        if match:
+                            paper_path = match.group(1)
+                            file_input = {"paper_path": paper_path}
+                            break
 
             # Extract paper directory path
             paper_dir = cls.extract_file_path(file_input)

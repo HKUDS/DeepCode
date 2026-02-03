@@ -4,6 +4,7 @@ anthropic
 asyncio-mqtt
 click>=8.0.0
 docling
+google-genai
 mcp-agent
 mcp-server-git
 nest_asyncio

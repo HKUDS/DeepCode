@@ -23,7 +23,6 @@ if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
 # 导入MCP应用和工作流
-
 from cli.workflows import CLIWorkflowAdapter
 from cli.cli_interface import CLIInterface, Colors
 
@@ -31,13 +30,16 @@ from cli.cli_interface import CLIInterface, Colors
 class CLIApp:
     """CLI应用主类 - 升级版智能体编排引擎"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.cli = CLIInterface()
         self.workflow_adapter = CLIWorkflowAdapter(cli_interface=self.cli)
         self.app = None  # Will be initialized by workflow adapter
         self.logger = None
-        self.context = None
+        # Context for storing last run metadata (input_source, input_type, error_flag)
+        # 同时用于 /retry-last 聊天命令
+        self.context = {"last_input": None}
         # Document segmentation will be managed by CLI interface
+        self._interrupt_handled = False  # Track if KeyboardInterrupt was already handled
 
     async def initialize_mcp_app(self):
         """初始化MCP应用 - 使用工作流适配器"""
@@ -48,8 +50,192 @@ class CLIApp:
         """清理MCP应用 - 使用工作流适配器"""
         await self.workflow_adapter.cleanup_mcp_app()
 
+    async def process_requirement_analysis_non_interactive(self, initial_idea: str):
+        """处理需求分析工作流（非交互式，用于命令行参数） (NEW: matching UI version)"""
+        try:
+            self.cli.print_separator()
+            self.cli.print_status(
+                "🧠 Starting requirement analysis workflow...", "info"
+            )
+
+            # Step 1: Generate guiding questions
+            self.cli.print_status(
+                "🤖 Generating AI-guided questions to refine your requirements...",
+                "processing",
+            )
+
+            questions_result = (
+                await self.workflow_adapter.execute_requirement_analysis_workflow(
+                    user_input=initial_idea, analysis_mode="generate_questions"
+                )
+            )
+
+            if questions_result["status"] != "success":
+                self.cli.print_status(
+                    f"❌ Failed to generate questions: {questions_result.get('error', 'Unknown error')}",
+                    "error",
+                )
+                return questions_result
+
+            # Step 2: Display questions
+            questions_json = questions_result["result"]
+            self.cli.display_guiding_questions(questions_json)
+
+            # For non-interactive mode, we can't get user answers, so we provide a summary
+            self.cli.print_status(
+                "ℹ️  In non-interactive mode, using initial idea for implementation",
+                "info",
+            )
+            self.cli.print_status(
+                "💡 For guided analysis, please use interactive mode (python main_cli.py)",
+                "info",
+            )
+
+            # Proceed directly with the initial idea as the requirement
+            self.cli.print_status(
+                "🚀 Starting code implementation based on initial requirements...",
+                "processing",
+            )
+
+            implementation_result = await self.process_input(initial_idea, "chat")
+
+            return {
+                "status": "success",
+                "questions_generated": questions_result,
+                "implementation": implementation_result,
+            }
+
+        except Exception as e:
+            error_msg = str(e)
+            self.cli.print_error_box("Requirement Analysis Error", error_msg)
+            self.cli.print_status(
+                f"Error during requirement analysis: {error_msg}", "error"
+            )
+
+            return {"status": "error", "error": error_msg}
+
+    async def process_requirement_analysis(self):
+        """处理需求分析工作流（交互式） (NEW: matching UI version)"""
+        try:
+            # Step 1: Get initial requirements from user
+            self.cli.print_separator()
+            self.cli.print_status(
+                "🧠 Starting requirement analysis workflow...", "info"
+            )
+
+            user_input = self.cli.get_requirement_analysis_input()
+
+            if not user_input:
+                self.cli.print_status("Requirement analysis cancelled", "warning")
+                return {"status": "cancelled"}
+
+            # Step 2: Generate guiding questions
+            self.cli.print_status(
+                "🤖 Generating AI-guided questions to refine your requirements...",
+                "processing",
+            )
+
+            questions_result = (
+                await self.workflow_adapter.execute_requirement_analysis_workflow(
+                    user_input=user_input, analysis_mode="generate_questions"
+                )
+            )
+
+            if questions_result["status"] != "success":
+                self.cli.print_status(
+                    f"❌ Failed to generate questions: {questions_result.get('error', 'Unknown error')}",
+                    "error",
+                )
+                return questions_result
+
+            # Step 3: Display questions and get user answers
+            questions_json = questions_result["result"]
+            self.cli.display_guiding_questions(questions_json)
+
+            # Ask if user wants to answer the questions
+            proceed = (
+                input(
+                    f"\n{Colors.BOLD}{Colors.YELLOW}Would you like to answer these questions? (y/n):{Colors.ENDC} "
+                )
+                .strip()
+                .lower()
+            )
+
+            if proceed != "y":
+                self.cli.print_status(
+                    "You can still use the initial requirements for chat input",
+                    "info",
+                )
+                return {"status": "partial", "initial_requirements": user_input}
+
+            user_answers = self.cli.get_question_answers(questions_json)
+
+            # Step 4: Generate requirement summary
+            self.cli.print_status(
+                "📄 Generating detailed requirement document...", "processing"
+            )
+
+            summary_result = (
+                await self.workflow_adapter.execute_requirement_analysis_workflow(
+                    user_input=user_input,
+                    analysis_mode="summarize_requirements",
+                    user_answers=user_answers,
+                )
+            )
+
+            if summary_result["status"] != "success":
+                self.cli.print_status(
+                    f"❌ Failed to generate summary: {summary_result.get('error', 'Unknown error')}",
+                    "error",
+                )
+                return summary_result
+
+            # Step 5: Display requirement summary
+            requirement_summary = summary_result["result"]
+            should_proceed = self.cli.display_requirement_summary(requirement_summary)
+
+            if should_proceed:
+                # Step 6: Proceed with chat-based implementation
+                self.cli.print_status(
+                    "🚀 Starting code implementation based on analyzed requirements...",
+                    "processing",
+                )
+
+                implementation_result = await self.process_input(
+                    requirement_summary, "chat"
+                )
+
+                return {
+                    "status": "success",
+                    "requirement_analysis": summary_result,
+                    "implementation": implementation_result,
+                }
+            else:
+                self.cli.print_status(
+                    "Requirement analysis completed. Implementation skipped.", "info"
+                )
+                return {
+                    "status": "success",
+                    "requirement_analysis": summary_result,
+                    "implementation": None,
+                }
+
+        except Exception as e:
+            error_msg = str(e)
+            self.cli.print_error_box("Requirement Analysis Error", error_msg)
+            self.cli.print_status(
+                f"Error during requirement analysis: {error_msg}", "error"
+            )
+
+            return {"status": "error", "error": error_msg}
+
     async def process_input(self, input_source: str, input_type: str):
-        """处理输入源（URL或文件）- 使用升级版智能体编排引擎"""
+        """处理输入源（URL或文件/聊天）- 使用升级版智能体编排引擎
+
+        同时在 ``self.context["last_input"]`` 中记录最近一次运行的
+        ``(input_source, input_type, error_flag)`` 信息，供 /retry-last 使用。
+        """
+
         try:
             # Document segmentation configuration is managed by CLI interface
 
@@ -59,7 +245,10 @@ class CLIApp:
             )
 
             # 显示处理阶段（根据配置决定）
-            self.cli.display_processing_stages(0, self.cli.enable_indexing)
+            chat_mode = input_type == "chat"
+            self.cli.display_processing_stages(
+                0, self.cli.enable_indexing, chat_mode=chat_mode
+            )
 
             # 使用工作流适配器进行处理
             result = await self.workflow_adapter.process_input_with_orchestration(
@@ -68,11 +257,17 @@ class CLIApp:
                 enable_indexing=self.cli.enable_indexing,
             )
 
-            if result["status"] == "success":
+            # 标记本次运行是否出错
+            error_flag = result.get("status") != "success"
+
+            if not error_flag:
                 # 显示完成状态
-                final_stage = 8 if self.cli.enable_indexing else 5
+                if chat_mode:
+                    final_stage = 4
+                else:
+                    final_stage = 8 if self.cli.enable_indexing else 5
                 self.cli.display_processing_stages(
-                    final_stage, self.cli.enable_indexing
+                    final_stage, self.cli.enable_indexing, chat_mode=chat_mode
                 )
                 self.cli.print_status(
                     "🎉 Agent orchestration completed successfully!", "complete"
@@ -94,9 +289,18 @@ class CLIApp:
             # 添加到历史记录
             self.cli.add_to_history(input_source, result)
 
+            # 在上下文中记录最近一次运行的输入信息
+            if self.context is None or not isinstance(self.context, dict):
+                self.context = {"last_input": None}
+            self.context["last_input"] = {
+                "input_source": input_source,
+                "input_type": input_type,
+                "error": error_flag,
+            }
+
             return result
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             error_msg = str(e)
             self.cli.print_error_box("Agent Orchestration Error", error_msg)
             self.cli.print_status(f"Error during orchestration: {error_msg}", "error")
@@ -104,6 +308,15 @@ class CLIApp:
             # 添加错误到历史记录
             error_result = {"status": "error", "error": error_msg}
             self.cli.add_to_history(input_source, error_result)
+
+            # 在上下文中记录最近一次失败运行的信息
+            if self.context is None or not isinstance(self.context, dict):
+                self.context = {"last_input": None}
+            self.context["last_input"] = {
+                "input_source": input_source,
+                "input_type": input_type,
+                "error": True,
+            }
 
             return error_result
 
@@ -143,7 +356,7 @@ class CLIApp:
                     if len(analysis_result) > 1000
                     else analysis_result
                 )
-        except Exception:
+        except Exception:  # noqa: BLE001
             print(
                 analysis_result[:1000] + "..."
                 if len(analysis_result) > 1000
@@ -233,8 +446,47 @@ class CLIApp:
 
                 elif choice in ["t", "chat", "text"]:
                     chat_input = self.cli.get_chat_input()
-                    if chat_input:
-                        await self.process_input(chat_input, "chat")
+                    if not chat_input:
+                        # 用户取消或未提供输入
+                        continue
+
+                    # 处理聊天命令（以 "/" 开头）
+                    if chat_input.strip() == "/retry-last":
+                        last = None
+                        if isinstance(self.context, dict):
+                            last = self.context.get("last_input")
+
+                        if not last:
+                            self.cli.print_status(
+                                "No previous run available to retry.", "warning"
+                            )
+                        elif not last.get("error"):
+                            self.cli.print_status(
+                                "Last run was successful; nothing to retry.", "info"
+                            )
+                        else:
+                            source = last.get("input_source")
+                            input_type = last.get("input_type", "chat")
+                            if not source:
+                                self.cli.print_status(
+                                    "Previous failed run has no input source to retry.",
+                                    "error",
+                                )
+                            else:
+                                self.cli.print_status(
+                                    "Retrying last failed input...", "processing"
+                                )
+                                await self.process_input(source, input_type)
+
+                        # 处理完命令后继续主循环
+                        continue
+
+                    # 普通聊天输入 - 直接作为 chat 类型处理
+                    await self.process_input(chat_input, "chat")
+
+                elif choice in ["r", "req", "requirement", "requirements"]:
+                    # NEW: Requirement Analysis workflow
+                    await self.process_requirement_analysis()
 
                 elif choice in ["h", "history"]:
                     self.cli.show_history()
@@ -245,19 +497,33 @@ class CLIApp:
 
                 else:
                     self.cli.print_status(
-                        "Invalid choice. Please select U, F, T, C, H, or Q.", "warning"
+                        "Invalid choice. Please select U, F, T, R, C, H, or Q.",
+                        "warning",
                     )
 
                 # 询问是否继续
-                if self.cli.is_running and choice in ["u", "f", "t", "chat", "text"]:
+                if self.cli.is_running and choice in [
+                    "u",
+                    "f",
+                    "t",
+                    "r",
+                    "chat",
+                    "text",
+                    "req",
+                    "requirement",
+                    "requirements",
+                ]:
                     if not self.cli.ask_continue():
                         self.cli.is_running = False
                         self.cli.print_status("Session ended by user", "info")
 
         except KeyboardInterrupt:
-            # Re-raise to let main() handle it uniformly
-            raise
-        except Exception as e:
+            if not self._interrupt_handled:
+                self._interrupt_handled = True
+                print(
+                    f"\n{Colors.WARNING}⚠️  Process interrupted by user{Colors.ENDC}"
+                )
+        except Exception as e:  # noqa: BLE001
             print(f"\n{Colors.FAIL}❌ Unexpected error: {str(e)}{Colors.ENDC}")
         finally:
             # 清理资源
@@ -267,6 +533,7 @@ class CLIApp:
 async def main():
     """主函数"""
     start_time = time.time()
+    app = None
 
     try:
         # 创建并运行CLI应用
@@ -274,8 +541,12 @@ async def main():
         await app.run_interactive_session()
 
     except KeyboardInterrupt:
-        print(f"\n{Colors.WARNING}⚠️  Application interrupted by user{Colors.ENDC}")
-    except Exception as e:
+        # Only print if not already handled by run_interactive_session
+        if app is None or not app._interrupt_handled:
+            print(
+                f"\n{Colors.WARNING}⚠️  Application interrupted by user{Colors.ENDC}"
+            )
+    except Exception as e:  # noqa: BLE001
         print(f"\n{Colors.FAIL}❌ Application error: {str(e)}{Colors.ENDC}")
     finally:
         end_time = time.time()

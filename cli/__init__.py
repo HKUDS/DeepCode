@@ -11,8 +11,8 @@ DeepCode智能体CLI模块
 __version__ = "1.0.0"
 __author__ = "DeepCode Team - Data Intelligence Lab @ HKU"
 
-from .cli_app import main as cli_main
+from .cli_app import cli, run_interactive_cli
 from .cli_interface import CLIInterface
 from .cli_launcher import main as launcher_main
 
-__all__ = ["cli_main", "CLIInterface", "launcher_main"]
+__all__ = ["cli", "run_interactive_cli", "CLIInterface", "launcher_main"]
