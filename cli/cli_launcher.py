@@ -129,14 +129,12 @@ def main():
         # 导入并运行CLI应用
         if str(project_root) not in sys.path:
             sys.path.insert(0, str(project_root))  # 添加项目根目录到路径
-        from cli.cli_app import main as cli_main
+        from cli.cli_app import cli
 
         print("\n🎯 Launching CLI application...")
 
-        # 使用asyncio运行主函数
-        import asyncio
-
-        asyncio.run(cli_main())
+        # 使用Click CLI运行主函数 (默认运行 'run' 命令)
+        cli(["run"])
 
     except KeyboardInterrupt:
         print("\n\n🛑 DeepCode CLI stopped by user")
