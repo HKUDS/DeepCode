@@ -540,6 +540,14 @@ curl -O https://raw.githubusercontent.com/HKUDS/DeepCode/main/mcp_agent.secrets.
 # 使用您的API密钥和base_url编辑mcp_agent.secrets.yaml:
 # - openai: api_key, base_url (用于OpenAI/自定义端点)
 # - anthropic: api_key (用于Claude模型)
+# - google: api_key (用于Gemini模型)
+
+# 🤖 选择您偏好的LLM提供商 (可选)
+# 编辑mcp_agent.config.yaml选择您的LLM (第~106行):
+# - llm_provider: "google"    # 使用Google Gemini模型
+# - llm_provider: "anthropic" # 使用Anthropic Claude模型
+# - llm_provider: "openai"    # 使用OpenAI/兼容模型
+# 注意: 如果未设置或不可用，将自动回退到第一个可用的提供商
 
 # 🔑 配置搜索API密钥用于Web搜索 (可选)
 # 编辑mcp_agent.config.yaml设置您的API密钥:
@@ -576,6 +584,14 @@ uv pip install -r requirements.txt
 # 使用您的API密钥和base_url编辑mcp_agent.secrets.yaml:
 # - openai: api_key, base_url (用于OpenAI/自定义端点)
 # - anthropic: api_key (用于Claude模型)
+# - google: api_key (用于Gemini模型)
+
+# 🤖 选择您偏好的LLM提供商 (可选)
+# 编辑mcp_agent.config.yaml选择您的LLM (第~106行):
+# - llm_provider: "google"    # 使用Google Gemini模型
+# - llm_provider: "anthropic" # 使用Anthropic Claude模型
+# - llm_provider: "openai"    # 使用OpenAI/兼容模型
+# 注意: 如果未设置或不可用，将自动回退到第一个可用的提供商
 
 # 🔑 配置搜索API密钥用于Web搜索 (可选)
 # 编辑mcp_agent.config.yaml设置您的API密钥:
@@ -602,6 +618,14 @@ pip install -r requirements.txt
 # 使用您的API密钥和base_url编辑mcp_agent.secrets.yaml:
 # - openai: api_key, base_url (用于OpenAI/自定义端点)
 # - anthropic: api_key (用于Claude模型)
+# - google: api_key (用于Gemini模型)
+
+# 🤖 选择您偏好的LLM提供商 (可选)
+# 编辑mcp_agent.config.yaml选择您的LLM (第~106行):
+# - llm_provider: "google"    # 使用Google Gemini模型
+# - llm_provider: "anthropic" # 使用Anthropic Claude模型
+# - llm_provider: "openai"    # 使用OpenAI/兼容模型
+# 注意: 如果未设置或不可用，将自动回退到第一个可用的提供商
 
 # 🔑 配置搜索API密钥用于Web搜索 (可选)
 # 编辑mcp_agent.config.yaml设置您的API密钥:

@@ -24,38 +24,7 @@ from dataclasses import dataclass, asdict
 from typing import List, Dict, Any
 
 # MCP Agent imports for LLM
-import yaml
-from utils.llm_utils import get_preferred_llm_class
-
-
-def get_default_models(config_path: str = "mcp_agent.config.yaml"):
-    """
-    Get default models from configuration file.
-
-    Args:
-        config_path: Path to the configuration file
-
-    Returns:
-        dict: Dictionary with 'anthropic' and 'openai' default models
-    """
-    try:
-        if os.path.exists(config_path):
-            with open(config_path, "r", encoding="utf-8") as f:
-                config = yaml.safe_load(f)
-
-            anthropic_model = config.get("anthropic", {}).get(
-                "default_model", "claude-sonnet-4-20250514"
-            )
-            openai_model = config.get("openai", {}).get("default_model", "o3-mini")
-
-            return {"anthropic": anthropic_model, "openai": openai_model}
-        else:
-            print(f"Config file {config_path} not found, using default models")
-            return {"anthropic": "claude-sonnet-4-20250514", "openai": "o3-mini"}
-
-    except Exception as e:
-        print(f"Error reading config file {config_path}: {e}")
-        return {"anthropic": "claude-sonnet-4-20250514", "openai": "o3-mini"}
+from utils.llm_utils import get_preferred_llm_class, get_default_models
 
 
 @dataclass

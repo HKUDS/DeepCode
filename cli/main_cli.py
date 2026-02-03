@@ -94,17 +94,19 @@ def parse_arguments():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""
 {Colors.BOLD}Examples:{Colors.ENDC}
-  {Colors.CYAN}python main_cli.py{Colors.ENDC}                               # Interactive mode
-  {Colors.CYAN}python main_cli.py --file paper.pdf{Colors.ENDC}                # Process file directly
-  {Colors.CYAN}python main_cli.py --url https://...{Colors.ENDC}               # Process URL directly
-  {Colors.CYAN}python main_cli.py --chat "Build a web app..."{Colors.ENDC}     # Process chat requirements
-  {Colors.CYAN}python main_cli.py --optimized{Colors.ENDC}                     # Use optimized mode
-  {Colors.CYAN}python main_cli.py --disable-segmentation{Colors.ENDC}          # Disable document segmentation
-  {Colors.CYAN}python main_cli.py --segmentation-threshold 30000{Colors.ENDC}  # Custom segmentation threshold
+  {Colors.CYAN}python main_cli.py{Colors.ENDC}                                      # Interactive mode
+  {Colors.CYAN}python main_cli.py --file paper.pdf{Colors.ENDC}                       # Process file directly
+  {Colors.CYAN}python main_cli.py --url https://...{Colors.ENDC}                      # Process URL directly
+  {Colors.CYAN}python main_cli.py --chat "Build a web app..."{Colors.ENDC}            # Process chat requirements
+  {Colors.CYAN}python main_cli.py --requirement "ML system for..."{Colors.ENDC}       # Guided requirement analysis (NEW)
+  {Colors.CYAN}python main_cli.py --optimized{Colors.ENDC}                            # Use optimized mode
+  {Colors.CYAN}python main_cli.py --disable-segmentation{Colors.ENDC}                 # Disable document segmentation
+  {Colors.CYAN}python main_cli.py --segmentation-threshold 30000{Colors.ENDC}         # Custom segmentation threshold
 
 {Colors.BOLD}Pipeline Modes:{Colors.ENDC}
-  {Colors.GREEN}Comprehensive{Colors.ENDC}: Full intelligence analysis with indexing
-  {Colors.YELLOW}Optimized{Colors.ENDC}:     Fast processing without indexing
+  {Colors.GREEN}Comprehensive{Colors.ENDC}:          Full intelligence analysis with indexing
+  {Colors.YELLOW}Optimized{Colors.ENDC}:              Fast processing without indexing
+  {Colors.BLUE}Requirement Analysis{Colors.ENDC}:   Guided Q&A to refine requirements (NEW)
 
 {Colors.BOLD}Document Processing:{Colors.ENDC}
   {Colors.BLUE}Smart Segmentation{Colors.ENDC}: Intelligent document segmentation for large papers
@@ -125,6 +127,13 @@ def parse_arguments():
         "-t",
         type=str,
         help="Process coding requirements via chat input (provide requirements as argument)",
+    )
+
+    parser.add_argument(
+        "--requirement",
+        "-r",
+        type=str,
+        help="Process requirements via guided analysis (provide initial idea as argument)",
     )
 
     parser.add_argument(
@@ -195,6 +204,43 @@ async def run_direct_processing(app: CLIApp, input_source: str, input_type: str)
         await app.cleanup_mcp_app()
 
 
+async def run_requirement_analysis(app: CLIApp, initial_idea: str):
+    """需求分析模式（非交互式） - NEW: matching UI version"""
+    try:
+        print(
+            f"\n{Colors.BOLD}{Colors.BLUE}🧠 Starting requirement analysis mode...{Colors.ENDC}"
+        )
+        print(f"{Colors.CYAN}Initial Idea: {initial_idea}{Colors.ENDC}")
+
+        # 初始化应用
+        init_result = await app.initialize_mcp_app()
+        if init_result["status"] != "success":
+            print(
+                f"{Colors.FAIL}❌ Initialization failed: {init_result['message']}{Colors.ENDC}"
+            )
+            return False
+
+        # 执行需求分析工作流
+        result = await app.process_requirement_analysis_non_interactive(initial_idea)
+
+        if result["status"] == "success":
+            print(
+                f"\n{Colors.BOLD}{Colors.OKGREEN}🎉 Requirement analysis completed successfully!{Colors.ENDC}"
+            )
+            return True
+        else:
+            print(
+                f"\n{Colors.BOLD}{Colors.FAIL}❌ Requirement analysis failed: {result.get('error', 'Unknown error')}{Colors.ENDC}"
+            )
+            return False
+
+    except Exception as e:
+        print(f"\n{Colors.FAIL}❌ Requirement analysis error: {str(e)}{Colors.ENDC}")
+        return False
+    finally:
+        await app.cleanup_mcp_app()
+
+
 async def main():
     """主函数"""
     # 解析命令行参数
@@ -214,15 +260,17 @@ async def main():
         # 创建CLI应用
         app = CLIApp()
 
-        # 设置配置
+        # 设置配置 - 默认禁用索引功能以加快处理速度
         if args.optimized:
             app.cli.enable_indexing = False
             print(
                 f"\n{Colors.YELLOW}⚡ Optimized mode enabled - indexing disabled{Colors.ENDC}"
             )
         else:
+            # 默认也禁用索引功能
+            app.cli.enable_indexing = False
             print(
-                f"\n{Colors.GREEN}🧠 Comprehensive mode enabled - full intelligence analysis{Colors.ENDC}"
+                f"\n{Colors.YELLOW}⚡ Fast mode enabled - indexing disabled by default{Colors.ENDC}"
             )
 
         # Configure document segmentation settings
@@ -242,13 +290,15 @@ async def main():
             app.cli._save_segmentation_config()
 
         # 检查是否为直接处理模式
-        if args.file or args.url or args.chat:
+        if args.file or args.url or args.chat or args.requirement:
             if args.file:
                 # 验证文件存在
                 if not os.path.exists(args.file):
                     print(f"{Colors.FAIL}❌ File not found: {args.file}{Colors.ENDC}")
                     sys.exit(1)
-                success = await run_direct_processing(app, args.file, "file")
+                # 使用 file:// 前缀保持与交互模式一致，确保文件被复制而非移动
+                file_url = f"file://{os.path.abspath(args.file)}"
+                success = await run_direct_processing(app, file_url, "file")
             elif args.url:
                 success = await run_direct_processing(app, args.url, "url")
             elif args.chat:
@@ -259,6 +309,15 @@ async def main():
                     )
                     sys.exit(1)
                 success = await run_direct_processing(app, args.chat, "chat")
+            elif args.requirement:
+                # NEW: Requirement analysis mode
+                # 验证需求输入长度
+                if len(args.requirement.strip()) < 10:
+                    print(
+                        f"{Colors.FAIL}❌ Requirement input too short. Please provide more details (at least 10 characters){Colors.ENDC}"
+                    )
+                    sys.exit(1)
+                success = await run_requirement_analysis(app, args.requirement)
 
             sys.exit(0 if success else 1)
         else:

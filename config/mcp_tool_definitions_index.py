@@ -25,18 +25,18 @@ class MCPToolDefinitions:
         Get tool definitions for code implementation
         """
         return [
-            MCPToolDefinitions._get_read_file_tool(),
-            MCPToolDefinitions._get_read_multiple_files_tool(),
-            MCPToolDefinitions._get_read_code_mem_tool(),
+            # MCPToolDefinitions._get_read_file_tool(),
+            # MCPToolDefinitions._get_read_multiple_files_tool(),
+            # MCPToolDefinitions._get_read_code_mem_tool(),
             MCPToolDefinitions._get_write_file_tool(),
-            MCPToolDefinitions._get_write_multiple_files_tool(),
-            MCPToolDefinitions._get_execute_python_tool(),
-            MCPToolDefinitions._get_execute_bash_tool(),
+            # MCPToolDefinitions._get_write_multiple_files_tool(),
+            # MCPToolDefinitions._get_execute_python_tool(),
+            # MCPToolDefinitions._get_execute_bash_tool(),
             MCPToolDefinitions._get_search_code_references_tool(),
-            MCPToolDefinitions._get_search_code_tool(),
-            MCPToolDefinitions._get_file_structure_tool(),
-            MCPToolDefinitions._get_set_workspace_tool(),
-            MCPToolDefinitions._get_operation_history_tool(),
+            # MCPToolDefinitions._get_search_code_tool(),
+            # MCPToolDefinitions._get_file_structure_tool(),
+            # MCPToolDefinitions._get_set_workspace_tool(),
+            # MCPToolDefinitions._get_operation_history_tool(),
         ]
 
     @staticmethod

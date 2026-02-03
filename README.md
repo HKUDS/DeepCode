@@ -35,8 +35,9 @@
 </p> -->
 <p>
   <a href="https://github.com/HKUDS/DeepCode/stargazers"><img src='https://img.shields.io/github/stars/HKUDS/DeepCode?color=00d9ff&style=for-the-badge&logo=star&logoColor=white&labelColor=1a1a2e' /></a>
+  <a href='https://arxiv.org/abs/2512.07921'><img src="https://img.shields.io/badge/Paper-arXiv-orange?style=for-the-badge&logo=arxiv&logoColor=white&labelColor=1a1a2e"></a>
   <img src="https://img.shields.io/badge/🐍Python-3.13-4ecdc4?style=for-the-badge&logo=python&logoColor=white&labelColor=1a1a2e">
-  <a href="https://pypi.org/project/deepcode-hku/"><img src="https://img.shields.io/pypi/v/deepcode-hku.svg?style=for-the-badge&logo=pypi&logoColor=white&labelColor=1a1a2e&color=ff6b6b"></a>
+  <!-- <a href="https://pypi.org/project/deepcode-hku/"><img src="https://img.shields.io/pypi/v/deepcode-hku.svg?style=for-the-badge&logo=pypi&logoColor=white&labelColor=1a1a2e&color=ff6b6b"></a> -->
 </p>
 <p>
   <a href="https://discord.gg/yF2MmDJyGJ"><img src="https://img.shields.io/badge/💬Discord-Community-7289da?style=for-the-badge&logo=discord&logoColor=white&labelColor=1a1a2e"></a>
@@ -542,6 +543,16 @@ curl -O https://raw.githubusercontent.com/HKUDS/DeepCode/main/mcp_agent.secrets.
 # Edit mcp_agent.secrets.yaml with your API keys and base_url:
 # - openai: api_key, base_url (for OpenAI/custom endpoints)
 # - anthropic: api_key (for Claude models)
+# - google: api_key (for Gemini models)
+# - openrouter: api_key (for unified access to multiple LLM providers)
+
+# 🤖 Select your preferred LLM provider (optional)
+# Edit mcp_agent.config.yaml to choose your LLM (line ~106):
+# - llm_provider: "google"    # Use Google Gemini models
+# - llm_provider: "anthropic" # Use Anthropic Claude models
+# - llm_provider: "openai"    # Use OpenAI/compatible models
+# - llm_provider: "openrouter"  # Use OpenRouter (single key for multiple providers)
+# Note: If not set or unavailable, will automatically fallback to first available provider
 
 # 🔑 Configure search API keys for web search (optional)
 # Edit mcp_agent.config.yaml to set your API keys:
@@ -578,6 +589,14 @@ uv pip install -r requirements.txt
 # Edit mcp_agent.secrets.yaml with your API keys and base_url:
 # - openai: api_key, base_url (for OpenAI/custom endpoints)
 # - anthropic: api_key (for Claude models)
+# - google: api_key (for Gemini models)
+
+# 🤖 Select your preferred LLM provider (optional)
+# Edit mcp_agent.config.yaml to choose your LLM (line ~106):
+# - llm_provider: "google"    # Use Google Gemini models
+# - llm_provider: "anthropic" # Use Anthropic Claude models
+# - llm_provider: "openai"    # Use OpenAI/compatible models
+# Note: If not set or unavailable, will automatically fallback to first available provider
 
 # 🔑 Configure search API keys for web search (optional)
 # Edit mcp_agent.config.yaml to set your API keys:
@@ -604,6 +623,14 @@ pip install -r requirements.txt
 # Edit mcp_agent.secrets.yaml with your API keys and base_url:
 # - openai: api_key, base_url (for OpenAI/custom endpoints)
 # - anthropic: api_key (for Claude models)
+# - google: api_key (for Gemini models)
+
+# 🤖 Select your preferred LLM provider (optional)
+# Edit mcp_agent.config.yaml to choose your LLM (line ~106):
+# - llm_provider: "google"    # Use Google Gemini models
+# - llm_provider: "anthropic" # Use Anthropic Claude models
+# - llm_provider: "openai"    # Use OpenAI/compatible models
+# Note: If not set or unavailable, will automatically fallback to first available provider
 
 # 🔑 Configure search API keys for web search (optional)
 # Edit mcp_agent.config.yaml to set your API keys:
@@ -855,14 +882,37 @@ We're continuously enhancing DeepCode with exciting new features:
 
 ---
 
+<div align="left">
+
+### 📖 **Citation**
+
+
+If you find DeepCode useful in your research or applications, please kindly cite:
+
+```
+@misc{li2025deepcodeopenagenticcoding,
+      title={DeepCode: Open Agentic Coding},
+      author={Zongwei Li and Zhonghang Li and Zirui Guo and Xubin Ren and Chao Huang},
+      year={2025},
+      eprint={2512.07921},
+      archivePrefix={arXiv},
+      primaryClass={cs.SE},
+      url={https://arxiv.org/abs/2512.07921},
+}
+```
+
+---
+
+
 ### 📄 **License**
+
+<div align="center">
 
 <img src="https://img.shields.io/badge/License-MIT-4ecdc4?style=for-the-badge&logo=opensourceinitiative&logoColor=white" alt="MIT License">
 
 **MIT License** - Copyright (c) 2025 Data Intelligence Lab, The University of Hong Kong
 
 ---
-
 
 
 <img src="https://visitor-badge.laobi.icu/badge?page_id=deepcode.readme&style=for-the-badge&color=00d4ff" alt="Visitors">

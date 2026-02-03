@@ -23,6 +23,7 @@ from workflows.agent_orchestration_engine import (
     execute_multi_agent_research_pipeline,
     execute_chat_based_planning_pipeline,
 )
+from .sidebar_feed import log_sidebar_event, ensure_sidebar_logging
 
 
 def _emergency_cleanup():
@@ -397,6 +398,11 @@ def handle_processing_workflow(
     progress_bar, status_text, step_indicators, workflow_steps = (
         enhanced_progress_display_component(enable_indexing, chat_mode)
     )
+    log_sidebar_event(
+        "SYSTEM",
+        f"Workflow started ({'guided/chat' if chat_mode else 'research'} mode)",
+        extra={"input_type": input_type, "indexing": enable_indexing},
+    )
 
     # Step mapping: map progress percentages to step indices - adjust based on mode and indexing toggle
     if chat_mode:
@@ -451,6 +457,17 @@ def handle_processing_workflow(
                 step_indicators, workflow_steps, current_step, "active"
             )
 
+        stage_index = (
+            min(current_step, len(workflow_steps) - 1) if workflow_steps else 0
+        )
+        stage_label = (
+            workflow_steps[stage_index]["title"] if workflow_steps else "STAGE"
+        )
+        log_sidebar_event(
+            stage_label,
+            message,
+            extra={"progress": progress},
+        )
         time.sleep(0.3)  # Brief pause for users to see progress changes
 
     # Step 1: Initialization
@@ -515,6 +532,16 @@ def handle_processing_workflow(
                 "🎉 Fast workflow completed! Your research paper has been processed (indexing skipped for faster processing).",
                 "success",
             )
+        log_sidebar_event(
+            "COMPLETE",
+            "All stages completed successfully.",
+            level="success",
+            extra={
+                "input_type": input_type,
+                "indexing": enable_indexing,
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
 
     else:
         # Processing failed
@@ -523,6 +550,16 @@ def handle_processing_workflow(
         display_status(
             f"❌ Processing encountered an error: {result.get('error', 'Unknown error')}",
             "error",
+        )
+        failure_stage = (
+            workflow_steps[current_step]["title"]
+            if workflow_steps and current_step < len(workflow_steps)
+            else "ERROR"
+        )
+        log_sidebar_event(
+            failure_stage,
+            f"Processing failed: {result.get('error', 'Unknown error')}",
+            level="error",
         )
 
     # Wait a moment for users to see completion status
@@ -574,17 +611,25 @@ def update_session_state_with_result(result: Dict[str, Any], input_type: str):
 
 def cleanup_temp_file(input_source: str, input_type: str):
     """
-    Cleanup temporary file
+    Cleanup temporary file using cross-platform safe method.
 
     Args:
         input_source: Input source
         input_type: Input type
     """
-    if input_type == "file" and input_source and os.path.exists(input_source):
+    if input_type == "file" and input_source:
         try:
-            os.unlink(input_source)
-        except Exception:
-            pass
+            from utils.cross_platform_file_handler import get_file_handler
+
+            file_handler = get_file_handler()
+            file_handler.safe_remove_file(input_source)
+        except Exception as e:
+            # Log but don't fail - cleanup is best effort
+            import logging
+
+            logging.getLogger(__name__).warning(
+                f"Failed to cleanup temp file {input_source}: {e}"
+            )
 
 
 async def handle_requirement_analysis_workflow(
@@ -784,9 +829,62 @@ def handle_guided_mode_processing():
                 st.error(f"Requirements modification exception: {str(e)}")
 
 
+def _background_workflow_runner(
+    input_source: str, input_type: str, enable_indexing: bool, session_id: str
+):
+    """
+    Background thread function to run the workflow WITHOUT any Streamlit UI calls
+    This runs in a separate thread to avoid blocking Streamlit's main thread
+    """
+    import logging
+
+    # Store results in a thread-safe way using a simple dict
+    if not hasattr(_background_workflow_runner, "results"):
+        _background_workflow_runner.results = {}
+
+    # Create a simple progress callback that only logs (no Streamlit UI calls)
+    def background_progress_callback(progress: int, message: str):
+        # Just log to Python logger, which will be captured by our logging handler
+        logging.info(f"Progress: {progress}% - {message}")
+
+    try:
+        # Call the core async workflow directly without UI components
+        import asyncio
+        import nest_asyncio
+
+        nest_asyncio.apply()
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(
+                process_input_async(
+                    input_source,
+                    input_type,
+                    enable_indexing,
+                    background_progress_callback,
+                )
+            )
+            _background_workflow_runner.results[session_id] = {
+                "status": "completed",
+                "result": result,
+            }
+        finally:
+            loop.close()
+            asyncio.set_event_loop(None)
+
+    except Exception as e:
+        logging.error(f"Background workflow error: {e}", exc_info=True)
+        _background_workflow_runner.results[session_id] = {
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+        }
+
+
 def handle_start_processing_button(input_source: str, input_type: str):
     """
-    Handle start processing button click
+    Handle start processing button click - synchronous execution
 
     Args:
         input_source: Input source
@@ -795,12 +893,22 @@ def handle_start_processing_button(input_source: str, input_type: str):
     from .components import display_status
 
     st.session_state.processing = True
+    st.session_state.workflow_start_time = time.time()
+    st.session_state.active_log_file = None
 
     # Get indexing toggle status
     enable_indexing = st.session_state.get("enable_indexing", True)
+    log_sidebar_event(
+        "SYSTEM",
+        "Engaging DeepCode pipeline...",
+        extra={
+            "input_type": input_type,
+            "indexing": enable_indexing,
+        },
+    )
 
     try:
-        # Process workflow
+        # Process workflow synchronously
         result = handle_processing_workflow(input_source, input_type, enable_indexing)
 
         # Display result status
@@ -829,6 +937,70 @@ def handle_start_processing_button(input_source: str, input_type: str):
         cleanup_resources()
 
         # Rerun to display results or errors
+        st.rerun()
+
+
+def check_background_workflow_status():
+    """
+    Check if background workflow has completed and handle results
+    This should be called on every Streamlit rerun
+    """
+    from .components import display_status
+
+    if not st.session_state.get("processing"):
+        return
+
+    session_id = st.session_state.get("workflow_session_id")
+    if not session_id:
+        return
+
+    # Check if background thread has finished
+    if (
+        hasattr(_background_workflow_runner, "results")
+        and session_id in _background_workflow_runner.results
+    ):
+        workflow_result = _background_workflow_runner.results[session_id]
+
+        # Clean up the result from the cache
+        del _background_workflow_runner.results[session_id]
+
+        # Process the result
+        if workflow_result["status"] == "completed":
+            result = workflow_result["result"]
+
+            # Display result status
+            if result["status"] == "success":
+                display_status("All operations completed successfully! 🎉", "success")
+            else:
+                display_status("Error during processing", "error")
+
+            # Update session state
+            update_session_state_with_result(
+                result, st.session_state.get("workflow_input_type", "")
+            )
+
+        elif workflow_result["status"] == "error":
+            st.error(f"Unexpected error during processing: {workflow_result['error']}")
+            result = {"status": "error", "error": workflow_result["error"]}
+            update_session_state_with_result(
+                result, st.session_state.get("workflow_input_type", "")
+            )
+
+        # Clean up
+        st.session_state.processing = False
+        cleanup_temp_file(
+            st.session_state.get("workflow_input_source"),
+            st.session_state.get("workflow_input_type"),
+        )
+        cleanup_resources()
+
+        # Clear workflow tracking variables
+        st.session_state.workflow_session_id = None
+        st.session_state.workflow_thread = None
+        st.session_state.workflow_input_source = None
+        st.session_state.workflow_input_type = None
+
+        # Rerun to show results
         st.rerun()
 
 
@@ -886,6 +1058,29 @@ def initialize_session_state():
         st.session_state.edit_feedback = ""
     if "requirements_editing" not in st.session_state:
         st.session_state.requirements_editing = False
+    if "guided_initial_requirement" not in st.session_state:
+        st.session_state.guided_initial_requirement = ""
+    if "guided_edit_feedback" not in st.session_state:
+        st.session_state.guided_edit_feedback = ""
+    if "confirmed_requirement_text" not in st.session_state:
+        st.session_state.confirmed_requirement_text = None
+    if "sidebar_events" not in st.session_state:
+        st.session_state.sidebar_events = []
+    ensure_sidebar_logging()
+    if "workflow_start_time" not in st.session_state:
+        st.session_state.workflow_start_time = None
+    if "active_log_file" not in st.session_state:
+        st.session_state.active_log_file = None
+    if "workflow_session_id" not in st.session_state:
+        st.session_state.workflow_session_id = None
+    if "workflow_thread" not in st.session_state:
+        st.session_state.workflow_thread = None
+    if "workflow_input_source" not in st.session_state:
+        st.session_state.workflow_input_source = None
+    if "workflow_input_type" not in st.session_state:
+        st.session_state.workflow_input_type = None
+    if "guided_payload" not in st.session_state:
+        st.session_state.guided_payload = None
 
 
 def cleanup_resources():

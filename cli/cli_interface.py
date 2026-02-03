@@ -39,7 +39,9 @@ class CLIInterface:
         self.uploaded_file = None
         self.is_running = True
         self.processing_history = []
-        self.enable_indexing = True  # Default configuration
+        self.enable_indexing = (
+            False  # Default configuration (matching UI: fast mode by default)
+        )
 
         # Load segmentation config from the same source as UI
         self._load_segmentation_config()
@@ -194,7 +196,8 @@ class CLIInterface:
 ║                                MAIN MENU                                      ║
 ╠═══════════════════════════════════════════════════════════════════════════════╣
 ║  {Colors.OKGREEN}🌐 [U] Process URL       {Colors.CYAN}│  {Colors.PURPLE}📁 [F] Upload File    {Colors.CYAN}│  {Colors.MAGENTA}💬 [T] Chat Input{Colors.CYAN}    ║
-║  {Colors.OKCYAN}⚙️  [C] Configure        {Colors.CYAN}│  {Colors.YELLOW}📊 [H] History        {Colors.CYAN}│  {Colors.FAIL}❌ [Q] Quit{Colors.CYAN}         ║
+║  {Colors.BLUE}🧠 [R] Req. Analysis    {Colors.CYAN}│  {Colors.OKCYAN}⚙️  [C] Configure        {Colors.CYAN}│  {Colors.YELLOW}📊 [H] History{Colors.CYAN}    ║
+║  {Colors.FAIL}❌ [Q] Quit{Colors.CYAN}                                                                 ║
 ║                                                                               ║
 ║  {Colors.BOLD}🤖 Current Pipeline Mode: {pipeline_mode}{Colors.CYAN}                          ║
 ║  {Colors.BOLD}🗂️  Codebase Indexing: {index_status}{Colors.CYAN}                                    ║
@@ -211,6 +214,10 @@ class CLIInterface:
 ║  {Colors.MAGENTA}💬 Chat Input:{Colors.CYAN}                                                           ║
 ║  {Colors.MAGENTA}   ▶ Describe your coding requirements in natural language                {Colors.CYAN}║
 ║  {Colors.MAGENTA}   ▶ AI generates implementation plan and code automatically             {Colors.CYAN}║
+║                                                                               ║
+║  {Colors.BLUE}🧠 Requirement Analysis (NEW):{Colors.CYAN}                                             ║
+║  {Colors.BLUE}   ▶ Get AI-guided questions to refine your requirements                   {Colors.CYAN}║
+║  {Colors.BLUE}   ▶ Generate detailed requirement documents from your answers             {Colors.CYAN}║
 ║                                                                               ║
 ║  {Colors.OKCYAN}🔄 Processing Pipeline:{Colors.CYAN}                                                    ║
 ║  {Colors.OKCYAN}   ▶ Intelligent agent orchestration → Code synthesis                     {Colors.CYAN}║
@@ -717,6 +724,206 @@ class CLIInterface:
 ╚═══════════════════════════════════════════════════════════════════════════════╝{Colors.ENDC}
 """
         print(goodbye)
+
+    def get_requirement_analysis_input(self) -> str:
+        """Enhanced requirement analysis input interface (NEW: matching UI version)"""
+        self.print_separator("─", 79, Colors.BLUE)
+        print(
+            f"{Colors.BOLD}{Colors.BLUE}🧠 Requirement Analysis Interface{Colors.ENDC}"
+        )
+        print(
+            f"{Colors.CYAN}Describe your project idea or requirements briefly.{Colors.ENDC}"
+        )
+        print(
+            f"{Colors.CYAN}Our AI will generate guiding questions to help you refine your vision.{Colors.ENDC}"
+        )
+        self.print_separator("─", 79, Colors.BLUE)
+
+        # Display examples
+        print(f"\n{Colors.BOLD}{Colors.YELLOW}💡 Examples:{Colors.ENDC}")
+        print(
+            f"{Colors.CYAN}  • 'I want to build a machine learning system for image recognition'{Colors.ENDC}"
+        )
+        print(
+            f"{Colors.CYAN}  • 'Create a web app for project management with real-time collaboration'{Colors.ENDC}"
+        )
+        print(
+            f"{Colors.CYAN}  • 'Develop a data analysis pipeline for financial forecasting'{Colors.ENDC}"
+        )
+
+        self.print_separator("─", 79, Colors.BLUE)
+
+        print(
+            f"\n{Colors.BOLD}{Colors.OKCYAN}✏️  Enter your initial requirements below:{Colors.ENDC}"
+        )
+        print(
+            f"{Colors.YELLOW}(Type your description, press Enter twice when finished, or Ctrl+C to cancel){Colors.ENDC}"
+        )
+
+        lines = []
+        empty_line_count = 0
+
+        while True:
+            try:
+                if len(lines) == 0:
+                    print(f"{Colors.BOLD}> {Colors.ENDC}", end="")
+                else:
+                    print(f"{Colors.BOLD}  {Colors.ENDC}", end="")
+
+                line = input()
+
+                if line.strip() == "":
+                    empty_line_count += 1
+                    if empty_line_count >= 2:
+                        break
+                    lines.append("")
+                else:
+                    empty_line_count = 0
+                    lines.append(line)
+
+            except KeyboardInterrupt:
+                print(f"\n{Colors.WARNING}Input cancelled by user{Colors.ENDC}")
+                return ""
+
+        user_input = "\n".join(lines).strip()
+
+        if not user_input:
+            self.print_status("No input provided", "warning")
+            return ""
+
+        if len(user_input) < 20:
+            self.print_status(
+                "Input too short. Please provide more details (at least 20 characters)",
+                "warning",
+            )
+            retry = (
+                input(f"{Colors.YELLOW}Try again? (y/n): {Colors.ENDC}").strip().lower()
+            )
+            if retry == "y":
+                return self.get_requirement_analysis_input()
+            return ""
+
+        # Display input summary
+        word_count = len(user_input.split())
+        char_count = len(user_input)
+
+        print(f"\n{Colors.BOLD}{Colors.GREEN}📋 Input Summary:{Colors.ENDC}")
+        print(f"  • {Colors.CYAN}Word count: {word_count}{Colors.ENDC}")
+        print(f"  • {Colors.CYAN}Character count: {char_count}{Colors.ENDC}")
+
+        # Show preview
+        preview = user_input[:200] + "..." if len(user_input) > 200 else user_input
+        print(f"\n{Colors.BOLD}{Colors.CYAN}📄 Preview:{Colors.ENDC}")
+        print(f"{Colors.YELLOW}{preview}{Colors.ENDC}")
+
+        # Confirm
+        confirm = (
+            input(
+                f"\n{Colors.BOLD}{Colors.OKCYAN}Proceed with this input? (y/n): {Colors.ENDC}"
+            )
+            .strip()
+            .lower()
+        )
+        if confirm != "y":
+            retry = (
+                input(f"{Colors.YELLOW}Edit input? (y/n): {Colors.ENDC}")
+                .strip()
+                .lower()
+            )
+            if retry == "y":
+                return self.get_requirement_analysis_input()
+            return ""
+
+        self.print_status(
+            f"Requirement input captured: {word_count} words, {char_count} characters",
+            "success",
+        )
+        return user_input
+
+    def display_guiding_questions(self, questions_json: str):
+        """Display AI-generated guiding questions (NEW: matching UI version)"""
+        import json
+
+        try:
+            questions = json.loads(questions_json)
+
+            self.print_separator("═", 79, Colors.GREEN)
+            print(
+                f"\n{Colors.BOLD}{Colors.GREEN}🤖 AI-Generated Guiding Questions{Colors.ENDC}"
+            )
+            print(
+                f"{Colors.CYAN}Please answer these questions to help refine your requirements:{Colors.ENDC}\n"
+            )
+            self.print_separator("─", 79, Colors.GREEN)
+
+            for i, q in enumerate(questions, 1):
+                print(
+                    f"\n{Colors.BOLD}{Colors.YELLOW}Question {i}:{Colors.ENDC} {Colors.CYAN}{q}{Colors.ENDC}"
+                )
+
+            self.print_separator("═", 79, Colors.GREEN)
+
+        except json.JSONDecodeError:
+            self.print_status("Failed to parse questions", "error")
+            print(questions_json)
+
+    def get_question_answers(self, questions_json: str) -> dict:
+        """Get user answers to guiding questions (NEW: matching UI version)"""
+        import json
+
+        try:
+            questions = json.loads(questions_json)
+            answers = {}
+
+            print(
+                f"\n{Colors.BOLD}{Colors.BLUE}📝 Answer the following questions:{Colors.ENDC}"
+            )
+            print(
+                f"{Colors.CYAN}(Type your answer and press Enter for each question){Colors.ENDC}\n"
+            )
+
+            for i, question in enumerate(questions, 1):
+                print(
+                    f"\n{Colors.BOLD}{Colors.YELLOW}Q{i}:{Colors.ENDC} {Colors.CYAN}{question}{Colors.ENDC}"
+                )
+                print(f"{Colors.BOLD}{Colors.OKCYAN}Your answer:{Colors.ENDC} ", end="")
+
+                answer = input().strip()
+                answers[f"question_{i}"] = answer
+
+                if answer:
+                    self.print_status(f"Answer {i} recorded", "success")
+                else:
+                    self.print_status(f"Answer {i} left blank", "warning")
+
+            return answers
+
+        except json.JSONDecodeError:
+            self.print_status("Failed to parse questions", "error")
+            return {}
+
+    def display_requirement_summary(self, summary: str):
+        """Display generated requirement document (NEW: matching UI version)"""
+        self.print_separator("═", 79, Colors.GREEN)
+        print(
+            f"\n{Colors.BOLD}{Colors.GREEN}📄 Generated Requirement Document{Colors.ENDC}\n"
+        )
+        self.print_separator("─", 79, Colors.GREEN)
+
+        print(f"{Colors.CYAN}{summary}{Colors.ENDC}")
+
+        self.print_separator("═", 79, Colors.GREEN)
+
+        # Ask if user wants to proceed with implementation
+        proceed = (
+            input(
+                f"\n{Colors.BOLD}{Colors.YELLOW}Would you like to proceed with code implementation based on these requirements? (y/n):{Colors.ENDC} "
+            )
+            .strip()
+            .lower()
+        )
+
+        return proceed == "y"
 
     def ask_continue(self) -> bool:
         """Ask if user wants to continue with another paper"""
