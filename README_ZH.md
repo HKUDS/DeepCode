@@ -156,6 +156,22 @@
 
 ## 📰 新闻
 
+🎨 **[2025-02] 全新 Web UI 体验升级！**
+
+- 🔄 **用户交互循环 (User-in-Loop)**: 支持工作流程中的实时用户交互，AI 会在对话中向您提问以澄清需求
+- 💬 **内联交互设计**: 交互问题直接显示在对话框中，体验更自然流畅
+- 🚀 **一键启动**: 运行 `deepcode` 即可启动新版 UI（跨平台支持：Windows/macOS/Linux）
+- 🔧 **优化的进程管理**: 改进了服务启停机制，自动清理端口占用
+- 📡 **WebSocket 实时通信**: 修复了消息丢失问题，确保交互状态正确同步
+
+<div align="center">
+  <img src="./assets/NewUI.png" alt="DeepCode 全新 UI" width="85%" style="border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15);" />
+  <br/>
+  <sub><em>DeepCode 全新 Web UI - 基于 React 的现代界面</em></sub>
+</div>
+
+---
+
 🎉 **[2025-10] 🎉 [2025-10-28] DeepCode在PaperBench上达到最先进水平！**
 
 DeepCode在OpenAI的PaperBench Code-Dev所有类别中创造新基准：
@@ -522,7 +538,39 @@ DeepCode利用**模型上下文协议 (MCP)** 标准与各种工具和服务无�
 
 ## 🚀 快速开始
 
+### 📋 **前置条件**
 
+在安装 DeepCode 之前，请确保您已安装以下软件：
+
+| 要求 | 版本 | 用途 |
+|------|------|------|
+| **Python** | 3.9+ | 核心运行环境 |
+| **Node.js** | 18+ | 新版 UI 前端 |
+| **npm** | 8+ | 包管理工具 |
+
+```bash
+# 检查您的版本
+python --version   # 应为 3.9+
+node --version     # 应为 18+
+npm --version      # 应为 8+
+```
+
+<details>
+<summary><strong>📥 安装 Node.js（如果未安装）</strong></summary>
+
+```bash
+# macOS (使用 Homebrew)
+brew install node
+
+# Ubuntu/Debian
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# Windows
+# 从 https://nodejs.org/ 下载安装
+```
+
+</details>
 
 ### 📦 **步骤1: 安装**
 
@@ -711,28 +759,64 @@ bocha-mcp:
 
 ### ⚡ **步骤2: 启动应用程序**
 
-#### 🚀 **使用已安装的包 (推荐)**
+#### 🚀 **使用 `deepcode` 命令 (推荐)**
 
 ```bash
-# 🌐 直接启动Web界面
+# 🌐 启动新版 React 界面
 deepcode
 
-# 应用程序将自动在 http://localhost:8501 启动
-```
-
-#### 🛠️ **使用源码**
-
-选择您首选的界面:
-
-##### 🌐 **Web界面** (推荐)
-```bash
-# 使用UV
-uv run streamlit run ui/streamlit_app.py
-# 或使用传统Python
-streamlit run ui/streamlit_app.py
+# 前端: http://localhost:5173
+# 后端 API: http://localhost:8000
+# 按 Ctrl+C 停止所有服务
 ```
 <div align="center">
-  <img src="https://img.shields.io/badge/访问-localhost:8501-00d4ff?style=flat-square&logo=streamlit&logoColor=white" alt="Web Access" />
+  <img src="https://img.shields.io/badge/前端-localhost:5173-00d4ff?style=flat-square&logo=react&logoColor=white" alt="Frontend" />
+  <img src="https://img.shields.io/badge/后端-localhost:8000-4ecdc4?style=flat-square&logo=fastapi&logoColor=white" alt="Backend" />
+</div>
+
+> **📦 自动安装**: 首次运行时会自动安装依赖（后端 `pip install`，前端 `npm install`）
+
+> **✨ 特性**: 用户交互循环、实时进度跟踪、内联对话交互
+
+#### 🛠️ **其他启动方式**
+
+<table>
+<tr>
+<td><strong>🍎 macOS / 🐧 Linux</strong></td>
+<td><strong>🪟 Windows</strong></td>
+</tr>
+<tr>
+<td>
+
+```bash
+# 使用 run.sh
+./run.sh
+
+# 或直接使用 Python
+python deepcode.py
+```
+
+</td>
+<td>
+
+```cmd
+# 使用 run.bat
+run.bat
+
+# 或直接使用 Python
+python deepcode.py
+```
+
+</td>
+</tr>
+</table>
+
+```bash
+# 经典 Streamlit UI (所有平台)
+deepcode --classic
+```
+<div align="center">
+  <img src="https://img.shields.io/badge/经典_UI-localhost:8501-00d4ff?style=flat-square&logo=streamlit&logoColor=white" alt="Classic UI" />
 </div>
 
 ##### 🖥️ **CLI界面** (高级用户)

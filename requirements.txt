@@ -1,16 +1,25 @@
+# Core Dependencies
 aiofiles>=0.8.0
 aiohttp>=3.8.0
 anthropic
 asyncio-mqtt
 docling
+
+# New UI Backend Dependencies
+fastapi>=0.104.0
 google-genai
 mcp-agent
 mcp-server-git
 nest_asyncio
 openai
 pathlib2
+pydantic-settings>=2.0.0
 PyPDF2>=2.0.0
+python-multipart>=0.0.6
+PyYAML>=6.0
 reportlab>=3.5.0
 streamlit
 microsandbox
 aiohttp
+uvicorn>=0.24.0
+websockets>=12.0

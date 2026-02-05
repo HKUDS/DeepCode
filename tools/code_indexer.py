@@ -80,9 +80,12 @@ class CodeIndexer:
         # Load configurations first
         self.config_path = config_path
         self.indexer_config_path = indexer_config_path
+        # Derive main config path from secrets path (same directory)
+        secrets_dir = os.path.dirname(os.path.abspath(config_path))
+        self.main_config_path = os.path.join(secrets_dir, "mcp_agent.config.yaml")
         self.api_config = self._load_api_config()
         self.indexer_config = self._load_indexer_config()
-        self.default_models = get_default_models("mcp_agent.config.yaml")
+        self.default_models = get_default_models(self.main_config_path)
 
         # Use config paths if not provided as parameters
         paths_config = self.indexer_config.get("paths", {})

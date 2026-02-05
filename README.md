@@ -35,8 +35,9 @@
 </p> -->
 <p>
   <a href="https://github.com/HKUDS/DeepCode/stargazers"><img src='https://img.shields.io/github/stars/HKUDS/DeepCode?color=00d9ff&style=for-the-badge&logo=star&logoColor=white&labelColor=1a1a2e' /></a>
+  <a href='https://arxiv.org/abs/2512.07921'><img src="https://img.shields.io/badge/Paper-arXiv-orange?style=for-the-badge&logo=arxiv&logoColor=white&labelColor=1a1a2e"></a>
   <img src="https://img.shields.io/badge/🐍Python-3.13-4ecdc4?style=for-the-badge&logo=python&logoColor=white&labelColor=1a1a2e">
-  <a href="https://pypi.org/project/deepcode-hku/"><img src="https://img.shields.io/pypi/v/deepcode-hku.svg?style=for-the-badge&logo=pypi&logoColor=white&labelColor=1a1a2e&color=ff6b6b"></a>
+  <!-- <a href="https://pypi.org/project/deepcode-hku/"><img src="https://img.shields.io/pypi/v/deepcode-hku.svg?style=for-the-badge&logo=pypi&logoColor=white&labelColor=1a1a2e&color=ff6b6b"></a> -->
 </p>
 <p>
   <a href="https://discord.gg/yF2MmDJyGJ"><img src="https://img.shields.io/badge/💬Discord-Community-7289da?style=for-the-badge&logo=discord&logoColor=white&labelColor=1a1a2e"></a>
@@ -156,6 +157,22 @@
 ---
 
 ## 📰 News
+
+🎨 **[2025-02] New Web UI Experience Upgrade!**
+
+- 🔄 **User-in-Loop Interaction**: Support real-time user interaction during workflows - AI asks clarifying questions directly in the chat
+- 💬 **Inline Interaction Design**: Interaction prompts appear naturally within the chat flow for a seamless experience
+- 🚀 **One-Click Launch**: Simply run `deepcode` to start the new UI (cross-platform: Windows/macOS/Linux)
+- 🔧 **Improved Process Management**: Enhanced service start/stop mechanism with automatic port cleanup
+- 📡 **WebSocket Real-time Communication**: Fixed message loss issues, ensuring proper interaction state synchronization
+
+<div align="center">
+  <img src="./assets/NewUI.png" alt="DeepCode New UI" width="85%" style="border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15);" />
+  <br/>
+  <sub><em>DeepCode New Web UI - Modern React-based Interface</em></sub>
+</div>
+
+---
 
 🎉 **[2025-10] 🎉 [2025-10-28] DeepCode Achieves SOTA on PaperBench!**
 
@@ -524,7 +541,39 @@ Implementation Generation • Testing • Documentation
 
 ## 🚀 Quick Start
 
+### 📋 **Prerequisites**
 
+Before installing DeepCode, ensure you have the following:
+
+| Requirement | Version | Purpose |
+|-------------|---------|---------|
+| **Python** | 3.9+ | Core runtime |
+| **Node.js** | 18+ | New UI frontend |
+| **npm** | 8+ | Package management |
+
+```bash
+# Check your versions
+python --version   # Should be 3.9+
+node --version     # Should be 18+
+npm --version      # Should be 8+
+```
+
+<details>
+<summary><strong>📥 Install Node.js (if not installed)</strong></summary>
+
+```bash
+# macOS (using Homebrew)
+brew install node
+
+# Ubuntu/Debian
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# Windows
+# Download from https://nodejs.org/
+```
+
+</details>
 
 ### 📦 **Step 1: Installation**
 
@@ -713,28 +762,64 @@ bocha-mcp:
 
 ### ⚡ **Step 2: Launch Application**
 
-#### 🚀 **Using Installed Package (Recommended)**
+#### 🚀 **Using `deepcode` Command (Recommended)**
 
 ```bash
-# 🌐 Launch web interface directly
+# 🌐 Launch the new React-based web interface
 deepcode
 
-# The application will automatically start at http://localhost:8501
-```
-
-#### 🛠️ **Using Source Code**
-
-Choose your preferred interface:
-
-##### 🌐 **Web Interface** (Recommended)
-```bash
-# Using UV
-uv run streamlit run ui/streamlit_app.py
-# Or using traditional Python
-streamlit run ui/streamlit_app.py
+# Frontend: http://localhost:5173
+# Backend API: http://localhost:8000
+# Press Ctrl+C to stop all services
 ```
 <div align="center">
-  <img src="https://img.shields.io/badge/Access-localhost:8501-00d4ff?style=flat-square&logo=streamlit&logoColor=white" alt="Web Access" />
+  <img src="https://img.shields.io/badge/Frontend-localhost:5173-00d4ff?style=flat-square&logo=react&logoColor=white" alt="Frontend" />
+  <img src="https://img.shields.io/badge/Backend-localhost:8000-4ecdc4?style=flat-square&logo=fastapi&logoColor=white" alt="Backend" />
+</div>
+
+> **📦 Auto Install**: On first run, dependencies are automatically installed (`pip install` for backend, `npm install` for frontend)
+
+> **✨ Features**: User-in-Loop interaction, real-time progress tracking, inline chat interaction
+
+#### 🛠️ **Alternative Launch Methods**
+
+<table>
+<tr>
+<td><strong>🍎 macOS / 🐧 Linux</strong></td>
+<td><strong>🪟 Windows</strong></td>
+</tr>
+<tr>
+<td>
+
+```bash
+# Using run.sh
+./run.sh
+
+# Or using Python directly
+python deepcode.py
+```
+
+</td>
+<td>
+
+```cmd
+# Using run.bat
+run.bat
+
+# Or using Python directly
+python deepcode.py
+```
+
+</td>
+</tr>
+</table>
+
+```bash
+# Classic Streamlit UI (all platforms)
+deepcode --classic
+```
+<div align="center">
+  <img src="https://img.shields.io/badge/Classic_UI-localhost:8501-00d4ff?style=flat-square&logo=streamlit&logoColor=white" alt="Classic UI" />
 </div>
 
 ##### 🖥️ **CLI Interface** (Advanced Users)
@@ -879,14 +964,37 @@ We're continuously enhancing DeepCode with exciting new features:
 
 ---
 
+<div align="left">
+
+### 📖 **Citation**
+
+
+If you find DeepCode useful in your research or applications, please kindly cite:
+
+```
+@misc{li2025deepcodeopenagenticcoding,
+      title={DeepCode: Open Agentic Coding},
+      author={Zongwei Li and Zhonghang Li and Zirui Guo and Xubin Ren and Chao Huang},
+      year={2025},
+      eprint={2512.07921},
+      archivePrefix={arXiv},
+      primaryClass={cs.SE},
+      url={https://arxiv.org/abs/2512.07921},
+}
+```
+
+---
+
+
 ### 📄 **License**
+
+<div align="center">
 
 <img src="https://img.shields.io/badge/License-MIT-4ecdc4?style=for-the-badge&logo=opensourceinitiative&logoColor=white" alt="MIT License">
 
 **MIT License** - Copyright (c) 2025 Data Intelligence Lab, The University of Hong Kong
 
 ---
-
 
 
 <img src="https://visitor-badge.laobi.icu/badge?page_id=deepcode.readme&style=for-the-badge&color=00d4ff" alt="Visitors">

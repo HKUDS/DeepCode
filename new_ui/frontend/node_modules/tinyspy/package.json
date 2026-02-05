@@ -1,0 +1,36 @@
+{
+  "name": "tinyspy",
+  "version": "2.2.1",
+  "type": "module",
+  "packageManager": "pnpm@8.4.0",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    "types": "./dist/index.d.ts",
+    "import": "./dist/index.js",
+    "require": "./dist/index.cjs",
+    "default": "./dist/index.cjs"
+  },
+  "files": [
+    "dist/**"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tinylibs/tinyspy.git"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/tinylibs/tinyspy/issues"
+  },
+  "homepage": "https://github.com/tinylibs/tinyspy#readme",
+  "keywords": [
+    "spy",
+    "mock",
+    "typescript",
+    "method"
+  ],
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

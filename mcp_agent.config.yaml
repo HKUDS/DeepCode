@@ -1,6 +1,6 @@
 $schema: ./schema/mcp-agent.config.schema.json
 anthropic: null
-default_search_server: brave
+default_search_server: filesystem
 document_segmentation:
   enabled: false
   size_threshold_chars: 50000
@@ -20,7 +20,7 @@ mcp:
     bocha-mcp:
       args:
       - tools/bocha_search_server.py
-      command: python3
+      command: python
       env:
         BOCHA_API_KEY: 'sk-8b88f2733a6546df9b5981974ac79ffb'
         PYTHONPATH: .
@@ -40,10 +40,12 @@ mcp:
         BRAVE_API_KEY: 'BSAZRVBHl1BOewYVhEelJP84VFYuyVD'
     filesystem:
       # macos and linux should use this
+      # Note: "No valid root directories" warning is harmless - connection still works
       args:
       - -y
       - '@modelcontextprotocol/server-filesystem'
       - .
+      - ./deepcode_lab
       command: npx
 
       # windows should use this
@@ -103,19 +105,30 @@ mcp:
 # LLM Provider Priority (选择使用哪个LLM / Choose which LLM to use)
 # Options: "anthropic", "google", "openai"
 # If not set or provider unavailable, will fallback to first available provider
-llm_provider: "google"  # 设置为 "google", "anthropic", 或 "openai"
+llm_provider: "openai"  # 设置为 "google", "anthropic", 或 "openai"
 
+#openrouter can be used here and openai professional key
 openai:
-  base_max_tokens: 20000
-  default_model: gemini-2.5-pro-preview-06-05-c
+  base_max_tokens: 40000
+  default_model: "google/gemini-3-flash-preview"
+  planning_model: "google/gemini-3-flash-preview"
+  implementation_model: "google/gemini-3-flash-preview"
+  reasoning_effort: low  # Only for thinking models
   max_tokens_policy: adaptive
   retry_max_tokens: 32768
 
-# Configuration for Google AI (Gemini)
+# Provider configurations
+# default_model is used by mcp_agent for planning/analysis phases
+# implementation_model is used by code_implementation_workflow for code generation
 google:
   default_model: "gemini-3-pro-preview"
+  planning_model: "gemini-3-pro-preview"
+  implementation_model: "gemini-2.5-flash"
 
 anthropic:
   default_model: "claude-sonnet-4.5"
+  planning_model: "claude-sonnet-4.5"
+  implementation_model: "claude-sonnet-3.5"
+
 
 planning_mode: traditional
