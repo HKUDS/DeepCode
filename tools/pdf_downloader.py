@@ -1098,8 +1098,25 @@ async def download_file_to(
         Status message about the download operation
     """
     # 确定文件名
+
+    url = URLExtractor.extract_urls(url)[0]
+
     if not filename:
         filename = URLExtractor.infer_filename_from_url(url)
+
+    if not filename:
+        filename = URLExtractor.infer_filename_from_url(url)
+    else:
+        name_source, extension_source = os.path.splitext(
+            os.path.basename(URLExtractor.infer_filename_from_url(url))
+        )
+        name_destination, extension_destination = os.path.splitext(
+            os.path.basename(filename)
+        )
+        if extension_source:
+            filename = name_destination + extension_source
+        else:
+            filename = name_destination + extension_destination
 
     # 确定完整路径
     if destination:
@@ -1203,6 +1220,15 @@ async def move_file_to(
     # 确定文件名
     if not filename:
         filename = os.path.basename(source)
+    else:
+        name_source, extension_source = os.path.splitext(os.path.basename(source))
+        name_destination, extension_destination = os.path.splitext(
+            os.path.basename(filename)
+        )
+        if extension_source:
+            filename = name_destination + extension_source
+        else:
+            filename = name_destination + extension_destination
 
     # 确定完整路径
     if destination:
@@ -1215,6 +1241,7 @@ async def move_file_to(
             target_path = destination
         else:  # 是目录
             target_path = os.path.join(destination, filename)
+
     else:
         target_path = filename
 

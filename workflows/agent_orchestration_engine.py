@@ -47,6 +47,7 @@ from prompts.code_prompts import (
 )
 from utils.file_processor import FileProcessor
 from workflows.code_implementation_workflow import CodeImplementationWorkflow
+from tools.pdf_downloader import move_file_to, download_file_to
 from workflows.code_implementation_workflow_index import (
     CodeImplementationWorkflowWithIndex,
 )
@@ -55,8 +56,10 @@ from utils.llm_utils import (
     should_use_document_segmentation,
     get_adaptive_agent_config,
     get_adaptive_prompts,
+    get_token_limits,
 )
 from workflows.agents.document_segmentation_agent import prepare_document_segments
+from workflows.agents.requirement_analysis_agent import RequirementAnalysisAgent
 
 # Environment configuration
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"  # Prevent .pyc file generation
@@ -144,31 +147,38 @@ def _assess_output_completeness(text: str) -> float:
     return min(score, 1.0)
 
 
-def _adjust_params_for_retry(params: RequestParams, retry_count: int) -> RequestParams:
+def _adjust_params_for_retry(
+    params: RequestParams, retry_count: int, config_path: str = "mcp_agent.config.yaml"
+) -> RequestParams:
     """
-    激进的token增长策略以确保完整输出
+    Token减少策略以适应模型context限制
 
-    策略说明：
-    - 第1次重试：大幅增加到40000 tokens（确保有足够空间输出完整YAML）
-    - 第2次重试：进一步增加到60000 tokens（处理极端情况）
+    策略说明（针对qwen/qwen-max的32768 token限制）：
+    - 第1次重试：REDUCE到retry_max_tokens（从config读取，默认15000）
+    - 第2次重试：REDUCE到retry_max_tokens的80%
+    - 第3次重试：REDUCE到retry_max_tokens的60%
     - 降低temperature提高稳定性和可预测性
 
-    为什么需要这么多tokens？
-    - ParallelLLM的fan_out agents会生成长篇分析结果（各5000+ tokens）
-    - fan_in agent接收这些结果作为输入context
-    - 需要输出包含5个详细sections的完整YAML（10000+ tokens）
-    - 因此需要为OUTPUT预留充足的token空间
+    为什么要REDUCE而不是INCREASE？
+    - qwen/qwen-max最大context = 32768 tokens (input + output 总和)
+    - 当遇到 "maximum context length exceeded" 错误时，说明 input + requested_output > 32768
+    - INCREASING max_tokens只会让问题更严重！
+    - 正确做法：DECREASE output tokens，为更多input留出空间
+    - 模型可以用更简洁的输出表达相同内容
     """
-    # 激进的token增长策略
+    # 从配置文件读取retry token limit
+    _, retry_max_tokens = get_token_limits(config_path)
+
+    # Token减少策略 - 为input腾出更多空间
     if retry_count == 0:
-        # 第一次重试：直接跳到40K，确保有足够输出空间
-        new_max_tokens = 40000
+        # 第一次重试：使用配置的retry_max_tokens
+        new_max_tokens = retry_max_tokens
     elif retry_count == 1:
-        # 第二次重试：进一步增加到60K
-        new_max_tokens = 60000
+        # 第二次重试：减少到retry_max_tokens的80%
+        new_max_tokens = int(retry_max_tokens * 0.9)
     else:
-        # 第三次及以上：使用最大限制
-        new_max_tokens = 80000
+        # 第三次及以上：减少到retry_max_tokens的60%
+        new_max_tokens = int(retry_max_tokens * 0.8)
 
     # 随着重试次数增加，降低temperature以获得更一致、更可预测的输出
     new_temperature = max(params.temperature - (retry_count * 0.15), 0.05)
@@ -176,12 +186,69 @@ def _adjust_params_for_retry(params: RequestParams, retry_count: int) -> Request
     print(f"🔧 Adjusting parameters for retry {retry_count + 1}:")
     print(f"   Token limit: {params.maxTokens} → {new_max_tokens}")
     print(f"   Temperature: {params.temperature:.2f} → {new_temperature:.2f}")
-    print("   💡 Strategy: Ensure sufficient output space for complete 5-section YAML")
-
-    return RequestParams(
-        maxTokens=new_max_tokens,  # 注意：使用 camelCase
-        temperature=new_temperature,
+    print(
+        "   💡 Strategy: REDUCE output tokens to fit within model's total context limit"
     )
+
+    # return RequestParams(
+    #     maxTokens=new_max_tokens,  # 注意：使用 camelCase
+    #     temperature=new_temperature,
+    # )
+    return new_max_tokens, new_temperature
+
+
+async def execute_requirement_analysis_workflow(
+    user_input: str,
+    analysis_mode: str,
+    user_answers: Optional[Dict[str, str]] = None,
+    logger=None,
+    progress_callback: Optional[Callable[[int, str], None]] = None,
+) -> Dict[str, Any]:
+    """
+    Lightweight orchestrator to run requirement-analysis-specific flows.
+    """
+
+    normalized_input = (user_input or "").strip()
+    if not normalized_input:
+        return {
+            "status": "error",
+            "error": "User requirement input cannot be empty.",
+        }
+
+    user_answers = user_answers or {}
+
+    try:
+        async with RequirementAnalysisAgent(logger=logger) as agent:
+            if progress_callback:
+                progress_callback(5, "🤖 Initializing requirement analysis agent...")
+
+            if analysis_mode == "generate_questions":
+                questions = await agent.generate_guiding_questions(normalized_input)
+                if progress_callback:
+                    progress_callback(100, "🧠 Guiding questions generated.")
+                return {
+                    "status": "success",
+                    "result": json.dumps(questions, ensure_ascii=False),
+                }
+
+            if analysis_mode == "summarize_requirements":
+                summary = await agent.summarize_detailed_requirements(
+                    normalized_input, user_answers
+                )
+                if progress_callback:
+                    progress_callback(100, "📄 Requirement document created.")
+                return {"status": "success", "result": summary}
+
+            raise ValueError(f"Unsupported analysis_mode: {analysis_mode}")
+
+    except Exception as exc:
+        message = str(exc)
+        if logger:
+            try:
+                logger.error("Requirement analysis workflow failed: %s", message)
+            except Exception:
+                pass
+        return {"status": "error", "error": message}
 
 
 def get_default_search_server(config_path: str = "mcp_agent.config.yaml"):
@@ -417,91 +484,166 @@ async def run_research_analyzer(prompt_text: str, logger) -> str:
 
 async def run_resource_processor(analysis_result: str, logger) -> str:
     """
-    Run the resource processing workflow using ResourceProcessorAgent.
+    Run the resource processing workflow - deterministic file operations without LLM.
+
+    This function handles file downloading/moving using direct logic rather than LLM,
+    since the paper directory structure and ID are pre-computed and deterministic.
 
     Args:
-        analysis_result: Result from the research analyzer
+        analysis_result: Result from the research analyzer (contains file path/URL)
         logger: Logger instance for logging information
 
     Returns:
-        str: Processing result from the agent
+        str: Processing result with paper directory path
     """
-    processor_agent = Agent(
-        name="ResourceProcessorAgent",
-        instruction=PAPER_DOWNLOADER_PROMPT,
-        server_names=["filesystem", "file-downloader"],
-    )
+    # Pre-compute paper ID - deterministic, no LLM needed
+    papers_dir = "./deepcode_lab/papers"
+    os.makedirs(papers_dir, exist_ok=True)
+    existing_ids = [
+        int(d)
+        for d in os.listdir(papers_dir)
+        if os.path.isdir(os.path.join(papers_dir, d)) and d.isdigit()
+    ]
+    next_id = max(existing_ids) + 1 if existing_ids else 1
+    paper_dir = os.path.join(papers_dir, str(next_id))
+    os.makedirs(paper_dir, exist_ok=True)
 
-    async with processor_agent:
-        print("processor: Connected to server, calling list_tools...")
-        tools = await processor_agent.list_tools()
-        print(
-            "Tools available:",
-            tools.model_dump() if hasattr(tools, "model_dump") else str(tools),
-        )
+    logger.info(f"📋 Paper ID: {next_id}")
+    logger.info(f"📂 Paper directory: {paper_dir}")
 
-        processor = await processor_agent.attach_llm(get_preferred_llm_class())
+    # Extract file path/URL from analysis_result - simple parsing, no LLM needed
+    # The analysis_result should contain the path/URL identified by the analyzer
+    try:
+        # Parse the analysis result to extract path
+        analysis_data = json.loads(analysis_result)
+        source_path = analysis_data.get("path") or analysis_data.get("input_path")
+        input_type = analysis_data.get("input_type", "unknown")
 
-        # Set higher token output for resource processing
-        processor_params = RequestParams(
-            maxTokens=4096,
-            temperature=0.2,
-        )
+        logger.info(f"📥 Processing {input_type}: {source_path}")
 
-        try:
-            raw_result = await processor.generate_str(
-                message=analysis_result,
-                request_params=processor_params,
+        # Try direct function calls first - no LLM needed for deterministic operations
+        direct_call_success = False
+        operation_result = None
+
+        # 1. Handle local file - direct copy
+        if input_type == "file" and source_path and os.path.exists(source_path):
+            logger.info(f"📄 Direct file copy: {source_path} -> {paper_dir}")
+            try:
+                operation_result = await move_file_to(
+                    source=source_path, destination=paper_dir, filename=f"{next_id}.pdf"
+                )
+                # Check if operation succeeded
+                if (
+                    "[SUCCESS]" in operation_result
+                    and "[ERROR]" not in operation_result
+                ):
+                    direct_call_success = True
+                    logger.info(f"✅ Direct file copy succeeded:\n{operation_result}")
+                else:
+                    logger.warning(f"⚠️ Direct file copy had issues: {operation_result}")
+            except Exception as e:
+                logger.warning(f"⚠️ Direct file copy failed: {e}")
+
+        # 2. Handle URL - direct download
+        elif input_type == "url" and source_path:
+            logger.info(f"🌐 Direct URL download: {source_path} -> {paper_dir}")
+            try:
+                operation_result = await download_file_to(
+                    url=source_path,
+                    destination=paper_dir,
+                    filename=f"{next_id}.pdf",  # Default to PDF, conversion will handle it
+                )
+                # Check if operation succeeded
+                if (
+                    "[SUCCESS]" in operation_result
+                    and "[ERROR]" not in operation_result
+                ):
+                    direct_call_success = True
+                    logger.info(f"✅ Direct download succeeded:\n{operation_result}")
+                else:
+                    logger.warning(f"⚠️ Direct download had issues: {operation_result}")
+            except Exception as e:
+                logger.warning(f"⚠️ Direct download failed: {e}")
+
+        # 3. If direct call succeeded, format result
+        if direct_call_success:
+            dest_path = os.path.join(paper_dir, f"{next_id}.md")
+            result = json.dumps(
+                {
+                    "status": "success",
+                    "paper_id": next_id,
+                    "paper_dir": paper_dir,
+                    "file_path": dest_path,
+                    "message": f"File successfully processed to {paper_dir}",
+                    "operation_details": operation_result,
+                }
             )
-            print("✅ Resource processor response received")
-            print(f"Raw processor result type: {type(raw_result)}")
-            print(
-                f"Raw processor result length: "
-                f"{len(raw_result) if raw_result else 0}"
+        else:
+            # 4. Fallback to LLM agent if direct call failed or unsupported type
+            logger.info(
+                f"🤖 Falling back to LLM agent for: {input_type} - {source_path}"
             )
-        except Exception as e:
-            print(f"❌ Resource processor failed: {e}")
-            raise
+            processor_agent = Agent(
+                name="ResourceProcessorAgent",
+                instruction=PAPER_DOWNLOADER_PROMPT,
+                server_names=["file-downloader"],
+            )
 
-        try:
-            clean_result = extract_clean_json(raw_result)
-            print(f"Cleaned processor result: {clean_result}")
-
-            if hasattr(logger, "log_response"):
-                logger.log_response(
-                    clean_result,
-                    model="ResourceProcessor",
-                    agent="ResourceProcessorAgent",
+            async with processor_agent:
+                processor = await processor_agent.attach_llm(get_preferred_llm_class())
+                processor_params = RequestParams(
+                    maxTokens=4096,
+                    temperature=0.2,
+                    tool_filter={
+                        "file-downloader": {"download_file_to", "move_file_to"}
+                    },
                 )
 
-            if not clean_result or clean_result.strip() == "":
-                raise ValueError("Resource processor returned empty output")
+                # Provide context about what failed if available
+                context = (
+                    f"\nPrevious attempt result: {operation_result}"
+                    if operation_result
+                    else ""
+                )
+                message = f"""Download/move the file to paper directory: {paper_dir}
+Source: {source_path}
+Input Type: {input_type}
+Paper ID: {next_id}
+Target filename: {next_id}.md (after conversion){context}
 
-            json.loads(clean_result)
-            print("✅ Resource processor output validated as JSON")
-            return clean_result
+Use the appropriate tool to complete this task."""
 
-        except json.JSONDecodeError as e:
-            print("❌ Resource processor output is not valid JSON")
-            print(f"Original output: {raw_result}")
-            raise ValueError(
-                "ResourceProcessorAgent returned non-JSON output. "
-                "Ensure the agent replies with the exact JSON schema defined "
-                "in PAPER_DOWNLOADER_PROMPT."
-            ) from e
-        except Exception as e:
-            print(f"❌ Failed to process resource processor output: {e}")
-            print(f"Original output: {raw_result}")
-            raise
+                result = await processor.generate_str(
+                    message=message, request_params=processor_params
+                )
+
+        return result
+
+    except (json.JSONDecodeError, KeyError, Exception) as e:
+        logger.error(f"❌ Error processing resource: {e}")
+        # Fallback - return paper directory for manual processing
+        return json.dumps(
+            {
+                "status": "partial",
+                "paper_id": next_id,
+                "paper_dir": paper_dir,
+                "message": f"Paper directory created at {paper_dir}, manual file placement may be needed",
+            }
+        )
 
 
 async def run_code_analyzer(
     paper_dir: str, logger, use_segmentation: bool = True
 ) -> str:
     """
-    Run the adaptive code analysis workflow using multiple agents for comprehensive code planning.
+    Run the adaptive code analysis workflow with optimized file reading.
 
-    This function orchestrates three specialized agents with adaptive configuration:
+    This function minimizes LLM tool calls by:
+    1. Reading paper file directly (deterministic, no LLM needed)
+    2. Passing paper content directly to agents
+    3. LLM only used for analysis and search decisions
+
+    Orchestrates three specialized agents:
     - ConceptAnalysisAgent: Analyzes system architecture and conceptual framework
     - AlgorithmAnalysisAgent: Extracts algorithms, formulas, and technical details
     - CodePlannerAgent: Integrates outputs into a comprehensive implementation plan
@@ -514,14 +656,53 @@ async def run_code_analyzer(
     Returns:
         str: Comprehensive analysis result from the coordinated agents
     """
-    # Get adaptive configuration based on segmentation usage
+    print(
+        f"📊 Code analysis mode: {'Segmented' if use_segmentation else 'Traditional'}"
+    )
+    print("   🔧 Optimized workflow: Direct file reading, LLM only for analysis")
+
+    # STEP 1: Read paper file directly - no LLM needed for deterministic file operations
+    paper_content = None
+    paper_file_path = None
+
+    try:
+        # Find .md file in paper directory - simple file system operation
+        for filename in os.listdir(paper_dir):
+            if filename.endswith(".md"):
+                paper_file_path = os.path.join(paper_dir, filename)
+                with open(paper_file_path, "r", encoding="utf-8") as f:
+                    paper_content = f.read()
+                logger.info(
+                    f"📄 Paper file loaded: {paper_file_path} ({len(paper_content)} chars)"
+                )
+                break
+
+        if not paper_content:
+            logger.warning(
+                f"⚠️ No .md file found in {paper_dir}, agents will search for it"
+            )
+    except Exception as e:
+        logger.warning(f"⚠️ Error reading paper file: {e}, agents will search for it")
+
+    # STEP 2: Configure agents with minimal tool access
     search_server_names = get_search_server_names()
     agent_config = get_adaptive_agent_config(use_segmentation, search_server_names)
     prompts = get_adaptive_prompts(use_segmentation)
 
-    print(
-        f"📊 Code analysis mode: {'Segmented' if use_segmentation else 'Traditional'}"
-    )
+    if paper_content:
+        # When paper content is already loaded, agents don't need search tools
+        agent_config = {
+            "concept_analysis": [],
+            "algorithm_analysis": search_server_names,
+            "code_planner": search_server_names,
+        }
+    else:
+        agent_config = {
+            "concept_analysis": ["filesystem"],
+            "algorithm_analysis": search_server_names + ["filesystem"],
+            "code_planner": search_server_names + ["filesystem"],
+        }
+
     print(f"   Agent configurations: {agent_config}")
 
     concept_analysis_agent = Agent(
@@ -546,27 +727,75 @@ async def run_code_analyzer(
         llm_factory=get_preferred_llm_class(),
     )
 
-    # Advanced token management system with dynamic scaling
-    # 关键优化：ParallelLLM需要为输出预留充足空间
-    # fan_in agent会接收fan_out agents的完整输出作为context，然后需要生成完整YAML
+    base_max_tokens, _ = get_token_limits()
+
+    # STEP 3: Configure parameters - minimal tool filter since paper content is provided
     if use_segmentation:
-        # 分段模式：输入已优化，但仍需大量输出空间
-        max_tokens_limit = 30000  # 充足的输出空间确保5个sections完整生成
-        temperature = 0.2  # 稍微降低temperature以提高一致性
-        print("🧠 Using SEGMENTED mode: max_tokens=30000 for complete YAML output")
+        max_tokens_limit = base_max_tokens
+        temperature = 0.2
+        max_iterations = 5
+        print(
+            f"🧠 Using SEGMENTED mode: max_tokens={base_max_tokens} for complete YAML output"
+        )
+
+        # Segmentation mode: Only use segmentation tools if needed (paper content already provided)
+        tool_filter = {
+            "document-segmentation": {"read_document_segments", "get_document_overview"}
+            if not paper_content
+            else set(),  # Empty if paper already loaded
+            # "brave" not in filter = all brave tools available for searching
+        }
     else:
-        # 传统模式：需要更多输出空间应对长篇分析结果
-        max_tokens_limit = 30000  # 足够的空间确保完整输出
+        max_tokens_limit = base_max_tokens
         temperature = 0.3
-        print("🧠 Using TRADITIONAL mode: max_tokens=30000 for complete YAML output")
+        max_iterations = 2
+        print(
+            f"🧠 Using TRADITIONAL mode: max_tokens={base_max_tokens} for complete YAML output"
+        )
+
+        # Traditional mode: No filesystem tools needed (paper content already provided)
+        if paper_content:
+            tool_filter = {
+                # Only brave search available - no filesystem tools needed
+            }
+        else:
+            tool_filter = {
+                "filesystem": {
+                    "read_text_file",
+                    "list_directory",
+                }
+            }
 
     enhanced_params = RequestParams(
-        maxTokens=max_tokens_limit,  # 注意：使用 camelCase 而不是 snake_case
+        maxTokens=max_tokens_limit,
         temperature=temperature,
+        max_iterations=max_iterations,
+        tool_filter=tool_filter
+        if tool_filter
+        else None,  # None = all tools, empty dict = no filtering
     )
 
-    # Concise message for multi-agent paper analysis and code planning
-    message = f"""Analyze the research paper in directory: {paper_dir}
+    # STEP 4: Construct message with paper content directly included
+    if paper_content:
+        # Paper content provided directly - LLM only needs to analyze, not read files
+        message = f"""Analyze the research paper provided below. The paper file has been pre-loaded for you.
+
+=== PAPER CONTENT START ===
+{paper_content}
+=== PAPER CONTENT END ===
+
+Based on this paper, generate a comprehensive code reproduction plan that includes:
+
+1. Complete system architecture and component breakdown
+2. All algorithms, formulas, and implementation details
+3. Detailed file structure and implementation roadmap
+
+You may use web search (brave_web_search) if you need clarification on algorithms, methods, or concepts.
+
+The goal is to create a reproduction plan detailed enough for independent implementation."""
+    else:
+        # Fallback: paper not found, agents will need to find it
+        message = f"""Analyze the research paper in directory: {paper_dir}
 
 Please locate and analyze the markdown (.md) file containing the research paper. Based on your analysis, generate a comprehensive code reproduction plan that includes:
 
@@ -576,7 +805,6 @@ Please locate and analyze the markdown (.md) file containing the research paper.
 
 The goal is to create a reproduction plan detailed enough for independent implementation."""
 
-    # 智能输出完整性检查和重试机制
     max_retries = 3
     retry_count = 0
 
@@ -589,11 +817,14 @@ The goal is to create a reproduction plan detailed enough for independent implem
                 message=message, request_params=enhanced_params
             )
 
-            # 检查输出完整性的高级指标
-            completeness_score = _assess_output_completeness(result)
+            print(f"🔍 Code analysis result:\n{result}")
+
+            completeness_score = _assess_output_completeness(
+                result
+            )  # need to add file structure val
             print(f"📊 Output completeness score: {completeness_score:.2f}/1.0")
 
-            if completeness_score >= 0.8:  # 输出被认为是完整的
+            if completeness_score >= 0.8:
                 print(
                     f"✅ Code analysis completed successfully (length: {len(result)} chars)"
                 )
@@ -602,8 +833,17 @@ The goal is to create a reproduction plan detailed enough for independent implem
                 print(
                     f"⚠️ Output appears truncated (score: {completeness_score:.2f}), retrying with enhanced parameters..."
                 )
-                # 动态调整参数进行重试
-                enhanced_params = _adjust_params_for_retry(enhanced_params, retry_count)
+                new_max_tokens, new_temperature = _adjust_params_for_retry(
+                    enhanced_params, retry_count
+                )
+                enhanced_params = RequestParams(
+                    maxTokens=new_max_tokens,
+                    temperature=new_temperature,
+                    max_iterations=max_iterations,
+                    tool_filter=tool_filter
+                    if tool_filter
+                    else None,  # None = all tools, empty dict = no filtering
+                )
                 retry_count += 1
 
         except Exception as e:
@@ -612,7 +852,6 @@ The goal is to create a reproduction plan detailed enough for independent implem
             if retry_count >= max_retries:
                 raise
 
-    # 如果所有重试都失败，返回最后一次的结果
     print(f"⚠️ Returning potentially incomplete result after {max_retries} attempts")
     return result
 
@@ -672,20 +911,25 @@ async def paper_reference_analyzer(paper_dir: str, logger) -> str:
 
 Please locate and analyze the markdown (.md) file containing the research paper. **Focus specifically on the References/Bibliography section** to identify and analyze the 5 most relevant references that have GitHub repositories.
 
-Focus on:
-1. **References section analysis** - Extract all citations from the References/Bibliography part
-2. References with high-quality GitHub implementations
-3. Papers cited for methodology, algorithms, or core techniques
-4. Related work that shares similar technical approaches
-5. Implementation references that could provide code patterns
-
 Goal: Find the most valuable GitHub repositories from the paper's reference list for code implementation reference."""
 
     async with reference_analysis_agent:
         print("Reference analyzer: Connected to server, analyzing references...")
         analyzer = await reference_analysis_agent.attach_llm(get_preferred_llm_class())
 
-        reference_result = await analyzer.generate_str(message=message)
+        # Filter tools to only essential ones for reference analysis
+        reference_params = RequestParams(
+            maxTokens=4096,
+            temperature=0.2,
+            tool_filter={
+                "filesystem": {"read_text_file", "list_directory"},
+                "fetch": {"fetch"},
+            },
+        )
+
+        reference_result = await analyzer.generate_str(
+            message=message, request_params=reference_params
+        )
         return reference_result
 
 
@@ -741,6 +985,7 @@ async def orchestrate_research_analysis_agent(
             25, "📥 Processing downloads and preparing document structure..."
         )
     download_result = await run_resource_processor(analysis_result, logger)
+    print("download result:", download_result)
 
     return analysis_result, download_result
 
@@ -1470,7 +1715,7 @@ async def execute_multi_agent_research_pipeline(
         dir_info = await synthesize_workspace_infrastructure_agent(
             download_result, logger, workspace_dir
         )
-        await asyncio.sleep(30)
+        await asyncio.sleep(5)
 
         # Phase 3.5: Document Segmentation and Preprocessing
 

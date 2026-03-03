@@ -5,13 +5,14 @@ CLI工作流适配器 - 智能体编排引擎
 This adapter provides CLI-optimized interface to the latest agent orchestration engine,
 with enhanced progress reporting, error handling, and CLI-specific optimizations.
 
-Version: 2.0 (Updated to match UI version)
+Version: 2.1 (Updated to match UI version - Added Requirement Analysis)
 Changes:
 - Default enable_indexing=False for faster processing (matching UI defaults)
 - Mode-aware progress callback with detailed stage mapping
 - Chat pipeline now accepts enable_indexing parameter
 - Improved error handling and resource management
 - Enhanced progress display for different modes (fast/comprehensive/chat)
+- NEW: Added requirement analysis workflow support
 """
 
 import os
@@ -228,6 +229,83 @@ class CLIWorkflowAdapter:
                 "error": error_msg,
                 "pipeline_mode": "comprehensive" if enable_indexing else "optimized",
             }
+
+    async def execute_requirement_analysis_workflow(
+        self, user_input: str, analysis_mode: str, user_answers: Dict[str, str] = None
+    ) -> Dict[str, Any]:
+        """
+        Execute requirement analysis workflow (NEW: matching UI version).
+
+        This workflow helps users refine their requirements through guided questions
+        and intelligent analysis before starting code implementation.
+
+        Args:
+            user_input: User's initial requirements or description
+            analysis_mode: Analysis mode ("generate_questions" or "summarize_requirements")
+            user_answers: Dictionary of user answers to guiding questions (for summarize mode)
+
+        Returns:
+            dict: Analysis result with questions or requirement summary
+        """
+        try:
+            # Import the requirement analysis workflow
+            from workflows.agent_orchestration_engine import (
+                execute_requirement_analysis_workflow,
+            )
+
+            # Create CLI progress callback
+            def analysis_progress_callback(progress: int, message: str):
+                if self.cli_interface:
+                    self.cli_interface.print_status(message, "processing")
+
+            # Display workflow start
+            if self.cli_interface:
+                if analysis_mode == "generate_questions":
+                    self.cli_interface.print_status(
+                        "🤖 Generating guiding questions for your requirements...",
+                        "processing",
+                    )
+                else:
+                    self.cli_interface.print_status(
+                        "📄 Analyzing and summarizing your detailed requirements...",
+                        "processing",
+                    )
+
+            # Execute the requirement analysis workflow
+            result = await execute_requirement_analysis_workflow(
+                user_input=user_input,
+                analysis_mode=analysis_mode,
+                user_answers=user_answers,
+                logger=self.logger,
+                progress_callback=analysis_progress_callback,
+            )
+
+            # Display completion
+            if self.cli_interface:
+                if result["status"] == "success":
+                    if analysis_mode == "generate_questions":
+                        self.cli_interface.print_status(
+                            "✅ Guiding questions generated successfully!", "success"
+                        )
+                    else:
+                        self.cli_interface.print_status(
+                            "✅ Requirements analysis completed successfully!",
+                            "success",
+                        )
+                else:
+                    self.cli_interface.print_status(
+                        f"❌ Analysis failed: {result.get('error', 'Unknown error')}",
+                        "error",
+                    )
+
+            return result
+
+        except Exception as e:
+            error_msg = f"Requirement analysis workflow failed: {str(e)}"
+            if self.cli_interface:
+                self.cli_interface.print_status(error_msg, "error")
+
+            return {"status": "error", "error": error_msg}
 
     async def execute_chat_pipeline(
         self, user_input: str, enable_indexing: bool = False

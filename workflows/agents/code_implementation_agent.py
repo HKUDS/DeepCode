@@ -889,7 +889,6 @@ class CodeImplementationAgent:
     def get_analysis_loop_guidance(self) -> str:
         """
         Get guidance to break out of analysis loop
-        获取跳出分析循环的指导
 
         Returns:
             Guidance message to encourage implementation
