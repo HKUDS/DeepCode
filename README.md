@@ -159,7 +159,7 @@
 
 ## 📰 News
 
-🎉 **[2025-02] nanobot ✖️ DeepCode. Just chat naturally with openclaw/nanobot to handle your coding tasks:**
+🎉 **[2026-02] nanobot ✖️ DeepCode. Just chat naturally with openclaw/nanobot to handle your coding tasks:**
 
 <div align="center">
 <table><tr>
@@ -187,7 +187,7 @@
 
 ---
 
-🎉 **[2025-02] New Web UI Experience Upgrade!**
+🎉 **[2026-02] New Web UI Experience Upgrade!**
 
 - 🔄 **User-in-Loop Interaction**: Support real-time user interaction during workflows - AI asks clarifying questions directly in the chat
 - 💬 **Inline Interaction Design**: Interaction prompts appear naturally within the chat flow for a seamless experience
