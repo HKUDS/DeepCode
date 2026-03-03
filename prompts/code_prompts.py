@@ -67,6 +67,13 @@ CRITICAL RULES:
 - Use the EXACT paper ID provided in the message (PAPER_ID=X).
 - Save path MUST be: ./deepcode_lab/papers/{PAPER_ID}/{PAPER_ID}.md
 
+CRITICAL OUTPUT RESTRICTIONS:
+- RETURN ONLY THE RAW JSON OBJECT DESCRIBED BELOW
+- NO markdown code fences (```json)
+- NO explanatory or conversational text before or after the JSON
+- NO tool call commentary or step-by-step narration in the final reply
+- IF YOU NEED TO EXPLAIN YOUR ACTIONS, DO SO THROUGH TOOL CALLS ONLY. THE FINAL ASSISTANT MESSAGE MUST BE JSON.
+
 Processing Rules:
 1. URL Input (input_type = "url"):
    - Use download_file_to tool with: url=<url>, destination="./deepcode_lab/papers/{PAPER_ID}/", filename="{PAPER_ID}.md"
