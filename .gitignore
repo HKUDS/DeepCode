@@ -26,6 +26,10 @@ site/
 *.logfire
 *.coverage/
 log/
+logs/
+
+# Node
+node_modules/
 
 # Caches
 .cache/
@@ -64,3 +68,10 @@ run_indexer_with_filtering.py
 
 # Cline files
 memory-bank/
+
+# project files
+deepcode_lab/
+
+# secrets (use .env or environment variables instead)
+mcp_agent.secrets.yaml
+nanobot_config.json

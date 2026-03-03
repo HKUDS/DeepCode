@@ -46,6 +46,7 @@ class ConciseMemoryAgent:
         logger: Optional[logging.Logger] = None,
         target_directory: Optional[str] = None,
         default_models: Optional[Dict[str, str]] = None,
+        code_directory: Optional[str] = None,
     ):
         """
         Initialize Concise Memory Agent
@@ -55,14 +56,16 @@ class ConciseMemoryAgent:
             logger: Logger instance
             target_directory: Target directory for saving summaries
             default_models: Default models configuration from workflow
+            code_directory: Generated code directory path (e.g., target_directory/generate_code)
         """
         self.logger = logger or self._create_default_logger()
         self.initial_plan = initial_plan_content
 
         # Store default models configuration
         self.default_models = default_models or {
-            "anthropic": "anthropic/claude-sonnet-4.5",
-            "openai": "anthropic/claude-sonnet-4.5",
+            "anthropic": "claude-sonnet-4-20250514",
+            "openai": "o3-mini",
+            "google": "gemini-2.0-flash",
         }
 
         # Memory state tracking - new logic: trigger after each write_file
@@ -75,14 +78,19 @@ class ConciseMemoryAgent:
         # Parse phase structure from initial plan
         self.phase_structure = self._parse_phase_structure()
 
-        # Extract all files from file structure in initial plan
-        self.all_files_list = self._extract_all_files_from_plan()
-
         # Memory configuration
         if target_directory:
             self.save_path = target_directory
         else:
             self.save_path = "./deepcode_lab/papers/1/"
+
+        # Store code directory for file extraction
+        self.code_directory = code_directory or os.path.join(
+            self.save_path, "generate_code"
+        )
+
+        # Extract all files - prioritize generated directory over plan parsing
+        self.all_files_list = self._extract_all_files()
 
         # Code summary file path
         self.code_summary_path = os.path.join(
@@ -101,6 +109,7 @@ class ConciseMemoryAgent:
         self.logger.info(
             f"Concise Memory Agent initialized with target directory: {self.save_path}"
         )
+        self.logger.info(f"Code directory: {self.code_directory}")
         self.logger.info(f"Code summary will be saved to: {self.code_summary_path}")
         # self.logger.info(f"🤖 Using models - Anthropic: {self.default_models['anthropic']}, OpenAI: {self.default_models['openai']}")
         self.logger.info(
@@ -145,6 +154,151 @@ class ConciseMemoryAgent:
         except Exception as e:
             self.logger.warning(f"Failed to parse phase structure: {e}")
             return {}
+
+    def _extract_all_files(self) -> List[str]:
+        """
+        Extract all code files - prioritizes generated directory over plan parsing
+
+        Strategy:
+        1. First try to extract from the generated code directory (reliable)
+        2. Fall back to plan parsing if directory doesn't exist yet
+
+        Returns:
+            List of all file paths that should be implemented
+        """
+        # Try extracting from generated directory first (more reliable)
+        if os.path.exists(self.code_directory):
+            files_from_dir = self._extract_files_from_generated_directory()
+            if files_from_dir:
+                self.logger.info(
+                    f"📁 Extracted {len(files_from_dir)} files from generated directory"
+                )
+                return files_from_dir
+
+        # Fall back to plan parsing
+        self.logger.info(
+            "📁 Generated directory not found, extracting from plan (less reliable)"
+        )
+        return self._extract_all_files_from_plan()
+
+    def _extract_files_from_generated_directory(self) -> List[str]:
+        """
+        Extract all code files from the generated code directory
+        This is more reliable than parsing the LLM-generated plan
+
+        Returns:
+            List of relative file paths within the code directory
+        """
+        code_files = []
+
+        # Define code file extensions to track
+        code_extensions = {
+            ".py",
+            ".js",
+            ".ts",
+            ".jsx",
+            ".tsx",
+            ".vue",
+            ".html",
+            ".css",
+            ".scss",
+            ".sass",
+            ".less",
+            ".json",
+            ".yaml",
+            ".yml",
+            ".toml",
+            ".xml",
+            ".ini",
+            ".cfg",
+            ".md",
+            ".rst",
+            ".txt",
+            ".sh",
+            ".bash",
+            ".zsh",
+            ".bat",
+            ".ps1",
+            ".cmd",
+            ".c",
+            ".cpp",
+            ".h",
+            ".hpp",
+            ".cc",
+            ".cxx",
+            ".java",
+            ".kt",
+            ".scala",
+            ".go",
+            ".rs",
+            ".php",
+            ".rb",
+            ".pl",
+            ".lua",
+            ".r",
+            ".sql",
+        }
+
+        # Files and directories to exclude
+        exclude_patterns = {
+            "__pycache__",
+            ".pyc",
+            "node_modules",
+            ".git",
+            ".vscode",
+            ".idea",
+            "dist",
+            "build",
+            "output",
+            ".egg-info",
+            "venv",
+            ".venv",
+            "env",
+            ".env",
+        }
+
+        try:
+            for root, dirs, files in os.walk(self.code_directory):
+                # Filter out excluded directories
+                dirs[:] = [
+                    d
+                    for d in dirs
+                    if d not in exclude_patterns and not d.startswith(".")
+                ]
+
+                for file in files:
+                    # Skip hidden files and excluded patterns
+                    if file.startswith("."):
+                        continue
+
+                    # Check if file has a code extension
+                    has_code_ext = any(
+                        file.lower().endswith(ext) for ext in code_extensions
+                    )
+                    if not has_code_ext:
+                        continue
+
+                    # Get full path and convert to relative path
+                    full_path = os.path.join(root, file)
+                    relative_path = os.path.relpath(full_path, self.code_directory)
+
+                    # Normalize path separators
+                    relative_path = relative_path.replace(os.sep, "/")
+
+                    code_files.append(relative_path)
+
+            # Sort for consistency
+            code_files = sorted(code_files)
+
+            if code_files:
+                self.logger.info(f"📄 Found {len(code_files)} code files in directory")
+                self.logger.info(f"📄 Sample files: {code_files[:3]}...")
+
+            return code_files
+
+        except Exception as e:
+            self.logger.error(f"Failed to extract files from directory: {e}")
+            return []
 
     def _extract_all_files_from_plan(self) -> List[str]:
         """
@@ -1225,9 +1379,12 @@ class ConciseMemoryAgent:
             )
 
             content = ""
-            for block in response.content:
-                if block.type == "text":
-                    content += block.text
+            if response and hasattr(response, "content") and response.content:
+                for block in response.content:
+                    if block.type == "text":
+                        content += block.text
+            else:
+                self.logger.warning("Anthropic response is empty or malformed")
 
             return {"content": content}
 
@@ -1259,7 +1416,60 @@ class ConciseMemoryAgent:
                 else:
                     raise
 
-            return {"content": response.choices[0].message.content or ""}
+            # Safely extract content from response
+            if response and hasattr(response, "choices") and response.choices:
+                return {"content": response.choices[0].message.content or ""}
+            else:
+                self.logger.warning("OpenAI response is empty or malformed")
+                return {"content": ""}
+
+        elif client_type == "google":
+            from google.genai import types
+
+            # Convert messages to Gemini format
+            system_instruction = "You are an expert code implementation summarizer. Create structured summaries of implemented code files that preserve essential information about functions, dependencies, and implementation approaches."
+
+            gemini_messages = []
+            for msg in summary_messages:
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+
+                # Convert role names: "assistant" -> "model"
+                if role == "assistant":
+                    role = "model"
+                elif role not in ["user", "model"]:
+                    role = "user"
+
+                gemini_messages.append(
+                    types.Content(role=role, parts=[types.Part.from_text(text=content)])
+                )
+
+            config = types.GenerateContentConfig(
+                max_output_tokens=5000,
+                temperature=0.2,
+                system_instruction=system_instruction,
+            )
+
+            response = await client.aio.models.generate_content(
+                model=self.default_models.get("google", "gemini-2.0-flash"),
+                contents=gemini_messages,
+                config=config,
+            )
+
+            # Extract content from Gemini response
+            content = ""
+            if response and hasattr(response, "candidates") and response.candidates:
+                candidate = response.candidates[0]
+                if hasattr(candidate, "content") and candidate.content:
+                    if hasattr(candidate.content, "parts") and candidate.content.parts:
+                        for part in candidate.content.parts:
+                            if hasattr(part, "text") and part.text:
+                                content += part.text
+
+            if not content:
+                self.logger.warning("Google response is empty or malformed")
+
+            return {"content": content}
 
         else:
             raise ValueError(f"Unsupported client type: {client_type}")
@@ -1402,10 +1612,10 @@ class ConciseMemoryAgent:
         }
 
         # Append Next Steps information if available
-        if self.current_next_steps.strip():
-            initial_plan_message["content"] += (
-                f"\n\n**Next Steps (from previous analysis):**\n{self.current_next_steps}"
-            )
+        # if self.current_next_steps.strip():
+        #     initial_plan_message["content"] += (
+        #         f"\n\n**Next Steps (from previous analysis):**\n{self.current_next_steps}"
+        #     )
 
         concise_messages.append(initial_plan_message)
 
@@ -1421,63 +1631,60 @@ class ConciseMemoryAgent:
 - If "Remaining Files to Implement" above shows "All files implemented!", reply "All files implemented" immediately
 
 **For NEW file implementation (if remaining files exist):**
-1. **You need to call read_code_mem(already_implemented_file_path)** to understand existing implementations and dependencies - agent should choose relevant ALREADY IMPLEMENTED file paths for reference, NOT the new file you want to create
-2. Write_file can be used to implement the new component
-3. Finally: Use execute_python or execute_bash for testing (if needed)
+Write_file can be used to implement the new component
 
 **Remember:** Stop and declare completion when all files are done!""",
         }
+        if self.current_next_steps.strip():
+            knowledge_base_message["content"] += (
+                f"\n\n**Next Steps (from previous analysis):**\n{self.current_next_steps}"
+            )
         concise_messages.append(knowledge_base_message)
 
-        # 3. Add current tool results (essential information for next file generation)
-        if self.current_round_tool_results:
-            tool_results_content = self._format_tool_results()
+        #         # 3. Add current tool results (essential information for next file generation)
+        #         if self.current_round_tool_results:
+        #             tool_results_content = self._format_tool_results()
 
-            # # Append Next Steps information if available
-            # if self.current_next_steps.strip():
-            #     tool_results_content += f"\n\n**Next Steps (from previous analysis):**\n{self.current_next_steps}"
+        #             # # Append Next Steps information if available
+        #             # if self.current_next_steps.strip():
+        #             #     tool_results_content += f"\n\n**Next Steps (from previous analysis):**\n{self.current_next_steps}"
 
-            tool_results_message = {
-                "role": "user",
-                "content": f"""**Current Tool Results:**
-{tool_results_content}""",
-            }
-            concise_messages.append(tool_results_message)
-        else:
-            # If no tool results yet, add guidance for next steps
-            guidance_content = f"""**Current Round:** {self.current_round}
+        #             tool_results_message = {
+        #                 "role": "user",
+        #                 "content": f"""**Current Tool Results:**
+        # {tool_results_content}""",
+        #             }
+        #             concise_messages.append(tool_results_message)
+        #         else:
+        #             # If no tool results yet, add guidance for next steps
+        #             guidance_content = f"""**Current Round:** {self.current_round}
 
-**Development Cycle - START HERE:**
+        # **Development Cycle - START HERE:**
 
-**For NEW file implementation:**
-1. **You need to call read_code_mem(already_implemented_file_path)** to understand existing implementations and dependencies - agent should choose relevant ALREADY IMPLEMENTED file paths for reference, NOT the new file you want to create
-2. Write_file can be used to implement the new component
-3. OPTIONALLY: Use execute_python or execute_bash if meet some specific requirements (if needed)
+        # **For NEW file implementation:**
+        # Write_file can be used to implement the new component"""
 
-**When all files implemented:**
-1. **Use execute_python or execute_bash** to test the complete implementation (if needed)"""
+        #             # # Append Next Steps information if available (even when no tool results)
+        #             # if self.current_next_steps.strip():
+        #             #     guidance_content += f"\n\n**Next Steps (from previous analysis):**\n{self.current_next_steps}"
 
-            # # Append Next Steps information if available (even when no tool results)
-            # if self.current_next_steps.strip():
-            #     guidance_content += f"\n\n**Next Steps (from previous analysis):**\n{self.current_next_steps}"
-
-            guidance_message = {
-                "role": "user",
-                "content": guidance_content,
-            }
-            concise_messages.append(guidance_message)
-        # **Available Essential Tools:** read_code_mem, write_file, execute_python, execute_bash
-        # **Remember:** Start with read_code_mem when implementing NEW files to understand existing code. When all files are implemented, focus on testing and completion. Implement according to the original paper's specifications - any reference code is for inspiration only."""
-        # self.logger.info(f"✅ Concise messages created: {len(concise_messages)} messages (original: {len(messages)})")
+        #             guidance_message = {
+        #                 "role": "user",
+        #                 "content": guidance_content,
+        #             }
+        #             concise_messages.append(guidance_message)
+        #         # **Available Essential Tools:** read_code_mem, write_file, execute_python, execute_bash
+        #         # **Remember:** Start with read_code_mem when implementing NEW files to understand existing code. When all files are implemented, focus on testing and completion. Implement according to the original paper's specifications - any reference code is for inspiration only."""
+        #         # self.logger.info(f"✅ Concise messages created: {len(concise_messages)} messages (original: {len(messages)})")
         return concise_messages
 
     def _read_code_knowledge_base(self) -> Optional[str]:
         """
         Read the implement_code_summary.md file as code knowledge base
-        Returns only the final/latest implementation entry, not all historical entries
+        Returns all content from the file
 
         Returns:
-            Content of the latest implementation entry if it exists, None otherwise
+            Full content of the file if it exists, None otherwise
         """
         try:
             if os.path.exists(self.code_summary_path):
@@ -1485,8 +1692,8 @@ class ConciseMemoryAgent:
                     content = f.read().strip()
 
                 if content:
-                    # Extract only the final/latest implementation entry
-                    return self._extract_latest_implementation_entry(content)
+                    # Return all content instead of just the latest entry
+                    return content
                 else:
                     return None
             else:
@@ -1697,6 +1904,28 @@ class ConciseMemoryAgent:
         """Get list of all files that should be implemented according to the plan"""
         return self.all_files_list.copy()
 
+    def refresh_files_list_from_directory(self) -> bool:
+        """
+        Refresh the files list by extracting from the generated directory
+        Useful when the directory structure has been updated after initialization
+
+        Returns:
+            True if successfully refreshed from directory, False if fell back to plan
+        """
+        if os.path.exists(self.code_directory):
+            files_from_dir = self._extract_files_from_generated_directory()
+            if files_from_dir:
+                old_count = len(self.all_files_list)
+                self.all_files_list = files_from_dir
+                new_count = len(self.all_files_list)
+                self.logger.info(
+                    f"🔄 Files list refreshed from directory: {old_count} → {new_count} files"
+                )
+                return True
+
+        self.logger.warning("Cannot refresh from directory, keeping current list")
+        return False
+
     def get_unimplemented_files(self) -> List[str]:
         """
         Get list of files that haven't been implemented yet
@@ -1859,7 +2088,7 @@ class ConciseMemoryAgent:
             if messages
             else 0
         )
-        self.logger.info(
+        print(
             f"🎯 CONCISE optimization applied: {len(messages)} → {len(optimized_messages)} messages ({compression_ratio:.1f}% compression)"
         )
 

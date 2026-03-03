@@ -73,7 +73,7 @@ Your enhanced capabilities include:
 - Provide actionable quality assessments
 
 Use the enhanced document-segmentation tools to deliver superior segmentation results that significantly improve planning agent performance.""",
-                server_names=["document-segmentation", "filesystem"],
+                server_names=["document-segmentation"],
             )
 
             # Initialize the agent context
