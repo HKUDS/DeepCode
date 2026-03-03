@@ -24,38 +24,7 @@ from dataclasses import dataclass, asdict
 from typing import List, Dict, Any
 
 # MCP Agent imports for LLM
-import yaml
-from utils.llm_utils import get_preferred_llm_class
-
-
-def get_default_models(config_path: str = "mcp_agent.config.yaml"):
-    """
-    Get default models from configuration file.
-
-    Args:
-        config_path: Path to the configuration file
-
-    Returns:
-        dict: Dictionary with 'anthropic' and 'openai' default models
-    """
-    try:
-        if os.path.exists(config_path):
-            with open(config_path, "r", encoding="utf-8") as f:
-                config = yaml.safe_load(f)
-
-            anthropic_model = config.get("anthropic", {}).get(
-                "default_model", "claude-sonnet-4-20250514"
-            )
-            openai_model = config.get("openai", {}).get("default_model", "o3-mini")
-
-            return {"anthropic": anthropic_model, "openai": openai_model}
-        else:
-            print(f"Config file {config_path} not found, using default models")
-            return {"anthropic": "claude-sonnet-4-20250514", "openai": "o3-mini"}
-
-    except Exception as e:
-        print(f"Error reading config file {config_path}: {e}")
-        return {"anthropic": "claude-sonnet-4-20250514", "openai": "o3-mini"}
+from utils.llm_utils import get_preferred_llm_class, get_default_models
 
 
 @dataclass
@@ -111,9 +80,12 @@ class CodeIndexer:
         # Load configurations first
         self.config_path = config_path
         self.indexer_config_path = indexer_config_path
+        # Derive main config path from secrets path (same directory)
+        secrets_dir = os.path.dirname(os.path.abspath(config_path))
+        self.main_config_path = os.path.join(secrets_dir, "mcp_agent.config.yaml")
         self.api_config = self._load_api_config()
         self.indexer_config = self._load_indexer_config()
-        self.default_models = get_default_models("mcp_agent.config.yaml")
+        self.default_models = get_default_models(self.main_config_path)
 
         # Use config paths if not provided as parameters
         paths_config = self.indexer_config.get("paths", {})

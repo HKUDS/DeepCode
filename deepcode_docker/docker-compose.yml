@@ -1,0 +1,50 @@
+services:
+  deepcode:
+    build:
+      context: ..
+      dockerfile: deepcode_docker/Dockerfile
+    container_name: deepcode
+    ports:
+      - "8000:8000"
+    volumes:
+      # Configuration (required)
+      - ../mcp_agent.config.yaml:/app/mcp_agent.config.yaml:ro
+      - ../mcp_agent.secrets.yaml:/app/mcp_agent.secrets.yaml:ro
+
+      # Persistent data
+      - ../deepcode_lab:/app/deepcode_lab
+      - ../uploads:/app/uploads
+      - ../logs:/app/logs
+    environment:
+      - DEEPCODE_ENV=docker
+      - DEEPCODE_PORT=8000
+    restart: unless-stopped
+
+  nanobot:
+    build:
+      context: ..
+      dockerfile: nanobot/Dockerfile
+    container_name: nanobot
+    ports:
+      - "18790:18790"
+    volumes:
+      # nanobot configuration (飞书/Telegram token 等)
+      - ../nanobot_config.json:/root/.nanobot/config.json:ro
+
+      # Persistent workspace data
+      - nanobot-workspace:/root/.nanobot/workspace
+      - nanobot-sessions:/root/.nanobot/sessions
+
+      # Shared with DeepCode: nanobot can access generated code
+      - ../deepcode_lab:/app/deepcode_lab
+    environment:
+      - NANOBOT_ENV=docker
+      # Internal API URL for nanobot -> DeepCode communication
+      - DEEPCODE_API_URL=http://deepcode:8000
+    depends_on:
+      - deepcode
+    restart: unless-stopped
+
+volumes:
+  nanobot-workspace:
+  nanobot-sessions:

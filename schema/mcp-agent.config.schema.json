@@ -667,25 +667,6 @@
       ],
       "title": "TemporalSettings",
       "type": "object"
-    },
-    "UsageTelemetrySettings": {
-      "description": "Settings for usage telemetry in the MCP Agent application.\nAnonymized usage metrics are sent to a telemetry server to help improve the product.",
-      "properties": {
-        "enabled": {
-          "default": true,
-          "title": "Enabled",
-          "type": "boolean",
-          "description": "Enable usage telemetry in the MCP Agent application."
-        },
-        "enable_detailed_telemetry": {
-          "default": false,
-          "title": "Enable Detailed Telemetry",
-          "type": "boolean",
-          "description": "If enabled, detailed telemetry data, including prompts and agents, will be sent to the telemetry server."
-        }
-      },
-      "title": "UsageTelemetrySettings",
-      "type": "object"
     }
   },
   "additionalProperties": true,
@@ -831,21 +812,6 @@
         "http_timeout": 5.0
       },
       "description": "Logger settings for the MCP Agent application"
-    },
-    "usage_telemetry": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/UsageTelemetrySettings"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": {
-        "enabled": true,
-        "enable_detailed_telemetry": false
-      },
-      "description": "Usage tracking settings for the MCP Agent application"
     }
   },
   "title": "MCP Agent Configuration Schema",

@@ -35,8 +35,9 @@
 </p> -->
 <p>
   <a href="https://github.com/HKUDS/DeepCode/stargazers"><img src='https://img.shields.io/github/stars/HKUDS/DeepCode?color=00d9ff&style=for-the-badge&logo=star&logoColor=white&labelColor=1a1a2e' /></a>
+  <a href='https://arxiv.org/abs/2512.07921'><img src="https://img.shields.io/badge/Paper-arXiv-orange?style=for-the-badge&logo=arxiv&logoColor=white&labelColor=1a1a2e"></a>
   <img src="https://img.shields.io/badge/🐍Python-3.13-4ecdc4?style=for-the-badge&logo=python&logoColor=white&labelColor=1a1a2e">
-  <a href="https://pypi.org/project/deepcode-hku/"><img src="https://img.shields.io/pypi/v/deepcode-hku.svg?style=for-the-badge&logo=pypi&logoColor=white&labelColor=1a1a2e&color=ff6b6b"></a>
+  <!-- <a href="https://pypi.org/project/deepcode-hku/"><img src="https://img.shields.io/pypi/v/deepcode-hku.svg?style=for-the-badge&logo=pypi&logoColor=white&labelColor=1a1a2e&color=ff6b6b"></a> -->
 </p>
 <p>
   <a href="https://discord.gg/yF2MmDJyGJ"><img src="https://img.shields.io/badge/💬Discord-Community-7289da?style=for-the-badge&logo=discord&logoColor=white&labelColor=1a1a2e"></a>
@@ -49,6 +50,15 @@
 <div align="center">
   <a href="#-quick-start" style="text-decoration: none;">
     <img src="https://img.shields.io/badge/Quick%20Start-Get%20Started%20Now-00d9ff?style=for-the-badge&logo=rocket&logoColor=white&labelColor=1a1a2e">
+  </a>
+</div>
+
+<div align="center" style="margin-top: 10px;">
+  <a href="README.md">
+    <img src="https://img.shields.io/badge/English-00d4ff?style=for-the-badge&logo=readme&logoColor=white&labelColor=1a1a2e" alt="English">
+  </a>
+  <a href="README_ZH.md">
+    <img src="https://img.shields.io/badge/中文-00d4ff?style=for-the-badge&logo=readme&logoColor=white&labelColor=1a1a2e" alt="中文">
   </a>
 </div>
 
@@ -133,13 +143,74 @@
 
 ## 📑 Table of Contents
 
+- [📰 News](#-news)
 - [🚀 Key Features](#-key-features)
 - [🏗️ Architecture](#️-architecture)
+- [📊 Experimental Results](#-experimental-results)
 - [🚀 Quick Start](#-quick-start)
+- [🤖 nanobot Integration (Feishu Chatbot)](#-nanobot-integration-feishu-chatbot)
 - [💡 Examples](#-examples)
   - [🎬 Live Demonstrations](#-live-demonstrations)
 - [⭐ Star History](#-star-history)
 - [📄 License](#-license)
+
+
+---
+
+## 📰 News
+
+🎉 **[2026-02] nanobot ✖️ DeepCode. Just chat naturally with openclaw/nanobot to handle your coding tasks:**
+
+<div align="center">
+<table><tr>
+<td align="center"><a href="https://github.com/HKUDS/DeepCode"><img src="./assets/logo.png" alt="DeepCode" height="60"/></a></td>
+<td align="center"><h2>✦</h2></td>
+<td align="center"><a href="https://github.com/HKUDS/nanobot"><img src="./assets/nanobot.png" alt="nanobot" height="60"/></a></td>
+</tr></table>
+</div>
+
+- [nanobot](https://github.com/HKUDS/nanobot) nanobot now powers your agentic coding & engineering! 🤖💻
+- Step away from your laptop — make vibe coding even more vibe! Code directly from your phone! 📱✨
+- One-command deploy: `./nanobot/run_nanobot.sh` → **[Setup Guide →](#-nanobot-integration-feishu-chatbot)**
+
+<div align="center">
+<table width="100%"><tr>
+<td width="50%" align="center">
+  <img src="./assets/IMG_8098.jpeg" alt="Feishu Chat Example 1" width="95%" style="border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.2);"/>
+</td>
+<td width="50%" align="center">
+  <img src="./assets/IMG_8099.jpeg" alt="Feishu Chat Example 2" width="95%" style="border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.2);"/>
+</td>
+</tr></table>
+<sub><em>Feishu Bot in Action — Natural language → Full code generation with setup instructions</em></sub>
+</div>
+
+---
+
+🎉 **[2026-02] New Web UI Experience Upgrade!**
+
+- 🔄 **User-in-Loop Interaction**: Support real-time user interaction during workflows - AI asks clarifying questions directly in the chat
+- 💬 **Inline Interaction Design**: Interaction prompts appear naturally within the chat flow for a seamless experience
+- 🚀 **One-Click Launch**: Simply run `deepcode` to start the new UI (cross-platform: Windows/macOS/Linux)
+- 🔧 **Improved Process Management**: Enhanced service start/stop mechanism with automatic port cleanup
+- 📡 **WebSocket Real-time Communication**: Fixed message loss issues, ensuring proper interaction state synchronization
+
+<div align="center">
+  <img src="./assets/NewUI.png" alt="DeepCode New UI" width="85%" style="border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15);" />
+  <br/>
+  <sub><em>DeepCode New Web UI - Modern React-based Interface</em></sub>
+</div>
+
+---
+
+🎉 **[2025-10-28] DeepCode Achieves SOTA on PaperBench!**
+
+DeepCode sets new benchmarks on OpenAI's PaperBench Code-Dev across all categories:
+
+- 🏆 **Surpasses Human Experts**: **75.9%** (DeepCode) vs Top Machine Learning PhDs 72.4% (+3.5%).
+- 🥇 **Outperforms SOTA Commercial Code Agents**: **84.8%** (DeepCode) vs Leading Commercial Code Agents (+26.1%) (Cursor, Claude Code, and Codex).
+- 🔬 **Advances Scientific Coding**: **73.5%** (DeepCode) vs PaperCoder 51.1% (+22.4%).
+- 🚀 **Beats LLM Agents**: **73.5%** (DeepCode) vs best LLM frameworks 43.3% (+30.2%).
 
 ---
 
@@ -217,7 +288,58 @@
 
 <br/>
 
-### 🎯 **Autonomous Multi-Agent Workflow**
+---
+
+## 📊 Experimental Results
+
+<div align="center">
+    <img src='./assets/result_main02.jpg' /><br>
+</div>
+<br/>
+
+We evaluate **DeepCode** on the [*PaperBench*](https://openai.com/index/paperbench/) benchmark (released by OpenAI), a rigorous testbed requiring AI agents to independently reproduce 20 ICML 2024 papers from scratch. The benchmark comprises 8,316 gradable components assessed using SimpleJudge with hierarchical weighting.
+
+Our experiments compare DeepCode against four baseline categories: **(1) Human Experts**, **(2) State-of-the-Art Commercial Code Agents**, **(3) Scientific Code Agents**, and **(4) LLM-Based Agents**.
+
+### ① 🧠 Human Expert Performance (Top Machine Learning PhD)
+
+**DeepCode: 75.9% vs. Top Machine Learning PhD: 72.4% (+3.5%)**
+
+DeepCode achieves **75.9%** on the 3-paper human evaluation subset, **surpassing the best-of-3 human expert baseline (72.4%) by +3.5 percentage points**. This demonstrates that our framework not only matches but exceeds expert-level code reproduction capabilities, representing a significant milestone in autonomous scientific software engineering.
+
+### ② 💼 State-of-the-Art Commercial Code Agents
+
+**DeepCode: 84.8% vs. Best Commercial Agent: 58.7% (+26.1%)**
+
+On the 5-paper subset, DeepCode substantially outperforms leading commercial coding tools:
+- Cursor: 58.4%
+- Claude Code: 58.7%
+- Codex: 40.0%
+- **DeepCode: 84.8%**
+
+This represents a **+26.1% improvement** over the leading commercial code agent. All commercial agents utilize Claude Sonnet 4.5 or GPT-5 Codex-high, highlighting that **DeepCode's superior architecture**—rather than base model capability—drives this performance gap.
+
+### ③ 🔬 Scientific Code Agents
+
+**DeepCode: 73.5% vs. PaperCoder: 51.1% (+22.4%)**
+
+Compared to PaperCoder (**51.1%**), the state-of-the-art scientific code reproduction framework, DeepCode achieves **73.5%**, demonstrating a **+22.4% relative improvement**. This substantial margin validates our multi-module architecture combining planning, hierarchical task decomposition, code generation, and iterative debugging over simpler pipeline-based approaches.
+
+### ④ 🤖 LLM-Based Agents
+
+**DeepCode: 73.5% vs. Best LLM Agent: 43.3% (+30.2%)**
+
+DeepCode significantly outperforms all tested LLM agents:
+- Claude 3.5 Sonnet + IterativeAgent: 27.5%
+- o1 + IterativeAgent (36 hours): 42.4%
+- o1 BasicAgent: 43.3%
+- **DeepCode: 73.5%**
+
+The **+30.2% improvement** over the best-performing LLM agent demonstrates that sophisticated agent scaffolding, rather than extended inference time or larger models, is critical for complex code reproduction tasks.
+
+---
+
+### 🎯 **Autonomous Self-Orchestrating Multi-Agent Architecture**
 
 **The Challenges**:
 
@@ -445,11 +567,46 @@ Implementation Generation • Testing • Documentation
 
 ---
 
+
 ## 🚀 Quick Start
 
+### 📋 **Prerequisites**
 
+Before installing DeepCode, ensure you have the following:
+
+| Requirement | Version | Purpose |
+|-------------|---------|---------|
+| **Python** | 3.9+ | Core runtime |
+| **Node.js** | 18+ | New UI frontend |
+| **npm** | 8+ | Package management |
+
+```bash
+# Check your versions
+python --version   # Should be 3.9+
+node --version     # Should be 18+
+npm --version      # Should be 8+
+```
+
+<details>
+<summary><strong>📥 Install Node.js (if not installed)</strong></summary>
+
+```bash
+# macOS (using Homebrew)
+brew install node
+
+# Ubuntu/Debian
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# Windows
+# Download from https://nodejs.org/
+```
+
+</details>
 
 ### 📦 **Step 1: Installation**
+
+Choose one of the following installation methods:
 
 #### ⚡ **Direct Installation (Recommended)**
 
@@ -460,21 +617,6 @@ pip install deepcode-hku
 # 🔑 Download configuration files
 curl -O https://raw.githubusercontent.com/HKUDS/DeepCode/main/mcp_agent.config.yaml
 curl -O https://raw.githubusercontent.com/HKUDS/DeepCode/main/mcp_agent.secrets.yaml
-
-# 🔑 Configure API keys (required)
-# Edit mcp_agent.secrets.yaml with your API keys and base_url:
-# - openai: api_key, base_url (for OpenAI/custom endpoints)
-# - anthropic: api_key (for Claude models)
-
-# 🔑 Configure search API keys for web search (optional)
-# Edit mcp_agent.config.yaml to set your API keys:
-# - For Brave Search: Set BRAVE_API_KEY: "your_key_here" in brave.env section (line ~28)
-# - For Bocha-MCP: Set BOCHA_API_KEY: "your_key_here" in bocha-mcp.env section (line ~74)
-
-# 📄 Configure document segmentation (optional)
-# Edit mcp_agent.config.yaml to control document processing:
-# - enabled: true/false (whether to use intelligent document segmentation)
-# - size_threshold_chars: 50000 (document size threshold to trigger segmentation)
 ```
 
 #### 🔧 **Development Installation (From Source)**
@@ -485,63 +627,91 @@ curl -O https://raw.githubusercontent.com/HKUDS/DeepCode/main/mcp_agent.secrets.
 ##### 🔥 **Using UV (Recommended for Development)**
 
 ```bash
-# 🔽 Clone the repository
 git clone https://github.com/HKUDS/DeepCode.git
 cd DeepCode/
 
-# 📦 Install UV package manager
 curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# 🔧 Install dependencies with UV
 uv venv --python=3.13
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 uv pip install -r requirements.txt
 
-# 🔑 Configure API keys (required)
-# Edit mcp_agent.secrets.yaml with your API keys and base_url:
-# - openai: api_key, base_url (for OpenAI/custom endpoints)
-# - anthropic: api_key (for Claude models)
-
-# 🔑 Configure search API keys for web search (optional)
-# Edit mcp_agent.config.yaml to set your API keys:
-# - For Brave Search: Set BRAVE_API_KEY: "your_key_here" in brave.env section (line ~28)
-# - For Bocha-MCP: Set BOCHA_API_KEY: "your_key_here" in bocha-mcp.env section (line ~74)
-
-# 📄 Configure document segmentation (optional)
-# Edit mcp_agent.config.yaml to control document processing:
-# - enabled: true/false (whether to use intelligent document segmentation)
-# - size_threshold_chars: 50000 (document size threshold to trigger segmentation)
+# Install frontend dependencies
+npm install --prefix new_ui/frontend
 ```
 
 ##### 🐍 **Using Traditional pip**
 
 ```bash
-# 🔽 Clone the repository
 git clone https://github.com/HKUDS/DeepCode.git
 cd DeepCode/
 
-# 📦 Install dependencies
 pip install -r requirements.txt
 
-# 🔑 Configure API keys (required)
-# Edit mcp_agent.secrets.yaml with your API keys and base_url:
-# - openai: api_key, base_url (for OpenAI/custom endpoints)
-# - anthropic: api_key (for Claude models)
-
-# 🔑 Configure search API keys for web search (optional)
-# Edit mcp_agent.config.yaml to set your API keys:
-# - For Brave Search: Set BRAVE_API_KEY: "your_key_here" in brave.env section (line ~28)
-# - For Bocha-MCP: Set BOCHA_API_KEY: "your_key_here" in bocha-mcp.env section (line ~74)
-
-# 📄 Configure document segmentation (optional)
-# Edit mcp_agent.config.yaml to control document processing:
-# - enabled: true/false (whether to use intelligent document segmentation)
-# - size_threshold_chars: 50000 (document size threshold to trigger segmentation)
+# Install frontend dependencies
+npm install --prefix new_ui/frontend
 ```
 
 </details>
 
-#### 🪟 **Windows Users: Additional MCP Server Configuration**
+### 🔧 **Step 2: Configuration**
+
+> The following configuration applies to **all installation methods** (pip, UV, source, and Docker).
+
+#### 🔑 API Keys *(required)*
+
+Edit `mcp_agent.secrets.yaml` with your API keys:
+
+```yaml
+# At least ONE provider API key is required
+openai:
+  api_key: "your_openai_api_key"
+  base_url: "https://openrouter.ai/api/v1"  # Optional: for OpenRouter or custom endpoints
+
+anthropic:
+  api_key: "your_anthropic_api_key"  # For Claude models
+
+google:
+  api_key: "your_google_api_key"     # For Gemini models
+```
+
+#### 🤖 LLM Provider *(optional)*
+
+Edit `mcp_agent.config.yaml` to choose your preferred LLM provider (line ~106):
+
+```yaml
+# Options: "google", "anthropic", "openai"
+# If not set or unavailable, will automatically fallback to first available provider
+llm_provider: "google"
+```
+
+#### 🔍 Search API Keys *(optional)*
+
+Configure web search in `mcp_agent.config.yaml`:
+
+```yaml
+# For Brave Search (default) — set in brave.env section (line ~28)
+brave:
+  env:
+    BRAVE_API_KEY: "your_brave_api_key_here"
+
+# For Bocha-MCP (alternative) — set in bocha-mcp.env section (line ~74)
+bocha-mcp:
+  env:
+    BOCHA_API_KEY: "your_bocha_api_key_here"
+```
+
+#### 📄 Document Segmentation *(optional)*
+
+Control document processing in `mcp_agent.config.yaml`:
+
+```yaml
+document_segmentation:
+  enabled: true          # true/false — whether to use intelligent document segmentation
+  size_threshold_chars: 50000  # Document size threshold to trigger segmentation
+```
+
+<details>
+<summary><strong>🪟 Windows Users: Additional MCP Server Configuration</strong></summary>
 
 If you're using Windows, you may need to configure MCP servers manually in `mcp_agent.config.yaml`:
 
@@ -569,7 +739,10 @@ mcp:
 
 > **Note**: Replace the path with your actual global node_modules path from step 2.
 
-#### 🔍 **Search Server Configuration (Optional)**
+</details>
+
+<details>
+<summary><strong>🔍 Search Server Configuration (Optional)</strong></summary>
 
 DeepCode supports multiple search servers for web search functionality. You can configure your preferred option in `mcp_agent.config.yaml`:
 
@@ -580,17 +753,10 @@ default_search_server: "brave"
 ```
 
 **Available Options:**
-- **🔍 Brave Search** (`"brave"`):
-  - Default option with high-quality search results
-  - Requires BRAVE_API_KEY configuration
-  - Recommended for most users
+- **🔍 Brave Search** (`"brave"`): Default option with high-quality search results. Requires `BRAVE_API_KEY`. Recommended for most users.
+- **🌐 Bocha-MCP** (`"bocha-mcp"`): Alternative search server. Requires `BOCHA_API_KEY`. Uses local Python server implementation.
 
-- **🌐 Bocha-MCP** (`"bocha-mcp"`):
-  - Alternative search server option
-  - Requires BOCHA_API_KEY configuration
-  - Uses local Python server implementation
-
-**API Key Configuration in mcp_agent.config.yaml:**
+**Full MCP server configuration in mcp_agent.config.yaml:**
 ```yaml
 # For Brave Search (default) - around line 28
 brave:
@@ -610,51 +776,266 @@ bocha-mcp:
 
 > **💡 Tip**: Both search servers require API key configuration. Choose the one that best fits your API access and requirements.
 
-### ⚡ **Step 2: Launch Application**
+</details>
 
-#### 🚀 **Using Installed Package (Recommended)**
+### ⚡ **Step 3: Launch Application**
+
+Choose your preferred launch method:
+
+<table width="100%">
+<tr>
+<th width="33%">🐳 Docker (Recommended)</th>
+<th width="33%">🚀 Local (<code>deepcode</code> command)</th>
+<th width="33%">🛠️ Other Methods</th>
+</tr>
+<tr><td>
+
+No Python/Node needed — everything in container.
 
 ```bash
-# 🌐 Launch web interface directly
+git clone https://github.com/HKUDS/DeepCode.git
+cd DeepCode/
+cp mcp_agent.secrets.yaml.example \
+   mcp_agent.secrets.yaml
+# Edit secrets with your API keys
+
+./deepcode_docker/run_docker.sh
+# Access → http://localhost:8000
+```
+
+</td><td>
+
+Auto-installs deps on first run.
+
+```bash
 deepcode
-
-# The application will automatically start at http://localhost:8501
+# Frontend → http://localhost:5173
+# Backend  → http://localhost:8000
+# Ctrl+C to stop
 ```
 
-#### 🛠️ **Using Source Code**
+Features: User-in-Loop, real-time progress, inline chat.
 
-Choose your preferred interface:
+</td><td>
 
-##### 🌐 **Web Interface** (Recommended)
 ```bash
-# Using UV
-uv run streamlit run ui/streamlit_app.py
-# Or using traditional Python
-streamlit run ui/streamlit_app.py
-```
-<div align="center">
-  <img src="https://img.shields.io/badge/Access-localhost:8501-00d4ff?style=flat-square&logo=streamlit&logoColor=white" alt="Web Access" />
-</div>
+# macOS / Linux
+./run.sh
+# or: python deepcode.py
 
-##### 🖥️ **CLI Interface** (Advanced Users)
+# Windows
+run.bat
+# or: python deepcode.py
+
+# Classic Streamlit UI
+deepcode --classic
+
+# CLI mode
+deepcode --cli
+# or: python cli/main_cli.py
+```
+
+</td></tr>
+</table>
+
+<details>
+<summary><strong>🐳 Docker Management Commands</strong></summary>
+
 ```bash
-# Using UV
-uv run python cli/main_cli.py
-# Or using traditional Python
-python cli/main_cli.py
+./deepcode_docker/run_docker.sh stop      # Stop
+./deepcode_docker/run_docker.sh restart   # Restart (no rebuild needed for config changes)
+./deepcode_docker/run_docker.sh --build   # Force rebuild
+./deepcode_docker/run_docker.sh logs      # Real-time logs
+./deepcode_docker/run_docker.sh status    # Health check
+./deepcode_docker/run_docker.sh clean     # Remove containers & images
 ```
-<div align="center">
-  <img src="https://img.shields.io/badge/Mode-Interactive_Terminal-9b59b6?style=flat-square&logo=terminal&logoColor=white" alt="CLI Mode" />
-</div>
 
-### 🎯 **Step 3: Generate Code**
+Or with Docker Compose directly:
+```bash
+docker compose -f deepcode_docker/docker-compose.yml up --build   # Build & start
+docker compose -f deepcode_docker/docker-compose.yml down         # Stop
+docker compose -f deepcode_docker/docker-compose.yml logs -f      # Logs
+```
 
-1. **📄 Input**: Upload your research paper, provide requirements, or paste a URL
-2. **🤖 Processing**: Watch the multi-agent system analyze and plan
-3. **⚡ Output**: Receive production-ready code with tests and documentation
+> **💡** Config files are mounted as volumes — edit and restart, no rebuild needed.
+> **💡** Windows users: run `docker compose` commands directly if shell scripts aren't available.
 
+</details>
+
+### 🎯 **Step 4: Generate Code**
+
+1. **📄 Input** — Upload a research paper, type requirements, or paste a URL
+2. **🤖 Processing** — The multi-agent system analyzes, plans, and generates
+3. **⚡ Output** — Receive production-ready code with tests and documentation
+
+---
+
+### 🔧 **Troubleshooting**
+
+<details>
+<summary><strong>❓ Common Issues & Solutions</strong></summary>
+
+| Problem | Cause | Fix |
+|---|---|---|
+| Docker build fails with `tsc: not found` | Corrupted build cache | `docker builder prune -f` then rebuild with `--no-cache` |
+| `error during connect` / `cannot find the file` | Docker Desktop not running | Start Docker Desktop, wait until ready, retry |
+| Frontend blank page | Corrupted `node_modules` | `cd new_ui/frontend && rm -rf node_modules && npm install` |
+| `ERR_CONNECTION_REFUSED` | Wrong port / backend not running | Docker: `http://localhost:8000`. Local: `http://localhost:5173` |
+| `npm install` → `Could not read package.json` | Wrong directory | Use `npm install --prefix new_ui/frontend` |
+| Windows: MCP servers not working | Need absolute paths | See [Windows MCP Configuration](#-step-2-configuration) above |
+
+</details>
 
   ---
+
+## 🤖 nanobot Integration (Feishu Chatbot)
+
+> Chat with DeepCode from **Feishu** — powered by [nanobot](https://github.com/HKUDS/nanobot).
+
+<div align="center">
+
+```mermaid
+flowchart LR
+    subgraph Clients["💬 Chat Platforms"]
+        direction TB
+        F["<b>Feishu</b><br/>WebSocket"]
+        T["<b>Telegram</b><br/>Polling"]
+        D["<b>Discord</b><br/>Gateway"]
+    end
+
+    subgraph Gateway["🐈 nanobot Gateway"]
+        direction TB
+        A["Agent Loop<br/><i>LLM + Tool Calls</i>"]
+    end
+
+    subgraph Engine["🧠 DeepCode Engine"]
+        direction TB
+        P2C["Paper → Code"]
+        C2C["Chat → Code"]
+        TRK["Task Tracking"]
+    end
+
+    F & T & D <-->|"messages"| A
+    A -->|"HTTP API"| P2C & C2C & TRK
+    A -.->|"LLM API"| LLM["☁️ OpenRouter"]
+
+    style Clients fill:#1a1a2e,stroke:#00d9ff,color:#fff
+    style Gateway fill:#1a1a2e,stroke:#4ecdc4,color:#fff
+    style Engine fill:#1a1a2e,stroke:#ff6b6b,color:#fff
+    style LLM fill:#1a1a2e,stroke:#9b59b6,color:#fff
+```
+
+</div>
+
+<div align="center">
+<table><tr>
+<td align="center"><a href="https://github.com/HKUDS/DeepCode"><img src="./assets/logo.png" alt="DeepCode" height="55"/></a></td>
+<td align="center"><h2>✦</h2></td>
+<td align="center"><a href="https://github.com/HKUDS/nanobot"><img src="./assets/nanobot.png" alt="nanobot" height="55"/></a></td>
+</tr></table>
+</div>
+
+Both services run inside the same **Docker Compose** network. Prerequisites: **Docker Desktop** + **OpenRouter API Key** ([get one](https://openrouter.ai/keys)) + **Feishu App**.
+
+---
+
+### Step 1 · Create a Feishu Bot
+
+<details open>
+<summary><b>Feishu / Lark</b> (Recommended — WebSocket, no public IP needed)</summary>
+
+1. Go to [Feishu Open Platform](https://open.feishu.cn/app) → **Create Custom App**
+2. Enable **Bot** capability in App Features
+3. Add permissions: `im:message` · `im:message:send_as_bot`
+4. Event Subscription → select **Long Connection** → add `im.message.receive_v1`
+5. Note your **App ID** (`cli_xxx`) and **App Secret** → Publish the app
+
+> **Note**: Feishu requires an active WebSocket connection before you can save "Long Connection" mode. Start nanobot first (Step 3), then come back to configure Event Subscription.
+
+</details>
+
+### Step 2 · Configure
+
+```bash
+cp nanobot_config.json.example nanobot_config.json
+```
+
+Edit `nanobot_config.json` — fill in the 3 required fields:
+
+```jsonc
+{
+  "channels": {
+    "feishu": {
+      "enabled": true,
+      "appId": "cli_xxx",              // ← Feishu App ID
+      "appSecret": "xxx",              // ← Feishu App Secret
+      "allowFrom": []                  // [] = allow all users
+    }
+  },
+  "providers": {
+    "openrouter": {
+      "apiKey": "sk-or-v1-xxx"         // ← OpenRouter API Key
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "anthropic/claude-sonnet-4-20250514"
+    }
+  }
+}
+```
+
+> **Model choice**: Any model on [openrouter.ai/models](https://openrouter.ai/models). Use `anthropic/claude-sonnet-4-20250514` for English, `minimax/minimax-m2.1` for Chinese.
+
+---
+
+### Step 3 · Launch
+
+Make sure `mcp_agent.secrets.yaml` has your DeepCode API keys (see [Configuration](#-step-2-configuration)), then:
+
+```bash
+./nanobot/run_nanobot.sh -d          # Start both DeepCode + nanobot in background
+```
+
+The script checks Docker, validates configs, builds images (first run only), and starts both containers.
+
+```
+✓ DeepCode API:  http://localhost:8000
+✓ Nanobot:       http://localhost:18790
+```
+
+Now open Feishu → find your bot → send a message!
+
+<details>
+<summary><b>Management Commands</b></summary>
+
+```bash
+./nanobot/run_nanobot.sh              # Start (foreground)
+./nanobot/run_nanobot.sh -d           # Start (background)
+./nanobot/run_nanobot.sh stop         # Stop all services
+./nanobot/run_nanobot.sh restart      # Restart (config changes take effect immediately)
+./nanobot/run_nanobot.sh --build      # Force rebuild Docker images
+./nanobot/run_nanobot.sh logs         # View real-time logs
+./nanobot/run_nanobot.sh status       # Health check
+./nanobot/run_nanobot.sh clean        # Remove containers & images
+```
+
+</details>
+
+<details>
+<summary><b>Troubleshooting</b></summary>
+
+| Problem | Fix |
+|---|---|
+| Feishu bot doesn't respond | Check logs (`./nanobot/run_nanobot.sh logs`), verify `appId`/`appSecret`, ensure app is published with Long Connection mode |
+| Can't connect to DeepCode | Verify `deepcode` container is healthy: `curl http://localhost:8000/health` |
+| Wrong language output | Switch model — `minimax-m2.1` defaults to Chinese, use Claude/GPT for English |
+| Config not taking effect | Just restart: `./nanobot/run_nanobot.sh restart` (no rebuild needed) |
+| Clear chat history | Send `/clear` in chat, or: `docker exec nanobot sh -c 'rm -rf /root/.nanobot/sessions/*.jsonl'` |
+
+</details>
+
+---
 
 ## 💡 Examples
 
@@ -778,14 +1159,37 @@ We're continuously enhancing DeepCode with exciting new features:
 
 ---
 
+<div align="left">
+
+### 📖 **Citation**
+
+
+If you find DeepCode useful in your research or applications, please kindly cite:
+
+```
+@misc{li2025deepcodeopenagenticcoding,
+      title={DeepCode: Open Agentic Coding},
+      author={Zongwei Li and Zhonghang Li and Zirui Guo and Xubin Ren and Chao Huang},
+      year={2025},
+      eprint={2512.07921},
+      archivePrefix={arXiv},
+      primaryClass={cs.SE},
+      url={https://arxiv.org/abs/2512.07921},
+}
+```
+
+---
+
+
 ### 📄 **License**
+
+<div align="center">
 
 <img src="https://img.shields.io/badge/License-MIT-4ecdc4?style=for-the-badge&logo=opensourceinitiative&logoColor=white" alt="MIT License">
 
 **MIT License** - Copyright (c) 2025 Data Intelligence Lab, The University of Hong Kong
 
 ---
-
 
 
 <img src="https://visitor-badge.laobi.icu/badge?page_id=deepcode.readme&style=for-the-badge&color=00d4ff" alt="Visitors">

@@ -5,8 +5,8 @@ DeepCode - AI Research Engine
 ⚡ Transform research papers into working code automatically
 """
 
-__version__ = "1.0.6-jm"
-__author__ = "DeepCode Team, Jany Martelli"
+__version__ = "1.2.0"
+__author__ = "DeepCode Team"
 __url__ = "https://github.com/HKUDS/DeepCode"
 __repo__ = "https://github.com/Jany-M/DeepCode/"
 

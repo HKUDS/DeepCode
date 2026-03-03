@@ -1,0 +1,52 @@
+{
+  "_comment": "nanobot configuration for DeepCode integration. Copy to nanobot_config.json and fill in your keys.",
+  "channels": {
+    "feishu": {
+      "enabled": true,
+      "appId": "your_feishu_app_id",
+      "appSecret": "your_feishu_app_secret",
+      "encryptKey": "",
+      "verificationToken": "",
+      "allowFrom": []
+    },
+    "telegram": {
+      "enabled": false,
+      "token": "your_telegram_bot_token",
+      "allowFrom": []
+    },
+    "discord": {
+      "enabled": false,
+      "token": "your_discord_bot_token",
+      "allowFrom": []
+    }
+  },
+  "providers": {
+    "openrouter": {
+      "apiKey": "sk-or-v1-your_openrouter_key"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "anthropic/claude-sonnet-4-20250514",
+      "workspace": "/root/.nanobot/workspace",
+      "maxTokens": 8192,
+      "temperature": 0.7
+    }
+  },
+  "gateway": {
+    "host": "0.0.0.0",
+    "port": 18790
+  },
+  "tools": {
+    "web": {
+      "search": {
+        "apiKey": "your_brave_search_api_key",
+        "maxResults": 5
+      }
+    },
+    "exec": {
+      "timeout": 120
+    },
+    "restrictToWorkspace": false
+  }
+}

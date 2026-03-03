@@ -1,161 +1,142 @@
 """
-Streamlit Page Layout Module
-
-Contains main page layout and flow control
+DeepCode Layout Manager
+Organizes the visual structure using the Cyber components.
 """
 
-import streamlit as st
+from typing import Optional
 
+import streamlit as st
 from .components import (
-    display_header,
     display_features,
-    sidebar_control_panel,
-    input_method_selector,
-    results_display_component,
+    display_header,
     footer_component,
+    guided_requirement_workflow,
+    input_method_selector,
+    requirement_mode_selector,
+    results_display_component,
+    sidebar_control_panel,
+    system_status_component,
 )
+from .styles import get_main_styles
 from .handlers import (
     initialize_session_state,
     handle_start_processing_button,
     handle_error_display,
     handle_guided_mode_processing,
 )
-from .styles import get_main_styles
 
 
 def setup_page_config():
-    """Setup optimized page configuration"""
     st.set_page_config(
-        page_title="DeepCode - AI Research Engine",
-        page_icon="🧬",
+        page_title="DeepCode",
+        page_icon="assets/logo.png",
         layout="wide",
         initial_sidebar_state="expanded",
         menu_items={
-            "Get Help": "https://github.com/yourusername/deepcode",
-            "Report a bug": "https://github.com/yourusername/deepcode/issues",
-            "About": "# DeepCode AI Research Engine\nNext-Generation Multi-Agent Coding Platform",
+            "Get Help": "https://github.com/deepcode",
+            "About": "DeepCode AI Research Engine v3.0",
         },
     )
 
 
-def apply_custom_styles():
-    """Apply custom styles"""
-    st.markdown(get_main_styles(), unsafe_allow_html=True)
-
-
-def render_main_content():
-    """Render main content area with improved layout"""
-    # Display modern, compact header and features
-    display_header()
-    display_features()
-
-    # Add subtle spacing instead of heavy divider
-    st.markdown(
-        """
-        <div style="height: 2rem; background: linear-gradient(90deg,
-            transparent 0%,
-            rgba(100, 181, 246, 0.1) 50%,
-            transparent 100%);
-            margin: 1.5rem 0;
-            border-radius: 2px;">
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    # Display results if available
-    if st.session_state.show_results and st.session_state.last_result:
-        results_display_component(
-            st.session_state.last_result, st.session_state.task_counter
-        )
-        st.markdown("---")
-        return
-
-    # Show input interface only when not displaying results
-    if not st.session_state.show_results:
-        render_input_interface()
-
-    # Display error messages if any
-    handle_error_display()
-
-
-def render_input_interface():
-    """Render input interface"""
-    # 处理引导模式的异步操作
-    handle_guided_mode_processing()
-
-    # Check if user is in guided analysis workflow
-    if st.session_state.get(
-        "requirement_analysis_mode"
-    ) == "guided" and st.session_state.get("requirement_analysis_step") in [
-        "questions",
-        "summary",
-        "editing",
-    ]:
-        # User is in guided analysis workflow, show chat input directly
-        from .components import chat_input_component
-
-        input_source = chat_input_component(st.session_state.task_counter)
-        input_type = "chat" if input_source else None
-    else:
-        # Normal flow: show input method selector
-        input_source, input_type = input_method_selector(st.session_state.task_counter)
-
-    # Processing button - Check if requirements are confirmed for guided mode
-    requirements_confirmed = st.session_state.get("requirements_confirmed", False)
-
-    # For guided mode, if requirements are confirmed, automatically start processing
-    if (
-        st.session_state.get("requirement_analysis_mode") == "guided"
-        and requirements_confirmed
-        and input_source
-        and not st.session_state.processing
-    ):
-        # Automatically start processing for confirmed requirements
-        st.session_state.requirements_confirmed = (
-            False  # Clear flag to prevent re-processing
-        )
-        handle_start_processing_button(input_source, input_type)
-    elif (
-        input_source and not st.session_state.processing and not requirements_confirmed
-    ):
-        # Only show Start Processing button if requirements are not already confirmed
-        if st.button("🚀 Start Processing", type="primary", use_container_width=True):
-            handle_start_processing_button(input_source, input_type)
-
-    elif st.session_state.processing:
-        st.info("🔄 Processing in progress... Please wait.")
-        st.warning("⚠️ Do not refresh the page or close the browser during processing.")
-
-    elif not input_source:
-        st.info(
-            "👆 Please upload a file, enter a URL, or describe your coding requirements to start processing."
-        )
-
-
-def render_sidebar():
-    """Render sidebar"""
-    return sidebar_control_panel()
-
-
 def main_layout():
-    """Main layout function"""
-    # Initialize session state
+    """Main layout execution"""
+    # Initialize Core
     initialize_session_state()
-
-    # Setup page configuration
     setup_page_config()
 
-    # Apply custom styles
-    apply_custom_styles()
+    # Inject Cyber Styles
+    st.markdown(get_main_styles(), unsafe_allow_html=True)
 
-    # Render sidebar
-    sidebar_info = render_sidebar()
+    # Render Sidebar
+    sidebar_control_panel()
 
-    # Render main content
-    render_main_content()
+    # Main Content Area
+    display_header()
 
-    # Display footer
+    # Determine Content State
+    show_results = st.session_state.get("show_results", False)
+    last_result = st.session_state.get("last_result", None)
+
+    if show_results and last_result:
+        results_display_component(last_result, st.session_state.task_counter)
+    else:
+        # Landing State
+        display_features()
+        system_status_component()
+
+        st.markdown('<div style="height: 2rem;"></div>', unsafe_allow_html=True)
+
+        # Input Interface
+        render_input_area()
+
+    # Global Error Handler (Always active)
+    handle_error_display()
+
+    # Footer
     footer_component()
 
-    return sidebar_info
+    return {}
+
+
+def render_input_area():
+    """Handles the logic for which input to show"""
+
+    # Handle guided mode async processing (background)
+    handle_guided_mode_processing()
+
+    mode = requirement_mode_selector()
+    is_guided = mode == "guided"
+    processing = st.session_state.get("processing", False)
+    requirements_confirmed = st.session_state.get("requirements_confirmed", False)
+
+    input_source: Optional[str] = None
+    input_type: Optional[str] = None
+
+    with st.container():
+        if is_guided:
+            input_source, _ = guided_requirement_workflow()
+            input_type = "chat" if input_source else None
+        else:
+            input_source, input_type = input_method_selector(
+                st.session_state.task_counter
+            )
+
+        st.markdown('<div style="height: 1.5rem;"></div>', unsafe_allow_html=True)
+
+        if is_guided and requirements_confirmed and input_source and not processing:
+            payload = input_source
+            st.session_state.requirements_confirmed = False
+            st.session_state.confirmed_requirement_text = None
+            handle_start_processing_button(payload, input_type or "chat")
+
+        elif input_source and not processing:
+            col1, col2, col3 = st.columns([1, 2, 1])
+            with col2:
+                if st.button(
+                    "START CODING 🚀", type="primary", use_container_width=True
+                ):
+                    if is_guided:
+                        st.session_state.confirmed_requirement_text = None
+                    handle_start_processing_button(input_source, input_type or "chat")
+
+        elif processing:
+            st.markdown(
+                """
+                <div style="padding:1.5rem; border:1px solid var(--primary); border-radius:4px; background:rgba(0, 242, 255, 0.05); text-align:center;">
+                    <div class="status-dot" style="display:inline-block; margin-right:10px;"></div>
+                    <span style="font-family: var(--font-code); color: var(--primary); animation: pulse-glow 2s infinite;">NEURAL PROCESSING ACTIVE...</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        elif not input_source and not is_guided:
+            st.markdown(
+                """
+                <div style="text-align:center; color:rgba(255,255,255,0.3); font-family:var(--font-code); font-size:0.8rem;">
+                    AWAITING INPUT SIGNAL...
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
