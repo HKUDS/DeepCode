@@ -8,6 +8,7 @@ DeepCode - AI Research Engine
 __version__ = "1.2.0"
 __author__ = "DeepCode Team"
 __url__ = "https://github.com/HKUDS/DeepCode"
+__repo__ = "https://github.com/Jany-M/DeepCode/"
 
 # Import main components for easy access
 from utils import FileProcessor, DialogueLogger

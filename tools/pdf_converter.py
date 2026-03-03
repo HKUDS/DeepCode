@@ -18,8 +18,9 @@ import subprocess
 import tempfile
 import shutil
 import platform
+import os
 from pathlib import Path
-from typing import Union, Optional, Dict, Any
+from typing import Union, Optional, Dict, Any, List
 
 
 class PDFConverter:
@@ -39,6 +40,39 @@ class PDFConverter:
     def __init__(self) -> None:
         """Initialize the PDF converter."""
         pass
+
+    @staticmethod
+    def find_libreoffice_windows() -> Optional[str]:
+        """
+        Find LibreOffice installation on Windows.
+        
+        Returns:
+            Path to soffice.exe if found, None otherwise
+        """
+        if platform.system() != "Windows":
+            return None
+            
+        # Common LibreOffice installation paths on Windows
+        possible_paths = [
+            r"C:\Program Files\LibreOffice\program\soffice.exe",
+            r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
+        ]
+        
+        # Also check PROGRAMFILES environment variables
+        program_files = os.environ.get("PROGRAMFILES")
+        program_files_x86 = os.environ.get("PROGRAMFILES(X86)")
+        
+        if program_files:
+            possible_paths.append(os.path.join(program_files, "LibreOffice", "program", "soffice.exe"))
+        if program_files_x86:
+            possible_paths.append(os.path.join(program_files_x86, "LibreOffice", "program", "soffice.exe"))
+        
+        # Check each path
+        for path in possible_paths:
+            if os.path.exists(path):
+                return path
+                
+        return None
 
     @staticmethod
     def convert_office_to_pdf(
@@ -67,7 +101,15 @@ class PDFConverter:
             if output_dir:
                 base_output_dir = Path(output_dir)
             else:
-                base_output_dir = doc_path.parent / "pdf_output"
+                # Generate unique folder name with timestamp to avoid conflicts
+                import time
+                timestamp = int(time.time())
+                folder_name = f"paper_{timestamp}"
+                
+                # Save to workspace instead of temp directory
+                workspace_base = Path(os.getcwd()) / "deepcode_lab" / "papers"
+                workspace_base.mkdir(parents=True, exist_ok=True)
+                base_output_dir = workspace_base / folder_name
 
             base_output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -86,26 +128,41 @@ class PDFConverter:
 
             # Hide console window on Windows
             if platform.system() == "Windows":
-                subprocess_kwargs["creationflags"] = (
-                    0x08000000  # subprocess.CREATE_NO_WINDOW
-                )
+                # Use CREATE_NO_WINDOW to prevent console window from appearing
+                subprocess_kwargs["creationflags"] = 0x08000000
+                # Also configure startupinfo to hide window
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = subprocess.SW_HIDE
+                subprocess_kwargs["startupinfo"] = startupinfo
 
-            try:
-                result = subprocess.run(
-                    ["libreoffice", "--version"], **subprocess_kwargs
-                )
-                libreoffice_available = True
-                working_libreoffice_cmd = "libreoffice"
-                logging.info(f"LibreOffice detected: {result.stdout.strip()}")  # type: ignore
-            except (
-                subprocess.CalledProcessError,
-                FileNotFoundError,
-                subprocess.TimeoutExpired,
-            ):
-                pass
+            # On Windows, try to find LibreOffice in standard installation paths first
+            # Don't run --version check on Windows as it can cause window/hanging issues
+            if platform.system() == "Windows":
+                windows_path = PDFConverter.find_libreoffice_windows()
+                if windows_path:
+                    libreoffice_available = True
+                    working_libreoffice_cmd = windows_path
+                    logging.info(f"LibreOffice detected at {windows_path}")
 
-            # Try alternative commands for LibreOffice
-            if not libreoffice_available:
+            # On non-Windows systems, try standard commands
+            if not libreoffice_available and platform.system() != "Windows":
+                try:
+                    result = subprocess.run(
+                        ["libreoffice", "--version"], **subprocess_kwargs
+                    )
+                    libreoffice_available = True
+                    working_libreoffice_cmd = "libreoffice"
+                    logging.info(f"LibreOffice detected: {result.stdout.strip()}")  # type: ignore
+                except (
+                    subprocess.CalledProcessError,
+                    FileNotFoundError,
+                    subprocess.TimeoutExpired,
+                ):
+                    pass
+
+            # Try alternative commands for LibreOffice (non-Windows)
+            if not libreoffice_available and platform.system() != "Windows":
                 for cmd in ["soffice", "libreoffice"]:
                     try:
                         result = subprocess.run([cmd, "--version"], **subprocess_kwargs)
@@ -142,7 +199,13 @@ class PDFConverter:
 
                 # Use the working LibreOffice command first, then try alternatives if it fails
                 commands_to_try = [working_libreoffice_cmd]
-                if working_libreoffice_cmd == "libreoffice":
+                
+                # Add alternative commands based on what was found
+                if platform.system() == "Windows" and working_libreoffice_cmd:
+                    # If we're using the full Windows path, also try standard commands
+                    if "Program Files" in working_libreoffice_cmd:
+                        commands_to_try.extend(["soffice", "libreoffice"])
+                elif working_libreoffice_cmd == "libreoffice":
                     commands_to_try.append("soffice")
                 else:
                     commands_to_try.append("libreoffice")
@@ -173,9 +236,12 @@ class PDFConverter:
 
                         # Hide console window on Windows
                         if platform.system() == "Windows":
-                            convert_subprocess_kwargs["creationflags"] = (
-                                0x08000000  # subprocess.CREATE_NO_WINDOW
-                            )
+                            convert_subprocess_kwargs["creationflags"] = 0x08000000
+                            # Also configure startupinfo to hide window
+                            startupinfo = subprocess.STARTUPINFO()
+                            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                            startupinfo.wShowWindow = subprocess.SW_HIDE
+                            convert_subprocess_kwargs["startupinfo"] = startupinfo
 
                         result = subprocess.run(
                             convert_cmd, **convert_subprocess_kwargs
@@ -227,6 +293,10 @@ class PDFConverter:
                 # Copy PDF to final output directory
                 final_pdf_path = base_output_dir / f"{name_without_suff}.pdf"
                 shutil.copy2(pdf_path, final_pdf_path)
+                
+                print(f"✅ PDF saved to: {final_pdf_path}")
+                print(f"   File size: {final_pdf_path.stat().st_size} bytes")
+                print(f"   Parent folder: {base_output_dir}")
 
                 return final_pdf_path
 
@@ -281,7 +351,15 @@ class PDFConverter:
             if output_dir:
                 base_output_dir = Path(output_dir)
             else:
-                base_output_dir = text_path.parent / "pdf_output"
+                # Generate unique folder name with timestamp to avoid conflicts
+                import time
+                timestamp = int(time.time())
+                folder_name = f"paper_{timestamp}"
+                
+                # Save to workspace instead of temp directory
+                workspace_base = Path(os.getcwd()) / "deepcode_lab" / "papers"
+                workspace_base.mkdir(parents=True, exist_ok=True)
+                base_output_dir = workspace_base / folder_name
 
             base_output_dir.mkdir(parents=True, exist_ok=True)
             pdf_path = base_output_dir / f"{text_path.stem}.pdf"
@@ -435,6 +513,10 @@ class PDFConverter:
                     f"PDF conversion failed for {text_path.name} - generated PDF is empty or corrupted."
                 )
 
+            print(f"✅ PDF saved to: {pdf_path}")
+            print(f"   File size: {pdf_path.stat().st_size} bytes")
+            print(f"   Parent folder: {base_output_dir}")
+            
             return pdf_path
 
         except Exception as e:
@@ -532,27 +614,34 @@ class PDFConverter:
         }
 
         # Check LibreOffice
-        try:
-            subprocess_kwargs: Dict[str, Any] = {
-                "capture_output": True,
-                "text": True,
-                "check": True,
-                "encoding": "utf-8",
-                "errors": "ignore",
-            }
-
-            if platform.system() == "Windows":
-                subprocess_kwargs["creationflags"] = (
-                    0x08000000  # subprocess.CREATE_NO_WINDOW
-                )
-
-            subprocess.run(["libreoffice", "--version"], **subprocess_kwargs)
-            results["libreoffice"] = True
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            try:
-                subprocess.run(["soffice", "--version"], **subprocess_kwargs)
+        # On Windows, just check if the executable exists (don't run it to avoid window issues)
+        if platform.system() == "Windows":
+            windows_path = PDFConverter.find_libreoffice_windows()
+            if windows_path:
                 results["libreoffice"] = True
-            except (subprocess.CalledProcessError, FileNotFoundError):
+        else:
+            # On non-Windows systems, try running the version command
+            try:
+                subprocess_kwargs: Dict[str, Any] = {
+                    "capture_output": True,
+                    "text": True,
+                    "check": True,
+                    "timeout": 5,
+                    "encoding": "utf-8",
+                    "errors": "ignore",
+                }
+
+                try:
+                    subprocess.run(["libreoffice", "--version"], **subprocess_kwargs)
+                    results["libreoffice"] = True
+                except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+                    try:
+                        subprocess.run(["soffice", "--version"], **subprocess_kwargs)
+                        results["libreoffice"] = True
+                    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+                        pass
+            except Exception:
+                # If any unexpected error occurs during LibreOffice check, silently pass
                 pass
 
         # Check ReportLab

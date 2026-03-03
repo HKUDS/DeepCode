@@ -67,16 +67,16 @@ os.environ["PYTHONDONTWRITEBYTECODE"] = "1"  # Prevent .pyc file generation
 
 def _assess_output_completeness(text: str) -> float:
     """
-    精准评估YAML格式实现计划的完整性
+    Accurately assess the completeness of YAML-formatted implementation plans.
 
-    基于CODE_PLANNING_PROMPT_TRADITIONAL的实际要求：
-    1. 检查5个必需的YAML sections是否都存在
-    2. 验证YAML结构的完整性（开始和结束标记）
-    3. 检查最后一行是否被截断
-    4. 验证最小合理长度
+    Based on the actual requirements of CODE_PLANNING_PROMPT_TRADITIONAL:
+    1. Check if all 5 required YAML sections are present
+    2. Verify YAML structure integrity (start and end markers)
+    3. Check if the last line is truncated
+    4. Verify minimum reasonable length
 
     Returns:
-        float: 完整性分数 (0.0-1.0)，越高表示越完整
+        float: Completeness score (0.0-1.0), higher indicates more complete
     """
     if not text or len(text.strip()) < 500:
         return 0.0
@@ -84,8 +84,8 @@ def _assess_output_completeness(text: str) -> float:
     score = 0.0
     text_lower = text.lower()
 
-    # 1. 检查5个必需的YAML sections (权重: 0.5 - 最重要)
-    # 这是prompt明确要求的5个sections
+    # 1. Check for 5 required YAML sections (weight: 0.5 - most important)
+    # These are the 5 sections explicitly required by the prompt
     required_sections = [
         "file_structure:",
         "implementation_components:",
@@ -100,7 +100,7 @@ def _assess_output_completeness(text: str) -> float:
 
     print(f"   📋 Required sections: {sections_found}/{len(required_sections)}")
 
-    # 2. 检查YAML结构完整性 (权重: 0.2)
+    # 2. Check YAML structure integrity (weight: 0.2)
     has_yaml_start = any(
         marker in text
         for marker in ["```yaml", "complete_reproduction_plan:", "paper_info:"]
@@ -115,25 +115,25 @@ def _assess_output_completeness(text: str) -> float:
     elif has_yaml_start:
         score += 0.1
 
-    # 3. 检查最后一行完整性 (权重: 0.15)
+    # 3. Check last line integrity (weight: 0.15)
     lines = text.strip().split("\n")
     if lines:
         last_line = lines[-1].strip()
-        # YAML的最后一行通常是缩进的内容行或结束标记
+        # YAML's last line is usually an indented content line or end marker
         if (
             last_line.endswith(("```", ".", ":", "]", "}"))
-            or last_line.startswith(("-", "*", " "))  # YAML列表项或缩进内容
+            or last_line.startswith(("-", "*", " "))  # YAML list items or indented content
             or (
                 len(last_line) < 100 and not last_line.endswith(",")
-            )  # 短行且不是被截断的
+            )  # Short line and not truncated
         ):
             score += 0.15
         else:
-            # 长行且没有合适的结尾，很可能被截断
+            # Long line without proper ending, likely truncated
             print(f"   ⚠️  Last line suspicious: '{last_line[-50:]}'")
 
-    # 4. 检查合理的最小长度 (权重: 0.15)
-    # 一个完整的5-section计划应该至少8000字符
+    # 4. Check reasonable minimum length (weight: 0.15)
+    # A complete 5-section plan should be at least 8000 characters
     length = len(text)
     if length >= 10000:
         score += 0.15
@@ -180,7 +180,7 @@ def _adjust_params_for_retry(
         # 第三次及以上：减少到retry_max_tokens的60%
         new_max_tokens = int(retry_max_tokens * 0.8)
 
-    # 随着重试次数增加，降低temperature以获得更一致、更可预测的输出
+    # Decrease temperature with each retry to get more consistent and predictable output
     new_temperature = max(params.temperature - (retry_count * 0.15), 0.05)
 
     print(f"🔧 Adjusting parameters for retry {retry_count + 1}:")
@@ -419,7 +419,7 @@ async def run_research_analyzer(prompt_text: str, logger) -> str:
 
             # Set higher token output for research analysis
             analysis_params = RequestParams(
-                maxTokens=6144,  # 使用 camelCase
+                maxTokens=6144,  # Using camelCase
                 temperature=0.3,
             )
 
@@ -882,7 +882,7 @@ async def github_repo_download(search_result: str, paper_dir: str, logger) -> st
 
         # Set higher token output for GitHub download
         github_params = RequestParams(
-            maxTokens=4096,  # 使用 camelCase
+            maxTokens=4096,  # Using camelCase
             temperature=0.1,
         )
 
@@ -1121,9 +1121,26 @@ async def orchestrate_document_preprocessing_agent(
             with open(md_path, "rb") as f:
                 header = f.read(8)
                 if header.startswith(b"%PDF"):
-                    raise IOError(
-                        f"File {md_path} is a PDF file, not a text file. Please convert it to markdown format or use PDF processing tools."
-                    )
+                    # If we find a PDF file where we expected markdown, try to convert it
+                    print(f"⚠️ Found PDF file instead of markdown: {md_path}")
+                    print("🔄 Attempting to convert PDF to markdown...")
+                    
+                    # Try to convert the PDF to markdown
+                    try:
+                        from tools.pdf_downloader import SimplePdfConverter
+                        converter = SimplePdfConverter()
+                        conversion_result = converter.convert_pdf_to_markdown(md_path)
+                        
+                        if conversion_result["success"]:
+                            print(f"✅ PDF converted to markdown: {conversion_result['output_file']}")
+                            # Use the converted markdown file instead
+                            md_path = conversion_result["output_file"]
+                        else:
+                            raise IOError(f"PDF conversion failed: {conversion_result['error']}")
+                    except Exception as conv_error:
+                        raise IOError(
+                            f"File {md_path} is a PDF file, not a text file. PDF conversion failed: {str(conv_error)}"
+                        )
 
             with open(md_path, "r", encoding="utf-8") as f:
                 document_content = f.read()
@@ -1141,6 +1158,7 @@ async def orchestrate_document_preprocessing_agent(
 
         # Step 3: Determine if segmentation should be used
         should_segment, reason = should_use_document_segmentation(document_content)
+        
         print(f"📊 Segmentation decision: {should_segment}")
         print(f"   Reason: {reason}")
 
@@ -1239,12 +1257,43 @@ async def orchestrate_code_planning_agent(
         use_segmentation = dir_info.get("use_segmentation", True)
         print(f"📊 Planning mode: {'Segmented' if use_segmentation else 'Traditional'}")
 
+        # First, verify there's a markdown file to analyze
+        import glob
+        md_files = glob.glob(os.path.join(dir_info["paper_dir"], "*.md"))
+        md_files = [f for f in md_files if not f.endswith("implement_code_summary.md")]  # Exclude summary
+        
+        if not md_files:
+            error_msg = f"❌ No markdown file found in {dir_info['paper_dir']}. PDF conversion may have failed."
+            print(error_msg)
+            print(f"   Paper directory: {dir_info['paper_dir']}")
+            print(f"   Directory exists: {os.path.exists(dir_info['paper_dir'])}")
+            if os.path.exists(dir_info['paper_dir']):
+                all_files = os.listdir(dir_info['paper_dir'])
+                print(f"   Available files ({len(all_files)}): {all_files}")
+                
+                # Check for PDF files that might need conversion
+                pdf_files = [f for f in all_files if f.endswith('.pdf')]
+                if pdf_files:
+                    print(f"   Found PDF files that weren't converted: {pdf_files}")
+            else:
+                print(f"   ⚠️ Directory doesn't exist!")
+            raise ValueError(error_msg)
+        
+        print(f"📄 Found markdown file for analysis: {os.path.basename(md_files[0])}")
+
         initial_plan_result = await run_code_analyzer(
             dir_info["paper_dir"], logger, use_segmentation=use_segmentation
         )
+        
+        # Check if plan is empty or invalid
+        if not initial_plan_result or len(initial_plan_result.strip()) < 100:
+            error_msg = f"❌ Code planning failed: Generated plan is empty or too short ({len(initial_plan_result)} chars)"
+            print(error_msg)
+            raise ValueError(error_msg)
+        
         with open(initial_plan_path, "w", encoding="utf-8") as f:
             f.write(initial_plan_result)
-        print(f"Initial plan saved to {initial_plan_path}")
+        print(f"✅ Initial plan saved to {initial_plan_path} ({len(initial_plan_result)} chars)")
 
 
 async def automate_repository_acquisition_agent(
@@ -1493,6 +1542,10 @@ async def synthesize_code_implementation_agent(
             print(f"Using initial plan from {dir_info['initial_plan_path']}")
 
             # Run code implementation workflow with pure code mode
+            # Pass segmentation information to help with token management
+            use_segmentation = dir_info.get("use_segmentation", False)
+            print(f"🔧 Code implementation using segmentation: {use_segmentation}")
+            
             implementation_result = await code_workflow.run_workflow(
                 plan_file_path=dir_info["initial_plan_path"],
                 target_directory=dir_info["paper_dir"],
@@ -1587,7 +1640,7 @@ async def run_chat_planning_agent(user_input: str, logger) -> str:
 
             # Set higher token output for comprehensive planning
             planning_params = RequestParams(
-                maxTokens=8192,  # 使用 camelCase - Higher token limit for detailed plans
+                maxTokens=8192,  # Using camelCase - Higher token limit for detailed plans
                 temperature=0.2,  # Lower temperature for more structured output
             )
 
@@ -1669,11 +1722,12 @@ async def execute_multi_agent_research_pipeline(
         str: The comprehensive pipeline execution result with status and outcomes
     """
     try:
-        # Phase 0: Workspace Setup
+        # Phase 0: Workspace Setup (5%)
         if progress_callback:
             progress_callback(5, "🔄 Setting up workspace for file processing...")
 
         print("🚀 Initializing intelligent multi-agent research orchestration system")
+        print("📊 Progress: 5% - Workspace Setup")
 
         # Setup local workspace directory
         workspace_dir = os.path.join(os.getcwd(), "deepcode_lab")
@@ -1689,11 +1743,59 @@ async def execute_multi_agent_research_pipeline(
         else:
             print("⚡ Optimized mode - advanced intelligence analysis disabled")
 
-        # Phase 1: Input Processing and Validation
+        # Phase 1: Input Processing and Validation (10%)
+        if progress_callback:
+            progress_callback(10, "📄 Processing and validating input source...")
+        print("📊 Progress: 10% - Input Processing")
+        
         input_source = await _process_input_source(input_source, logger)
 
-        # Phase 2: Research Analysis and Resource Processing (if needed)
-        if isinstance(input_source, str) and (
+        # Phase 2: Research Analysis and Resource Processing (25%)
+        if progress_callback:
+            progress_callback(25, "🔍 Analyzing research content and downloading resources...")
+        print("📊 Progress: 25% - Research Analysis")
+        
+        # Check if input_source is already a JSON with paper_path in a paper_{timestamp} folder
+        skip_processing = False
+        if isinstance(input_source, str):
+            try:
+                import json
+                import re
+                input_dict = json.loads(input_source)
+                if "paper_path" in input_dict:
+                    paper_path = input_dict["paper_path"]
+                    paper_dir = os.path.dirname(paper_path)
+                    # Check if already in a paper_{timestamp} folder
+                    if re.match(r"paper_\d+$", os.path.basename(paper_dir)):
+                        print(f"✅ File already in organized folder: {paper_dir}")
+                        print(f"   Skipping research analysis phase (file already processed)")
+                        
+                        # Convert PDF to markdown if not already done
+                        if paper_path.endswith('.pdf'):
+                            print(f"🔄 Converting PDF to markdown...")
+                            try:
+                                from tools.pdf_downloader import SimplePdfConverter
+                                converter = SimplePdfConverter()
+                                conversion_result = converter.convert_pdf_to_markdown(paper_path)
+                                if conversion_result["success"]:
+                                    print(f"✅ PDF converted to markdown: {conversion_result['output_file']}")
+                                    # Update paper_path to point to markdown file
+                                    input_dict["paper_path"] = conversion_result["output_file"]
+                                    download_result = json.dumps(input_dict)
+                                else:
+                                    print(f"⚠️ PDF conversion failed: {conversion_result.get('error')}")
+                                    download_result = input_source
+                            except Exception as e:
+                                print(f"⚠️ PDF conversion error: {e}")
+                                download_result = input_source
+                        else:
+                            download_result = input_source
+                        
+                        skip_processing = True
+            except:
+                pass  # Not JSON, continue normal processing
+        
+        if not skip_processing and isinstance(input_source, str) and (
             input_source.endswith((".pdf", ".docx", ".txt", ".html", ".md"))
             or input_source.startswith(("http", "file://"))
         ):
@@ -1703,21 +1805,25 @@ async def execute_multi_agent_research_pipeline(
             ) = await orchestrate_research_analysis_agent(
                 input_source, logger, progress_callback
             )
-        else:
+        elif not skip_processing:
             download_result = input_source  # Use input directly if already processed
 
-        # Phase 3: Workspace Infrastructure Synthesis
+        # Phase 3: Workspace Infrastructure Synthesis (40%)
         if progress_callback:
             progress_callback(
                 40, "🏗️ Synthesizing intelligent workspace infrastructure..."
             )
+        print("📊 Progress: 40% - Workspace Setup")
 
         dir_info = await synthesize_workspace_infrastructure_agent(
             download_result, logger, workspace_dir
         )
         await asyncio.sleep(5)
 
-        # Phase 3.5: Document Segmentation and Preprocessing
+        # Phase 4: Document Segmentation and Preprocessing (50%)
+        if progress_callback:
+            progress_callback(50, "📄 Processing and segmenting document content...")
+        print("📊 Progress: 50% - Document Preprocessing")
 
         segmentation_result = await orchestrate_document_preprocessing_agent(
             dir_info, logger
@@ -1743,10 +1849,18 @@ async def execute_multi_agent_research_pipeline(
                 f"⚠️ Document preprocessing encountered issues: {segmentation_result.get('error_message', 'Unknown')}"
             )
 
-        # Phase 4: Code Planning Orchestration
+        # Phase 5: Code Planning Orchestration (65%)
+        if progress_callback:
+            progress_callback(65, "📋 Generating implementation plan and code structure...")
+        print("📊 Progress: 65% - Code Planning")
+        
         await orchestrate_code_planning_agent(dir_info, logger, progress_callback)
 
-        # Phase 5: Reference Intelligence (only when indexing is enabled)
+        # Phase 6: Reference Intelligence (only when indexing is enabled) (70%)
+        if progress_callback:
+            progress_callback(70, "🔍 Analyzing references and related work...")
+        print("📊 Progress: 70% - Reference Analysis")
+        
         if enable_indexing:
             reference_result = await orchestrate_reference_intelligence_agent(
                 dir_info, logger, progress_callback
@@ -1758,7 +1872,11 @@ async def execute_multi_agent_research_pipeline(
             with open(dir_info["reference_path"], "w", encoding="utf-8") as f:
                 f.write(reference_result)
 
-        # Phase 6: Repository Acquisition Automation (optional)
+        # Phase 7: Repository Acquisition Automation (optional) (75%)
+        if progress_callback:
+            progress_callback(75, "📦 Acquiring related repositories and codebases...")
+        print("📊 Progress: 75% - Repository Acquisition")
+        
         if enable_indexing:
             await automate_repository_acquisition_agent(
                 reference_result, dir_info, logger, progress_callback
@@ -1771,7 +1889,11 @@ async def execute_multi_agent_research_pipeline(
                     "Automated repository acquisition skipped - fast mode enabled for optimized processing"
                 )
 
-        # Phase 7: Codebase Intelligence Orchestration (optional)
+        # Phase 8: Codebase Intelligence Orchestration (optional) (80%)
+        if progress_callback:
+            progress_callback(80, "🧠 Analyzing codebase intelligence and indexing...")
+        print("📊 Progress: 80% - Codebase Intelligence")
+        
         if enable_indexing:
             index_result = await orchestrate_codebase_intelligence_agent(
                 dir_info, logger, progress_callback
@@ -1787,11 +1909,20 @@ async def execute_multi_agent_research_pipeline(
             with open(dir_info["index_report_path"], "w", encoding="utf-8") as f:
                 f.write(str(index_result))
 
-        # Phase 8: Code Implementation Synthesis
+        # Phase 9: Code Implementation Synthesis (85%)
+        if progress_callback:
+            progress_callback(85, "💻 Implementing code based on analysis and planning...")
+        print("📊 Progress: 85% - Code Implementation")
+        
         implementation_result = await synthesize_code_implementation_agent(
             dir_info, logger, progress_callback, enable_indexing
         )
 
+        # Phase 10: Finalization (100%)
+        if progress_callback:
+            progress_callback(100, "🎉 Finalizing results and generating summary...")
+        print("📊 Progress: 100% - Finalization")
+        
         # Final Status Report
         if enable_indexing:
             pipeline_summary = (
@@ -1833,7 +1964,18 @@ async def execute_multi_agent_research_pipeline(
             return pipeline_summary
 
     except Exception as e:
-        print(f"Error in execute_multi_agent_research_pipeline: {e}")
+        error_msg = f"Error in execute_multi_agent_research_pipeline: {e}"
+        print(f"❌ {error_msg}")
+        print(f"   Error type: {type(e).__name__}")
+        print(f"   Error details: {str(e)}")
+        
+        # Display error in UI if progress callback available
+        if progress_callback:
+            progress_callback(0, "Pipeline failed", error_msg)
+        
+        # Ensure all resources are cleaned up on error
+        import gc
+        gc.collect()
         raise e
 
 

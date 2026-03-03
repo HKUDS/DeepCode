@@ -61,6 +61,8 @@ class CodeImplementationWorkflow:
         self.enable_read_tools = (
             True  # Default value, will be overridden by run_workflow parameter
         )
+        self.loop_detector = LoopDetector()
+        self.progress_tracker = ProgressTracker()
 
     def _load_api_config(self) -> Dict[str, Any]:
         """Load API configuration with environment variable override."""
@@ -348,6 +350,22 @@ Requirements:
             if elapsed_time > max_time:
                 self.logger.warning(f"Time limit reached: {elapsed_time:.2f}s")
                 break
+                
+            # Check for loops and timeouts
+            if self.loop_detector.should_abort():
+                abort_reason = self.loop_detector.get_abort_reason()
+                self.logger.error(f"🛑 Process aborted: {abort_reason}")
+                # Return error immediately instead of continuing to final report
+                return f"❌ Process aborted due to: {abort_reason}\n\nThe code implementation was stopped because the system detected an issue that prevented progress. Please check the logs for more details."
+                
+            # Update file-level progress
+            files_implemented = code_agent.get_files_implemented_count()
+            if files_implemented > 0:
+                self.progress_tracker.total_files = max(self.progress_tracker.total_files, files_implemented + 5)  # Estimate total
+                progress_info = self.progress_tracker.get_progress_info()
+                print(f"📁 Files: {progress_info['files_completed']}/{progress_info['total_files']} ({progress_info['file_progress']:.1f}%)")
+                if progress_info['estimated_remaining_seconds'] > 0:
+                    print(f"⏱️ Estimated remaining: {progress_info['estimated_remaining_seconds']:.0f}s")
 
             # # Test simplified memory approach if we have files implemented
             # if iteration == 5 and code_agent.get_files_implemented_count() > 0:
@@ -375,12 +393,36 @@ Requirements:
 
             # Handle tool calls
             if response.get("tool_calls"):
+                # Check for loops before executing tools
+                for tool_call in response["tool_calls"]:
+                    loop_status = self.loop_detector.check_tool_call(tool_call["name"])
+                    if loop_status["should_stop"]:
+                        self.logger.error(f"🛑 Tool execution aborted: {loop_status['message']}")
+                        return f"Process aborted: {loop_status['message']}"
+                
                 tool_results = await code_agent.execute_tool_calls(
                     response["tool_calls"]
                 )
 
                 # Record essential tool results in concise memory agent
                 for tool_call, tool_result in zip(response["tool_calls"], tool_results):
+                    # Check if tool actually failed
+                    # Only count as error if isError flag is True
+                    is_error = tool_result.get("isError", False)
+                    
+                    if not is_error:
+                        # Tool succeeded
+                        self.loop_detector.record_success()
+                        
+                        # Track file completion
+                        if tool_call["name"] == "write_file":
+                            filename = tool_call["input"].get("file_path", "unknown")
+                            self.progress_tracker.complete_file(filename)
+                            print(f"✅ File completed: {filename}")
+                    else:
+                        # Tool actually failed
+                        self.loop_detector.record_error(f"Tool {tool_call['name']} failed: {tool_result.get('result', '')[:100]}")
+                    
                     memory_agent.record_tool_result(
                         tool_name=tool_call["name"],
                         tool_input=tool_call["input"],
@@ -470,8 +512,8 @@ Requirements:
         try:
             self.mcp_agent = Agent(
                 name="CodeImplementationAgent",
-                instruction="You are a code implementation assistant, using MCP tools to implement paper code replication.",
-                server_names=["code-implementation", "code-reference-indexer"],
+                instruction="You are a code implementation assistant, using MCP tools to implement paper code replication. For large documents, use document-segmentation tools to read content in smaller chunks to avoid token limits.",
+                server_names=["code-implementation", "code-reference-indexer", "document-segmentation"],
             )
 
             await self.mcp_agent.__aenter__()
@@ -677,7 +719,7 @@ Requirements:
     async def _call_anthropic_with_tools(
         self, client, system_message, messages, tools, max_tokens
     ):
-        """Call Anthropic API"""
+        """Call Anthropic API with token limit management"""
         validated_messages = self._validate_messages(messages)
         if not validated_messages:
             validated_messages = [
@@ -713,7 +755,34 @@ Requirements:
                     {"id": block.id, "name": block.name, "input": block.input}
                 )
 
-        return {"content": content, "tool_calls": tool_calls}
+        # Extract token usage and calculate cost
+        token_usage = {}
+        cost = 0.0
+        
+        if hasattr(response, 'usage') and response.usage:
+            token_usage = {
+                "input_tokens": response.usage.input_tokens,
+                "output_tokens": response.usage.output_tokens,
+                "total_tokens": response.usage.input_tokens + response.usage.output_tokens
+            }
+            
+            # Use dynamic cost calculation based on current model
+            from utils.model_limits import calculate_token_cost
+            cost = calculate_token_cost(
+                response.usage.input_tokens,
+                response.usage.output_tokens,
+                model_name=self.default_models.get("anthropic")
+            )
+            
+            print(f"💰 Tokens: {token_usage['total_tokens']} (${cost:.4f})")
+            self.logger.info(f"Token usage: {token_usage['input_tokens']} input + {token_usage['output_tokens']} output = {token_usage['total_tokens']} total (${cost:.4f})")
+
+        return {
+            "content": content, 
+            "tool_calls": tool_calls,
+            "token_usage": token_usage,
+            "cost": cost
+        }
 
     async def _call_google_with_tools(
         self, client, system_message, messages, tools, max_tokens
@@ -1160,7 +1229,34 @@ Requirements:
                         print("   ⚠️  Skipping unrepairable tool call")
                         continue
 
-        return {"content": content, "tool_calls": tool_calls}
+        # Extract token usage and calculate cost
+        token_usage = {}
+        cost = 0.0
+        
+        if hasattr(response, 'usage') and response.usage:
+            token_usage = {
+                "prompt_tokens": response.usage.prompt_tokens,
+                "completion_tokens": response.usage.completion_tokens,
+                "total_tokens": response.usage.total_tokens
+            }
+            
+            # Use dynamic cost calculation based on current model
+            from utils.model_limits import calculate_token_cost
+            cost = calculate_token_cost(
+                response.usage.prompt_tokens,
+                response.usage.completion_tokens,
+                model_name=self.default_models.get("openai")
+            )
+            
+            print(f"💰 Tokens: {token_usage['total_tokens']} (${cost:.4f})")
+            self.logger.info(f"Token usage: {token_usage['prompt_tokens']} prompt + {token_usage['completion_tokens']} completion = {token_usage['total_tokens']} total (${cost:.4f})")
+
+        return {
+            "content": content, 
+            "tool_calls": tool_calls,
+            "token_usage": token_usage,
+            "cost": cost
+        }
 
     # ==================== 5. Tools and Utility Methods (Utility Layer) ====================
 
