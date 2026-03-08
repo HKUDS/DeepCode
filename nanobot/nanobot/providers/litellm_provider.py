@@ -68,7 +68,10 @@ class LiteLLMProvider(LLMProvider):
         for env_name, env_val in spec.env_extras:
             resolved = env_val.replace("{api_key}", api_key)
             resolved = resolved.replace("{api_base}", effective_base)
-            os.environ.setdefault(env_name, resolved)
+            if self._gateway:
+                os.environ[env_name] = resolved
+            else:
+                os.environ.setdefault(env_name, resolved)
 
     def _resolve_model(self, model: str) -> str:
         """Resolve model name by applying provider/gateway prefixes."""
