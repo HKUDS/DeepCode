@@ -22,6 +22,7 @@ from typing import Dict, Any, Optional, List
 
 # MCP Agent imports
 from mcp_agent.agents.agent import Agent
+from utils.loop_detector import LoopDetector, ProgressTracker
 
 # Local imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

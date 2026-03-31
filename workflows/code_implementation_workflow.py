@@ -33,6 +33,7 @@ from workflows.agents import CodeImplementationAgent
 from workflows.agents.memory_agent_concise import ConciseMemoryAgent
 from config.mcp_tool_definitions import get_mcp_tools
 from utils.llm_utils import get_preferred_llm_class, get_default_models, load_api_config
+from utils.loop_detector import LoopDetector, ProgressTracker
 # DialogueLogger removed - no longer needed
 
 
