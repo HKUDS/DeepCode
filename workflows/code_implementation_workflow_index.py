@@ -33,6 +33,7 @@ from workflows.agents import CodeImplementationAgent
 from workflows.agents.memory_agent_concise import ConciseMemoryAgent
 from config.mcp_tool_definitions_index import get_mcp_tools
 from utils.llm_utils import get_preferred_llm_class, get_default_models, load_api_config
+from utils.loop_detector import LoopDetector, ProgressTracker
 # DialogueLogger removed - no longer needed
 
 
@@ -462,7 +463,11 @@ Requirements:
             self.mcp_agent = Agent(
                 name="CodeImplementationAgent",
                 instruction="You are a code implementation assistant, using MCP tools to implement paper code replication. For large documents, use document-segmentation tools to read content in smaller chunks to avoid token limits.",
-                server_names=["code-implementation", "code-reference-indexer", "document-segmentation"],
+                server_names=[
+                    "code-implementation",
+                    "code-reference-indexer",
+                    "document-segmentation",
+                ],
             )
 
             await self.mcp_agent.__aenter__()
@@ -708,30 +713,34 @@ Requirements:
         # Extract token usage and calculate cost
         token_usage = {}
         cost = 0.0
-        
-        if hasattr(response, 'usage') and response.usage:
+
+        if hasattr(response, "usage") and response.usage:
             token_usage = {
                 "input_tokens": response.usage.input_tokens,
                 "output_tokens": response.usage.output_tokens,
-                "total_tokens": response.usage.input_tokens + response.usage.output_tokens
+                "total_tokens": response.usage.input_tokens
+                + response.usage.output_tokens,
             }
-            
+
             # Use dynamic cost calculation based on current model
             from utils.model_limits import calculate_token_cost
+
             cost = calculate_token_cost(
                 response.usage.input_tokens,
                 response.usage.output_tokens,
-                model_name=self.default_models.get("anthropic")
+                model_name=self.default_models.get("anthropic"),
             )
-            
+
             print(f"💰 Tokens: {token_usage['total_tokens']} (${cost:.4f})")
-            self.logger.info(f"Token usage: {token_usage['input_tokens']} input + {token_usage['output_tokens']} output = {token_usage['total_tokens']} total (${cost:.4f})")
+            self.logger.info(
+                f"Token usage: {token_usage['input_tokens']} input + {token_usage['output_tokens']} output = {token_usage['total_tokens']} total (${cost:.4f})"
+            )
 
         return {
-            "content": content, 
+            "content": content,
             "tool_calls": tool_calls,
             "token_usage": token_usage,
-            "cost": cost
+            "cost": cost,
         }
 
     async def _call_google_with_tools(
@@ -1182,30 +1191,33 @@ Requirements:
         # Extract token usage and calculate cost
         token_usage = {}
         cost = 0.0
-        
-        if hasattr(response, 'usage') and response.usage:
+
+        if hasattr(response, "usage") and response.usage:
             token_usage = {
                 "prompt_tokens": response.usage.prompt_tokens,
                 "completion_tokens": response.usage.completion_tokens,
-                "total_tokens": response.usage.total_tokens
+                "total_tokens": response.usage.total_tokens,
             }
-            
+
             # Use dynamic cost calculation based on current model
             from utils.model_limits import calculate_token_cost
+
             cost = calculate_token_cost(
                 response.usage.prompt_tokens,
                 response.usage.completion_tokens,
-                model_name=self.default_models.get("openai")
+                model_name=self.default_models.get("openai"),
             )
-            
+
             print(f"💰 Tokens: {token_usage['total_tokens']} (${cost:.4f})")
-            self.logger.info(f"Token usage: {token_usage['prompt_tokens']} prompt + {token_usage['completion_tokens']} completion = {token_usage['total_tokens']} total (${cost:.4f})")
+            self.logger.info(
+                f"Token usage: {token_usage['prompt_tokens']} prompt + {token_usage['completion_tokens']} completion = {token_usage['total_tokens']} total (${cost:.4f})"
+            )
 
         return {
-            "content": content, 
+            "content": content,
             "tool_calls": tool_calls,
             "token_usage": token_usage,
-            "cost": cost
+            "cost": cost,
         }
 
     # ==================== 5. Tools and Utility Methods (Utility Layer) ====================

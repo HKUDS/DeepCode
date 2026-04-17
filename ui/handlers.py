@@ -20,6 +20,7 @@ import concurrent.futures
 # Global abort flag
 _abort_requested = False
 
+
 def set_abort_requested(value: bool = True):
     """Set the global abort flag"""
     global _abort_requested
@@ -27,14 +28,17 @@ def set_abort_requested(value: bool = True):
     if value:
         print("🛑 Abort requested by user")
 
+
 def is_abort_requested() -> bool:
     """Check if abort has been requested"""
     return _abort_requested
+
 
 def reset_abort_flag():
     """Reset the abort flag"""
     global _abort_requested
     _abort_requested = False
+
 
 # Import necessary modules
 from mcp_agent.app import MCPApp
@@ -141,7 +145,7 @@ async def process_input_async(
             # Check for abort before starting
             if is_abort_requested():
                 return {"status": "aborted", "message": "Process aborted by user"}
-            
+
             # Choose pipeline based on input type
             if input_type == "chat":
                 # Use chat-based planning pipeline for user requirements
@@ -467,7 +471,7 @@ def handle_processing_workflow(
     # Define enhanced progress callback function
     def update_progress(progress: int, message: str, error: str = None):
         nonlocal current_step
-        
+
         # Check for abort request
         if is_abort_requested():
             st.error("🛑 Process aborted by user")
@@ -475,12 +479,12 @@ def handle_processing_workflow(
 
         # Update progress bar
         progress_bar.progress(progress)
-        
+
         # Display error if present
         if error:
             st.error(f"❌ Error: {error}")
             print(f"❌ Error: {error}")
-        
+
         # Update status with timestamp
         timestamp = datetime.now().strftime("%H:%M:%S")
         status_text.markdown(f"**[{timestamp}]** {message}")
@@ -523,7 +527,7 @@ def handle_processing_workflow(
         # Check for abort before starting
         if is_abort_requested():
             return {"status": "aborted", "message": "Process aborted by user"}
-            
+
         try:
             # First try using simple async processing method
             result = run_async_task_simple(
@@ -536,7 +540,7 @@ def handle_processing_workflow(
             st.warning(error_msg)
             print(f"⚠️ {error_msg}")
             update_progress(0, "Retrying with fallback method...", error_msg)
-            
+
             # Fallback method: use original thread pool method
             try:
                 result = run_async_task(
@@ -983,7 +987,7 @@ def handle_start_processing_button(input_source: str, input_type: str):
 
         # Clean up system resources
         cleanup_resources()
-        
+
         # Reset abort flag
         reset_abort_flag()
 

@@ -10,9 +10,9 @@ fastapi>=0.104.0
 google-genai
 mcp-agent
 mcp-server-git
-openapi
 nest_asyncio
 openai
+openapi
 pathlib2
 pydantic-settings>=2.0.0
 PyPDF2>=2.0.0

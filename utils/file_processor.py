@@ -194,14 +194,17 @@ class FileProcessor:
                     # Try to convert PDF to markdown automatically
                     try:
                         from tools.pdf_downloader import SimplePdfConverter
+
                         converter = SimplePdfConverter()
                         conversion_result = converter.convert_pdf_to_markdown(file_path)
-                        
+
                         if conversion_result["success"]:
                             # Use the converted markdown file instead
                             file_path = conversion_result["output_file"]
                         else:
-                            raise IOError(f"PDF conversion failed: {conversion_result['error']}")
+                            raise IOError(
+                                f"PDF conversion failed: {conversion_result['error']}"
+                            )
                     except Exception as conv_error:
                         raise IOError(
                             f"File {file_path} is a PDF file, not a text file. PDF conversion failed: {str(conv_error)}"

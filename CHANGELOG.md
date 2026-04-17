@@ -71,4 +71,3 @@ All notable changes to DeepCode will be documented in this file.
 ## [1.0.5] - Previous Release
 
 See previous releases for earlier changes.
-
