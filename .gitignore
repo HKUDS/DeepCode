@@ -71,7 +71,18 @@ memory-bank/
 
 # project files
 deepcode_lab/
+uploads/
 
 # secrets (use .env or environment variables instead)
+# NEVER commit real API keys; use the *.example files as templates.
 mcp_agent.secrets.yaml
 nanobot_config.json
+*.secrets.yaml
+*.secrets.yml
+secrets.json
+credentials.json
+*credentials*.json
+.env
+.env.*
+!.env.example
+!*.env.example
