@@ -29,18 +29,15 @@ Architecture:
 import asyncio
 import json
 import os
-import re
 import yaml
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
 # MCP Agent imports
 from core.compat import Agent, ParallelLLM, RequestParams
 
 # Local imports
 from prompts.code_prompts import (
-    PAPER_INPUT_ANALYZER_PROMPT,
-    PAPER_DOWNLOADER_PROMPT,
     PAPER_REFERENCE_ANALYZER_PROMPT,
     CHAT_AGENT_PLANNING_PROMPT,
 )
@@ -308,331 +305,50 @@ def get_search_server_names(
     return server_names
 
 
-def extract_clean_json(llm_output: str) -> str:
+async def acquire_input_artifact(ctx: WorkflowContext, logger) -> None:
+    """Phase 2 - deterministic input acquisition.
+
+    Routes ``ctx.input_source`` to the right MCP file-downloader tool purely
+    based on ``ctx.input_kind`` (already classified by Phase 0+1 in
+    :func:`workflows.environment.prepare_workflow_environment`). No LLM
+    call, no JSON parsing, no fallback heuristics. On failure it raises so
+    that ``execute_multi_agent_research_pipeline``'s outer ``try/except``
+    reports it through the standard error path.
+
+    Replaces the legacy ``run_research_analyzer`` (LLM-classify) +
+    ``run_resource_processor`` (LLM-fallback wrapper) +
+    ``orchestrate_research_analysis_agent`` (sequencer) trio. Saves about
+    one LLM round-trip and 10 s of artificial sleep per task.
     """
-    Extract clean JSON from LLM output, removing all extra text and formatting.
 
-    Args:
-        llm_output: Raw LLM output
-
-    Returns:
-        str: Clean JSON string
-    """
-    try:
-        # Try to parse the entire output as JSON first
-        json.loads(llm_output.strip())
-        return llm_output.strip()
-    except json.JSONDecodeError:
-        pass
-
-    # Remove markdown code blocks
-    if "```json" in llm_output:
-        pattern = r"```json\s*(.*?)\s*```"
-        match = re.search(pattern, llm_output, re.DOTALL)
-        if match:
-            json_text = match.group(1).strip()
-            try:
-                json.loads(json_text)
-                return json_text
-            except json.JSONDecodeError:
-                pass
-
-    # Find JSON object starting with {
-    lines = llm_output.split("\n")
-    json_lines = []
-    in_json = False
-    brace_count = 0
-
-    for line in lines:
-        stripped = line.strip()
-        if not in_json and stripped.startswith("{"):
-            in_json = True
-            json_lines = [line]
-            brace_count = stripped.count("{") - stripped.count("}")
-        elif in_json:
-            json_lines.append(line)
-            brace_count += stripped.count("{") - stripped.count("}")
-            if brace_count == 0:
-                break
-
-    if json_lines:
-        json_text = "\n".join(json_lines).strip()
-        try:
-            json.loads(json_text)
-            return json_text
-        except json.JSONDecodeError:
-            pass
-
-    # Last attempt: use regex to find JSON
-    pattern = r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}"
-    matches = re.findall(pattern, llm_output, re.DOTALL)
-    for match in matches:
-        try:
-            json.loads(match)
-            return match
-        except json.JSONDecodeError:
-            continue
-
-    # If all methods fail, return original output
-    return llm_output
-
-
-async def run_research_analyzer(prompt_text: str, logger) -> str:
-    """
-    Run the research analysis workflow using ResearchAnalyzerAgent.
-
-    Args:
-        prompt_text: Input prompt text containing research information
-        logger: Logger instance for logging information
-
-    Returns:
-        str: Analysis result from the agent
-    """
-    try:
-        # Log input information for debugging
-        print("📊 Starting research analysis...")
-        print(f"Input prompt length: {len(prompt_text) if prompt_text else 0}")
-        print(f"Input preview: {prompt_text[:200] if prompt_text else 'None'}...")
-
-        if not prompt_text or prompt_text.strip() == "":
-            raise ValueError(
-                "Empty or None prompt_text provided to run_research_analyzer"
-            )
-
-        analyzer_agent = Agent(
-            name="ResearchAnalyzerAgent",
-            instruction=PAPER_INPUT_ANALYZER_PROMPT,
-            server_names=get_search_server_names(),
-        )
-
-        async with analyzer_agent:
-            print("analyzer: Connected to server, calling list_tools...")
-            try:
-                tools = await analyzer_agent.list_tools()
-                print(
-                    "Tools available:",
-                    tools.model_dump() if hasattr(tools, "model_dump") else str(tools),
-                )
-            except Exception as e:
-                print(f"Failed to list tools: {e}")
-
-            try:
-                analyzer = await analyzer_agent.attach_llm(get_preferred_llm_class())
-                print("✅ LLM attached successfully")
-            except Exception as e:
-                print(f"❌ Failed to attach LLM: {e}")
-                raise
-
-            # Set higher token output for research analysis
-            analysis_params = RequestParams(
-                maxTokens=6144,  # Using camelCase
-                temperature=0.3,
-            )
-
-            print(
-                f"🔄 Making LLM request with params: maxTokens={analysis_params.maxTokens}, temperature={analysis_params.temperature}"
-            )
-
-            try:
-                raw_result = await analyzer.generate_str(
-                    message=prompt_text, request_params=analysis_params
-                )
-
-                print("✅ LLM request completed")
-                print(f"Raw result type: {type(raw_result)}")
-                print(f"Raw result length: {len(raw_result) if raw_result else 0}")
-
-                if not raw_result:
-                    print("❌ CRITICAL: raw_result is empty or None!")
-                    print("This could indicate:")
-                    print("1. LLM API call failed silently")
-                    print("2. API rate limiting or quota exceeded")
-                    print("3. Network connectivity issues")
-                    print("4. MCP server communication problems")
-                    raise ValueError("LLM returned empty result")
-
-            except Exception as e:
-                print(f"❌ LLM generation failed: {e}")
-                print(f"Exception type: {type(e)}")
-                raise
-
-            # Clean LLM output to ensure only pure JSON is returned
-            try:
-                clean_result = extract_clean_json(raw_result)
-                print(f"Raw LLM output: {raw_result}")
-                print(f"Cleaned JSON output: {clean_result}")
-
-                # Log to SimpleLLMLogger
-                if hasattr(logger, "log_response"):
-                    logger.log_response(
-                        clean_result,
-                        model="ResearchAnalyzer",
-                        agent="ResearchAnalyzerAgent",
-                    )
-
-                if not clean_result or clean_result.strip() == "":
-                    print("❌ CRITICAL: clean_result is empty after JSON extraction!")
-                    print(f"Original raw_result was: {raw_result}")
-                    raise ValueError("JSON extraction resulted in empty output")
-
-                return clean_result
-
-            except Exception as e:
-                print(f"❌ JSON extraction failed: {e}")
-                print(f"Raw result was: {raw_result}")
-                raise
-
-    except Exception as e:
-        print(f"❌ run_research_analyzer failed: {e}")
-        print(f"Exception details: {type(e).__name__}: {str(e)}")
-        raise
-
-
-async def run_resource_processor(
-    analysis_result: str, ctx: WorkflowContext, logger
-) -> str:
-    """
-    Run the resource processing workflow - deterministic file operations without LLM.
-
-    This function handles file downloading/moving using direct logic rather than LLM,
-    since the paper directory and task id were already allocated by
-    :func:`workflows.environment.prepare_workflow_environment`.
-
-    Args:
-        analysis_result: Result from the research analyzer (contains file path/URL)
-        ctx: WorkflowContext (owns ``task_id`` and ``task_dir``)
-        logger: Logger instance for logging information
-
-    Returns:
-        str: Processing result with paper directory path
-    """
     paper_dir = str(ctx.task_dir)
-    next_id = ctx.task_id  # kept for prompt/log clarity; no longer an int
     target_pdf_name = "paper.pdf"
-    target_md_name = "paper.md"
 
-    logger.info(f"📋 Paper ID: {next_id}")
+    logger.info(f"📋 Paper ID: {ctx.task_id}")
     logger.info(f"📂 Paper directory: {paper_dir}")
+    logger.info(f"📥 Processing {ctx.input_kind}: {ctx.input_source}")
 
-    # Extract file path/URL from analysis_result - simple parsing, no LLM needed
-    # The analysis_result should contain the path/URL identified by the analyzer
-    try:
-        # Parse the analysis result to extract path
-        analysis_data = json.loads(analysis_result)
-        source_path = analysis_data.get("path") or analysis_data.get("input_path")
-        input_type = analysis_data.get("input_type", "unknown")
-
-        logger.info(f"📥 Processing {input_type}: {source_path}")
-
-        # Try direct function calls first - no LLM needed for deterministic operations
-        direct_call_success = False
-        operation_result = None
-
-        # 1. Handle local file - direct copy
-        if input_type == "file" and source_path and os.path.exists(source_path):
-            logger.info(f"📄 Direct file copy: {source_path} -> {paper_dir}")
-            try:
-                operation_result = await move_file_to(
-                    source=source_path, destination=paper_dir, filename=target_pdf_name
-                )
-                # Check if operation succeeded
-                if (
-                    "[SUCCESS]" in operation_result
-                    and "[ERROR]" not in operation_result
-                ):
-                    direct_call_success = True
-                    logger.info(f"✅ Direct file copy succeeded:\n{operation_result}")
-                else:
-                    logger.warning(f"⚠️ Direct file copy had issues: {operation_result}")
-            except Exception as e:
-                logger.warning(f"⚠️ Direct file copy failed: {e}")
-
-        # 2. Handle URL - direct download
-        elif input_type == "url" and source_path:
-            logger.info(f"🌐 Direct URL download: {source_path} -> {paper_dir}")
-            try:
-                operation_result = await download_file_to(
-                    url=source_path,
-                    destination=paper_dir,
-                    filename=target_pdf_name,  # Default to PDF, conversion will handle it
-                )
-                # Check if operation succeeded
-                if (
-                    "[SUCCESS]" in operation_result
-                    and "[ERROR]" not in operation_result
-                ):
-                    direct_call_success = True
-                    logger.info(f"✅ Direct download succeeded:\n{operation_result}")
-                else:
-                    logger.warning(f"⚠️ Direct download had issues: {operation_result}")
-            except Exception as e:
-                logger.warning(f"⚠️ Direct download failed: {e}")
-
-        # 3. If direct call succeeded, format result
-        if direct_call_success:
-            dest_path = os.path.join(paper_dir, target_md_name)
-            result = json.dumps(
-                {
-                    "status": "success",
-                    "paper_id": next_id,
-                    "paper_dir": paper_dir,
-                    "file_path": dest_path,
-                    "message": f"File successfully processed to {paper_dir}",
-                    "operation_details": operation_result,
-                }
-            )
-        else:
-            # 4. Fallback to LLM agent if direct call failed or unsupported type
-            logger.info(
-                f"🤖 Falling back to LLM agent for: {input_type} - {source_path}"
-            )
-            processor_agent = Agent(
-                name="ResourceProcessorAgent",
-                instruction=PAPER_DOWNLOADER_PROMPT,
-                server_names=["file-downloader"],
-            )
-
-            async with processor_agent:
-                processor = await processor_agent.attach_llm(get_preferred_llm_class())
-                processor_params = RequestParams(
-                    maxTokens=4096,
-                    temperature=0.2,
-                    tool_filter={
-                        "file-downloader": {"download_file_to", "move_file_to"}
-                    },
-                )
-
-                # Provide context about what failed if available
-                context = (
-                    f"\nPrevious attempt result: {operation_result}"
-                    if operation_result
-                    else ""
-                )
-                message = f"""Download/move the file to paper directory: {paper_dir}
-Source: {source_path}
-Input Type: {input_type}
-Paper ID: {next_id}
-Target filename: {target_md_name} (after conversion){context}
-
-Use the appropriate tool to complete this task."""
-
-                result = await processor.generate_str(
-                    message=message, request_params=processor_params
-                )
-
-        return result
-
-    except (json.JSONDecodeError, KeyError, Exception) as e:
-        logger.error(f"❌ Error processing resource: {e}")
-        # Fallback - return paper directory for manual processing
-        return json.dumps(
-            {
-                "status": "partial",
-                "paper_id": next_id,
-                "paper_dir": paper_dir,
-                "message": f"Paper directory created at {paper_dir}, manual file placement may be needed",
-            }
+    if ctx.input_kind == "url":
+        operation_result = await download_file_to(
+            url=ctx.input_source,
+            destination=paper_dir,
+            filename=target_pdf_name,
         )
+    else:
+        operation_result = await move_file_to(
+            source=ctx.input_source,
+            destination=paper_dir,
+            filename=target_pdf_name,
+        )
+
+    if "[SUCCESS]" not in operation_result or "[ERROR]" in operation_result:
+        logger.error(f"❌ Input acquisition failed: {operation_result}")
+        raise RuntimeError(
+            f"Failed to acquire input artifact for task {ctx.task_id}: "
+            f"{operation_result}"
+        )
+
+    logger.info(f"✅ Input acquired:\n{operation_result}")
 
 
 async def run_code_analyzer(
@@ -930,44 +646,6 @@ Goal: Find the most valuable GitHub repositories from the paper's reference list
             message=message, request_params=reference_params
         )
         return reference_result
-
-
-async def orchestrate_research_analysis_agent(
-    ctx: WorkflowContext, logger, progress_callback: Optional[Callable] = None
-) -> Tuple[str, str]:
-    """
-    Orchestrate intelligent research analysis and resource processing automation.
-
-    This agent coordinates multiple AI components to analyze research content
-    and process associated resources with automated workflow management.
-
-    Args:
-        ctx: Pre-populated :class:`WorkflowContext` (owns task_id / task_dir / input_source)
-        logger: Logger instance for process tracking
-        progress_callback: Progress callback function for workflow monitoring
-
-    Returns:
-        tuple: (analysis_result, resource_processing_result)
-    """
-    # Step 1: Research Analysis
-    if progress_callback:
-        progress_callback(
-            10, "📊 Analyzing research content and extracting key information..."
-        )
-    analysis_result = await run_research_analyzer(ctx.input_source, logger)
-
-    # Add brief pause for system stability
-    await asyncio.sleep(5)
-
-    # Step 2: Download Processing
-    if progress_callback:
-        progress_callback(
-            25, "📥 Processing downloads and preparing document structure..."
-        )
-    download_result = await run_resource_processor(analysis_result, ctx, logger)
-    print("download result:", download_result)
-
-    return analysis_result, download_result
 
 
 async def synthesize_workspace_infrastructure_agent(
@@ -1739,32 +1417,15 @@ async def execute_multi_agent_research_pipeline(
         print(f"📂 Task dir  : {ctx.task_dir}")
         print(f"🔖 Task ID   : {ctx.task_id}")
 
-        # Phase 2: Research Analysis and Resource Processing (25%)
+        # Phase 2: Input Acquisition (25%)
         if progress_callback:
-            progress_callback(
-                25, "🔍 Analyzing research content and downloading resources..."
-            )
-        print("📊 Progress: 25% - Research Analysis")
+            progress_callback(25, "📥 Acquiring input artifact...")
+        print("📊 Progress: 25% - Input Acquisition")
 
         if ctx.skip_research_analysis:
             print(f"✅ Resume mode: reusing existing task directory {ctx.task_dir}")
-            download_result = json.dumps(
-                {
-                    "status": "resume",
-                    "paper_id": ctx.task_id,
-                    "paper_dir": str(ctx.task_dir),
-                    "file_path": str(ctx.paper_path)
-                    if ctx.paper_path
-                    else ctx.input_source,
-                }
-            )
         else:
-            (
-                analysis_result,
-                download_result,
-            ) = await orchestrate_research_analysis_agent(
-                ctx, logger, progress_callback
-            )
+            await acquire_input_artifact(ctx, logger)
 
         # Phase 3: Workspace Infrastructure Synthesis (40%)
         if progress_callback:
@@ -1774,7 +1435,6 @@ async def execute_multi_agent_research_pipeline(
         print("📊 Progress: 40% - Workspace Setup")
 
         dir_info = await synthesize_workspace_infrastructure_agent(ctx, logger)
-        await asyncio.sleep(5)
 
         # Phase 4: Document Segmentation and Preprocessing (50%)
         if progress_callback:
