@@ -36,6 +36,9 @@ from core.compat.runtime import get_runtime
 from workflows.workflow_context import (
     EXTENSION_TO_KIND,
     InputKind,
+    TASK_KIND_PREFIX,
+    TASKS_DIRNAME,
+    TaskKind,
     WorkflowContext,
     resolve_workspace_root,
 )
@@ -45,9 +48,6 @@ ProgressCallback = Callable[[int, str], Any]
 
 _DEFAULT_MAX_INPUT_MB = 100
 """Default upper bound on input file size; override via yaml ``workspace.max_input_mb``."""
-
-_PAPERS_DIRNAME = "papers"
-"""Subdirectory of ``workspace_root`` that holds per-task work."""
 
 _LOW_DISK_THRESHOLD_BYTES = 500 * 1024 * 1024
 """Warn (do not fail) if the workspace volume has less than 500 MB free."""
@@ -62,6 +62,7 @@ async def prepare_workflow_environment(
     raw_input: str,
     *,
     enable_indexing: bool,
+    task_kind: TaskKind = "paper2code",
     task_id: str | None = None,
     progress_cb: ProgressCallback | None = None,
     logger: Any | None = None,
@@ -72,6 +73,13 @@ async def prepare_workflow_environment(
     Raises :class:`ValueError` (with a human-readable reason) if the input
     is missing, oversized, or has a disallowed extension; caller should
     catch it and mark the task failed without spending any LLM tokens.
+
+    The on-disk task directory is named
+    ``deepcode_lab/tasks/<prefix>_<task_id>/`` where ``<prefix>`` is
+    derived from ``task_kind`` (``paper`` / ``chat`` / ``web`` …). Old
+    ``deepcode_lab/papers/<id>/`` directories created by previous releases
+    are **not** auto-resumed; users who want to continue an old run need
+    to re-submit the input.
     """
     log = logger or default_logger
     _maybe_progress(progress_cb, 1, "🔧 Resolving workspace and validating input...")
@@ -82,16 +90,32 @@ async def prepare_workflow_environment(
     normalized, kind = _normalize_input(raw_input)
     _validate_input(normalized, kind, max_input_mb, log)
 
-    existing_dir, is_resume = _detect_resume(normalized, workspace_root)
+    prefix = TASK_KIND_PREFIX[task_kind]
+    existing_dir, detected_kind, is_resume = _detect_resume(normalized, workspace_root)
 
     if is_resume and existing_dir is not None:
-        chosen_id = existing_dir.name
+        # Resume preserves the existing directory name (and therefore its
+        # original modality) regardless of what the caller passed in. The
+        # alternative — silently relocating an in-progress task — would
+        # break MCP allowed-roots and on-disk references.
+        full_dirname = existing_dir.name
+        chosen_id = _strip_known_prefix(full_dirname, detected_kind)
+        if detected_kind is not None and detected_kind != task_kind:
+            log.info(
+                "Resume: caller asked for task_kind={} but existing task_dir is {} (kind={}); "
+                "honouring the on-disk kind.",
+                task_kind,
+                full_dirname,
+                detected_kind,
+            )
+            task_kind = detected_kind
+            prefix = TASK_KIND_PREFIX[task_kind]
         task_dir = existing_dir
     else:
         chosen_id = (task_id or uuid.uuid4().hex[:8]).strip()
         if not chosen_id:
             chosen_id = uuid.uuid4().hex[:8]
-        task_dir = workspace_root / _PAPERS_DIRNAME / chosen_id
+        task_dir = workspace_root / TASKS_DIRNAME / f"{prefix}_{chosen_id}"
 
     _ensure_workspace(workspace_root, task_dir, allow_existing=is_resume, logger=log)
     _register_workspace_for_filesystem_mcp(workspace_root, log)
@@ -103,9 +127,10 @@ async def prepare_workflow_environment(
             paper_path = candidate
 
     log.info(
-        "🗂️  Workspace={} task_id={} kind={} resume={}",
+        "🗂️  Workspace={} task_kind={} task_dir={} kind={} resume={}",
         workspace_root,
-        chosen_id,
+        task_kind,
+        task_dir.name,
         kind,
         is_resume,
     )
@@ -119,9 +144,23 @@ async def prepare_workflow_environment(
         workspace_root=workspace_root,
         task_dir=task_dir,
         enable_indexing=enable_indexing,
+        task_kind=task_kind,
         skip_research_analysis=is_resume,
         paper_path=paper_path,
     )
+
+
+def _strip_known_prefix(dirname: str, detected_kind: TaskKind | None) -> str:
+    """Return the bare task_id portion of a ``<prefix>_<id>`` directory name.
+
+    Falls back to the full name if no known prefix matches (e.g. user
+    manually named the directory).
+    """
+    if detected_kind is not None:
+        prefix = TASK_KIND_PREFIX[detected_kind] + "_"
+        if dirname.startswith(prefix):
+            return dirname[len(prefix):]
+    return dirname
 
 
 # ---------------------------------------------------------------------------
@@ -250,35 +289,48 @@ def _validate_input(normalized: str, kind: InputKind, max_mb: int, log: Any) -> 
     log.debug("input validated: {} ({:.2f} MB, kind={})", path, size_mb, kind)
 
 
-def _detect_resume(normalized: str, workspace_root: Path) -> tuple[Path | None, bool]:
-    """Detect when the user re-fed a file already inside ``papers/<id>/``.
+def _detect_resume(
+    normalized: str, workspace_root: Path
+) -> tuple[Path | None, TaskKind | None, bool]:
+    """Detect when the user re-fed a file already inside ``tasks/<prefix>_<id>/``.
 
-    Returns ``(existing_task_dir, True)`` if so, else ``(None, False)``.
-    A resume reuses the existing ``task_id`` and skips Phase 2 (the paper
-    is already on disk and—usually—already converted to markdown).
+    Returns ``(existing_task_dir, detected_kind, True)`` on a hit, where
+    ``detected_kind`` is inferred from the directory's prefix
+    (``paper_`` → ``"paper2code"`` etc.). Returns ``(None, None, False)``
+    otherwise. A resume reuses the existing ``task_id`` and skips Phase 2.
+
+    Old-style ``deepcode_lab/papers/<id>/`` paths are intentionally **not**
+    resumed — the user opted out of legacy migration, so they must
+    re-submit the input to get a fresh ``tasks/paper_<uuid>/`` directory.
     """
     if normalized.startswith(("http://", "https://")):
-        return None, False
+        return None, None, False
 
     try:
         candidate = Path(normalized).resolve()
     except OSError:
-        return None, False
+        return None, None, False
 
-    papers_root = (workspace_root / _PAPERS_DIRNAME).resolve()
+    tasks_root = (workspace_root / TASKS_DIRNAME).resolve()
     try:
-        rel = candidate.relative_to(papers_root)
+        rel = candidate.relative_to(tasks_root)
     except ValueError:
-        return None, False
+        return None, None, False
 
     parts = rel.parts
     if not parts:
-        return None, False
+        return None, None, False
 
-    task_dir = papers_root / parts[0]
+    task_dir = tasks_root / parts[0]
     if not task_dir.is_dir():
-        return None, False
-    return task_dir, True
+        return None, None, False
+
+    detected_kind: TaskKind | None = None
+    for kind, prefix in TASK_KIND_PREFIX.items():
+        if parts[0].startswith(prefix + "_"):
+            detected_kind = kind
+            break
+    return task_dir, detected_kind, True
 
 
 def _ensure_workspace(
@@ -290,7 +342,7 @@ def _ensure_workspace(
 ) -> None:
     """Create the workspace tree and fail loudly on permission/disk issues."""
     workspace_root.mkdir(parents=True, exist_ok=True)
-    (workspace_root / _PAPERS_DIRNAME).mkdir(parents=True, exist_ok=True)
+    (workspace_root / TASKS_DIRNAME).mkdir(parents=True, exist_ok=True)
 
     probe = workspace_root / ".deepcode_write_probe"
     try:

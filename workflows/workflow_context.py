@@ -42,6 +42,23 @@ EXTENSION_TO_KIND: dict[str, InputKind] = {
 }
 
 
+TaskKind = Literal["paper2code", "chat2code", "text2web"]
+"""Top-level pipeline modality. Drives task-directory naming under
+``deepcode_lab/tasks/<prefix>_<task_id>/``.
+"""
+
+TASK_KIND_PREFIX: dict[TaskKind, str] = {
+    "paper2code": "paper",
+    "chat2code": "chat",
+    "text2web": "web",
+}
+"""Short per-modality prefix used in the on-disk task directory name."""
+
+TASKS_DIRNAME = "tasks"
+"""Single root subdirectory that holds *all* per-task work, replacing the
+legacy ``papers/`` directory which conflated every modality."""
+
+
 @dataclass(slots=True)
 class WorkflowContext:
     """Everything the pipeline needs to know about one task.
@@ -64,13 +81,18 @@ class WorkflowContext:
     """Resolved workspace root (env > yaml > ``cwd/deepcode_lab``)."""
 
     task_dir: Path
-    """Per-task directory: ``workspace_root / "papers" / task_id``."""
+    """Per-task directory: ``workspace_root / "tasks" / "<prefix>_<task_id>"``."""
 
     enable_indexing: bool
     """Forwarded from the entry-point; controls Phase 6/7/8 skip logic."""
 
+    task_kind: TaskKind = "paper2code"
+    """Pipeline modality. Decides the on-disk prefix (``paper_``, ``chat_``,
+    ``web_``) under ``tasks/`` so users can tell at a glance which kind of
+    task created each directory."""
+
     skip_research_analysis: bool = False
-    """Set when the input already lives inside ``workspace_root/papers/``."""
+    """Set when the input already lives inside ``workspace_root/tasks/``."""
 
     paper_path: Path | None = None
     """The original PDF/MD/etc. file inside ``task_dir`` (filled by Phase 2)."""
