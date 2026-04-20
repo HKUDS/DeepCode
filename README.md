@@ -159,6 +159,18 @@
 
 ## 📰 News
 
+🛠️ **[2026-04-17] Stability, Windows compatibility & secrets hygiene update**
+
+- 🐛 **Code Implementation no longer crashes** with `name 'LoopDetector' is not defined` — added the missing `LoopDetector`/`ProgressTracker` imports in both `workflows/code_implementation_workflow.py` and `workflows/code_implementation_workflow_index.py`.
+- 🪟 **Windows: `mkdir -p` / `touch` / `rm -rf` / `cp -r` / `mv` now work natively.** `tools/command_executor.py` translates these common Unix file-tree commands via `pathlib`/`shutil` on every platform, eliminating the bug where `cmd.exe` would create a literal `-p` directory and stall the workflow.
+- 🚀 **Removed Brave Search end-to-end.** All Python code, MCP server config, Dockerfile pre-installs, nanobot integration and docs are scrubbed of `brave`/`BRAVE_API_KEY`/`WebSearchTool`. Web fetching keeps working via the built-in `fetch` MCP server; `bocha-mcp` is the recommended search backend.
+- 🔌 **OpenAI-compatible providers documented.** New `Quick Start → Configuration` snippet shows how to point the `openai` block at Poe (`https://api.poe.com/v1`), OpenRouter, or Alibaba DashScope, plus how to set `default_model`/`planning_model`/`implementation_model` (e.g. `gpt-5.4`).
+- 🔐 **Secrets hygiene.** `.gitignore` now covers `*.secrets.yaml`, `*.secrets.yml`, `secrets.json`, `*credentials*.json`, `.env`, `.env.*` (with `*.env.example` whitelisted). `mcp_agent.secrets.yaml` was also `git rm --cached`'d so existing checkouts stop tracking it.
+- 📝 **Launch table fixed.** `deepcode` (no flags) actually starts Docker mode — the README now shows `deepcode --local` for the no-Docker path and adds explicit Troubleshooting rows for "Docker is installed but not running", Windows GBK encoding, and the issues fixed above.
+- 🧹 **Misc:** auto-create `logs/` directory so JSONL logging never fails on a fresh checkout, replace bare `except:` with `except Exception:` in `agent_orchestration_engine.py` (Ruff E722), `command_executor` MCP tool descriptions now embed the host OS so the LLM picks compatible commands.
+
+---
+
 🎉 **[2026-02] nanobot ✖️ DeepCode. Just chat naturally with openclaw/nanobot to handle your coding tasks:**
 
 <div align="center">
@@ -432,7 +444,6 @@ DeepCode leverages the **Model Context Protocol (MCP)** standard to seamlessly i
 
 | 🛠️ **MCP Server** | 🔧 **Primary Function** | 💡 **Purpose & Capabilities** |
 |-------------------|-------------------------|-------------------------------|
-| **🔍 brave** | Web Search Engine | Real-time information retrieval via Brave Search API |
 | **🌐 bocha-mcp** | Alternative Search | Secondary search option with independent API access |
 | **📂 filesystem** | File System Operations | Local file and directory management, read/write operations |
 | **🌐 fetch** | Web Content Retrieval | Fetch and extract content from URLs and web resources |
@@ -651,6 +662,23 @@ pip install -r requirements.txt
 npm install --prefix new_ui/frontend
 ```
 
+##### 🧪 **Editable install (lets `deepcode` always run THIS checkout)**
+
+If you want the global `deepcode` command to launch the source tree you are
+hacking on, install the project in editable mode after the steps above:
+
+```bash
+pip install -e .
+```
+
+This registers a `deepcode-hku` package (current version 1.2.0) and exposes
+the `deepcode` CLI entry point. Any local code change is picked up
+immediately on next launch — no reinstall needed.
+
+> If you maintain multiple DeepCode checkouts, only one of them can own the
+> `deepcode` command at a time (the most recent `pip install -e .` wins).
+> Reinstall in the checkout you currently want to be active.
+
 </details>
 
 ### 🔧 **Step 2: Configuration**
@@ -674,6 +702,37 @@ google:
   api_key: "your_google_api_key"     # For Gemini models
 ```
 
+<details>
+<summary><strong>🔌 Using OpenAI-compatible providers (OpenRouter / Poe / DashScope / etc.)</strong></summary>
+
+The `openai` block accepts any OpenAI-compatible endpoint. Just override
+`base_url`. Then in `mcp_agent.config.yaml` set the model name your provider
+expects (the `default_model`, `planning_model`, and `implementation_model`
+fields under the `openai:` section).
+
+```yaml
+# mcp_agent.secrets.yaml
+openai:
+  api_key: "your_provider_api_key"
+  base_url: "https://api.poe.com/v1"            # Poe
+  # base_url: "https://openrouter.ai/api/v1"    # OpenRouter
+  # base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"  # Alibaba DashScope
+```
+
+```yaml
+# mcp_agent.config.yaml — pick the model your provider supports
+openai:
+  default_model: "gpt-5.4"
+  planning_model: "gpt-5.4"
+  implementation_model: "gpt-5.4"
+```
+
+> **🔐 Never commit `mcp_agent.secrets.yaml`.** The provided `.gitignore`
+> excludes it, but if you cloned an older snapshot, also run
+> `git rm --cached mcp_agent.secrets.yaml` before your next push.
+
+</details>
+
 #### 🤖 LLM Provider *(optional)*
 
 Edit `mcp_agent.config.yaml` to choose your preferred LLM provider (line ~106):
@@ -689,12 +748,7 @@ llm_provider: "google"
 Configure web search in `mcp_agent.config.yaml`:
 
 ```yaml
-# For Brave Search (default) — set in brave.env section (line ~28)
-brave:
-  env:
-    BRAVE_API_KEY: "your_brave_api_key_here"
-
-# For Bocha-MCP (alternative) — set in bocha-mcp.env section (line ~74)
+# For Bocha-MCP (optional) — set in bocha-mcp.env section
 bocha-mcp:
   env:
     BOCHA_API_KEY: "your_bocha_api_key_here"
@@ -717,7 +771,6 @@ If you're using Windows, you may need to configure MCP servers manually in `mcp_
 
 ```bash
 # 1. Install MCP servers globally
-npm i -g @modelcontextprotocol/server-brave-search
 npm i -g @modelcontextprotocol/server-filesystem
 
 # 2. Find your global node_modules path
@@ -729,9 +782,6 @@ Then update your `mcp_agent.config.yaml` to use absolute paths:
 ```yaml
 mcp:
   servers:
-    brave:
-      command: "node"
-      args: ["C:/Program Files/nodejs/node_modules/@modelcontextprotocol/server-brave-search/dist/index.js"]
     filesystem:
       command: "node"
       args: ["C:/Program Files/nodejs/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js", "."]
@@ -744,28 +794,20 @@ mcp:
 <details>
 <summary><strong>🔍 Search Server Configuration (Optional)</strong></summary>
 
-DeepCode supports multiple search servers for web search functionality. You can configure your preferred option in `mcp_agent.config.yaml`:
+DeepCode supports optional Bocha search plus built-in `fetch` for web content retrieval:
 
 ```yaml
 # Default search server configuration
-# Options: "brave" or "bocha-mcp"
-default_search_server: "brave"
+# Option: "bocha-mcp"
+default_search_server: "bocha-mcp"
 ```
 
 **Available Options:**
-- **🔍 Brave Search** (`"brave"`): Default option with high-quality search results. Requires `BRAVE_API_KEY`. Recommended for most users.
 - **🌐 Bocha-MCP** (`"bocha-mcp"`): Alternative search server. Requires `BOCHA_API_KEY`. Uses local Python server implementation.
 
 **Full MCP server configuration in mcp_agent.config.yaml:**
 ```yaml
-# For Brave Search (default) - around line 28
-brave:
-  command: "npx"
-  args: ["-y", "@modelcontextprotocol/server-brave-search"]
-  env:
-    BRAVE_API_KEY: "your_brave_api_key_here"
-
-# For Bocha-MCP (alternative) - around line 74
+# For Bocha-MCP (optional)
 bocha-mcp:
   command: "python"
   args: ["tools/bocha_search_server.py"]
@@ -785,7 +827,7 @@ Choose your preferred launch method:
 <table width="100%">
 <tr>
 <th width="33%">🐳 Docker (Recommended)</th>
-<th width="33%">🚀 Local (<code>deepcode</code> command)</th>
+<th width="33%">🚀 Local — no Docker</th>
 <th width="33%">🛠️ Other Methods</th>
 </tr>
 <tr><td>
@@ -803,29 +845,35 @@ cp mcp_agent.secrets.yaml.example \
 # Access → http://localhost:8000
 ```
 
+> Plain `deepcode` (no flags) is equivalent to launching this Docker
+> path. It will fail with `Docker is installed but not running` if
+> Docker Desktop isn't started — use the `--local` mode on the right
+> in that case.
+
 </td><td>
 
-Auto-installs deps on first run.
+Run the new UI directly on the host (frontend + backend, no container).
 
 ```bash
-deepcode
+deepcode --local
 # Frontend → http://localhost:5173
 # Backend  → http://localhost:8000
 # Ctrl+C to stop
 ```
 
-Features: User-in-Loop, real-time progress, inline chat.
+Features: User-in-Loop, real-time progress, inline chat. Use this when
+Docker isn't available or you need to iterate on local source changes.
 
 </td><td>
 
 ```bash
 # macOS / Linux
 ./run.sh
-# or: python deepcode.py
+# or: python deepcode.py --local
 
 # Windows
 run.bat
-# or: python deepcode.py
+# or: python deepcode.py --local
 
 # Classic Streamlit UI
 deepcode --classic
@@ -878,11 +926,14 @@ docker compose -f deepcode_docker/docker-compose.yml logs -f      # Logs
 | Problem | Cause | Fix |
 |---|---|---|
 | Docker build fails with `tsc: not found` | Corrupted build cache | `docker builder prune -f` then rebuild with `--no-cache` |
-| `error during connect` / `cannot find the file` | Docker Desktop not running | Start Docker Desktop, wait until ready, retry |
+| `error during connect` / `cannot find the file` / `Docker is installed but not running` | Docker Desktop not running | Either start Docker Desktop, **or** skip Docker entirely with `deepcode --local` |
 | Frontend blank page | Corrupted `node_modules` | `cd new_ui/frontend && rm -rf node_modules && npm install` |
-| `ERR_CONNECTION_REFUSED` | Wrong port / backend not running | Docker: `http://localhost:8000`. Local: `http://localhost:5173` |
+| `ERR_CONNECTION_REFUSED` | Wrong port / backend not running | Docker: `http://localhost:8000`. Local (`--local`): frontend `http://localhost:5173`, backend `http://localhost:8000` |
 | `npm install` → `Could not read package.json` | Wrong directory | Use `npm install --prefix new_ui/frontend` |
 | Windows: MCP servers not working | Need absolute paths | See [Windows MCP Configuration](#-step-2-configuration) above |
+| Windows: `UnicodeEncodeError: 'gbk' codec can't encode...` on launch | Default GBK console can't render emoji in startup banner | Set UTF-8 first: `set PYTHONIOENCODING=utf-8 && set PYTHONUTF8=1` (cmd) or `$env:PYTHONIOENCODING="utf-8"; $env:PYTHONUTF8="1"` (PowerShell) |
+| Windows: code-implementation stage hangs / produces a `-p` directory | LLM emitted `mkdir -p ...` and `cmd.exe` treated `-p` as a folder name | Already fixed in `tools/command_executor.py` — common Unix commands (`mkdir -p`, `touch`, `rm -rf`, `cp -r`, `mv`) are now executed natively via `pathlib`/`shutil`, no shell needed |
+| `name 'LoopDetector' is not defined` during code implementation | Missing import in workflow modules | Already fixed — `LoopDetector` and `ProgressTracker` are now imported from `utils.loop_detector` in both `workflows/code_implementation_workflow.py` and `workflows/code_implementation_workflow_index.py` |
 
 </details>
 
