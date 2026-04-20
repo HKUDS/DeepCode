@@ -10,7 +10,7 @@ import json
 import logging
 from typing import Dict, List, Optional
 
-from mcp_agent.agents.agent import Agent
+from core.compat import Agent, RequestParams
 from utils.llm_utils import get_preferred_llm_class
 
 
@@ -132,8 +132,6 @@ Return format (pure JSON array, no other text):
 ]
 
 Requirements: Questions should be specific and practical, avoiding general discussions."""
-
-            from mcp_agent.workflows.llm.augmented_llm import RequestParams
 
             params = RequestParams(
                 max_tokens=3000,
@@ -280,8 +278,6 @@ Recommended technical design including:
 
 Requirements: Focus on what needs to be built and how to build it technically. Be concise but comprehensive - avoid unnecessary implementation details."""
 
-            from mcp_agent.workflows.llm.augmented_llm import RequestParams
-
             params = RequestParams(max_tokens=4000, temperature=0.3)
 
             self.logger.info(
@@ -379,8 +375,6 @@ MANDATORY REQUIREMENTS:
 5. Ensure all technical suggestions are feasible and practical
 6. NEVER return an incomplete or partial document - always provide full sections
 7. Keep the same professional structure and format in all cases"""
-
-            from mcp_agent.workflows.llm.augmented_llm import RequestParams
 
             params = RequestParams(max_tokens=4000, temperature=0.3)
 

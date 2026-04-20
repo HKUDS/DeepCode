@@ -17,7 +17,7 @@ Changes:
 
 import os
 from typing import Callable, Dict, Any
-from mcp_agent.app import MCPApp
+from core.compat import MCPApp
 
 
 class CLIWorkflowAdapter:
@@ -64,8 +64,9 @@ class CLIWorkflowAdapter:
             self.logger = agent_app.logger
             self.context = agent_app.context
 
-            # Configure filesystem access
-            self.context.config.mcp.servers["filesystem"].args.extend([os.getcwd()])
+            # NOTE: filesystem MCP allowed-dirs are now managed by
+            # workflows.environment.prepare_workflow_environment(). Do not
+            # patch context.config.mcp.servers["filesystem"].args here.
 
             if self.cli_interface:
                 self.cli_interface.print_status(

@@ -5,6 +5,12 @@ document_segmentation:
   enabled: false
   size_threshold_chars: 50000
 execution_engine: asyncio
+# Optional workspace settings consumed by workflows.environment.
+# Both keys are optional; defaults are <cwd>/deepcode_lab and 100 MB.
+# DEEPCODE_WORKSPACE env var (if set) overrides workspace.root.
+workspace:
+  root: ./deepcode_lab
+  max_input_mb: 100
 logger:
   level: info
   path_settings:

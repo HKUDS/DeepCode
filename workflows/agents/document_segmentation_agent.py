@@ -9,7 +9,7 @@ import os
 import logging
 from typing import Dict, Any, Optional
 
-from mcp_agent.agents.agent import Agent
+from core.compat import Agent
 from utils.llm_utils import get_preferred_llm_class
 
 

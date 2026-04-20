@@ -150,7 +150,7 @@ class WorkflowService:
     ) -> Dict[str, Any]:
         """Execute paper-to-code workflow"""
         # Lazy imports - DeepCode modules found via sys.path set in main.py
-        from mcp_agent.app import MCPApp
+        from core.compat import MCPApp
         from workflows.agent_orchestration_engine import (
             execute_multi_agent_research_pipeline,
         )
@@ -174,17 +174,17 @@ class WorkflowService:
 
             async with app.run() as agent_app:
                 logger = agent_app.logger
-                context = agent_app.context
+                # NOTE: filesystem MCP allowed-dirs are now managed by
+                # workflows.environment.prepare_workflow_environment(). Do not
+                # patch agent_app.context.config.mcp.servers["filesystem"].args here.
 
-                # Add current working directory to filesystem server args
-                context.config.mcp.servers["filesystem"].args.extend([os.getcwd()])
-
-                # Execute the pipeline
+                # Execute the pipeline (task_id forwarded for cross-tab isolation)
                 result = await execute_multi_agent_research_pipeline(
                     input_source,
                     logger,
                     progress_callback,
                     enable_indexing=enable_indexing,
+                    task_id=str(task_id)[:8] if task_id else None,
                 )
 
                 task.status = "completed"
@@ -240,7 +240,7 @@ class WorkflowService:
     ) -> Dict[str, Any]:
         """Execute chat-based planning workflow"""
         # Lazy imports - DeepCode modules found via sys.path set in main.py
-        from mcp_agent.app import MCPApp
+        from core.compat import MCPApp
         from workflows.agent_orchestration_engine import (
             execute_chat_based_planning_pipeline,
         )
@@ -266,8 +266,9 @@ class WorkflowService:
                 logger = agent_app.logger
                 context = agent_app.context
 
-                # Add current working directory to filesystem server args
-                context.config.mcp.servers["filesystem"].args.extend([os.getcwd()])
+                _fs = context.config.mcp.servers.get("filesystem")
+                if _fs is not None and os.getcwd() not in _fs.args:
+                    _fs.args.append(os.getcwd())
 
                 # --- User-in-Loop: Before Planning Hook ---
                 final_requirements = requirements

@@ -87,23 +87,25 @@ def load_api_config(secrets_path: str = "mcp_agent.secrets.yaml") -> Dict[str, A
 
 
 def _get_llm_class(provider: str) -> Type[Any]:
-    """Lazily import and return the LLM class for a given provider."""
+    """Return the DeepCode-native compat marker class for a provider.
+
+    The legacy ``mcp_agent`` augmented LLM classes have been removed; we now
+    return the equivalent shim from :mod:`core.compat`, so callers like
+    ``await agent.attach_llm(get_preferred_llm_class())`` keep working.
+    """
+    from core.compat import (
+        AnthropicAugmentedLLM,
+        GoogleAugmentedLLM,
+        OpenAIAugmentedLLM,
+    )
+
     if provider == "anthropic":
-        from mcp_agent.workflows.llm.augmented_llm_anthropic import (
-            AnthropicAugmentedLLM,
-        )
-
         return AnthropicAugmentedLLM
-    elif provider == "openai":
-        from mcp_agent.workflows.llm.augmented_llm_openai import OpenAIAugmentedLLM
-
+    if provider == "openai":
         return OpenAIAugmentedLLM
-    elif provider == "google":
-        from mcp_agent.workflows.llm.augmented_llm_google import GoogleAugmentedLLM
-
+    if provider in ("google", "gemini"):
         return GoogleAugmentedLLM
-    else:
-        raise ValueError(f"Unknown provider: {provider}")
+    raise ValueError(f"Unknown provider: {provider}")
 
 
 def get_preferred_llm_class(config_path: str = "mcp_agent.secrets.yaml") -> Type[Any]:
@@ -137,11 +139,11 @@ def get_preferred_llm_class(config_path: str = "mcp_agent.secrets.yaml") -> Type
                 main_config = yaml.safe_load(f)
                 preferred_provider = main_config.get("llm_provider", "").strip().lower()
 
-        # Map of providers to their keys and class names
         provider_keys = {
             "anthropic": (anthropic_key, "AnthropicAugmentedLLM"),
             "google": (google_key, "GoogleAugmentedLLM"),
             "openai": (openai_key, "OpenAIAugmentedLLM"),
+            "gemini": (google_key, "GoogleAugmentedLLM"),
         }
 
         # Try user's preferred provider first

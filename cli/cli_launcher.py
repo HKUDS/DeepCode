@@ -37,11 +37,16 @@ def check_dependencies():
     else:
         print("⚠️  Tkinter not available - file dialogs will use manual input")
 
-    # Check for MCP agent dependencies
-    if importlib.util.find_spec("mcp_agent.app") is not None:
-        print("✅ MCP Agent framework is available")
+    # Check for DeepCode-native runtime (replaces legacy mcp-agent)
+    if importlib.util.find_spec("core.compat") is not None:
+        print("✅ DeepCode core runtime is available")
     else:
-        missing_deps.append("mcp-agent")
+        missing_deps.append("core (DeepCode core runtime missing)")
+
+    if importlib.util.find_spec("mcp") is not None:
+        print("✅ MCP SDK is installed")
+    else:
+        missing_deps.append("mcp")
 
     # Check for workflow dependencies
     # 添加项目根目录到路径

@@ -31,12 +31,11 @@ import json
 import os
 import re
 import yaml
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # MCP Agent imports
-from mcp_agent.agents.agent import Agent
-from mcp_agent.workflows.llm.augmented_llm import RequestParams
-from mcp_agent.workflows.parallel.parallel_llm import ParallelLLM
+from core.compat import Agent, ParallelLLM, RequestParams
 
 # Local imports
 from prompts.code_prompts import (
@@ -60,6 +59,8 @@ from utils.llm_utils import (
 )
 from workflows.agents.document_segmentation_agent import prepare_document_segments
 from workflows.agents.requirement_analysis_agent import RequirementAnalysisAgent
+from workflows.environment import prepare_workflow_environment
+from workflows.workflow_context import WorkflowContext
 
 # Environment configuration
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"  # Prevent .pyc file generation
@@ -487,31 +488,28 @@ async def run_research_analyzer(prompt_text: str, logger) -> str:
         raise
 
 
-async def run_resource_processor(analysis_result: str, logger) -> str:
+async def run_resource_processor(
+    analysis_result: str, ctx: WorkflowContext, logger
+) -> str:
     """
     Run the resource processing workflow - deterministic file operations without LLM.
 
     This function handles file downloading/moving using direct logic rather than LLM,
-    since the paper directory structure and ID are pre-computed and deterministic.
+    since the paper directory and task id were already allocated by
+    :func:`workflows.environment.prepare_workflow_environment`.
 
     Args:
         analysis_result: Result from the research analyzer (contains file path/URL)
+        ctx: WorkflowContext (owns ``task_id`` and ``task_dir``)
         logger: Logger instance for logging information
 
     Returns:
         str: Processing result with paper directory path
     """
-    # Pre-compute paper ID - deterministic, no LLM needed
-    papers_dir = "./deepcode_lab/papers"
-    os.makedirs(papers_dir, exist_ok=True)
-    existing_ids = [
-        int(d)
-        for d in os.listdir(papers_dir)
-        if os.path.isdir(os.path.join(papers_dir, d)) and d.isdigit()
-    ]
-    next_id = max(existing_ids) + 1 if existing_ids else 1
-    paper_dir = os.path.join(papers_dir, str(next_id))
-    os.makedirs(paper_dir, exist_ok=True)
+    paper_dir = str(ctx.task_dir)
+    next_id = ctx.task_id  # kept for prompt/log clarity; no longer an int
+    target_pdf_name = "paper.pdf"
+    target_md_name = "paper.md"
 
     logger.info(f"📋 Paper ID: {next_id}")
     logger.info(f"📂 Paper directory: {paper_dir}")
@@ -535,7 +533,7 @@ async def run_resource_processor(analysis_result: str, logger) -> str:
             logger.info(f"📄 Direct file copy: {source_path} -> {paper_dir}")
             try:
                 operation_result = await move_file_to(
-                    source=source_path, destination=paper_dir, filename=f"{next_id}.pdf"
+                    source=source_path, destination=paper_dir, filename=target_pdf_name
                 )
                 # Check if operation succeeded
                 if (
@@ -556,7 +554,7 @@ async def run_resource_processor(analysis_result: str, logger) -> str:
                 operation_result = await download_file_to(
                     url=source_path,
                     destination=paper_dir,
-                    filename=f"{next_id}.pdf",  # Default to PDF, conversion will handle it
+                    filename=target_pdf_name,  # Default to PDF, conversion will handle it
                 )
                 # Check if operation succeeded
                 if (
@@ -572,7 +570,7 @@ async def run_resource_processor(analysis_result: str, logger) -> str:
 
         # 3. If direct call succeeded, format result
         if direct_call_success:
-            dest_path = os.path.join(paper_dir, f"{next_id}.md")
+            dest_path = os.path.join(paper_dir, target_md_name)
             result = json.dumps(
                 {
                     "status": "success",
@@ -614,7 +612,7 @@ async def run_resource_processor(analysis_result: str, logger) -> str:
 Source: {source_path}
 Input Type: {input_type}
 Paper ID: {next_id}
-Target filename: {next_id}.md (after conversion){context}
+Target filename: {target_md_name} (after conversion){context}
 
 Use the appropriate tool to complete this task."""
 
@@ -934,27 +932,8 @@ Goal: Find the most valuable GitHub repositories from the paper's reference list
         return reference_result
 
 
-async def _process_input_source(input_source: str, logger) -> str:
-    """
-    Process and validate input source (file path or URL).
-
-    Args:
-        input_source: Input source (file path or analysis result)
-        logger: Logger instance
-
-    Returns:
-        str: Processed input source
-    """
-    if input_source.startswith("file://"):
-        file_path = input_source[7:]
-        if os.name == "nt" and file_path.startswith("/"):
-            file_path = file_path.lstrip("/")
-        return file_path
-    return input_source
-
-
 async def orchestrate_research_analysis_agent(
-    input_source: str, logger, progress_callback: Optional[Callable] = None
+    ctx: WorkflowContext, logger, progress_callback: Optional[Callable] = None
 ) -> Tuple[str, str]:
     """
     Orchestrate intelligent research analysis and resource processing automation.
@@ -963,7 +942,7 @@ async def orchestrate_research_analysis_agent(
     and process associated resources with automated workflow management.
 
     Args:
-        input_source: Research input source for analysis
+        ctx: Pre-populated :class:`WorkflowContext` (owns task_id / task_dir / input_source)
         logger: Logger instance for process tracking
         progress_callback: Progress callback function for workflow monitoring
 
@@ -975,7 +954,7 @@ async def orchestrate_research_analysis_agent(
         progress_callback(
             10, "📊 Analyzing research content and extracting key information..."
         )
-    analysis_result = await run_research_analyzer(input_source, logger)
+    analysis_result = await run_research_analyzer(ctx.input_source, logger)
 
     # Add brief pause for system stability
     await asyncio.sleep(5)
@@ -985,53 +964,45 @@ async def orchestrate_research_analysis_agent(
         progress_callback(
             25, "📥 Processing downloads and preparing document structure..."
         )
-    download_result = await run_resource_processor(analysis_result, logger)
+    download_result = await run_resource_processor(analysis_result, ctx, logger)
     print("download result:", download_result)
 
     return analysis_result, download_result
 
 
 async def synthesize_workspace_infrastructure_agent(
-    download_result: str, logger, workspace_dir: Optional[str] = None
+    ctx: WorkflowContext, logger
 ) -> Dict[str, str]:
     """
-    Synthesize intelligent research workspace infrastructure with automated structure generation.
+    Synthesize the per-task workspace by reading the converted markdown into ``ctx``.
 
-    This agent autonomously creates and configures the optimal workspace architecture
-    for research project implementation with AI-driven path optimization.
-
-    Args:
-        download_result: Resource processing result from analysis agent
-        logger: Logger instance for infrastructure tracking
-        workspace_dir: Optional workspace directory path for environment customization
-
-    Returns:
-        dict: Comprehensive workspace infrastructure metadata
+    All directory allocation and path resolution is owned by
+    :func:`workflows.environment.prepare_workflow_environment`; this function
+    only loads the markdown body (Phase 2 wrote it to ``ctx.task_dir``) and
+    fills ``ctx.paper_md_path`` / ``ctx.standardized_text``. The legacy
+    ``dir_info`` dict is then derived from ``ctx`` for downstream phases.
     """
-    # Parse download result to get file information
-    result = await FileProcessor.process_file_input(
-        download_result, base_dir=workspace_dir
-    )
-    paper_dir = result["paper_dir"]
+    md_path = FileProcessor.find_markdown_file(str(ctx.task_dir))
+    if not md_path:
+        raise ValueError(
+            f"No markdown file found in task directory: {ctx.task_dir}"
+        )
 
-    # Log workspace infrastructure synthesis
+    content = await FileProcessor.read_file_content(md_path)
+    structured_content = FileProcessor.parse_markdown_sections(content)
+    standardized_text = FileProcessor.standardize_output(structured_content)
+
+    ctx.paper_md_path = Path(md_path)
+    ctx.standardized_text = standardized_text
+    if ctx.paper_path is None:
+        ctx.paper_path = ctx.paper_md_path
+
     print("🏗️ Intelligent workspace infrastructure synthesized:")
-    print(f"   Base workspace environment: {workspace_dir or 'auto-detected'}")
-    print(f"   Research workspace: {paper_dir}")
-    print("   AI-driven path optimization: active")
+    print(f"   Workspace root : {ctx.workspace_root}")
+    print(f"   Task directory : {ctx.task_dir}")
+    print(f"   Markdown source: {ctx.paper_md_path}")
 
-    return {
-        "paper_dir": paper_dir,
-        "standardized_text": result["standardized_text"],
-        "reference_path": os.path.join(paper_dir, "reference.txt"),
-        "initial_plan_path": os.path.join(paper_dir, "initial_plan.txt"),
-        "download_path": os.path.join(paper_dir, "github_download.txt"),
-        "index_report_path": os.path.join(paper_dir, "codebase_index_report.txt"),
-        "implementation_report_path": os.path.join(
-            paper_dir, "code_implementation_report.txt"
-        ),
-        "workspace_dir": workspace_dir,
-    }
+    return ctx.to_dir_info()
 
 
 async def orchestrate_reference_intelligence_agent(
@@ -1711,6 +1682,7 @@ async def execute_multi_agent_research_pipeline(
     logger,
     progress_callback: Optional[Callable] = None,
     enable_indexing: bool = True,
+    task_id: Optional[str] = None,
 ) -> str:
     """
     Execute the complete intelligent multi-agent research orchestration pipeline.
@@ -1733,33 +1705,24 @@ async def execute_multi_agent_research_pipeline(
         str: The comprehensive pipeline execution result with status and outcomes
     """
     try:
-        # Phase 0: Workspace Setup (5%)
-        if progress_callback:
-            progress_callback(5, "🔄 Setting up workspace for file processing...")
-
+        # Phase 0+1: Unified workspace + input housekeeping (no LLM)
         print("🚀 Initializing intelligent multi-agent research orchestration system")
-        print("📊 Progress: 5% - Workspace Setup")
-
-        # Setup local workspace directory
-        workspace_dir = os.path.join(os.getcwd(), "deepcode_lab")
-        os.makedirs(workspace_dir, exist_ok=True)
-
-        print("📁 Working environment: local")
-        print(f"📂 Workspace directory: {workspace_dir}")
-        print("✅ Workspace status: ready")
-
-        # Log intelligence functionality status
         if enable_indexing:
             print("🧠 Advanced intelligence analysis enabled - comprehensive workflow")
         else:
             print("⚡ Optimized mode - advanced intelligence analysis disabled")
 
-        # Phase 1: Input Processing and Validation (10%)
-        if progress_callback:
-            progress_callback(10, "📄 Processing and validating input source...")
-        print("📊 Progress: 10% - Input Processing")
+        ctx = await prepare_workflow_environment(
+            raw_input=input_source,
+            enable_indexing=enable_indexing,
+            task_id=task_id,
+            progress_cb=progress_callback,
+            logger=logger,
+        )
 
-        input_source = await _process_input_source(input_source, logger)
+        print(f"📁 Workspace : {ctx.workspace_root}")
+        print(f"📂 Task dir  : {ctx.task_dir}")
+        print(f"🔖 Task ID   : {ctx.task_id}")
 
         # Phase 2: Research Analysis and Resource Processing (25%)
         if progress_callback:
@@ -1768,74 +1731,25 @@ async def execute_multi_agent_research_pipeline(
             )
         print("📊 Progress: 25% - Research Analysis")
 
-        # Check if input_source is already a JSON with paper_path in a paper_{timestamp} folder
-        skip_processing = False
-        if isinstance(input_source, str):
-            try:
-                import json
-                import re
-
-                input_dict = json.loads(input_source)
-                if "paper_path" in input_dict:
-                    paper_path = input_dict["paper_path"]
-                    paper_dir = os.path.dirname(paper_path)
-                    # Check if already in a paper_{timestamp} folder
-                    if re.match(r"paper_\d+$", os.path.basename(paper_dir)):
-                        print(f"✅ File already in organized folder: {paper_dir}")
-                        print(
-                            "   Skipping research analysis phase (file already processed)"
-                        )
-
-                        # Convert PDF to markdown if not already done
-                        if paper_path.endswith(".pdf"):
-                            print("🔄 Converting PDF to markdown...")
-                            try:
-                                from tools.pdf_downloader import SimplePdfConverter
-
-                                converter = SimplePdfConverter()
-                                conversion_result = converter.convert_pdf_to_markdown(
-                                    paper_path
-                                )
-                                if conversion_result["success"]:
-                                    print(
-                                        f"✅ PDF converted to markdown: {conversion_result['output_file']}"
-                                    )
-                                    # Update paper_path to point to markdown file
-                                    input_dict["paper_path"] = conversion_result[
-                                        "output_file"
-                                    ]
-                                    download_result = json.dumps(input_dict)
-                                else:
-                                    print(
-                                        f"⚠️ PDF conversion failed: {conversion_result.get('error')}"
-                                    )
-                                    download_result = input_source
-                            except Exception as e:
-                                print(f"⚠️ PDF conversion error: {e}")
-                                download_result = input_source
-                        else:
-                            download_result = input_source
-
-                        skip_processing = True
-            except Exception:
-                pass  # Not JSON, continue normal processing
-
-        if (
-            not skip_processing
-            and isinstance(input_source, str)
-            and (
-                input_source.endswith((".pdf", ".docx", ".txt", ".html", ".md"))
-                or input_source.startswith(("http", "file://"))
+        if ctx.skip_research_analysis:
+            print(f"✅ Resume mode: reusing existing task directory {ctx.task_dir}")
+            download_result = json.dumps(
+                {
+                    "status": "resume",
+                    "paper_id": ctx.task_id,
+                    "paper_dir": str(ctx.task_dir),
+                    "file_path": str(ctx.paper_path)
+                    if ctx.paper_path
+                    else ctx.input_source,
+                }
             )
-        ):
+        else:
             (
                 analysis_result,
                 download_result,
             ) = await orchestrate_research_analysis_agent(
-                input_source, logger, progress_callback
+                ctx, logger, progress_callback
             )
-        elif not skip_processing:
-            download_result = input_source  # Use input directly if already processed
 
         # Phase 3: Workspace Infrastructure Synthesis (40%)
         if progress_callback:
@@ -1844,9 +1758,7 @@ async def execute_multi_agent_research_pipeline(
             )
         print("📊 Progress: 40% - Workspace Setup")
 
-        dir_info = await synthesize_workspace_infrastructure_agent(
-            download_result, logger, workspace_dir
-        )
+        dir_info = await synthesize_workspace_infrastructure_agent(ctx, logger)
         await asyncio.sleep(5)
 
         # Phase 4: Document Segmentation and Preprocessing (50%)
@@ -2138,23 +2050,19 @@ The following implementation plan was generated by the AI chat planning agent:
         print(f"💾 Created chat project workspace: {chat_paper_dir}")
         print(f"📄 Saved requirements to: {markdown_file_path}")
 
-        # Create a download result that matches FileProcessor expectations
-        synthetic_download_result = json.dumps(
-            {
-                "status": "success",
-                "paper_path": markdown_file_path,
-                "input_type": "chat_input",
-                "paper_info": {
-                    "title": "User-Provided Coding Requirements",
-                    "source": "chat_input",
-                    "description": "Implementation plan generated from user requirements",
-                },
-            }
+        # Build a synthetic WorkflowContext so the chat pipeline can reuse
+        # the same Phase 3 path-derivation logic the file pipeline uses.
+        chat_ctx = WorkflowContext(
+            task_id=paper_name,
+            input_source=markdown_file_path,
+            input_kind="md",
+            workspace_root=Path(workspace_dir).resolve(),
+            task_dir=Path(chat_paper_dir).resolve(),
+            enable_indexing=enable_indexing,
+            paper_path=Path(markdown_file_path),
+            paper_md_path=Path(markdown_file_path),
         )
-
-        dir_info = await synthesize_workspace_infrastructure_agent(
-            synthetic_download_result, logger, workspace_dir
-        )
+        dir_info = await synthesize_workspace_infrastructure_agent(chat_ctx, logger)
         await asyncio.sleep(10)  # Brief pause for file system operations
 
         # Phase 3: Save Planning Result
