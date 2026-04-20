@@ -261,39 +261,42 @@ def get_default_search_server(config_path: str = "mcp_agent.config.yaml"):
         config_path: Path to the main configuration file
 
     Returns:
-        str: The default search server name ("brave" or "bocha-mcp")
+        str: The default auxiliary server name from configuration
     """
     try:
         if os.path.exists(config_path):
             with open(config_path, "r", encoding="utf-8") as f:
                 config = yaml.safe_load(f)
 
-            default_server = config.get("default_search_server", "brave")
+            default_server = config.get("default_search_server", "filesystem")
             print(f"🔍 Using search server: {default_server}")
             return default_server
         else:
-            print(f"⚠️ Config file {config_path} not found, using default: brave")
-            return "brave"
+            print(f"⚠️ Config file {config_path} not found, using default: filesystem")
+            return "filesystem"
     except Exception as e:
         print(f"⚠️ Error reading config file {config_path}: {e}")
-        print("🔍 Falling back to default search server: brave")
-        return "brave"
+        print("🔍 Falling back to default search server: filesystem")
+        return "filesystem"
 
 
 def get_search_server_names(
     additional_servers: Optional[List[str]] = None,
 ) -> List[str]:
     """
-    Get server names list with the configured default search server.
+    Get server names list with fetch plus the configured auxiliary server.
 
     Args:
         additional_servers: Optional list of additional servers to include
 
     Returns:
-        List[str]: List of server names including the default search server
+        List[str]: List of server names including fetch and optional extra servers
     """
     default_search = get_default_search_server()
-    server_names = [default_search]
+    server_names = ["fetch"]
+
+    if default_search and default_search not in server_names:
+        server_names.append(default_search)
 
     if additional_servers:
         # Add additional servers, avoiding duplicates
@@ -745,7 +748,6 @@ async def run_code_analyzer(
             "document-segmentation": {"read_document_segments", "get_document_overview"}
             if not paper_content
             else set(),  # Empty if paper already loaded
-            # "brave" not in filter = all brave tools available for searching
         }
     else:
         max_tokens_limit = base_max_tokens
@@ -757,15 +759,14 @@ async def run_code_analyzer(
 
         # Traditional mode: No filesystem tools needed (paper content already provided)
         if paper_content:
-            tool_filter = {
-                # Only brave search available - no filesystem tools needed
-            }
+            tool_filter = {"fetch": {"fetch"}}
         else:
             tool_filter = {
+                "fetch": {"fetch"},
                 "filesystem": {
                     "read_text_file",
                     "list_directory",
-                }
+                },
             }
 
     enhanced_params = RequestParams(
@@ -791,8 +792,6 @@ Based on this paper, generate a comprehensive code reproduction plan that includ
 1. Complete system architecture and component breakdown
 2. All algorithms, formulas, and implementation details
 3. Detailed file structure and implementation roadmap
-
-You may use web search (brave_web_search) if you need clarification on algorithms, methods, or concepts.
 
 The goal is to create a reproduction plan detailed enough for independent implementation."""
     else:
@@ -1818,7 +1817,7 @@ async def execute_multi_agent_research_pipeline(
                             download_result = input_source
 
                         skip_processing = True
-            except json.JSONDecodeError:
+            except Exception:
                 pass  # Not JSON, continue normal processing
 
         if (

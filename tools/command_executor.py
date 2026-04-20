@@ -6,37 +6,149 @@ Command Executor MCP Tool / 命令执行器 MCP 工具
 Specialized in executing LLM-generated shell commands to create file tree structures
 """
 
+import platform
+import shlex
+import shutil
 import subprocess
 from pathlib import Path
-from typing import List, Dict
+from typing import Dict, List, Optional, Tuple
 from mcp.server.models import InitializationOptions
 import mcp.types as types
 from mcp.server import NotificationOptions, Server
 import mcp.server.stdio
 
-# 创建MCP服务器实例 / Create MCP server instance
+IS_WINDOWS = platform.system() == "Windows"
+
 app = Server("command-executor")
+
+
+def _try_native_execute(command: str, cwd: Path) -> Optional[Tuple[int, str, str]]:
+    """Try to execute common file-tree commands natively (no shell).
+
+    Handles Unix-style commands so they work on Windows where cmd.exe would
+    misinterpret flags like ``-p`` as directory names. Returns
+    ``(returncode, stdout, stderr)`` when the command is handled, otherwise
+    ``None`` so the caller can fall back to running through the system shell.
+    """
+    try:
+        tokens = shlex.split(command, posix=True)
+    except ValueError:
+        return None
+    if not tokens:
+        return None
+
+    cmd = tokens[0]
+    args = tokens[1:]
+    flags = [a for a in args if a.startswith("-") and a != "-"]
+    paths = [a for a in args if not a.startswith("-")]
+
+    def _resolve(p: str) -> Path:
+        pp = Path(p)
+        return pp if pp.is_absolute() else (cwd / pp)
+
+    try:
+        if cmd == "mkdir":
+            for p in paths:
+                _resolve(p).mkdir(parents=True, exist_ok=True)
+            return 0, f"Created {len(paths)} directory/directories", ""
+
+        if cmd == "touch":
+            count = 0
+            for p in paths:
+                target = _resolve(p)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.touch(exist_ok=True)
+                count += 1
+            return 0, f"Touched {count} file(s)", ""
+
+        if cmd == "rm":
+            recursive = any(("r" in f) or ("R" in f) for f in flags)
+            force = any("f" in f for f in flags)
+            removed = 0
+            for p in paths:
+                target = _resolve(p)
+                if target.is_dir():
+                    if recursive:
+                        shutil.rmtree(target, ignore_errors=force)
+                        removed += 1
+                    else:
+                        if not force:
+                            return 1, "", f"rm: cannot remove '{p}': Is a directory"
+                elif target.exists():
+                    target.unlink()
+                    removed += 1
+                elif not force:
+                    return 1, "", f"rm: cannot remove '{p}': No such file or directory"
+            return 0, f"Removed {removed} item(s)", ""
+
+        if cmd in ("cp", "copy"):
+            recursive = any(("r" in f) or ("R" in f) for f in flags)
+            if len(paths) < 2:
+                return None
+            *srcs, dst = paths
+            dst_path = _resolve(dst)
+            for s in srcs:
+                sp = _resolve(s)
+                if sp.is_dir():
+                    if not recursive:
+                        return 1, "", f"cp: -r not specified; omitting directory '{s}'"
+                    target = (
+                        dst_path / sp.name
+                        if dst_path.exists() and dst_path.is_dir()
+                        else dst_path
+                    )
+                    shutil.copytree(sp, target, dirs_exist_ok=True)
+                else:
+                    if dst_path.exists() and dst_path.is_dir():
+                        shutil.copy2(sp, dst_path / sp.name)
+                    else:
+                        dst_path.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(sp, dst_path)
+            return 0, f"Copied {len(srcs)} item(s)", ""
+
+        if cmd in ("mv", "move"):
+            if len(paths) < 2:
+                return None
+            *srcs, dst = paths
+            dst_path = _resolve(dst)
+            for s in srcs:
+                sp = _resolve(s)
+                if dst_path.exists() and dst_path.is_dir():
+                    shutil.move(str(sp), str(dst_path / sp.name))
+                else:
+                    dst_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(sp), str(dst_path))
+            return 0, f"Moved {len(srcs)} item(s)", ""
+
+    except Exception as e:
+        return 1, "", f"{cmd}: {e}"
+
+    return None
+
+
+_PLATFORM_HINT = (
+    f"Current host OS: {platform.system()} ({platform.platform()}). "
+    "Common Unix file-tree commands (mkdir -p, touch, rm -rf, cp -r, mv) are "
+    "auto-translated to native cross-platform operations, so you may use them "
+    "directly. Avoid shell-specific syntax like heredocs or process substitution. "
+    "Prefer one filesystem operation per line."
+)
 
 
 @app.list_tools()
 async def handle_list_tools() -> list[types.Tool]:
-    """
-    列出可用工具 / List available tools
-    """
+    """List available tools."""
     return [
         types.Tool(
             name="execute_commands",
-            description="""
-            执行shell命令列表来创建文件树结构
-            Execute shell command list to create file tree structure
-
-            Args:
-                commands: 要执行的shell命令列表（每行一个命令）
-                working_directory: 执行命令的工作目录
-
-            Returns:
-                命令执行结果和详细报告
-            """,
+            description=(
+                "Execute a list of shell commands to build a file tree structure.\n"
+                f"{_PLATFORM_HINT}\n\n"
+                "Args:\n"
+                "    commands: shell commands, one per line\n"
+                "    working_directory: working directory for command execution\n\n"
+                "Returns: execution results and a detailed report."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -56,17 +168,14 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="execute_single_command",
-            description="""
-            执行单个shell命令
-            Execute single shell command
-
-            Args:
-                command: 要执行的单个命令
-                working_directory: 执行命令的工作目录
-
-            Returns:
-                命令执行结果
-            """,
+            description=(
+                "Execute a single shell command.\n"
+                f"{_PLATFORM_HINT}\n\n"
+                "Args:\n"
+                "    command: a single shell command\n"
+                "    working_directory: working directory for execution\n\n"
+                "Returns: execution result."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -143,36 +252,54 @@ async def execute_command_batch(
             ]
 
         results = []
-        stats = {"successful": 0, "failed": 0, "timeout": 0}
+        stats = {"successful": 0, "failed": 0, "timeout": 0, "native": 0}
+        cwd_path = Path(working_directory)
 
         for i, command in enumerate(command_lines, 1):
+            native = _try_native_execute(command, cwd_path)
+            if native is not None:
+                rc, out, err = native
+                if rc == 0:
+                    results.append(f"✅ Command {i}: {command}")
+                    if out.strip():
+                        results.append(f"   Output: {out.strip()}")
+                    stats["successful"] += 1
+                    stats["native"] += 1
+                else:
+                    results.append(f"❌ Command {i}: {command}")
+                    if err.strip():
+                        results.append(f"   Error: {err.strip()}")
+                    stats["failed"] += 1
+                continue
+
             try:
-                # 执行命令 / Execute command
                 result = subprocess.run(
                     command,
                     shell=True,
                     cwd=working_directory,
                     capture_output=True,
                     text=True,
-                    timeout=30,  # 30秒超时
+                    timeout=30,
+                    encoding="utf-8",
+                    errors="replace",
                 )
 
                 if result.returncode == 0:
                     results.append(f"✅ Command {i}: {command}")
                     if result.stdout.strip():
-                        results.append(f"   输出 / Output: {result.stdout.strip()}")
+                        results.append(f"   Output: {result.stdout.strip()}")
                     stats["successful"] += 1
                 else:
                     results.append(f"❌ Command {i}: {command}")
                     if result.stderr.strip():
-                        results.append(f"   错误 / Error: {result.stderr.strip()}")
+                        results.append(f"   Error: {result.stderr.strip()}")
                     stats["failed"] += 1
 
             except subprocess.TimeoutExpired:
-                results.append(f"⏱️ Command {i} 超时 / timeout: {command}")
+                results.append(f"⏱️ Command {i} timeout: {command}")
                 stats["timeout"] += 1
             except Exception as e:
-                results.append(f"💥 Command {i} 异常 / exception: {command} - {str(e)}")
+                results.append(f"💥 Command {i} exception: {command} - {str(e)}")
                 stats["failed"] += 1
 
         # 生成执行报告 / Generate execution report
@@ -204,20 +331,27 @@ async def execute_single_command(
         执行结果 / Execution result
     """
     try:
-        # 确保工作目录存在 / Ensure working directory exists
-        Path(working_directory).mkdir(parents=True, exist_ok=True)
+        cwd_path = Path(working_directory)
+        cwd_path.mkdir(parents=True, exist_ok=True)
 
-        # 执行命令 / Execute command
-        result = subprocess.run(
-            command,
-            shell=True,
-            cwd=working_directory,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        native = _try_native_execute(command, cwd_path)
+        if native is not None:
+            rc, out, err = native
+            result = subprocess.CompletedProcess(
+                args=command, returncode=rc, stdout=out, stderr=err
+            )
+        else:
+            result = subprocess.run(
+                command,
+                shell=True,
+                cwd=working_directory,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                encoding="utf-8",
+                errors="replace",
+            )
 
-        # 格式化输出 / Format output
         output = format_single_command_result(command, working_directory, result)
 
         return [types.TextContent(type="text", text=output)]
@@ -250,16 +384,17 @@ def generate_execution_summary(
     Returns:
         格式化的总结 / Formatted summary
     """
+    native_count = stats.get("native", 0)
     return f"""
-命令执行总结 / Command Execution Summary:
+Command Execution Summary:
 {'='*50}
-工作目录 / Working Directory: {working_directory}
-总命令数 / Total Commands: {len(command_lines)}
-成功 / Successful: {stats['successful']}
-失败 / Failed: {stats['failed']}
-超时 / Timeout: {stats['timeout']}
+Working Directory: {working_directory}
+Total Commands: {len(command_lines)}
+Successful: {stats['successful']} (native: {native_count})
+Failed: {stats['failed']}
+Timeout: {stats['timeout']}
 
-详细结果 / Detailed Results:
+Detailed Results:
 {'-'*50}"""
 
 
@@ -278,22 +413,22 @@ def format_single_command_result(
         格式化的结果 / Formatted result
     """
     output = f"""
-单命令执行 / Single Command Execution:
+Single Command Execution:
 {'='*40}
-工作目录 / Working Directory: {working_directory}
-命令 / Command: {command}
-返回码 / Return Code: {result.returncode}
+Working Directory: {working_directory}
+Command: {command}
+Return Code: {result.returncode}
 
 """
 
     if result.returncode == 0:
-        output += "✅ 状态 / Status: SUCCESS / 成功\n"
+        output += "Status: SUCCESS\n"
         if result.stdout.strip():
-            output += f"输出 / Output:\n{result.stdout.strip()}\n"
+            output += f"Output:\n{result.stdout.strip()}\n"
     else:
-        output += "❌ 状态 / Status: FAILED / 失败\n"
+        output += "Status: FAILED\n"
         if result.stderr.strip():
-            output += f"错误 / Error:\n{result.stderr.strip()}\n"
+            output += f"Error:\n{result.stderr.strip()}\n"
 
     return output
 
