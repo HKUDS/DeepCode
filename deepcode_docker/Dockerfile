@@ -30,7 +30,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Install system dependencies:
 #   - git: for git clone operations in workflows
-#   - nodejs/npm/npx: for MCP servers (brave-search, filesystem, fetch)
+#   - nodejs/npm/npx: for MCP servers (filesystem, fetch)
 #   - curl: for health checks
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -57,8 +57,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Pre-install npx MCP server packages (avoid download at runtime)
-RUN npx -y @modelcontextprotocol/server-brave-search --help 2>/dev/null || true && \
-    npx -y @modelcontextprotocol/server-filesystem --help 2>/dev/null || true
+RUN npx -y @modelcontextprotocol/server-filesystem --help 2>/dev/null || true
 
 # Copy project source code
 COPY __init__.py setup.py deepcode.py ./

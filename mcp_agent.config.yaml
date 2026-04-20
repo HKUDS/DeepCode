@@ -24,20 +24,6 @@ mcp:
       env:
         BOCHA_API_KEY: ''
         PYTHONPATH: .
-    brave:
-      # macos and linux should use this
-      args:
-      - -y
-      - '@modelcontextprotocol/server-brave-search'
-      command: npx
-
-      # windows should use this
-      # args:
-      # # please use the correct path for your system
-      # - C:/Users/LEGION/AppData/Roaming/npm/node_modules/@modelcontextprotocol/server-brave-search/dist/index.js
-      # command: node
-      env:
-        BRAVE_API_KEY: ''
     filesystem:
       # macos and linux should use this
       # Note: "No valid root directories" warning is harmless - connection still works
@@ -110,9 +96,9 @@ llm_provider: "openai"  # 设置为 "google", "anthropic", 或 "openai"
 #openrouter can be used here and openai professional key
 openai:
   base_max_tokens: 40000
-  default_model: "google/gemini-3-flash-preview"
-  planning_model: "google/gemini-3-flash-preview"
-  implementation_model: "google/gemini-3-flash-preview"
+  default_model: "gpt-5.4"
+  planning_model: "gpt-5.4"
+  implementation_model: "gpt-5.4"
   reasoning_effort: low  # Only for thinking models
   max_tokens_policy: adaptive
   retry_max_tokens: 32768

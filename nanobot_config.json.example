@@ -38,12 +38,7 @@
     "port": 18790
   },
   "tools": {
-    "web": {
-      "search": {
-        "apiKey": "your_brave_search_api_key",
-        "maxResults": 5
-      }
-    },
+    "web": {},
     "exec": {
       "timeout": 120
     },

@@ -13,7 +13,7 @@ from loguru import logger
 from nanobot.agent.tools.filesystem import ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
+from nanobot.agent.tools.web import WebFetchTool
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
@@ -37,7 +37,6 @@ class SubagentManager:
         workspace: Path,
         bus: MessageBus,
         model: str | None = None,
-        brave_api_key: str | None = None,
         exec_config: ExecToolConfig | None = None,
         restrict_to_workspace: bool = False,
     ):
@@ -47,7 +46,6 @@ class SubagentManager:
         self.workspace = workspace
         self.bus = bus
         self.model = model or provider.get_default_model()
-        self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
@@ -113,7 +111,6 @@ class SubagentManager:
                     restrict_to_workspace=self.restrict_to_workspace,
                 )
             )
-            tools.register(WebSearchTool(api_key=self.brave_api_key))
             tools.register(WebFetchTool())
 
             # Build messages with subagent-specific prompt
@@ -240,7 +237,7 @@ You are a subagent spawned by the main agent to complete a specific task.
 ## What You Can Do
 - Read and write files in the workspace
 - Execute shell commands
-- Search the web and fetch web pages
+- Fetch web pages
 - Complete the task thoroughly
 
 ## What You Cannot Do
