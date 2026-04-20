@@ -98,6 +98,7 @@ def _apply_tool_filter(
     tool_filter: dict[str, set[str]] | None,
     *,
     agent_name: str = "<unknown>",
+    agent_server_names: Iterable[str] | None = None,
 ) -> ToolRegistry:
     """Return a (possibly filtered) view of ``registry`` honouring ``tool_filter``.
 
@@ -110,12 +111,14 @@ def _apply_tool_filter(
       that server's tools if the allow-set is empty. Non-MCP tools are
       preserved unconditionally.
 
-    Diagnostics: if ``tool_filter`` references an MCP server that is not
-    represented in the registry (typically because the agent's
-    ``server_names`` did not include it, or that server failed to connect),
-    a one-shot ``logger.warning`` is emitted naming the agent. This catches
-    the silent "LLM has zero tools" failure mode where filtering would
-    otherwise make every tool disappear.
+    Diagnostics: if ``tool_filter`` references a server that the agent
+    actually requested (it's in ``agent_server_names``) but that server is
+    *not* represented in the registry, the connection failed and a one-shot
+    ``logger.warning`` is emitted. If the filter mentions a server the agent
+    did not request — common with ``ParallelLLM`` where the same
+    ``RequestParams`` is shared across fan-out agents with different
+    ``server_names`` — the filter line is treated as a no-op and only logged
+    at DEBUG level.
 
     The returned :class:`ToolRegistry` references the same :class:`Tool`
     objects but owns no MCP server stacks, so closing it is a no-op (the
@@ -123,6 +126,16 @@ def _apply_tool_filter(
     """
     if not tool_filter:
         return registry
+
+    # ``None`` means "caller did not tell us which servers the agent asked for"
+    # (legacy path) → fall back to the original behaviour and warn whenever
+    # the filter mentions an unregistered server. An *empty* set means "caller
+    # explicitly said the agent requested zero servers" → every filter entry
+    # is a deliberate no-op (common when a ParallelLLM fan-out shares the
+    # parent's RequestParams) and should stay silent.
+    requested_servers: set[str] | None = (
+        None if agent_server_names is None else {str(s) for s in agent_server_names}
+    )
 
     registry_servers: set[str] = set()
     for tool_name in registry.tool_names:
@@ -135,18 +148,24 @@ def _apply_tool_filter(
     for srv in tool_filter.keys():
         if srv in registry_servers:
             continue
+        if requested_servers is not None and srv not in requested_servers:
+            logger.debug(
+                "Agent '{}' tool_filter mentions server '{}' which is not in "
+                "the agent's server_names; ignoring (expected under ParallelLLM).",
+                agent_name,
+                srv,
+            )
+            continue
         key = (agent_name, srv)
         if key in _WARNED_MISSING_FILTER_SERVERS:
             continue
         _WARNED_MISSING_FILTER_SERVERS.add(key)
         logger.warning(
-            "Agent '{}' tool_filter references MCP server '{}' but no tools from "
-            "that server are registered. Either add '{}' to the agent's "
-            "server_names, fix the server's mcp_agent.config.yaml entry, or "
-            "drop '{}' from tool_filter. The filter will exclude it for now.",
+            "Agent '{}' requested MCP server '{}' (in server_names) but no "
+            "tools from that server are registered — the server most likely "
+            "failed to connect. Check the corresponding mcp_agent.config.yaml "
+            "entry. The filter will exclude it for now.",
             agent_name,
-            srv,
-            srv,
             srv,
         )
 
@@ -216,7 +235,10 @@ class AugmentedLLM:
         params = request_params or RequestParams()
         tools = self.agent._tool_registry  # noqa: SLF001 - intentional shim access
         tools = _apply_tool_filter(
-            tools, params.tool_filter, agent_name=self.agent.name
+            tools,
+            params.tool_filter,
+            agent_name=self.agent.name,
+            agent_server_names=self.agent.server_names,
         )
 
         messages: list[dict[str, Any]] = []
