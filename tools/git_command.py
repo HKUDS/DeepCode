@@ -6,8 +6,19 @@ GitHub Repository Downloader MCP Tool using FastMCP
 import asyncio
 import os
 import re
+import sys
 from typing import Dict, List, Optional
 from pathlib import Path
+
+# Force UTF-8 on stdio so emoji prints don't kill the server on Windows
+# consoles whose default encoding is GBK / cp936. Each MCP server is launched
+# as its own subprocess; a UnicodeEncodeError here would surface to the host
+# as the opaque "MCP server '<name>': failed to connect: Connection closed".
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, OSError):
+        pass
 
 from mcp.server import FastMCP
 
