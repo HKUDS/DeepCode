@@ -163,7 +163,7 @@
 
 - 🐛 **Code Implementation no longer crashes** with `name 'LoopDetector' is not defined` — added the missing `LoopDetector`/`ProgressTracker` imports in both `workflows/code_implementation_workflow.py` and `workflows/code_implementation_workflow_index.py`.
 - 🪟 **Windows: `mkdir -p` / `touch` / `rm -rf` / `cp -r` / `mv` now work natively.** `tools/command_executor.py` translates these common Unix file-tree commands via `pathlib`/`shutil` on every platform, eliminating the bug where `cmd.exe` would create a literal `-p` directory and stall the workflow.
-- 🚀 **Removed Brave Search end-to-end.** All Python code, MCP server config, Dockerfile pre-installs, nanobot integration and docs are scrubbed of `brave`/`BRAVE_API_KEY`/`WebSearchTool`. Web fetching keeps working via the built-in `fetch` MCP server; `bocha-mcp` is the recommended search backend.
+- 🚀 **Removed Brave Search end-to-end.** All Python code, MCP server config, Dockerfile pre-installs, nanobot integration and docs are scrubbed of `brave`/`BRAVE_API_KEY`/`WebSearchTool`. Web fetching now relies entirely on the built-in `fetch` MCP server.
 - 🔌 **OpenAI-compatible providers documented.** New `Quick Start → Configuration` snippet shows how to point the `openai` block at Poe (`https://api.poe.com/v1`), OpenRouter, or Alibaba DashScope, plus how to set `default_model`/`planning_model`/`implementation_model` (e.g. `gpt-5.4`).
 - 🔐 **Secrets hygiene.** `.gitignore` now covers `*.secrets.yaml`, `*.secrets.yml`, `secrets.json`, `*credentials*.json`, `.env`, `.env.*` (with `*.env.example` whitelisted). `mcp_agent.secrets.yaml` was also `git rm --cached`'d so existing checkouts stop tracking it.
 - 📝 **Launch table fixed.** `deepcode` (no flags) actually starts Docker mode — the README now shows `deepcode --local` for the no-Docker path and adds explicit Troubleshooting rows for "Docker is installed but not running", Windows GBK encoding, and the issues fixed above.
@@ -444,7 +444,6 @@ DeepCode leverages the **Model Context Protocol (MCP)** standard to seamlessly i
 
 | 🛠️ **MCP Server** | 🔧 **Primary Function** | 💡 **Purpose & Capabilities** |
 |-------------------|-------------------------|-------------------------------|
-| **🌐 bocha-mcp** | Alternative Search | Secondary search option with independent API access |
 | **📂 filesystem** | File System Operations | Local file and directory management, read/write operations |
 | **🌐 fetch** | Web Content Retrieval | Fetch and extract content from URLs and web resources |
 | **📥 github-downloader** | Repository Management | Clone and download GitHub repositories for analysis |
@@ -743,17 +742,6 @@ Edit `mcp_agent.config.yaml` to choose your preferred LLM provider (line ~106):
 llm_provider: "google"
 ```
 
-#### 🔍 Search API Keys *(optional)*
-
-Configure web search in `mcp_agent.config.yaml`:
-
-```yaml
-# For Bocha-MCP (optional) — set in bocha-mcp.env section
-bocha-mcp:
-  env:
-    BOCHA_API_KEY: "your_bocha_api_key_here"
-```
-
 #### 📄 Document Segmentation *(optional)*
 
 Control document processing in `mcp_agent.config.yaml`:
@@ -792,31 +780,16 @@ mcp:
 </details>
 
 <details>
-<summary><strong>🔍 Search Server Configuration (Optional)</strong></summary>
+<summary><strong>🔍 Web Search Configuration</strong></summary>
 
-DeepCode supports optional Bocha search plus built-in `fetch` for web content retrieval:
+DeepCode performs web content retrieval through the built-in `fetch` MCP server (no API key required) and reads local files via `filesystem`. The auxiliary search server defaults to `filesystem`:
 
 ```yaml
-# Default search server configuration
-# Option: "bocha-mcp"
-default_search_server: "bocha-mcp"
+# mcp_agent.config.yaml — auxiliary search server alongside fetch
+default_search_server: "filesystem"
 ```
 
-**Available Options:**
-- **🌐 Bocha-MCP** (`"bocha-mcp"`): Alternative search server. Requires `BOCHA_API_KEY`. Uses local Python server implementation.
-
-**Full MCP server configuration in mcp_agent.config.yaml:**
-```yaml
-# For Bocha-MCP (optional)
-bocha-mcp:
-  command: "python"
-  args: ["tools/bocha_search_server.py"]
-  env:
-    PYTHONPATH: "."
-    BOCHA_API_KEY: "your_bocha_api_key_here"
-```
-
-> **💡 Tip**: Both search servers require API key configuration. Choose the one that best fits your API access and requirements.
+> **💡 Tip**: To plug in another search backend, add it under `mcp.servers` in `mcp_agent.config.yaml` and set `default_search_server` to its name. `get_search_server_names()` will pick it up automatically.
 
 </details>
 

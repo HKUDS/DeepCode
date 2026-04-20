@@ -23,13 +23,6 @@ logger:
   - file
 mcp:
   servers:
-    bocha-mcp:
-      args:
-      - tools/bocha_search_server.py
-      command: python
-      env:
-        BOCHA_API_KEY: ''
-        PYTHONPATH: .
     filesystem:
       # macos and linux should use this
       # Note: "No valid root directories" warning is harmless - connection still works
