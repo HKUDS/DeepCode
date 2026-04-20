@@ -136,4 +136,37 @@ class ToolRegistry:
         if errors:
             from loguru import logger
             for exc in errors:
-                logger.warning("ToolRegistry.aclose: error draining stack: {}", exc)
+                # MCP stdio_client uses anyio cancel scopes that are isolated
+                # to the supervisor task (see core/compat/agent.py). When that
+                # supervisor is cancelled, anyio's stack teardown surfaces a
+                # benign CancelledError / "exit cancel scope in a different
+                # task" message — it does not affect the caller. Treat it as
+                # DEBUG noise so logs only show genuine close failures.
+                if _is_benign_cancel_teardown(exc):
+                    logger.debug(
+                        "ToolRegistry.aclose: benign anyio teardown noise: {}", exc
+                    )
+                else:
+                    logger.warning(
+                        "ToolRegistry.aclose: error draining stack: {}", exc
+                    )
+
+
+def _is_benign_cancel_teardown(exc: BaseException) -> bool:
+    """Return ``True`` if *exc* is the well-known anyio cancel-scope churn
+    that fires during supervisor-task shutdown.
+
+    These messages fire when the supervisor task wrapping the MCP stdio
+    sessions is cancelled and anyio unwinds its task-scoped cancel stack.
+    The caller pipeline is unaffected, so we don't want WARNING noise.
+    """
+    import asyncio
+    if isinstance(exc, asyncio.CancelledError):
+        return True
+    msg = str(exc).lower()
+    benign_markers = (
+        "cancel scope in a different task",
+        "isn't the current task",
+        "cancelled via cancel scope",
+    )
+    return any(marker in msg for marker in benign_markers)

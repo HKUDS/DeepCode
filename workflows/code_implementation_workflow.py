@@ -64,6 +64,17 @@ class CodeImplementationWorkflow:
         )
         self.loop_detector = LoopDetector()
         self.progress_tracker = ProgressTracker()
+        # Populated by _pure_code_implementation_loop on each call so
+        # run_workflow can report a truthful status (completed / aborted /
+        # max_iterations / max_time) instead of unconditional success.
+        self._last_run_state: Dict[str, Any] = {
+            "status": "unknown",
+            "reason": None,
+            "iterations": 0,
+            "elapsed_seconds": 0.0,
+            "files_completed": 0,
+            "unimplemented_files": [],
+        }
 
     def _load_api_config(self) -> Dict[str, Any]:
         """Load API configuration with environment variable override."""
@@ -149,10 +160,38 @@ class CodeImplementationWorkflow:
             else:
                 pass
 
-            self.logger.info("Workflow execution successful")
+            run_state = dict(self._last_run_state)
+            inner_status = run_state.get("status", "unknown")
+            done = inner_status == "completed"
+            if done:
+                self.logger.info("Workflow execution successful (all files implemented)")
+                top_status = "success"
+            else:
+                # Surface the actual reason instead of silently lying about success.
+                pending = run_state.get("unimplemented_files", []) or []
+                self.logger.warning(
+                    "Workflow execution finished EARLY: status=%s reason=%s "
+                    "(files=%d, %d unimplemented)",
+                    inner_status,
+                    run_state.get("reason"),
+                    run_state.get("files_completed", 0),
+                    len(pending),
+                )
+                if pending:
+                    sample = ", ".join(pending[:5])
+                    if len(pending) > 5:
+                        sample += f", ... (+{len(pending) - 5} more)"
+                    self.logger.warning("Unimplemented files: %s", sample)
+                top_status = "incomplete"
 
             return {
-                "status": "success",
+                "status": top_status,
+                "inner_status": inner_status,
+                "abort_reason": run_state.get("reason"),
+                "files_completed": run_state.get("files_completed", 0),
+                "unimplemented_files": run_state.get("unimplemented_files", []),
+                "iterations": run_state.get("iterations", 0),
+                "elapsed_seconds": run_state.get("elapsed_seconds", 0.0),
                 "plan_file": plan_file_path,
                 "target_directory": target_directory,
                 "code_directory": os.path.join(target_directory, "generate_code"),
@@ -311,6 +350,13 @@ Requirements:
         iteration = 0
         start_time = time.time()
         max_time = 7200  # 120 minutes (2 hours)
+        # Track abort/completion so run_workflow can report a truthful status
+        # rather than always claiming success. Default to "max_iterations" —
+        # overwritten by any earlier exit branch.
+        run_state: Dict[str, Any] = {
+            "status": "max_iterations",
+            "reason": f"reached max_iterations={max_iterations} without completion",
+        }
 
         # Initialize specialized agents
         code_agent = CodeImplementationAgent(
@@ -350,14 +396,21 @@ Requirements:
 
             if elapsed_time > max_time:
                 self.logger.warning(f"Time limit reached: {elapsed_time:.2f}s")
+                run_state = {
+                    "status": "max_time",
+                    "reason": f"wall-clock budget exhausted after {elapsed_time:.0f}s (limit {max_time}s)",
+                }
                 break
 
-            # Check for loops and timeouts
+            # Check for loops and timeouts (pre-LLM gate)
             if self.loop_detector.should_abort():
                 abort_reason = self.loop_detector.get_abort_reason()
-                self.logger.error(f"🛑 Process aborted: {abort_reason}")
-                # Return error immediately instead of continuing to final report
-                return f"❌ Process aborted due to: {abort_reason}\n\nThe code implementation was stopped because the system detected an issue that prevented progress. Please check the logs for more details."
+                self.logger.error(f"🛑 Process aborted (pre-LLM): {abort_reason}")
+                run_state = {
+                    "status": "aborted",
+                    "reason": f"loop_detector pre-LLM: {abort_reason}",
+                }
+                break
 
             # Update file-level progress
             files_implemented = code_agent.get_files_implemented_count()
@@ -387,10 +440,15 @@ Requirements:
 
             # Round logging removed
 
-            # Call LLM
+            # Call LLM. Time it so we can subtract the LLM wait from the
+            # stall budget — otherwise a single slow round-trip (long
+            # context, transient retry, network blip) trips the
+            # "no progress for 180s" guard and aborts the whole pipeline.
+            llm_start = time.time()
             response = await self._call_llm_with_tools(
                 client, client_type, current_system_message, messages, tools
             )
+            self.loop_detector.note_llm_wait(time.time() - llm_start)
 
             response_content = response.get("content", "").strip()
             if not response_content:
@@ -401,13 +459,21 @@ Requirements:
             # Handle tool calls
             if response.get("tool_calls"):
                 # Check for loops before executing tools
+                aborted_in_tool_check = False
                 for tool_call in response["tool_calls"]:
                     loop_status = self.loop_detector.check_tool_call(tool_call["name"])
                     if loop_status["should_stop"]:
                         self.logger.error(
                             f"🛑 Tool execution aborted: {loop_status['message']}"
                         )
-                        return f"Process aborted: {loop_status['message']}"
+                        run_state = {
+                            "status": "aborted",
+                            "reason": f"loop_detector tool-check: {loop_status['message']}",
+                        }
+                        aborted_in_tool_check = True
+                        break
+                if aborted_in_tool_check:
+                    break
 
                 tool_results = await code_agent.execute_tool_calls(
                     response["tool_calls"]
@@ -498,6 +564,10 @@ Requirements:
                 self.logger.info(
                     "✅ Code implementation complete - All files implemented"
                 )
+                run_state = {
+                    "status": "completed",
+                    "reason": "all planned files implemented",
+                }
                 break
 
             # Emergency trim if too long
@@ -512,8 +582,18 @@ Requirements:
                     current_system_message, messages, files_implemented_count
                 )
 
+        elapsed_total = time.time() - start_time
+        # Snapshot run state for run_workflow's truthful status reporting.
+        self._last_run_state = {
+            "status": run_state["status"],
+            "reason": run_state["reason"],
+            "iterations": iteration,
+            "elapsed_seconds": elapsed_total,
+            "files_completed": code_agent.get_files_implemented_count(),
+            "unimplemented_files": list(memory_agent.get_unimplemented_files() or []),
+        }
         return await self._generate_pure_code_final_report_with_concise_agents(
-            iteration, time.time() - start_time, code_agent, memory_agent
+            iteration, elapsed_total, code_agent, memory_agent
         )
 
     # ==================== 4. MCP Agent and LLM Communication Management (Communication Layer) ====================

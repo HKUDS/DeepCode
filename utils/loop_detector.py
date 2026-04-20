@@ -23,8 +23,8 @@ class LoopDetector:
     def __init__(
         self,
         max_repeats: int = 5,
-        timeout_seconds: int = 300,
-        stall_threshold: int = 180,
+        timeout_seconds: int = 600,
+        stall_threshold: int = 300,
         max_errors: int = 10,
     ):
         """
@@ -32,8 +32,12 @@ class LoopDetector:
 
         Args:
             max_repeats: Maximum consecutive calls to same tool before flagging
-            timeout_seconds: Maximum time per file/operation (5 minutes default)
-            stall_threshold: Maximum time without progress (3 minutes default)
+            timeout_seconds: Maximum time per file/operation (10 minutes default)
+            stall_threshold: Maximum time without progress (5 minutes default).
+                Increased from the original 180s because slow LLM calls (large
+                contexts, transient retries, network blips) can routinely take
+                several minutes — counting that idle wait as a "stall" used to
+                kill mid-run pipelines.
             max_errors: Maximum consecutive errors before force stop
         """
         self.max_repeats = max_repeats
@@ -48,6 +52,10 @@ class LoopDetector:
         self.consecutive_errors = 0
         self.current_file = None
         self.file_start_time = None
+        # Wall-clock budget that *excludes* LLM-call time. ``note_llm_wait``
+        # adds the elapsed LLM seconds back to ``last_progress_time`` so the
+        # stall check only penalises true tool-side inactivity.
+        self._pending_llm_offset_s: float = 0.0
 
     def start_file(self, filename: str):
         """Start tracking a new file."""
@@ -116,6 +124,20 @@ class LoopDetector:
         """Record that progress has been made."""
         self.last_progress_time = time.time()
         self.consecutive_errors = 0  # Reset error counter on progress
+        self._pending_llm_offset_s = 0.0
+
+    def note_llm_wait(self, elapsed_seconds: float) -> None:
+        """Exclude an LLM-call wait from the stall budget.
+
+        Call this with ``time.time() - llm_start`` after every LLM
+        request/response cycle (including retries). The detector forwards
+        ``last_progress_time`` by that amount so a slow LLM round-trip is
+        not mistaken for a frozen workflow. Has no effect if the call
+        completed quickly.
+        """
+        if elapsed_seconds <= 0:
+            return
+        self.last_progress_time += elapsed_seconds
 
     def record_error(self, error_message: str):
         """Record an error occurred."""

@@ -5,8 +5,13 @@ This module provides utilities to detect LLM model capabilities and limits
 dynamically, avoiding hardcoded values and supporting model changes.
 """
 
-from typing import Dict, Optional
+from typing import Dict, Optional, Set
 import yaml
+
+
+# Track models we've already warned about so we don't spam the log with
+# the same "Model 'X' not in database" notice on every LLM call.
+_UNKNOWN_MODELS_WARNED: Set[str] = set()
 
 
 # Model capability database
@@ -60,6 +65,18 @@ MODEL_LIMITS = {
         "max_context_tokens": 200000,
         "input_cost_per_1m": 15.00,
         "output_cost_per_1m": 60.00,
+        "provider": "openai",
+    },
+    # GPT-5 family (also covers Poe-routed aliases like ``gpt-5.4`` because
+    # the lookup uses substring matching on the lowercased model name).
+    # Token costs left at 0.0 because Poe / proxy gateways often bill on a
+    # per-message basis rather than per-token; downstream cost calculations
+    # therefore report $0 instead of guessing.
+    "gpt-5": {
+        "max_completion_tokens": 32768,
+        "max_context_tokens": 400000,
+        "input_cost_per_1m": 0.0,
+        "output_cost_per_1m": 0.0,
         "provider": "openai",
     },
     # Anthropic Models
@@ -149,18 +166,29 @@ def get_model_limits(
             "provider": "unknown",
         }
 
-    # Find matching model in database
+    # Find matching model in database. Prefer the longest matching pattern so
+    # ``gpt-5.4`` matches the ``gpt-5`` family entry rather than no entry,
+    # and ``gpt-4o`` matches ``gpt-4o`` rather than the generic ``gpt-4``.
+    best_pattern: Optional[str] = None
+    best_limits: Optional[Dict] = None
+    lowered = model_name.lower()
     for pattern, limits in MODEL_LIMITS.items():
-        if pattern.lower() in model_name.lower():
-            print(f"📊 Detected model: {model_name} → {pattern}")
-            print(f"   Max completion tokens: {limits['max_completion_tokens']}")
-            print(f"   Max context tokens: {limits['max_context_tokens']}")
-            return limits.copy()
+        if pattern.lower() in lowered:
+            if best_pattern is None or len(pattern) > len(best_pattern):
+                best_pattern = pattern
+                best_limits = limits
+    if best_limits is not None:
+        return best_limits.copy()
 
-    # Model not in database - use conservative defaults
-    print(
-        f"⚠️ Warning: Model '{model_name}' not in database, using conservative defaults"
-    )
+    # Model not in database - use conservative defaults. Warn at most once
+    # per model so a long-running pipeline doesn't spam dozens of identical
+    # warnings (one per LLM call).
+    if model_name not in _UNKNOWN_MODELS_WARNED:
+        _UNKNOWN_MODELS_WARNED.add(model_name)
+        print(
+            f"⚠️ Warning: Model '{model_name}' not in database, using conservative "
+            "defaults (this warning will not repeat for this model)"
+        )
     return {
         "max_completion_tokens": 4096,
         "max_context_tokens": 8192,

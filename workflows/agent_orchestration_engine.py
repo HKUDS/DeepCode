@@ -1534,24 +1534,38 @@ async def synthesize_code_implementation_agent(
                 pure_code_mode=True,  # Focus on code implementation, skip testing
             )
 
-            # Log implementation results
-            if implementation_result["status"] == "success":
-                print("Code implementation completed successfully!")
-                print(f"Code directory: {implementation_result['code_directory']}")
-
-                # Save implementation results to file
-                with open(
-                    dir_info["implementation_report_path"], "w", encoding="utf-8"
-                ) as f:
-                    f.write(str(implementation_result))
-                print(
-                    f"Implementation report saved to {dir_info['implementation_report_path']}"
-                )
-
+            # Log implementation results truthfully — distinguish full
+            # completion from an early termination (loop_detector abort,
+            # max_iterations, max_time, etc.). The legacy code unconditionally
+            # printed "completed successfully!" which masked partial output.
+            inner_status = implementation_result.get("inner_status") or implementation_result.get("status")
+            files_done = implementation_result.get("files_completed", 0)
+            unimpl = implementation_result.get("unimplemented_files", []) or []
+            if inner_status == "completed":
+                print("✅ Code implementation completed successfully (all planned files written)!")
+                print(f"   Code directory : {implementation_result['code_directory']}")
+                print(f"   Files written  : {files_done}")
             else:
+                reason = implementation_result.get("abort_reason") or "unknown"
                 print(
-                    f"Code implementation failed: {implementation_result.get('message', 'Unknown error')}"
+                    f"⚠️  Code implementation finished EARLY — status={inner_status}, "
+                    f"files_written={files_done}, unimplemented={len(unimpl)}"
                 )
+                print(f"   Reason         : {reason}")
+                print(f"   Code directory : {implementation_result['code_directory']}")
+                if unimpl:
+                    sample = ", ".join(unimpl[:5])
+                    if len(unimpl) > 5:
+                        sample += f", ... (+{len(unimpl) - 5} more)"
+                    print(f"   Missing files  : {sample}")
+
+            with open(
+                dir_info["implementation_report_path"], "w", encoding="utf-8"
+            ) as f:
+                f.write(str(implementation_result))
+            print(
+                f"Implementation report saved to {dir_info['implementation_report_path']}"
+            )
 
             return implementation_result
         else:
@@ -1770,8 +1784,11 @@ async def execute_multi_agent_research_pipeline(
             dir_info, logger
         )
 
-        # Handle segmentation result
-        if segmentation_result["status"] == "success":
+        # Handle segmentation result. Each known status has its own message;
+        # the catch-all fallback now reports the actual status + every key in
+        # the result dict so future surprises don't silently log "Unknown".
+        seg_status = segmentation_result.get("status", "missing")
+        if seg_status == "success":
             print("✅ Document preprocessing completed successfully!")
             print(
                 f"   📊 Using segmentation: {dir_info.get('use_segmentation', False)}"
@@ -1780,15 +1797,36 @@ async def execute_multi_agent_research_pipeline(
                 print(
                     f"   📁 Segments directory: {segmentation_result.get('segments_dir', 'N/A')}"
                 )
-        elif segmentation_result["status"] == "fallback_to_traditional":
-            print("⚠️ Document segmentation failed, using traditional processing")
+        elif seg_status == "traditional":
             print(
-                f"   Original error: {segmentation_result.get('original_error', 'Unknown')}"
+                "📖 Document preprocessing: using traditional full-document workflow"
+            )
+            print(f"   Reason: {segmentation_result.get('reason', 'n/a')}")
+            print(
+                f"   Document size: {segmentation_result.get('document_size', 0)} chars"
+            )
+        elif seg_status == "skipped":
+            print(
+                f"ℹ️ Document preprocessing skipped — {segmentation_result.get('reason', 'n/a')}"
+            )
+        elif seg_status == "fallback_to_traditional":
+            print("⚠️ Document segmentation failed, falling back to traditional processing")
+            print(
+                f"   Original error: {segmentation_result.get('original_error', 'n/a')}"
+            )
+            print(
+                f"   Fallback reason: {segmentation_result.get('fallback_reason', 'n/a')}"
+            )
+        elif seg_status == "error":
+            print(
+                f"⚠️ Document preprocessing failed: {segmentation_result.get('error_message', 'no error_message provided')}"
             )
         else:
+            # Unknown status — dump the entire result so we can diagnose later.
             print(
-                f"⚠️ Document preprocessing encountered issues: {segmentation_result.get('error_message', 'Unknown')}"
+                f"⚠️ Document preprocessing returned unrecognised status='{seg_status}'."
             )
+            print(f"   Full result: {segmentation_result}")
 
         # Phase 5: Code Planning Orchestration (65%)
         if progress_callback:
@@ -1890,23 +1928,35 @@ async def execute_multi_agent_research_pipeline(
         elif index_result["status"] == "success":
             pipeline_summary += "\n✅ Codebase indexing completed successfully"
 
-        # Add implementation status to summary
-        if implementation_result["status"] == "success":
+        # Add implementation status to summary — distinguish "all done" from
+        # "stopped early but partial output exists".
+        impl_status = implementation_result["status"]
+        impl_inner = implementation_result.get("inner_status", impl_status)
+        if impl_inner == "completed":
             pipeline_summary += "\n🎉 Code implementation completed successfully!"
             pipeline_summary += (
                 f"\n📁 Code generated in: {implementation_result['code_directory']}"
             )
-            return pipeline_summary
-        elif implementation_result["status"] == "warning":
+        elif impl_status == "incomplete":
+            files_done = implementation_result.get("files_completed", 0)
+            unimpl = implementation_result.get("unimplemented_files", []) or []
             pipeline_summary += (
-                f"\n⚠️ Code implementation: {implementation_result['message']}"
+                f"\n⚠️ Code implementation finished EARLY — wrote {files_done} files, "
+                f"{len(unimpl)} unimplemented (status={impl_inner}, "
+                f"reason={implementation_result.get('abort_reason', 'unknown')})"
             )
-            return pipeline_summary
+            pipeline_summary += (
+                f"\n📁 Partial code in: {implementation_result['code_directory']}"
+            )
+        elif impl_status == "warning":
+            pipeline_summary += (
+                f"\n⚠️ Code implementation: {implementation_result.get('message', 'see logs')}"
+            )
         else:
             pipeline_summary += (
-                f"\n❌ Code implementation failed: {implementation_result['message']}"
+                f"\n❌ Code implementation failed: {implementation_result.get('message', 'see logs')}"
             )
-            return pipeline_summary
+        return pipeline_summary
 
     except Exception as e:
         error_msg = f"Error in execute_multi_agent_research_pipeline: {e}"
@@ -2086,8 +2136,11 @@ The following implementation plan was generated by the AI chat planning agent:
         # Final Status Report
         pipeline_summary = f"Chat-based planning and implementation pipeline completed for {dir_info['paper_dir']}"
 
-        # Add implementation status to summary
-        if implementation_result["status"] == "success":
+        # Add implementation status to summary — distinguish full completion
+        # from an early termination (loop_detector abort, max_iterations, etc.).
+        impl_status = implementation_result["status"]
+        impl_inner = implementation_result.get("inner_status", impl_status)
+        if impl_inner == "completed":
             pipeline_summary += "\n🎉 Code implementation completed successfully!"
             pipeline_summary += (
                 f"\n📁 Code generated in: {implementation_result['code_directory']}"
@@ -2095,17 +2148,26 @@ The following implementation plan was generated by the AI chat planning agent:
             pipeline_summary += (
                 "\n💬 Generated from user requirements via chat interface"
             )
-            return pipeline_summary
-        elif implementation_result["status"] == "warning":
+        elif impl_status == "incomplete":
+            files_done = implementation_result.get("files_completed", 0)
+            unimpl = implementation_result.get("unimplemented_files", []) or []
             pipeline_summary += (
-                f"\n⚠️ Code implementation: {implementation_result['message']}"
+                f"\n⚠️ Code implementation finished EARLY — wrote {files_done} files, "
+                f"{len(unimpl)} unimplemented (status={impl_inner}, "
+                f"reason={implementation_result.get('abort_reason', 'unknown')})"
             )
-            return pipeline_summary
+            pipeline_summary += (
+                f"\n📁 Partial code in: {implementation_result['code_directory']}"
+            )
+        elif impl_status == "warning":
+            pipeline_summary += (
+                f"\n⚠️ Code implementation: {implementation_result.get('message', 'see logs')}"
+            )
         else:
             pipeline_summary += (
-                f"\n❌ Code implementation failed: {implementation_result['message']}"
+                f"\n❌ Code implementation failed: {implementation_result.get('message', 'see logs')}"
             )
-            return pipeline_summary
+        return pipeline_summary
 
     except Exception as e:
         print(f"Error in execute_chat_based_planning_pipeline: {e}")
