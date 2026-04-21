@@ -57,7 +57,7 @@ export function useTaskRecovery() {
       const taskStatus = await workflowsApi.getStatus(activeTaskId);
       console.log('[TaskRecovery] Task status from backend:', taskStatus);
 
-      if (taskStatus.status === 'running') {
+      if (taskStatus.status === 'running' || taskStatus.status === 'pending') {
         // Task is still running - restore steps and let WebSocket reconnect
         console.log('[TaskRecovery] Task still running, reconnecting...');
 
@@ -69,6 +69,25 @@ export function useTaskRecovery() {
         }
 
         // Update progress from backend
+        updateProgress(taskStatus.progress, taskStatus.message);
+        setStatus('running');
+        setNeedsRecovery(false);
+
+        setRecoveryState({
+          isRecovering: false,
+          recoveredTaskId: activeTaskId,
+          error: null,
+        });
+
+      } else if (taskStatus.status === 'waiting_for_input') {
+        console.log('[TaskRecovery] Task waiting for input, restoring interactive state...');
+
+        if (workflowType === 'paper-to-code') {
+          setSteps(PAPER_TO_CODE_STEPS);
+        } else if (workflowType === 'chat-planning') {
+          setSteps(CHAT_PLANNING_STEPS);
+        }
+
         updateProgress(taskStatus.progress, taskStatus.message);
         setStatus('running');
         setNeedsRecovery(false);

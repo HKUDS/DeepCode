@@ -1,16 +1,18 @@
 $schema: ./schema/mcp-agent.config.schema.json
-anthropic: null
+anthropic:
+  default_model: claude-sonnet-4.5
+  implementation_model: claude-sonnet-3.5
+  planning_model: claude-sonnet-4.5
 default_search_server: filesystem
 document_segmentation:
-  enabled: false
+  enabled: true
   size_threshold_chars: 50000
 execution_engine: asyncio
-# Optional workspace settings consumed by workflows.environment.
-# Both keys are optional; defaults are <cwd>/deepcode_lab and 100 MB.
-# DEEPCODE_WORKSPACE env var (if set) overrides workspace.root.
-workspace:
-  root: ./deepcode_lab
-  max_input_mb: 100
+google:
+  default_model: gemini-3-pro-preview
+  implementation_model: gemini-2.5-flash
+  planning_model: gemini-3-pro-preview
+llm_provider: openai
 logger:
   level: info
   path_settings:
@@ -23,24 +25,6 @@ logger:
   - file
 mcp:
   servers:
-    filesystem:
-      # macos and linux should use this
-      # Note: "No valid root directories" warning is harmless - connection still works
-      args:
-      - -y
-      - '@modelcontextprotocol/server-filesystem'
-      - .
-      - ./deepcode_lab
-      command: npx
-
-      # windows should use this
-      # args:
-      # # please use the correct path for your system
-      # - C:/Users/LEGION/AppData/Roaming/npm/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js
-      # - .
-      # command: node
-
-
     code-implementation:
       args:
       - tools/code_implementation_server.py
@@ -81,39 +65,28 @@ mcp:
       command: python
       env:
         PYTHONPATH: .
+    filesystem:
+      args:
+      - -y
+      - '@modelcontextprotocol/server-filesystem'
+      - .
+      - ./deepcode_lab
+      command: npx
     github-downloader:
       args:
       - tools/git_command.py
       command: python
       env:
         PYTHONPATH: .
-# LLM Provider Priority (选择使用哪个LLM / Choose which LLM to use)
-# Options: "anthropic", "google", "openai"
-# If not set or provider unavailable, will fallback to first available provider
-llm_provider: "openai"  # 设置为 "google", "anthropic", 或 "openai"
-
-#openrouter can be used here and openai professional key
 openai:
   base_max_tokens: 40000
-  default_model: "gpt-5.4"
-  planning_model: "gpt-5.4"
-  implementation_model: "gpt-5.4"
-  reasoning_effort: low  # Only for thinking models
+  default_model: gpt-5.4
+  implementation_model: gpt-5.4
   max_tokens_policy: adaptive
+  planning_model: gpt-5.4
+  reasoning_effort: low
   retry_max_tokens: 32768
-
-# Provider configurations
-# default_model is used by mcp_agent for planning/analysis phases
-# implementation_model is used by code_implementation_workflow for code generation
-google:
-  default_model: "gemini-3-pro-preview"
-  planning_model: "gemini-3-pro-preview"
-  implementation_model: "gemini-2.5-flash"
-
-anthropic:
-  default_model: "claude-sonnet-4.5"
-  planning_model: "claude-sonnet-4.5"
-  implementation_model: "claude-sonnet-3.5"
-
-
 planning_mode: traditional
+workspace:
+  max_input_mb: 100
+  root: ./deepcode_lab

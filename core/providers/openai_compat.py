@@ -149,6 +149,30 @@ _RESPONSES_FAILURE_THRESHOLD = 3
 _RESPONSES_PROBE_INTERVAL_S = 300  # 5 minutes
 
 
+def _get_default_request_timeout_s() -> float:
+    """Return the default wall-clock timeout for OpenAI-compatible requests."""
+    raw = (
+        os.environ.get("DEEPCODE_OPENAI_REQUEST_TIMEOUT_S")
+        or os.environ.get("NANOBOT_OPENAI_REQUEST_TIMEOUT_S")
+        or "180"
+    ).strip()
+    try:
+        timeout_s = float(raw)
+    except ValueError:
+        logger.warning(
+            "Invalid OpenAI-compatible request timeout '{}'; falling back to 180s",
+            raw,
+        )
+        return 180.0
+    if timeout_s <= 0:
+        logger.warning(
+            "Non-positive OpenAI-compatible request timeout '{}'; falling back to 180s",
+            raw,
+        )
+        return 180.0
+    return timeout_s
+
+
 def _is_direct_openai_base(api_base: str | None) -> bool:
     """Return True for direct OpenAI endpoints, not generic OpenAI-compatible gateways."""
     if not api_base:
@@ -203,6 +227,7 @@ class OpenAICompatProvider(LLMProvider):
             base_url=effective_base,
             default_headers=default_headers,
             max_retries=0,
+            timeout=_get_default_request_timeout_s(),
         )
 
         # Responses API circuit breaker: skip after repeated failures,

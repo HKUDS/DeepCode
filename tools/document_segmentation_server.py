@@ -1443,6 +1443,36 @@ def ensure_segments_dir_exists(segments_dir: str):
     os.makedirs(segments_dir, exist_ok=True)
 
 
+def _build_fallback_segments(
+    content: str, segmenter: "DocumentSegmenter"
+) -> Tuple[List[DocumentSegment], str]:
+    """Guarantee a usable segmentation result for downstream planning."""
+    fallback_strategies = [
+        ("header_fallback", segmenter._segment_by_headers),
+        ("academic_fallback", segmenter._segment_academic_paper),
+        ("semantic_chunk_fallback", segmenter._segment_by_enhanced_semantic_chunks),
+        ("content_aware_fallback", segmenter._segment_content_aware),
+        ("paragraph_fallback", segmenter._segment_by_paragraphs),
+    ]
+
+    for strategy_name, strategy_fn in fallback_strategies:
+        try:
+            segments = strategy_fn(content)
+        except Exception as exc:
+            logger.warning(f"Segmentation fallback {strategy_name} failed: {exc}")
+            continue
+
+        usable_segments = [
+            segment
+            for segment in segments
+            if (segment.content or "").strip() and segment.char_count > 0
+        ]
+        if usable_segments:
+            return usable_segments, strategy_name
+
+    raise ValueError("All segmentation strategies produced zero usable segments")
+
+
 @mcp.tool()
 async def analyze_and_segment_document(
     paper_dir: str, force_refresh: bool = False
@@ -1538,6 +1568,11 @@ async def analyze_and_segment_document(
 
         # Create segments
         segments = segmenter.segment_document(content, strategy)
+        if not segments:
+            logger.warning(
+                f"Primary segmentation strategy '{strategy}' produced zero segments; applying deterministic fallback"
+            )
+            segments, strategy = _build_fallback_segments(content, segmenter)
 
         # Create document index
         document_index = DocumentIndex(

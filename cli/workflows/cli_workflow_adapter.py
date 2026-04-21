@@ -114,7 +114,7 @@ class CLIWorkflowAdapter:
             Callable: Progress callback function
         """
 
-        def progress_callback(progress: int, message: str):
+        def progress_callback(progress: int, message: str, error: str = None):
             if self.cli_interface:
                 # Mode-aware stage mapping (matching UI version logic)
                 if enable_indexing:
@@ -155,7 +155,9 @@ class CLIWorkflowAdapter:
                 self.cli_interface.display_processing_stages(stage, enable_indexing)
 
                 # Display status message
-                self.cli_interface.print_status(message, "processing")
+                status_level = "error" if error else "processing"
+                status_message = f"{message}: {error}" if error else message
+                self.cli_interface.print_status(status_message, status_level)
 
         return progress_callback
 

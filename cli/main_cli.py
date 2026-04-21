@@ -11,6 +11,7 @@ import os
 import sys
 import asyncio
 import argparse
+import io
 
 # 禁止生成.pyc文件
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -23,6 +24,40 @@ if parent_dir not in sys.path:
 
 # 导入CLI应用
 from cli.cli_app import CLIApp, Colors
+
+
+def _configure_console_encoding():
+    """Prefer UTF-8 output and degrade safely on legacy Windows consoles."""
+    try:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        else:
+            sys.stdout = io.TextIOWrapper(
+                sys.stdout.detach(), encoding="utf-8", errors="replace"
+            )
+        if hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        else:
+            sys.stderr = io.TextIOWrapper(
+                sys.stderr.detach(), encoding="utf-8", errors="replace"
+            )
+    except Exception:
+        pass
+
+
+def _safe_print(text: str):
+    """Print text safely on terminals with non-UTF-8 encodings."""
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+        sanitized = text.encode(encoding, errors="replace").decode(
+            encoding, errors="replace"
+        )
+        print(sanitized)
+
+
+_configure_console_encoding()
 
 
 def print_enhanced_banner():
@@ -45,7 +80,7 @@ def print_enhanced_banner():
 ║                                                                              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝{Colors.ENDC}
 """
-    print(banner)
+    _safe_print(banner)
 
 
 def check_environment():

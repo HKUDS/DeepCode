@@ -29,12 +29,13 @@ Architecture:
 import asyncio
 import json
 import os
+import textwrap
 import yaml
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 # MCP Agent imports
-from core.compat import Agent, ParallelLLM, RequestParams
+from core.compat import Agent, RequestParams
 
 # Local imports
 from prompts.code_prompts import (
@@ -50,7 +51,6 @@ from workflows.code_implementation_workflow_index import (
 from utils.llm_utils import (
     get_preferred_llm_class,
     should_use_document_segmentation,
-    get_adaptive_agent_config,
     get_adaptive_prompts,
     get_token_limits,
 )
@@ -61,6 +61,181 @@ from workflows.workflow_context import WorkflowContext
 
 # Environment configuration
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"  # Prevent .pyc file generation
+
+_DEFAULT_CODE_ANALYZER_TIMEOUT_S = 180
+
+
+def _get_code_analyzer_timeout_s() -> int:
+    """Return the wall-clock timeout for a single planning LLM attempt."""
+    raw = (
+        os.environ.get("DEEPCODE_CODE_ANALYZER_TIMEOUT_S")
+        or os.environ.get("NANOBOT_CODE_ANALYZER_TIMEOUT_S")
+        or ""
+    ).strip()
+    if not raw:
+        return _DEFAULT_CODE_ANALYZER_TIMEOUT_S
+    try:
+        value = int(raw)
+    except ValueError:
+        print(
+            f"⚠️ Invalid code analyzer timeout '{raw}', using default {_DEFAULT_CODE_ANALYZER_TIMEOUT_S}s"
+        )
+        return _DEFAULT_CODE_ANALYZER_TIMEOUT_S
+    if value <= 0:
+        print(
+            f"⚠️ Non-positive code analyzer timeout '{raw}', using default {_DEFAULT_CODE_ANALYZER_TIMEOUT_S}s"
+        )
+        return _DEFAULT_CODE_ANALYZER_TIMEOUT_S
+    return value
+
+
+async def _generate_plan_with_single_agent(
+    planner_agent: Agent,
+    *,
+    message: str,
+    request_params: RequestParams,
+    timeout_s: int,
+    logger,
+) -> str:
+    """Generate a plan with the planner agent only.
+
+    This path is used as the stable default for traditional full-document
+    planning when the paper content is already preloaded locally. In practice
+    it avoids the slowest branch in the parallel planning fan-out while still
+    producing a complete YAML plan for the downstream workflow.
+    """
+    async with planner_agent:
+        planner_llm = await planner_agent.attach_llm(get_preferred_llm_class())
+        logger.info(
+            f"Single-agent planning started (timeout={timeout_s}s, agent={planner_agent.name})"
+        )
+        return await asyncio.wait_for(
+            planner_llm.generate_str(message=message, request_params=request_params),
+            timeout=timeout_s,
+        )
+
+
+def _load_paper_markdown_content(paper_dir: str, logger) -> tuple[str, str]:
+    """Load the primary markdown artifact used for planning."""
+    markdown_candidates = [
+        filename
+        for filename in os.listdir(paper_dir)
+        if filename.endswith(".md") and not filename.endswith("implement_code_summary.md")
+    ]
+    if not markdown_candidates:
+        raise FileNotFoundError(f"No markdown file found in {paper_dir}")
+
+    paper_file_path = os.path.join(paper_dir, markdown_candidates[0])
+    with open(paper_file_path, "r", encoding="utf-8") as f:
+        paper_content = f.read()
+
+    logger.info(
+        f"Loaded paper markdown for planning: {paper_file_path} ({len(paper_content)} chars)"
+    )
+    return paper_file_path, paper_content
+
+
+def _load_document_segments_context(
+    paper_dir: str, *, max_segments: int = 8, max_chars: int = 24000
+) -> Optional[str]:
+    """Build deterministic planner context from the segmentation index."""
+    index_path = os.path.join(paper_dir, "document_segments", "document_index.json")
+    if not os.path.exists(index_path):
+        return None
+
+    with open(index_path, "r", encoding="utf-8") as f:
+        index_data = json.load(f)
+
+    segments = index_data.get("segments") or []
+    if not segments:
+        return None
+
+    ranked_segments = sorted(
+        segments,
+        key=lambda seg: (
+            float((seg.get("relevance_scores") or {}).get("code_planning", 0.0)),
+            int(seg.get("char_count", 0)),
+        ),
+        reverse=True,
+    )
+
+    selected_segments: List[Dict[str, Any]] = []
+    selected_chars = 0
+    for segment in ranked_segments:
+        content = (segment.get("content") or "").strip()
+        if not content:
+            continue
+        content_len = len(content)
+        if selected_segments and (
+            len(selected_segments) >= max_segments
+            or selected_chars + content_len > max_chars
+        ):
+            continue
+        selected_segments.append(segment)
+        selected_chars += content_len
+        if len(selected_segments) >= max_segments or selected_chars >= max_chars:
+            break
+
+    if not selected_segments:
+        return None
+
+    overview = (
+        f"document_type={index_data.get('document_type', 'unknown')}, "
+        f"strategy={index_data.get('segmentation_strategy', 'unknown')}, "
+        f"total_segments={index_data.get('total_segments', len(segments))}"
+    )
+    chunks = [f"SEGMENT OVERVIEW: {overview}"]
+    for idx, segment in enumerate(selected_segments, start=1):
+        relevance = (segment.get("relevance_scores") or {}).get("code_planning", 0.0)
+        chunks.append(
+            textwrap.dedent(
+                f"""\
+                --- SEGMENT {idx} ---
+                title: {segment.get('title', f'Segment {idx}')}
+                content_type: {segment.get('content_type', 'general')}
+                code_planning_relevance: {relevance}
+                keywords: {", ".join((segment.get('keywords') or [])[:12])}
+                content:
+                {segment.get('content', '').strip()}
+                """
+            ).strip()
+        )
+
+    return "\n\n".join(chunks)
+
+
+def _build_planning_message(
+    *,
+    paper_dir: str,
+    paper_content: str,
+    use_segmentation: bool,
+    segmented_context: Optional[str],
+) -> str:
+    """Create planner input for segmented or full-document planning."""
+    if use_segmentation and segmented_context:
+        return textwrap.dedent(
+            f"""\
+            Create a complete implementation plan for the research paper in `{paper_dir}`.
+
+            Use the segmented document context below as the authoritative source. Produce a full YAML reproduction plan with all five required sections. Do not defer work to other agents and do not describe a parallel analysis process.
+
+            === SEGMENTED DOCUMENT CONTEXT START ===
+            {segmented_context}
+            === SEGMENTED DOCUMENT CONTEXT END ===
+            """
+        )
+
+    return textwrap.dedent(
+        f"""\
+        Analyze the research paper provided below and generate a comprehensive code reproduction plan.
+
+        === PAPER CONTENT START ===
+        {paper_content}
+        === PAPER CONTENT END ===
+
+        Based on this paper, generate a complete implementation plan detailed enough for independent implementation.
+        """
+    )
 
 
 def _assess_output_completeness(text: str) -> float:
@@ -355,17 +530,11 @@ async def run_code_analyzer(
     paper_dir: str, logger, use_segmentation: bool = True
 ) -> str:
     """
-    Run the adaptive code analysis workflow with optimized file reading.
+    Run code planning through a single authoritative planner.
 
-    This function minimizes LLM tool calls by:
-    1. Reading paper file directly (deterministic, no LLM needed)
-    2. Passing paper content directly to agents
-    3. LLM only used for analysis and search decisions
-
-    Orchestrates three specialized agents:
-    - ConceptAnalysisAgent: Analyzes system architecture and conceptual framework
-    - AlgorithmAnalysisAgent: Extracts algorithms, formulas, and technical details
-    - CodePlannerAgent: Integrates outputs into a comprehensive implementation plan
+    Segmentation may be used to prepare a compact deterministic context, but
+    final plan generation is always performed by one planner agent. This keeps
+    planning architecture consistent and avoids fan-out deadlocks.
 
     Args:
         paper_dir: Directory path containing the research paper and related resources
@@ -373,202 +542,132 @@ async def run_code_analyzer(
         use_segmentation: Whether to use document segmentation capabilities
 
     Returns:
-        str: Comprehensive analysis result from the coordinated agents
+        str: Comprehensive implementation plan generated by the planner
     """
     print(
-        f"📊 Code analysis mode: {'Segmented' if use_segmentation else 'Traditional'}"
+        f"?? Code analysis mode: {'Segmented' if use_segmentation else 'Traditional'}"
     )
-    print("   🔧 Optimized workflow: Direct file reading, LLM only for analysis")
+    print("   ?? Planner architecture: single authoritative planner")
 
-    # STEP 1: Read paper file directly - no LLM needed for deterministic file operations
-    paper_content = None
-    paper_file_path = None
+    paper_file_path, paper_content = _load_paper_markdown_content(paper_dir, logger)
+    logger.info(f"Planning source markdown: {paper_file_path}")
 
-    try:
-        # Find .md file in paper directory - simple file system operation
-        for filename in os.listdir(paper_dir):
-            if filename.endswith(".md"):
-                paper_file_path = os.path.join(paper_dir, filename)
-                with open(paper_file_path, "r", encoding="utf-8") as f:
-                    paper_content = f.read()
-                logger.info(
-                    f"📄 Paper file loaded: {paper_file_path} ({len(paper_content)} chars)"
-                )
-                break
-
-        if not paper_content:
+    segmented_context = None
+    if use_segmentation:
+        segmented_context = _load_document_segments_context(paper_dir)
+        if segmented_context:
+            logger.info("Using segmented planner context derived from document_index.json")
+        else:
             logger.warning(
-                f"⚠️ No .md file found in {paper_dir}, agents will search for it"
+                "Segmented planning requested but no usable segments were found; falling back to full-document planning context"
             )
-    except Exception as e:
-        logger.warning(f"⚠️ Error reading paper file: {e}, agents will search for it")
+            use_segmentation = False
 
-    # STEP 2: Configure agents with minimal tool access
-    search_server_names = get_search_server_names()
-    agent_config = get_adaptive_agent_config(use_segmentation, search_server_names)
     prompts = get_adaptive_prompts(use_segmentation)
-
-    if paper_content:
-        # When paper content is already loaded, agents don't need search tools
-        agent_config = {
-            "concept_analysis": [],
-            "algorithm_analysis": search_server_names,
-            "code_planner": search_server_names,
-        }
-    else:
-        agent_config = {
-            "concept_analysis": ["filesystem"],
-            "algorithm_analysis": search_server_names + ["filesystem"],
-            "code_planner": search_server_names + ["filesystem"],
-        }
-
-    print(f"   Agent configurations: {agent_config}")
-
-    concept_analysis_agent = Agent(
-        name="ConceptAnalysisAgent",
-        instruction=prompts["concept_analysis"],
-        server_names=agent_config["concept_analysis"],
-    )
-    algorithm_analysis_agent = Agent(
-        name="AlgorithmAnalysisAgent",
-        instruction=prompts["algorithm_analysis"],
-        server_names=agent_config["algorithm_analysis"],
-    )
     code_planner_agent = Agent(
         name="CodePlannerAgent",
         instruction=prompts["code_planning"],
-        server_names=agent_config["code_planner"],
-    )
-
-    code_aggregator_agent = ParallelLLM(
-        fan_in_agent=code_planner_agent,
-        fan_out_agents=[concept_analysis_agent, algorithm_analysis_agent],
-        llm_factory=get_preferred_llm_class(),
+        server_names=get_search_server_names(),
     )
 
     base_max_tokens, _ = get_token_limits()
-
-    # STEP 3: Configure parameters - minimal tool filter since paper content is provided
-    if use_segmentation:
-        max_tokens_limit = base_max_tokens
-        temperature = 0.2
-        max_iterations = 5
-        print(
-            f"🧠 Using SEGMENTED mode: max_tokens={base_max_tokens} for complete YAML output"
-        )
-
-        # Segmentation mode: Only use segmentation tools if needed (paper content already provided)
-        tool_filter = {
-            "document-segmentation": {"read_document_segments", "get_document_overview"}
-            if not paper_content
-            else set(),  # Empty if paper already loaded
-        }
-    else:
-        max_tokens_limit = base_max_tokens
-        temperature = 0.3
-        max_iterations = 2
-        print(
-            f"🧠 Using TRADITIONAL mode: max_tokens={base_max_tokens} for complete YAML output"
-        )
-
-        # Traditional mode: No filesystem tools needed (paper content already provided)
-        if paper_content:
-            tool_filter = {"fetch": {"fetch"}}
-        else:
-            tool_filter = {
-                "fetch": {"fetch"},
-                "filesystem": {
-                    "read_text_file",
-                    "list_directory",
-                },
-            }
-
+    max_iterations = 5 if use_segmentation else 2
     enhanced_params = RequestParams(
-        maxTokens=max_tokens_limit,
-        temperature=temperature,
+        maxTokens=base_max_tokens,
+        temperature=0.2 if use_segmentation else 0.3,
         max_iterations=max_iterations,
-        tool_filter=tool_filter
-        if tool_filter
-        else None,  # None = all tools, empty dict = no filtering
+        tool_filter={"fetch": {"fetch"}},
     )
-
-    # STEP 4: Construct message with paper content directly included
-    if paper_content:
-        # Paper content provided directly - LLM only needs to analyze, not read files
-        message = f"""Analyze the research paper provided below. The paper file has been pre-loaded for you.
-
-=== PAPER CONTENT START ===
-{paper_content}
-=== PAPER CONTENT END ===
-
-Based on this paper, generate a comprehensive code reproduction plan that includes:
-
-1. Complete system architecture and component breakdown
-2. All algorithms, formulas, and implementation details
-3. Detailed file structure and implementation roadmap
-
-The goal is to create a reproduction plan detailed enough for independent implementation."""
-    else:
-        # Fallback: paper not found, agents will need to find it
-        message = f"""Analyze the research paper in directory: {paper_dir}
-
-Please locate and analyze the markdown (.md) file containing the research paper. Based on your analysis, generate a comprehensive code reproduction plan that includes:
-
-1. Complete system architecture and component breakdown
-2. All algorithms, formulas, and implementation details
-3. Detailed file structure and implementation roadmap
-
-The goal is to create a reproduction plan detailed enough for independent implementation."""
+    message = _build_planning_message(
+        paper_dir=paper_dir,
+        paper_content=paper_content,
+        use_segmentation=use_segmentation,
+        segmented_context=segmented_context,
+    )
 
     max_retries = 3
     retry_count = 0
+    request_timeout_s = _get_code_analyzer_timeout_s()
+    logger.info(
+        "Using single planner path "
+        f"(segmentation={use_segmentation}, segmented_context={bool(segmented_context)})"
+    )
 
     while retry_count < max_retries:
         try:
             print(
-                f"🚀 Attempting code analysis (attempt {retry_count + 1}/{max_retries})"
+                f"?? Attempting code analysis (attempt {retry_count + 1}/{max_retries})"
             )
-            result = await code_aggregator_agent.generate_str(
-                message=message, request_params=enhanced_params
+            logger.info(
+                f"Code planning attempt {retry_count + 1}/{max_retries} started "
+                f"(timeout={request_timeout_s}s, segmentation={use_segmentation}, "
+                f"paper_content_loaded={bool(paper_content)})"
+            )
+            result = await _generate_plan_with_single_agent(
+                code_planner_agent,
+                message=message,
+                request_params=enhanced_params,
+                timeout_s=request_timeout_s,
+                logger=logger,
             )
 
-            print(f"🔍 Code analysis result:\n{result}")
+            if not result:
+                raise ValueError("Code planning agent returned empty output")
 
-            completeness_score = _assess_output_completeness(
-                result
-            )  # need to add file structure val
-            print(f"📊 Output completeness score: {completeness_score:.2f}/1.0")
+            normalized_result = result.strip()
+            if normalized_result.lower().startswith("error calling llm:"):
+                raise RuntimeError(normalized_result)
+            if normalized_result.lower().startswith("error:"):
+                raise RuntimeError(normalized_result)
+
+            print(f"?? Code analysis result:\n{result}")
+
+            completeness_score = _assess_output_completeness(result)
+            print(f"?? Output completeness score: {completeness_score:.2f}/1.0")
 
             if completeness_score >= 0.8:
                 print(
-                    f"✅ Code analysis completed successfully (length: {len(result)} chars)"
+                    f"??Code analysis completed successfully (length: {len(result)} chars)"
                 )
                 return result
-            else:
-                print(
-                    f"⚠️ Output appears truncated (score: {completeness_score:.2f}), retrying with enhanced parameters..."
-                )
-                new_max_tokens, new_temperature = _adjust_params_for_retry(
-                    enhanced_params, retry_count
-                )
-                enhanced_params = RequestParams(
-                    maxTokens=new_max_tokens,
-                    temperature=new_temperature,
-                    max_iterations=max_iterations,
-                    tool_filter=tool_filter
-                    if tool_filter
-                    else None,  # None = all tools, empty dict = no filtering
-                )
-                retry_count += 1
 
+            print(
+                f"??? Output appears truncated (score: {completeness_score:.2f}), retrying with enhanced parameters..."
+            )
+            new_max_tokens, new_temperature = _adjust_params_for_retry(
+                enhanced_params, retry_count
+            )
+            enhanced_params = RequestParams(
+                maxTokens=new_max_tokens,
+                temperature=new_temperature,
+                max_iterations=max_iterations,
+                tool_filter={"fetch": {"fetch"}},
+            )
+            retry_count += 1
+
+        except asyncio.TimeoutError:
+            timeout_msg = (
+                f"Code planning attempt {retry_count + 1}/{max_retries} timed out "
+                f"after {request_timeout_s}s while waiting for the LLM response"
+            )
+            logger.error(timeout_msg)
+            print(f"Timeout: {timeout_msg}")
+            retry_count += 1
+            if retry_count >= max_retries:
+                raise TimeoutError(timeout_msg)
         except Exception as e:
-            print(f"❌ Error in code analysis attempt {retry_count + 1}: {e}")
+            logger.error(
+                f"Code planning attempt {retry_count + 1}/{max_retries} failed: {type(e).__name__}: {e}"
+            )
+            print(f"??Error in code analysis attempt {retry_count + 1}: {e}")
             retry_count += 1
             if retry_count >= max_retries:
                 raise
 
-    print(f"⚠️ Returning potentially incomplete result after {max_retries} attempts")
-    return result
+    print(f"??? Returning potentially incomplete result after {max_retries} attempts")
+    raise RuntimeError(
+        f"Code planning exhausted {max_retries} attempts without producing a usable plan"
+    )
 
 
 async def github_repo_download(search_result: str, paper_dir: str, logger) -> str:
@@ -902,7 +1001,7 @@ async def orchestrate_code_planning_agent(
         progress_callback: Progress callback function for monitoring
     """
     if progress_callback:
-        progress_callback(40, "🏗️ Synthesizing intelligent code architecture...")
+        progress_callback(65, "📋 Generating implementation plan and code structure...")
 
     initial_plan_path = dir_info["initial_plan_path"]
 
@@ -1497,6 +1596,10 @@ async def execute_multi_agent_research_pipeline(
         print("📊 Progress: 65% - Code Planning")
 
         await orchestrate_code_planning_agent(dir_info, logger, progress_callback)
+        if not os.path.exists(dir_info["initial_plan_path"]):
+            raise RuntimeError(
+                "Code planning did not produce initial_plan.txt; aborting the pipeline before any subsequent phase"
+            )
 
         # Phase 6: Reference Intelligence (only when indexing is enabled) (70%)
         if progress_callback:

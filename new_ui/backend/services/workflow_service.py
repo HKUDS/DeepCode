@@ -120,10 +120,12 @@ class WorkflowService:
         """Create a progress callback that broadcasts to all subscribers"""
         task = self._tasks.get(task_id)
 
-        def callback(progress: int, message: str):
+        def callback(progress: int, message: str, error: Optional[str] = None):
             if task:
                 task.progress = progress
                 task.message = message
+                if error:
+                    task.error = error
 
             # Broadcast to all subscribers
             asyncio.create_task(
@@ -134,6 +136,7 @@ class WorkflowService:
                         "task_id": task_id,
                         "progress": progress,
                         "message": message,
+                        "error": error,
                         "timestamp": datetime.utcnow().isoformat(),
                     },
                 )
