@@ -20,11 +20,12 @@ stack.
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Any, Iterable, Type
 
 from loguru import logger
 
-from core.agent_runtime.runner import AgentRunner, AgentRunSpec
+from core.agent_runtime.runner import AgentRunner, AgentRunResult, AgentRunSpec
 from core.agent_runtime.tools.mcp import connect_mcp_servers
 from core.agent_runtime.tools.registry import ToolRegistry
 from core.compat.request_params import RequestParams
@@ -91,6 +92,15 @@ async def _close_registry_quietly(registry: ToolRegistry, agent_name: str) -> No
 # Keep "filter references missing server" warnings down to one per
 # (agent_name, server) pair per process, so the log stays useful.
 _WARNED_MISSING_FILTER_SERVERS: set[tuple[str, str]] = set()
+
+
+def _mcp_supervisor_close_timeout_s() -> float:
+    raw = os.environ.get("DEEPCODE_MCP_SUPERVISOR_CLOSE_TIMEOUT_S", "12").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return 12.0
+    return max(value, 0.1)
 
 
 def _apply_tool_filter(
@@ -232,6 +242,22 @@ class AugmentedLLM:
         the system prompt is the agent's ``instruction``; the registered
         tools come from the agent's ``server_names``.
         """
+        result = await self.generate(message=message, request_params=request_params)
+        if result.error and not result.final_content:
+            raise RuntimeError(f"AugmentedLLM error: {result.error}")
+        return result.final_content or ""
+
+    async def generate(
+        self,
+        message: str,
+        request_params: RequestParams | None = None,
+    ) -> AgentRunResult:
+        """Run one turn and return the full :class:`AgentRunResult`.
+
+        ``generate_str`` remains the legacy convenience API. New workflow code
+        should prefer this method when it needs stop reasons, tool usage,
+        checkpoints, or token accounting.
+        """
         params = request_params or RequestParams()
         tools = self.agent._tool_registry  # noqa: SLF001 - intentional shim access
         tools = _apply_tool_filter(
@@ -247,24 +273,37 @@ class AugmentedLLM:
         messages.append({"role": "user", "content": message})
 
         max_tokens = params.resolved_max_tokens()
-        max_iterations = max(int(params.max_iterations or 1), 1)
+        requested_iterations = max(int(params.max_iterations or 1), 1)
+        if params.enforce_default_max_iterations:
+            max_iterations = max(
+                requested_iterations,
+                self.DEFAULT_MAX_ITERATIONS if tools.tool_names else 1,
+            )
+        else:
+            max_iterations = requested_iterations
 
         spec = AgentRunSpec(
             initial_messages=messages,
             tools=tools,
             model=params.model or self.provider.default_model,
-            max_iterations=max(max_iterations, self.DEFAULT_MAX_ITERATIONS if tools.tool_names else 1),
-            max_tool_result_chars=self.DEFAULT_MAX_TOOL_RESULT_CHARS,
+            max_iterations=max_iterations,
+            max_tool_result_chars=(
+                params.max_tool_result_chars or self.DEFAULT_MAX_TOOL_RESULT_CHARS
+            ),
             temperature=params.temperature,
             max_tokens=max_tokens,
+            reasoning_effort=params.reasoning_effort,
             session_key=self.agent.name,
+            context_window_tokens=params.context_window_tokens,
+            context_block_limit=params.context_block_limit,
+            provider_retry_mode=params.provider_retry_mode,
+            retry_wait_callback=params.retry_wait_callback,
+            checkpoint_callback=params.checkpoint_callback,
+            llm_timeout_s=params.llm_timeout_s,
             concurrent_tools=bool(params.parallel_tool_calls),
         )
 
-        result = await self._runner.run(spec)
-        if result.error and not result.final_content:
-            raise RuntimeError(f"AugmentedLLM error: {result.error}")
-        return result.final_content or ""
+        return await self._runner.run(spec)
 
 
 class AnthropicAugmentedLLM(AugmentedLLM):
@@ -355,9 +394,33 @@ class Agent:
             if self._stop_event is not None:
                 self._stop_event.set()
             if self._supervisor_task is not None:
-                # ``asyncio.wait`` never re-raises the awaited task's exception
-                # or its cancellation; perfect for supervised teardown.
-                await asyncio.wait({self._supervisor_task})
+                timeout_s = _mcp_supervisor_close_timeout_s()
+                done, pending = await asyncio.wait(
+                    {self._supervisor_task},
+                    timeout=timeout_s,
+                )
+                if pending:
+                    logger.warning(
+                        "Agent '{}' MCP supervisor close timed out after {}s; cancelling",
+                        self.name,
+                        timeout_s,
+                    )
+                    self._supervisor_task.cancel()
+                    await asyncio.wait({self._supervisor_task}, timeout=2.0)
+                for task in done:
+                    try:
+                        task.result()
+                    except asyncio.CancelledError:
+                        logger.debug(
+                            "Agent '{}' MCP supervisor cancelled during close",
+                            self.name,
+                        )
+                    except BaseException as close_exc:  # noqa: BLE001
+                        logger.warning(
+                            "Agent '{}' MCP supervisor close error: {}",
+                            self.name,
+                            close_exc,
+                        )
         finally:
             # Anyio's cancel-scope teardown sometimes leaves a stale cancel
             # request on the *current* task even when we contained the
@@ -469,23 +532,24 @@ class Agent:
         llm_class: Type[AugmentedLLM] | None = None,
         *,
         phase: str = "default",
+        provider_name: str | None = None,
         model: str | None = None,
     ) -> AugmentedLLM:
         """Return an :class:`AugmentedLLM` for the configured provider.
 
-        ``llm_class`` is honoured if it identifies a provider (e.g.
-        :class:`AnthropicAugmentedLLM`); otherwise the runtime's configured
-        ``llm_provider`` is used.
+        ``provider_name`` wins when supplied. ``llm_class`` remains supported
+        for legacy callsites that pass marker classes such as
+        :class:`AnthropicAugmentedLLM`.
         """
         runtime = self._runtime or get_runtime()
         self._runtime = runtime
 
-        provider_name: str | None = None
-        if llm_class is not None and getattr(llm_class, "PROVIDER_NAME", None):
-            provider_name = llm_class.PROVIDER_NAME
+        resolved_provider_name = provider_name
+        if resolved_provider_name is None and llm_class is not None and getattr(llm_class, "PROVIDER_NAME", None):
+            resolved_provider_name = llm_class.PROVIDER_NAME
 
         provider = runtime.provider_for(
-            provider_name=provider_name,
+            provider_name=resolved_provider_name,
             phase=phase,
             model=model,
         )
@@ -493,7 +557,7 @@ class Agent:
         return cls(
             agent=self,
             provider=provider,
-            provider_name=provider_name or runtime.config.llm_provider,
+            provider_name=resolved_provider_name or runtime.config.llm_provider,
             phase=phase,
         )
 

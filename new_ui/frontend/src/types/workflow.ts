@@ -1,6 +1,6 @@
 // Workflow types
 
-export type WorkflowStatus = 'idle' | 'running' | 'completed' | 'error' | 'cancelled';
+export type WorkflowStatus = 'idle' | 'running' | 'waiting_for_input' | 'completed' | 'error' | 'cancelled';
 
 export interface WorkflowStep {
   id: string;

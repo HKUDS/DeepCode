@@ -10,6 +10,9 @@ class PaperToCodeRequest(BaseModel):
     input_source: str = Field(..., description="Path to paper file or URL")
     input_type: str = Field(..., description="Type of input: file, url")
     enable_indexing: bool = Field(default=False, description="Enable code indexing")
+    enable_user_interaction: bool = Field(
+        default=True, description="Enable user review and approval steps"
+    )
 
 
 class ChatPlanningRequest(BaseModel):
@@ -17,6 +20,9 @@ class ChatPlanningRequest(BaseModel):
 
     requirements: str = Field(..., description="User requirements text")
     enable_indexing: bool = Field(default=False, description="Enable code indexing")
+    enable_user_interaction: bool = Field(
+        default=True, description="Enable user review and approval steps"
+    )
 
 
 class GenerateQuestionsRequest(BaseModel):

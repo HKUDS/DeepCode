@@ -1,5 +1,7 @@
 """Tool registry for dynamic tool management (ported from nanobot)."""
 
+import asyncio
+import os
 from contextlib import AsyncExitStack
 from typing import Any
 
@@ -117,18 +119,38 @@ class ToolRegistry:
         """Track a per-MCP-server :class:`AsyncExitStack` so :meth:`aclose` can drain it."""
         self._owned_server_stacks[server_name] = stack
 
+    @staticmethod
+    def _close_timeout_s() -> float:
+        raw = os.environ.get("DEEPCODE_MCP_CLOSE_TIMEOUT_S", "8").strip()
+        try:
+            value = float(raw)
+        except ValueError:
+            return 8.0
+        return max(value, 0.1)
+
     async def aclose(self) -> None:
         """Close every owned MCP server stack and forget all tools."""
         errors: list[BaseException] = []
+        timeout_s = self._close_timeout_s()
         for name, stack in list(self._owned_server_stacks.items()):
             try:
-                await stack.aclose()
+                await asyncio.wait_for(stack.aclose(), timeout=timeout_s)
+            except asyncio.TimeoutError as exc:
+                errors.append(
+                    TimeoutError(
+                        f"MCP server '{name}' close timed out after {timeout_s:g}s"
+                    )
+                )
             except BaseException as exc:  # noqa: BLE001 - log and continue
                 errors.append(exc)
             finally:
                 self._owned_server_stacks.pop(name, None)
         try:
-            await self._exit_stack.aclose()
+            await asyncio.wait_for(self._exit_stack.aclose(), timeout=timeout_s)
+        except asyncio.TimeoutError as exc:
+            errors.append(
+                TimeoutError(f"ToolRegistry exit stack close timed out after {timeout_s:g}s")
+            )
         except BaseException as exc:  # noqa: BLE001
             errors.append(exc)
         self._tools.clear()

@@ -36,6 +36,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 # MCP Agent imports
 from core.compat import Agent, RequestParams
+from core.agent_runtime.runner import AgentRunResult
+from core.llm_runtime import attach_workflow_llm
 
 # Local imports
 from prompts.code_prompts import (
@@ -49,7 +51,6 @@ from workflows.code_implementation_workflow_index import (
     CodeImplementationWorkflowWithIndex,
 )
 from utils.llm_utils import (
-    get_preferred_llm_class,
     should_use_document_segmentation,
     get_adaptive_prompts,
     get_token_limits,
@@ -57,6 +58,20 @@ from utils.llm_utils import (
 from workflows.agents.document_segmentation_agent import prepare_document_segments
 from workflows.agents.requirement_analysis_agent import RequirementAnalysisAgent
 from workflows.environment import prepare_workflow_environment
+from workflows.planning_runtime import (
+    append_planning_attempt,
+    build_planning_checkpoint_callback,
+    clear_planning_checkpoint,
+    is_existing_plan_usable,
+    read_planning_meta,
+    validate_plan_text,
+    write_planning_meta,
+)
+from workflows.plan_review_runtime import (
+    PlanReviewCallback,
+    PlanReviewCancelled,
+    run_plan_review_gate,
+)
 from workflows.workflow_context import WorkflowContext
 
 # Environment configuration
@@ -96,7 +111,7 @@ async def _generate_plan_with_single_agent(
     request_params: RequestParams,
     timeout_s: int,
     logger,
-) -> str:
+) -> AgentRunResult:
     """Generate a plan with the planner agent only.
 
     This path is used as the stable default for traditional full-document
@@ -105,13 +120,13 @@ async def _generate_plan_with_single_agent(
     producing a complete YAML plan for the downstream workflow.
     """
     async with planner_agent:
-        planner_llm = await planner_agent.attach_llm(get_preferred_llm_class())
+        planner_llm = await attach_workflow_llm(planner_agent, phase="planning")
         logger.info(
             f"Single-agent planning started (timeout={timeout_s}s, agent={planner_agent.name})"
         )
-        return await asyncio.wait_for(
-            planner_llm.generate_str(message=message, request_params=request_params),
-            timeout=timeout_s,
+        return await planner_llm.generate(
+            message=message,
+            request_params=request_params,
         )
 
 
@@ -572,12 +587,9 @@ async def run_code_analyzer(
 
     base_max_tokens, _ = get_token_limits()
     max_iterations = 5 if use_segmentation else 2
-    enhanced_params = RequestParams(
-        maxTokens=base_max_tokens,
-        temperature=0.2 if use_segmentation else 0.3,
-        max_iterations=max_iterations,
-        tool_filter={"fetch": {"fetch"}},
-    )
+    current_max_tokens = base_max_tokens
+    current_temperature = 0.2 if use_segmentation else 0.3
+    planning_mode = "segmented" if use_segmentation else "traditional"
     message = _build_planning_message(
         paper_dir=paper_dir,
         paper_content=paper_content,
@@ -594,77 +606,186 @@ async def run_code_analyzer(
     )
 
     while retry_count < max_retries:
+        attempt = retry_count + 1
+        attempt_record: Dict[str, Any] = {
+            "attempt": attempt,
+            "max_retries": max_retries,
+            "mode": planning_mode,
+            "segmentation": use_segmentation,
+            "segmented_context": bool(segmented_context),
+            "max_iterations": max_iterations,
+            "max_tokens": current_max_tokens,
+            "temperature": current_temperature,
+        }
+        attempt_logged = False
         try:
             print(
-                f"?? Attempting code analysis (attempt {retry_count + 1}/{max_retries})"
+                f"?? Attempting code analysis (attempt {attempt}/{max_retries})"
             )
             logger.info(
-                f"Code planning attempt {retry_count + 1}/{max_retries} started "
+                f"Code planning attempt {attempt}/{max_retries} started "
                 f"(timeout={request_timeout_s}s, segmentation={use_segmentation}, "
                 f"paper_content_loaded={bool(paper_content)})"
             )
-            result = await _generate_plan_with_single_agent(
+            enhanced_params = RequestParams(
+                maxTokens=current_max_tokens,
+                temperature=current_temperature,
+                max_iterations=max_iterations,
+                tool_filter={"fetch": {"fetch"}},
+                llm_timeout_s=request_timeout_s,
+                enforce_default_max_iterations=False,
+                checkpoint_callback=build_planning_checkpoint_callback(
+                    paper_dir,
+                    attempt=attempt,
+                    mode=planning_mode,
+                ),
+            )
+            run_result = await _generate_plan_with_single_agent(
                 code_planner_agent,
                 message=message,
                 request_params=enhanced_params,
                 timeout_s=request_timeout_s,
                 logger=logger,
             )
+            result = (run_result.final_content or "").strip()
+            attempt_record.update(
+                {
+                    "status": run_result.stop_reason,
+                    "result_chars": len(result),
+                    "tools_used": run_result.tools_used,
+                    "usage": run_result.usage,
+                    "runner_error": run_result.error,
+                }
+            )
 
             if not result:
+                attempt_record["error"] = "Code planning agent returned empty output"
+                append_planning_attempt(paper_dir, attempt_record)
+                attempt_logged = True
                 raise ValueError("Code planning agent returned empty output")
 
             normalized_result = result.strip()
             if normalized_result.lower().startswith("error calling llm:"):
+                attempt_record["error"] = normalized_result
+                append_planning_attempt(paper_dir, attempt_record)
+                attempt_logged = True
                 raise RuntimeError(normalized_result)
             if normalized_result.lower().startswith("error:"):
+                attempt_record["error"] = normalized_result
+                append_planning_attempt(paper_dir, attempt_record)
+                attempt_logged = True
                 raise RuntimeError(normalized_result)
+            if run_result.stop_reason == "max_iterations":
+                attempt_record["error"] = (
+                    f"planner reached max_iterations={max_iterations}"
+                )
+                append_planning_attempt(paper_dir, attempt_record)
+                attempt_logged = True
+                raise RuntimeError(attempt_record["error"])
 
             print(f"?? Code analysis result:\n{result}")
 
             completeness_score = _assess_output_completeness(result)
+            plan_validation = validate_plan_text(result)
             print(f"?? Output completeness score: {completeness_score:.2f}/1.0")
+            attempt_record.update(
+                {
+                    "completeness_score": completeness_score,
+                    "plan_validation": plan_validation,
+                }
+            )
 
-            if completeness_score >= 0.8:
+            if completeness_score >= 0.8 and plan_validation.get("valid", False):
                 print(
                     f"??Code analysis completed successfully (length: {len(result)} chars)"
                 )
+                attempt_record["status"] = "success"
+                append_planning_attempt(paper_dir, attempt_record)
+                write_planning_meta(
+                    paper_dir,
+                    {
+                        "status": "success",
+                        "source": "generated",
+                        "mode": planning_mode,
+                        "attempts": attempt,
+                        "stop_reason": run_result.stop_reason,
+                        "completeness_score": completeness_score,
+                        "plan_validation": plan_validation,
+                        "tools_used": run_result.tools_used,
+                        "usage": run_result.usage,
+                        "plan_chars": len(result),
+                    },
+                )
+                clear_planning_checkpoint(paper_dir)
                 return result
 
+            attempt_record["status"] = "incomplete"
+            append_planning_attempt(paper_dir, attempt_record)
+            attempt_logged = True
             print(
                 f"??? Output appears truncated (score: {completeness_score:.2f}), retrying with enhanced parameters..."
             )
+            missing = plan_validation.get("missing_sections") or []
+            if missing:
+                logger.warning(f"Code planning missing required sections: {missing}")
             new_max_tokens, new_temperature = _adjust_params_for_retry(
                 enhanced_params, retry_count
             )
-            enhanced_params = RequestParams(
-                maxTokens=new_max_tokens,
-                temperature=new_temperature,
-                max_iterations=max_iterations,
-                tool_filter={"fetch": {"fetch"}},
-            )
+            current_max_tokens = new_max_tokens
+            current_temperature = new_temperature
             retry_count += 1
 
         except asyncio.TimeoutError:
             timeout_msg = (
-                f"Code planning attempt {retry_count + 1}/{max_retries} timed out "
+                f"Code planning attempt {attempt}/{max_retries} timed out "
                 f"after {request_timeout_s}s while waiting for the LLM response"
             )
             logger.error(timeout_msg)
             print(f"Timeout: {timeout_msg}")
+            if not attempt_logged:
+                attempt_record.update({"status": "timeout", "error": timeout_msg})
+                append_planning_attempt(paper_dir, attempt_record)
             retry_count += 1
             if retry_count >= max_retries:
                 raise TimeoutError(timeout_msg)
         except Exception as e:
             logger.error(
-                f"Code planning attempt {retry_count + 1}/{max_retries} failed: {type(e).__name__}: {e}"
+                f"Code planning attempt {attempt}/{max_retries} failed: {type(e).__name__}: {e}"
             )
-            print(f"??Error in code analysis attempt {retry_count + 1}: {e}")
+            print(f"??Error in code analysis attempt {attempt}: {e}")
+            if not attempt_logged:
+                attempt_record.update(
+                    {
+                        "status": "error",
+                        "error": f"{type(e).__name__}: {e}",
+                    }
+                )
+                append_planning_attempt(paper_dir, attempt_record)
             retry_count += 1
             if retry_count >= max_retries:
+                write_planning_meta(
+                    paper_dir,
+                    {
+                        "status": "error",
+                        "source": "generated",
+                        "mode": planning_mode,
+                        "attempts": retry_count,
+                        "error": f"{type(e).__name__}: {e}",
+                    },
+                )
                 raise
 
     print(f"??? Returning potentially incomplete result after {max_retries} attempts")
+    write_planning_meta(
+        paper_dir,
+        {
+            "status": "error",
+            "source": "generated",
+            "mode": planning_mode,
+            "attempts": max_retries,
+            "error": "exhausted retries without usable plan",
+        },
+    )
     raise RuntimeError(
         f"Code planning exhausted {max_retries} attempts without producing a usable plan"
     )
@@ -692,7 +813,10 @@ async def github_repo_download(search_result: str, paper_dir: str, logger) -> st
 
     async with github_download_agent:
         print("GitHub downloader: Downloading repositories...")
-        downloader = await github_download_agent.attach_llm(get_preferred_llm_class())
+        downloader = await attach_workflow_llm(
+            github_download_agent,
+            phase="planning",
+        )
 
         # Set higher token output for GitHub download
         github_params = RequestParams(
@@ -729,7 +853,10 @@ Goal: Find the most valuable GitHub repositories from the paper's reference list
 
     async with reference_analysis_agent:
         print("Reference analyzer: Connected to server, analyzing references...")
-        analyzer = await reference_analysis_agent.attach_llm(get_preferred_llm_class())
+        analyzer = await attach_workflow_llm(
+            reference_analysis_agent,
+            phase="planning",
+        )
 
         # Filter tools to only essential ones for reference analysis
         reference_params = RequestParams(
@@ -1004,9 +1131,33 @@ async def orchestrate_code_planning_agent(
         progress_callback(65, "📋 Generating implementation plan and code structure...")
 
     initial_plan_path = dir_info["initial_plan_path"]
+    reusable, reuse_info = is_existing_plan_usable(
+        initial_plan_path,
+        paper_dir=dir_info["paper_dir"],
+    )
+    if reusable:
+        print(f"Found reusable initial plan at {initial_plan_path}")
+        if not reuse_info.get("meta") or reuse_info["meta"].get("status") != "success":
+            write_planning_meta(
+                dir_info["paper_dir"],
+                {
+                    "status": "success",
+                    "source": "existing",
+                    "initial_plan_path": initial_plan_path,
+                    "plan_chars": reuse_info.get("plan_chars", 0),
+                    "plan_validation": reuse_info.get("plan_validation"),
+                },
+            )
+        return
 
-    # Check if initial plan already exists
-    if not os.path.exists(initial_plan_path):
+    if os.path.exists(initial_plan_path):
+        print(
+            f"Existing initial plan is not reusable; regenerating ({reuse_info.get('reason', 'unknown')})"
+        )
+    should_generate_plan = not reusable
+
+    # Generate or regenerate the plan after resume validation.
+    if should_generate_plan:
         # Use segmentation setting from preprocessing phase
         use_segmentation = dir_info.get("use_segmentation", True)
         print(f"📊 Planning mode: {'Segmented' if use_segmentation else 'Traditional'}")
@@ -1048,8 +1199,29 @@ async def orchestrate_code_planning_agent(
             print(error_msg)
             raise ValueError(error_msg)
 
+        plan_validation = validate_plan_text(initial_plan_result)
+        if not plan_validation.get("valid", False):
+            missing = plan_validation.get("missing_sections") or []
+            raise ValueError(
+                f"Code planning produced invalid plan; missing sections: {missing}"
+            )
+
         with open(initial_plan_path, "w", encoding="utf-8") as f:
             f.write(initial_plan_result)
+        current_meta = read_planning_meta(dir_info["paper_dir"]) or {}
+        write_planning_meta(
+            dir_info["paper_dir"],
+            {
+                **current_meta,
+                "status": "success",
+                "source": current_meta.get("source", "generated"),
+                "initial_plan_path": initial_plan_path,
+                "plan_saved": True,
+                "plan_chars": len(initial_plan_result),
+                "plan_validation": plan_validation,
+            },
+        )
+        clear_planning_checkpoint(dir_info["paper_dir"])
         print(
             f"✅ Initial plan saved to {initial_plan_path} ({len(initial_plan_result)} chars)"
         )
@@ -1403,8 +1575,9 @@ async def run_chat_planning_agent(user_input: str, logger) -> str:
                 print(f"Failed to list tools: {e}")
 
             try:
-                planner = await chat_planning_agent.attach_llm(
-                    get_preferred_llm_class()
+                planner = await attach_workflow_llm(
+                    chat_planning_agent,
+                    phase="planning",
                 )
                 print("✅ LLM attached successfully")
             except Exception as e:
@@ -1474,6 +1647,7 @@ async def execute_multi_agent_research_pipeline(
     progress_callback: Optional[Callable] = None,
     enable_indexing: bool = True,
     task_id: Optional[str] = None,
+    plan_review_callback: Optional[PlanReviewCallback] = None,
 ) -> str:
     """
     Execute the complete intelligent multi-agent research orchestration pipeline.
@@ -1601,6 +1775,18 @@ async def execute_multi_agent_research_pipeline(
                 "Code planning did not produce initial_plan.txt; aborting the pipeline before any subsequent phase"
             )
 
+        if plan_review_callback:
+            if progress_callback:
+                progress_callback(66, "Reviewing implementation plan...")
+            print("Progress: 66% - Plan Review")
+            review_result = await run_plan_review_gate(
+                initial_plan_path=dir_info["initial_plan_path"],
+                paper_dir=dir_info["paper_dir"],
+                callback=plan_review_callback,
+                logger=logger,
+            )
+            print(f"Plan review completed: {review_result.get('status')}")
+
         # Phase 6: Reference Intelligence (only when indexing is enabled) (70%)
         if progress_callback:
             progress_callback(70, "🔍 Analyzing references and related work...")
@@ -1722,6 +1908,8 @@ async def execute_multi_agent_research_pipeline(
             )
         return pipeline_summary
 
+    except PlanReviewCancelled:
+        raise
     except Exception as e:
         error_msg = f"Error in execute_multi_agent_research_pipeline: {e}"
         print(f"❌ {error_msg}")
@@ -1767,6 +1955,8 @@ async def execute_chat_based_planning_pipeline(
     logger,
     progress_callback: Optional[Callable] = None,
     enable_indexing: bool = True,
+    task_id: Optional[str] = None,
+    plan_review_callback: Optional[PlanReviewCallback] = None,
 ) -> str:
     """
     Execute the chat-based planning and implementation pipeline.
@@ -1830,7 +2020,7 @@ async def execute_chat_based_planning_pipeline(
         from workflows.workflow_context import TASKS_DIRNAME, TASK_KIND_PREFIX
 
         timestamp = str(int(time.time()))
-        chat_id = _uuid.uuid4().hex[:8]
+        chat_id = task_id or _uuid.uuid4().hex[:8]
         prefix = TASK_KIND_PREFIX["chat2code"]  # "chat"
         task_dirname = f"{prefix}_{chat_id}"
 
@@ -1895,6 +2085,18 @@ The following implementation plan was generated by the AI chat planning agent:
             f.write(planning_result)
         print(f"💾 Implementation plan saved to {initial_plan_path}")
 
+        if plan_review_callback:
+            if progress_callback:
+                progress_callback(75, "Reviewing implementation plan...")
+            print("Progress: 75% - Plan Review")
+            review_result = await run_plan_review_gate(
+                initial_plan_path=initial_plan_path,
+                paper_dir=dir_info["paper_dir"],
+                callback=plan_review_callback,
+                logger=logger,
+            )
+            print(f"Plan review completed: {review_result.get('status')}")
+
         # Phase 4: Code Implementation Synthesis (same as Phase 8 in original pipeline)
         if progress_callback:
             progress_callback(85, "🔬 Synthesizing intelligent code implementation...")
@@ -1939,6 +2141,8 @@ The following implementation plan was generated by the AI chat planning agent:
             )
         return pipeline_summary
 
+    except PlanReviewCancelled:
+        raise
     except Exception as e:
         print(f"Error in execute_chat_based_planning_pipeline: {e}")
         raise e

@@ -10,18 +10,12 @@ import platform
 import shlex
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-# Force UTF-8 on stdio so emoji prints don't kill the server on Windows
-# consoles whose default encoding is GBK / cp936. See tools/git_command.py
-# for the full rationale.
-for _stream in (sys.stdout, sys.stderr):
-    try:
-        _stream.reconfigure(encoding="utf-8", errors="replace")
-    except (AttributeError, OSError):
-        pass
+from core.platform_compat import configure_utf8_stdio, subprocess_env
+
+configure_utf8_stdio()
 
 from mcp.server.models import InitializationOptions
 import mcp.types as types
@@ -293,6 +287,7 @@ async def execute_command_batch(
                     timeout=30,
                     encoding="utf-8",
                     errors="replace",
+                    env=subprocess_env(),
                 )
 
                 if result.returncode == 0:
@@ -361,6 +356,7 @@ async def execute_single_command(
                 timeout=30,
                 encoding="utf-8",
                 errors="replace",
+                env=subprocess_env(),
             )
 
         output = format_single_command_result(command, working_directory, result)

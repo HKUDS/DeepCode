@@ -11,7 +11,6 @@ import os
 import sys
 import asyncio
 import argparse
-import io
 
 # 禁止生成.pyc文件
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -22,27 +21,15 @@ parent_dir = os.path.dirname(current_dir)
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
+from core.platform_compat import configure_utf8_stdio
+
 # 导入CLI应用
 from cli.cli_app import CLIApp, Colors
 
 
 def _configure_console_encoding():
     """Prefer UTF-8 output and degrade safely on legacy Windows consoles."""
-    try:
-        if hasattr(sys.stdout, "reconfigure"):
-            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        else:
-            sys.stdout = io.TextIOWrapper(
-                sys.stdout.detach(), encoding="utf-8", errors="replace"
-            )
-        if hasattr(sys.stderr, "reconfigure"):
-            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-        else:
-            sys.stderr = io.TextIOWrapper(
-                sys.stderr.detach(), encoding="utf-8", errors="replace"
-            )
-    except Exception:
-        pass
+    configure_utf8_stdio()
 
 
 def _safe_print(text: str):
@@ -135,6 +122,7 @@ def parse_arguments():
   {Colors.CYAN}python main_cli.py --chat "Build a web app..."{Colors.ENDC}            # Process chat requirements
   {Colors.CYAN}python main_cli.py --requirement "ML system for..."{Colors.ENDC}       # Guided requirement analysis (NEW)
   {Colors.CYAN}python main_cli.py --optimized{Colors.ENDC}                            # Use optimized mode
+  {Colors.CYAN}python main_cli.py --no-plan-review{Colors.ENDC}                       # Skip plan approval gate
   {Colors.CYAN}python main_cli.py --disable-segmentation{Colors.ENDC}                 # Disable document segmentation
   {Colors.CYAN}python main_cli.py --segmentation-threshold 30000{Colors.ENDC}         # Custom segmentation threshold
 
@@ -176,6 +164,12 @@ def parse_arguments():
         "-o",
         action="store_true",
         help="Use optimized mode (skip indexing for faster processing)",
+    )
+
+    parser.add_argument(
+        "--no-plan-review",
+        action="store_true",
+        help="Skip interactive review after initial_plan.txt is generated",
     )
 
     parser.add_argument(
@@ -306,6 +300,12 @@ async def main():
             app.cli.enable_indexing = False
             print(
                 f"\n{Colors.YELLOW}⚡ Fast mode enabled - indexing disabled by default{Colors.ENDC}"
+            )
+
+        app.cli.enable_plan_review = not args.no_plan_review
+        if args.no_plan_review:
+            print(
+                f"\n{Colors.YELLOW}Plan review disabled - implementation will start after planning{Colors.ENDC}"
             )
 
         # Configure document segmentation settings

@@ -42,6 +42,7 @@ class CLIInterface:
         self.enable_indexing = (
             False  # Default configuration (matching UI: fast mode by default)
         )
+        self.enable_plan_review = True
 
         # Load segmentation config from the same source as UI
         self._load_segmentation_config()

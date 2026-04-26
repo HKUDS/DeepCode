@@ -51,6 +51,7 @@ class ProviderSpec:
     is_oauth: bool = False
     is_direct: bool = False
     supports_prompt_caching: bool = False
+    thinking_style: str = ""
 
     @property
     def label(self) -> str:
@@ -101,6 +102,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="DeepSeek",
         backend="openai_compat",
         default_api_base="https://api.deepseek.com",
+        thinking_style="thinking_type",
     ),
     ProviderSpec(
         name="gemini",
@@ -126,6 +128,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="DashScope",
         backend="openai_compat",
         default_api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        thinking_style="enable_thinking",
     ),
     ProviderSpec(
         name="vllm",

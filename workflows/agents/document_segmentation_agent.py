@@ -10,7 +10,7 @@ import logging
 from typing import Dict, Any, Optional
 
 from core.compat import Agent
-from utils.llm_utils import get_preferred_llm_class
+from core.llm_runtime import attach_workflow_llm
 
 
 class DocumentSegmentationAgent:
@@ -80,7 +80,10 @@ Use the enhanced document-segmentation tools to deliver superior segmentation re
             await self.mcp_agent.__aenter__()
 
             # Attach LLM
-            self.llm = await self.mcp_agent.attach_llm(get_preferred_llm_class())
+            self.llm = await attach_workflow_llm(
+                self.mcp_agent,
+                phase="planning",
+            )
 
             self.logger.info("DocumentSegmentationAgent initialized successfully")
 

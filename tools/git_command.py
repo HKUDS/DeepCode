@@ -10,15 +10,9 @@ import sys
 from typing import Dict, List, Optional
 from pathlib import Path
 
-# Force UTF-8 on stdio so emoji prints don't kill the server on Windows
-# consoles whose default encoding is GBK / cp936. Each MCP server is launched
-# as its own subprocess; a UnicodeEncodeError here would surface to the host
-# as the opaque "MCP server '<name>': failed to connect: Connection closed".
-for _stream in (sys.stdout, sys.stderr):
-    try:
-        _stream.reconfigure(encoding="utf-8", errors="replace")
-    except (AttributeError, OSError):
-        pass
+from core.platform_compat import configure_utf8_stdio, subprocess_env
+
+configure_utf8_stdio()
 
 from mcp.server import FastMCP
 
@@ -134,6 +128,7 @@ async def check_git_installed() -> bool:
             "--version",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=subprocess_env(),
         )
         await proc.wait()
         return proc.returncode == 0
@@ -151,6 +146,7 @@ async def clone_repository(repo_url: str, target_path: str) -> Dict[str, any]:
             target_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=subprocess_env(),
         )
 
         stdout, stderr = await proc.communicate()
@@ -334,7 +330,10 @@ async def git_clone(
     # 执行克隆
     try:
         proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=subprocess_env(),
         )
 
         stdout, stderr = await proc.communicate()
@@ -355,6 +354,8 @@ async def git_clone(
 
 # 主程序入口
 if __name__ == "__main__":
+    _mcp_stdout = sys.stdout
+    sys.stdout = sys.stderr
     print("🚀 GitHub Repository Downloader MCP Tool")
     print("📝 Starting server with FastMCP...")
     print("\nAvailable tools:")
@@ -364,4 +365,5 @@ if __name__ == "__main__":
     print("")
 
     # 运行服务器
+    sys.stdout = _mcp_stdout
     mcp.run()

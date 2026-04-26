@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
 import type {
   WorkflowStatus,
   WorkflowStep,
@@ -220,15 +220,17 @@ export const useWorkflowStore = create<WorkflowState>()(
     console.log('[workflowStore] Resetting state and clearing localStorage');
     // Clear localStorage explicitly to ensure clean state
     try {
+      sessionStorage.removeItem('deepcode-workflow-session');
       localStorage.removeItem('deepcode-workflow');
     } catch (e) {
-      console.error('[workflowStore] Failed to clear localStorage:', e);
+      console.error('[workflowStore] Failed to clear persisted workflow state:', e);
     }
     set(initialState);
   },
     }),
     {
-      name: 'deepcode-workflow',
+      name: 'deepcode-workflow-session',
+      storage: createJSONStorage(() => sessionStorage),
       // Only persist task-related data for recovery when task is running or waiting
       partialize: (state) => {
         const isActive = state.status === 'running' || state.isWaitingForInput;

@@ -248,6 +248,7 @@ class CLIApp:
                 input_source=input_source,
                 input_type=input_type,
                 enable_indexing=self.cli.enable_indexing,
+                enable_plan_review=getattr(self.cli, "enable_plan_review", True),
             )
 
             if result["status"] == "success":
@@ -270,6 +271,12 @@ class CLIApp:
                     result.get("repo_result", ""),
                     result.get("pipeline_mode", "comprehensive"),
                 )
+            elif result["status"] == "cancelled":
+                self.cli.print_status(
+                    f"Processing cancelled: {result.get('error', 'cancelled')}",
+                    "warning",
+                )
+
             else:
                 self.cli.print_status(
                     f"❌ Processing failed: {result.get('error', 'Unknown error')}",

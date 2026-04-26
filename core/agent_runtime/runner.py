@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -36,7 +37,7 @@ from core.agent_runtime.runtime import (
     repeated_external_lookup_error,
 )
 from core.agent_runtime.tools.registry import ToolRegistry
-from core.providers.base import LLMProvider, ToolCallRequest
+from core.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
 _PERSISTED_MODEL_ERROR_PLACEHOLDER = "[Assistant reply unavailable due to model error.]"
@@ -91,6 +92,7 @@ class AgentRunSpec:
     retry_wait_callback: Any | None = None
     checkpoint_callback: Any | None = None
     injection_callback: Any | None = None
+    llm_timeout_s: float | None = None
 
 
 @dataclass(slots=True)
@@ -577,6 +579,20 @@ class AgentRunner:
         hook: AgentHook,
         context: AgentHookContext,
     ):
+        timeout_s: float | None = spec.llm_timeout_s
+        if timeout_s is None:
+            raw = (
+                os.environ.get("DEEPCODE_LLM_TIMEOUT_S")
+                or os.environ.get("NANOBOT_LLM_TIMEOUT_S")
+                or "300"
+            ).strip()
+            try:
+                timeout_s = float(raw)
+            except (TypeError, ValueError):
+                timeout_s = 300.0
+        if timeout_s is not None and timeout_s <= 0:
+            timeout_s = None
+
         kwargs = self._build_request_kwargs(
             spec,
             messages,
@@ -587,11 +603,23 @@ class AgentRunner:
             async def _stream(delta: str) -> None:
                 await hook.on_stream(context, delta)
 
-            return await self.provider.chat_stream_with_retry(
+            coro = self.provider.chat_stream_with_retry(
                 **kwargs,
                 on_content_delta=_stream,
             )
-        return await self.provider.chat_with_retry(**kwargs)
+        else:
+            coro = self.provider.chat_with_retry(**kwargs)
+
+        if timeout_s is None:
+            return await coro
+        try:
+            return await asyncio.wait_for(coro, timeout=timeout_s)
+        except asyncio.TimeoutError:
+            return LLMResponse(
+                content=f"Error calling LLM: timed out after {timeout_s:g}s",
+                finish_reason="error",
+                error_kind="timeout",
+            )
 
     async def _request_finalization_retry(
         self,

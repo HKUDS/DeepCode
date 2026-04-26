@@ -21,6 +21,7 @@ from loguru import logger
 
 from core.agent_runtime.tools.base import Tool
 from core.agent_runtime.tools.registry import ToolRegistry
+from core.platform_compat import normalize_stdio_command
 
 
 @dataclass(slots=True)
@@ -365,8 +366,15 @@ async def connect_mcp_servers(
                     return name, None
 
             if transport_type == "stdio":
+                command, args, env = normalize_stdio_command(
+                    cfg.command or "",
+                    cfg.args,
+                    cfg.env or None,
+                )
                 params = StdioServerParameters(
-                    command=cfg.command, args=cfg.args, env=cfg.env or None
+                    command=command,
+                    args=args,
+                    env=env,
                 )
                 read, write = await server_stack.enter_async_context(stdio_client(params))
             elif transport_type == "sse":

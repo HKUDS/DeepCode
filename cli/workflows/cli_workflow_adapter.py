@@ -15,8 +15,11 @@ Changes:
 - NEW: Added requirement analysis workflow support
 """
 
+import asyncio
 import os
-from typing import Callable, Dict, Any
+import sys
+from pathlib import Path
+from typing import Callable, Dict, Any, Optional
 from core.compat import MCPApp
 
 
@@ -161,8 +164,100 @@ class CLIWorkflowAdapter:
 
         return progress_callback
 
+    def create_cli_plan_review_callback(
+        self,
+        *,
+        enabled: bool = True,
+    ) -> Optional[Callable[[Dict[str, Any]], Any]]:
+        """Create an interactive, session-local plan review callback."""
+        if not enabled:
+            return None
+        if not sys.stdin.isatty():
+            return None
+
+        async def callback(request: Dict[str, Any]) -> Dict[str, Any]:
+            return await asyncio.to_thread(self._prompt_plan_review, request)
+
+        return callback
+
+    def _prompt_plan_review(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        data = request.get("data", {}) or {}
+        plan = str(data.get("plan") or data.get("plan_preview") or "")
+        plan_path = str(data.get("plan_path") or "")
+        round_no = data.get("modification_round", 0)
+        max_rounds = data.get("max_rounds", 0)
+        last_error = data.get("last_error")
+
+        while True:
+            if self.cli_interface:
+                self.cli_interface.print_separator()
+                self.cli_interface.print_status(
+                    f"Plan review round {round_no}/{max_rounds}", "info"
+                )
+            else:
+                print("\n=== Plan Review ===")
+
+            if plan_path:
+                print(f"Plan file: {plan_path}")
+            if last_error:
+                print(f"Last issue: {last_error}")
+
+            preview_lines = plan.splitlines()
+            preview = "\n".join(preview_lines[:120])
+            if len(preview_lines) > 120:
+                preview += f"\n... ({len(preview_lines) - 120} more lines)"
+            print("\n" + preview + "\n")
+
+            choice = (
+                input(
+                    "[a]pprove, [m]odify with feedback, [e]dit file, "
+                    "[v]iew full, [c]ancel: "
+                )
+                .strip()
+                .lower()
+            )
+
+            if choice in {"a", "approve", "y", "yes", ""}:
+                return {"action": "confirm"}
+
+            if choice in {"m", "modify"}:
+                feedback = input("Describe the plan changes you want: ").strip()
+                if feedback:
+                    return {"action": "modify", "feedback": feedback}
+                print("Feedback cannot be empty.")
+                continue
+
+            if choice in {"e", "edit"}:
+                if not plan_path:
+                    print("No plan file path is available for manual edit.")
+                    continue
+                print(f"Edit this file, save it, then press Enter:\n{plan_path}")
+                input("Press Enter after saving the edited plan...")
+                try:
+                    replacement = Path(plan_path).read_text(encoding="utf-8")
+                except Exception as exc:
+                    print(f"Failed to read edited plan: {exc}")
+                    continue
+                return {"action": "replace", "plan": replacement}
+
+            if choice in {"v", "view"}:
+                print("\n" + plan + "\n")
+                continue
+
+            if choice in {"c", "cancel", "q", "quit"}:
+                reason = input("Cancel reason (optional): ").strip()
+                return {
+                    "action": "cancel",
+                    "reason": reason or "User cancelled in CLI plan review",
+                }
+
+            print("Unknown choice. Please select a, m, e, v, or c.")
+
     async def execute_full_pipeline(
-        self, input_source: str, enable_indexing: bool = False
+        self,
+        input_source: str,
+        enable_indexing: bool = False,
+        enable_plan_review: bool = True,
     ) -> Dict[str, Any]:
         """
         Execute the complete intelligent multi-agent research orchestration pipeline.
@@ -178,6 +273,7 @@ class CLIWorkflowAdapter:
         """
         try:
             # Import the latest agent orchestration engine
+            from workflows.plan_review_runtime import PlanReviewCancelled
             from workflows.agent_orchestration_engine import (
                 execute_multi_agent_research_pipeline,
             )
@@ -203,6 +299,9 @@ class CLIWorkflowAdapter:
                 logger=self.logger,
                 progress_callback=progress_callback,
                 enable_indexing=enable_indexing,
+                plan_review_callback=self.create_cli_plan_review_callback(
+                    enabled=enable_plan_review
+                ),
             )
 
             # Display completion
@@ -219,6 +318,15 @@ class CLIWorkflowAdapter:
             return {
                 "status": "success",
                 "result": result,
+                "pipeline_mode": "comprehensive" if enable_indexing else "optimized",
+            }
+
+        except PlanReviewCancelled as e:
+            if self.cli_interface:
+                self.cli_interface.print_status(e.reason, "warning")
+            return {
+                "status": "cancelled",
+                "error": e.reason,
                 "pipeline_mode": "comprehensive" if enable_indexing else "optimized",
             }
 
@@ -311,7 +419,10 @@ class CLIWorkflowAdapter:
             return {"status": "error", "error": error_msg}
 
     async def execute_chat_pipeline(
-        self, user_input: str, enable_indexing: bool = False
+        self,
+        user_input: str,
+        enable_indexing: bool = False,
+        enable_plan_review: bool = True,
     ) -> Dict[str, Any]:
         """
         Execute the chat-based planning and implementation pipeline.
@@ -327,6 +438,7 @@ class CLIWorkflowAdapter:
         """
         try:
             # Import the chat-based pipeline
+            from workflows.plan_review_runtime import PlanReviewCancelled
             from workflows.agent_orchestration_engine import (
                 execute_chat_based_planning_pipeline,
             )
@@ -368,6 +480,9 @@ class CLIWorkflowAdapter:
                 logger=self.logger,
                 progress_callback=chat_progress_callback,
                 enable_indexing=enable_indexing,  # Pass through enable_indexing parameter
+                plan_review_callback=self.create_cli_plan_review_callback(
+                    enabled=enable_plan_review
+                ),
             )
 
             # Display completion
@@ -380,6 +495,11 @@ class CLIWorkflowAdapter:
 
             return {"status": "success", "result": result, "pipeline_mode": "chat"}
 
+        except PlanReviewCancelled as e:
+            if self.cli_interface:
+                self.cli_interface.print_status(e.reason, "warning")
+            return {"status": "cancelled", "error": e.reason, "pipeline_mode": "chat"}
+
         except Exception as e:
             error_msg = f"Chat pipeline execution failed: {str(e)}"
             if self.cli_interface:
@@ -388,7 +508,11 @@ class CLIWorkflowAdapter:
             return {"status": "error", "error": error_msg, "pipeline_mode": "chat"}
 
     async def process_input_with_orchestration(
-        self, input_source: str, input_type: str, enable_indexing: bool = False
+        self,
+        input_source: str,
+        input_type: str,
+        enable_indexing: bool = False,
+        enable_plan_review: bool = True,
     ) -> Dict[str, Any]:
         """
         Process input using the intelligent agent orchestration engine.
@@ -424,12 +548,16 @@ class CLIWorkflowAdapter:
                 # Use chat-based planning pipeline for user requirements
                 # Pass enable_indexing to chat pipeline as well
                 pipeline_result = await self.execute_chat_pipeline(
-                    input_source, enable_indexing=enable_indexing
+                    input_source,
+                    enable_indexing=enable_indexing,
+                    enable_plan_review=enable_plan_review,
                 )
             else:
                 # Use traditional multi-agent research pipeline for files/URLs
                 pipeline_result = await self.execute_full_pipeline(
-                    input_source, enable_indexing=enable_indexing
+                    input_source,
+                    enable_indexing=enable_indexing,
+                    enable_plan_review=enable_plan_review,
                 )
 
             return {

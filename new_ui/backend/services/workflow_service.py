@@ -144,12 +144,87 @@ class WorkflowService:
 
         return callback
 
+    def _create_plan_review_callback(
+        self,
+        task_id: str,
+        *,
+        enabled: bool = True,
+    ) -> Optional[Callable[[Dict[str, Any]], Any]]:
+        """Create a task-scoped plan review callback for the core workflow."""
+        if not enabled:
+            return None
+
+        async def callback(request: Dict[str, Any]) -> Dict[str, Any]:
+            plugin_integration = self._get_plugin_integration()
+            if not plugin_integration:
+                return {
+                    "action": "skip",
+                    "skipped": True,
+                    "reason": "plugin_integration_unavailable",
+                }
+
+            from workflows.plugins.base import InteractionRequest
+
+            interaction = InteractionRequest(
+                interaction_type=request.get("interaction_type", "plan_review"),
+                title=request.get("title", "Review Implementation Plan"),
+                description=request.get("description", ""),
+                data=request.get("data", {}),
+                options=request.get("options", {}),
+                required=bool(request.get("required", False)),
+                timeout_seconds=int(request.get("timeout_seconds", 1800)),
+            )
+            response = await plugin_integration.request_interaction(
+                task_id, interaction
+            )
+            data = dict(response.data or {})
+            return {
+                "action": response.action,
+                "data": data,
+                "skipped": response.skipped,
+                **data,
+            }
+
+        return callback
+
+    async def _mark_task_cancelled(
+        self,
+        task_id: str,
+        reason: str,
+    ) -> Dict[str, Any]:
+        task = self._tasks.get(task_id)
+        if task:
+            task.status = "cancelled"
+            task.message = reason
+            task.error = None
+            task.pending_interaction = None
+            task.completed_at = datetime.utcnow()
+
+        plugin_integration = self._plugin_integration
+        if plugin_integration:
+            plugin_integration.cancel_interaction(task_id)
+
+        result = {"status": "cancelled", "reason": reason}
+        await self._broadcast(
+            task_id,
+            {
+                "type": "cancelled",
+                "task_id": task_id,
+                "status": "cancelled",
+                "reason": reason,
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
+        await asyncio.sleep(0.5)
+        return result
+
     async def execute_paper_to_code(
         self,
         task_id: str,
         input_source: str,
         input_type: str,
         enable_indexing: bool = False,
+        enable_user_interaction: bool = True,
     ) -> Dict[str, Any]:
         """Execute paper-to-code workflow"""
         # Lazy imports - DeepCode modules found via sys.path set in main.py
@@ -157,6 +232,7 @@ class WorkflowService:
         from workflows.agent_orchestration_engine import (
             execute_multi_agent_research_pipeline,
         )
+        from workflows.plan_review_runtime import PlanReviewCancelled
 
         task = self._tasks.get(task_id)
         if not task:
@@ -188,6 +264,9 @@ class WorkflowService:
                     progress_callback,
                     enable_indexing=enable_indexing,
                     task_id=str(task_id)[:8] if task_id else None,
+                    plan_review_callback=self._create_plan_review_callback(
+                        task_id, enabled=enable_user_interaction
+                    ),
                 )
 
                 task.status = "completed"
@@ -212,6 +291,9 @@ class WorkflowService:
                 await asyncio.sleep(0.5)
 
                 return task.result
+
+        except PlanReviewCancelled as e:
+            return await self._mark_task_cancelled(task_id, e.reason)
 
         except Exception as e:
             task.status = "error"
@@ -247,6 +329,7 @@ class WorkflowService:
         from workflows.agent_orchestration_engine import (
             execute_chat_based_planning_pipeline,
         )
+        from workflows.plan_review_runtime import PlanReviewCancelled
 
         task = self._tasks.get(task_id)
         if not task:
@@ -325,6 +408,10 @@ class WorkflowService:
                     logger,
                     progress_callback,
                     enable_indexing=enable_indexing,
+                    task_id=str(task_id)[:8] if task_id else None,
+                    plan_review_callback=self._create_plan_review_callback(
+                        task_id, enabled=enable_user_interaction
+                    ),
                 )
 
                 task.status = "completed"
@@ -350,6 +437,9 @@ class WorkflowService:
 
                 return task.result
 
+        except PlanReviewCancelled as e:
+            return await self._mark_task_cancelled(task_id, e.reason)
+
         except Exception as e:
             task.status = "error"
             task.error = str(e)
@@ -374,9 +464,13 @@ class WorkflowService:
     def cancel_task(self, task_id: str) -> bool:
         """Cancel a running task"""
         task = self._tasks.get(task_id)
-        if task and task.status == "running":
+        if task and task.status in {"running", "waiting_for_input"}:
             task.cancel_event.set()
             task.status = "cancelled"
+            task.pending_interaction = None
+            plugin_integration = self._plugin_integration
+            if plugin_integration:
+                plugin_integration.cancel_interaction(task_id)
             return True
         return False
 
@@ -389,7 +483,11 @@ class WorkflowService:
 
     def get_active_tasks(self) -> List[WorkflowTask]:
         """Get all tasks that are currently running"""
-        return [task for task in self._tasks.values() if task.status == "running"]
+        return [
+            task
+            for task in self._tasks.values()
+            if task.status in {"running", "waiting_for_input"}
+        ]
 
     def get_recent_tasks(self, limit: int = 10) -> List[WorkflowTask]:
         """Get recent tasks sorted by start time (newest first)"""

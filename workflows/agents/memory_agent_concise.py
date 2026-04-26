@@ -1369,6 +1369,25 @@ class ConciseMemoryAgent:
         This method is used only for creating code implementation summaries,
         NOT for conversation summarization which has been removed.
         """
+        if client_type == "provider":
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You are an expert code implementation summarizer. Create structured summaries of implemented code files that preserve essential information about functions, dependencies, and implementation approaches.",
+                }
+            ]
+            messages.extend(summary_messages)
+            response = await client.chat_with_retry(
+                messages=messages,
+                model=client.get_default_model(),
+                max_tokens=5000,
+                temperature=0.2,
+                retry_mode="standard",
+            )
+            if response.finish_reason == "error":
+                raise RuntimeError(response.content or "LLM provider returned an error")
+            return {"content": response.content or ""}
+
         if client_type == "anthropic":
             response = await client.messages.create(
                 model=self.default_models["anthropic"],

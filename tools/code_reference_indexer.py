@@ -18,20 +18,14 @@ Key Improvement:
 """
 
 import json
-import sys
 from pathlib import Path
 from typing import Dict, List, Tuple
 from dataclasses import dataclass
 import logging
 
-# Force UTF-8 on stdio so emoji prints don't kill the server on Windows
-# consoles whose default encoding is GBK / cp936. See tools/git_command.py
-# for the full rationale.
-for _stream in (sys.stdout, sys.stderr):
-    try:
-        _stream.reconfigure(encoding="utf-8", errors="replace")
-    except (AttributeError, OSError):
-        pass
+from core.platform_compat import configure_utf8_stdio
+
+configure_utf8_stdio()
 
 # Import MCP modules
 from mcp.server.fastmcp import FastMCP

@@ -22,23 +22,27 @@ export const workflowsApi = {
   startPaperToCode: async (
     inputSource: string,
     inputType: 'file' | 'url',
-    enableIndexing: boolean = false
+    enableIndexing: boolean = false,
+    enableUserInteraction: boolean = true
   ): Promise<TaskResponse> => {
     const response = await api.post<TaskResponse>('/workflows/paper-to-code', {
       input_source: inputSource,
       input_type: inputType,
       enable_indexing: enableIndexing,
+      enable_user_interaction: enableUserInteraction,
     });
     return response.data;
   },
 
   startChatPlanning: async (
     requirements: string,
-    enableIndexing: boolean = false
+    enableIndexing: boolean = false,
+    enableUserInteraction: boolean = true
   ): Promise<TaskResponse> => {
     const response = await api.post<TaskResponse>('/workflows/chat-planning', {
       requirements,
       enable_indexing: enableIndexing,
+      enable_user_interaction: enableUserInteraction,
     });
     return response.data;
   },

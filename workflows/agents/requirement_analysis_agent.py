@@ -11,7 +11,7 @@ import logging
 from typing import Dict, List, Optional
 
 from core.compat import Agent, RequestParams
-from utils.llm_utils import get_preferred_llm_class
+from core.llm_runtime import attach_workflow_llm
 
 
 class RequirementAnalysisAgent:
@@ -85,7 +85,10 @@ Requirement Summary Principles:
             await self.mcp_agent.__aenter__()
 
             # Attach LLM
-            self.llm = await self.mcp_agent.attach_llm(get_preferred_llm_class())
+            self.llm = await attach_workflow_llm(
+                self.mcp_agent,
+                phase="planning",
+            )
 
             self.logger.info("RequirementAnalysisAgent initialized successfully")
 

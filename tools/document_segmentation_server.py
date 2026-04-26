@@ -61,25 +61,15 @@ python tools/document_segmentation_server.py
 import os
 import re
 import json
-import sys
-import io
 from typing import Dict, List, Tuple
 import hashlib
 import logging
 from datetime import datetime
 from dataclasses import dataclass, asdict
 
-# Set standard output encoding to UTF-8
-if sys.stdout.encoding != "utf-8":
-    try:
-        if hasattr(sys.stdout, "reconfigure"):
-            sys.stdout.reconfigure(encoding="utf-8")
-            sys.stderr.reconfigure(encoding="utf-8")
-        else:
-            sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding="utf-8")
-            sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding="utf-8")
-    except Exception as e:
-        print(f"Warning: Could not set UTF-8 encoding: {e}")
+from core.platform_compat import configure_utf8_stdio
+
+configure_utf8_stdio()
 
 # Import MCP related modules
 from mcp.server.fastmcp import FastMCP

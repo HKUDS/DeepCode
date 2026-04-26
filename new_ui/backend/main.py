@@ -35,6 +35,10 @@ if str(PROJECT_ROOT) not in sys.path:
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(1, str(BACKEND_DIR))
 
+from core.platform_compat import configure_utf8_stdio
+
+configure_utf8_stdio()
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware

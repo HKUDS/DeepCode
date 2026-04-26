@@ -54,8 +54,14 @@ _DEFAULT_OPENROUTER_HEADERS = {
 }
 _KIMI_THINKING_MODELS: frozenset[str] = frozenset({
     "kimi-k2.5",
+    "kimi-k2.6",
     "k2.6-code-preview",
 })
+_THINKING_STYLE_MAP: dict[str, Any] = {
+    "thinking_type": lambda on: {"thinking": {"type": "enabled" if on else "disabled"}},
+    "enable_thinking": lambda on: {"enable_thinking": on},
+    "reasoning_split": lambda on: {"reasoning_split": on},
+}
 
 
 def _is_kimi_thinking_model(model_name: str) -> bool:
@@ -411,24 +417,31 @@ class OpenAICompatProvider(LLMProvider):
                     kwargs.update(overrides)
                     break
 
-        if reasoning_effort:
-            kwargs["reasoning_effort"] = reasoning_effort
+        semantic_effort: str | None = None
+        if isinstance(reasoning_effort, str):
+            semantic_effort = reasoning_effort.lower()
+            if semantic_effort == "minimum":
+                semantic_effort = "minimal"
+
+        wire_effort = reasoning_effort
+        if spec and spec.name == "dashscope" and semantic_effort == "minimal":
+            # DashScope accepts "minimum"; OpenAI-compatible models commonly
+            # use "minimal". Keep semantic checks normalized while sending the
+            # provider's wire spelling.
+            wire_effort = "minimum"
+
+        if wire_effort:
+            kwargs["reasoning_effort"] = wire_effort
 
         # Provider-specific thinking parameters.
         # Only sent when reasoning_effort is explicitly configured so that
         # the provider default is preserved otherwise.
-        if spec and reasoning_effort is not None:
-            thinking_enabled = reasoning_effort.lower() != "minimal"
-            extra: dict[str, Any] | None = None
-            if spec.name == "dashscope":
-                extra = {"enable_thinking": thinking_enabled}
-            elif spec.name in (
-                "volcengine", "volcengine_coding_plan",
-                "byteplus", "byteplus_coding_plan",
-            ):
-                extra = {
-                    "thinking": {"type": "enabled" if thinking_enabled else "disabled"}
-                }
+        if spec and spec.thinking_style and reasoning_effort is not None:
+            thinking_enabled = semantic_effort != "minimal"
+            extra = _THINKING_STYLE_MAP.get(
+                spec.thinking_style,
+                lambda _: None,
+            )(thinking_enabled)
             if extra:
                 kwargs.setdefault("extra_body", {}).update(extra)
 
@@ -437,7 +450,7 @@ class OpenAICompatProvider(LLMProvider):
         # so that OpenRouter-style names like "moonshotai/kimi-k2.5" are handled
         # identically to bare names like "kimi-k2.5".
         if reasoning_effort is not None and _is_kimi_thinking_model(model_name):
-            thinking_enabled = reasoning_effort.lower() != "minimal"
+            thinking_enabled = semantic_effort != "minimal"
             kwargs.setdefault("extra_body", {}).update(
                 {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
             )
@@ -445,6 +458,20 @@ class OpenAICompatProvider(LLMProvider):
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice or "auto"
+
+        thinking_active = (
+            (spec and spec.thinking_style and reasoning_effort is not None
+             and semantic_effort != "minimal")
+            or (
+                reasoning_effort is not None
+                and _is_kimi_thinking_model(model_name)
+                and semantic_effort != "minimal"
+            )
+        )
+        if thinking_active:
+            for msg in kwargs["messages"]:
+                if msg.get("role") == "assistant" and "reasoning_content" not in msg:
+                    msg["reasoning_content"] = ""
 
         return kwargs
 

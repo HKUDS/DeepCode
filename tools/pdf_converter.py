@@ -22,6 +22,10 @@ import os
 from pathlib import Path
 from typing import Union, Optional, Dict, Any
 
+from core.platform_compat import configure_utf8_stdio, subprocess_env
+
+configure_utf8_stdio()
+
 
 class PDFConverter:
     """
@@ -129,6 +133,7 @@ class PDFConverter:
                 "timeout": 10,
                 "encoding": "utf-8",
                 "errors": "ignore",
+                "env": subprocess_env(),
             }
 
             # Hide console window on Windows
@@ -237,6 +242,7 @@ class PDFConverter:
                             "timeout": 60,  # 60 second timeout
                             "encoding": "utf-8",
                             "errors": "ignore",
+                            "env": subprocess_env(),
                         }
 
                         # Hide console window on Windows
@@ -635,6 +641,7 @@ class PDFConverter:
                     "timeout": 5,
                     "encoding": "utf-8",
                     "errors": "ignore",
+                    "env": subprocess_env(),
                 }
 
                 try:

@@ -35,6 +35,7 @@ async def start_paper_to_code(
         request.input_source,
         request.input_type,
         request.enable_indexing,
+        request.enable_user_interaction,
     )
 
     return TaskResponse(
@@ -61,6 +62,7 @@ async def start_chat_planning(
         task.task_id,
         request.requirements,
         request.enable_indexing,
+        request.enable_user_interaction,
     )
 
     return TaskResponse(
@@ -131,12 +133,13 @@ async def respond_to_interaction(task_id: str, request: InteractionResponseReque
         )
 
     # Check if plugin integration is available
-    if not hasattr(workflow_service, "_plugin_integration"):
+    plugin_integration = getattr(workflow_service, "_plugin_integration", None)
+    if plugin_integration is None:
         raise HTTPException(
             status_code=501, detail="User-in-Loop plugin system not enabled"
         )
 
-    success = workflow_service._plugin_integration.submit_response(
+    success = plugin_integration.submit_response(
         task_id=task_id,
         action=request.action,
         data=request.data,

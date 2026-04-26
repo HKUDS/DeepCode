@@ -88,6 +88,14 @@ export interface WSErrorMessage {
   timestamp: string;
 }
 
+export interface WSCancelledMessage {
+  type: 'cancelled';
+  task_id: string;
+  status: 'cancelled';
+  reason: string;
+  timestamp: string;
+}
+
 export interface WSCodeChunkMessage {
   type: 'code_chunk' | 'file_start' | 'file_end';
   task_id: string;
@@ -127,6 +135,7 @@ export type WSMessage =
   | WSProgressMessage
   | WSCompleteMessage
   | WSErrorMessage
+  | WSCancelledMessage
   | WSCodeChunkMessage
   | WSLogMessage
   | WSInteractionMessage;

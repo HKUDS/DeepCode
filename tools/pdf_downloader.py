@@ -20,10 +20,12 @@ import aiohttp
 import aiofiles
 import shutil
 import sys
-import io
 from typing import List, Dict, Optional, Any
 from urllib.parse import urlparse, unquote
 from datetime import datetime
+
+from core.platform_compat import configure_utf8_stdio
+configure_utf8_stdio()
 
 from mcp.server import FastMCP
 
@@ -38,7 +40,8 @@ try:
 except ImportError:
     DOCLING_AVAILABLE = False
     print(
-        "Warning: docling package not available. Document conversion will be disabled."
+        "Warning: docling package not available. Document conversion will be disabled.",
+        file=sys.stderr,
     )
 
 # Fallback PDF text extraction
@@ -49,21 +52,11 @@ try:
 except ImportError:
     PYPDF2_AVAILABLE = False
     print(
-        "Warning: PyPDF2 package not available. Fallback PDF extraction will be disabled."
+        "Warning: PyPDF2 package not available. Fallback PDF extraction will be disabled.",
+        file=sys.stderr,
     )
 
 # 设置标准输出编码为UTF-8
-if sys.stdout.encoding != "utf-8":
-    try:
-        if hasattr(sys.stdout, "reconfigure"):
-            sys.stdout.reconfigure(encoding="utf-8")
-            sys.stderr.reconfigure(encoding="utf-8")
-        else:
-            sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding="utf-8")
-            sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding="utf-8")
-    except Exception as e:
-        print(f"Warning: Could not set UTF-8 encoding: {e}")
-
 # 创建 FastMCP 实例
 mcp = FastMCP("smart-pdf-downloader")
 
@@ -611,11 +604,14 @@ class DoclingConverter:
                         image_map[img_id] = rel_path
 
                 except Exception as img_error:
-                    print(f"Warning: Failed to extract image {idx+1}: {img_error}")
+                    print(
+                        f"Warning: Failed to extract image {idx+1}: {img_error}",
+                        file=sys.stderr,
+                    )
                     continue
 
         except Exception as e:
-            print(f"Warning: Failed to extract images: {e}")
+            print(f"Warning: Failed to extract images: {e}", file=sys.stderr)
 
         return image_map
 
@@ -1392,6 +1388,8 @@ async def move_file_to(
 
 
 if __name__ == "__main__":
+    _mcp_stdout = sys.stdout
+    sys.stdout = sys.stderr
     print("📄 Smart PDF Downloader MCP Tool")
     print("📝 Starting server with FastMCP...")
 
@@ -1417,4 +1415,5 @@ if __name__ == "__main__":
     print("")
 
     # 运行服务器
+    sys.stdout = _mcp_stdout
     mcp.run()

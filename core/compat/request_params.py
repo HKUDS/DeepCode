@@ -25,11 +25,20 @@ _KNOWN_FIELDS = frozenset(
         "max_tokens",
         "maxTokens",
         "temperature",
+        "reasoning_effort",
         "model",
         "use_history",
         "max_iterations",
         "parallel_tool_calls",
         "tool_filter",
+        "max_tool_result_chars",
+        "context_window_tokens",
+        "context_block_limit",
+        "provider_retry_mode",
+        "retry_wait_callback",
+        "checkpoint_callback",
+        "llm_timeout_s",
+        "enforce_default_max_iterations",
         "metadata",
     }
 )
@@ -57,11 +66,20 @@ class RequestParams:
         "max_tokens",
         "maxTokens",
         "temperature",
+        "reasoning_effort",
         "model",
         "use_history",
         "max_iterations",
         "parallel_tool_calls",
         "tool_filter",
+        "max_tool_result_chars",
+        "context_window_tokens",
+        "context_block_limit",
+        "provider_retry_mode",
+        "retry_wait_callback",
+        "checkpoint_callback",
+        "llm_timeout_s",
+        "enforce_default_max_iterations",
         "metadata",
     )
 
@@ -71,22 +89,40 @@ class RequestParams:
         max_tokens: int | None = None,
         maxTokens: int | None = None,  # noqa: N803 - legacy spelling
         temperature: float | None = None,
+        reasoning_effort: str | None = None,
         model: str | None = None,
         use_history: bool = True,
         max_iterations: int = 1,
         parallel_tool_calls: bool = False,
         tool_filter: dict[str, set[str]] | None = None,
+        max_tool_result_chars: int | None = None,
+        context_window_tokens: int | None = None,
+        context_block_limit: int | None = None,
+        provider_retry_mode: str = "standard",
+        retry_wait_callback: Any | None = None,
+        checkpoint_callback: Any | None = None,
+        llm_timeout_s: float | None = None,
+        enforce_default_max_iterations: bool = True,
         metadata: dict[str, Any] | None = None,
         **unknown: Any,
     ) -> None:
         self.max_tokens = max_tokens
         self.maxTokens = maxTokens
         self.temperature = temperature
+        self.reasoning_effort = reasoning_effort
         self.model = model
         self.use_history = use_history
         self.max_iterations = max_iterations
         self.parallel_tool_calls = parallel_tool_calls
         self.tool_filter = tool_filter
+        self.max_tool_result_chars = max_tool_result_chars
+        self.context_window_tokens = context_window_tokens
+        self.context_block_limit = context_block_limit
+        self.provider_retry_mode = provider_retry_mode
+        self.retry_wait_callback = retry_wait_callback
+        self.checkpoint_callback = checkpoint_callback
+        self.llm_timeout_s = llm_timeout_s
+        self.enforce_default_max_iterations = enforce_default_max_iterations
         self.metadata = dict(metadata) if metadata else None
 
         if unknown:

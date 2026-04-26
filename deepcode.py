@@ -17,6 +17,14 @@ import socket
 import time
 from pathlib import Path
 
+from core.platform_compat import (
+    configure_utf8_stdio,
+    normalize_stdio_command,
+    subprocess_env,
+    subprocess_text_kwargs,
+)
+
+configure_utf8_stdio()
 
 # Global process references for cleanup
 _backend_process = None
@@ -75,9 +83,10 @@ def check_dependencies():
             result = subprocess.run(
                 ["node", "--version"],
                 capture_output=True,
-                text=True,
+                **subprocess_text_kwargs(),
                 timeout=5,
                 shell=(get_platform() == "windows"),
+                env=subprocess_env(),
             )
             if result.returncode == 0:
                 print(f"✅ Node.js is installed ({result.stdout.strip()})")
@@ -139,8 +148,9 @@ def kill_process_on_port(port: int):
             result = subprocess.run(
                 f"netstat -ano | findstr :{port}",
                 capture_output=True,
-                text=True,
+                **subprocess_text_kwargs(),
                 shell=True,
+                env=subprocess_env(),
             )
             if result.stdout:
                 for line in result.stdout.strip().split("\n"):
@@ -152,12 +162,17 @@ def kill_process_on_port(port: int):
                                 f"taskkill /F /PID {pid}",
                                 shell=True,
                                 capture_output=True,
+                                env=subprocess_env(),
                             )
                             print(f"  ✓ Killed process on port {port} (PID: {pid})")
         else:
             # macOS/Linux: use lsof
             result = subprocess.run(
-                f"lsof -ti :{port}", capture_output=True, text=True, shell=True
+                f"lsof -ti :{port}",
+                capture_output=True,
+                **subprocess_text_kwargs(),
+                shell=True,
+                env=subprocess_env(),
             )
             if result.stdout:
                 pids = result.stdout.strip().split("\n")
@@ -194,7 +209,9 @@ def install_backend_deps():
             "pyyaml",
         ]
         subprocess.run(
-            [sys.executable, "-m", "pip", "install", "-q"] + deps, check=True
+            [sys.executable, "-m", "pip", "install", "-q"] + deps,
+            check=True,
+            env=subprocess_env(),
         )
         print("✅ Backend dependencies installed")
 
@@ -206,12 +223,12 @@ def install_frontend_deps(frontend_dir: Path):
     if not node_modules.exists():
         print("📦 Installing frontend dependencies (first run)...")
         npm_cmd = "npm.cmd" if get_platform() == "windows" else "npm"
-        subprocess.run(
-            [npm_cmd, "install"],
-            cwd=frontend_dir,
-            check=True,
-            shell=(get_platform() == "windows"),
-        )
+        command = npm_cmd
+        args = ["install"]
+        env = subprocess_env()
+        if get_platform() == "windows":
+            command, args, env = normalize_stdio_command(npm_cmd, args)
+        subprocess.run([command, *args], cwd=frontend_dir, check=True, env=env)
         print("✅ Frontend dependencies installed")
 
 
@@ -221,13 +238,22 @@ def start_backend(backend_dir: Path):
 
     print("🔧 Starting backend server...")
 
-    # Use shell=True on Windows for proper command handling
     if get_platform() == "windows":
         _backend_process = subprocess.Popen(
-            f'"{sys.executable}" -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload',
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "main:app",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                "8000",
+                "--reload",
+            ],
             cwd=backend_dir,
-            shell=True,
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+            env=subprocess_env(),
         )
     else:
         _backend_process = subprocess.Popen(
@@ -244,6 +270,7 @@ def start_backend(backend_dir: Path):
             ],
             cwd=backend_dir,
             start_new_session=True,  # Create new process group
+            env=subprocess_env(),
         )
 
     # Wait for backend to start
@@ -266,17 +293,19 @@ def start_frontend(frontend_dir: Path):
     npm_cmd = "npm.cmd" if get_platform() == "windows" else "npm"
 
     if get_platform() == "windows":
+        command, args, env = normalize_stdio_command(npm_cmd, ["run", "dev"])
         _frontend_process = subprocess.Popen(
-            f"{npm_cmd} run dev",
+            [command, *args],
             cwd=frontend_dir,
-            shell=True,
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+            env=env,
         )
     else:
         _frontend_process = subprocess.Popen(
             [npm_cmd, "run", "dev"],
             cwd=frontend_dir,
             start_new_session=True,  # Create new process group
+            env=subprocess_env(),
         )
 
     # Wait for frontend to start
@@ -305,6 +334,7 @@ def cleanup_processes():
                         f"taskkill /F /T /PID {proc.pid}",
                         shell=True,
                         capture_output=True,
+                        env=subprocess_env(),
                     )
                 else:
                     # Unix: kill the process group
@@ -403,7 +433,7 @@ def launch_classic_ui():
             "--browser.gatherUsageStats",
             "false",
         ]
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True, env=subprocess_env())
     except KeyboardInterrupt:
         print("\n\n🛑 Streamlit server stopped by user")
     except Exception as e:
@@ -430,7 +460,12 @@ def _check_docker_prerequisites():
         sys.exit(1)
 
     # Check Docker daemon is running
-    result = subprocess.run(["docker", "info"], capture_output=True, text=True)
+    result = subprocess.run(
+        ["docker", "info"],
+        capture_output=True,
+        **subprocess_text_kwargs(),
+        env=subprocess_env(),
+    )
     if result.returncode != 0:
         print("❌ Docker is installed but not running.")
         print("   Please start Docker Desktop and try again.")
@@ -489,16 +524,19 @@ def launch_docker():
     try:
         # Check if image exists (auto-build on first run)
         result = subprocess.run(
-            compose_args + ["images", "-q"], capture_output=True, text=True
+            compose_args + ["images", "-q"],
+            capture_output=True,
+            **subprocess_text_kwargs(),
+            env=subprocess_env(),
         )
         if not result.stdout.strip():
             print(
                 "📦 First run detected — building Docker image (may take a few minutes)..."
             )
-            subprocess.run(compose_args + ["build"], check=True)
+            subprocess.run(compose_args + ["build"], check=True, env=subprocess_env())
 
         # Start (if already running, docker compose will detect and skip)
-        subprocess.run(compose_args + ["up", "-d"], check=True)
+        subprocess.run(compose_args + ["up", "-d"], check=True, env=subprocess_env())
 
         print("")
         print("=" * 50)
@@ -530,17 +568,22 @@ def launch_docker_cli():
     try:
         # Check if image exists (auto-build on first run)
         result = subprocess.run(
-            compose_args + ["images", "-q"], capture_output=True, text=True
+            compose_args + ["images", "-q"],
+            capture_output=True,
+            **subprocess_text_kwargs(),
+            env=subprocess_env(),
         )
         if not result.stdout.strip():
             print(
                 "📦 First run detected — building Docker image (may take a few minutes)..."
             )
-            subprocess.run(compose_args + ["build"], check=True)
+            subprocess.run(compose_args + ["build"], check=True, env=subprocess_env())
 
         # Run CLI interactively
         subprocess.run(
-            compose_args + ["run", "--rm", "-it", "deepcode", "cli"], check=True
+            compose_args + ["run", "--rm", "-it", "deepcode", "cli"],
+            check=True,
+            env=subprocess_env(),
         )
 
     except subprocess.CalledProcessError as e:
@@ -563,7 +606,7 @@ def launch_paper_test(paper_name: str, fast_mode: bool = False):
         if fast_mode:
             setup_cmd.append("--fast")
 
-        result = subprocess.run(setup_cmd, check=True)
+        result = subprocess.run(setup_cmd, check=True, env=subprocess_env())
 
         if result.returncode == 0:
             print("\n✅ Paper test setup completed successfully!")

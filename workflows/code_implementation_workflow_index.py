@@ -22,6 +22,7 @@ from typing import Dict, Any, Optional, List
 
 # MCP Agent imports
 from core.compat import Agent
+from core.llm_runtime import attach_workflow_llm, get_workflow_provider
 
 # Local imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -31,8 +32,9 @@ from prompts.code_prompts import (
 )
 from workflows.agents import CodeImplementationAgent
 from workflows.agents.memory_agent_concise import ConciseMemoryAgent
+from workflows.implementation_llm_runtime import call_provider_with_legacy_tools
 from config.mcp_tool_definitions_index import get_mcp_tools
-from utils.llm_utils import get_preferred_llm_class, get_default_models, load_api_config
+from utils.llm_utils import get_default_models, load_api_config
 from utils.loop_detector import LoopDetector, ProgressTracker
 # DialogueLogger removed - no longer needed
 
@@ -181,8 +183,9 @@ class CodeImplementationWorkflowWithIndex:
         )
 
         async with structure_agent:
-            creator = await structure_agent.attach_llm(
-                get_preferred_llm_class(self.config_path)
+            creator = await attach_workflow_llm(
+                structure_agent,
+                phase="implementation",
             )
 
             message = f"""Analyze the following implementation plan and generate shell commands to create the file tree structure.
@@ -471,8 +474,9 @@ Requirements:
             )
 
             await self.mcp_agent.__aenter__()
-            llm = await self.mcp_agent.attach_llm(
-                get_preferred_llm_class(self.config_path)
+            llm = await attach_workflow_llm(
+                self.mcp_agent,
+                phase="implementation",
             )
 
             # Set workspace to the target code directory
@@ -505,7 +509,25 @@ Requirements:
                 self.mcp_agent = None
 
     async def _initialize_llm_client(self):
-        """Initialize LLM client based on llm_provider preference and API key availability"""
+        """Initialize the implementation LLM.
+
+        Default path uses DeepCode's provider runtime. The legacy direct-SDK
+        path remains behind an explicit env flag as a rollback escape hatch
+        while implementation tooling is migrated.
+        """
+        if os.environ.get("DEEPCODE_USE_LEGACY_IMPLEMENTATION_LLM") != "1":
+            provider, profile = get_workflow_provider(
+                phase="implementation",
+                legacy_secrets_path=self.config_path,
+            )
+            self.logger.info(
+                "Using DeepCode provider runtime: phase=%s provider=%s model=%s",
+                profile.phase,
+                profile.provider_name,
+                profile.model,
+            )
+            return provider, "provider"
+
         # Get API keys
         anthropic_key = self.api_config.get("anthropic", {}).get("api_key", "")
         openai_key = self.api_config.get("openai", {}).get("api_key", "")
@@ -653,7 +675,11 @@ Requirements:
     ):
         """Call LLM with tools"""
         try:
-            if client_type == "anthropic":
+            if client_type == "provider":
+                return await self._call_provider_with_tools(
+                    client, system_message, messages, tools, max_tokens
+                )
+            elif client_type == "anthropic":
                 return await self._call_anthropic_with_tools(
                     client, system_message, messages, tools, max_tokens
                 )
@@ -670,6 +696,25 @@ Requirements:
         except Exception as e:
             self.logger.error(f"LLM call failed: {e}")
             raise
+
+    async def _call_provider_with_tools(
+        self,
+        provider,
+        system_message,
+        messages,
+        tools,
+        max_tokens,
+    ):
+        """Call DeepCode's unified provider abstraction with manual tool loop output."""
+        return await call_provider_with_legacy_tools(
+            provider,
+            system_message=system_message,
+            messages=messages,
+            tools=tools,
+            max_tokens=max_tokens,
+            validate_messages=self._validate_messages,
+            logger=self.logger,
+        )
 
     async def _call_anthropic_with_tools(
         self, client, system_message, messages, tools, max_tokens
