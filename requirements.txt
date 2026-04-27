@@ -17,7 +17,7 @@ pathlib2
 pydantic-settings>=2.0.0
 PyPDF2>=2.0.0
 python-multipart>=0.0.6
-PyYAML>=6.0
+PyYAML>=6.0.3
 reportlab>=3.5.0
 streamlit
 uvicorn>=0.24.0
