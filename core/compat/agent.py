@@ -173,8 +173,8 @@ def _apply_tool_filter(
         logger.warning(
             "Agent '{}' requested MCP server '{}' (in server_names) but no "
             "tools from that server are registered — the server most likely "
-            "failed to connect. Check the corresponding mcp_agent.config.yaml "
-            "entry. The filter will exclude it for now.",
+            "failed to connect. Check the corresponding tools.mcpServers entry "
+            "in deepcode_config.json. The filter will exclude it for now.",
             agent_name,
             srv,
         )
@@ -211,7 +211,7 @@ class AugmentedLLM:
     / ``GoogleAugmentedLLM``) act purely as markers so the legacy callsites
     can keep passing a class to :meth:`Agent.attach_llm`. The real provider
     is selected by inspecting the marker class name and falling back to the
-    runtime's configured ``llm_provider``.
+    provider matched against the configured model.
     """
 
     PROVIDER_NAME: str | None = None
@@ -501,7 +501,7 @@ class Agent:
         if missing:
             available = sorted(configured.keys())
             logger.warning(
-                "Agent '{}': MCP server(s) {} not in mcp_agent.config.yaml. "
+                "Agent '{}': MCP server(s) {} not in deepcode_config.json (tools.mcpServers). "
                 "Available: {}. The agent will run without those tools.",
                 self.name,
                 missing,
@@ -515,7 +515,7 @@ class Agent:
             if failed:
                 logger.warning(
                     "Agent '{}': MCP server(s) {} failed to start "
-                    "(check command/args/env in mcp_agent.config.yaml).",
+                    "(check command/args/env in deepcode_config.json).",
                     self.name,
                     failed,
                 )
@@ -554,10 +554,16 @@ class Agent:
             model=model,
         )
         cls = llm_class if isinstance(llm_class, type) and issubclass(llm_class, AugmentedLLM) else AugmentedLLM
+        effective_provider = (
+            resolved_provider_name
+            or runtime.config.get_provider_name(model)
+            or runtime.config.llm_provider
+            or "auto"
+        )
         return cls(
             agent=self,
             provider=provider,
-            provider_name=resolved_provider_name or runtime.config.llm_provider,
+            provider_name=effective_provider,
             phase=phase,
         )
 

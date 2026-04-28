@@ -471,37 +471,28 @@ def _check_docker_prerequisites():
         print("   Please start Docker Desktop and try again.")
         sys.exit(1)
 
-    # Check/create secrets file
-    secrets_file = current_dir / "mcp_agent.secrets.yaml"
-    if not secrets_file.exists():
-        example = current_dir / "mcp_agent.secrets.yaml.example"
+    # Check/create the unified deepcode_config.json
+    config_file = current_dir / "deepcode_config.json"
+    if not config_file.exists():
+        example = current_dir / "deepcode_config.json.example"
         if example.exists():
-            print("⚠️  mcp_agent.secrets.yaml not found.")
+            print("⚠️  deepcode_config.json not found.")
             print("   Creating from template...")
             import shutil as sh
 
-            sh.copy2(example, secrets_file)
-            print(f"   ✅ Created {secrets_file}")
+            sh.copy2(example, config_file)
+            print(f"   ✅ Created {config_file}")
             print("")
-            print("   ⚠️  Please edit mcp_agent.secrets.yaml and fill in your API keys:")
-            print(f"      {secrets_file}")
-            print("")
+            print("   ⚠️  Please edit deepcode_config.json:")
+            print(f"      {config_file}")
             print(
-                "   At least ONE LLM provider key is required (OpenAI/Anthropic/Google)."
+                "   Fill in providers.<name>.apiKey for at least ONE LLM "
+                "provider (OpenAI/Anthropic/Gemini/etc.) or set it via ${ENV_VAR}."
             )
             print("   Then run 'deepcode' again.")
             sys.exit(0)
-        else:
-            print(
-                "❌ mcp_agent.secrets.yaml not found. Please create it with your API keys."
-            )
-            sys.exit(1)
-
-    # Check config file
-    config_file = current_dir / "mcp_agent.config.yaml"
-    if not config_file.exists():
-        print("❌ mcp_agent.config.yaml not found.")
-        print("   This file should be in the project root.")
+        print("❌ deepcode_config.json not found and no template available.")
+        print("   Create it in the project root, or copy deepcode_config.json.example.")
         sys.exit(1)
 
     # Ensure data directories exist

@@ -127,10 +127,9 @@ chmod +x scripts/build.sh
 
 ## Configuration
 
-The new UI reads configuration from the existing DeepCode config files:
+The new UI reads from the unified DeepCode configuration file:
 
-- `mcp_agent.config.yaml` - LLM provider, models, MCP server settings
-- `mcp_agent.secrets.yaml` - API keys
+- `deepcode_config.json` - LLM providers, models, API keys, MCP servers, workspace, segmentation, logger (single source of truth)
 
 ## Integration
 

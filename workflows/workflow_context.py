@@ -153,7 +153,7 @@ def resolve_workspace_root(yaml_root: str | None) -> Path:
     Priority (highest first):
 
     1. ``DEEPCODE_WORKSPACE`` environment variable.
-    2. ``workspace.root`` in ``mcp_agent.config.yaml`` (passed in as
+    2. ``workspace.root`` in ``deepcode_config.json`` (passed in as
        ``yaml_root``; ``None`` if absent).
     3. ``<cwd>/deepcode_lab`` as a sane default that matches existing
        behaviour for users who do not customise anything.

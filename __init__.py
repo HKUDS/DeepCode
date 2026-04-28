@@ -11,11 +11,10 @@ __url__ = "https://github.com/HKUDS/DeepCode"
 __repo__ = "https://github.com/Jany-M/DeepCode/"
 
 # Import main components for easy access
-from utils import FileProcessor, DialogueLogger
+from utils import FileProcessor
 
 __all__ = [
     "FileProcessor",
-    "DialogueLogger",
     "__version__",
     "__author__",
     "__url__",

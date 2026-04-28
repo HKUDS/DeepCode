@@ -393,6 +393,158 @@ class CLIApp:
 
         self.cli.print_separator()
 
+    # ------------------------------------------------------------------
+    # @<path-or-url> inline input (Cursor / Codex CLI style)
+    # ------------------------------------------------------------------
+
+    async def _handle_at_shortcut(self, target: str) -> str:
+        """Dispatch ``@<file-path>`` or ``@<url>`` typed at the menu prompt.
+
+        Returns the *effective* menu letter (``"f"`` or ``"u"``) so the
+        outer loop knows whether to offer ``ask_continue`` afterwards;
+        returns an empty string when the input was malformed (in which
+        case the user already saw an error toast).
+        """
+        if not target:
+            self.cli.print_status(
+                "Usage: @<file-path>   or   @<url>", "warning"
+            )
+            return ""
+
+        # Strip optional surrounding quotes (clipboard pastes often
+        # bring them along: @"C:\path with spaces\file.pdf").
+        if (target.startswith('"') and target.endswith('"')) or (
+            target.startswith("'") and target.endswith("'")
+        ):
+            target = target[1:-1].strip()
+
+        lowered = target.lower()
+
+        # URL branch — anything starting with http(s)://
+        if lowered.startswith(("http://", "https://")):
+            self.cli.print_status(
+                f"@-shortcut → URL: {target}", "info"
+            )
+            await self.process_input(target, "url")
+            return "u"
+
+        # File branch — accept ``file://`` prefix and existence check.
+        raw_path = target[len("file://"):] if lowered.startswith("file://") else target
+        if not os.path.exists(raw_path):
+            self.cli.print_status(
+                f"Path not found: {raw_path}", "error"
+            )
+            return ""
+
+        abspath = os.path.abspath(raw_path)
+        self.cli.print_status(
+            f"@-shortcut → File: {abspath}", "info"
+        )
+        await self.process_input(f"file://{abspath}", "file")
+        return "f"
+
+    # ------------------------------------------------------------------
+    # Slash command dispatcher (in-CLI session management)
+    # ------------------------------------------------------------------
+
+    def _handle_slash_command(self, raw: str) -> None:
+        """Route a ``/...`` line typed at the menu prompt.
+
+        Mirrors the Cursor / Claude-Code style: ``/resume`` lists recent
+        sessions and lets the user pick one; ``/new`` starts a fresh
+        session; ``/session`` shows the active one; ``/help`` lists all
+        commands.
+
+        We don't bother stacking ``contextvars`` tokens here — the very
+        first ``set_session`` happens in ``main_cli.main`` and its
+        ``finally`` will reset on process exit. Subsequent in-CLI
+        switches simply overwrite the current value, which is exactly
+        what we want for a long-lived REPL.
+        """
+        try:
+            from core.observability import current_session_id, set_session
+            from core.sessions import get_default_store
+        except Exception as exc:
+            self.cli.print_status(
+                f"Session subsystem unavailable: {exc}", "error"
+            )
+            return
+
+        parts = raw.strip().split(maxsplit=1)
+        cmd = parts[0].lower()
+        arg = parts[1].strip() if len(parts) > 1 else ""
+
+        store = get_default_store()
+
+        if cmd in ("/help", "/?", "/h"):
+            self.cli.print_slash_help()
+            return
+
+        if cmd in ("/session", "/whoami"):
+            sid = current_session_id()
+            session = store.get_session(sid) if sid else None
+            self.cli.print_active_session(
+                sid, session.title if session else None
+            )
+            return
+
+        if cmd in ("/resume", "/sessions", "/load"):
+            summaries = store.list_sessions(limit=20)
+            picked = self.cli.pick_session_interactive(summaries)
+            if not picked:
+                return
+            session = store.get_session(picked)
+            if session is None:
+                # Treat input as a prefix — try to disambiguate against
+                # the listed summaries before giving up.
+                candidates = [
+                    s for s in summaries if s.session_id.startswith(picked)
+                ]
+                if len(candidates) == 1:
+                    session = store.get_session(candidates[0].session_id)
+                elif len(candidates) > 1:
+                    self.cli.print_status(
+                        f"'{picked}' is ambiguous ({len(candidates)} matches). "
+                        "Type a longer prefix or the full ID.",
+                        "warning",
+                    )
+                    return
+            if session is None:
+                self.cli.print_status(
+                    f"Session '{picked}' not found.", "error"
+                )
+                return
+            set_session(session.session_id)
+            self.cli.print_status(
+                f"Switched to session {session.session_id}"
+                + (f" — {session.title}" if session.title else ""),
+                "success",
+            )
+            if session.tasks:
+                last = session.tasks[-1]
+                self.cli.print_status(
+                    f"Last task: {last.task_id} [{last.task_kind}] "
+                    f"status={last.status}",
+                    "info",
+                )
+            return
+
+        if cmd in ("/new", "/new-session"):
+            session = store.create_session(title=arg)
+            set_session(session.session_id)
+            self.cli.print_status(
+                f"Created and switched to new session "
+                f"{session.session_id}"
+                + (f" — {session.title}" if session.title else ""),
+                "success",
+            )
+            return
+
+        self.cli.print_status(
+            f"Unknown slash command '{cmd}'. Type /help to see available commands.",
+            "warning",
+        )
+
     async def run_interactive_session(self):
         """运行交互式会话"""
         # 清屏并显示启动界面
@@ -407,9 +559,35 @@ class CLIApp:
             # 主交互循环
             while self.cli.is_running:
                 self.cli.create_menu()
-                choice = self.cli.get_user_input()
+                # Raw text preserves case (needed for @<path> on
+                # case-sensitive URL components); ``choice`` is the
+                # lower-cased view used for menu-letter / slash
+                # matching.
+                choice_raw = self.cli.get_user_input()
+                choice = choice_raw.lower()
 
-                if choice in ["q", "quit", "exit"]:
+                # Slash commands (Cursor / Claude-Code style) — handled
+                # before the menu-letter dispatcher so users can type
+                # /resume, /new, /session, /help at the menu prompt.
+                if choice.startswith("/"):
+                    self._handle_slash_command(choice)
+                    continue
+
+                # @-shortcut for inline file path / URL input. We rewrite
+                # ``choice`` to the equivalent menu letter so the
+                # ask_continue check below behaves the same as if the
+                # user had picked [F] / [U] from the menu.
+                if choice_raw.startswith("@"):
+                    effective = await self._handle_at_shortcut(
+                        choice_raw[1:].strip()
+                    )
+                    if effective in ("f", "u"):
+                        choice = effective
+                    else:
+                        # Malformed input — error already shown; loop.
+                        continue
+
+                elif choice in ["q", "quit", "exit"]:
                     self.cli.print_goodbye()
                     break
 
@@ -441,7 +619,8 @@ class CLIApp:
 
                 else:
                     self.cli.print_status(
-                        "Invalid choice. Please select U, F, T, R, C, H, or Q.",
+                        "Invalid choice. Please select U, F, T, R, C, H, Q, "
+                        "type /help for slash commands, or @<path>/@<url>.",
                         "warning",
                     )
 

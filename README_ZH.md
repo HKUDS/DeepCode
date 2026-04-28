@@ -609,9 +609,9 @@ sudo apt-get install -y nodejs
 # 🚀 直接安装 DeepCode 包
 pip install deepcode-hku
 
-# 🔑 下载配置文件
-curl -O https://raw.githubusercontent.com/HKUDS/DeepCode/main/mcp_agent.config.yaml
-curl -O https://raw.githubusercontent.com/HKUDS/DeepCode/main/mcp_agent.secrets.yaml
+# 🔑 下载统一配置模板
+curl -O https://raw.githubusercontent.com/HKUDS/DeepCode/main/deepcode_config.json.example
+cp deepcode_config.json.example deepcode_config.json
 ```
 
 #### 🔧 **开发安装 (从源码)**
@@ -650,49 +650,61 @@ npm install --prefix new_ui/frontend
 
 ### 🔧 **步骤2: 配置**
 
-> 以下配置适用于**所有安装方式**（pip、UV、源码安装和 Docker 均通用）。
+> 以下配置适用于**所有安装方式**（pip、UV、源码安装和 Docker 均通用）。所有设置统一收敛在一个文件中：`deepcode_config.json`（参考 nanobot 设计）。
 
 #### 🔑 API 密钥 *（必需）*
 
-编辑 `mcp_agent.secrets.yaml`，填入你的 API 密钥：
+编辑 `deepcode_config.json`，至少填入一个 provider 的 `apiKey`。可以直接写入字符串，也可以使用 `${ENV_VAR}` 引用环境变量，加载时自动解析。
 
-```yaml
-# 至少需要配置一个 LLM 提供商的 API Key
-openai:
-  api_key: "your_openai_api_key"
-  base_url: "https://openrouter.ai/api/v1"  # 可选: 用于 OpenRouter 或自定义端点
-
-anthropic:
-  api_key: "your_anthropic_api_key"  # 用于 Claude 模型
-
-google:
-  api_key: "your_google_api_key"     # 用于 Gemini 模型
+```json
+{
+  "providers": {
+    "openai":    { "apiKey": "your_openai_api_key" },
+    "anthropic": { "apiKey": "${ANTHROPIC_API_KEY}" },
+    "gemini":    { "apiKey": "" }
+  }
+}
 ```
 
 #### 🤖 LLM 提供商 *（可选）*
 
-编辑 `mcp_agent.config.yaml` 选择你偏好的 LLM 提供商（第 ~106 行）：
+DeepCode 会根据 `model` 前缀（例如 `openai/...`、`anthropic/...`、`gemini/...`）自动识别后端。如需强制指定：
 
-```yaml
-# 选项: "google", "anthropic", "openai"
-# 如果未设置或不可用，将自动回退到第一个可用的提供商
-llm_provider: "google"
+```json
+{
+  "agents": {
+    "defaults": { "provider": "openai" }
+  }
+}
+```
+
+不同阶段可以单独覆盖模型：
+
+```json
+{
+  "agents": {
+    "defaults":       { "model": "openai/gpt-5.4" },
+    "planning":       { "model": "openai/gpt-5.4" },
+    "implementation": { "model": "anthropic/claude-sonnet-4.5" }
+  }
+}
 ```
 
 #### 📄 文档分割 *（可选）*
 
-在 `mcp_agent.config.yaml` 中控制文档处理：
-
-```yaml
-document_segmentation:
-  enabled: true          # true/false — 是否使用智能文档分割
-  size_threshold_chars: 50000  # 触发分割的文档大小阈值
+```json
+{
+  "documentSegmentation": {
+    "enabled": true,
+    "sizeThresholdChars": 50000
+  }
+}
 ```
 
 <details>
 <summary><strong>🪟 Windows 用户: 额外的 MCP 服务器配置</strong></summary>
 
-如果您使用 Windows，可能需要在 `mcp_agent.config.yaml` 中手动配置 MCP 服务器:
+如果您使用 Windows，可能需要在 `deepcode_config.json` 的 `tools.mcpServers` 中手动配置 MCP 服务器:
 
 ```bash
 # 1. 全局安装 MCP 服务器
@@ -702,14 +714,18 @@ npm i -g @modelcontextprotocol/server-filesystem
 npm -g root
 ```
 
-然后更新您的 `mcp_agent.config.yaml` 使用绝对路径:
-
-```yaml
-mcp:
-  servers:
-    filesystem:
-      command: "node"
-      args: ["C:/Program Files/nodejs/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js", "."]
+```json
+{
+  "tools": {
+    "mcpServers": {
+      "filesystem": {
+        "type": "stdio",
+        "command": "node",
+        "args": ["C:/Program Files/nodejs/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js", "."]
+      }
+    }
+  }
+}
 ```
 
 > **注意**: 将路径替换为步骤 2 中您实际的全局 node_modules 路径。
@@ -721,12 +737,13 @@ mcp:
 
 DeepCode 通过内置的 `fetch` MCP 服务器（无需 API key）抓取网页内容，并通过 `filesystem` 读取本地文件。辅助搜索服务器默认使用 `filesystem`：
 
-```yaml
-# mcp_agent.config.yaml — 与 fetch 并用的辅助搜索服务器
-default_search_server: "filesystem"
+```json
+{
+  "tools": { "defaultSearchServer": "filesystem" }
+}
 ```
 
-> **💡 提示**: 若要接入其他搜索后端，在 `mcp_agent.config.yaml` 的 `mcp.servers` 下添加配置，并将 `default_search_server` 改成对应名称即可，`get_search_server_names()` 会自动识别。
+> **💡 提示**: 若要接入其他搜索后端，在 `deepcode_config.json` 的 `tools.mcpServers` 下新增条目，并把 `tools.defaultSearchServer` 改成对应名称即可。
 
 </details>
 
@@ -747,9 +764,9 @@ default_search_server: "filesystem"
 ```bash
 git clone https://github.com/HKUDS/DeepCode.git
 cd DeepCode/
-cp mcp_agent.secrets.yaml.example \
-   mcp_agent.secrets.yaml
-# 编辑填入 API Key
+cp deepcode_config.json.example \
+   deepcode_config.json
+# 编辑 deepcode_config.json 填入 API Key
 
 ./deepcode_docker/run_docker.sh
 # 访问 → http://localhost:8000

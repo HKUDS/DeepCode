@@ -75,7 +75,7 @@ uploads/
 
 # secrets (use .env or environment variables instead)
 # NEVER commit real API keys; use the *.example files as templates.
-mcp_agent.secrets.yaml
+deepcode_config.json
 nanobot_config.json
 *.secrets.yaml
 *.secrets.yml

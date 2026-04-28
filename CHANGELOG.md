@@ -24,7 +24,7 @@ All notable changes to DeepCode will be documented in this file.
 - **Process Hanging**: Fixed infinite loops and hanging on errors - process now exits cleanly
 - **Token Cost Tracking**: Restored accurate token usage and cost display (was showing $0.0000)
 - **PDF to Markdown Conversion**: Fixed automatic conversion and file location handling
-- **Document Segmentation**: Properly uses configured 50K character threshold from `mcp_agent.config.yaml`
+- **Document Segmentation**: Properly uses configured 50K character threshold from `deepcode_config.json`
 - **Error Propagation**: Abort mechanism now properly stops process after 10 consecutive real errors
 
 ### Changed

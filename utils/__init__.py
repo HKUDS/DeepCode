@@ -1,17 +1,13 @@
-"""
-Utils package for paper processing tools.
+"""Utility helpers for the DeepCode pipeline.
+
+The legacy ``dialogue_logger`` and ``simple_llm_logger`` modules have
+been removed; structured logging now lives in
+:mod:`core.observability` (per-task ``system.jsonl`` / ``llm.jsonl`` /
+``mcp.jsonl`` files) which is wired up automatically at process start.
 """
 
 from .file_processor import FileProcessor
-from .dialogue_logger import (
-    DialogueLogger,
-    create_dialogue_logger,
-    extract_paper_id_from_path,
-)
 
 __all__ = [
     "FileProcessor",
-    "DialogueLogger",
-    "create_dialogue_logger",
-    "extract_paper_id_from_path",
 ]

@@ -2,8 +2,9 @@
 
 Ported from nanobot.agent.tools.mcp. Compared to the upstream version we:
 
-- Accept a small ``MCPServerConfig`` dataclass (this module) so we can read
-  DeepCode's ``mcp_agent.config.yaml`` directly without pydantic.
+- Accept a small ``MCPServerConfig`` dataclass (this module) so callers can
+  feed in entries materialised from ``deepcode_config.json`` without taking
+  a Pydantic dependency at the agent-runtime layer.
 - Track per-server :class:`AsyncExitStack` on the supplied
   :class:`ToolRegistry` so the orchestration code can close them all with a
   single ``await tool_registry.aclose()`` call.
@@ -12,8 +13,10 @@ Ported from nanobot.agent.tools.mcp. Compared to the upstream version we:
 from __future__ import annotations
 
 import asyncio
+import time
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -21,6 +24,7 @@ from loguru import logger
 
 from core.agent_runtime.tools.base import Tool
 from core.agent_runtime.tools.registry import ToolRegistry
+from core.observability import current_task_id, log_mcp_call
 from core.platform_compat import normalize_stdio_command
 
 
@@ -126,6 +130,13 @@ class MCPToolWrapper(Tool):
     async def execute(self, **kwargs: Any) -> str:
         from mcp import types
 
+        # Parse "mcp_<server>_<tool>" back into its components for logging.
+        # Falls back to the wrapped name when the convention is broken.
+        server_name = self._server_name(self._name)
+        started = time.monotonic()
+        status = "ok"
+        error_msg: str | None = None
+        result_text: str = ""
         try:
             result = await asyncio.wait_for(
                 self._session.call_tool(self._original_name, arguments=kwargs),
@@ -133,12 +144,18 @@ class MCPToolWrapper(Tool):
             )
         except asyncio.TimeoutError:
             logger.warning("MCP tool '{}' timed out after {}s", self._name, self._tool_timeout)
+            status = "error"
+            error_msg = f"timeout after {self._tool_timeout}s"
+            self._record_observability(server_name, kwargs, error_msg, status, started)
             return f"(MCP tool call timed out after {self._tool_timeout}s)"
         except asyncio.CancelledError:
             task = asyncio.current_task()
             if task is not None and task.cancelling() > 0:
                 raise
             logger.warning("MCP tool '{}' was cancelled by server/SDK", self._name)
+            status = "error"
+            error_msg = "cancelled"
+            self._record_observability(server_name, kwargs, error_msg, status, started)
             return "(MCP tool call was cancelled)"
         except Exception as exc:
             logger.exception(
@@ -147,6 +164,9 @@ class MCPToolWrapper(Tool):
                 type(exc).__name__,
                 exc,
             )
+            status = "error"
+            error_msg = f"{type(exc).__name__}: {exc}"
+            self._record_observability(server_name, kwargs, error_msg, status, started)
             return f"(MCP tool call failed: {type(exc).__name__})"
 
         parts = []
@@ -155,7 +175,42 @@ class MCPToolWrapper(Tool):
                 parts.append(block.text)
             else:
                 parts.append(str(block))
-        return "\n".join(parts) or "(no output)"
+        result_text = "\n".join(parts) or "(no output)"
+        self._record_observability(server_name, kwargs, result_text, status, started)
+        return result_text
+
+    def _server_name(self, wrapped: str) -> str:
+        """Recover the originating MCP server name from ``mcp_<server>_<tool>``."""
+        prefix = "mcp_"
+        if not wrapped.startswith(prefix):
+            return wrapped
+        rest = wrapped[len(prefix):]
+        suffix = "_" + self._original_name
+        if rest.endswith(suffix):
+            return rest[: -len(suffix)] or wrapped
+        return rest.split("_", 1)[0]
+
+    def _record_observability(
+        self,
+        server: str,
+        arguments: dict[str, Any],
+        result_or_error: Any,
+        status: str,
+        started_at: float,
+    ) -> None:
+        """Forward one MCP call to the observability bus (errors swallowed)."""
+        try:
+            log_mcp_call(
+                server=server,
+                tool=self._original_name,
+                duration_ms=int((time.monotonic() - started_at) * 1000),
+                status=status,
+                arguments=arguments,
+                result=result_or_error if status == "ok" else None,
+                error=result_or_error if status != "ok" else None,
+            )
+        except Exception:  # pragma: no cover
+            pass
 
 
 class MCPResourceWrapper(Tool):
@@ -325,6 +380,37 @@ class MCPPromptWrapper(Tool):
         return "\n".join(parts) or "(no output)"
 
 
+def _open_mcp_stderr_log(server_name: str, server_stack: AsyncExitStack):
+    """Open ``mcp_server_<name>.log`` in the active task's logs dir.
+
+    Falls back to ``logs/mcp_servers/<name>.log`` when there is no active
+    task (e.g. process-startup smoke test). The file handle is registered
+    with ``server_stack`` so it is closed when the MCP connection tears
+    down. Returns ``None`` on any error so the caller can use the SDK's
+    default stderr instead.
+    """
+    try:
+        # Resolve task dir lazily to avoid a hard dependency cycle: bus.py
+        # imports records.py only, not this module.
+        from core.observability.bus import _resolve_task_dir  # type: ignore
+
+        task_id = current_task_id()
+        target_dir: Path
+        if task_id and (task_dir := _resolve_task_dir(task_id)) is not None:
+            target_dir = task_dir / "logs"
+        else:
+            target_dir = Path("logs") / "mcp_servers"
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        path = target_dir / f"mcp_server_{server_name}.log"
+        # Append mode keeps history across multiple runs of the same task.
+        handle = path.open("a", encoding="utf-8", buffering=1)
+        server_stack.callback(handle.close)
+        return handle
+    except Exception:
+        return None
+
+
 async def connect_mcp_servers(
     mcp_servers: dict[str, MCPServerConfig],
     registry: ToolRegistry,
@@ -376,7 +462,17 @@ async def connect_mcp_servers(
                     args=args,
                     env=env,
                 )
-                read, write = await server_stack.enter_async_context(stdio_client(params))
+                # Redirect the child's stderr to a per-task (or per-process)
+                # file so we can inspect MCP server crashes after the fact
+                # rather than relying on console output. Failures here are
+                # non-fatal: we fall back to the SDK's default stderr.
+                errlog = _open_mcp_stderr_log(name, server_stack)
+                if errlog is not None:
+                    read, write = await server_stack.enter_async_context(
+                        stdio_client(params, errlog=errlog)
+                    )
+                else:
+                    read, write = await server_stack.enter_async_context(stdio_client(params))
             elif transport_type == "sse":
 
                 def httpx_client_factory(

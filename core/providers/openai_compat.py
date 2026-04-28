@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING, Any
 import json_repair
 from loguru import logger
 
+from core.observability import log_llm_call
+
 if os.environ.get("LANGFUSE_SECRET_KEY") and importlib.util.find_spec("langfuse"):
     from langfuse.openai import AsyncOpenAI
 else:
@@ -1011,6 +1013,8 @@ class OpenAICompatProvider(LLMProvider):
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
+        started = time.monotonic()
+        response: LLMResponse | None = None
         try:
             if self._should_use_responses_api(model, reasoning_effort):
                 try:
@@ -1020,6 +1024,7 @@ class OpenAICompatProvider(LLMProvider):
                     )
                     result = parse_response_output(await self._client.responses.create(**body))
                     self._record_responses_success(model, reasoning_effort)
+                    response = result
                     return result
                 except Exception as responses_error:
                     if not self._should_fallback_from_responses_error(responses_error):
@@ -1030,9 +1035,19 @@ class OpenAICompatProvider(LLMProvider):
                 messages, tools, model, max_tokens, temperature,
                 reasoning_effort, tool_choice,
             )
-            return self._parse(await self._client.chat.completions.create(**kwargs))
+            response = self._parse(await self._client.chat.completions.create(**kwargs))
+            return response
         except Exception as e:
-            return self._handle_error(e, spec=self._spec, api_base=self.api_base)
+            response = self._handle_error(e, spec=self._spec, api_base=self.api_base)
+            return response
+        finally:
+            self._emit_observability(
+                model=model,
+                messages=messages,
+                tools=tools,
+                response=response,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
 
     async def chat_stream(
         self,
@@ -1050,6 +1065,8 @@ class OpenAICompatProvider(LLMProvider):
             or os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S")
             or "90"
         )
+        started = time.monotonic()
+        response: LLMResponse | None = None
         try:
             if self._should_use_responses_api(model, reasoning_effort):
                 try:
@@ -1076,13 +1093,14 @@ class OpenAICompatProvider(LLMProvider):
                         on_content_delta,
                     )
                     self._record_responses_success(model, reasoning_effort)
-                    return LLMResponse(
+                    response = LLMResponse(
                         content=content or None,
                         tool_calls=tool_calls,
                         finish_reason=finish_reason,
                         usage=usage,
                         reasoning_content=reasoning_content,
                     )
+                    return response
                 except Exception as responses_error:
                     if not self._should_fallback_from_responses_error(responses_error):
                         raise
@@ -1110,9 +1128,10 @@ class OpenAICompatProvider(LLMProvider):
                     text = getattr(chunk.choices[0].delta, "content", None)
                     if text:
                         await on_content_delta(text)
-            return self._parse_chunks(chunks)
+            response = self._parse_chunks(chunks)
+            return response
         except asyncio.TimeoutError:
-            return LLMResponse(
+            response = LLMResponse(
                 content=(
                     f"Error calling LLM: stream stalled for more than "
                     f"{idle_timeout_s} seconds"
@@ -1120,8 +1139,82 @@ class OpenAICompatProvider(LLMProvider):
                 finish_reason="error",
                 error_kind="timeout",
             )
+            return response
         except Exception as e:
-            return self._handle_error(e, spec=self._spec, api_base=self.api_base)
+            response = self._handle_error(e, spec=self._spec, api_base=self.api_base)
+            return response
+        finally:
+            self._emit_observability(
+                model=model,
+                messages=messages,
+                tools=tools,
+                response=response,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
 
     def get_default_model(self) -> str:
         return self.default_model
+
+    def _emit_observability(
+        self,
+        *,
+        model: str | None,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        response: LLMResponse | None,
+        duration_ms: int,
+    ) -> None:
+        """Forward one chat / chat_stream call to the observability bus.
+
+        Errors are swallowed: logging must never break a workflow.
+        """
+        try:
+            provider_name = self._spec.name if self._spec else "openai_compat"
+            chosen_model = model or self.default_model
+
+            request_preview: dict[str, Any] = {
+                "model": chosen_model,
+                "message_count": len(messages),
+                "tool_count": len(tools) if tools else 0,
+                "first_role": messages[0].get("role") if messages else None,
+                "last_role": messages[-1].get("role") if messages else None,
+            }
+
+            response_text: Any = None
+            tool_calls_payload: list[dict[str, Any]] | None = None
+            usage: dict[str, int] | None = None
+            finish_reason: str | None = None
+            error: str | None = None
+            status = "ok"
+
+            if response is not None:
+                finish_reason = response.finish_reason
+                usage = dict(response.usage) if response.usage else None
+                response_text = response.content
+                if response.tool_calls:
+                    tool_calls_payload = [
+                        {
+                            "name": tc.name,
+                            "arguments": tc.arguments,
+                        }
+                        for tc in response.tool_calls
+                    ]
+                if response.finish_reason == "error":
+                    status = "error"
+                    error = response.content
+
+            log_llm_call(
+                provider=provider_name,
+                model=chosen_model,
+                phase=None,
+                duration_ms=duration_ms,
+                status=status,
+                finish_reason=finish_reason,
+                usage=usage,
+                request=request_preview,
+                response=response_text,
+                tool_calls=tool_calls_payload,
+                error=error,
+            )
+        except Exception:  # pragma: no cover - logging must not raise
+            pass

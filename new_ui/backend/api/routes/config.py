@@ -1,18 +1,28 @@
+"""Configuration API routes.
+
+Reads / writes the active LLM provider against the shared
+``deepcode_config.json``. The shape of the responses is preserved so the
+existing frontend (``SettingsPage``) does not need to be rewritten in
+this PR.
 """
-Configuration API Routes
-Handles LLM provider and settings management
-"""
+
+from __future__ import annotations
+
+import json
 
 from fastapi import APIRouter, HTTPException
-import yaml
+
+from core.compat.runtime import set_runtime
+from core.providers.registry import find_by_name
 
 from settings import (
-    load_mcp_config,
-    load_secrets,
-    get_llm_provider,
-    get_llm_models,
-    is_indexing_enabled,
     CONFIG_PATH,
+    get_api_key,
+    get_document_segmentation,
+    get_llm_models,
+    get_llm_provider,
+    is_indexing_enabled,
+    list_available_providers,
 )
 from models.requests import LLMProviderUpdateRequest
 from models.responses import ConfigResponse, SettingsResponse
@@ -23,67 +33,72 @@ router = APIRouter()
 
 @router.get("/settings", response_model=SettingsResponse)
 async def get_settings():
-    """Get current application settings"""
-    config = load_mcp_config()
+    """Return the current application settings."""
     provider = get_llm_provider()
-    models = get_llm_models(provider)
-
     return SettingsResponse(
         llm_provider=provider,
-        models=models,
+        models=get_llm_models(provider),
         indexing_enabled=is_indexing_enabled(),
-        document_segmentation=config.get("document_segmentation", {}),
+        document_segmentation=get_document_segmentation(),
     )
 
 
 @router.get("/llm-providers", response_model=ConfigResponse)
 async def get_llm_providers():
-    """Get available LLM providers and their configurations"""
-    secrets = load_secrets()
-
-    # Get available providers (those with API keys configured)
-    available_providers = []
-    for provider in ["google", "anthropic", "openai"]:
-        if secrets.get(provider, {}).get("api_key"):
-            available_providers.append(provider)
-
+    """List available providers and the currently active one."""
     current_provider = get_llm_provider()
-    models = get_llm_models(current_provider)
-
     return ConfigResponse(
         llm_provider=current_provider,
-        available_providers=available_providers,
-        models=models,
+        available_providers=list_available_providers(),
+        models=get_llm_models(current_provider),
         indexing_enabled=is_indexing_enabled(),
     )
 
 
 @router.put("/llm-provider")
 async def set_llm_provider(request: LLMProviderUpdateRequest):
-    """Update the preferred LLM provider"""
-    secrets = load_secrets()
-
-    # Verify provider has an API key
-    if not secrets.get(request.provider, {}).get("api_key"):
+    """Force a specific provider for all phases by setting ``agents.defaults.provider``."""
+    spec = find_by_name(request.provider)
+    if spec is None:
         raise HTTPException(
             status_code=400,
-            detail=f"Provider '{request.provider}' does not have an API key configured",
+            detail=f"Unknown provider '{request.provider}'.",
         )
 
-    # Update config file
-    try:
-        config = load_mcp_config()
-        config["llm_provider"] = request.provider
+    needs_key = not (spec.is_oauth or spec.is_local or spec.is_direct)
+    if needs_key and not get_api_key(spec.name):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Provider '{spec.name}' has no apiKey configured in deepcode_config.json",
+        )
 
+    try:
+        config: dict = {}
+        if CONFIG_PATH.exists():
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                config = json.load(f) or {}
+
+        agents = config.setdefault("agents", {})
+        defaults = agents.setdefault("defaults", {})
+        defaults["provider"] = spec.name
+
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-            yaml.dump(config, f, default_flow_style=False)
+            json.dump(config, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+
+        # Force the runtime to reload on the next access so subsequent
+        # workflow calls see the new provider selection.
+        set_runtime(None)
 
         return {
             "status": "success",
-            "message": f"LLM provider updated to '{request.provider}'",
-            "provider": request.provider,
+            "message": f"LLM provider updated to '{spec.name}'",
+            "provider": spec.name,
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=500,

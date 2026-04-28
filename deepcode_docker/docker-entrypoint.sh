@@ -6,16 +6,12 @@ echo "  DeepCode - AI Research Engine (Docker)"
 echo "============================================"
 
 # ------ Validate configuration ------
-if [ ! -f "mcp_agent.config.yaml" ]; then
-    echo "⚠️  mcp_agent.config.yaml not found, using default config"
-fi
-
-if [ ! -f "mcp_agent.secrets.yaml" ]; then
+if [ ! -f "deepcode_config.json" ]; then
     echo ""
-    echo "❌ ERROR: mcp_agent.secrets.yaml not found!"
+    echo "❌ ERROR: deepcode_config.json not found!"
     echo ""
-    echo "Please mount your secrets file:"
-    echo "  docker run -v ./mcp_agent.secrets.yaml:/app/mcp_agent.secrets.yaml ..."
+    echo "Mount your configuration file, e.g.:"
+    echo "  docker run -v ./deepcode_config.json:/app/deepcode_config.json:ro ..."
     echo ""
     echo "Or use docker-compose with the provided template."
     echo ""

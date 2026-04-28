@@ -26,7 +26,10 @@ async def start_paper_to_code(
     Start a paper-to-code workflow.
     Returns a task ID that can be used to track progress via WebSocket.
     """
-    task = workflow_service.create_task()
+    task = workflow_service.create_task(
+        session_id=request.session_id,
+        task_kind="paper" if request.input_type != "url" else "url",
+    )
 
     # Run workflow in background
     background_tasks.add_task(
@@ -54,7 +57,10 @@ async def start_chat_planning(
     Start a chat-based planning workflow.
     Returns a task ID that can be used to track progress via WebSocket.
     """
-    task = workflow_service.create_task()
+    task = workflow_service.create_task(
+        session_id=request.session_id,
+        task_kind="chat",
+    )
 
     # Run workflow in background
     background_tasks.add_task(

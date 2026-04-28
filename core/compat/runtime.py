@@ -4,28 +4,28 @@ The legacy code obtained logger / config / MCP wiring from
 ``mcp_agent``'s :class:`MCPApp` async context manager. We replace it with a
 single :class:`DeepCodeRuntime` object that owns:
 
-- the merged :class:`core.config.DeepCodeConfig`
-- a loguru logger (DeepCode already standardised on loguru)
+- the parsed :class:`core.config.DeepCodeConfig`
+- a loguru logger (DeepCode standardised on loguru)
 - a lazily-instantiated :class:`core.providers.base.LLMProvider` cache,
   keyed by ``(provider_name, phase, model)``
 
 Each :class:`core.compat.MCPApp` instance pulls a runtime from this module
 on entry and releases it on exit, so the agent / orchestration code can
 keep using a process-wide ``app.context.config.mcp.servers`` namespace
-while we incrementally tear ``mcp_agent`` out of the codebase.
+even though the underlying loader is now nanobot-style JSON.
 """
 
 from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from typing import Any
 
 from loguru import logger
 
+from core.agent_runtime.tools.mcp import MCPServerConfig
 from core.config import (
     DeepCodeConfig,
-    LLMProviderConfig,
+    ProviderConfig,
     load_config,
     make_llm_provider,
 )
@@ -40,7 +40,7 @@ _runtime: "DeepCodeRuntime | None" = None
 class _MCPNamespace:
     """Mirror of ``mcp_agent.config.mcp`` exposing ``.servers`` only."""
 
-    servers: dict[str, Any]
+    servers: dict[str, MCPServerConfig]
 
 
 @dataclass(slots=True)
@@ -48,7 +48,6 @@ class _ConfigNamespace:
     """Mirror of ``mcp_agent.context.config`` exposing the bits DeepCode reads."""
 
     mcp: _MCPNamespace
-    raw: dict[str, Any]
 
 
 @dataclass(slots=True)
@@ -65,19 +64,17 @@ class DeepCodeRuntime:
         self.config = config
         self.logger = logger
         self._provider_cache: dict[tuple[str, str, str | None], LLMProvider] = {}
-        mcp_namespace = _MCPNamespace(servers=config.mcp_servers)
-        config_namespace = _ConfigNamespace(mcp=mcp_namespace, raw=config.raw)
+        # MCP servers materialised on construction so legacy callers can
+        # mutate ``args`` in place (workflows.environment, plugin code, ...).
+        self._mcp_servers = config.mcp_servers
+        mcp_namespace = _MCPNamespace(servers=self._mcp_servers)
+        config_namespace = _ConfigNamespace(mcp=mcp_namespace)
         self.context = _ContextNamespace(config=config_namespace)
 
     @classmethod
-    def load(
-        cls,
-        config_path: str | None = None,
-        secrets_path: str | None = None,
-    ) -> "DeepCodeRuntime":
-        """Read the YAML files and build a fresh :class:`DeepCodeRuntime`."""
-        cfg = load_config(config_path=config_path, secrets_path=secrets_path)
-        return cls(cfg)
+    def load(cls, config_path: str | None = None) -> "DeepCodeRuntime":
+        """Read ``deepcode_config.json`` and build a fresh runtime."""
+        return cls(load_config(config_path=config_path))
 
     def provider_for(
         self,
@@ -87,28 +84,37 @@ class DeepCodeRuntime:
         model: str | None = None,
     ) -> LLMProvider:
         """Return a cached :class:`LLMProvider` for the requested combination."""
-        chosen_provider = (provider_name or self.config.llm_provider or "openai").lower()
+        chosen_provider = (provider_name or self.config.llm_provider or "auto").lower()
         if chosen_provider == "google":
             chosen_provider = "gemini"
         cache_key = (chosen_provider, phase, model)
-        if cache_key in self._provider_cache:
-            return self._provider_cache[cache_key]
+        cached = self._provider_cache.get(cache_key)
+        if cached is not None:
+            return cached
         provider = make_llm_provider(
             self.config,
             model=model,
-            provider_name=chosen_provider,
+            provider_name=None if chosen_provider == "auto" else chosen_provider,
             phase=phase,
         )
         self._provider_cache[cache_key] = provider
         return provider
 
-    def get_provider_config(self, name: str | None = None) -> LLMProviderConfig:
-        """Return the configured :class:`LLMProviderConfig` for ``name``."""
-        return self.config.get_provider_config(name)
+    def get_provider_config(self, name: str | None = None) -> ProviderConfig | None:
+        """Return the :class:`ProviderConfig` block for ``name`` (or the
+        currently active provider when ``name`` is ``None``)."""
+        if name:
+            return getattr(self.config.providers, name.lower(), None)
+        return self.config.get_provider()
+
+    @property
+    def mcp_servers(self) -> dict[str, MCPServerConfig]:
+        """Live, mutable view of the MCP server map."""
+        return self._mcp_servers
 
 
 def get_runtime() -> DeepCodeRuntime:
-    """Return the process-wide runtime, loading lazily if needed."""
+    """Return the process-wide runtime, loading lazily on first use."""
     global _runtime
     if _runtime is None:
         with _runtime_lock:

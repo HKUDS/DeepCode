@@ -15,6 +15,7 @@ from typing import Optional, Dict, Any, Callable, List
 from dataclasses import dataclass, field
 
 from settings import CONFIG_PATH, PROJECT_ROOT
+from services.session_service import session_store
 
 
 @dataclass
@@ -34,6 +35,13 @@ class WorkflowTask:
     pending_interaction: Optional[Dict[str, Any]] = (
         None  # Current interaction request waiting for user
     )
+    # Session integration: every WorkflowTask belongs to exactly one
+    # session. ``task_short_id`` mirrors the 8-char id used by
+    # workflows.environment for task_dir naming and log routing.
+    session_id: Optional[str] = None
+    task_kind: str = "paper"  # paper | chat | url | repo | requirement
+    task_short_id: Optional[str] = None
+    task_dir: Optional[str] = None
 
 
 class WorkflowService:
@@ -60,10 +68,27 @@ class WorkflowService:
                 self._plugin_enabled = False
         return self._plugin_integration
 
-    def create_task(self) -> WorkflowTask:
-        """Create a new workflow task"""
+    def create_task(
+        self,
+        session_id: Optional[str] = None,
+        *,
+        task_kind: str = "paper",
+        title: Optional[str] = None,
+    ) -> WorkflowTask:
+        """Create a new workflow task, attached to a session.
+
+        When ``session_id`` is omitted a fresh session is created so
+        every task is reachable from the session listing endpoint.
+        """
         task_id = str(uuid.uuid4())
-        task = WorkflowTask(task_id=task_id)
+        if session_id is None:
+            session = session_store.create_session(title=title or "")
+            session_id = session.session_id
+        task = WorkflowTask(
+            task_id=task_id,
+            session_id=session_id,
+            task_kind=task_kind,
+        )
         self._tasks[task_id] = task
         self._subscribers[task_id] = []
         return task
@@ -229,6 +254,7 @@ class WorkflowService:
         """Execute paper-to-code workflow"""
         # Lazy imports - DeepCode modules found via sys.path set in main.py
         from core.compat import MCPApp
+        from core.observability import bind_task, pop_task, set_session
         from workflows.agent_orchestration_engine import (
             execute_multi_agent_research_pipeline,
         )
@@ -240,6 +266,30 @@ class WorkflowService:
 
         task.status = "running"
         task.started_at = datetime.utcnow()
+
+        # Bind task_id into the async context so every loguru call and
+        # provider/MCP record made downstream is automatically attributed
+        # to this task (no business-code change needed).
+        short_task_id = str(task_id)[:8] if task_id else None
+        task.task_short_id = short_task_id
+        task.task_kind = self._infer_task_kind(input_type, task.task_kind)
+        task_token = bind_task(short_task_id)
+        session_id = getattr(task, "session_id", None)
+        session_token = set_session(session_id) if session_id else None
+
+        # Record the user-facing intent in the session transcript so the
+        # session listing UI / CLI shows a meaningful preview.
+        if session_id:
+            try:
+                session_store.append_message(
+                    session_id,
+                    role="user",
+                    content=f"[{task.task_kind}] {input_source}",
+                    task_id_ref=short_task_id,
+                    metadata={"input_type": input_type},
+                )
+            except Exception:
+                pass
 
         try:
             progress_callback = await self._create_progress_callback(task_id)
@@ -276,6 +326,7 @@ class WorkflowService:
                     "repo_result": result,
                 }
                 task.completed_at = datetime.utcnow()
+                self._record_session_outcome(task, role="assistant", body=str(result))
 
                 # Broadcast completion signal to all subscribers
                 await self._broadcast(
@@ -299,6 +350,9 @@ class WorkflowService:
             task.status = "error"
             task.error = str(e)
             task.completed_at = datetime.utcnow()
+            self._record_session_outcome(
+                task, role="system", body=f"Workflow failed: {e}"
+            )
 
             # Broadcast error signal to all subscribers
             await self._broadcast(
@@ -315,6 +369,12 @@ class WorkflowService:
         finally:
             # Restore original working directory
             os.chdir(original_cwd)
+            # Detach task / session context vars
+            if session_token is not None:
+                from core.observability import pop_session as _pop_session
+
+                _pop_session(session_token)
+            pop_task(task_token)
 
     async def execute_chat_planning(
         self,
@@ -326,6 +386,7 @@ class WorkflowService:
         """Execute chat-based planning workflow"""
         # Lazy imports - DeepCode modules found via sys.path set in main.py
         from core.compat import MCPApp
+        from core.observability import bind_task, pop_task, set_session
         from workflows.agent_orchestration_engine import (
             execute_chat_based_planning_pipeline,
         )
@@ -337,6 +398,25 @@ class WorkflowService:
 
         task.status = "running"
         task.started_at = datetime.utcnow()
+
+        short_task_id = str(task_id)[:8] if task_id else None
+        task.task_short_id = short_task_id
+        task.task_kind = "chat"
+        task_token = bind_task(short_task_id)
+        session_id = getattr(task, "session_id", None)
+        session_token = set_session(session_id) if session_id else None
+
+        if session_id:
+            try:
+                session_store.append_message(
+                    session_id,
+                    role="user",
+                    content=requirements,
+                    task_id_ref=short_task_id,
+                    metadata={"input_type": "chat"},
+                )
+            except Exception:
+                pass
 
         try:
             progress_callback = await self._create_progress_callback(task_id)
@@ -421,6 +501,7 @@ class WorkflowService:
                     "repo_result": result,
                 }
                 task.completed_at = datetime.utcnow()
+                self._record_session_outcome(task, role="assistant", body=str(result))
 
                 # Broadcast completion signal to all subscribers
                 await self._broadcast(
@@ -444,6 +525,9 @@ class WorkflowService:
             task.status = "error"
             task.error = str(e)
             task.completed_at = datetime.utcnow()
+            self._record_session_outcome(
+                task, role="system", body=f"Workflow failed: {e}"
+            )
 
             # Broadcast error signal to all subscribers
             await self._broadcast(
@@ -460,6 +544,11 @@ class WorkflowService:
         finally:
             # Restore original working directory
             os.chdir(original_cwd)
+            if session_token is not None:
+                from core.observability import pop_session as _pop_session
+
+                _pop_session(session_token)
+            pop_task(task_token)
 
     def cancel_task(self, task_id: str) -> bool:
         """Cancel a running task"""
@@ -495,6 +584,74 @@ class WorkflowService:
         # Sort by started_at descending (newest first)
         tasks.sort(key=lambda t: t.started_at or datetime.min, reverse=True)
         return tasks[:limit]
+
+    # ------------------------------------------------------------------
+    # Session integration helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _infer_task_kind(input_type: str, fallback: str) -> str:
+        mapping = {
+            "file": "paper",
+            "url": "url",
+            "chat": "chat",
+            "requirement": "requirement",
+            "repo": "repo",
+        }
+        return mapping.get((input_type or "").lower(), fallback)
+
+    def _record_session_outcome(
+        self, task: "WorkflowTask", *, role: str, body: str
+    ) -> None:
+        """Append the task's final state to its session transcript."""
+        sid = getattr(task, "session_id", None)
+        if not sid:
+            return
+        try:
+            session_store.append_message(
+                sid,
+                role=role,
+                content=body[:8000],
+                task_id_ref=task.task_short_id or task.task_id[:8],
+                metadata={"status": task.status, "task_kind": task.task_kind},
+            )
+            session_store.update_task_status(
+                sid,
+                task.task_short_id or task.task_id[:8],
+                task.status,
+            )
+        except Exception:
+            pass
+
+    def hydrate_from_sessions(self) -> int:
+        """Rebuild :class:`WorkflowTask` rows from the on-disk session store.
+
+        Called by the FastAPI lifespan hook so a backend restart does
+        not erase the user's task history. Live task progress cannot be
+        recovered (the original asyncio coroutine is gone), so any
+        previously running task is marked as ``interrupted``.
+        """
+        restored = 0
+        for session, stored in session_store.list_attached_tasks():
+            short = stored.task_id
+            if short in self._tasks:
+                continue
+            status = stored.status
+            if status in {"pending", "running", "waiting_for_input"}:
+                status = "interrupted"
+            task = WorkflowTask(
+                task_id=short,
+                status=status,
+                session_id=session.session_id,
+                task_kind=stored.task_kind,
+                task_short_id=short,
+                task_dir=stored.task_dir,
+                message=f"Restored from session {session.session_id}",
+            )
+            self._tasks[short] = task
+            self._subscribers[short] = []
+            restored += 1
+        return restored
 
 
 # Global service instance

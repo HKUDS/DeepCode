@@ -1,6 +1,6 @@
 """Request models for API endpoints"""
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from pydantic import BaseModel, Field
 
 
@@ -13,6 +13,10 @@ class PaperToCodeRequest(BaseModel):
     enable_user_interaction: bool = Field(
         default=True, description="Enable user review and approval steps"
     )
+    session_id: Optional[str] = Field(
+        default=None,
+        description="Attach this run to an existing session (created if absent).",
+    )
 
 
 class ChatPlanningRequest(BaseModel):
@@ -22,6 +26,37 @@ class ChatPlanningRequest(BaseModel):
     enable_indexing: bool = Field(default=False, description="Enable code indexing")
     enable_user_interaction: bool = Field(
         default=True, description="Enable user review and approval steps"
+    )
+    session_id: Optional[str] = Field(
+        default=None,
+        description="Attach this run to an existing session (created if absent).",
+    )
+
+
+class SessionCreateRequest(BaseModel):
+    """Request model for explicitly creating a session."""
+
+    title: str = Field(default="", description="Optional human-readable title")
+
+
+class SessionMessageRequest(BaseModel):
+    """Request model for appending a free-form message to a session."""
+
+    role: str = Field(
+        default="user",
+        description="Message role: user | assistant | system",
+    )
+    content: str = Field(..., description="Message body")
+
+
+class SessionBranchRequest(BaseModel):
+    """Request model for forking a session at a given message index."""
+
+    from_message_index: int = Field(
+        ..., description="Number of messages from the source to keep"
+    )
+    title: Optional[str] = Field(
+        default=None, description="Optional title for the new branch"
     )
 
 

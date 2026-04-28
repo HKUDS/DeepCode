@@ -7,11 +7,13 @@ import os
 import re
 import secrets
 import string
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 import json_repair
 
+from core.observability import log_llm_call
 from core.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 _ALNUM = string.ascii_letters + string.digits
@@ -480,11 +482,23 @@ class AnthropicProvider(LLMProvider):
             messages, tools, model, max_tokens, temperature,
             reasoning_effort, tool_choice,
         )
+        started = time.monotonic()
+        result: LLMResponse | None = None
         try:
             response = await self._client.messages.create(**kwargs)
-            return self._parse_response(response)
+            result = self._parse_response(response)
+            return result
         except Exception as e:
-            return self._handle_error(e)
+            result = self._handle_error(e)
+            return result
+        finally:
+            self._emit_observability(
+                model=model,
+                messages=messages,
+                tools=tools,
+                response=result,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
 
     async def chat_stream(
         self,
@@ -506,6 +520,8 @@ class AnthropicProvider(LLMProvider):
             or os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S")
             or "90"
         )
+        started = time.monotonic()
+        result: LLMResponse | None = None
         try:
             async with self._client.messages.stream(**kwargs) as stream:
                 if on_content_delta:
@@ -523,9 +539,10 @@ class AnthropicProvider(LLMProvider):
                     stream.get_final_message(),
                     timeout=idle_timeout_s,
                 )
-            return self._parse_response(response)
+            result = self._parse_response(response)
+            return result
         except asyncio.TimeoutError:
-            return LLMResponse(
+            result = LLMResponse(
                 content=(
                     f"Error calling LLM: stream stalled for more than "
                     f"{idle_timeout_s} seconds"
@@ -533,8 +550,78 @@ class AnthropicProvider(LLMProvider):
                 finish_reason="error",
                 error_kind="timeout",
             )
+            return result
         except Exception as e:
-            return self._handle_error(e)
+            result = self._handle_error(e)
+            return result
+        finally:
+            self._emit_observability(
+                model=model,
+                messages=messages,
+                tools=tools,
+                response=result,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
 
     def get_default_model(self) -> str:
         return self.default_model
+
+    def _emit_observability(
+        self,
+        *,
+        model: str | None,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        response: LLMResponse | None,
+        duration_ms: int,
+    ) -> None:
+        """Forward one Anthropic call to the observability bus."""
+        try:
+            chosen_model = model or self.default_model
+
+            request_preview: dict[str, Any] = {
+                "model": chosen_model,
+                "message_count": len(messages),
+                "tool_count": len(tools) if tools else 0,
+                "first_role": messages[0].get("role") if messages else None,
+                "last_role": messages[-1].get("role") if messages else None,
+            }
+
+            response_text: Any = None
+            tool_calls_payload: list[dict[str, Any]] | None = None
+            usage: dict[str, int] | None = None
+            finish_reason: str | None = None
+            error: str | None = None
+            status = "ok"
+
+            if response is not None:
+                finish_reason = response.finish_reason
+                usage = dict(response.usage) if response.usage else None
+                response_text = response.content
+                if response.tool_calls:
+                    tool_calls_payload = [
+                        {
+                            "name": tc.name,
+                            "arguments": tc.arguments,
+                        }
+                        for tc in response.tool_calls
+                    ]
+                if response.finish_reason == "error":
+                    status = "error"
+                    error = response.content
+
+            log_llm_call(
+                provider="anthropic",
+                model=chosen_model,
+                phase=None,
+                duration_ms=duration_ms,
+                status=status,
+                finish_reason=finish_reason,
+                usage=usage,
+                request=request_preview,
+                response=response_text,
+                tool_calls=tool_calls_payload,
+                error=error,
+            )
+        except Exception:  # pragma: no cover - logging must not raise
+            pass

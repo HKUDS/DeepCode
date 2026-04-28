@@ -55,28 +55,19 @@ check_docker() {
 check_deepcode_config() {
     echo -e "${BLUE}[2/5] 检查 DeepCode 配置文件...${NC}"
 
-    # mcp_agent.config.yaml
-    if [ ! -f "$PROJECT_ROOT/mcp_agent.config.yaml" ]; then
-        echo -e "${RED}   ❌ 缺少 mcp_agent.config.yaml${NC}"
-        echo -e "      请确保项目根目录下存在 mcp_agent.config.yaml"
-        exit 1
-    fi
-    echo -e "${GREEN}   ✓ mcp_agent.config.yaml${NC}"
-
-    # mcp_agent.secrets.yaml
-    if [ ! -f "$PROJECT_ROOT/mcp_agent.secrets.yaml" ]; then
-        if [ -f "$PROJECT_ROOT/mcp_agent.secrets.yaml.example" ]; then
-            echo -e "${YELLOW}   ⚠ 未找到 mcp_agent.secrets.yaml，从模板创建...${NC}"
-            cp "$PROJECT_ROOT/mcp_agent.secrets.yaml.example" "$PROJECT_ROOT/mcp_agent.secrets.yaml"
-            echo -e "${YELLOW}   ⚡ 请编辑 mcp_agent.secrets.yaml 填入你的 API Key，然后重新运行${NC}"
-            echo -e "      文件路径: $PROJECT_ROOT/mcp_agent.secrets.yaml"
+    if [ ! -f "$PROJECT_ROOT/deepcode_config.json" ]; then
+        if [ -f "$PROJECT_ROOT/deepcode_config.json.example" ]; then
+            echo -e "${YELLOW}   ⚠ 未找到 deepcode_config.json，从模板创建...${NC}"
+            cp "$PROJECT_ROOT/deepcode_config.json.example" "$PROJECT_ROOT/deepcode_config.json"
+            echo -e "${YELLOW}   ⚡ 请编辑 deepcode_config.json 填入 providers.<name>.apiKey 后重新运行${NC}"
+            echo -e "      文件路径: $PROJECT_ROOT/deepcode_config.json"
             exit 1
         else
-            echo -e "${RED}   ❌ 缺少 mcp_agent.secrets.yaml 且无模板文件${NC}"
+            echo -e "${RED}   ❌ 缺少 deepcode_config.json 且无模板文件${NC}"
             exit 1
         fi
     fi
-    echo -e "${GREEN}   ✓ mcp_agent.secrets.yaml${NC}"
+    echo -e "${GREEN}   ✓ deepcode_config.json${NC}"
 }
 
 # ============ 检查 Nanobot 配置文件 ============

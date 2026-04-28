@@ -23,8 +23,8 @@ from pathlib import Path
 from dataclasses import dataclass, asdict
 from typing import List, Dict, Any
 
-# MCP Agent imports for LLM
-from utils.llm_utils import get_preferred_llm_class, get_default_models
+from core.llm_runtime import get_workflow_provider
+from utils.llm_utils import get_default_models
 
 
 @dataclass
@@ -73,19 +73,15 @@ class CodeIndexer:
         code_base_path: str = None,
         target_structure: str = None,
         output_dir: str = None,
-        config_path: str = "mcp_agent.secrets.yaml",
         indexer_config_path: str = None,
         enable_pre_filtering: bool = True,
     ):
         # Load configurations first
-        self.config_path = config_path
         self.indexer_config_path = indexer_config_path
-        # Derive main config path from secrets path (same directory)
-        secrets_dir = os.path.dirname(os.path.abspath(config_path))
-        self.main_config_path = os.path.join(secrets_dir, "mcp_agent.config.yaml")
-        self.api_config = self._load_api_config()
         self.indexer_config = self._load_indexer_config()
-        self.default_models = get_default_models(self.main_config_path)
+        # ``default_models`` is kept for legacy log lines / mock paths; the
+        # actual model selection happens inside the provider runtime.
+        self.default_models = get_default_models()
 
         # Use config paths if not provided as parameters
         paths_config = self.indexer_config.get("paths", {})
@@ -279,18 +275,6 @@ class CodeIndexer:
 
         return logger
 
-    def _load_api_config(self) -> Dict[str, Any]:
-        """Load API configuration from YAML file"""
-        try:
-            import yaml
-
-            with open(self.config_path, "r", encoding="utf-8") as f:
-                return yaml.safe_load(f)
-        except Exception as e:
-            # Create a basic logger for this error since self.logger doesn't exist yet
-            print(f"Warning: Failed to load API config from {self.config_path}: {e}")
-            return {}
-
     def _load_indexer_config(self) -> Dict[str, Any]:
         """Load indexer configuration from YAML file"""
         try:
@@ -309,96 +293,42 @@ class CodeIndexer:
             return {}
 
     async def _initialize_llm_client(self):
-        """Initialize LLM client (Anthropic or OpenAI) based on API key availability"""
+        """Initialize the LLM client via DeepCode's provider runtime."""
         if self.llm_client is not None:
             return self.llm_client, self.llm_client_type
 
-        # Check if mock responses are enabled
         if self.mock_llm_responses:
             self.logger.info("Using mock LLM responses for testing")
             self.llm_client = "mock"
             self.llm_client_type = "mock"
             return "mock", "mock"
 
-        # Check which API has available key and try that first
-        anthropic_key = self.api_config.get("anthropic", {}).get("api_key", "")
-        openai_key = self.api_config.get("openai", {}).get("api_key", "")
-
-        # Try Anthropic API first if key is available
-        if anthropic_key and anthropic_key.strip():
-            try:
-                from anthropic import AsyncAnthropic
-
-                client = AsyncAnthropic(api_key=anthropic_key)
-                # Test connection with default model from config
-                await client.messages.create(
-                    model=self.default_models["anthropic"],
-                    max_tokens=10,
-                    messages=[{"role": "user", "content": "test"}],
-                )
-                self.logger.info(
-                    f"Using Anthropic API with model: {self.default_models['anthropic']}"
-                )
-                self.llm_client = client
-                self.llm_client_type = "anthropic"
-                return client, "anthropic"
-            except Exception as e:
-                self.logger.warning(f"Anthropic API unavailable: {e}")
-
-        # Try OpenAI API if Anthropic failed or key not available
-        if openai_key and openai_key.strip():
-            try:
-                from openai import AsyncOpenAI
-
-                # Handle custom base_url if specified
-                openai_config = self.api_config.get("openai", {})
-                base_url = openai_config.get("base_url")
-
-                if base_url:
-                    client = AsyncOpenAI(api_key=openai_key, base_url=base_url)
-                else:
-                    client = AsyncOpenAI(api_key=openai_key)
-
-                # Test connection with default model from config
-                await client.chat.completions.create(
-                    model=self.default_models["openai"],
-                    max_tokens=10,
-                    messages=[{"role": "user", "content": "test"}],
-                )
-                self.logger.info(
-                    f"Using OpenAI API with model: {self.default_models['openai']}"
-                )
-                if base_url:
-                    self.logger.info(f"Using custom base URL: {base_url}")
-                self.llm_client = client
-                self.llm_client_type = "openai"
-                return client, "openai"
-            except Exception as e:
-                self.logger.warning(f"OpenAI API unavailable: {e}")
-
-        raise ValueError(
-            "No available LLM API - please check your API keys in configuration"
+        provider, profile = get_workflow_provider(phase="default")
+        self.logger.info(
+            "Using DeepCode provider runtime for indexing: provider=%s model=%s",
+            profile.provider_name,
+            profile.model,
         )
+        self.llm_client = provider
+        self.llm_client_type = "provider"
+        return provider, "provider"
 
     async def _call_llm(
         self, prompt: str, system_prompt: str = None, max_tokens: int = None
     ) -> str:
-        """Call LLM for code analysis with retry mechanism and debugging support"""
+        """Call the LLM for code analysis through DeepCode's provider runtime."""
         if system_prompt is None:
             system_prompt = self.llm_system_prompt
         if max_tokens is None:
             max_tokens = self.llm_max_tokens
 
-        # Mock response for testing
         if self.mock_llm_responses:
             mock_response = self._generate_mock_response(prompt)
             if self.save_raw_responses:
                 self._save_debug_response("mock", prompt, mock_response)
             return mock_response
 
-        last_error = None
-
-        # Retry mechanism
+        last_error: Exception | None = None
         for attempt in range(self.max_retries):
             try:
                 if self.verbose_output and attempt > 0:
@@ -406,61 +336,34 @@ class CodeIndexer:
                         f"LLM call attempt {attempt + 1}/{self.max_retries}"
                     )
 
-                client, client_type = await self._initialize_llm_client()
+                provider, _ = await self._initialize_llm_client()
 
-                if client_type == "anthropic":
-                    response = await client.messages.create(
-                        model=self.default_models["anthropic"],
-                        system=system_prompt,
-                        messages=[{"role": "user", "content": prompt}],
-                        max_tokens=max_tokens,
-                        temperature=self.llm_temperature,
-                    )
-
-                    content = ""
-                    for block in response.content:
-                        if block.type == "text":
-                            content += block.text
-
-                    # Save debug response if enabled
-                    if self.save_raw_responses:
-                        self._save_debug_response("anthropic", prompt, content)
-
-                    return content
-
-                elif client_type == "openai":
-                    messages = [
+                response = await provider.chat_with_retry(
+                    messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt},
-                    ]
+                    ],
+                    tools=None,
+                    model=provider.get_default_model(),
+                    max_tokens=max_tokens,
+                    temperature=self.llm_temperature,
+                    retry_mode="persistent",
+                )
+                if response.finish_reason == "error":
+                    raise RuntimeError(response.content or "LLM provider returned an error")
 
-                    response = await client.chat.completions.create(
-                        model=self.default_models["openai"],
-                        messages=messages,
-                        max_tokens=max_tokens,
-                        temperature=self.llm_temperature,
-                    )
-
-                    content = response.choices[0].message.content or ""
-
-                    # Save debug response if enabled
-                    if self.save_raw_responses:
-                        self._save_debug_response("openai", prompt, content)
-
-                    return content
-                else:
-                    raise ValueError(f"Unsupported client type: {client_type}")
+                content = response.content or ""
+                if self.save_raw_responses:
+                    self._save_debug_response("provider", prompt, content)
+                return content
 
             except Exception as e:
                 last_error = e
                 self.logger.warning(f"LLM call attempt {attempt + 1} failed: {e}")
 
                 if attempt < self.max_retries - 1:
-                    await asyncio.sleep(
-                        self.retry_delay * (attempt + 1)
-                    )  # Exponential backoff
+                    await asyncio.sleep(self.retry_delay * (attempt + 1))
 
-        # All retries failed
         error_msg = f"LLM call failed after {self.max_retries} attempts. Last error: {str(last_error)}"
         self.logger.error(error_msg)
         return f"Error in LLM analysis: {error_msg}"
@@ -1443,7 +1346,6 @@ class CodeIndexer:
             "code_base_path": str(self.code_base_path),
             "configuration": {
                 "config_file_used": self.indexer_config_path,
-                "api_config_file": self.config_path,
                 "pre_filtering_enabled": self.enable_pre_filtering,
                 "min_confidence_score": self.min_confidence_score,
                 "high_confidence_threshold": self.high_confidence_threshold,
@@ -1464,9 +1366,9 @@ class CodeIndexer:
 async def main():
     """Main function to run the code indexer with full configuration support"""
 
-    # Configuration - can be overridden by config file
+    # Configuration file path - other settings are read from deepcode_config.json
+    # via the global runtime.
     config_file = "DeepCode/tools/indexer_config.yaml"
-    api_config_file = "DeepCode/mcp_agent.secrets.yaml"
 
     # You can override these parameters or let them be read from config
     code_base_path = "DeepCode/deepcode_lab/papers/1/code_base/"  # Will use config file value if None
@@ -1513,15 +1415,13 @@ async def main():
 
     print("🚀 Starting Code Indexer with Enhanced Configuration Support")
     print(f"📋 Configuration file: {config_file}")
-    print(f"🔑 API configuration file: {api_config_file}")
+    print("🔑 LLM provider/keys are read from deepcode_config.json")
 
-    # Create indexer with full configuration support
     try:
         indexer = CodeIndexer(
             code_base_path=code_base_path,  # None = read from config
             target_structure=target_structure,  # Required - project specific
             output_dir=output_dir,  # None = read from config
-            config_path=api_config_file,  # API configuration file
             indexer_config_path=config_file,  # Configuration file
             enable_pre_filtering=True,  # Can be overridden in config
         )
@@ -1529,10 +1429,7 @@ async def main():
         # Display configuration information
         print(f"📁 Code base path: {indexer.code_base_path}")
         print(f"📂 Output directory: {indexer.output_dir}")
-        print(
-            f"🤖 Default models: Anthropic={indexer.default_models['anthropic']}, OpenAI={indexer.default_models['openai']}"
-        )
-        print(f"🔧 Preferred LLM: {get_preferred_llm_class(api_config_file).__name__}")
+        print(f"🤖 Default model (resolved from runtime): {indexer.default_models['openai']}")
         print(
             f"⚡ Concurrent analysis: {'enabled' if indexer.enable_concurrent_analysis else 'disabled'}"
         )

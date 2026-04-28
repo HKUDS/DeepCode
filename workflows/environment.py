@@ -135,6 +135,34 @@ async def prepare_workflow_environment(
         is_resume,
     )
 
+    # Hand the per-task log directory to the observability bus so any
+    # subsequent loguru call carrying this task_id (set by the entry
+    # layer via bind_task) is tee'd into <task_dir>/logs/system.jsonl.
+    try:
+        from core.observability import set_task_dir as _obs_set_task_dir
+
+        _obs_set_task_dir(chosen_id, task_dir)
+    except Exception as exc:  # pragma: no cover - observability never fatal
+        log.debug("observability.set_task_dir failed: {}", exc)
+
+    # If a session is bound on the contextvar, persist the task → session
+    # link so the listing UI / CLI can show the new task immediately.
+    try:
+        from core.observability import current_session_id as _current_session_id
+        from core.sessions import get_default_store as _get_session_store
+
+        active_session = _current_session_id()
+        if active_session:
+            _get_session_store().attach_task(
+                active_session,
+                chosen_id,
+                task_kind=task_kind,
+                task_dir=str(task_dir),
+                status="running",
+            )
+    except Exception as exc:  # pragma: no cover - never fatal
+        log.debug("session.attach_task failed: {}", exc)
+
     _maybe_progress(progress_cb, 4, f"📁 Task workspace ready: {task_dir.name}")
 
     return WorkflowContext(
@@ -186,35 +214,26 @@ def _maybe_progress(cb: ProgressCallback | None, pct: int, msg: str) -> None:
 
 
 def _load_workspace_config() -> tuple[str | None, int]:
-    """Read ``workspace.{root,max_input_mb}`` from the active yaml config."""
+    """Read ``workspace.{root,maxInputMb}`` from the active deepcode_config.json."""
     try:
         runtime = get_runtime()
     except Exception as exc:  # pragma: no cover - defensive
         default_logger.warning("Could not load DeepCode runtime config: {}", exc)
         return None, _DEFAULT_MAX_INPUT_MB
 
-    block = runtime.config.raw.get("workspace") or {}
-    if not isinstance(block, dict):
-        default_logger.warning(
-            "Ignoring malformed yaml 'workspace' block (expected mapping, got {})",
-            type(block).__name__,
-        )
-        return None, _DEFAULT_MAX_INPUT_MB
+    workspace = runtime.config.workspace
+    cfg_root = str(workspace.root) if workspace.root else None
 
-    yaml_root = block.get("root")
-    yaml_root = str(yaml_root) if yaml_root else None
-
-    max_mb_raw = block.get("max_input_mb", _DEFAULT_MAX_INPUT_MB)
     try:
-        max_mb = max(1, int(max_mb_raw))
+        max_mb = max(1, int(workspace.max_input_mb))
     except (TypeError, ValueError):
         default_logger.warning(
-            "Invalid workspace.max_input_mb={!r}; falling back to {}MB",
-            max_mb_raw,
+            "Invalid workspace.maxInputMb={!r}; falling back to {}MB",
+            workspace.max_input_mb,
             _DEFAULT_MAX_INPUT_MB,
         )
         max_mb = _DEFAULT_MAX_INPUT_MB
-    return yaml_root, max_mb
+    return cfg_root, max_mb
 
 
 def _normalize_input(raw_input: str) -> tuple[str, InputKind]:
@@ -277,7 +296,7 @@ def _validate_input(normalized: str, kind: InputKind, max_mb: int, log: Any) -> 
     if size_mb > max_mb:
         raise ValueError(
             f"input '{normalized}': size {size_mb:.1f}MB exceeds limit {max_mb}MB "
-            f"(raise workspace.max_input_mb in mcp_agent.config.yaml to override)"
+            f"(raise workspace.maxInputMb in deepcode_config.json to override)"
         )
 
     suffix = path.suffix.lower()

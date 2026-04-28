@@ -407,7 +407,6 @@ project/
         self,
         paper_dir: str,
         initial_plan_path: Optional[str] = None,
-        config_path: str = "mcp_agent.secrets.yaml",
     ) -> Dict[str, Any]:
         """
         Run the complete code indexing workflow
@@ -415,7 +414,6 @@ project/
         Args:
             paper_dir: Paper directory path
             initial_plan_path: Initial plan file path (optional)
-            config_path: API configuration file path
 
         Returns:
             Index result dictionary
@@ -467,7 +465,6 @@ project/
                 code_base_path=code_base_path,
                 target_structure=target_structure,
                 output_dir=output_dir,
-                config_path=config_path,
                 enable_pre_filtering=True,
             )
 
@@ -682,7 +679,6 @@ project/
 async def run_codebase_indexing(
     paper_dir: str,
     initial_plan_path: Optional[str] = None,
-    config_path: str = "mcp_agent.secrets.yaml",
     logger=None,
 ) -> Dict[str, Any]:
     """
@@ -691,7 +687,6 @@ async def run_codebase_indexing(
     Args:
         paper_dir: Paper directory path
         initial_plan_path: Initial plan file path (optional)
-        config_path: API configuration file path
         logger: Logger instance (optional)
 
     Returns:
@@ -703,7 +698,6 @@ async def run_codebase_indexing(
     return await workflow.run_indexing_workflow(
         paper_dir=paper_dir,
         initial_plan_path=initial_plan_path,
-        config_path=config_path,
     )
 
 

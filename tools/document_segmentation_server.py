@@ -52,7 +52,7 @@ large research papers and technical documents that exceed LLM token limits.
 - Concept-implementation relationship mapping
 - Multi-level relevance scoring (content type, importance, keyword matching)
 - Backward compatibility with existing document indexes
-- Configurable via mcp_agent.config.yaml (enabled/disabled, size thresholds)
+- Configurable via deepcode_config.json (documentSegmentation.enabled / sizeThresholdChars)
 
 Usage:
 python tools/document_segmentation_server.py

@@ -50,7 +50,7 @@ class MCPApp:
     name:
         Logical name of the app. Currently informational only.
     settings:
-        Optional path to ``mcp_agent.config.yaml``. When provided we re-load
+        Optional path to ``deepcode_config.json``. When provided we re-load
         the DeepCode runtime from that file; otherwise the global runtime
         is reused.
     """

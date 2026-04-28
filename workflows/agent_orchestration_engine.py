@@ -29,8 +29,8 @@ Architecture:
 import asyncio
 import json
 import os
+import re
 import textwrap
-import yaml
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -338,26 +338,24 @@ def _assess_output_completeness(text: str) -> float:
 
 
 def _adjust_params_for_retry(
-    params: RequestParams, retry_count: int, config_path: str = "mcp_agent.config.yaml"
+    params: RequestParams, retry_count: int
 ) -> RequestParams:
     """
     Token减少策略以适应模型context限制
 
-    策略说明（针对qwen/qwen-max的32768 token限制）：
-    - 第1次重试：REDUCE到retry_max_tokens（从config读取，默认15000）
+    策略说明（针对总context有限的模型，例如 qwen/qwen-max 的 32768 token 限制）：
+    - 第1次重试：REDUCE到retry_max_tokens（从 deepcode_config.json 读取）
     - 第2次重试：REDUCE到retry_max_tokens的80%
     - 第3次重试：REDUCE到retry_max_tokens的60%
     - 降低temperature提高稳定性和可预测性
 
     为什么要REDUCE而不是INCREASE？
-    - qwen/qwen-max最大context = 32768 tokens (input + output 总和)
-    - 当遇到 "maximum context length exceeded" 错误时，说明 input + requested_output > 32768
-    - INCREASING max_tokens只会让问题更严重！
-    - 正确做法：DECREASE output tokens，为更多input留出空间
-    - 模型可以用更简洁的输出表达相同内容
+    - 模型总 context = input + output。
+    - 当遇到 "maximum context length exceeded" 错误时，说明 input + requested_output 超限。
+    - INCREASING max_tokens 只会让问题更严重；正确做法是 DECREASE output tokens
+      为更多 input 留出空间。
     """
-    # 从配置文件读取retry token limit
-    _, retry_max_tokens = get_token_limits(config_path)
+    _, retry_max_tokens = get_token_limits()
 
     # Token减少策略 - 为input腾出更多空间
     if retry_count == 0:
@@ -441,29 +439,16 @@ async def execute_requirement_analysis_workflow(
         return {"status": "error", "error": message}
 
 
-def get_default_search_server(config_path: str = "mcp_agent.config.yaml"):
-    """
-    Get the default search server from configuration.
-
-    Args:
-        config_path: Path to the main configuration file
-
-    Returns:
-        str: The default auxiliary server name from configuration
-    """
+def get_default_search_server() -> str:
+    """Return the default auxiliary search server name from runtime config."""
     try:
-        if os.path.exists(config_path):
-            with open(config_path, "r", encoding="utf-8") as f:
-                config = yaml.safe_load(f)
+        from core.compat.runtime import get_runtime
 
-            default_server = config.get("default_search_server", "filesystem")
-            print(f"🔍 Using search server: {default_server}")
-            return default_server
-        else:
-            print(f"⚠️ Config file {config_path} not found, using default: filesystem")
-            return "filesystem"
+        default_server = get_runtime().config.tools.default_search_server or "filesystem"
+        print(f"🔍 Using search server: {default_server}")
+        return default_server
     except Exception as e:
-        print(f"⚠️ Error reading config file {config_path}: {e}")
+        print(f"⚠️ Could not read default search server from config: {e}")
         print("🔍 Falling back to default search server: filesystem")
         return "filesystem"
 
@@ -493,6 +478,40 @@ def get_search_server_names(
                 server_names.append(server)
 
     return server_names
+
+
+_URL_RE = re.compile(r"https?://|www\.", re.IGNORECASE)
+_CHAT_PLANNING_WEB_KEYWORDS = (
+    "url",
+    "link",
+    "web",
+    "website",
+    "fetch",
+    "download",
+    "github",
+    "gitlab",
+    "arxiv",
+    "链接",
+    "网址",
+    "网页",
+    "联网",
+    "在线",
+    "下载",
+)
+
+
+def _chat_planning_needs_fetch(user_input: str) -> bool:
+    """Return whether chat planning needs network-backed fetch tools."""
+    text = user_input or ""
+    if _URL_RE.search(text):
+        return True
+    lowered = text.lower()
+    return any(keyword in lowered for keyword in _CHAT_PLANNING_WEB_KEYWORDS)
+
+
+def get_chat_planning_server_names(user_input: str) -> List[str]:
+    """Expose fetch to chat planning only when the request asks for web context."""
+    return ["fetch"] if _chat_planning_needs_fetch(user_input) else []
 
 
 async def acquire_input_artifact(ctx: WorkflowContext, logger) -> None:
@@ -582,7 +601,7 @@ async def run_code_analyzer(
     code_planner_agent = Agent(
         name="CodePlannerAgent",
         instruction=prompts["code_planning"],
-        server_names=get_search_server_names(),
+        server_names=[],
     )
 
     base_max_tokens, _ = get_token_limits()
@@ -631,7 +650,6 @@ async def run_code_analyzer(
                 maxTokens=current_max_tokens,
                 temperature=current_temperature,
                 max_iterations=max_iterations,
-                tool_filter={"fetch": {"fetch"}},
                 llm_timeout_s=request_timeout_s,
                 enforce_default_max_iterations=False,
                 checkpoint_callback=build_planning_checkpoint_callback(
@@ -1385,7 +1403,6 @@ async def orchestrate_codebase_intelligence_agent(
         index_result = await run_codebase_indexing(
             paper_dir=dir_info["paper_dir"],
             initial_plan_path=dir_info["initial_plan_path"],
-            config_path="mcp_agent.secrets.yaml",
             logger=logger,
         )
 
@@ -1560,7 +1577,7 @@ async def run_chat_planning_agent(user_input: str, logger) -> str:
         chat_planning_agent = Agent(
             name="ChatPlanningAgent",
             instruction=CHAT_AGENT_PLANNING_PROMPT,
-            server_names=get_search_server_names(),  # Dynamic search server configuration
+            server_names=get_chat_planning_server_names(user_input),
         )
 
         async with chat_planning_agent:
@@ -1620,11 +1637,10 @@ Please provide a detailed implementation plan that covers all aspects needed for
                 print(f"Exception type: {type(e)}")
                 raise
 
-            # Log to SimpleLLMLogger
-            if hasattr(logger, "log_response"):
-                logger.log_response(
-                    raw_result, model="ChatPlanningAgent", agent="ChatPlanningAgent"
-                )
+            # NOTE: Per-call structured logging is handled centrally by
+            # core.observability (see core/providers/openai_compat.py and
+            # anthropic.py — every chat() call writes a record to the
+            # task-scoped llm.jsonl).
 
             if not raw_result or raw_result.strip() == "":
                 print("❌ CRITICAL: Planning result is empty!")
@@ -1669,6 +1685,13 @@ async def execute_multi_agent_research_pipeline(
     Returns:
         str: The comprehensive pipeline execution result with status and outcomes
     """
+    # Track the final status so the finally block can persist it back to the
+    # session store regardless of which branch (return / except / cancel) we
+    # take. Also remember the resolved task_id, since `ctx` may not exist if
+    # prepare_workflow_environment raises before assignment.
+    _resolved_task_id: Optional[str] = task_id
+    _final_status: str = "running"
+
     try:
         # Phase 0+1: Unified workspace + input housekeeping (no LLM)
         print("🚀 Initializing intelligent multi-agent research orchestration system")
@@ -1685,6 +1708,16 @@ async def execute_multi_agent_research_pipeline(
             progress_cb=progress_callback,
             logger=logger,
         )
+
+        # Bind the resolved task_id into the async context so every loguru
+        # call below routes to <task_dir>/logs/system.jsonl. Safe even when
+        # an outer caller (UI WorkflowService) has already bound: ContextVar
+        # tokens stack and we restore on exit.
+        from core.observability import bind_task as _bind_task
+        from core.observability import pop_task as _pop_task
+
+        _task_token = _bind_task(ctx.task_id)
+        _resolved_task_id = ctx.task_id
 
         print(f"📁 Workspace : {ctx.workspace_root}")
         print(f"📂 Task dir  : {ctx.task_dir}")
@@ -1825,6 +1858,16 @@ async def execute_multi_agent_research_pipeline(
             progress_callback(80, "🧠 Analyzing codebase intelligence and indexing...")
         print("📊 Progress: 80% - Codebase Intelligence")
 
+        # Diagnostic stop-probe: lets developers halt the pipeline right at the
+        # phase 8 entry to inspect intermediate state. Inactive unless the
+        # environment variable is explicitly set to "8". Safe to leave in place.
+        if os.getenv("DEEPCODE_STOP_AT_PHASE") == "8":
+            print("🛑 [STOP_AT_PHASE_8] halt requested via DEEPCODE_STOP_AT_PHASE")
+            raise RuntimeError(
+                "[STOP_AT_PHASE_8] Pipeline halted at phase 8 entry as requested "
+                "(DEEPCODE_STOP_AT_PHASE=8). Phase 1-7 outputs are preserved in the task dir."
+            )
+
         if enable_indexing:
             index_result = await orchestrate_codebase_intelligence_agent(
                 dir_info, logger, progress_callback
@@ -1906,11 +1949,14 @@ async def execute_multi_agent_research_pipeline(
             pipeline_summary += (
                 f"\n❌ Code implementation failed: {implementation_result.get('message', 'see logs')}"
             )
+        _final_status = "completed"
         return pipeline_summary
 
     except PlanReviewCancelled:
+        _final_status = "cancelled"
         raise
     except Exception as e:
+        _final_status = "error"
         error_msg = f"Error in execute_multi_agent_research_pipeline: {e}"
         print(f"❌ {error_msg}")
         print(f"   Error type: {type(e).__name__}")
@@ -1925,6 +1971,31 @@ async def execute_multi_agent_research_pipeline(
 
         gc.collect()
         raise e
+    finally:
+        # Persist final task status into the session store so the on-disk
+        # tasks.jsonl reflects reality (CLI/Backend share this codepath, so
+        # both surfaces benefit). Best-effort — never let it mask the real
+        # error.
+        if _resolved_task_id and _final_status != "running":
+            try:
+                from core.observability import current_session_id as _cur_sid
+                from core.sessions import get_default_store as _get_session_store
+
+                _sid = _cur_sid()
+                if _sid:
+                    _get_session_store().update_task_status(
+                        _sid, _resolved_task_id, _final_status
+                    )
+            except Exception:
+                pass
+
+        # Always release the task contextvar so subsequent runs in the same
+        # process (CLI loop, background job pool) start with a clean slate.
+        # The token may not exist if prepare_workflow_environment failed.
+        try:
+            _pop_task(_task_token)  # type: ignore[name-defined]
+        except (NameError, ValueError):
+            pass
 
 
 # Backward compatibility alias (deprecated)
