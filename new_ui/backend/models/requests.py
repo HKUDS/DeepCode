@@ -90,6 +90,15 @@ class LLMProviderUpdateRequest(BaseModel):
     )
 
 
+class LLMModelsUpdateRequest(BaseModel):
+    """Request model for updating phase-specific LLM models."""
+
+    provider: str = Field(default="openrouter", description="LLM provider name")
+    default_model: str = Field(..., description="Default phase model id")
+    planning_model: str = Field(..., description="Planning phase model id")
+    implementation_model: str = Field(..., description="Implementation phase model id")
+
+
 class FileUploadResponse(BaseModel):
     """Response model for file upload"""
 

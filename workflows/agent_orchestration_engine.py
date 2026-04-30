@@ -62,6 +62,7 @@ from workflows.planning_runtime import (
     append_planning_attempt,
     build_planning_checkpoint_callback,
     clear_planning_checkpoint,
+    coerce_text_to_minimal_plan,
     is_existing_plan_usable,
     read_planning_meta,
     validate_plan_text,
@@ -250,6 +251,32 @@ def _build_planning_message(
 
         Based on this paper, generate a complete implementation plan detailed enough for independent implementation.
         """
+    )
+
+
+def _planner_instruction(base_prompt: str, *, use_segmentation: bool) -> str:
+    """Return the planner prompt aligned with the tools actually attached."""
+    if not use_segmentation:
+        return base_prompt
+    return (
+        base_prompt
+        + "\n\n# RUNTIME TOOL CONTRACT OVERRIDE\n"
+        + "You do not have access to any tools in this planning step. The segmented document context is already provided in the user message and is authoritative. Do not request, mention, or emit read_document_segments calls. Do not output XML-like <tool_call> text. Produce the final YAML plan immediately with these exact required keys: file_structure, implementation_components, validation_approach, environment_setup, implementation_strategy.\n"
+    )
+
+
+def _is_deferred_planning_output(text: str) -> bool:
+    """Return True when the planner defers work instead of producing a plan."""
+    lowered = (text or "").lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "<tool_call",
+            "read_document_segments",
+            "need to gather more",
+            "let me read",
+            "before creating the complete plan",
+        )
     )
 
 
@@ -600,7 +627,9 @@ async def run_code_analyzer(
     prompts = get_adaptive_prompts(use_segmentation)
     code_planner_agent = Agent(
         name="CodePlannerAgent",
-        instruction=prompts["code_planning"],
+        instruction=_planner_instruction(
+            prompts["code_planning"], use_segmentation=use_segmentation
+        ),
         server_names=[],
     )
 
@@ -618,6 +647,10 @@ async def run_code_analyzer(
 
     max_retries = 3
     retry_count = 0
+    best_invalid_result = ""
+    best_invalid_score = -1.0
+    best_invalid_validation: Dict[str, Any] | None = None
+    final_planning_error: str | None = None
     request_timeout_s = _get_code_analyzer_timeout_s()
     logger.info(
         "Using single planner path "
@@ -737,6 +770,23 @@ async def run_code_analyzer(
                 clear_planning_checkpoint(paper_dir)
                 return result
 
+            if _is_deferred_planning_output(result):
+                logger.warning(
+                    "Code planner deferred to unavailable tools; using provided segmented context for fallback plan"
+                )
+                best_invalid_result = (
+                    segmented_context or paper_content[:6000] or result
+                ).strip()
+                best_invalid_score = max(best_invalid_score, completeness_score)
+                best_invalid_validation = plan_validation
+                retry_count = max_retries
+                break
+
+            if len(result) > 200 and completeness_score > best_invalid_score:
+                best_invalid_result = result
+                best_invalid_score = completeness_score
+                best_invalid_validation = plan_validation
+
             attempt_record["status"] = "incomplete"
             append_planning_attempt(paper_dir, attempt_record)
             attempt_logged = True
@@ -765,7 +815,8 @@ async def run_code_analyzer(
                 append_planning_attempt(paper_dir, attempt_record)
             retry_count += 1
             if retry_count >= max_retries:
-                raise TimeoutError(timeout_msg)
+                final_planning_error = timeout_msg
+                break
         except Exception as e:
             logger.error(
                 f"Code planning attempt {attempt}/{max_retries} failed: {type(e).__name__}: {e}"
@@ -781,17 +832,38 @@ async def run_code_analyzer(
                 append_planning_attempt(paper_dir, attempt_record)
             retry_count += 1
             if retry_count >= max_retries:
-                write_planning_meta(
-                    paper_dir,
-                    {
-                        "status": "error",
-                        "source": "generated",
-                        "mode": planning_mode,
-                        "attempts": retry_count,
-                        "error": f"{type(e).__name__}: {e}",
-                    },
-                )
-                raise
+                final_planning_error = f"{type(e).__name__}: {e}"
+                break
+
+    fallback_source = best_invalid_result
+    if len(fallback_source.strip()) < 500:
+        fallback_source = (segmented_context or paper_content[:6000] or fallback_source).strip()
+
+    if fallback_source:
+        coerced_plan = coerce_text_to_minimal_plan(fallback_source, paper_dir=paper_dir)
+        coerced_validation = validate_plan_text(coerced_plan)
+        if coerced_validation.get("valid", False):
+            logger.warning(
+                "Code planning fell back to minimal schema wrapper after "
+                f"{max_retries} invalid attempts; previous validation={best_invalid_validation}; "
+                f"final_error={final_planning_error}"
+            )
+            write_planning_meta(
+                paper_dir,
+                {
+                    "status": "success",
+                    "source": "coerced_from_freeform",
+                    "mode": planning_mode,
+                    "attempts": max_retries,
+                    "completeness_score": best_invalid_score,
+                    "plan_validation": coerced_validation,
+                    "original_plan_validation": best_invalid_validation,
+                    "final_error": final_planning_error,
+                    "plan_chars": len(coerced_plan),
+                },
+            )
+            clear_planning_checkpoint(paper_dir)
+            return coerced_plan
 
     print(f"??? Returning potentially incomplete result after {max_retries} attempts")
     write_planning_meta(
@@ -801,11 +873,12 @@ async def run_code_analyzer(
             "source": "generated",
             "mode": planning_mode,
             "attempts": max_retries,
-            "error": "exhausted retries without usable plan",
+            "error": final_planning_error or "exhausted retries without usable plan",
         },
     )
     raise RuntimeError(
-        f"Code planning exhausted {max_retries} attempts without producing a usable plan"
+        final_planning_error
+        or f"Code planning exhausted {max_retries} attempts without producing a usable plan"
     )
 
 

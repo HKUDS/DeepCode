@@ -10,7 +10,9 @@ no naming conflicts (config.py -> settings.py, utils/ -> app_utils/).
 import asyncio
 import uuid
 import os
+import shutil
 from datetime import datetime
+from pathlib import Path
 from typing import Optional, Dict, Any, Callable, List
 from dataclasses import dataclass, field
 
@@ -81,7 +83,7 @@ class WorkflowService:
         every task is reachable from the session listing endpoint.
         """
         task_id = str(uuid.uuid4())
-        if session_id is None:
+        if session_id is None or session_store.get_session(session_id) is None:
             session = session_store.create_session(title=title or "")
             session_id = session.session_id
         task = WorkflowTask(
@@ -174,6 +176,8 @@ class WorkflowService:
 
         def callback(progress: int, message: str, error: Optional[str] = None):
             if task:
+                if task.cancel_event.is_set() or task.status == "cancelled":
+                    raise asyncio.CancelledError("Workflow cancelled by user")
                 task.progress = progress
                 task.message = message
                 if error:
@@ -374,8 +378,9 @@ class WorkflowService:
 
                 return task.result
 
-        except PlanReviewCancelled as e:
-            return await self._mark_task_cancelled(task_id, e.reason)
+        except (PlanReviewCancelled, asyncio.CancelledError) as e:
+            reason = getattr(e, "reason", None) or str(e) or "Workflow cancelled"
+            return await self._mark_task_cancelled(task_id, reason)
 
         except Exception as e:
             task.status = "error"
@@ -554,8 +559,9 @@ class WorkflowService:
 
                 return task.result
 
-        except PlanReviewCancelled as e:
-            return await self._mark_task_cancelled(task_id, e.reason)
+        except (PlanReviewCancelled, asyncio.CancelledError) as e:
+            reason = getattr(e, "reason", None) or str(e) or "Workflow cancelled"
+            return await self._mark_task_cancelled(task_id, reason)
 
         except Exception as e:
             task.status = "error"
@@ -593,10 +599,27 @@ class WorkflowService:
         if task and task.status in {"running", "waiting_for_input"}:
             task.cancel_event.set()
             task.status = "cancelled"
+            task.message = "Workflow cancelled by user"
             task.pending_interaction = None
+            task.completed_at = datetime.utcnow()
+            self._record_session_outcome(
+                task, role="system", body="Workflow cancelled by user"
+            )
             plugin_integration = self._plugin_integration
             if plugin_integration:
                 plugin_integration.cancel_interaction(task_id)
+            asyncio.create_task(
+                self._broadcast(
+                    task.task_id,
+                    {
+                        "type": "cancelled",
+                        "task_id": task.task_id,
+                        "status": "cancelled",
+                        "reason": task.message,
+                        "timestamp": datetime.utcnow().isoformat(),
+                    },
+                )
+            )
             return True
         return False
 
@@ -606,6 +629,101 @@ class WorkflowService:
             del self._tasks[task_id]
         if task_id in self._subscribers:
             del self._subscribers[task_id]
+
+    def delete_session_cascade(self, session_id: str) -> Dict[str, Any]:
+        """Delete a session and its task workspaces when no task is active.
+
+        Raw uploaded files under ``uploads/`` are intentionally preserved because
+        they may be shared across sessions. Only task directories recorded in the
+        session store and located under ``deepcode_lab/tasks`` are removed.
+        """
+        session = session_store.get_session(session_id)
+        if session is None:
+            return {"status": "not_found", "session_id": session_id}
+
+        blocking_statuses = {"pending", "running", "waiting_for_input"}
+        task_ids = {task.task_id for task in session.tasks}
+        running_tasks = [
+            {
+                "task_id": task.task_id,
+                "task_short_id": task.task_short_id,
+                "status": task.status,
+            }
+            for task in self._tasks.values()
+            if task.status in blocking_statuses
+            and (
+                task.session_id == session_id
+                or task.task_short_id in task_ids
+                or task.task_id in task_ids
+            )
+        ]
+        stored_blocking_tasks = [
+            {
+                "task_id": task.task_id,
+                "status": task.status,
+            }
+            for task in session.tasks
+            if task.status in blocking_statuses
+        ]
+        if running_tasks or stored_blocking_tasks:
+            return {
+                "status": "blocked",
+                "session_id": session_id,
+                "reason": "Session has running or pending tasks.",
+                "running_tasks": running_tasks,
+                "stored_blocking_tasks": stored_blocking_tasks,
+            }
+
+        allowed_tasks_root = (PROJECT_ROOT / "deepcode_lab" / "tasks").resolve()
+        deleted_task_dirs: List[str] = []
+        missing_task_dirs: List[str] = []
+        skipped_task_dirs: List[str] = []
+
+        for stored in session.tasks:
+            task_dir_raw = (stored.task_dir or "").strip()
+            if not task_dir_raw:
+                continue
+            task_dir = Path(task_dir_raw).expanduser()
+            if not task_dir.is_absolute():
+                task_dir = PROJECT_ROOT / task_dir
+            task_dir = task_dir.resolve()
+
+            if not self._is_safe_task_dir(task_dir, allowed_tasks_root):
+                skipped_task_dirs.append(str(task_dir))
+                continue
+            if not task_dir.exists():
+                missing_task_dirs.append(str(task_dir))
+                continue
+            shutil.rmtree(task_dir)
+            deleted_task_dirs.append(str(task_dir))
+
+        for key, task in list(self._tasks.items()):
+            if (
+                task.session_id == session_id
+                or task.task_short_id in task_ids
+                or task.task_id in task_ids
+            ):
+                self._tasks.pop(key, None)
+                self._subscribers.pop(key, None)
+
+        deleted = session_store.delete_session(session_id)
+        if not deleted:
+            return {
+                "status": "not_found",
+                "session_id": session_id,
+                "deleted_task_dirs": deleted_task_dirs,
+                "missing_task_dirs": missing_task_dirs,
+                "skipped_task_dirs": skipped_task_dirs,
+            }
+
+        return {
+            "status": "deleted",
+            "session_id": session_id,
+            "deleted_task_dirs": deleted_task_dirs,
+            "missing_task_dirs": missing_task_dirs,
+            "skipped_task_dirs": skipped_task_dirs,
+            "uploads_deleted": False,
+        }
 
     def get_active_tasks(self) -> List[WorkflowTask]:
         """Get all tasks that are currently running"""
@@ -625,6 +743,16 @@ class WorkflowService:
     # ------------------------------------------------------------------
     # Session integration helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _is_safe_task_dir(task_dir: Path, allowed_tasks_root: Path) -> bool:
+        if task_dir == allowed_tasks_root:
+            return False
+        try:
+            task_dir.relative_to(allowed_tasks_root)
+        except ValueError:
+            return False
+        return True
 
     @staticmethod
     def _infer_task_kind(input_type: str, fallback: str) -> str:

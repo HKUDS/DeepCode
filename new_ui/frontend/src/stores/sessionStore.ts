@@ -97,12 +97,19 @@ export const useSessionStore = create<SessionState>()(
           return session;
         } catch (error) {
           if (get()._requestSeq !== seq) return null;
+          const statusCode =
+            typeof error === 'object' && error !== null && 'response' in error
+              ? (error as { response?: { status?: number } }).response?.status
+              : undefined;
           set({
             error:
               error instanceof Error
                 ? error.message
                 : 'Failed to load session',
             isLoading: false,
+            ...(statusCode === 404
+              ? { activeSessionId: null, activeSession: null }
+              : {}),
           });
           return null;
         }
@@ -145,13 +152,46 @@ export const useSessionStore = create<SessionState>()(
       },
 
       deleteSession: async (id) => {
-        await sessionsApi.delete(id);
+        set({ isLoading: true, error: null });
+        try {
+          await sessionsApi.delete(id);
+        } catch (error) {
+          const statusCode =
+            typeof error === 'object' && error !== null && 'response' in error
+              ? (error as { response?: { status?: number } }).response?.status
+              : undefined;
+          if (statusCode === 404) {
+            set((state) => ({
+              sessions: state.sessions.filter((s) => s.session_id !== id),
+              activeSessionId:
+                state.activeSessionId === id ? null : state.activeSessionId,
+              activeSession:
+                state.activeSession?.session_id === id
+                  ? null
+                  : state.activeSession,
+              isLoading: false,
+              error: 'Session no longer exists',
+            }));
+            return;
+          }
+          const message =
+            statusCode === 409
+              ? 'This session has running or pending tasks. Cancel them or wait for completion before deleting.'
+              : error instanceof Error
+                ? error.message
+                : 'Failed to delete session';
+          set({ error: message, isLoading: false });
+          throw new Error(message);
+        }
         set((state) => ({
           sessions: state.sessions.filter((s) => s.session_id !== id),
           activeSessionId:
             state.activeSessionId === id ? null : state.activeSessionId,
           activeSession:
             state.activeSession?.session_id === id ? null : state.activeSession,
+          isLoading: false,
+          error: null,
+          lastLoadedAt: new Date().toISOString(),
         }));
       },
 

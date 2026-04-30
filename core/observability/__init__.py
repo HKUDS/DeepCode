@@ -36,6 +36,7 @@ from core.observability.context import (
     bind_task,
     current_session_id,
     current_task_id,
+    pop_session,
     pop_task,
     set_session,
 )
@@ -54,6 +55,7 @@ __all__ = [
     "current_task_id",
     "log_llm_call",
     "log_mcp_call",
+    "pop_session",
     "pop_task",
     "register_task_dir",
     "set_session",

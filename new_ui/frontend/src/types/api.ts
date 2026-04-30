@@ -54,6 +54,31 @@ export interface SettingsResponse {
   document_segmentation: Record<string, unknown>;
 }
 
+export interface OpenRouterModelInfo {
+  id: string;
+  name: string;
+  context_length?: number | null;
+  top_provider: Record<string, unknown>;
+  supported_parameters: string[];
+  pricing: Record<string, unknown>;
+  expiration_date?: string | null;
+  source: string;
+}
+
+export interface OpenRouterModelsResponse {
+  models: OpenRouterModelInfo[];
+  source: string;
+  cached_at?: number | null;
+  stale: boolean;
+}
+
+export interface LLMModelsUpdateRequest {
+  provider: string;
+  default_model: string;
+  planning_model: string;
+  implementation_model: string;
+}
+
 export interface FileUploadResponse {
   file_id: string;
   filename: string;
@@ -96,6 +121,15 @@ export interface SessionDetail {
   metadata: Record<string, unknown>;
   messages: SessionMessage[];
   tasks: SessionTask[];
+}
+
+export interface SessionDeleteReport {
+  status: 'deleted';
+  session_id: string;
+  deleted_task_dirs: string[];
+  missing_task_dirs: string[];
+  skipped_task_dirs: string[];
+  uploads_deleted: boolean;
 }
 
 export interface ErrorResponse {

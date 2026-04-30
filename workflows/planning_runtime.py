@@ -171,6 +171,72 @@ def validate_plan_text(text: str) -> dict[str, Any]:
     return result
 
 
+def coerce_text_to_minimal_plan(text: str, *, paper_dir: str | Path) -> str:
+    """Wrap free-form planner output in the required YAML plan shape.
+
+    Some providers answer the planning prompt with useful analysis but do not
+    emit the exact YAML sections. This fallback preserves that analysis and
+    creates a conservative plan that downstream code can consume instead of
+    failing the entire workflow before implementation starts.
+    """
+    summary = (text or "").strip()
+    if len(summary) > 6000:
+        summary = summary[:6000].rstrip() + "\n...[truncated]"
+
+    payload = {
+        "file_structure": {
+            "root": "generate_code",
+            "files": [
+                {
+                    "path": "README.md",
+                    "purpose": "Summarize the paper reproduction target and usage.",
+                },
+                {
+                    "path": "src/main.py",
+                    "purpose": "Provide an executable entrypoint for the reproduction scaffold.",
+                },
+                {
+                    "path": "src/pipeline.py",
+                    "purpose": "Implement the core algorithmic pipeline inferred from the paper.",
+                },
+                {
+                    "path": "tests/test_pipeline.py",
+                    "purpose": "Smoke-test the generated pipeline with minimal data.",
+                },
+            ],
+        },
+        "implementation_components": [
+            {
+                "name": "paper_interpretation",
+                "description": "Convert the planner analysis into concrete modules and APIs.",
+            },
+            {
+                "name": "core_pipeline",
+                "description": "Implement the main method described by the paper at scaffold fidelity.",
+            },
+            {
+                "name": "validation_smoke_test",
+                "description": "Add a fast validation path that confirms imports and basic execution.",
+            },
+        ],
+        "validation_approach": {
+            "strategy": "Use lightweight unit and smoke tests because the model did not produce a full experimental protocol.",
+            "commands": ["python -m pytest tests"],
+        },
+        "environment_setup": {
+            "language": "python",
+            "dependencies": ["pytest"],
+            "notes": "Keep dependencies minimal unless the implementation step identifies explicit paper requirements.",
+        },
+        "implementation_strategy": {
+            "approach": "Start from the preserved planner analysis, implement a small runnable scaffold, then expand only where the paper details are explicit.",
+            "paper_dir": str(paper_dir),
+            "planner_analysis": summary or "Planner did not return usable analysis.",
+        },
+    }
+    return yaml.safe_dump(payload, sort_keys=False, allow_unicode=True)
+
+
 def is_existing_plan_usable(
     initial_plan_path: str | Path,
     *,

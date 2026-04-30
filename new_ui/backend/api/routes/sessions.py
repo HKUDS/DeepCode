@@ -20,6 +20,7 @@ from models.requests import (
     SessionMessageRequest,
 )
 from services.session_service import session_store
+from services.workflow_service import workflow_service
 
 
 router = APIRouter()
@@ -81,9 +82,12 @@ async def get_session(session_id: str):
 
 @router.delete("/{session_id}")
 async def delete_session(session_id: str):
-    if not session_store.delete_session(session_id):
+    report = workflow_service.delete_session_cascade(session_id)
+    if report["status"] == "not_found":
         raise HTTPException(status_code=404, detail="Session not found")
-    return {"deleted": session_id}
+    if report["status"] == "blocked":
+        raise HTTPException(status_code=409, detail=report)
+    return report
 
 
 @router.post("/{session_id}/messages")

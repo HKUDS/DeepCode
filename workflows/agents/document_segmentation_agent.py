@@ -276,9 +276,11 @@ async def run_document_segmentation_analysis(
         )
 
         if analysis_result["status"] == "success":
-            # Validate segmentation quality
-            validation_result = await agent.validate_segmentation_quality(paper_dir)
-            analysis_result["validation"] = validation_result
+            analysis_result["validation"] = {
+                "status": "skipped",
+                "paper_dir": paper_dir,
+                "reason": "Segmentation quality validation is disabled in the interactive workflow to avoid blocking Paper2Code on extra LLM review calls.",
+            }
 
         return analysis_result
 

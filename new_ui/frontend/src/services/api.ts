@@ -7,7 +7,10 @@ import type {
   ConfigResponse,
   SettingsResponse,
   FileUploadResponse,
+  LLMModelsUpdateRequest,
+  OpenRouterModelsResponse,
   SessionDetail,
+  SessionDeleteReport,
   SessionMessage,
   SessionSummary,
   SessionTask,
@@ -144,8 +147,11 @@ export const sessionsApi = {
     return response.data;
   },
 
-  delete: async (sessionId: string): Promise<void> => {
-    await api.delete(`/sessions/${sessionId}`);
+  delete: async (sessionId: string): Promise<SessionDeleteReport> => {
+    const response = await api.delete<SessionDeleteReport>(
+      `/sessions/${sessionId}`
+    );
+    return response.data;
   },
 
   appendMessage: async (
@@ -235,6 +241,20 @@ export const configApi = {
 
   setLLMProvider: async (provider: string): Promise<void> => {
     await api.put('/config/llm-provider', { provider });
+  },
+
+  getOpenRouterModels: async (
+    supportedParameters?: string
+  ): Promise<OpenRouterModelsResponse> => {
+    const response = await api.get<OpenRouterModelsResponse>(
+      '/config/openrouter/models',
+      { params: { supported_parameters: supportedParameters } }
+    );
+    return response.data;
+  },
+
+  setLLMModels: async (request: LLMModelsUpdateRequest): Promise<void> => {
+    await api.put('/config/llm-models', request);
   },
 };
 

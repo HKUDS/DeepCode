@@ -61,6 +61,28 @@ class SettingsResponse(BaseModel):
     document_segmentation: Dict[str, Any]
 
 
+class OpenRouterModelInfo(BaseModel):
+    """One OpenRouter model option shown in the settings UI."""
+
+    id: str
+    name: str
+    context_length: Optional[int] = None
+    top_provider: Dict[str, Any] = Field(default_factory=dict)
+    supported_parameters: List[str] = Field(default_factory=list)
+    pricing: Dict[str, Any] = Field(default_factory=dict)
+    expiration_date: Optional[str] = None
+    source: str = "openrouter"
+
+
+class OpenRouterModelsResponse(BaseModel):
+    """Response model for OpenRouter model catalog."""
+
+    models: List[OpenRouterModelInfo]
+    source: str
+    cached_at: Optional[int] = None
+    stale: bool = False
+
+
 class ErrorResponse(BaseModel):
     """Response model for errors"""
 

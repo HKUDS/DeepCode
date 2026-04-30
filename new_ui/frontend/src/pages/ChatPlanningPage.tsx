@@ -303,7 +303,11 @@ export default function ChatPlanningPage() {
           {/* Progress */}
           {status !== 'idle' && (
             <Card>
-              <ProgressTracker steps={steps} currentProgress={progress} />
+              <ProgressTracker
+                steps={steps}
+                currentProgress={progress}
+                currentMessage={message}
+              />
             </Card>
           )}
 

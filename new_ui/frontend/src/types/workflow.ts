@@ -39,14 +39,13 @@ export interface WorkflowInput {
 
 // Workflow step definitions
 export const PAPER_TO_CODE_STEPS: WorkflowStep[] = [
-  { id: 'init', title: 'Initialize', subtitle: 'Load systems', progress: 5, status: 'pending' },
-  { id: 'analyze', title: 'Analyze', subtitle: 'Parse paper', progress: 10, status: 'pending' },
-  { id: 'download', title: 'Download', subtitle: 'Collect refs', progress: 25, status: 'pending' },
-  { id: 'plan', title: 'Plan', subtitle: 'Blueprint', progress: 40, status: 'pending' },
-  { id: 'references', title: 'References', subtitle: 'Key refs', progress: 50, status: 'pending' },
-  { id: 'repos', title: 'Repos', subtitle: 'GitHub sync', progress: 60, status: 'pending' },
-  { id: 'index', title: 'Index', subtitle: 'Vectorize', progress: 70, status: 'pending' },
-  { id: 'implement', title: 'Implement', subtitle: 'Code gen', progress: 85, status: 'pending' },
+  { id: 'init', title: 'Initialize', subtitle: 'Start workflow', progress: 5, status: 'pending' },
+  { id: 'input', title: 'Input acquisition', subtitle: 'Copy and convert PDF', progress: 25, status: 'pending' },
+  { id: 'workspace', title: 'Workspace setup', subtitle: 'Prepare task directory', progress: 40, status: 'pending' },
+  { id: 'preprocess', title: 'Document preprocessing', subtitle: 'Segment paper content', progress: 50, status: 'pending' },
+  { id: 'planning', title: 'Planning', subtitle: 'Generate implementation plan', progress: 60, status: 'pending' },
+  { id: 'references', title: 'Reference research', subtitle: 'Analyze related work', progress: 70, status: 'pending' },
+  { id: 'implementation', title: 'Implementation', subtitle: 'Generate code files', progress: 85, status: 'pending' },
 ];
 
 export const CHAT_PLANNING_STEPS: WorkflowStep[] = [

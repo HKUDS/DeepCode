@@ -234,7 +234,11 @@ export default function PaperToCodePage() {
           {/* Progress */}
           {status !== 'idle' && (
             <Card>
-              <ProgressTracker steps={steps} currentProgress={progress} />
+              <ProgressTracker
+                steps={steps}
+                currentProgress={progress}
+                currentMessage={message}
+              />
             </Card>
           )}
 
