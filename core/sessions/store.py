@@ -221,13 +221,17 @@ class SessionStore:
             return task
 
     def update_task_status(
-        self, session_id: str, task_id: str, status: str
+        self,
+        session_id: str,
+        task_id: str,
+        status: str,
+        metadata: dict | None = None,
     ) -> SessionTask | None:
         with self._lock:
             session = self.get_session(session_id)
             if session is None:
                 return None
-            task = session.update_task_status(task_id, status)
+            task = session.update_task_status(task_id, status, metadata=metadata)
             if task is None:
                 return None
             self._rewrite_tasks(session_id, session.tasks)

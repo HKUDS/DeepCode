@@ -161,8 +161,9 @@
 
 🗂️ **[2026-04-28] Persistent sessions & dual-layer logging**
 
-- 🆕 **Sessions are now persistent.** Every CLI / UI run is automatically attached to a session under `~/.deepcode/sessions/<id>/` (override with `DEEPCODE_SESSIONS_DIR`). Sessions are JSONL — `tail -f session.jsonl` works out of the box. List / inspect / branch them with `deepcode session list|show <id>|new|resume <id>|delete <id>`, or via `GET /api/v1/sessions` from the backend.
+- 🆕 **Sessions are now persistent.** Every CLI / UI run is automatically attached to a session under `~/.deepcode/sessions/<id>/` (override with `DEEPCODE_SESSIONS_DIR`). Sessions are JSONL — `tail -f session.jsonl` works out of the box. List / inspect / branch them with `python cli/main_cli.py session list|show <id>|new|resume <id>|delete <id>`, or via `GET /api/v1/sessions` from the backend.
 - 🔄 **Resume a previous run** by passing `--session <id>` to the CLI or `session_id` to `POST /api/v1/workflows/paper-to-code` (or `chat-planning`). Backend restarts no longer drop task history; running tasks left over from a crash are surfaced as `interrupted`.
+- 💻 **CLI session UX.** The interactive CLI now supports Cursor-style slash commands: `/resume` opens a numbered session picker, `/new [title]` creates and switches sessions, `/session` shows the active session, and `/help` lists commands. You can also paste inline inputs directly at the menu prompt with `@/path/to/paper.pdf`, `@"C:\path with spaces\paper.pdf"`, or `@https://...`.
 - 📜 **Two-layer structured logging.** A global rotating JSONL lives at `logs/server-YYYYMMDD.jsonl`; per-task logs at `deepcode_lab/tasks/<task_id>/logs/{system,llm,mcp}.jsonl`. Every `loguru.logger` call automatically picks up the active `task_id` via a contextvar — business code did not have to change. Configure via the new `logger.{globalFile,taskFile,llm}` block in `deepcode_config.json`.
 - 📡 **WebSocket log streaming.** Tail one task with `/ws/tasks/{task_id}/logs?channel=llm`, or merge every task in a session via `/ws/sessions/{session_id}/logs`. The legacy `/ws/logs/{session_id}` endpoint that silently ignored its parameter has been removed.
 - 🧹 **Dead code removed.** `utils/simple_llm_logger.py`, `utils/dialogue_logger.py`, and the in-memory `services/session_service.py` implementation are gone (the latter is now a thin re-export of `core.sessions.SessionStore`).
@@ -867,6 +868,34 @@ deepcode --cli
 
 </td></tr>
 </table>
+
+#### 💻 **CLI sessions & inline inputs**
+
+The CLI is session-aware by default. A run without `--session` creates a new
+persistent session under `~/.deepcode/sessions/<id>/`; pass `--session <id>` to
+attach a new task to an existing session.
+
+```bash
+# Session management from the shell
+python cli/main_cli.py session list
+python cli/main_cli.py session show <session_id>
+python cli/main_cli.py session resume <session_id>   # show history, then enter interactive mode
+python cli/main_cli.py --session <session_id> --file paper.pdf
+```
+
+Inside `python cli/main_cli.py`, type these at the main menu prompt:
+
+```text
+/resume                 # pick a previous session from a numbered list
+/new My experiment      # create and switch to a fresh session
+/session                # show the currently active session
+@/absolute/path.pdf     # process a file without opening the file picker
+@"C:\path with spaces\paper.pdf"
+@https://arxiv.org/pdf/....
+```
+
+Every task created from these flows inherits the active `session_id`; per-task
+logs are written to `deepcode_lab/tasks/<task>/logs/`.
 
 <details>
 <summary><strong>🐳 Docker Management Commands</strong></summary>

@@ -45,7 +45,16 @@ export function useTaskRecovery() {
 
   const recoverTask = useCallback(async () => {
     // Only recover if there's a persisted task and it was running
-    if (!activeTaskId || status === 'idle' || status === 'completed' || status === 'error') {
+    if (
+      !activeTaskId ||
+      status === 'idle' ||
+      status === 'completed' ||
+      status === 'completed_with_warnings' ||
+      status === 'incomplete' ||
+      status === 'interrupted' ||
+      status === 'error' ||
+      status === 'cancelled'
+    ) {
       return;
     }
 
@@ -70,7 +79,22 @@ export function useTaskRecovery() {
 
         // Update progress from backend
         updateProgress(taskStatus.progress, taskStatus.message);
-        setStatus('running');
+        setStatus('waiting_for_input');
+        try {
+          const interaction = await workflowsApi.getInteraction(activeTaskId);
+          if (interaction.has_interaction && interaction.interaction) {
+            useWorkflowStore.getState().setPendingInteraction({
+              type: interaction.interaction.type,
+              title: interaction.interaction.title,
+              description: interaction.interaction.description,
+              data: interaction.interaction.data,
+              options: interaction.interaction.options,
+              required: interaction.interaction.required,
+            });
+          }
+        } catch (error) {
+          console.warn('[TaskRecovery] Failed to restore interaction:', error);
+        }
         setNeedsRecovery(false);
 
         setRecoveryState({
@@ -98,7 +122,11 @@ export function useTaskRecovery() {
           error: null,
         });
 
-      } else if (taskStatus.status === 'completed') {
+      } else if (
+        taskStatus.status === 'completed' ||
+        taskStatus.status === 'completed_with_warnings' ||
+        taskStatus.status === 'incomplete'
+      ) {
         // Task completed while we were away
         console.log('[TaskRecovery] Task completed, syncing final state...');
 
@@ -108,8 +136,8 @@ export function useTaskRecovery() {
           setSteps(CHAT_PLANNING_STEPS);
         }
 
-        updateProgress(100, 'Completed');
-        setStatus('completed');
+        updateProgress(taskStatus.status === 'incomplete' ? 95 : 100, 'Completed');
+        setStatus(taskStatus.status);
         setResult(taskStatus.result || null);
         setNeedsRecovery(false);
 
@@ -117,6 +145,19 @@ export function useTaskRecovery() {
           isRecovering: false,
           recoveredTaskId: activeTaskId,
           error: null,
+        });
+
+      } else if (taskStatus.status === 'interrupted') {
+        console.log('[TaskRecovery] Task interrupted, syncing final state...');
+
+        setStatus('interrupted');
+        setError(taskStatus.message || 'Task was interrupted by a backend restart');
+        setNeedsRecovery(false);
+
+        setRecoveryState({
+          isRecovering: false,
+          recoveredTaskId: activeTaskId,
+          error: taskStatus.message || null,
         });
 
       } else if (taskStatus.status === 'error') {

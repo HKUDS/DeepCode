@@ -18,7 +18,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Callable
 
 from core.compat import Agent
 from core.llm_runtime import attach_workflow_llm, get_workflow_provider
@@ -61,6 +61,15 @@ class CodeImplementationWorkflowWithIndex:
         self.enable_read_tools = True
         self.loop_detector = LoopDetector()
         self.progress_tracker = ProgressTracker()
+        self._last_run_state: Dict[str, Any] = {
+            "status": "unknown",
+            "reason": None,
+            "iterations": 0,
+            "elapsed_seconds": 0.0,
+            "files_completed": 0,
+            "total_files": 0,
+            "unimplemented_files": [],
+        }
 
     def _create_logger(self) -> logging.Logger:
         """Create and configure logger"""
@@ -93,6 +102,7 @@ class CodeImplementationWorkflowWithIndex:
         target_directory: Optional[str] = None,
         pure_code_mode: bool = False,
         enable_read_tools: bool = True,
+        progress_callback: Optional[Callable] = None,
     ):
         """Run complete workflow - Main public interface"""
         # Set the read tools configuration
@@ -134,26 +144,70 @@ class CodeImplementationWorkflowWithIndex:
             if pure_code_mode:
                 self.logger.info("Starting pure code implementation...")
                 results["code_implementation"] = await self.implement_code_pure(
-                    plan_content, target_directory, code_directory
+                    plan_content,
+                    target_directory,
+                    code_directory,
+                    progress_callback=progress_callback,
                 )
             else:
                 pass
 
-            self.logger.info("Workflow execution successful")
+            run_state = dict(self._last_run_state)
+            inner_status = run_state.get("status", "unknown")
+            done = inner_status == "completed"
+            if done:
+                self.logger.info("Workflow execution successful (all files implemented)")
+                top_status = "success"
+            else:
+                pending = run_state.get("unimplemented_files", []) or []
+                self.logger.warning(
+                    "Workflow execution finished EARLY: status=%s reason=%s "
+                    "(files=%d/%d, %d unimplemented)",
+                    inner_status,
+                    run_state.get("reason"),
+                    run_state.get("files_completed", 0),
+                    run_state.get("total_files", 0),
+                    len(pending),
+                )
+                top_status = "incomplete"
 
             return {
-                "status": "success",
+                "status": top_status,
+                "inner_status": inner_status,
+                "abort_reason": run_state.get("reason"),
+                "files_completed": run_state.get("files_completed", 0),
+                "total_files": run_state.get("total_files", 0),
+                "unimplemented_files": run_state.get("unimplemented_files", []),
+                "iterations": run_state.get("iterations", 0),
+                "elapsed_seconds": run_state.get("elapsed_seconds", 0.0),
                 "plan_file": plan_file_path,
                 "target_directory": target_directory,
                 "code_directory": os.path.join(target_directory, "generate_code"),
                 "results": results,
-                "mcp_architecture": "standard",
+                "mcp_architecture": "indexed",
             }
 
         except Exception as e:
             self.logger.error(f"Workflow execution failed: {e}")
 
-            return {"status": "error", "message": str(e), "plan_file": plan_file_path}
+            code_directory = os.path.join(
+                target_directory or str(Path(plan_file_path).parent), "generate_code"
+            )
+            return {
+                "status": "error",
+                "inner_status": "error",
+                "abort_reason": str(e),
+                "message": str(e),
+                "files_completed": 0,
+                "total_files": 0,
+                "unimplemented_files": [],
+                "elapsed_seconds": 0.0,
+                "plan_file": plan_file_path,
+                "target_directory": target_directory,
+                "code_directory": code_directory,
+                "results": {},
+                "mcp_architecture": "indexed",
+            }
         finally:
             await self._cleanup_mcp_agent()
 
@@ -199,7 +253,11 @@ Requirements:
             return result
 
     async def implement_code_pure(
-        self, plan_content: str, target_directory: str, code_directory: str = None
+        self,
+        plan_content: str,
+        target_directory: str,
+        code_directory: str = None,
+        progress_callback: Optional[Callable] = None,
     ) -> str:
         """Pure code implementation - focus on code writing without testing"""
         self.logger.info("Starting pure code implementation (no testing)...")
@@ -266,6 +324,7 @@ Requirements:
                 tools,
                 plan_content,
                 target_directory,
+                progress_callback=progress_callback,
             )
 
             return result
@@ -284,12 +343,17 @@ Requirements:
         tools,
         plan_content,
         target_directory,
+        progress_callback: Optional[Callable] = None,
     ):
         """Pure code implementation loop with memory optimization and phase consistency"""
         max_iterations = 800
         iteration = 0
         start_time = time.time()
         max_time = 7200  # 120 minutes (2 hours)
+        run_state: Dict[str, Any] = {
+            "status": "max_iterations",
+            "reason": f"reached max_iterations={max_iterations} without completion",
+        }
 
         # Initialize specialized agents
         code_agent = CodeImplementationAgent(
@@ -305,6 +369,13 @@ Requirements:
             self.default_models,
             code_directory,
         )
+        total_files = len(memory_agent.all_files_list)
+        self.progress_tracker.set_total_files(total_files)
+        if progress_callback:
+            progress_callback(
+                85,
+                f"Code implementation started: 0/{total_files} planned files completed",
+            )
 
         # Log read tools configuration
         read_tools_status = "ENABLED" if self.enable_read_tools else "DISABLED"
@@ -329,6 +400,10 @@ Requirements:
 
             if elapsed_time > max_time:
                 self.logger.warning(f"Time limit reached: {elapsed_time:.2f}s")
+                run_state = {
+                    "status": "max_time",
+                    "reason": f"wall-clock budget exhausted after {elapsed_time:.0f}s (limit {max_time}s)",
+                }
                 break
 
             # # Test simplified memory approach if we have files implemented
@@ -345,9 +420,25 @@ Requirements:
             # Round logging removed
 
             # Call LLM
-            response = await self._call_llm_with_tools(
-                client, client_type, current_system_message, messages, tools
-            )
+            llm_start = time.time()
+            try:
+                response = await self._call_llm_with_tools(
+                    client,
+                    client_type,
+                    current_system_message,
+                    messages,
+                    tools,
+                    progress_callback=progress_callback,
+                )
+            except Exception as e:
+                self.loop_detector.note_llm_wait(time.time() - llm_start)
+                reason = f"LLM request failed during implementation: {e}"
+                self.logger.error(reason)
+                run_state = {"status": "incomplete", "reason": reason}
+                if progress_callback:
+                    progress_callback(85, reason, str(e))
+                break
+            self.loop_detector.note_llm_wait(time.time() - llm_start)
 
             response_content = response.get("content", "").strip()
             if not response_content:
@@ -363,6 +454,22 @@ Requirements:
 
                 # Record essential tool results in concise memory agent
                 for tool_call, tool_result in zip(response["tool_calls"], tool_results):
+                    if (
+                        tool_call["name"] == "write_file"
+                        and not tool_result.get("isError", False)
+                    ):
+                        filename = tool_call["input"].get("file_path", "unknown")
+                        completed_first_time = self.progress_tracker.complete_file(
+                            memory_agent.normalize_file_path(filename)
+                        )
+                        if completed_first_time and progress_callback:
+                            progress_info = self.progress_tracker.get_progress_info()
+                            progress_callback(
+                                85,
+                                "Code implementation progress: "
+                                f"{progress_info['files_completed']}/"
+                                f"{progress_info['total_files']} files completed",
+                            )
                     memory_agent.record_tool_result(
                         tool_name=tool_call["name"],
                         tool_input=tool_call["input"],
@@ -427,6 +534,10 @@ Requirements:
                 self.logger.info(
                     "✅ Code implementation complete - All files implemented"
                 )
+                run_state = {
+                    "status": "completed",
+                    "reason": "all planned files implemented",
+                }
                 break
 
             # Emergency trim if too long
@@ -441,8 +552,18 @@ Requirements:
                     current_system_message, messages, files_implemented_count
                 )
 
+        elapsed_total = time.time() - start_time
+        self._last_run_state = {
+            "status": run_state["status"],
+            "reason": run_state["reason"],
+            "iterations": iteration,
+            "elapsed_seconds": elapsed_total,
+            "files_completed": len(memory_agent.get_implemented_files()),
+            "total_files": len(memory_agent.get_all_files_list()),
+            "unimplemented_files": list(memory_agent.get_unimplemented_files() or []),
+        }
         return await self._generate_pure_code_final_report_with_concise_agents(
-            iteration, time.time() - start_time, code_agent, memory_agent
+            iteration, elapsed_total, code_agent, memory_agent
         )
 
     # ==================== 4. MCP Agent and LLM Communication Management (Communication Layer) ====================
@@ -507,7 +628,14 @@ Requirements:
         return provider, "provider"
 
     async def _call_llm_with_tools(
-        self, client, client_type, system_message, messages, tools, max_tokens=8192
+        self,
+        client,
+        client_type,
+        system_message,
+        messages,
+        tools,
+        max_tokens=8192,
+        progress_callback: Optional[Callable] = None,
     ):
         """Call the implementation LLM through the unified provider abstraction."""
         if client_type != "provider":
@@ -516,6 +644,14 @@ Requirements:
                 "only routes through DeepCode's provider runtime."
             )
         try:
+            async def on_retry_wait(message: str):
+                self.logger.warning("Implementation LLM retry: %s", message)
+                if progress_callback:
+                    progress_callback(
+                        85,
+                        f"Retrying implementation LLM call: {message}",
+                    )
+
             return await call_provider_with_legacy_tools(
                 client,
                 system_message=system_message,
@@ -524,6 +660,8 @@ Requirements:
                 max_tokens=max_tokens,
                 validate_messages=self._validate_messages,
                 logger=self.logger,
+                retry_mode="standard",
+                on_retry_wait=on_retry_wait,
             )
         except Exception as e:
             self.logger.error(f"LLM call failed: {e}")

@@ -187,6 +187,7 @@ class ProgressTracker:
     def __init__(self, total_files: int = 0):
         self.total_files = total_files
         self.completed_files = 0
+        self.completed_file_paths = set()
         self.current_phase = "Initializing"
         self.phase_progress = 0
         self.start_time = time.time()
@@ -197,12 +198,35 @@ class ProgressTracker:
         self.phase_progress = progress_percent
         print(f"📊 Progress: {progress_percent}% - {phase_name}")
 
-    def complete_file(self, filename: str):
-        """Record completion of a file."""
+    @staticmethod
+    def _normalize_file_path(filename: str) -> str:
+        """Normalize file paths so repeated writes do not inflate progress."""
+        return str(filename or "").replace("\\", "/").strip().strip("/")
+
+    def set_total_files(self, total_files: int):
+        """Set the real planned file count."""
+        self.total_files = max(0, int(total_files or 0))
+
+    def complete_file(self, filename: str) -> bool:
+        """Record completion of a unique file.
+
+        Returns ``True`` when this is the first completed write for the file,
+        ``False`` when the same file was already counted.
+        """
+        normalized = self._normalize_file_path(filename)
+        if normalized and normalized in self.completed_file_paths:
+            print(
+                f"ℹ️  File already counted: {filename} "
+                f"({self.completed_files}/{self.total_files})"
+            )
+            return False
+        if normalized:
+            self.completed_file_paths.add(normalized)
         self.completed_files += 1
         print(
             f"✅ Completed file {self.completed_files}/{self.total_files}: {filename}"
         )
+        return True
 
     def get_progress_info(self) -> Dict[str, Any]:
         """Get current progress information."""

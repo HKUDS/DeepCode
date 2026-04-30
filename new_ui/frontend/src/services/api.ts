@@ -7,6 +7,10 @@ import type {
   ConfigResponse,
   SettingsResponse,
   FileUploadResponse,
+  SessionDetail,
+  SessionMessage,
+  SessionSummary,
+  SessionTask,
 } from '../types/api';
 
 const api = axios.create({
@@ -23,13 +27,15 @@ export const workflowsApi = {
     inputSource: string,
     inputType: 'file' | 'url',
     enableIndexing: boolean = false,
-    enableUserInteraction: boolean = true
+    enableUserInteraction: boolean = true,
+    sessionId?: string | null
   ): Promise<TaskResponse> => {
     const response = await api.post<TaskResponse>('/workflows/paper-to-code', {
       input_source: inputSource,
       input_type: inputType,
       enable_indexing: enableIndexing,
       enable_user_interaction: enableUserInteraction,
+      session_id: sessionId ?? null,
     });
     return response.data;
   },
@@ -37,12 +43,14 @@ export const workflowsApi = {
   startChatPlanning: async (
     requirements: string,
     enableIndexing: boolean = false,
-    enableUserInteraction: boolean = true
+    enableUserInteraction: boolean = true,
+    sessionId?: string | null
   ): Promise<TaskResponse> => {
     const response = await api.post<TaskResponse>('/workflows/chat-planning', {
       requirements,
       enable_indexing: enableIndexing,
       enable_user_interaction: enableUserInteraction,
+      session_id: sessionId ?? null,
     });
     return response.data;
   },
@@ -112,6 +120,63 @@ export const workflowsApi = {
     };
   }> => {
     const response = await api.get(`/workflows/interaction/${taskId}`);
+    return response.data;
+  },
+};
+
+// Sessions API
+export const sessionsApi = {
+  list: async (
+    limit: number = 50,
+    order: 'recent' | 'created' = 'recent'
+  ): Promise<{ sessions: SessionSummary[] }> => {
+    const response = await api.get('/sessions', { params: { limit, order } });
+    return response.data;
+  },
+
+  create: async (title: string = ''): Promise<SessionDetail> => {
+    const response = await api.post<SessionDetail>('/sessions', { title });
+    return response.data;
+  },
+
+  get: async (sessionId: string): Promise<SessionDetail> => {
+    const response = await api.get<SessionDetail>(`/sessions/${sessionId}`);
+    return response.data;
+  },
+
+  delete: async (sessionId: string): Promise<void> => {
+    await api.delete(`/sessions/${sessionId}`);
+  },
+
+  appendMessage: async (
+    sessionId: string,
+    role: string,
+    content: string
+  ): Promise<SessionMessage> => {
+    const response = await api.post<SessionMessage>(
+      `/sessions/${sessionId}/messages`,
+      { role, content }
+    );
+    return response.data;
+  },
+
+  branch: async (
+    sessionId: string,
+    fromMessageIndex: number,
+    title?: string
+  ): Promise<SessionDetail> => {
+    const response = await api.post<SessionDetail>(
+      `/sessions/${sessionId}/branch`,
+      {
+        from_message_index: fromMessageIndex,
+        title,
+      }
+    );
+    return response.data;
+  },
+
+  getTasks: async (sessionId: string): Promise<{ tasks: SessionTask[] }> => {
+    const response = await api.get(`/sessions/${sessionId}/tasks`);
     return response.data;
   },
 };

@@ -19,7 +19,7 @@ export function GuardedLink({ to, children, ...props }: GuardedLinkProps) {
   const location = useLocation();
   const [showDialog, setShowDialog] = useState(false);
 
-  const shouldBlock = status === 'running';
+  const shouldBlock = status === 'running' || status === 'waiting_for_input';
   const targetPath = typeof to === 'string' ? to : to.pathname;
   const isSamePage = targetPath === location.pathname;
 

@@ -1,10 +1,11 @@
-import { ReactNode, useState } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 import Header from './Header';
 import Sidebar from './Sidebar';
 import { TaskRecoveryBanner } from '../common/TaskRecoveryBanner';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { useTaskRecovery } from '../../hooks/useTaskRecovery';
 import { useNavigationGuard } from '../../hooks/useNavigationGuard';
+import { useSessionStore } from '../../stores/sessionStore';
 
 interface LayoutProps {
   children: ReactNode;
@@ -13,12 +14,24 @@ interface LayoutProps {
 export default function Layout({ children }: LayoutProps) {
   const { isRecovering, recoveredTaskId } = useTaskRecovery();
   const [showBanner, setShowBanner] = useState(true);
+  const { activeSessionId, activeSession, loadSessions, selectSession } =
+    useSessionStore();
 
   const {
     showConfirmDialog,
     confirmNavigation,
     cancelNavigation,
   } = useNavigationGuard();
+
+  useEffect(() => {
+    loadSessions();
+  }, [loadSessions]);
+
+  useEffect(() => {
+    if (activeSessionId && !activeSession) {
+      selectSession(activeSessionId);
+    }
+  }, [activeSessionId, activeSession, selectSession]);
 
   return (
     <div className="min-h-screen bg-gray-50">

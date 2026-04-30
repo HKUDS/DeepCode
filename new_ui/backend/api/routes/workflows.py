@@ -43,6 +43,8 @@ async def start_paper_to_code(
 
     return TaskResponse(
         task_id=task.task_id,
+        session_id=task.session_id,
+        task_short_id=task.task_short_id or task.task_id[:8],
         status="started",
         message="Paper-to-code workflow started",
     )
@@ -73,6 +75,8 @@ async def start_chat_planning(
 
     return TaskResponse(
         task_id=task.task_id,
+        session_id=task.session_id,
+        task_short_id=task.task_short_id or task.task_id[:8],
         status="started",
         message="Chat planning workflow started",
     )
@@ -81,13 +85,15 @@ async def start_chat_planning(
 @router.get("/status/{task_id}")
 async def get_workflow_status(task_id: str):
     """Get the status of a workflow task"""
-    task = workflow_service.get_task(task_id)
+    task = workflow_service.get_task_by_any_id(task_id)
 
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
     response = {
         "task_id": task.task_id,
+        "session_id": task.session_id,
+        "task_short_id": task.task_short_id or task.task_id[:8],
         "status": task.status,
         "progress": task.progress,
         "message": task.message,
@@ -127,7 +133,7 @@ async def respond_to_interaction(task_id: str, request: InteractionResponseReque
     pauses to ask the user for input (e.g., requirement questions,
     plan confirmation).
     """
-    task = workflow_service.get_task(task_id)
+    task = workflow_service.get_task_by_any_id(task_id)
 
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -171,7 +177,7 @@ async def get_pending_interaction(task_id: str):
 
     Returns the interaction data that needs user response.
     """
-    task = workflow_service.get_task(task_id)
+    task = workflow_service.get_task_by_any_id(task_id)
 
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -202,6 +208,8 @@ async def get_active_tasks():
         "tasks": [
             {
                 "task_id": task.task_id,
+                "session_id": task.session_id,
+                "task_short_id": task.task_short_id or task.task_id[:8],
                 "status": task.status,
                 "progress": task.progress,
                 "message": task.message,
@@ -223,6 +231,8 @@ async def get_recent_tasks(limit: int = 10):
         "tasks": [
             {
                 "task_id": task.task_id,
+                "session_id": task.session_id,
+                "task_short_id": task.task_short_id or task.task_id[:8],
                 "status": task.status,
                 "progress": task.progress,
                 "message": task.message,

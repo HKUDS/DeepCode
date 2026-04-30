@@ -116,6 +116,10 @@ chmod +x scripts/build.sh
 | POST | `/api/v1/requirements/summarize` | Summarize requirements |
 | POST | `/api/v1/files/upload` | Upload file |
 | GET | `/api/v1/config/settings` | Get settings |
+| GET | `/api/v1/sessions` | List persistent sessions |
+| GET | `/api/v1/sessions/{session_id}` | Inspect one session |
+| POST | `/api/v1/sessions` | Create a session |
+| DELETE | `/api/v1/sessions/{session_id}` | Delete a session |
 
 ### WebSocket Endpoints
 
@@ -123,7 +127,8 @@ chmod +x scripts/build.sh
 |----------|-------------|
 | `/ws/workflow/{task_id}` | Real-time workflow progress |
 | `/ws/code-stream/{task_id}` | Streaming code output |
-| `/ws/logs/{session_id}` | Live log streaming |
+| `/ws/tasks/{task_id}/logs?channel=llm` | Tail one task log (`system`, `llm`, or `mcp`) |
+| `/ws/sessions/{session_id}/logs` | Merge and stream logs from every task in a session |
 
 ## Configuration
 

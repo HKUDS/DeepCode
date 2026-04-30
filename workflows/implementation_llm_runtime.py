@@ -8,7 +8,7 @@ variants while that larger loop remains in place.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 
@@ -49,6 +49,8 @@ async def call_provider_with_legacy_tools(
     max_tokens: int,
     validate_messages: Callable[[list[dict[str, Any]]], list[dict[str, Any]]],
     logger: Any = None,
+    retry_mode: str = "standard",
+    on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
     """Call a DeepCode provider and return the legacy workflow response shape."""
     validated_messages = validate_messages(messages)
@@ -68,7 +70,8 @@ async def call_provider_with_legacy_tools(
         model=provider.get_default_model(),
         max_tokens=max_tokens,
         temperature=0.2,
-        retry_mode="persistent",
+        retry_mode=retry_mode,
+        on_retry_wait=on_retry_wait,
     )
     if response.finish_reason == "error":
         raise RuntimeError(response.content or "LLM provider returned an error")

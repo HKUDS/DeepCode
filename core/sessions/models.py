@@ -175,11 +175,15 @@ class Session:
         self.updated_at = task.updated_at
         return task
 
-    def update_task_status(self, task_id: str, status: str) -> SessionTask | None:
+    def update_task_status(
+        self, task_id: str, status: str, metadata: dict[str, Any] | None = None
+    ) -> SessionTask | None:
         for t in self.tasks:
             if t.task_id == task_id:
                 t.status = status
                 t.updated_at = _utcnow_iso()
+                if metadata:
+                    t.metadata = {**(t.metadata or {}), **metadata}
                 self.updated_at = t.updated_at
                 return t
         return None

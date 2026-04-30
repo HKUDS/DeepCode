@@ -9,7 +9,7 @@ export default function Header() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const { status, workflowType, progress } = useWorkflowStore();
-  const isRunning = status === 'running';
+  const isRunning = status === 'running' || status === 'waiting_for_input';
 
   const navItems = [
     { path: '/', label: 'Home' },

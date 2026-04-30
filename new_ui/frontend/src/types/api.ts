@@ -2,6 +2,8 @@
 
 export interface TaskResponse {
   task_id: string;
+  session_id?: string | null;
+  task_short_id?: string | null;
   status: string;
   message: string;
   created_at?: string;
@@ -9,6 +11,8 @@ export interface TaskResponse {
 
 export interface WorkflowStatusResponse {
   task_id: string;
+  session_id?: string | null;
+  task_short_id?: string | null;
   status: string;
   progress: number;
   message: string;
@@ -57,6 +61,43 @@ export interface FileUploadResponse {
   size: number;
 }
 
+export interface SessionSummary {
+  session_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+  task_count: number;
+}
+
+export interface SessionMessage {
+  role: 'user' | 'assistant' | 'system' | string;
+  content: string;
+  timestamp: string;
+  task_id_ref?: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface SessionTask {
+  task_id: string;
+  task_kind: 'paper' | 'chat' | 'url' | 'repo' | 'requirement' | string;
+  task_dir: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface SessionDetail {
+  session_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  metadata: Record<string, unknown>;
+  messages: SessionMessage[];
+  tasks: SessionTask[];
+}
+
 export interface ErrorResponse {
   error: string;
   detail?: string;
@@ -92,6 +133,14 @@ export interface WSCancelledMessage {
   type: 'cancelled';
   task_id: string;
   status: 'cancelled';
+  reason: string;
+  timestamp: string;
+}
+
+export interface WSInterruptedMessage {
+  type: 'interrupted';
+  task_id: string;
+  status: 'interrupted';
   reason: string;
   timestamp: string;
 }
@@ -136,6 +185,7 @@ export type WSMessage =
   | WSCompleteMessage
   | WSErrorMessage
   | WSCancelledMessage
+  | WSInterruptedMessage
   | WSCodeChunkMessage
   | WSLogMessage
   | WSInteractionMessage;

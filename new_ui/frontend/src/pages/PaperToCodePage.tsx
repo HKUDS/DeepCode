@@ -6,11 +6,12 @@ import { ProgressTracker, ActivityLogViewer } from '../components/streaming';
 import { FileTree } from '../components/results';
 import { InteractionPanel } from '../components/interaction';
 import { useWorkflowStore } from '../stores/workflowStore';
+import { useSessionStore } from '../stores/sessionStore';
 import { useStreaming } from '../hooks/useStreaming';
 import { workflowsApi } from '../services/api';
 import { toast } from '../components/common/Toaster';
 import { PAPER_TO_CODE_STEPS } from '../types/workflow';
-import { CheckCircle, XCircle, FolderOpen, StopCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle, XCircle, FolderOpen, StopCircle } from 'lucide-react';
 import { ConfirmDialog } from '../components/common/ConfirmDialog';
 
 type InputMethod = 'file' | 'url';
@@ -39,17 +40,29 @@ export default function PaperToCodePage() {
     setStatus,
     reset,
   } = useWorkflowStore();
+  const {
+    activeSessionId,
+    activeSession,
+    setActiveSessionId,
+    selectSession,
+    refreshActiveSession,
+  } = useSessionStore();
 
   useStreaming(activeTaskId);
 
   // Show toast when workflow completes
   useEffect(() => {
-    if (status === 'completed' && result) {
+    if ((status === 'completed' || status === 'incomplete' || status === 'completed_with_warnings') && result) {
       toast.success('Paper processing complete!', 'Code has been generated successfully.');
+      refreshActiveSession();
     } else if (status === 'error' && error) {
       toast.error('Processing failed', error);
+      refreshActiveSession();
+    } else if (status === 'interrupted') {
+      toast.warning('Task interrupted', 'The backend restarted before this task completed.');
+      refreshActiveSession();
     }
-  }, [status, error, result]);
+  }, [status, error, result, refreshActiveSession]);
 
   // Handle task cancellation
   const handleCancelTask = async () => {
@@ -78,10 +91,16 @@ export default function PaperToCodePage() {
       const response = await workflowsApi.startPaperToCode(
         inputSource,
         inputType,
-        enableIndexing
+        enableIndexing,
+        true,
+        activeSessionId
       );
 
       setActiveTask(response.task_id, 'paper-to-code');
+      if (response.session_id) {
+        setActiveSessionId(response.session_id);
+        selectSession(response.session_id);
+      }
       toast.info('Workflow started', 'Processing your paper...');
     } catch (error) {
       toast.error('Failed to start workflow', 'Please try again');
@@ -104,6 +123,10 @@ export default function PaperToCodePage() {
   };
 
   const isRunning = status === 'running';
+  const implementationResult =
+    result?.implementation && typeof result.implementation === 'object'
+      ? (result.implementation as Record<string, unknown>)
+      : null;
 
   return (
     <div className="space-y-6">
@@ -116,6 +139,12 @@ export default function PaperToCodePage() {
         <p className="text-gray-500 mt-1">
           Upload a research paper and convert it to a working implementation
         </p>
+        <div className="mt-3 inline-flex items-center rounded-full border border-gray-200 bg-white px-3 py-1 text-xs text-gray-500">
+          Session:{' '}
+          <span className="ml-1 font-medium text-gray-700">
+            {activeSession?.title || activeSessionId || 'New session will be created'}
+          </span>
+        </div>
       </motion.div>
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -255,6 +284,47 @@ export default function PaperToCodePage() {
                         </span>
                       </div>
                     ) : null}
+                  </div>
+                </div>
+              </Card>
+            </motion.div>
+          )}
+
+          {(status === 'incomplete' ||
+            status === 'completed_with_warnings' ||
+            status === 'interrupted') && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+            >
+              <Card className="border-yellow-200 bg-yellow-50">
+                <div className="flex items-start space-x-3">
+                  <AlertTriangle className="h-6 w-6 text-yellow-500 flex-shrink-0" />
+                  <div className="flex-1">
+                    <h3 className="font-medium text-yellow-900">
+                      {status === 'interrupted'
+                        ? 'Task Interrupted'
+                        : 'Code Generation Partially Completed'}
+                    </h3>
+                    <p className="text-sm text-yellow-700 mt-1">
+                      {status === 'interrupted'
+                        ? 'The backend restarted before this task completed. Select this session and start again to continue from persisted files.'
+                        : 'Some files may still be unfinished. Review the implementation metadata below.'}
+                    </p>
+                    {implementationResult && (
+                        <div className="mt-3 text-xs text-yellow-800 space-y-1">
+                          <div>
+                            Files:{' '}
+                            {String(implementationResult.files_completed ?? 0)}
+                            /
+                            {String(implementationResult.total_files ?? 0)}
+                          </div>
+                          <div>
+                            Reason:{' '}
+                            {String(implementationResult.abort_reason ?? 'see logs')}
+                          </div>
+                        </div>
+                      )}
                   </div>
                 </div>
               </Card>

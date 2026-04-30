@@ -233,7 +233,10 @@ export const useWorkflowStore = create<WorkflowState>()(
       storage: createJSONStorage(() => sessionStorage),
       // Only persist task-related data for recovery when task is running or waiting
       partialize: (state) => {
-        const isActive = state.status === 'running' || state.isWaitingForInput;
+        const isActive =
+          state.status === 'running' ||
+          state.status === 'waiting_for_input' ||
+          state.isWaitingForInput;
         return {
           // Only persist activeTaskId if task is still running or waiting for input
           // This prevents trying to recover completed/errored tasks

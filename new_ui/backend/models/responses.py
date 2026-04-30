@@ -9,6 +9,8 @@ class TaskResponse(BaseModel):
     """Response model for task creation"""
 
     task_id: str
+    session_id: Optional[str] = None
+    task_short_id: Optional[str] = None
     status: str = "created"
     message: str = "Task created successfully"
     created_at: datetime = Field(default_factory=datetime.utcnow)

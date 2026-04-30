@@ -97,6 +97,33 @@ class WorkflowService:
         """Get task by ID"""
         return self._tasks.get(task_id)
 
+    def get_task_by_any_id(self, task_id: str) -> Optional[WorkflowTask]:
+        """Get a task by full UUID, short id, or restored short task id.
+
+        UI clients may hold the full UUID from the original create response,
+        while hydrated tasks after a backend restart are keyed by the 8-char
+        task id persisted in the session store.
+        """
+        if not task_id:
+            return None
+        task = self._tasks.get(task_id)
+        if task is not None:
+            return task
+        short = str(task_id)[:8]
+        task = self._tasks.get(short)
+        if task is not None:
+            return task
+        return next(
+            (
+                candidate
+                for candidate in self._tasks.values()
+                if candidate.task_short_id == task_id
+                or candidate.task_short_id == short
+                or candidate.task_id[:8] == short
+            ),
+            None,
+        )
+
     def subscribe(self, task_id: str) -> Optional[asyncio.Queue]:
         """Subscribe to a task's progress updates. Returns a new queue for this subscriber."""
         if task_id not in self._subscribers:
@@ -319,14 +346,17 @@ class WorkflowService:
                     ),
                 )
 
-                task.status = "completed"
-                task.progress = 100
-                task.result = {
-                    "status": "success",
-                    "repo_result": result,
-                }
+                result_status = self._pipeline_status(result)
+                task.status = result_status
+                task.progress = 100 if result_status == "completed" else 95
+                task.result = self._build_workflow_result(result, result_status)
                 task.completed_at = datetime.utcnow()
-                self._record_session_outcome(task, role="assistant", body=str(result))
+                self._record_session_outcome(
+                    task,
+                    role="assistant",
+                    body=self._pipeline_summary(result),
+                    metadata=self._pipeline_metadata(result),
+                )
 
                 # Broadcast completion signal to all subscribers
                 await self._broadcast(
@@ -334,8 +364,9 @@ class WorkflowService:
                     {
                         "type": "complete",
                         "task_id": task_id,
-                        "status": "success",
+                        "status": result_status,
                         "result": task.result,
+                        "timestamp": datetime.utcnow().isoformat(),
                     },
                 )
                 # Give WebSocket handlers time to receive the completion message
@@ -361,6 +392,7 @@ class WorkflowService:
                     "type": "error",
                     "task_id": task_id,
                     "error": str(e),
+                        "timestamp": datetime.utcnow().isoformat(),
                 },
             )
 
@@ -494,14 +526,17 @@ class WorkflowService:
                     ),
                 )
 
-                task.status = "completed"
-                task.progress = 100
-                task.result = {
-                    "status": "success",
-                    "repo_result": result,
-                }
+                result_status = self._pipeline_status(result)
+                task.status = result_status
+                task.progress = 100 if result_status == "completed" else 95
+                task.result = self._build_workflow_result(result, result_status)
                 task.completed_at = datetime.utcnow()
-                self._record_session_outcome(task, role="assistant", body=str(result))
+                self._record_session_outcome(
+                    task,
+                    role="assistant",
+                    body=self._pipeline_summary(result),
+                    metadata=self._pipeline_metadata(result),
+                )
 
                 # Broadcast completion signal to all subscribers
                 await self._broadcast(
@@ -509,8 +544,9 @@ class WorkflowService:
                     {
                         "type": "complete",
                         "task_id": task_id,
-                        "status": "success",
+                        "status": result_status,
                         "result": task.result,
+                        "timestamp": datetime.utcnow().isoformat(),
                     },
                 )
                 # Give WebSocket handlers time to receive the completion message
@@ -536,6 +572,7 @@ class WorkflowService:
                     "type": "error",
                     "task_id": task_id,
                     "error": str(e),
+                        "timestamp": datetime.utcnow().isoformat(),
                 },
             )
 
@@ -552,7 +589,7 @@ class WorkflowService:
 
     def cancel_task(self, task_id: str) -> bool:
         """Cancel a running task"""
-        task = self._tasks.get(task_id)
+        task = self.get_task_by_any_id(task_id)
         if task and task.status in {"running", "waiting_for_input"}:
             task.cancel_event.set()
             task.status = "cancelled"
@@ -600,8 +637,48 @@ class WorkflowService:
         }
         return mapping.get((input_type or "").lower(), fallback)
 
+    @staticmethod
+    def _pipeline_status(result: Any) -> str:
+        if isinstance(result, dict):
+            status = str(result.get("status") or "completed")
+            if status == "success":
+                return "completed"
+            return status
+        return "completed"
+
+    @staticmethod
+    def _pipeline_summary(result: Any) -> str:
+        if isinstance(result, dict):
+            return str(result.get("summary") or result)
+        return str(result)
+
+    @staticmethod
+    def _pipeline_metadata(result: Any) -> Dict[str, Any]:
+        if not isinstance(result, dict):
+            return {}
+        metadata: Dict[str, Any] = {}
+        implementation = result.get("implementation")
+        if isinstance(implementation, dict):
+            metadata["implementation"] = implementation
+        return metadata
+
+    @staticmethod
+    def _build_workflow_result(result: Any, result_status: str) -> Dict[str, Any]:
+        payload = {
+            "status": "success" if result_status == "completed" else result_status,
+            "repo_result": result,
+        }
+        if isinstance(result, dict) and isinstance(result.get("implementation"), dict):
+            payload["implementation"] = result["implementation"]
+        return payload
+
     def _record_session_outcome(
-        self, task: "WorkflowTask", *, role: str, body: str
+        self,
+        task: "WorkflowTask",
+        *,
+        role: str,
+        body: str,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Append the task's final state to its session transcript."""
         sid = getattr(task, "session_id", None)
@@ -613,12 +690,17 @@ class WorkflowService:
                 role=role,
                 content=body[:8000],
                 task_id_ref=task.task_short_id or task.task_id[:8],
-                metadata={"status": task.status, "task_kind": task.task_kind},
+                metadata={
+                    "status": task.status,
+                    "task_kind": task.task_kind,
+                    **(metadata or {}),
+                },
             )
             session_store.update_task_status(
                 sid,
                 task.task_short_id or task.task_id[:8],
                 task.status,
+                metadata=metadata,
             )
         except Exception:
             pass
@@ -639,6 +721,18 @@ class WorkflowService:
             status = stored.status
             if status in {"pending", "running", "waiting_for_input"}:
                 status = "interrupted"
+                try:
+                    session_store.update_task_status(
+                        session.session_id,
+                        stored.task_id,
+                        status,
+                        metadata={
+                            "interrupted": True,
+                            "reason": "Backend restarted before the workflow completed.",
+                        },
+                    )
+                except Exception:
+                    pass
             task = WorkflowTask(
                 task_id=short,
                 status=status,

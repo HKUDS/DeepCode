@@ -28,7 +28,7 @@ export function useNavigationGuard() {
   });
 
   // Determine if we should block navigation
-  const shouldBlock = status === 'running';
+  const shouldBlock = status === 'running' || status === 'waiting_for_input';
 
   // Handle browser beforeunload event (refresh, close tab, close browser)
   useEffect(() => {

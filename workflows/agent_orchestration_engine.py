@@ -1498,6 +1498,7 @@ async def synthesize_code_implementation_agent(
                 plan_file_path=dir_info["initial_plan_path"],
                 target_directory=dir_info["paper_dir"],
                 pure_code_mode=True,  # Focus on code implementation, skip testing
+                progress_callback=progress_callback,
             )
 
             # Log implementation results truthfully — distinguish full
@@ -1925,11 +1926,24 @@ async def execute_multi_agent_research_pipeline(
         # "stopped early but partial output exists".
         impl_status = implementation_result["status"]
         impl_inner = implementation_result.get("inner_status", impl_status)
+        implementation_metadata = {
+            "status": impl_status,
+            "inner_status": impl_inner,
+            "abort_reason": implementation_result.get("abort_reason"),
+            "files_completed": implementation_result.get("files_completed", 0),
+            "total_files": implementation_result.get("total_files", 0),
+            "unimplemented_files": implementation_result.get(
+                "unimplemented_files", []
+            )
+            or [],
+            "code_directory": implementation_result.get("code_directory"),
+        }
         if impl_inner == "completed":
             pipeline_summary += "\n🎉 Code implementation completed successfully!"
             pipeline_summary += (
                 f"\n📁 Code generated in: {implementation_result['code_directory']}"
             )
+            pipeline_status = "completed"
         elif impl_status == "incomplete":
             files_done = implementation_result.get("files_completed", 0)
             unimpl = implementation_result.get("unimplemented_files", []) or []
@@ -1941,16 +1955,24 @@ async def execute_multi_agent_research_pipeline(
             pipeline_summary += (
                 f"\n📁 Partial code in: {implementation_result['code_directory']}"
             )
+            pipeline_status = "incomplete"
         elif impl_status == "warning":
             pipeline_summary += (
                 f"\n⚠️ Code implementation: {implementation_result.get('message', 'see logs')}"
             )
+            pipeline_status = "completed_with_warnings"
         else:
             pipeline_summary += (
                 f"\n❌ Code implementation failed: {implementation_result.get('message', 'see logs')}"
             )
-        _final_status = "completed"
-        return pipeline_summary
+            pipeline_status = "error"
+        _final_status = pipeline_status
+        return {
+            "status": pipeline_status,
+            "summary": pipeline_summary,
+            "implementation": implementation_metadata,
+            "paper_dir": dir_info["paper_dir"],
+        }
 
     except PlanReviewCancelled:
         _final_status = "cancelled"
@@ -1983,8 +2005,11 @@ async def execute_multi_agent_research_pipeline(
 
                 _sid = _cur_sid()
                 if _sid:
+                    _metadata = None
+                    if "implementation_metadata" in locals():
+                        _metadata = {"implementation": implementation_metadata}
                     _get_session_store().update_task_status(
-                        _sid, _resolved_task_id, _final_status
+                        _sid, _resolved_task_id, _final_status, metadata=_metadata
                     )
             except Exception:
                 pass
