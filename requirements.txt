@@ -1,5 +1,5 @@
 # Core Dependencies
-aiofiles>=0.8.0
+aiofiles>=25.1.0
 aiohttp>=3.8.0
 anthropic>=0.40.0
 asyncio-mqtt
