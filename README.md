@@ -159,6 +159,16 @@
 
 ## 📰 News
 
+🧭 **[2026-05-01] OpenRouter model selector, session cleanup & workflow UX hardening**
+
+- 🧠 **OpenRouter model catalog in Settings.** The new UI can now fetch OpenRouter model metadata from `https://openrouter.ai/api/v1/models`, cache it locally, and expose searchable model selectors for the Default, Planning, and Implementation phases. Use exact OpenRouter model ids such as `z-ai/glm-5.1` without editing JSON by hand.
+- 🔄 **Runtime model switching.** Saving model choices from Settings updates `deepcode_config.json` and reloads the in-process LLM runtime so newly started workflows pick up the selected provider/model combination immediately.
+- 🗑️ **Session deletion now performs safe cascade cleanup.** Deleting a session from the UI removes its persistent session store and associated `deepcode_lab/tasks/<task_id>/` workspaces, while preserving shared `uploads/` source files. Sessions with `pending`, `running`, or `waiting_for_input` tasks are blocked with a clear `409 Conflict`.
+- 📊 **More accurate Paper2Code progress.** The frontend now shows backend stage messages and avoids marking intermediate phases as fully "Done" while long LLM work is still running.
+- 🛡️ **Workflow robustness fixes.** Uploads now reject Git LFS pointer files, cancelled tasks stop backend work promptly, stale browser session ids recover cleanly, planner retries fall back to a minimal valid plan when a model defers/tool-calls incorrectly, and document segmentation skips an extra validation LLM call that could stall progress.
+
+---
+
 🗂️ **[2026-04-28] Persistent sessions & dual-layer logging**
 
 - 🆕 **Sessions are now persistent.** Every CLI / UI run is automatically attached to a session under `~/.deepcode/sessions/<id>/` (override with `DEEPCODE_SESSIONS_DIR`). Sessions are JSONL — `tail -f session.jsonl` works out of the box. List / inspect / branch them with `python cli/main_cli.py session list|show <id>|new|resume <id>|delete <id>`, or via `GET /api/v1/sessions` from the backend.
@@ -718,10 +728,11 @@ Any OpenAI-compatible endpoint is supported by overriding `apiBase` on the match
 {
   "agents": {
     "defaults": {
-      "model": "openai/gpt-5.4"
+      "provider": "openrouter",
+      "model": "z-ai/glm-5.1"
     },
-    "planning":       { "model": "openai/gpt-5.4" },
-    "implementation": { "model": "openai/gpt-5.4" }
+    "planning":       { "provider": "openrouter", "model": "z-ai/glm-5.1" },
+    "implementation": { "provider": "openrouter", "model": "z-ai/glm-5.1" }
   },
   "providers": {
     "openai":     { "apiKey": "your_openai_api_key" },
@@ -729,6 +740,13 @@ Any OpenAI-compatible endpoint is supported by overriding `apiBase` on the match
   }
 }
 ```
+
+OpenRouter model ids must use the exact `id` returned by OpenRouter, for example
+`z-ai/glm-5.1`, `anthropic/claude-sonnet-4.5`, or
+`google/gemini-2.5-pro`. In the new UI, open **Settings → OpenRouter Models**
+to search the live OpenRouter catalog and update the Default, Planning, and
+Implementation models without editing this file manually. Saving from the UI
+reloads the runtime for newly started workflows.
 
 > **🔐 Never commit `deepcode_config.json`.** It is already in `.gitignore`.
 
@@ -896,6 +914,12 @@ Inside `python cli/main_cli.py`, type these at the main menu prompt:
 
 Every task created from these flows inherits the active `session_id`; per-task
 logs are written to `deepcode_lab/tasks/<task>/logs/`.
+
+In the web UI, use the **Sessions** menu in the header to resume or delete a
+session. Deleting a session removes its JSONL session record and associated task
+workspace under `deepcode_lab/tasks/`, but keeps original files in `uploads/`.
+If the session still has `pending`, `running`, or `waiting_for_input` tasks, the
+backend rejects the deletion until the task is cancelled or completed.
 
 <details>
 <summary><strong>🐳 Docker Management Commands</strong></summary>

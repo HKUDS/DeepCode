@@ -157,6 +157,16 @@
 
 ## 📰 新闻
 
+🧭 **[2026-05-01] OpenRouter 模型选择器、session 清理与工作流体验增强**
+
+- 🧠 **Settings 中新增 OpenRouter 模型目录。** 新版 UI 可以从 `https://openrouter.ai/api/v1/models` 获取 OpenRouter 模型元数据，本地缓存后提供可搜索的 Default、Planning、Implementation 三阶段模型下拉框。用户可以直接选择 `z-ai/glm-5.1` 这类 OpenRouter 精确模型 id，无需手动编辑 JSON。
+- 🔄 **运行时模型切换。** 在 Settings 保存模型选择后，会更新 `deepcode_config.json` 并刷新进程内 LLM runtime；之后新启动的 workflow 会立即使用新的 provider/model 组合。
+- 🗑️ **Session 删除改为安全级联清理。** 在 UI 中删除 session 时，会删除持久化 session 记录和对应的 `deepcode_lab/tasks/<task_id>/` 工作目录，但保留可被多个 session 共享的 `uploads/` 原始文件。若 session 下仍有 `pending`、`running` 或 `waiting_for_input` task，后端会返回明确的 `409 Conflict`。
+- 📊 **Paper2Code 进度显示更准确。** 前端现在会展示后端阶段消息，并避免在长时间 LLM 阶段尚未完成时，把中间步骤误标记为完全 Done。
+- 🛡️ **工作流稳定性修复。** 上传阶段会拒绝 Git LFS pointer 文件；取消任务会及时中断后端工作；浏览器中的过期 session id 会自动恢复；planner 在模型输出错误的工具调用/延迟执行文本时会回退到最小合法 plan；文档分割阶段跳过额外质量验证 LLM 调用，减少卡在 50% 的概率。
+
+---
+
 🗂️ **[2026-04-28] 持久化 session 与双层结构化日志**
 
 - 🆕 **Session 现在会持久化。** 每次 CLI / UI 运行都会自动挂到一个 session，默认保存在 `~/.deepcode/sessions/<id>/`（可用 `DEEPCODE_SESSIONS_DIR` 覆盖）。session 使用 JSONL 存储，支持 `python cli/main_cli.py session list|show <id>|new|resume <id>|delete <id>`，后端也提供 `GET /api/v1/sessions`。
@@ -694,12 +704,21 @@ DeepCode 会根据 `model` 前缀（例如 `openai/...`、`anthropic/...`、`gem
 ```json
 {
   "agents": {
-    "defaults":       { "model": "openai/gpt-5.4" },
-    "planning":       { "model": "openai/gpt-5.4" },
-    "implementation": { "model": "anthropic/claude-sonnet-4.5" }
+    "defaults":       { "provider": "openrouter", "model": "z-ai/glm-5.1" },
+    "planning":       { "provider": "openrouter", "model": "z-ai/glm-5.1" },
+    "implementation": { "provider": "openrouter", "model": "z-ai/glm-5.1" }
+  },
+  "providers": {
+    "openrouter": { "apiKey": "your_openrouter_key", "apiBase": "https://openrouter.ai/api/v1" }
   }
 }
 ```
+
+OpenRouter 模型必须使用 OpenRouter 官方模型目录返回的精确 `id`，例如
+`z-ai/glm-5.1`、`anthropic/claude-sonnet-4.5` 或
+`google/gemini-2.5-pro`。在新版 UI 中，可以打开 **Settings → OpenRouter
+Models** 搜索实时模型目录，并分别更新 Default、Planning、Implementation
+模型。保存后会刷新 runtime，之后新启动的 workflow 会使用新的模型配置。
 
 #### 📄 文档分割 *（可选）*
 
@@ -848,6 +867,11 @@ python cli/main_cli.py --session <session_id> --file paper.pdf
 
 这些入口创建的 task 都会继承当前 `session_id`；per-task 日志会写入
 `deepcode_lab/tasks/<task>/logs/`。
+
+在 Web UI 中，可以通过顶部 **Sessions** 菜单恢复或删除 session。删除
+session 会移除 JSONL session 记录和对应的 `deepcode_lab/tasks/` 工作目录，
+但不会删除 `uploads/` 中的原始上传文件。如果该 session 仍有 `pending`、
+`running` 或 `waiting_for_input` task，后端会拒绝删除，直到任务被取消或完成。
 
 <details>
 <summary><strong>🐳 Docker 管理命令</strong></summary>
