@@ -187,7 +187,7 @@ def _strip_known_prefix(dirname: str, detected_kind: TaskKind | None) -> str:
     if detected_kind is not None:
         prefix = TASK_KIND_PREFIX[detected_kind] + "_"
         if dirname.startswith(prefix):
-            return dirname[len(prefix):]
+            return dirname[len(prefix) :]
     return dirname
 
 

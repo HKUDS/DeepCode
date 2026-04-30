@@ -4,6 +4,10 @@ aiohttp>=3.8.0
 anthropic>=0.40.0
 asyncio-mqtt
 docling
+
+# New UI Backend Dependencies
+fastapi>=0.104.0
+google-genai
 httpx>=0.27.0
 json-repair>=0.30.0
 loguru>=0.7.0
@@ -11,12 +15,8 @@ loguru>=0.7.0
 # DeepCode-native LLM + MCP runtime (replaces legacy mcp-agent)
 mcp>=1.0.0
 mcp-server-git
-openai>=1.55.0
-
-# New UI Backend Dependencies
-fastapi>=0.104.0
-google-genai
 nest_asyncio
+openai>=1.55.0
 openapi
 pathlib2
 pydantic-settings>=2.0.0

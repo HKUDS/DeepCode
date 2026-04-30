@@ -47,11 +47,14 @@ class ParallelLLM:
         request_params: RequestParams | None = None,
     ) -> str:
         """Run all fan-out agents in parallel, then aggregate via fan-in."""
+
         async def _run_branch(agent: Agent) -> tuple[str, str]:
             async with agent:
                 llm = await self._attach(agent)
                 try:
-                    text = await llm.generate_str(message=message, request_params=request_params)
+                    text = await llm.generate_str(
+                        message=message, request_params=request_params
+                    )
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(
                         "ParallelLLM branch '{}' failed: {}: {}",

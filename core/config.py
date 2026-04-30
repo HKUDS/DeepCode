@@ -405,7 +405,10 @@ class DeepCodeConfig(BaseSettings):
             p = getattr(self.providers, spec.name, None)
             if not (p and p.api_base):
                 continue
-            if spec.detect_by_base_keyword and spec.detect_by_base_keyword in p.api_base:
+            if (
+                spec.detect_by_base_keyword
+                and spec.detect_by_base_keyword in p.api_base
+            ):
                 return p, spec.name
             if local_fallback is None:
                 local_fallback = (p, spec.name)
@@ -458,6 +461,7 @@ def default_config_path() -> Path:
 
 def _resolve_env_refs(value: Any, *, path: str = "") -> Any:
     if isinstance(value, str):
+
         def _replace(match: re.Match[str]) -> str:
             name = match.group(1)
             env_value = os.environ.get(name)
@@ -470,7 +474,10 @@ def _resolve_env_refs(value: Any, *, path: str = "") -> Any:
 
         return _ENV_REF_PATTERN.sub(_replace, value)
     if isinstance(value, dict):
-        return {k: _resolve_env_refs(v, path=f"{path}.{k}" if path else k) for k, v in value.items()}
+        return {
+            k: _resolve_env_refs(v, path=f"{path}.{k}" if path else k)
+            for k, v in value.items()
+        }
     if isinstance(value, list):
         return [
             _resolve_env_refs(item, path=f"{path}[{i}]") for i, item in enumerate(value)

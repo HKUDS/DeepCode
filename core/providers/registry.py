@@ -47,7 +47,9 @@ class ProviderSpec:
     default_api_base: str = ""
     strip_model_prefix: bool = False
     supports_max_completion_tokens: bool = False
-    model_overrides: tuple[tuple[str, dict[str, Any]], ...] = field(default_factory=tuple)
+    model_overrides: tuple[tuple[str, dict[str, Any]], ...] = field(
+        default_factory=tuple
+    )
     is_oauth: bool = False
     is_direct: bool = False
     supports_prompt_caching: bool = False

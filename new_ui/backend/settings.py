@@ -111,7 +111,9 @@ def list_available_providers() -> list[str]:
     """Return providers that look usable (have an apiKey or are local/oauth)."""
     cfg = load_deepcode_config()
     available: list[str] = []
-    for spec in (find_by_name(name) for name in cfg.providers.model_dump(by_alias=False).keys()):
+    for spec in (
+        find_by_name(name) for name in cfg.providers.model_dump(by_alias=False).keys()
+    ):
         if spec is None:
             continue
         block = getattr(cfg.providers, spec.name, None)

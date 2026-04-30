@@ -406,9 +406,7 @@ class CLIApp:
         case the user already saw an error toast).
         """
         if not target:
-            self.cli.print_status(
-                "Usage: @<file-path>   or   @<url>", "warning"
-            )
+            self.cli.print_status("Usage: @<file-path>   or   @<url>", "warning")
             return ""
 
         # Strip optional surrounding quotes (clipboard pastes often
@@ -422,24 +420,18 @@ class CLIApp:
 
         # URL branch — anything starting with http(s)://
         if lowered.startswith(("http://", "https://")):
-            self.cli.print_status(
-                f"@-shortcut → URL: {target}", "info"
-            )
+            self.cli.print_status(f"@-shortcut → URL: {target}", "info")
             await self.process_input(target, "url")
             return "u"
 
         # File branch — accept ``file://`` prefix and existence check.
-        raw_path = target[len("file://"):] if lowered.startswith("file://") else target
+        raw_path = target[len("file://") :] if lowered.startswith("file://") else target
         if not os.path.exists(raw_path):
-            self.cli.print_status(
-                f"Path not found: {raw_path}", "error"
-            )
+            self.cli.print_status(f"Path not found: {raw_path}", "error")
             return ""
 
         abspath = os.path.abspath(raw_path)
-        self.cli.print_status(
-            f"@-shortcut → File: {abspath}", "info"
-        )
+        self.cli.print_status(f"@-shortcut → File: {abspath}", "info")
         await self.process_input(f"file://{abspath}", "file")
         return "f"
 
@@ -465,9 +457,7 @@ class CLIApp:
             from core.observability import current_session_id, set_session
             from core.sessions import get_default_store
         except Exception as exc:
-            self.cli.print_status(
-                f"Session subsystem unavailable: {exc}", "error"
-            )
+            self.cli.print_status(f"Session subsystem unavailable: {exc}", "error")
             return
 
         parts = raw.strip().split(maxsplit=1)
@@ -483,9 +473,7 @@ class CLIApp:
         if cmd in ("/session", "/whoami"):
             sid = current_session_id()
             session = store.get_session(sid) if sid else None
-            self.cli.print_active_session(
-                sid, session.title if session else None
-            )
+            self.cli.print_active_session(sid, session.title if session else None)
             return
 
         if cmd in ("/resume", "/sessions", "/load"):
@@ -497,9 +485,7 @@ class CLIApp:
             if session is None:
                 # Treat input as a prefix — try to disambiguate against
                 # the listed summaries before giving up.
-                candidates = [
-                    s for s in summaries if s.session_id.startswith(picked)
-                ]
+                candidates = [s for s in summaries if s.session_id.startswith(picked)]
                 if len(candidates) == 1:
                     session = store.get_session(candidates[0].session_id)
                 elif len(candidates) > 1:
@@ -510,9 +496,7 @@ class CLIApp:
                     )
                     return
             if session is None:
-                self.cli.print_status(
-                    f"Session '{picked}' not found.", "error"
-                )
+                self.cli.print_status(f"Session '{picked}' not found.", "error")
                 return
             set_session(session.session_id)
             self.cli.print_status(
@@ -578,9 +562,7 @@ class CLIApp:
                 # ask_continue check below behaves the same as if the
                 # user had picked [F] / [U] from the menu.
                 if choice_raw.startswith("@"):
-                    effective = await self._handle_at_shortcut(
-                        choice_raw[1:].strip()
-                    )
+                    effective = await self._handle_at_shortcut(choice_raw[1:].strip())
                     if effective in ("f", "u"):
                         choice = effective
                     else:

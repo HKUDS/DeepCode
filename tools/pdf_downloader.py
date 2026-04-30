@@ -25,6 +25,7 @@ from urllib.parse import urlparse, unquote
 from datetime import datetime
 
 from core.platform_compat import configure_utf8_stdio
+
 configure_utf8_stdio()
 
 from mcp.server import FastMCP

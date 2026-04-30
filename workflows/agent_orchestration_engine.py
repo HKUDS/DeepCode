@@ -136,7 +136,8 @@ def _load_paper_markdown_content(paper_dir: str, logger) -> tuple[str, str]:
     markdown_candidates = [
         filename
         for filename in os.listdir(paper_dir)
-        if filename.endswith(".md") and not filename.endswith("implement_code_summary.md")
+        if filename.endswith(".md")
+        and not filename.endswith("implement_code_summary.md")
     ]
     if not markdown_candidates:
         raise FileNotFoundError(f"No markdown file found in {paper_dir}")
@@ -364,9 +365,7 @@ def _assess_output_completeness(text: str) -> float:
     return min(score, 1.0)
 
 
-def _adjust_params_for_retry(
-    params: RequestParams, retry_count: int
-) -> RequestParams:
+def _adjust_params_for_retry(params: RequestParams, retry_count: int) -> RequestParams:
     """
     Token减少策略以适应模型context限制
 
@@ -471,7 +470,9 @@ def get_default_search_server() -> str:
     try:
         from core.compat.runtime import get_runtime
 
-        default_server = get_runtime().config.tools.default_search_server or "filesystem"
+        default_server = (
+            get_runtime().config.tools.default_search_server or "filesystem"
+        )
         print(f"🔍 Using search server: {default_server}")
         return default_server
     except Exception as e:
@@ -617,7 +618,9 @@ async def run_code_analyzer(
     if use_segmentation:
         segmented_context = _load_document_segments_context(paper_dir)
         if segmented_context:
-            logger.info("Using segmented planner context derived from document_index.json")
+            logger.info(
+                "Using segmented planner context derived from document_index.json"
+            )
         else:
             logger.warning(
                 "Segmented planning requested but no usable segments were found; falling back to full-document planning context"
@@ -671,9 +674,7 @@ async def run_code_analyzer(
         }
         attempt_logged = False
         try:
-            print(
-                f"?? Attempting code analysis (attempt {attempt}/{max_retries})"
-            )
+            print(f"?? Attempting code analysis (attempt {attempt}/{max_retries})")
             logger.info(
                 f"Code planning attempt {attempt}/{max_retries} started "
                 f"(timeout={request_timeout_s}s, segmentation={use_segmentation}, "
@@ -837,7 +838,9 @@ async def run_code_analyzer(
 
     fallback_source = best_invalid_result
     if len(fallback_source.strip()) < 500:
-        fallback_source = (segmented_context or paper_content[:6000] or fallback_source).strip()
+        fallback_source = (
+            segmented_context or paper_content[:6000] or fallback_source
+        ).strip()
 
     if fallback_source:
         coerced_plan = coerce_text_to_minimal_plan(fallback_source, paper_dir=paper_dir)
@@ -979,9 +982,7 @@ async def synthesize_workspace_infrastructure_agent(
     """
     md_path = FileProcessor.find_markdown_file(str(ctx.task_dir))
     if not md_path:
-        raise ValueError(
-            f"No markdown file found in task directory: {ctx.task_dir}"
-        )
+        raise ValueError(f"No markdown file found in task directory: {ctx.task_dir}")
 
     content = await FileProcessor.read_file_content(md_path)
     structured_content = FileProcessor.parse_markdown_sections(content)
@@ -1578,11 +1579,15 @@ async def synthesize_code_implementation_agent(
             # completion from an early termination (loop_detector abort,
             # max_iterations, max_time, etc.). The legacy code unconditionally
             # printed "completed successfully!" which masked partial output.
-            inner_status = implementation_result.get("inner_status") or implementation_result.get("status")
+            inner_status = implementation_result.get(
+                "inner_status"
+            ) or implementation_result.get("status")
             files_done = implementation_result.get("files_completed", 0)
             unimpl = implementation_result.get("unimplemented_files", []) or []
             if inner_status == "completed":
-                print("✅ Code implementation completed successfully (all planned files written)!")
+                print(
+                    "✅ Code implementation completed successfully (all planned files written)!"
+                )
                 print(f"   Code directory : {implementation_result['code_directory']}")
                 print(f"   Files written  : {files_done}")
             else:
@@ -1839,9 +1844,7 @@ async def execute_multi_agent_research_pipeline(
                     f"   📁 Segments directory: {segmentation_result.get('segments_dir', 'N/A')}"
                 )
         elif seg_status == "traditional":
-            print(
-                "📖 Document preprocessing: using traditional full-document workflow"
-            )
+            print("📖 Document preprocessing: using traditional full-document workflow")
             print(f"   Reason: {segmentation_result.get('reason', 'n/a')}")
             print(
                 f"   Document size: {segmentation_result.get('document_size', 0)} chars"
@@ -1851,7 +1854,9 @@ async def execute_multi_agent_research_pipeline(
                 f"ℹ️ Document preprocessing skipped — {segmentation_result.get('reason', 'n/a')}"
             )
         elif seg_status == "fallback_to_traditional":
-            print("⚠️ Document segmentation failed, falling back to traditional processing")
+            print(
+                "⚠️ Document segmentation failed, falling back to traditional processing"
+            )
             print(
                 f"   Original error: {segmentation_result.get('original_error', 'n/a')}"
             )
@@ -2005,9 +2010,7 @@ async def execute_multi_agent_research_pipeline(
             "abort_reason": implementation_result.get("abort_reason"),
             "files_completed": implementation_result.get("files_completed", 0),
             "total_files": implementation_result.get("total_files", 0),
-            "unimplemented_files": implementation_result.get(
-                "unimplemented_files", []
-            )
+            "unimplemented_files": implementation_result.get("unimplemented_files", [])
             or [],
             "code_directory": implementation_result.get("code_directory"),
         }
@@ -2030,14 +2033,10 @@ async def execute_multi_agent_research_pipeline(
             )
             pipeline_status = "incomplete"
         elif impl_status == "warning":
-            pipeline_summary += (
-                f"\n⚠️ Code implementation: {implementation_result.get('message', 'see logs')}"
-            )
+            pipeline_summary += f"\n⚠️ Code implementation: {implementation_result.get('message', 'see logs')}"
             pipeline_status = "completed_with_warnings"
         else:
-            pipeline_summary += (
-                f"\n❌ Code implementation failed: {implementation_result.get('message', 'see logs')}"
-            )
+            pipeline_summary += f"\n❌ Code implementation failed: {implementation_result.get('message', 'see logs')}"
             pipeline_status = "error"
         _final_status = pipeline_status
         return {
@@ -2301,13 +2300,9 @@ The following implementation plan was generated by the AI chat planning agent:
                 f"\n📁 Partial code in: {implementation_result['code_directory']}"
             )
         elif impl_status == "warning":
-            pipeline_summary += (
-                f"\n⚠️ Code implementation: {implementation_result.get('message', 'see logs')}"
-            )
+            pipeline_summary += f"\n⚠️ Code implementation: {implementation_result.get('message', 'see logs')}"
         else:
-            pipeline_summary += (
-                f"\n❌ Code implementation failed: {implementation_result.get('message', 'see logs')}"
-            )
+            pipeline_summary += f"\n❌ Code implementation failed: {implementation_result.get('message', 'see logs')}"
         return pipeline_summary
 
     except PlanReviewCancelled:

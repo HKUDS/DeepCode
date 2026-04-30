@@ -163,7 +163,9 @@ class CodeImplementationWorkflow:
             inner_status = run_state.get("status", "unknown")
             done = inner_status == "completed"
             if done:
-                self.logger.info("Workflow execution successful (all files implemented)")
+                self.logger.info(
+                    "Workflow execution successful (all files implemented)"
+                )
                 top_status = "success"
             else:
                 # Surface the actual reason instead of silently lying about success.
@@ -543,7 +545,9 @@ Requirements:
                             if completed_first_time:
                                 print(f"✅ File completed: {filename}")
                                 if progress_callback:
-                                    progress_info = self.progress_tracker.get_progress_info()
+                                    progress_info = (
+                                        self.progress_tracker.get_progress_info()
+                                    )
                                     progress_callback(
                                         85,
                                         "Code implementation progress: "
@@ -731,6 +735,7 @@ Requirements:
                 "only routes through DeepCode's provider runtime."
             )
         try:
+
             async def on_retry_wait(message: str):
                 self.logger.warning("Implementation LLM retry: %s", message)
                 if progress_callback:

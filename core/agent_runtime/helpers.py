@@ -121,7 +121,9 @@ def _bucket_mtime(path: Path) -> float:
 
 
 def _cleanup_tool_result_buckets(root: Path, current_bucket: Path) -> None:
-    siblings = [path for path in root.iterdir() if path.is_dir() and path != current_bucket]
+    siblings = [
+        path for path in root.iterdir() if path.is_dir() and path != current_bucket
+    ]
     cutoff = time.time() - _TOOL_RESULT_RETENTION_SECS
     for path in siblings:
         if _bucket_mtime(path) < cutoff:
@@ -205,7 +207,9 @@ def build_assistant_message(
     if tool_calls:
         msg["tool_calls"] = tool_calls
     if reasoning_content is not None or thinking_blocks:
-        msg["reasoning_content"] = reasoning_content if reasoning_content is not None else ""
+        msg["reasoning_content"] = (
+            reasoning_content if reasoning_content is not None else ""
+        )
     if thinking_blocks:
         msg["thinking_blocks"] = thinking_blocks
     return msg

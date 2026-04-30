@@ -143,7 +143,9 @@ class MCPToolWrapper(Tool):
                 timeout=self._tool_timeout,
             )
         except asyncio.TimeoutError:
-            logger.warning("MCP tool '{}' timed out after {}s", self._name, self._tool_timeout)
+            logger.warning(
+                "MCP tool '{}' timed out after {}s", self._name, self._tool_timeout
+            )
             status = "error"
             error_msg = f"timeout after {self._tool_timeout}s"
             self._record_observability(server_name, kwargs, error_msg, status, started)
@@ -184,7 +186,7 @@ class MCPToolWrapper(Tool):
         prefix = "mcp_"
         if not wrapped.startswith(prefix):
             return wrapped
-        rest = wrapped[len(prefix):]
+        rest = wrapped[len(prefix) :]
         suffix = "_" + self._original_name
         if rest.endswith(suffix):
             return rest[: -len(suffix)] or wrapped
@@ -216,7 +218,9 @@ class MCPToolWrapper(Tool):
 class MCPResourceWrapper(Tool):
     """Wraps an MCP resource URI as a read-only Tool."""
 
-    def __init__(self, session, server_name: str, resource_def, resource_timeout: int = 300):
+    def __init__(
+        self, session, server_name: str, resource_def, resource_timeout: int = 300
+    ):
         self._session = session
         self._uri = resource_def.uri
         self._name = f"mcp_{server_name}_resource_{resource_def.name}"
@@ -255,7 +259,9 @@ class MCPResourceWrapper(Tool):
             )
         except asyncio.TimeoutError:
             logger.warning(
-                "MCP resource '{}' timed out after {}s", self._name, self._resource_timeout
+                "MCP resource '{}' timed out after {}s",
+                self._name,
+                self._resource_timeout,
             )
             return f"(MCP resource read timed out after {self._resource_timeout}s)"
         except asyncio.CancelledError:
@@ -287,7 +293,9 @@ class MCPResourceWrapper(Tool):
 class MCPPromptWrapper(Tool):
     """Wraps an MCP prompt as a read-only Tool."""
 
-    def __init__(self, session, server_name: str, prompt_def, prompt_timeout: int = 300):
+    def __init__(
+        self, session, server_name: str, prompt_def, prompt_timeout: int = 300
+    ):
         self._session = session
         self._prompt_name = prompt_def.name
         self._name = f"mcp_{server_name}_prompt_{prompt_def.name}"
@@ -339,7 +347,9 @@ class MCPPromptWrapper(Tool):
                 timeout=self._prompt_timeout,
             )
         except asyncio.TimeoutError:
-            logger.warning("MCP prompt '{}' timed out after {}s", self._name, self._prompt_timeout)
+            logger.warning(
+                "MCP prompt '{}' timed out after {}s", self._name, self._prompt_timeout
+            )
             return f"(MCP prompt call timed out after {self._prompt_timeout}s)"
         except asyncio.CancelledError:
             task = asyncio.current_task()
@@ -354,7 +364,9 @@ class MCPPromptWrapper(Tool):
                 exc.error.code,
                 exc.error.message,
             )
-            return f"(MCP prompt call failed: {exc.error.message} [code {exc.error.code}])"
+            return (
+                f"(MCP prompt call failed: {exc.error.message} [code {exc.error.code}])"
+            )
         except Exception as exc:
             logger.exception(
                 "MCP prompt '{}' failed: {}: {}",
@@ -427,7 +439,9 @@ async def connect_mcp_servers(
     from mcp.client.stdio import stdio_client
 
     try:
-        from mcp.client.streamable_http import streamablehttp_client as streamable_http_client
+        from mcp.client.streamable_http import (
+            streamablehttp_client as streamable_http_client,
+        )
     except ImportError:  # pragma: no cover - some mcp versions use the snake_case name
         from mcp.client.streamable_http import streamable_http_client  # type: ignore[no-redef]
 
@@ -444,10 +458,14 @@ async def connect_mcp_servers(
                     transport_type = "stdio"
                 elif cfg.url:
                     transport_type = (
-                        "sse" if cfg.url.rstrip("/").endswith("/sse") else "streamableHttp"
+                        "sse"
+                        if cfg.url.rstrip("/").endswith("/sse")
+                        else "streamableHttp"
                     )
                 else:
-                    logger.warning("MCP server '{}': no command or url configured, skipping", name)
+                    logger.warning(
+                        "MCP server '{}': no command or url configured, skipping", name
+                    )
                     await server_stack.aclose()
                     return name, None
 
@@ -472,7 +490,9 @@ async def connect_mcp_servers(
                         stdio_client(params, errlog=errlog)
                     )
                 else:
-                    read, write = await server_stack.enter_async_context(stdio_client(params))
+                    read, write = await server_stack.enter_async_context(
+                        stdio_client(params)
+                    )
             elif transport_type == "sse":
 
                 def httpx_client_factory(
@@ -507,7 +527,9 @@ async def connect_mcp_servers(
                     streamable_http_client(cfg.url, http_client=http_client)
                 )
             else:
-                logger.warning("MCP server '{}': unknown transport type '{}'", name, transport_type)
+                logger.warning(
+                    "MCP server '{}': unknown transport type '{}'", name, transport_type
+                )
                 await server_stack.aclose()
                 return name, None
 
@@ -520,7 +542,9 @@ async def connect_mcp_servers(
             registered_count = 0
             matched_enabled_tools: set[str] = set()
             available_raw_names = [tool_def.name for tool_def in tools.tools]
-            available_wrapped_names = [f"mcp_{name}_{tool_def.name}" for tool_def in tools.tools]
+            available_wrapped_names = [
+                f"mcp_{name}_{tool_def.name}" for tool_def in tools.tools
+            ]
             for tool_def in tools.tools:
                 wrapped_name = f"mcp_{name}_{tool_def.name}"
                 if (
@@ -534,9 +558,13 @@ async def connect_mcp_servers(
                         name,
                     )
                     continue
-                wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=cfg.tool_timeout)
+                wrapper = MCPToolWrapper(
+                    session, name, tool_def, tool_timeout=cfg.tool_timeout
+                )
                 registry.register(wrapper)
-                logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
+                logger.debug(
+                    "MCP: registered tool '{}' from server '{}'", wrapper.name, name
+                )
                 registered_count += 1
                 if enabled_tools:
                     if tool_def.name in enabled_tools:
@@ -565,10 +593,14 @@ async def connect_mcp_servers(
                     registry.register(wrapper)
                     registered_count += 1
                     logger.debug(
-                        "MCP: registered resource '{}' from server '{}'", wrapper.name, name
+                        "MCP: registered resource '{}' from server '{}'",
+                        wrapper.name,
+                        name,
                     )
             except Exception as e:
-                logger.debug("MCP server '{}': resources not supported or failed: {}", name, e)
+                logger.debug(
+                    "MCP server '{}': resources not supported or failed: {}", name, e
+                )
 
             try:
                 prompts_result = await session.list_prompts()
@@ -578,12 +610,20 @@ async def connect_mcp_servers(
                     )
                     registry.register(wrapper)
                     registered_count += 1
-                    logger.debug("MCP: registered prompt '{}' from server '{}'", wrapper.name, name)
+                    logger.debug(
+                        "MCP: registered prompt '{}' from server '{}'",
+                        wrapper.name,
+                        name,
+                    )
             except Exception as e:
-                logger.debug("MCP server '{}': prompts not supported or failed: {}", name, e)
+                logger.debug(
+                    "MCP server '{}': prompts not supported or failed: {}", name, e
+                )
 
             logger.info(
-                "MCP server '{}': connected, {} capabilities registered", name, registered_count
+                "MCP server '{}': connected, {} capabilities registered",
+                name,
+                registered_count,
             )
             return name, server_stack
 

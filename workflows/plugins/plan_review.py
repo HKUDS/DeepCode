@@ -179,9 +179,7 @@ class PlanReviewPlugin(InteractionPlugin):
 
         elif action in {"replace", "edit"}:
             replacement = (
-                response.data.get("plan")
-                or response.data.get("replacement_plan")
-                or ""
+                response.data.get("plan") or response.data.get("replacement_plan") or ""
             )
             replacement = str(replacement).strip()
             validation = validate_plan_text(replacement)

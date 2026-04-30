@@ -61,7 +61,9 @@ def external_lookup_signature(tool_name: str, arguments: dict[str, Any]) -> str 
         if url:
             return f"web_fetch:{url.lower()}"
     if tool_name == "web_search":
-        query = str(arguments.get("query") or arguments.get("search_term") or "").strip()
+        query = str(
+            arguments.get("query") or arguments.get("search_term") or ""
+        ).strip()
         if query:
             return f"web_search:{query.lower()}"
     return None

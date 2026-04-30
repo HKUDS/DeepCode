@@ -301,8 +301,7 @@ class CLIInterface:
             f"({len(summaries)} total){Colors.ENDC}"
         )
         header = (
-            f"  {'#':<3} {'ID':<10} {'Updated':<26} "
-            f"{'Tasks':<6} {'Msgs':<6} Title"
+            f"  {'#':<3} {'ID':<10} {'Updated':<26} " f"{'Tasks':<6} {'Msgs':<6} Title"
         )
         print(f"{Colors.BOLD}{header}{Colors.ENDC}")
         print("  " + "-" * (len(header) - 2))

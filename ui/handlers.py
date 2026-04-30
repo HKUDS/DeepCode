@@ -130,7 +130,6 @@ async def process_input_async(
 
         async with app.run() as agent_app:
             logger = agent_app.logger
-            context = agent_app.context
             # NOTE: filesystem MCP allowed-dirs are now managed by
             # workflows.environment.prepare_workflow_environment(). Do not
             # patch context.config.mcp.servers["filesystem"].args here.

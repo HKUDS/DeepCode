@@ -133,7 +133,9 @@ async def task_logs_websocket(
         return
 
     channels = (
-        [channel] if channel and channel in _DEFAULT_CHANNELS else list(_DEFAULT_CHANNELS)
+        [channel]
+        if channel and channel in _DEFAULT_CHANNELS
+        else list(_DEFAULT_CHANNELS)
     )
     sources = [(_channel_path(target, c), c) for c in channels]
     await _multiplex(websocket, sources)

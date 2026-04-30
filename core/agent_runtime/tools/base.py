@@ -31,9 +31,13 @@ class Schema(ABC):
         return f"{path}.{key}" if path else key
 
     @staticmethod
-    def validate_json_schema_value(val: Any, schema: dict[str, Any], path: str = "") -> list[str]:
+    def validate_json_schema_value(
+        val: Any, schema: dict[str, Any], path: str = ""
+    ) -> list[str]:
         raw_type = schema.get("type")
-        nullable = (isinstance(raw_type, list) and "null" in raw_type) or schema.get("nullable", False)
+        nullable = (isinstance(raw_type, list) and "null" in raw_type) or schema.get(
+            "nullable", False
+        )
         t = Schema.resolve_json_schema_type(raw_type)
         label = path or "parameter"
 
@@ -45,7 +49,11 @@ class Schema(ABC):
             not isinstance(val, _JSON_TYPE_MAP["number"]) or isinstance(val, bool)
         ):
             return [f"{label} should be number"]
-        if t in _JSON_TYPE_MAP and t not in ("integer", "number") and not isinstance(val, _JSON_TYPE_MAP[t]):
+        if (
+            t in _JSON_TYPE_MAP
+            and t not in ("integer", "number")
+            and not isinstance(val, _JSON_TYPE_MAP[t])
+        ):
             return [f"{label} should be {t}"]
 
         errors: list[str] = []
@@ -68,7 +76,11 @@ class Schema(ABC):
                     errors.append(f"missing required {Schema.subpath(path, k)}")
             for k, v in val.items():
                 if k in props:
-                    errors.extend(Schema.validate_json_schema_value(v, props[k], Schema.subpath(path, k)))
+                    errors.extend(
+                        Schema.validate_json_schema_value(
+                            v, props[k], Schema.subpath(path, k)
+                        )
+                    )
         if t == "array":
             if "minItems" in schema and len(val) < schema["minItems"]:
                 errors.append(f"{label} must have at least {schema['minItems']} items")
@@ -78,7 +90,9 @@ class Schema(ABC):
                 prefix = f"{path}[{{}}]" if path else "[{}]"
                 for i, item in enumerate(val):
                     errors.extend(
-                        Schema.validate_json_schema_value(item, schema["items"], prefix.format(i))
+                        Schema.validate_json_schema_value(
+                            item, schema["items"], prefix.format(i)
+                        )
                     )
         return errors
 
@@ -92,8 +106,7 @@ class Schema(ABC):
         raise TypeError(f"Expected schema object or dict, got {type(value).__name__}")
 
     @abstractmethod
-    def to_json_schema(self) -> dict[str, Any]:
-        ...
+    def to_json_schema(self) -> dict[str, Any]: ...
 
     def validate_value(self, value: Any, path: str = "") -> list[str]:
         return Schema.validate_json_schema_value(value, self.to_json_schema(), path)
@@ -119,18 +132,15 @@ class Tool(ABC):
 
     @property
     @abstractmethod
-    def name(self) -> str:
-        ...
+    def name(self) -> str: ...
 
     @property
     @abstractmethod
-    def description(self) -> str:
-        ...
+    def description(self) -> str: ...
 
     @property
     @abstractmethod
-    def parameters(self) -> dict[str, Any]:
-        ...
+    def parameters(self) -> dict[str, Any]: ...
 
     @property
     def read_only(self) -> bool:
@@ -145,14 +155,16 @@ class Tool(ABC):
         return False
 
     @abstractmethod
-    async def execute(self, **kwargs: Any) -> Any:
-        ...
+    async def execute(self, **kwargs: Any) -> Any: ...
 
     def _cast_object(self, obj: Any, schema: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(obj, dict):
             return obj
         props = schema.get("properties", {})
-        return {k: self._cast_value(v, props[k]) if k in props else v for k, v in obj.items()}
+        return {
+            k: self._cast_value(v, props[k]) if k in props else v
+            for k, v in obj.items()
+        }
 
     def cast_params(self, params: dict[str, Any]) -> dict[str, Any]:
         schema = self.parameters or {}
@@ -204,7 +216,9 @@ class Tool(ABC):
         schema = self.parameters or {}
         if schema.get("type", "object") != "object":
             raise ValueError(f"Schema must be object type, got {schema.get('type')!r}")
-        return Schema.validate_json_schema_value(params, {**schema, "type": "object"}, "")
+        return Schema.validate_json_schema_value(
+            params, {**schema, "type": "object"}, ""
+        )
 
     def to_schema(self) -> dict[str, Any]:
         return {

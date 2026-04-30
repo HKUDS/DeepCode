@@ -66,9 +66,7 @@ async def _close_registry_quietly(registry: ToolRegistry, agent_name: str) -> No
             agent_name,
         )
     except BaseException as exc:  # noqa: BLE001 - log and swallow
-        logger.warning(
-            "Agent '{}' tool registry close error: {}", agent_name, exc
-        )
+        logger.warning("Agent '{}' tool registry close error: {}", agent_name, exc)
 
     current = asyncio.current_task()
     if current is not None:
@@ -195,7 +193,7 @@ def _apply_tool_filter(
             if not allowed:
                 kept = True
             else:
-                bare = tool_name[len(prefix):]
+                bare = tool_name[len(prefix) :]
                 if bare in allowed or tool_name in allowed:
                     kept = True
             break
@@ -473,9 +471,7 @@ class Agent:
         try:
             await self._tool_registry.aclose()
         except BaseException as exc:  # noqa: BLE001 - log and swallow
-            logger.warning(
-                "Agent '{}' MCP supervisor close error: {}", self.name, exc
-            )
+            logger.warning("Agent '{}' MCP supervisor close error: {}", self.name, exc)
 
     async def _connect_servers(self) -> None:
         if self._connected:
@@ -545,7 +541,11 @@ class Agent:
         self._runtime = runtime
 
         resolved_provider_name = provider_name
-        if resolved_provider_name is None and llm_class is not None and getattr(llm_class, "PROVIDER_NAME", None):
+        if (
+            resolved_provider_name is None
+            and llm_class is not None
+            and getattr(llm_class, "PROVIDER_NAME", None)
+        ):
             resolved_provider_name = llm_class.PROVIDER_NAME
 
         provider = runtime.provider_for(
@@ -553,7 +553,11 @@ class Agent:
             phase=phase,
             model=model,
         )
-        cls = llm_class if isinstance(llm_class, type) and issubclass(llm_class, AugmentedLLM) else AugmentedLLM
+        cls = (
+            llm_class
+            if isinstance(llm_class, type) and issubclass(llm_class, AugmentedLLM)
+            else AugmentedLLM
+        )
         effective_provider = (
             resolved_provider_name
             or runtime.config.get_provider_name(model)
@@ -571,7 +575,9 @@ class Agent:
         """Return a ``{"tools": [...]}`` mapping mirroring the legacy interface."""
         return {"tools": list(self._tool_registry.get_definitions())}
 
-    async def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
+    async def call_tool(
+        self, name: str, arguments: dict[str, Any] | None = None
+    ) -> Any:
         """Invoke a registered tool by name.
 
         ``name`` may be the bare tool name (e.g. ``"read_file"``) or the

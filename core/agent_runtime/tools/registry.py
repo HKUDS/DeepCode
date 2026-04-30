@@ -70,23 +70,33 @@ class ToolRegistry:
         name: str,
         params: dict[str, Any],
     ) -> tuple[Tool | None, dict[str, Any], str | None]:
-        if not isinstance(params, dict) and name in ('write_file', 'read_file'):
-            return None, params, (
-                f"Error: Tool '{name}' parameters must be a JSON object, got {type(params).__name__}. "
-                "Use named parameters: tool_name(param1=\"value1\", param2=\"value2\")"
+        if not isinstance(params, dict) and name in ("write_file", "read_file"):
+            return (
+                None,
+                params,
+                (
+                    f"Error: Tool '{name}' parameters must be a JSON object, got {type(params).__name__}. "
+                    'Use named parameters: tool_name(param1="value1", param2="value2")'
+                ),
             )
 
         tool = self._tools.get(name)
         if not tool:
-            return None, params, (
-                f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"
+            return (
+                None,
+                params,
+                (
+                    f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"
+                ),
             )
 
         cast_params = tool.cast_params(params)
         errors = tool.validate_params(cast_params)
         if errors:
-            return tool, cast_params, (
-                f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors)
+            return (
+                tool,
+                cast_params,
+                (f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors)),
             )
         return tool, cast_params, None
 
@@ -135,7 +145,7 @@ class ToolRegistry:
         for name, stack in list(self._owned_server_stacks.items()):
             try:
                 await asyncio.wait_for(stack.aclose(), timeout=timeout_s)
-            except asyncio.TimeoutError as exc:
+            except asyncio.TimeoutError:
                 errors.append(
                     TimeoutError(
                         f"MCP server '{name}' close timed out after {timeout_s:g}s"
@@ -147,9 +157,11 @@ class ToolRegistry:
                 self._owned_server_stacks.pop(name, None)
         try:
             await asyncio.wait_for(self._exit_stack.aclose(), timeout=timeout_s)
-        except asyncio.TimeoutError as exc:
+        except asyncio.TimeoutError:
             errors.append(
-                TimeoutError(f"ToolRegistry exit stack close timed out after {timeout_s:g}s")
+                TimeoutError(
+                    f"ToolRegistry exit stack close timed out after {timeout_s:g}s"
+                )
             )
         except BaseException as exc:  # noqa: BLE001
             errors.append(exc)
@@ -157,6 +169,7 @@ class ToolRegistry:
         self._cached_definitions = None
         if errors:
             from loguru import logger
+
             for exc in errors:
                 # MCP stdio_client uses anyio cancel scopes that are isolated
                 # to the supervisor task (see core/compat/agent.py). When that
@@ -169,9 +182,7 @@ class ToolRegistry:
                         "ToolRegistry.aclose: benign anyio teardown noise: {}", exc
                     )
                 else:
-                    logger.warning(
-                        "ToolRegistry.aclose: error draining stack: {}", exc
-                    )
+                    logger.warning("ToolRegistry.aclose: error draining stack: {}", exc)
 
 
 def _is_benign_cancel_teardown(exc: BaseException) -> bool:
@@ -183,6 +194,7 @@ def _is_benign_cancel_teardown(exc: BaseException) -> bool:
     The caller pipeline is unaffected, so we don't want WARNING noise.
     """
     import asyncio
+
     if isinstance(exc, asyncio.CancelledError):
         return True
     msg = str(exc).lower()

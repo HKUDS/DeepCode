@@ -128,7 +128,9 @@ def _fetch_live_models(
     except (OSError, urllib.error.URLError, json.JSONDecodeError):
         return None
 
-    models = [_normalize_model(item, source="openrouter") for item in payload.get("data", [])]
+    models = [
+        _normalize_model(item, source="openrouter") for item in payload.get("data", [])
+    ]
     return {
         "models": sorted(models, key=lambda item: item["id"]),
         "source": "openrouter",
@@ -178,9 +180,7 @@ def _filter_response(
     supported_parameters: str | None = None,
 ) -> dict[str, Any]:
     required = {
-        item.strip()
-        for item in (supported_parameters or "").split(",")
-        if item.strip()
+        item.strip() for item in (supported_parameters or "").split(",") if item.strip()
     }
     if not required:
         return payload

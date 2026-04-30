@@ -30,7 +30,7 @@ async def iter_sse(response: httpx.Response) -> AsyncGenerator[dict[str, Any], N
     buffer: list[str] = []
 
     def _flush() -> dict[str, Any] | None:
-        data_lines = [l[5:].strip() for l in buffer if l.startswith("data:")]
+        data_lines = [line[5:].strip() for line in buffer if line.startswith("data:")]
         buffer.clear()
         if not data_lines:
             return None
@@ -174,14 +174,20 @@ def parse_response_output(response: Any) -> LLMResponse:
                     item.get("name"),
                     str(args_raw)[:200],
                 )
-                args = json_repair.loads(args_raw) if isinstance(args_raw, str) else args_raw
+                args = (
+                    json_repair.loads(args_raw)
+                    if isinstance(args_raw, str)
+                    else args_raw
+                )
                 if not isinstance(args, dict):
                     args = {"raw": args_raw}
-            tool_calls.append(ToolCallRequest(
-                id=f"{call_id}|{item_id}",
-                name=item.get("name") or "",
-                arguments=args if isinstance(args, dict) else {},
-            ))
+            tool_calls.append(
+                ToolCallRequest(
+                    id=f"{call_id}|{item_id}",
+                    name=item.get("name") or "",
+                    arguments=args if isinstance(args, dict) else {},
+                )
+            )
 
     usage_raw = response.get("usage") or {}
     if not isinstance(usage_raw, dict):
@@ -203,7 +209,9 @@ def parse_response_output(response: Any) -> LLMResponse:
         tool_calls=tool_calls,
         finish_reason=finish_reason,
         usage=usage,
-        reasoning_content=reasoning_content if isinstance(reasoning_content, str) else None,
+        reasoning_content=reasoning_content
+        if isinstance(reasoning_content, str)
+        else None,
     )
 
 
@@ -240,11 +248,15 @@ async def consume_sdk_stream(
         elif event_type == "response.function_call_arguments.delta":
             call_id = getattr(event, "call_id", None)
             if call_id and call_id in tool_call_buffers:
-                tool_call_buffers[call_id]["arguments"] += getattr(event, "delta", "") or ""
+                tool_call_buffers[call_id]["arguments"] += (
+                    getattr(event, "delta", "") or ""
+                )
         elif event_type == "response.function_call_arguments.done":
             call_id = getattr(event, "call_id", None)
             if call_id and call_id in tool_call_buffers:
-                tool_call_buffers[call_id]["arguments"] = getattr(event, "arguments", "") or ""
+                tool_call_buffers[call_id]["arguments"] = (
+                    getattr(event, "arguments", "") or ""
+                )
         elif event_type == "response.output_item.done":
             item = getattr(event, "item", None)
             if item and getattr(item, "type", None) == "function_call":
@@ -252,7 +264,9 @@ async def consume_sdk_stream(
                 if not call_id:
                     continue
                 buf = tool_call_buffers.get(call_id) or {}
-                args_raw = buf.get("arguments") or getattr(item, "arguments", None) or "{}"
+                args_raw = (
+                    buf.get("arguments") or getattr(item, "arguments", None) or "{}"
+                )
                 try:
                     args = json.loads(args_raw)
                 except Exception:
@@ -279,8 +293,12 @@ async def consume_sdk_stream(
                 usage_obj = getattr(resp, "usage", None)
                 if usage_obj:
                     usage = {
-                        "prompt_tokens": int(getattr(usage_obj, "input_tokens", 0) or 0),
-                        "completion_tokens": int(getattr(usage_obj, "output_tokens", 0) or 0),
+                        "prompt_tokens": int(
+                            getattr(usage_obj, "input_tokens", 0) or 0
+                        ),
+                        "completion_tokens": int(
+                            getattr(usage_obj, "output_tokens", 0) or 0
+                        ),
                         "total_tokens": int(getattr(usage_obj, "total_tokens", 0) or 0),
                     }
                 for out_item in getattr(resp, "output", None) or []:
@@ -291,7 +309,11 @@ async def consume_sdk_stream(
                                 if text:
                                     reasoning_content = (reasoning_content or "") + text
         elif event_type in {"error", "response.failed"}:
-            detail = getattr(event, "error", None) or getattr(event, "message", None) or event
+            detail = (
+                getattr(event, "error", None)
+                or getattr(event, "message", None)
+                or event
+            )
             raise RuntimeError(f"Response failed: {str(detail)[:500]}")
 
     return content, tool_calls, finish_reason, usage, reasoning_content

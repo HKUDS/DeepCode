@@ -2048,6 +2048,7 @@ Write_file can be used to implement the new component
         Returns:
             Dictionary with 'implemented' and 'unimplemented' formatted lists
         """
+
         def format_preview(files: List[str], empty_text: str) -> str:
             if not files:
                 return empty_text

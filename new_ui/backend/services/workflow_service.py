@@ -397,7 +397,7 @@ class WorkflowService:
                     "type": "error",
                     "task_id": task_id,
                     "error": str(e),
-                        "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.utcnow().isoformat(),
                 },
             )
 
@@ -578,7 +578,7 @@ class WorkflowService:
                     "type": "error",
                     "task_id": task_id,
                     "error": str(e),
-                        "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.utcnow().isoformat(),
                 },
             )
 

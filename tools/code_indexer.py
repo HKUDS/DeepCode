@@ -350,7 +350,9 @@ class CodeIndexer:
                     retry_mode="persistent",
                 )
                 if response.finish_reason == "error":
-                    raise RuntimeError(response.content or "LLM provider returned an error")
+                    raise RuntimeError(
+                        response.content or "LLM provider returned an error"
+                    )
 
                 content = response.content or ""
                 if self.save_raw_responses:
@@ -1429,7 +1431,9 @@ async def main():
         # Display configuration information
         print(f"📁 Code base path: {indexer.code_base_path}")
         print(f"📂 Output directory: {indexer.output_dir}")
-        print(f"🤖 Default model (resolved from runtime): {indexer.default_models['openai']}")
+        print(
+            f"🤖 Default model (resolved from runtime): {indexer.default_models['openai']}"
+        )
         print(
             f"⚡ Concurrent analysis: {'enabled' if indexer.enable_concurrent_analysis else 'disabled'}"
         )

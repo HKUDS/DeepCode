@@ -291,7 +291,9 @@ def _serialize_record(record: dict[str, Any]) -> dict[str, Any]:
     """
     extra = record.get("extra", {}) or {}
     payload: dict[str, Any] = {
-        "timestamp": record["time"].isoformat() if record.get("time") else datetime.utcnow().isoformat(),
+        "timestamp": record["time"].isoformat()
+        if record.get("time")
+        else datetime.utcnow().isoformat(),
         "level": record["level"].name if record.get("level") else "INFO",
         "logger": record.get("name") or "",
         "function": record.get("function") or "",
@@ -328,7 +330,9 @@ def _make_global_sink(global_dir: str):
         if record is None:
             return
         ts = record.get("time")
-        date_segment = ts.strftime("%Y%m%d") if ts else datetime.utcnow().strftime("%Y%m%d")
+        date_segment = (
+            ts.strftime("%Y%m%d") if ts else datetime.utcnow().strftime("%Y%m%d")
+        )
         path = Path(global_dir) / f"server-{date_segment}.jsonl"
         payload = _serialize_record(record)
         _write_jsonl(path, json.dumps(payload, ensure_ascii=False, default=str))

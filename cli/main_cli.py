@@ -303,7 +303,9 @@ def handle_session_command(args):
     if sub == "show":
         target = args.session_arg or args.session
         if not target:
-            print(f"{Colors.FAIL}Usage: deepcode session show <session_id>{Colors.ENDC}")
+            print(
+                f"{Colors.FAIL}Usage: deepcode session show <session_id>{Colors.ENDC}"
+            )
             return 1
         session = store.get_session(target)
         if session is None:
@@ -315,7 +317,9 @@ def handle_session_command(args):
     if sub == "resume":
         target = args.session_arg or args.session
         if not target:
-            print(f"{Colors.FAIL}Usage: deepcode session resume <session_id>{Colors.ENDC}")
+            print(
+                f"{Colors.FAIL}Usage: deepcode session resume <session_id>{Colors.ENDC}"
+            )
             return 1
         session = store.get_session(target)
         if session is None:
@@ -338,7 +342,9 @@ def handle_session_command(args):
     if sub == "delete":
         target = args.session_arg
         if not target:
-            print(f"{Colors.FAIL}Usage: deepcode session delete <session_id>{Colors.ENDC}")
+            print(
+                f"{Colors.FAIL}Usage: deepcode session delete <session_id>{Colors.ENDC}"
+            )
             return 1
         if store.delete_session(target):
             print(f"{Colors.OKGREEN}Deleted session {target}{Colors.ENDC}")

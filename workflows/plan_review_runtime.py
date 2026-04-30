@@ -79,7 +79,9 @@ def save_plan_version(
     paths = plan_review_paths(paper_dir)
     versions_dir = paths["versions_dir"]
     versions_dir.mkdir(parents=True, exist_ok=True)
-    safe_label = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in label)
+    safe_label = "".join(
+        ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in label
+    )
     target = versions_dir / f"initial_plan.v{version:02d}.{safe_label}.txt"
     target.write_text(plan_text, encoding="utf-8")
     return target

@@ -156,7 +156,9 @@ class CodeImplementationWorkflowWithIndex:
             inner_status = run_state.get("status", "unknown")
             done = inner_status == "completed"
             if done:
-                self.logger.info("Workflow execution successful (all files implemented)")
+                self.logger.info(
+                    "Workflow execution successful (all files implemented)"
+                )
                 top_status = "success"
             else:
                 pending = run_state.get("unimplemented_files", []) or []
@@ -454,9 +456,8 @@ Requirements:
 
                 # Record essential tool results in concise memory agent
                 for tool_call, tool_result in zip(response["tool_calls"], tool_results):
-                    if (
-                        tool_call["name"] == "write_file"
-                        and not tool_result.get("isError", False)
+                    if tool_call["name"] == "write_file" and not tool_result.get(
+                        "isError", False
                     ):
                         filename = tool_call["input"].get("file_path", "unknown")
                         completed_first_time = self.progress_tracker.complete_file(
@@ -644,6 +645,7 @@ Requirements:
                 "only routes through DeepCode's provider runtime."
             )
         try:
+
             async def on_retry_wait(message: str):
                 self.logger.warning("Implementation LLM retry: %s", message)
                 if progress_callback:

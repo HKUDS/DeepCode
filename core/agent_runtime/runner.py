@@ -123,7 +123,9 @@ class AgentRunner:
         def _to_blocks(value: Any) -> list[dict[str, Any]]:
             if isinstance(value, list):
                 return [
-                    item if isinstance(item, dict) else {"type": "text", "text": str(item)}
+                    item
+                    if isinstance(item, dict)
+                    else {"type": "text", "text": str(item)}
                     for item in value
                 ]
             if value is None:
@@ -213,7 +215,11 @@ class AgentRunner:
             return []
         injected_messages: list[dict[str, Any]] = []
         for item in items:
-            if isinstance(item, dict) and item.get("role") == "user" and "content" in item:
+            if (
+                isinstance(item, dict)
+                and item.get("role") == "user"
+                and "content" in item
+            ):
                 injected_messages.append(item)
                 continue
             text = getattr(item, "content", str(item))
@@ -248,12 +254,18 @@ class AgentRunner:
         for iteration in range(spec.max_iterations):
             try:
                 messages_for_model = self._drop_orphan_tool_results(messages)
-                messages_for_model = self._backfill_missing_tool_results(messages_for_model)
+                messages_for_model = self._backfill_missing_tool_results(
+                    messages_for_model
+                )
                 messages_for_model = self._microcompact(messages_for_model)
-                messages_for_model = self._apply_tool_result_budget(spec, messages_for_model)
+                messages_for_model = self._apply_tool_result_budget(
+                    spec, messages_for_model
+                )
                 messages_for_model = self._snip_history(spec, messages_for_model)
                 messages_for_model = self._drop_orphan_tool_results(messages_for_model)
-                messages_for_model = self._backfill_missing_tool_results(messages_for_model)
+                messages_for_model = self._backfill_missing_tool_results(
+                    messages_for_model
+                )
             except Exception as exc:
                 logger.warning(
                     "Context governance failed on turn {} for {}: {}; applying minimal repair",
@@ -263,12 +275,16 @@ class AgentRunner:
                 )
                 try:
                     messages_for_model = self._drop_orphan_tool_results(messages)
-                    messages_for_model = self._backfill_missing_tool_results(messages_for_model)
+                    messages_for_model = self._backfill_missing_tool_results(
+                        messages_for_model
+                    )
                 except Exception:
                     messages_for_model = messages
             context = AgentHookContext(iteration=iteration, messages=messages)
             await hook.before_iteration(context)
-            response = await self._request_model(spec, messages_for_model, hook, context)
+            response = await self._request_model(
+                spec, messages_for_model, hook, context
+            )
             raw_usage = self._usage_dict(response.usage)
             context.response = response
             context.usage = dict(raw_usage)
@@ -335,7 +351,10 @@ class AgentRunner:
                     context.error = error
                     context.stop_reason = stop_reason
                     await hook.after_iteration(context)
-                    should_continue, injection_cycles = await self._try_drain_injections(
+                    (
+                        should_continue,
+                        injection_cycles,
+                    ) = await self._try_drain_injections(
                         spec,
                         messages,
                         None,
@@ -401,7 +420,9 @@ class AgentRunner:
                 )
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=False)
-                response = await self._request_finalization_retry(spec, messages_for_model)
+                response = await self._request_finalization_retry(
+                    spec, messages_for_model
+                )
                 retry_usage = self._usage_dict(response.usage)
                 self._accumulate_usage(usage, retry_usage)
                 raw_usage = self._merge_usage(raw_usage, retry_usage)
@@ -529,7 +550,10 @@ class AgentRunner:
             template = spec.max_iterations_message or _DEFAULT_MAX_ITERATIONS_MESSAGE
             final_content = template.format(max_iterations=spec.max_iterations)
             self._append_final_message(messages, final_content)
-            drained_after_max_iterations, injection_cycles = await self._try_drain_injections(
+            (
+                drained_after_max_iterations,
+                injection_cycles,
+            ) = await self._try_drain_injections(
                 spec,
                 messages,
                 None,
@@ -775,7 +799,9 @@ class AgentRunner:
             await callback(payload)
 
     @staticmethod
-    def _append_final_message(messages: list[dict[str, Any]], content: str | None) -> None:
+    def _append_final_message(
+        messages: list[dict[str, Any]], content: str | None
+    ) -> None:
         if not content:
             return
         if (
@@ -873,7 +899,9 @@ class AgentRunner:
                 if tid:
                     fulfilled.add(str(tid))
 
-        missing = [(ai, cid, name) for ai, cid, name in declared if cid not in fulfilled]
+        missing = [
+            (ai, cid, name) for ai, cid, name in declared if cid not in fulfilled
+        ]
         if not missing:
             return messages
 
@@ -905,7 +933,9 @@ class AgentRunner:
         if len(compactable_indices) <= _MICROCOMPACT_KEEP_RECENT:
             return messages
 
-        stale = compactable_indices[: len(compactable_indices) - _MICROCOMPACT_KEEP_RECENT]
+        stale = compactable_indices[
+            : len(compactable_indices) - _MICROCOMPACT_KEEP_RECENT
+        ]
         updated: list[dict[str, Any]] | None = None
         for idx in stale:
             msg = messages[idx]
@@ -949,7 +979,9 @@ class AgentRunner:
         if not messages or not spec.context_window_tokens:
             return messages
 
-        provider_max_tokens = getattr(getattr(self.provider, "generation", None), "max_tokens", 4096)
+        provider_max_tokens = getattr(
+            getattr(self.provider, "generation", None), "max_tokens", 4096
+        )
         max_output = (
             spec.max_tokens
             if isinstance(spec.max_tokens, int)
