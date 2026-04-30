@@ -7,8 +7,8 @@ Features:
 
 MCP Architecture:
 - MCP Server: tools/code_implementation_server.py
-- MCP Client: Called through mcp_agent framework
-- Configuration: mcp_agent.config.yaml
+- MCP Client: Called through DeepCode's compat layer over MCP stdio
+- Configuration: deepcode_config.json (single source of truth)
 """
 
 import asyncio
@@ -18,12 +18,11 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Callable
 
-# MCP Agent imports
-from mcp_agent.agents.agent import Agent
+from core.compat import Agent
+from core.llm_runtime import attach_workflow_llm, get_workflow_provider
 
-# Local imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from prompts.code_prompts import STRUCTURE_GENERATOR_PROMPT
 from prompts.code_prompts import (
@@ -31,10 +30,10 @@ from prompts.code_prompts import (
 )
 from workflows.agents import CodeImplementationAgent
 from workflows.agents.memory_agent_concise import ConciseMemoryAgent
+from workflows.implementation_llm_runtime import call_provider_with_legacy_tools
 from config.mcp_tool_definitions_index import get_mcp_tools
-from utils.llm_utils import get_preferred_llm_class, get_default_models, load_api_config
+from utils.llm_utils import get_default_models
 from utils.loop_detector import LoopDetector, ProgressTracker
-# DialogueLogger removed - no longer needed
 
 
 class CodeImplementationWorkflowWithIndex:
@@ -50,28 +49,27 @@ class CodeImplementationWorkflowWithIndex:
 
     # ==================== 1. Class Initialization and Configuration (Infrastructure Layer) ====================
 
-    def __init__(self, config_path: str = "mcp_agent.secrets.yaml"):
-        """Initialize workflow with configuration"""
-        self.config_path = config_path
-        # Derive main config path from secrets path (same directory)
-        secrets_dir = os.path.dirname(os.path.abspath(config_path))
-        self.main_config_path = os.path.join(secrets_dir, "mcp_agent.config.yaml")
-        self.api_config = self._load_api_config()
-        self.default_models = get_default_models(self.main_config_path)
+    def __init__(self) -> None:
+        """Initialize workflow.
+
+        Reads configuration from the process-wide DeepCode runtime backed by
+        ``deepcode_config.json``.
+        """
+        self.default_models = get_default_models()
         self.logger = self._create_logger()
         self.mcp_agent = None
-        self.enable_read_tools = (
-            True  # Default value, will be overridden by run_workflow parameter
-        )
+        self.enable_read_tools = True
         self.loop_detector = LoopDetector()
         self.progress_tracker = ProgressTracker()
-
-    def _load_api_config(self) -> Dict[str, Any]:
-        """Load API configuration with environment variable override."""
-        try:
-            return load_api_config(self.config_path)
-        except Exception as e:
-            raise Exception(f"Failed to load API config: {e}")
+        self._last_run_state: Dict[str, Any] = {
+            "status": "unknown",
+            "reason": None,
+            "iterations": 0,
+            "elapsed_seconds": 0.0,
+            "files_completed": 0,
+            "total_files": 0,
+            "unimplemented_files": [],
+        }
 
     def _create_logger(self) -> logging.Logger:
         """Create and configure logger"""
@@ -104,6 +102,7 @@ class CodeImplementationWorkflowWithIndex:
         target_directory: Optional[str] = None,
         pure_code_mode: bool = False,
         enable_read_tools: bool = True,
+        progress_callback: Optional[Callable] = None,
     ):
         """Run complete workflow - Main public interface"""
         # Set the read tools configuration
@@ -145,26 +144,72 @@ class CodeImplementationWorkflowWithIndex:
             if pure_code_mode:
                 self.logger.info("Starting pure code implementation...")
                 results["code_implementation"] = await self.implement_code_pure(
-                    plan_content, target_directory, code_directory
+                    plan_content,
+                    target_directory,
+                    code_directory,
+                    progress_callback=progress_callback,
                 )
             else:
                 pass
 
-            self.logger.info("Workflow execution successful")
+            run_state = dict(self._last_run_state)
+            inner_status = run_state.get("status", "unknown")
+            done = inner_status == "completed"
+            if done:
+                self.logger.info(
+                    "Workflow execution successful (all files implemented)"
+                )
+                top_status = "success"
+            else:
+                pending = run_state.get("unimplemented_files", []) or []
+                self.logger.warning(
+                    "Workflow execution finished EARLY: status=%s reason=%s "
+                    "(files=%d/%d, %d unimplemented)",
+                    inner_status,
+                    run_state.get("reason"),
+                    run_state.get("files_completed", 0),
+                    run_state.get("total_files", 0),
+                    len(pending),
+                )
+                top_status = "incomplete"
 
             return {
-                "status": "success",
+                "status": top_status,
+                "inner_status": inner_status,
+                "abort_reason": run_state.get("reason"),
+                "files_completed": run_state.get("files_completed", 0),
+                "total_files": run_state.get("total_files", 0),
+                "unimplemented_files": run_state.get("unimplemented_files", []),
+                "iterations": run_state.get("iterations", 0),
+                "elapsed_seconds": run_state.get("elapsed_seconds", 0.0),
                 "plan_file": plan_file_path,
                 "target_directory": target_directory,
                 "code_directory": os.path.join(target_directory, "generate_code"),
                 "results": results,
-                "mcp_architecture": "standard",
+                "mcp_architecture": "indexed",
             }
 
         except Exception as e:
             self.logger.error(f"Workflow execution failed: {e}")
 
-            return {"status": "error", "message": str(e), "plan_file": plan_file_path}
+            code_directory = os.path.join(
+                target_directory or str(Path(plan_file_path).parent), "generate_code"
+            )
+            return {
+                "status": "error",
+                "inner_status": "error",
+                "abort_reason": str(e),
+                "message": str(e),
+                "files_completed": 0,
+                "total_files": 0,
+                "unimplemented_files": [],
+                "elapsed_seconds": 0.0,
+                "plan_file": plan_file_path,
+                "target_directory": target_directory,
+                "code_directory": code_directory,
+                "results": {},
+                "mcp_architecture": "indexed",
+            }
         finally:
             await self._cleanup_mcp_agent()
 
@@ -181,8 +226,9 @@ class CodeImplementationWorkflowWithIndex:
         )
 
         async with structure_agent:
-            creator = await structure_agent.attach_llm(
-                get_preferred_llm_class(self.config_path)
+            creator = await attach_workflow_llm(
+                structure_agent,
+                phase="implementation",
             )
 
             message = f"""Analyze the following implementation plan and generate shell commands to create the file tree structure.
@@ -209,7 +255,11 @@ Requirements:
             return result
 
     async def implement_code_pure(
-        self, plan_content: str, target_directory: str, code_directory: str = None
+        self,
+        plan_content: str,
+        target_directory: str,
+        code_directory: str = None,
+        progress_callback: Optional[Callable] = None,
     ) -> str:
         """Pure code implementation - focus on code writing without testing"""
         self.logger.info("Starting pure code implementation (no testing)...")
@@ -276,6 +326,7 @@ Requirements:
                 tools,
                 plan_content,
                 target_directory,
+                progress_callback=progress_callback,
             )
 
             return result
@@ -294,12 +345,17 @@ Requirements:
         tools,
         plan_content,
         target_directory,
+        progress_callback: Optional[Callable] = None,
     ):
         """Pure code implementation loop with memory optimization and phase consistency"""
         max_iterations = 800
         iteration = 0
         start_time = time.time()
         max_time = 7200  # 120 minutes (2 hours)
+        run_state: Dict[str, Any] = {
+            "status": "max_iterations",
+            "reason": f"reached max_iterations={max_iterations} without completion",
+        }
 
         # Initialize specialized agents
         code_agent = CodeImplementationAgent(
@@ -315,6 +371,13 @@ Requirements:
             self.default_models,
             code_directory,
         )
+        total_files = len(memory_agent.all_files_list)
+        self.progress_tracker.set_total_files(total_files)
+        if progress_callback:
+            progress_callback(
+                85,
+                f"Code implementation started: 0/{total_files} planned files completed",
+            )
 
         # Log read tools configuration
         read_tools_status = "ENABLED" if self.enable_read_tools else "DISABLED"
@@ -339,6 +402,10 @@ Requirements:
 
             if elapsed_time > max_time:
                 self.logger.warning(f"Time limit reached: {elapsed_time:.2f}s")
+                run_state = {
+                    "status": "max_time",
+                    "reason": f"wall-clock budget exhausted after {elapsed_time:.0f}s (limit {max_time}s)",
+                }
                 break
 
             # # Test simplified memory approach if we have files implemented
@@ -355,9 +422,25 @@ Requirements:
             # Round logging removed
 
             # Call LLM
-            response = await self._call_llm_with_tools(
-                client, client_type, current_system_message, messages, tools
-            )
+            llm_start = time.time()
+            try:
+                response = await self._call_llm_with_tools(
+                    client,
+                    client_type,
+                    current_system_message,
+                    messages,
+                    tools,
+                    progress_callback=progress_callback,
+                )
+            except Exception as e:
+                self.loop_detector.note_llm_wait(time.time() - llm_start)
+                reason = f"LLM request failed during implementation: {e}"
+                self.logger.error(reason)
+                run_state = {"status": "incomplete", "reason": reason}
+                if progress_callback:
+                    progress_callback(85, reason, str(e))
+                break
+            self.loop_detector.note_llm_wait(time.time() - llm_start)
 
             response_content = response.get("content", "").strip()
             if not response_content:
@@ -373,6 +456,21 @@ Requirements:
 
                 # Record essential tool results in concise memory agent
                 for tool_call, tool_result in zip(response["tool_calls"], tool_results):
+                    if tool_call["name"] == "write_file" and not tool_result.get(
+                        "isError", False
+                    ):
+                        filename = tool_call["input"].get("file_path", "unknown")
+                        completed_first_time = self.progress_tracker.complete_file(
+                            memory_agent.normalize_file_path(filename)
+                        )
+                        if completed_first_time and progress_callback:
+                            progress_info = self.progress_tracker.get_progress_info()
+                            progress_callback(
+                                85,
+                                "Code implementation progress: "
+                                f"{progress_info['files_completed']}/"
+                                f"{progress_info['total_files']} files completed",
+                            )
                     memory_agent.record_tool_result(
                         tool_name=tool_call["name"],
                         tool_input=tool_call["input"],
@@ -437,6 +535,10 @@ Requirements:
                 self.logger.info(
                     "✅ Code implementation complete - All files implemented"
                 )
+                run_state = {
+                    "status": "completed",
+                    "reason": "all planned files implemented",
+                }
                 break
 
             # Emergency trim if too long
@@ -451,8 +553,18 @@ Requirements:
                     current_system_message, messages, files_implemented_count
                 )
 
+        elapsed_total = time.time() - start_time
+        self._last_run_state = {
+            "status": run_state["status"],
+            "reason": run_state["reason"],
+            "iterations": iteration,
+            "elapsed_seconds": elapsed_total,
+            "files_completed": len(memory_agent.get_implemented_files()),
+            "total_files": len(memory_agent.get_all_files_list()),
+            "unimplemented_files": list(memory_agent.get_unimplemented_files() or []),
+        }
         return await self._generate_pure_code_final_report_with_concise_agents(
-            iteration, time.time() - start_time, code_agent, memory_agent
+            iteration, elapsed_total, code_agent, memory_agent
         )
 
     # ==================== 4. MCP Agent and LLM Communication Management (Communication Layer) ====================
@@ -471,8 +583,9 @@ Requirements:
             )
 
             await self.mcp_agent.__aenter__()
-            llm = await self.mcp_agent.attach_llm(
-                get_preferred_llm_class(self.config_path)
+            llm = await attach_workflow_llm(
+                self.mcp_agent,
+                phase="implementation",
             )
 
             # Set workspace to the target code directory
@@ -505,438 +618,56 @@ Requirements:
                 self.mcp_agent = None
 
     async def _initialize_llm_client(self):
-        """Initialize LLM client based on llm_provider preference and API key availability"""
-        # Get API keys
-        anthropic_key = self.api_config.get("anthropic", {}).get("api_key", "")
-        openai_key = self.api_config.get("openai", {}).get("api_key", "")
-        google_key = self.api_config.get("google", {}).get("api_key", "")
-
-        # Read user preference from main config
-        preferred_provider = None
-        try:
-            import yaml
-
-            # Derive config path from secrets path (same directory)
-            secrets_dir = os.path.dirname(os.path.abspath(self.config_path))
-            config_path = os.path.join(secrets_dir, "mcp_agent.config.yaml")
-            if os.path.exists(config_path):
-                with open(config_path, "r", encoding="utf-8") as f:
-                    config = yaml.safe_load(f)
-                    preferred_provider = config.get("llm_provider", "").strip().lower()
-        except Exception as e:
-            self.logger.warning(f"Could not read llm_provider preference: {e}")
-
-        # Define provider initialization functions
-        async def init_anthropic():
-            if not (anthropic_key and anthropic_key.strip()):
-                return None
-            try:
-                from anthropic import AsyncAnthropic
-
-                client = AsyncAnthropic(api_key=anthropic_key)
-                await client.messages.create(
-                    model=self.default_models["anthropic"],
-                    max_tokens=20,
-                    messages=[{"role": "user", "content": "test"}],
-                )
-                self.logger.info(
-                    f"Using Anthropic API with model: {self.default_models['anthropic']}"
-                )
-                return client, "anthropic"
-            except Exception as e:
-                self.logger.warning(f"Anthropic API unavailable: {e}")
-                return None
-
-        async def init_google():
-            if not (google_key and google_key.strip()):
-                return None
-            try:
-                from google import genai
-
-                client = genai.Client(api_key=google_key)
-                try:
-                    test_response = await client.aio.models.generate_content(
-                        model=self.default_models.get("google", "gemini-2.0-flash"),
-                        contents="test",
-                    )
-
-                    self.logger.info(
-                        "Google API connection successful: " + str(test_response)
-                    )
-                except Exception as test_err:
-                    self.logger.warning(
-                        f"Could not test Google API: {test_err}, but will try to use client"
-                    )
-
-                self.logger.info(
-                    f"Using Google API with model: {self.default_models.get('google', 'gemini-2.0-flash')}"
-                )
-                return client, "google"
-            except Exception as e:
-                self.logger.warning(f"Google API unavailable: {e}")
-                return None
-
-        async def init_openai():
-            if not (openai_key and openai_key.strip()):
-                return None
-            try:
-                from openai import AsyncOpenAI
-
-                openai_config = self.api_config.get("openai", {})
-                base_url = openai_config.get("base_url")
-
-                if base_url:
-                    client = AsyncOpenAI(api_key=openai_key, base_url=base_url)
-                else:
-                    client = AsyncOpenAI(api_key=openai_key)
-
-                model_name = self.default_models.get("openai", "o3-mini")
-
-                try:
-                    await client.chat.completions.create(
-                        model=model_name,
-                        max_tokens=20,
-                        messages=[{"role": "user", "content": "test"}],
-                    )
-                except Exception as e:
-                    if "max_tokens" in str(e) and "max_completion_tokens" in str(e):
-                        self.logger.info(
-                            f"Model {model_name} requires max_completion_tokens parameter"
-                        )
-                        await client.chat.completions.create(
-                            model=model_name,
-                            max_completion_tokens=20,
-                            messages=[{"role": "user", "content": "test"}],
-                        )
-                    else:
-                        raise
-                self.logger.info(f"Using OpenAI API with model: {model_name}")
-                if base_url:
-                    self.logger.info(f"Using custom base URL: {base_url}")
-                return client, "openai"
-            except Exception as e:
-                self.logger.warning(f"OpenAI API unavailable: {e}")
-                return None
-
-        # Map providers to their init functions
-        provider_init_map = {
-            "anthropic": init_anthropic,
-            "google": init_google,
-            "openai": init_openai,
-        }
-
-        # Try preferred provider first
-        if preferred_provider and preferred_provider in provider_init_map:
-            self.logger.info(f"🎯 Trying preferred provider: {preferred_provider}")
-            result = await provider_init_map[preferred_provider]()
-            if result:
-                return result
-            else:
-                self.logger.warning(
-                    f"⚠️ Preferred provider '{preferred_provider}' unavailable, trying alternatives..."
-                )
-
-        # Fallback: try providers in order
-        for provider_name, init_func in provider_init_map.items():
-            if provider_name == preferred_provider:
-                continue  # Already tried
-            result = await init_func()
-            if result:
-                return result
-
-        raise ValueError(
-            "No available LLM API - please check your API keys in configuration"
+        """Initialize the implementation LLM via DeepCode's provider runtime."""
+        provider, profile = get_workflow_provider(phase="implementation")
+        self.logger.info(
+            "Using DeepCode provider runtime: phase=%s provider=%s model=%s",
+            profile.phase,
+            profile.provider_name,
+            profile.model,
         )
+        return provider, "provider"
 
     async def _call_llm_with_tools(
-        self, client, client_type, system_message, messages, tools, max_tokens=8192
+        self,
+        client,
+        client_type,
+        system_message,
+        messages,
+        tools,
+        max_tokens=8192,
+        progress_callback: Optional[Callable] = None,
     ):
-        """Call LLM with tools"""
+        """Call the implementation LLM through the unified provider abstraction."""
+        if client_type != "provider":
+            raise ValueError(
+                f"Unsupported client type '{client_type}'. The implementation workflow "
+                "only routes through DeepCode's provider runtime."
+            )
         try:
-            if client_type == "anthropic":
-                return await self._call_anthropic_with_tools(
-                    client, system_message, messages, tools, max_tokens
-                )
-            elif client_type == "openai":
-                return await self._call_openai_with_tools(
-                    client, system_message, messages, tools, max_tokens
-                )
-            elif client_type == "google":
-                return await self._call_google_with_tools(
-                    client, system_message, messages, tools, max_tokens
-                )
-            else:
-                raise ValueError(f"Unsupported client type: {client_type}")
+
+            async def on_retry_wait(message: str):
+                self.logger.warning("Implementation LLM retry: %s", message)
+                if progress_callback:
+                    progress_callback(
+                        85,
+                        f"Retrying implementation LLM call: {message}",
+                    )
+
+            return await call_provider_with_legacy_tools(
+                client,
+                system_message=system_message,
+                messages=messages,
+                tools=tools,
+                max_tokens=max_tokens,
+                validate_messages=self._validate_messages,
+                logger=self.logger,
+                retry_mode="standard",
+                on_retry_wait=on_retry_wait,
+            )
         except Exception as e:
             self.logger.error(f"LLM call failed: {e}")
             raise
-
-    async def _call_anthropic_with_tools(
-        self, client, system_message, messages, tools, max_tokens
-    ):
-        """Call Anthropic API with token limit management"""
-        validated_messages = self._validate_messages(messages)
-        if not validated_messages:
-            validated_messages = [
-                {"role": "user", "content": "Please continue implementing code"}
-            ]
-
-        try:
-            # Use implementation-specific model for code generation
-            impl_model = self.default_models.get(
-                "anthropic_implementation", self.default_models["anthropic"]
-            )
-            self.logger.info(f"🔧 Code generation using model: {impl_model}")
-            response = await client.messages.create(
-                model=impl_model,
-                system=system_message,
-                messages=validated_messages,
-                tools=tools,
-                max_tokens=max_tokens,
-                temperature=0.2,
-            )
-        except Exception as e:
-            self.logger.error(f"Anthropic API call failed: {e}")
-            raise
-
-        content = ""
-        tool_calls = []
-
-        for block in response.content:
-            if block.type == "text":
-                content += block.text
-            elif block.type == "tool_use":
-                tool_calls.append(
-                    {"id": block.id, "name": block.name, "input": block.input}
-                )
-
-        # Extract token usage and calculate cost
-        token_usage = {}
-        cost = 0.0
-
-        if hasattr(response, "usage") and response.usage:
-            token_usage = {
-                "input_tokens": response.usage.input_tokens,
-                "output_tokens": response.usage.output_tokens,
-                "total_tokens": response.usage.input_tokens
-                + response.usage.output_tokens,
-            }
-
-            # Use dynamic cost calculation based on current model
-            from utils.model_limits import calculate_token_cost
-
-            cost = calculate_token_cost(
-                response.usage.input_tokens,
-                response.usage.output_tokens,
-                model_name=self.default_models.get("anthropic"),
-            )
-
-            print(f"💰 Tokens: {token_usage['total_tokens']} (${cost:.4f})")
-            self.logger.info(
-                f"Token usage: {token_usage['input_tokens']} input + {token_usage['output_tokens']} output = {token_usage['total_tokens']} total (${cost:.4f})"
-            )
-
-        return {
-            "content": content,
-            "tool_calls": tool_calls,
-            "token_usage": token_usage,
-            "cost": cost,
-        }
-
-    async def _call_google_with_tools(
-        self, client, system_message, messages, tools, max_tokens
-    ):
-        """
-        Call Google Gemini API with tools
-
-        Note: Google Gemini uses a completely different API structure.
-        The client here is expected to be google.genai.Client from google-genai SDK.
-
-        Reference: https://ai.google.dev/gemini-api/docs/function-calling
-        """
-        try:
-            from google.genai import types
-        except ImportError:
-            raise ImportError("google-genai package is required for Google API calls")
-
-        validated_messages = self._validate_messages(messages)
-        if not validated_messages:
-            validated_messages = [
-                {"role": "user", "content": "Please continue implementing code"}
-            ]
-
-        # Convert messages to Google Gemini format (types.Content)
-        # Gemini expects: role="user" or role="model" (not "assistant")
-        gemini_messages = []
-        for msg in validated_messages:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-
-            # Convert role names: "assistant" -> "model"
-            if role == "assistant":
-                role = "model"
-            elif role not in ["user", "model"]:
-                # Skip unsupported roles or convert to user
-                role = "user"
-
-            gemini_messages.append(
-                types.Content(role=role, parts=[types.Part.from_text(text=content)])
-            )
-
-        # Convert tools to Google Gemini format (types.Tool with FunctionDeclaration)
-        # Following the EXACT pattern from GoogleAugmentedLLM line 92-103
-        # IMPORTANT: Each tool should be wrapped in its own Tool object!
-        gemini_tools = []
-        if tools:
-            for tool in tools:
-                # Transform the input_schema to be Gemini-compatible
-                parameters = self._transform_schema_for_gemini(tool["input_schema"])
-
-                # Each tool gets its own Tool wrapper (not all in one!)
-                gemini_tools.append(
-                    types.Tool(
-                        function_declarations=[
-                            types.FunctionDeclaration(
-                                name=tool["name"],
-                                description=tool["description"],
-                                parameters=parameters,
-                            )
-                        ]
-                    )
-                )
-
-        # Create config with system instruction and tools
-        config = types.GenerateContentConfig(
-            max_output_tokens=max_tokens,
-            temperature=0.2,
-            system_instruction=system_message if system_message else None,
-            tools=gemini_tools if gemini_tools else None,
-            # Disable automatic function calling - we handle it manually
-            automatic_function_calling=types.AutomaticFunctionCallingConfig(
-                disable=True
-            ),
-        )
-
-        try:
-            # Google Gemini API call using the native SDK
-            # client is google.genai.Client instance
-            # Use implementation-specific model for code generation
-            impl_model = self.default_models.get(
-                "google_implementation", self.default_models["google"]
-            )
-            self.logger.info(f"🔧 Code generation using model: {impl_model}")
-            response = await client.aio.models.generate_content(
-                model=impl_model,
-                contents=gemini_messages,
-                config=config,
-            )
-        except Exception as e:
-            self.logger.error(f"Google API call failed: {e}")
-            raise
-
-        # Parse Gemini response (types.GenerateContentResponse)
-        # Following the pattern from augmented_llm_google.py lines 145-165
-        content = ""
-        tool_calls = []
-
-        if response and hasattr(response, "candidates") and response.candidates:
-            candidate = response.candidates[0]
-
-            if hasattr(candidate, "content") and candidate.content:
-                if hasattr(candidate.content, "parts") and candidate.content.parts:
-                    for part in candidate.content.parts:
-                        # Handle text content
-                        if hasattr(part, "text") and part.text:
-                            content += part.text
-
-                        # Handle function calls
-                        # Check for function_call attribute, matching augmented_llm_google.py line 164
-                        if hasattr(part, "function_call") and part.function_call:
-                            fc = part.function_call
-                            # Extract function call details
-                            # Note: Gemini function_call has name and args attributes
-                            tool_call = {
-                                "id": getattr(
-                                    fc, "id", getattr(fc, "name", "")
-                                ),  # Use name as fallback for id
-                                "name": fc.name if hasattr(fc, "name") else "",
-                                "input": dict(fc.args)
-                                if hasattr(fc, "args") and fc.args
-                                else {},
-                            }
-                            self.logger.debug(
-                                f"Google function_call parsed: {tool_call}"
-                            )
-                            tool_calls.append(tool_call)
-
-        return {"content": content, "tool_calls": tool_calls}
-
-    def _transform_schema_for_gemini(self, schema: dict) -> dict:
-        """
-        Transform JSON Schema to OpenAPI Schema format compatible with Gemini.
-
-        This is based on the transform_mcp_tool_schema from GoogleAugmentedLLM.
-        Key transformations:
-        1. Convert camelCase to snake_case
-        2. Remove unsupported fields (default, additionalProperties)
-        3. Handle nullable types via anyOf
-        """
-        if not isinstance(schema, dict):
-            return schema
-
-        # Fields to exclude
-        EXCLUDED_PROPERTIES = {"default", "additionalProperties"}
-
-        # camelCase to snake_case mappings
-        CAMEL_TO_SNAKE = {
-            "anyOf": "any_of",
-            "maxLength": "max_length",
-            "minLength": "min_length",
-            "minProperties": "min_properties",
-            "maxProperties": "max_properties",
-            "maxItems": "max_items",
-            "minItems": "min_items",
-        }
-
-        result = {}
-
-        for key, value in schema.items():
-            # Skip excluded properties
-            if key in EXCLUDED_PROPERTIES:
-                continue
-
-            # Convert camelCase to snake_case
-            snake_key = CAMEL_TO_SNAKE.get(key, key)
-
-            # Handle nested structures
-            if key == "properties" and isinstance(value, dict):
-                result[snake_key] = {
-                    prop_k: self._transform_schema_for_gemini(prop_v)
-                    for prop_k, prop_v in value.items()
-                }
-            elif key == "items" and isinstance(value, dict):
-                result[snake_key] = self._transform_schema_for_gemini(value)
-            elif key == "anyOf" and isinstance(value, list):
-                # Handle nullable types (Type | None)
-                has_null = any(
-                    isinstance(item, dict) and item.get("type") == "null"
-                    for item in value
-                )
-                if has_null:
-                    result["nullable"] = True
-
-                # Get first non-null schema
-                for item in value:
-                    if isinstance(item, dict) and item.get("type") != "null":
-                        transformed = self._transform_schema_for_gemini(item)
-                        for k, v in transformed.items():
-                            if k not in result:
-                                result[k] = v
-                        break
-            else:
-                result[snake_key] = value
-
-        return result
 
     def _repair_truncated_json(self, json_str: str, tool_name: str = "") -> dict:
         """
@@ -1024,201 +755,6 @@ Requirements:
         result += "}" * open_braces
 
         return result
-
-    async def _call_openai_with_tools(
-        self, client, system_message, messages, tools, max_tokens
-    ):
-        """Call OpenAI API with robust JSON error handling and retry mechanism"""
-        openai_tools = []
-        for tool in tools:
-            openai_tools.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": tool["name"],
-                        "description": tool["description"],
-                        "parameters": tool["input_schema"],
-                    },
-                }
-            )
-
-        openai_messages = [{"role": "system", "content": system_message}]
-        openai_messages.extend(messages)
-
-        # Retry mechanism for API calls
-        max_retries = 3
-        retry_delay = 2  # seconds
-
-        # Use implementation-specific model for code generation
-        impl_model = self.default_models.get(
-            "openai_implementation", self.default_models["openai"]
-        )
-        self.logger.info(f"🔧 Code generation using model: {impl_model}")
-
-        for attempt in range(max_retries):
-            try:
-                # Try max_tokens first, fallback to max_completion_tokens if unsupported
-                try:
-                    response = await client.chat.completions.create(
-                        model=impl_model,
-                        messages=openai_messages,
-                        tools=openai_tools if openai_tools else None,
-                        max_tokens=max_tokens,
-                        temperature=0.2,
-                    )
-                except Exception as e:
-                    if "max_tokens" in str(e) and "max_completion_tokens" in str(e):
-                        # Retry with max_completion_tokens for models that require it
-                        response = await client.chat.completions.create(
-                            model=impl_model,
-                            messages=openai_messages,
-                            tools=openai_tools if openai_tools else None,
-                            max_completion_tokens=max_tokens,
-                        )
-                    else:
-                        raise
-
-                # Validate response structure
-                if (
-                    not response
-                    or not hasattr(response, "choices")
-                    or not response.choices
-                ):
-                    raise ValueError("Invalid API response: missing choices")
-
-                if not response.choices[0] or not hasattr(
-                    response.choices[0], "message"
-                ):
-                    raise ValueError("Invalid API response: missing message in choice")
-
-                message = response.choices[0].message
-                content = message.content or ""
-
-                # Successfully got a valid response
-                break
-
-            except json.JSONDecodeError as e:
-                print(
-                    f"\n❌ JSON Decode Error in API response (attempt {attempt + 1}/{max_retries}):"
-                )
-                print(f"   Error: {e}")
-                print(f"   Position: line {e.lineno}, column {e.colno}")
-
-                if attempt < max_retries - 1:
-                    print(f"   ⏳ Retrying in {retry_delay} seconds...")
-                    await asyncio.sleep(retry_delay)
-                    retry_delay *= 2  # Exponential backoff
-                else:
-                    print("   ❌ All retries exhausted")
-                    raise
-
-            except (ValueError, AttributeError, TypeError) as e:
-                print(f"\n❌ API Response Error (attempt {attempt + 1}/{max_retries}):")
-                print(f"   Error type: {type(e).__name__}")
-                print(f"   Error: {e}")
-
-                if attempt < max_retries - 1:
-                    print(f"   ⏳ Retrying in {retry_delay} seconds...")
-                    await asyncio.sleep(retry_delay)
-                    retry_delay *= 2
-                else:
-                    print("   ❌ All retries exhausted")
-                    # Return empty response instead of crashing
-                    return {
-                        "content": "API error - unable to get valid response",
-                        "tool_calls": [],
-                    }
-
-            except Exception as e:
-                print(
-                    f"\n❌ Unexpected API Error (attempt {attempt + 1}/{max_retries}):"
-                )
-                print(f"   Error type: {type(e).__name__}")
-                print(f"   Error: {e}")
-
-                if attempt < max_retries - 1:
-                    print(f"   ⏳ Retrying in {retry_delay} seconds...")
-                    await asyncio.sleep(retry_delay)
-                    retry_delay *= 2
-                else:
-                    print("   ❌ All retries exhausted")
-                    raise
-
-        tool_calls = []
-        if message.tool_calls:
-            for tool_call in message.tool_calls:
-                try:
-                    # Attempt to parse tool call arguments
-                    parsed_input = json.loads(tool_call.function.arguments)
-                    tool_calls.append(
-                        {
-                            "id": tool_call.id,
-                            "name": tool_call.function.name,
-                            "input": parsed_input,
-                        }
-                    )
-                except json.JSONDecodeError as e:
-                    # Detailed JSON parsing error logging
-                    print("\n❌ JSON Parsing Error in tool call:")
-                    print(f"   Tool: {tool_call.function.name}")
-                    print(f"   Error: {e}")
-                    print("   Raw arguments (first 500 chars):")
-                    print(f"   {tool_call.function.arguments[:500]}")
-                    print(f"   Error position: line {e.lineno}, column {e.colno}")
-                    print(
-                        f"   Problem at: ...{tool_call.function.arguments[max(0, e.pos-50):e.pos+50]}..."
-                    )
-
-                    # Attempt advanced JSON repair
-                    repaired = self._repair_truncated_json(
-                        tool_call.function.arguments, tool_call.function.name
-                    )
-
-                    if repaired:
-                        print("   ✅ JSON repaired successfully")
-                        tool_calls.append(
-                            {
-                                "id": tool_call.id,
-                                "name": tool_call.function.name,
-                                "input": repaired,
-                            }
-                        )
-                    else:
-                        # Skip this tool call if repair failed
-                        print("   ⚠️  Skipping unrepairable tool call")
-                        continue
-
-        # Extract token usage and calculate cost
-        token_usage = {}
-        cost = 0.0
-
-        if hasattr(response, "usage") and response.usage:
-            token_usage = {
-                "prompt_tokens": response.usage.prompt_tokens,
-                "completion_tokens": response.usage.completion_tokens,
-                "total_tokens": response.usage.total_tokens,
-            }
-
-            # Use dynamic cost calculation based on current model
-            from utils.model_limits import calculate_token_cost
-
-            cost = calculate_token_cost(
-                response.usage.prompt_tokens,
-                response.usage.completion_tokens,
-                model_name=self.default_models.get("openai"),
-            )
-
-            print(f"💰 Tokens: {token_usage['total_tokens']} (${cost:.4f})")
-            self.logger.info(
-                f"Token usage: {token_usage['prompt_tokens']} prompt + {token_usage['completion_tokens']} completion = {token_usage['total_tokens']} total (${cost:.4f})"
-            )
-
-        return {
-            "content": content,
-            "tool_calls": tool_calls,
-            "token_usage": token_usage,
-            "cost": cost,
-        }
 
     # ==================== 5. Tools and Utility Methods (Utility Layer) ====================
 

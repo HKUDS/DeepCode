@@ -6,8 +6,7 @@ for automated research analysis and code implementation synthesis.
 """
 
 from .agent_orchestration_engine import (
-    run_research_analyzer,
-    run_resource_processor,
+    acquire_input_artifact,
     run_code_analyzer,
     github_repo_download,
     paper_reference_analyzer,
@@ -19,8 +18,7 @@ from .code_implementation_workflow import CodeImplementationWorkflow
 
 __all__ = [
     # Initial workflows
-    "run_research_analyzer",
-    "run_resource_processor",
+    "acquire_input_artifact",
     "run_code_analyzer",
     "github_repo_download",
     "paper_reference_analyzer",

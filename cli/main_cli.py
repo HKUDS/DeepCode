@@ -21,8 +21,30 @@ parent_dir = os.path.dirname(current_dir)
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
+from core.platform_compat import configure_utf8_stdio
+
 # 导入CLI应用
 from cli.cli_app import CLIApp, Colors
+
+
+def _configure_console_encoding():
+    """Prefer UTF-8 output and degrade safely on legacy Windows consoles."""
+    configure_utf8_stdio()
+
+
+def _safe_print(text: str):
+    """Print text safely on terminals with non-UTF-8 encodings."""
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+        sanitized = text.encode(encoding, errors="replace").decode(
+            encoding, errors="replace"
+        )
+        print(sanitized)
+
+
+_configure_console_encoding()
 
 
 def print_enhanced_banner():
@@ -45,7 +67,7 @@ def print_enhanced_banner():
 ║                                                                              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝{Colors.ENDC}
 """
-    print(banner)
+    _safe_print(banner)
 
 
 def check_environment():
@@ -100,6 +122,7 @@ def parse_arguments():
   {Colors.CYAN}python main_cli.py --chat "Build a web app..."{Colors.ENDC}            # Process chat requirements
   {Colors.CYAN}python main_cli.py --requirement "ML system for..."{Colors.ENDC}       # Guided requirement analysis (NEW)
   {Colors.CYAN}python main_cli.py --optimized{Colors.ENDC}                            # Use optimized mode
+  {Colors.CYAN}python main_cli.py --no-plan-review{Colors.ENDC}                       # Skip plan approval gate
   {Colors.CYAN}python main_cli.py --disable-segmentation{Colors.ENDC}                 # Disable document segmentation
   {Colors.CYAN}python main_cli.py --segmentation-threshold 30000{Colors.ENDC}         # Custom segmentation threshold
 
@@ -144,6 +167,12 @@ def parse_arguments():
     )
 
     parser.add_argument(
+        "--no-plan-review",
+        action="store_true",
+        help="Skip interactive review after initial_plan.txt is generated",
+    )
+
+    parser.add_argument(
         "--disable-segmentation",
         action="store_true",
         help="Disable intelligent document segmentation (use traditional full-document processing)",
@@ -160,7 +189,174 @@ def parse_arguments():
         "--verbose", "-v", action="store_true", help="Enable verbose output"
     )
 
+    parser.add_argument(
+        "--session",
+        "-s",
+        type=str,
+        default=None,
+        help=(
+            "Attach this run to an existing session id (creates a new "
+            "anonymous session when omitted)."
+        ),
+    )
+
+    parser.add_argument(
+        "--session-title",
+        type=str,
+        default=None,
+        help="Title to use when creating a new session implicitly.",
+    )
+
+    parser.add_argument(
+        "command",
+        nargs="?",
+        default=None,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "subcommand",
+        nargs="?",
+        default=None,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "session_arg",
+        nargs="?",
+        default=None,
+        help=argparse.SUPPRESS,
+    )
+
     return parser.parse_args()
+
+
+def _print_session_table(summaries):
+    if not summaries:
+        print(f"{Colors.WARNING}No sessions yet.{Colors.ENDC}")
+        return
+    header = f"  {'ID':<10} {'Updated':<26} {'Tasks':<6} {'Msgs':<6} Title"
+    print(f"{Colors.BOLD}{header}{Colors.ENDC}")
+    print("  " + "-" * (len(header) - 2))
+    for s in summaries:
+        title = s.title or "(untitled)"
+        if len(title) > 50:
+            title = title[:47] + "..."
+        print(
+            f"  {Colors.CYAN}{s.session_id:<10}{Colors.ENDC} "
+            f"{s.updated_at:<26} {s.task_count:<6} {s.message_count:<6} {title}"
+        )
+
+
+def _print_session_detail(session):
+    print(
+        f"{Colors.BOLD}Session {Colors.CYAN}{session.session_id}{Colors.ENDC} "
+        f"— {session.title or '(untitled)'}"
+    )
+    print(f"  Created: {session.created_at}")
+    print(f"  Updated: {session.updated_at}")
+    print(f"  Tasks  : {len(session.tasks)}, Messages: {len(session.messages)}\n")
+    if session.tasks:
+        print(f"{Colors.BOLD}Tasks:{Colors.ENDC}")
+        for t in session.tasks:
+            print(
+                f"  • {Colors.CYAN}{t.task_id}{Colors.ENDC} "
+                f"[{t.task_kind}] status={t.status} dir={t.task_dir}"
+            )
+        print()
+    if session.messages:
+        print(f"{Colors.BOLD}Messages:{Colors.ENDC}")
+        for i, m in enumerate(session.messages):
+            preview = (m.content or "").splitlines()[0][:80]
+            print(
+                f"  {i:>3}. [{m.role:<9}] {preview}"
+                f"{' (task=' + m.task_id_ref + ')' if m.task_id_ref else ''}"
+            )
+
+
+def handle_session_command(args):
+    """Implement ``deepcode session list|show|new|resume|delete``.
+
+    Returns:
+        ``int`` exit code → ``main`` should ``sys.exit`` immediately.
+        ``None``          → ``resume`` mode: keep running and hand control
+                            back to ``main`` so the CLI enters interactive
+                            mode bound to the resolved session.
+    """
+    from core.sessions import get_default_store
+
+    store = get_default_store()
+    sub = (args.subcommand or "").lower()
+
+    if sub == "list":
+        summaries = store.list_sessions(limit=50)
+        _print_session_table(summaries)
+        return 0
+
+    if sub == "new":
+        title = args.session_title or args.session_arg or ""
+        session = store.create_session(title=title)
+        print(
+            f"{Colors.OKGREEN}Created session "
+            f"{Colors.CYAN}{session.session_id}{Colors.ENDC}"
+        )
+        return 0
+
+    if sub == "show":
+        target = args.session_arg or args.session
+        if not target:
+            print(
+                f"{Colors.FAIL}Usage: deepcode session show <session_id>{Colors.ENDC}"
+            )
+            return 1
+        session = store.get_session(target)
+        if session is None:
+            print(f"{Colors.FAIL}Session not found: {target}{Colors.ENDC}")
+            return 1
+        _print_session_detail(session)
+        return 0
+
+    if sub == "resume":
+        target = args.session_arg or args.session
+        if not target:
+            print(
+                f"{Colors.FAIL}Usage: deepcode session resume <session_id>{Colors.ENDC}"
+            )
+            return 1
+        session = store.get_session(target)
+        if session is None:
+            print(f"{Colors.FAIL}Session not found: {target}{Colors.ENDC}")
+            return 1
+        _print_session_detail(session)
+        # Hand control back to main(): pre-populate args.session so the
+        # normal startup path attaches to this session and drops into
+        # interactive mode (no extra command needed).
+        args.session = target
+        args.command = None
+        args.subcommand = None
+        args.session_arg = None
+        print(
+            f"\n{Colors.OKGREEN}🔁 Resuming session {Colors.CYAN}{target}{Colors.ENDC}"
+            f"{Colors.OKGREEN} — entering interactive mode...{Colors.ENDC}\n"
+        )
+        return None
+
+    if sub == "delete":
+        target = args.session_arg
+        if not target:
+            print(
+                f"{Colors.FAIL}Usage: deepcode session delete <session_id>{Colors.ENDC}"
+            )
+            return 1
+        if store.delete_session(target):
+            print(f"{Colors.OKGREEN}Deleted session {target}{Colors.ENDC}")
+            return 0
+        print(f"{Colors.FAIL}Session not found: {target}{Colors.ENDC}")
+        return 1
+
+    print(
+        f"{Colors.FAIL}Unknown session subcommand '{sub}'. "
+        f"Try: list | show <id> | new [title] | resume <id> | delete <id>{Colors.ENDC}"
+    )
+    return 2
 
 
 async def run_direct_processing(app: CLIApp, input_source: str, input_type: str):
@@ -246,6 +442,17 @@ async def main():
     # 解析命令行参数
     args = parse_arguments()
 
+    # The optional positional "command" is reserved for ``deepcode session ...``
+    # subcommands. Most subcommands (list/show/new/delete) are quick reads and
+    # exit immediately. ``resume`` is special: it returns ``None`` so we keep
+    # running, falling through to the normal startup path with ``args.session``
+    # already pre-populated — this drops the user straight into interactive
+    # mode bound to the resolved session, instead of just printing a hint.
+    if args.command == "session":
+        result = handle_session_command(args)
+        if result is not None:
+            sys.exit(result)
+
     # 显示横幅
     print_enhanced_banner()
 
@@ -257,6 +464,52 @@ async def main():
         sys.exit(1)
 
     try:
+        # Wire observability sinks before any workflow code runs so even
+        # early-startup loguru calls land in the per-process JSONL log.
+        try:
+            from pathlib import Path as _Path
+
+            from core.config import load_config
+            from core.observability import setup_logging
+
+            cfg = load_config()
+            setup_logging(cfg.logger, workspace_root=_Path(parent_dir))
+        except Exception as exc:
+            print(
+                f"{Colors.WARNING}⚠️  Logging setup failed (continuing): {exc}{Colors.ENDC}"
+            )
+
+        # Resolve / create the active session and bind it to the
+        # observability contextvar so prepare_workflow_environment can
+        # attach the new task to it (no plumbing through every call).
+        session_token = None
+        try:
+            from core.observability import set_session
+            from core.sessions import get_default_store
+
+            store = get_default_store()
+            if args.session:
+                session = store.get_session(args.session)
+                if session is None:
+                    print(
+                        f"{Colors.WARNING}⚠️  Session '{args.session}' not found, "
+                        f"creating a fresh one{Colors.ENDC}"
+                    )
+                    session = store.create_session(title=args.session_title or "")
+            else:
+                session = store.create_session(title=args.session_title or "")
+            session_token = set_session(session.session_id)
+            print(
+                f"{Colors.OKGREEN}🗂️  Session: "
+                f"{Colors.CYAN}{session.session_id}{Colors.ENDC}"
+                + (f" — {session.title}" if session.title else "")
+            )
+        except Exception as exc:
+            print(
+                f"{Colors.WARNING}⚠️  Session bootstrap failed (continuing without): "
+                f"{exc}{Colors.ENDC}"
+            )
+
         # 创建CLI应用
         app = CLIApp()
 
@@ -271,6 +524,12 @@ async def main():
             app.cli.enable_indexing = False
             print(
                 f"\n{Colors.YELLOW}⚡ Fast mode enabled - indexing disabled by default{Colors.ENDC}"
+            )
+
+        app.cli.enable_plan_review = not args.no_plan_review
+        if args.no_plan_review:
+            print(
+                f"\n{Colors.YELLOW}Plan review disabled - implementation will start after planning{Colors.ENDC}"
             )
 
         # Configure document segmentation settings
@@ -331,6 +590,14 @@ async def main():
     except Exception as e:
         print(f"\n{Colors.FAIL}❌ Application errors: {str(e)}{Colors.ENDC}")
         sys.exit(1)
+    finally:
+        try:
+            if session_token is not None:  # type: ignore[name-defined]
+                from core.observability import pop_session
+
+                pop_session(session_token)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

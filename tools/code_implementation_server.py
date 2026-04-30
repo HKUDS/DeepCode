@@ -16,7 +16,6 @@ import os
 import subprocess
 import json
 import sys
-import io
 from pathlib import Path
 import re
 from typing import Dict, Any, List
@@ -25,17 +24,13 @@ import shutil
 import logging
 from datetime import datetime
 
-# Set standard output encoding to UTF-8
-if sys.stdout.encoding != "utf-8":
-    try:
-        if hasattr(sys.stdout, "reconfigure"):
-            sys.stdout.reconfigure(encoding="utf-8")
-            sys.stderr.reconfigure(encoding="utf-8")
-        else:
-            sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding="utf-8")
-            sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding="utf-8")
-    except Exception as e:
-        print(f"Warning: Could not set UTF-8 encoding: {e}")
+from core.platform_compat import (
+    configure_utf8_stdio,
+    subprocess_env,
+    subprocess_text_kwargs,
+)
+
+configure_utf8_stdio()
 
 # Import MCP related modules
 from mcp.server.fastmcp import FastMCP
@@ -712,9 +707,9 @@ async def execute_python(code: str, timeout: int = 30) -> str:
                 [sys.executable, temp_file],
                 cwd=WORKSPACE_DIR,
                 capture_output=True,
-                text=True,
                 timeout=timeout,
-                encoding="utf-8",
+                env=subprocess_env(),
+                **subprocess_text_kwargs(),
             )
 
             execution_result = {
@@ -798,9 +793,9 @@ async def execute_bash(command: str, timeout: int = 30) -> str:
             shell=True,
             cwd=WORKSPACE_DIR,
             capture_output=True,
-            text=True,
             timeout=timeout,
-            encoding="utf-8",
+            env=subprocess_env(),
+            **subprocess_text_kwargs(),
         )
 
         execution_result = {
@@ -1486,6 +1481,10 @@ async def get_operation_history(last_n: int = 10) -> str:
 
 def main():
     """Start MCP server"""
+    import builtins
+    from functools import partial
+
+    print = partial(builtins.print, file=sys.stderr)
     print("🚀 Code Implementation MCP Server")
     print(
         "📝 Paper Code Implementation Tool Server / Paper Code Implementation Tool Server"

@@ -90,7 +90,7 @@ class ConciseMemoryAgent:
         )
 
         # Extract all files - prioritize generated directory over plan parsing
-        self.all_files_list = self._extract_all_files()
+        self.all_files_list = self._dedupe_normalized_paths(self._extract_all_files())
 
         # Code summary file path
         self.code_summary_path = os.path.join(
@@ -102,6 +102,7 @@ class ConciseMemoryAgent:
 
         # Track all implemented files
         self.implemented_files = []
+        self._implemented_file_keys = set()
 
         # Store Next Steps information temporarily (not saved to file)
         self.current_next_steps = ""
@@ -115,6 +116,51 @@ class ConciseMemoryAgent:
         self.logger.info(
             "📝 NEW LOGIC: Memory clearing triggered after each write_file call"
         )
+
+    def normalize_file_path(self, file_path: str) -> str:
+        """Normalize a path to a stable, code-directory-relative key."""
+        if not file_path:
+            return ""
+        raw_path = str(file_path).strip().strip('"').strip("'").strip("`")
+        raw_path = raw_path.replace("\\", "/")
+        code_root = os.path.abspath(self.code_directory).replace("\\", "/").rstrip("/")
+
+        try:
+            abs_path = os.path.abspath(raw_path).replace("\\", "/")
+            if abs_path == code_root:
+                raw_path = ""
+            elif abs_path.startswith(code_root + "/"):
+                raw_path = abs_path[len(code_root) + 1 :]
+        except (OSError, ValueError):
+            pass
+
+        prefixes = ("./", "generate_code/", "/")
+        changed = True
+        while changed:
+            changed = False
+            for prefix in prefixes:
+                if raw_path.startswith(prefix):
+                    raw_path = raw_path[len(prefix) :]
+                    changed = True
+
+        normalized = os.path.normpath(raw_path).replace("\\", "/")
+        if normalized == ".":
+            return ""
+        while normalized.startswith("../"):
+            normalized = normalized[3:]
+        return normalized.strip("/")
+
+    def _dedupe_normalized_paths(self, files: List[str]) -> List[str]:
+        """Normalize and de-duplicate paths while preserving first occurrence."""
+        seen = set()
+        normalized_files = []
+        for file_path in files or []:
+            normalized = self.normalize_file_path(file_path)
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            normalized_files.append(normalized)
+        return normalized_files
 
     def _create_default_logger(self) -> logging.Logger:
         """Create default logger"""
@@ -985,11 +1031,16 @@ class ConciseMemoryAgent:
             file_path: Path of the implemented file
             implementation_content: Content of the implemented file
         """
-        # Add file to implemented files list if not already present
-        if file_path not in self.implemented_files:
-            self.implemented_files.append(file_path)
+        normalized_path = self.normalize_file_path(file_path)
+        if not normalized_path:
+            return
 
-        self.logger.info(f"📝 File implementation recorded: {file_path}")
+        # Add file to implemented files list if not already present
+        if normalized_path not in self._implemented_file_keys:
+            self._implemented_file_keys.add(normalized_path)
+            self.implemented_files.append(normalized_path)
+
+        self.logger.info(f"📝 File implementation recorded: {normalized_path}")
 
     async def create_code_implementation_summary(
         self,
@@ -1369,6 +1420,25 @@ class ConciseMemoryAgent:
         This method is used only for creating code implementation summaries,
         NOT for conversation summarization which has been removed.
         """
+        if client_type == "provider":
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You are an expert code implementation summarizer. Create structured summaries of implemented code files that preserve essential information about functions, dependencies, and implementation approaches.",
+                }
+            ]
+            messages.extend(summary_messages)
+            response = await client.chat_with_retry(
+                messages=messages,
+                model=client.get_default_model(),
+                max_tokens=5000,
+                temperature=0.2,
+                retry_mode="standard",
+            )
+            if response.finish_reason == "error":
+                raise RuntimeError(response.content or "LLM provider returned an error")
+            return {"content": response.content or ""}
+
         if client_type == "anthropic":
             response = await client.messages.create(
                 model=self.default_models["anthropic"],
@@ -1580,11 +1650,23 @@ class ConciseMemoryAgent:
         implemented_files_list = file_lists["implemented"]
         unimplemented_files_list = file_lists["unimplemented"]
 
-        # Debug output for unimplemented files (clean format without dashes)
+        # Debug output for file progress (bounded preview for long plans)
         unimplemented_files = self.get_unimplemented_files()
-        print("✅ Unimplemented Files:")
-        for file_path in unimplemented_files:
+        implemented_files = self.get_implemented_files()
+        print(
+            f"Implemented files ({len(implemented_files)}/{len(self.all_files_list)}):"
+        )
+        for file_path in implemented_files[:10]:
             print(f"{file_path}")
+        if len(implemented_files) > 10:
+            print(f"... (+{len(implemented_files) - 10} more)")
+        print(f"Remaining files ({len(unimplemented_files)}):")
+        for file_path in unimplemented_files[:10]:
+            print(f"{file_path}")
+        if len(unimplemented_files) > 10:
+            print(f"... (+{len(unimplemented_files) - 10} more)")
+        if unimplemented_files:
+            print(f"Next file: {unimplemented_files[0]}")
         if self.current_next_steps.strip():
             print(f"\n📋 {self.current_next_steps}")
 
@@ -1916,7 +1998,7 @@ Write_file can be used to implement the new component
             files_from_dir = self._extract_files_from_generated_directory()
             if files_from_dir:
                 old_count = len(self.all_files_list)
-                self.all_files_list = files_from_dir
+                self.all_files_list = self._dedupe_normalized_paths(files_from_dir)
                 new_count = len(self.all_files_list)
                 self.logger.info(
                     f"🔄 Files list refreshed from directory: {old_count} → {new_count} files"
@@ -1929,70 +2011,35 @@ Write_file can be used to implement the new component
     def get_unimplemented_files(self) -> List[str]:
         """
         Get list of files that haven't been implemented yet
-        Uses fuzzy path matching to handle partial paths
+        Uses exact normalized matching, with suffix matching only when the
+        suffix identifies one unique planned file.
 
         Returns:
             List of file paths that still need to be implemented
         """
+        planned_files = self._dedupe_normalized_paths(self.all_files_list)
+        implemented_keys = {
+            self.normalize_file_path(file_path) for file_path in self.implemented_files
+        }
+        implemented_keys.discard("")
 
-        # def is_implemented(plan_file: str) -> bool:
-        #     """Check if a file from plan is implemented (with fuzzy matching)"""
-        #     # Normalize paths for comparison
-        #     plan_file_normalized = plan_file.replace("\\", "/").strip("/")
-        #     plan_filename = plan_file_normalized.split("/")[-1]  # Extract filename
+        completed_planned = set()
+        planned_set = set(planned_files)
 
-        #     for impl_file in self.implemented_files:
-        #         impl_file_normalized = impl_file.replace("\\", "/").strip("/")
-        #         impl_filename = impl_file_normalized.split("/")[-1]  # Extract filename
+        # Exact normalized path match is always safe.
+        completed_planned.update(planned_set.intersection(implemented_keys))
 
-        #         # Strategy 1: Exact path match
-        #         if plan_file_normalized == impl_file_normalized:
-        #             return True
+        # Suffix fallback is allowed only if it resolves to exactly one planned file.
+        for impl_key in implemented_keys - completed_planned:
+            candidates = [
+                planned
+                for planned in planned_files
+                if planned.endswith("/" + impl_key) or impl_key.endswith("/" + planned)
+            ]
+            if len(candidates) == 1:
+                completed_planned.add(candidates[0])
 
-        #         # Strategy 2: One path ends with the other (partial path match)
-        #         if plan_file_normalized.endswith(
-        #             impl_file_normalized
-        #         ) or impl_file_normalized.endswith(plan_file_normalized):
-        #             # Ensure match is at a path boundary (not middle of directory name)
-        #             if (
-        #                 plan_file_normalized.endswith("/" + impl_file_normalized)
-        #                 or impl_file_normalized.endswith("/" + plan_file_normalized)
-        #             ):
-        #                 return True
-
-        #         # Strategy 3: Same filename (fallback for different directory structures)
-        #         # Only match if filenames are identical and reasonably unique (length > 5)
-        #         if (plan_filename == impl_filename and len(plan_filename) > 5):
-        #             return True
-
-        #     return False
-        def is_implemented(plan_file: str) -> bool:
-            """Check if a file from plan is implemented (with fuzzy matching)"""
-            # Normalize paths for comparison
-            plan_file_normalized = plan_file.replace("\\", "/").strip("/")
-
-            for impl_file in self.implemented_files:
-                impl_file_normalized = impl_file.replace("\\", "/").strip("/")
-
-                # Check if plan_file ends with impl_file (partial path match)
-                # or impl_file ends with plan_file (reverse partial match)
-                if plan_file_normalized.endswith(
-                    impl_file_normalized
-                ) or impl_file_normalized.endswith(plan_file_normalized):
-                    # Ensure match is at a path boundary (not middle of directory name)
-                    if (
-                        plan_file_normalized.endswith("/" + impl_file_normalized)
-                        or plan_file_normalized == impl_file_normalized
-                        or impl_file_normalized.endswith("/" + plan_file_normalized)
-                    ):
-                        return True
-            return False
-
-        # unimplemented = [f for f in self.all_files_list if not is_implemented(f)]
-        # return unimplemented
-
-        unimplemented = [f for f in self.all_files_list if not is_implemented(f)]
-        return unimplemented
+        return [f for f in planned_files if f not in completed_planned]
 
     def get_formatted_files_lists(self) -> Dict[str, str]:
         """
@@ -2001,17 +2048,20 @@ Write_file can be used to implement the new component
         Returns:
             Dictionary with 'implemented' and 'unimplemented' formatted lists
         """
-        implemented_list = (
-            "\n".join([f"- {file}" for file in self.implemented_files])
-            if self.implemented_files
-            else "- None yet"
-        )
+
+        def format_preview(files: List[str], empty_text: str) -> str:
+            if not files:
+                return empty_text
+            preview = "\n".join([f"- {file}" for file in files[:20]])
+            if len(files) > 20:
+                preview += f"\n- ... (+{len(files) - 20} more)"
+            return preview
+
+        implemented_list = format_preview(self.implemented_files, "- None yet")
 
         unimplemented_files = self.get_unimplemented_files()
-        unimplemented_list = (
-            "\n".join([f"- {file}" for file in unimplemented_files])
-            if unimplemented_files
-            else "- All files implemented!"
+        unimplemented_list = format_preview(
+            unimplemented_files, "- All files implemented!"
         )
 
         return {"implemented": implemented_list, "unimplemented": unimplemented_list}

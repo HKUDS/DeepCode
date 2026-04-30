@@ -41,7 +41,7 @@ def reset_abort_flag():
 
 
 # Import necessary modules
-from mcp_agent.app import MCPApp
+from core.compat import MCPApp
 from workflows.agent_orchestration_engine import (
     execute_multi_agent_research_pipeline,
     execute_chat_based_planning_pipeline,
@@ -130,8 +130,9 @@ async def process_input_async(
 
         async with app.run() as agent_app:
             logger = agent_app.logger
-            context = agent_app.context
-            context.config.mcp.servers["filesystem"].args.extend([os.getcwd()])
+            # NOTE: filesystem MCP allowed-dirs are now managed by
+            # workflows.environment.prepare_workflow_environment(). Do not
+            # patch context.config.mcp.servers["filesystem"].args here.
 
             # Initialize progress
             if progress_callback:

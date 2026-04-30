@@ -7,7 +7,7 @@
  * - plan_review: Show plan and allow confirm/modify/cancel
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   MessageCircle,
@@ -39,7 +39,17 @@ export default function InteractionPanel({
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [feedback, setFeedback] = useState('');
   const [showModify, setShowModify] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [editedPlan, setEditedPlan] = useState('');
   const { clearInteraction, addActivityLog } = useWorkflowStore();
+
+  useEffect(() => {
+    const plan = String(interaction.data.plan || interaction.data.plan_preview || '');
+    setEditedPlan(plan);
+    setFeedback('');
+    setShowModify(false);
+    setShowEdit(false);
+  }, [interaction]);
 
   const handleSubmit = useCallback(async (action: string, data: Record<string, unknown> = {}) => {
     setIsSubmitting(true);
@@ -153,15 +163,31 @@ export default function InteractionPanel({
   };
 
   const renderPlanReview = () => {
-    const plan = interaction.data.plan || interaction.data.plan_preview || '';
+    const plan = String(interaction.data.plan || interaction.data.plan_preview || '');
+    const lastError = interaction.data.last_error ? String(interaction.data.last_error) : '';
 
     return (
       <div className="space-y-4">
-        <div className="bg-gray-900 rounded-lg p-4 max-h-80 overflow-y-auto">
-          <pre className="text-xs text-gray-300 font-mono whitespace-pre-wrap">
-            {plan}
-          </pre>
-        </div>
+        {lastError && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            {lastError}
+          </div>
+        )}
+
+        {showEdit ? (
+          <textarea
+            className="w-full min-h-80 px-3 py-2 text-xs border border-gray-200 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent font-mono"
+            value={editedPlan}
+            onChange={(e) => setEditedPlan(e.target.value)}
+            disabled={isSubmitting}
+          />
+        ) : (
+          <div className="bg-gray-900 rounded-lg p-4 max-h-80 overflow-y-auto">
+            <pre className="text-xs text-gray-300 font-mono whitespace-pre-wrap">
+              {plan}
+            </pre>
+          </div>
+        )}
 
         <AnimatePresence>
           {showModify && (
@@ -195,7 +221,10 @@ export default function InteractionPanel({
           {!showModify ? (
             <Button
               variant="secondary"
-              onClick={() => setShowModify(true)}
+              onClick={() => {
+                setShowModify(true);
+                setShowEdit(false);
+              }}
               disabled={isSubmitting}
             >
               <Edit className="h-4 w-4 mr-2" />
@@ -215,6 +244,35 @@ export default function InteractionPanel({
             >
               <Send className="h-4 w-4 mr-2" />
               Submit Changes
+            </Button>
+          )}
+
+          {!showEdit ? (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setShowEdit(true);
+                setShowModify(false);
+              }}
+              disabled={isSubmitting}
+            >
+              <Edit className="h-4 w-4 mr-2" />
+              Edit Plan
+            </Button>
+          ) : (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                if (editedPlan.trim()) {
+                  handleSubmit('replace', { plan: editedPlan });
+                } else {
+                  toast.warning('Plan cannot be empty', 'Paste or write a complete plan');
+                }
+              }}
+              disabled={isSubmitting || !editedPlan.trim()}
+            >
+              <Send className="h-4 w-4 mr-2" />
+              Save Edited Plan
             </Button>
           )}
 

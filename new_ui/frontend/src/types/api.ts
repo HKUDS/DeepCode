@@ -2,6 +2,8 @@
 
 export interface TaskResponse {
   task_id: string;
+  session_id?: string | null;
+  task_short_id?: string | null;
   status: string;
   message: string;
   created_at?: string;
@@ -9,6 +11,8 @@ export interface TaskResponse {
 
 export interface WorkflowStatusResponse {
   task_id: string;
+  session_id?: string | null;
+  task_short_id?: string | null;
   status: string;
   progress: number;
   message: string;
@@ -50,11 +54,82 @@ export interface SettingsResponse {
   document_segmentation: Record<string, unknown>;
 }
 
+export interface OpenRouterModelInfo {
+  id: string;
+  name: string;
+  context_length?: number | null;
+  top_provider: Record<string, unknown>;
+  supported_parameters: string[];
+  pricing: Record<string, unknown>;
+  expiration_date?: string | null;
+  source: string;
+}
+
+export interface OpenRouterModelsResponse {
+  models: OpenRouterModelInfo[];
+  source: string;
+  cached_at?: number | null;
+  stale: boolean;
+}
+
+export interface LLMModelsUpdateRequest {
+  provider: string;
+  default_model: string;
+  planning_model: string;
+  implementation_model: string;
+}
+
 export interface FileUploadResponse {
   file_id: string;
   filename: string;
   path: string;
   size: number;
+}
+
+export interface SessionSummary {
+  session_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+  task_count: number;
+}
+
+export interface SessionMessage {
+  role: 'user' | 'assistant' | 'system' | string;
+  content: string;
+  timestamp: string;
+  task_id_ref?: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface SessionTask {
+  task_id: string;
+  task_kind: 'paper' | 'chat' | 'url' | 'repo' | 'requirement' | string;
+  task_dir: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface SessionDetail {
+  session_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  metadata: Record<string, unknown>;
+  messages: SessionMessage[];
+  tasks: SessionTask[];
+}
+
+export interface SessionDeleteReport {
+  status: 'deleted';
+  session_id: string;
+  deleted_task_dirs: string[];
+  missing_task_dirs: string[];
+  skipped_task_dirs: string[];
+  uploads_deleted: boolean;
 }
 
 export interface ErrorResponse {
@@ -85,6 +160,22 @@ export interface WSErrorMessage {
   type: 'error';
   task_id: string;
   error: string;
+  timestamp: string;
+}
+
+export interface WSCancelledMessage {
+  type: 'cancelled';
+  task_id: string;
+  status: 'cancelled';
+  reason: string;
+  timestamp: string;
+}
+
+export interface WSInterruptedMessage {
+  type: 'interrupted';
+  task_id: string;
+  status: 'interrupted';
+  reason: string;
   timestamp: string;
 }
 
@@ -127,6 +218,8 @@ export type WSMessage =
   | WSProgressMessage
   | WSCompleteMessage
   | WSErrorMessage
+  | WSCancelledMessage
+  | WSInterruptedMessage
   | WSCodeChunkMessage
   | WSLogMessage
   | WSInteractionMessage;

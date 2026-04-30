@@ -12,6 +12,11 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+from core.platform_compat import configure_utf8_stdio, subprocess_env
+
+configure_utf8_stdio()
+
 from mcp.server.models import InitializationOptions
 import mcp.types as types
 from mcp.server import NotificationOptions, Server
@@ -282,6 +287,7 @@ async def execute_command_batch(
                     timeout=30,
                     encoding="utf-8",
                     errors="replace",
+                    env=subprocess_env(),
                 )
 
                 if result.returncode == 0:
@@ -350,6 +356,7 @@ async def execute_single_command(
                 timeout=30,
                 encoding="utf-8",
                 errors="replace",
+                env=subprocess_env(),
             )
 
         output = format_single_command_result(command, working_directory, result)

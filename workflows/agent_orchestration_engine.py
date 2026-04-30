@@ -30,18 +30,17 @@ import asyncio
 import json
 import os
 import re
-import yaml
-from typing import Any, Callable, Dict, List, Optional, Tuple
+import textwrap
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
 
 # MCP Agent imports
-from mcp_agent.agents.agent import Agent
-from mcp_agent.workflows.llm.augmented_llm import RequestParams
-from mcp_agent.workflows.parallel.parallel_llm import ParallelLLM
+from core.compat import Agent, RequestParams
+from core.agent_runtime.runner import AgentRunResult
+from core.llm_runtime import attach_workflow_llm
 
 # Local imports
 from prompts.code_prompts import (
-    PAPER_INPUT_ANALYZER_PROMPT,
-    PAPER_DOWNLOADER_PROMPT,
     PAPER_REFERENCE_ANALYZER_PROMPT,
     CHAT_AGENT_PLANNING_PROMPT,
 )
@@ -52,17 +51,234 @@ from workflows.code_implementation_workflow_index import (
     CodeImplementationWorkflowWithIndex,
 )
 from utils.llm_utils import (
-    get_preferred_llm_class,
     should_use_document_segmentation,
-    get_adaptive_agent_config,
     get_adaptive_prompts,
     get_token_limits,
 )
 from workflows.agents.document_segmentation_agent import prepare_document_segments
 from workflows.agents.requirement_analysis_agent import RequirementAnalysisAgent
+from workflows.environment import prepare_workflow_environment
+from workflows.planning_runtime import (
+    append_planning_attempt,
+    build_planning_checkpoint_callback,
+    clear_planning_checkpoint,
+    coerce_text_to_minimal_plan,
+    is_existing_plan_usable,
+    read_planning_meta,
+    validate_plan_text,
+    write_planning_meta,
+)
+from workflows.plan_review_runtime import (
+    PlanReviewCallback,
+    PlanReviewCancelled,
+    run_plan_review_gate,
+)
+from workflows.workflow_context import WorkflowContext
 
 # Environment configuration
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"  # Prevent .pyc file generation
+
+_DEFAULT_CODE_ANALYZER_TIMEOUT_S = 180
+
+
+def _get_code_analyzer_timeout_s() -> int:
+    """Return the wall-clock timeout for a single planning LLM attempt."""
+    raw = (
+        os.environ.get("DEEPCODE_CODE_ANALYZER_TIMEOUT_S")
+        or os.environ.get("NANOBOT_CODE_ANALYZER_TIMEOUT_S")
+        or ""
+    ).strip()
+    if not raw:
+        return _DEFAULT_CODE_ANALYZER_TIMEOUT_S
+    try:
+        value = int(raw)
+    except ValueError:
+        print(
+            f"⚠️ Invalid code analyzer timeout '{raw}', using default {_DEFAULT_CODE_ANALYZER_TIMEOUT_S}s"
+        )
+        return _DEFAULT_CODE_ANALYZER_TIMEOUT_S
+    if value <= 0:
+        print(
+            f"⚠️ Non-positive code analyzer timeout '{raw}', using default {_DEFAULT_CODE_ANALYZER_TIMEOUT_S}s"
+        )
+        return _DEFAULT_CODE_ANALYZER_TIMEOUT_S
+    return value
+
+
+async def _generate_plan_with_single_agent(
+    planner_agent: Agent,
+    *,
+    message: str,
+    request_params: RequestParams,
+    timeout_s: int,
+    logger,
+) -> AgentRunResult:
+    """Generate a plan with the planner agent only.
+
+    This path is used as the stable default for traditional full-document
+    planning when the paper content is already preloaded locally. In practice
+    it avoids the slowest branch in the parallel planning fan-out while still
+    producing a complete YAML plan for the downstream workflow.
+    """
+    async with planner_agent:
+        planner_llm = await attach_workflow_llm(planner_agent, phase="planning")
+        logger.info(
+            f"Single-agent planning started (timeout={timeout_s}s, agent={planner_agent.name})"
+        )
+        return await planner_llm.generate(
+            message=message,
+            request_params=request_params,
+        )
+
+
+def _load_paper_markdown_content(paper_dir: str, logger) -> tuple[str, str]:
+    """Load the primary markdown artifact used for planning."""
+    markdown_candidates = [
+        filename
+        for filename in os.listdir(paper_dir)
+        if filename.endswith(".md")
+        and not filename.endswith("implement_code_summary.md")
+    ]
+    if not markdown_candidates:
+        raise FileNotFoundError(f"No markdown file found in {paper_dir}")
+
+    paper_file_path = os.path.join(paper_dir, markdown_candidates[0])
+    with open(paper_file_path, "r", encoding="utf-8") as f:
+        paper_content = f.read()
+
+    logger.info(
+        f"Loaded paper markdown for planning: {paper_file_path} ({len(paper_content)} chars)"
+    )
+    return paper_file_path, paper_content
+
+
+def _load_document_segments_context(
+    paper_dir: str, *, max_segments: int = 8, max_chars: int = 24000
+) -> Optional[str]:
+    """Build deterministic planner context from the segmentation index."""
+    index_path = os.path.join(paper_dir, "document_segments", "document_index.json")
+    if not os.path.exists(index_path):
+        return None
+
+    with open(index_path, "r", encoding="utf-8") as f:
+        index_data = json.load(f)
+
+    segments = index_data.get("segments") or []
+    if not segments:
+        return None
+
+    ranked_segments = sorted(
+        segments,
+        key=lambda seg: (
+            float((seg.get("relevance_scores") or {}).get("code_planning", 0.0)),
+            int(seg.get("char_count", 0)),
+        ),
+        reverse=True,
+    )
+
+    selected_segments: List[Dict[str, Any]] = []
+    selected_chars = 0
+    for segment in ranked_segments:
+        content = (segment.get("content") or "").strip()
+        if not content:
+            continue
+        content_len = len(content)
+        if selected_segments and (
+            len(selected_segments) >= max_segments
+            or selected_chars + content_len > max_chars
+        ):
+            continue
+        selected_segments.append(segment)
+        selected_chars += content_len
+        if len(selected_segments) >= max_segments or selected_chars >= max_chars:
+            break
+
+    if not selected_segments:
+        return None
+
+    overview = (
+        f"document_type={index_data.get('document_type', 'unknown')}, "
+        f"strategy={index_data.get('segmentation_strategy', 'unknown')}, "
+        f"total_segments={index_data.get('total_segments', len(segments))}"
+    )
+    chunks = [f"SEGMENT OVERVIEW: {overview}"]
+    for idx, segment in enumerate(selected_segments, start=1):
+        relevance = (segment.get("relevance_scores") or {}).get("code_planning", 0.0)
+        chunks.append(
+            textwrap.dedent(
+                f"""\
+                --- SEGMENT {idx} ---
+                title: {segment.get('title', f'Segment {idx}')}
+                content_type: {segment.get('content_type', 'general')}
+                code_planning_relevance: {relevance}
+                keywords: {", ".join((segment.get('keywords') or [])[:12])}
+                content:
+                {segment.get('content', '').strip()}
+                """
+            ).strip()
+        )
+
+    return "\n\n".join(chunks)
+
+
+def _build_planning_message(
+    *,
+    paper_dir: str,
+    paper_content: str,
+    use_segmentation: bool,
+    segmented_context: Optional[str],
+) -> str:
+    """Create planner input for segmented or full-document planning."""
+    if use_segmentation and segmented_context:
+        return textwrap.dedent(
+            f"""\
+            Create a complete implementation plan for the research paper in `{paper_dir}`.
+
+            Use the segmented document context below as the authoritative source. Produce a full YAML reproduction plan with all five required sections. Do not defer work to other agents and do not describe a parallel analysis process.
+
+            === SEGMENTED DOCUMENT CONTEXT START ===
+            {segmented_context}
+            === SEGMENTED DOCUMENT CONTEXT END ===
+            """
+        )
+
+    return textwrap.dedent(
+        f"""\
+        Analyze the research paper provided below and generate a comprehensive code reproduction plan.
+
+        === PAPER CONTENT START ===
+        {paper_content}
+        === PAPER CONTENT END ===
+
+        Based on this paper, generate a complete implementation plan detailed enough for independent implementation.
+        """
+    )
+
+
+def _planner_instruction(base_prompt: str, *, use_segmentation: bool) -> str:
+    """Return the planner prompt aligned with the tools actually attached."""
+    if not use_segmentation:
+        return base_prompt
+    return (
+        base_prompt
+        + "\n\n# RUNTIME TOOL CONTRACT OVERRIDE\n"
+        + "You do not have access to any tools in this planning step. The segmented document context is already provided in the user message and is authoritative. Do not request, mention, or emit read_document_segments calls. Do not output XML-like <tool_call> text. Produce the final YAML plan immediately with these exact required keys: file_structure, implementation_components, validation_approach, environment_setup, implementation_strategy.\n"
+    )
+
+
+def _is_deferred_planning_output(text: str) -> bool:
+    """Return True when the planner defers work instead of producing a plan."""
+    lowered = (text or "").lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "<tool_call",
+            "read_document_segments",
+            "need to gather more",
+            "let me read",
+            "before creating the complete plan",
+        )
+    )
 
 
 def _assess_output_completeness(text: str) -> float:
@@ -149,27 +365,23 @@ def _assess_output_completeness(text: str) -> float:
     return min(score, 1.0)
 
 
-def _adjust_params_for_retry(
-    params: RequestParams, retry_count: int, config_path: str = "mcp_agent.config.yaml"
-) -> RequestParams:
+def _adjust_params_for_retry(params: RequestParams, retry_count: int) -> RequestParams:
     """
     Token减少策略以适应模型context限制
 
-    策略说明（针对qwen/qwen-max的32768 token限制）：
-    - 第1次重试：REDUCE到retry_max_tokens（从config读取，默认15000）
+    策略说明（针对总context有限的模型，例如 qwen/qwen-max 的 32768 token 限制）：
+    - 第1次重试：REDUCE到retry_max_tokens（从 deepcode_config.json 读取）
     - 第2次重试：REDUCE到retry_max_tokens的80%
     - 第3次重试：REDUCE到retry_max_tokens的60%
     - 降低temperature提高稳定性和可预测性
 
     为什么要REDUCE而不是INCREASE？
-    - qwen/qwen-max最大context = 32768 tokens (input + output 总和)
-    - 当遇到 "maximum context length exceeded" 错误时，说明 input + requested_output > 32768
-    - INCREASING max_tokens只会让问题更严重！
-    - 正确做法：DECREASE output tokens，为更多input留出空间
-    - 模型可以用更简洁的输出表达相同内容
+    - 模型总 context = input + output。
+    - 当遇到 "maximum context length exceeded" 错误时，说明 input + requested_output 超限。
+    - INCREASING max_tokens 只会让问题更严重；正确做法是 DECREASE output tokens
+      为更多 input 留出空间。
     """
-    # 从配置文件读取retry token limit
-    _, retry_max_tokens = get_token_limits(config_path)
+    _, retry_max_tokens = get_token_limits()
 
     # Token减少策略 - 为input腾出更多空间
     if retry_count == 0:
@@ -253,29 +465,18 @@ async def execute_requirement_analysis_workflow(
         return {"status": "error", "error": message}
 
 
-def get_default_search_server(config_path: str = "mcp_agent.config.yaml"):
-    """
-    Get the default search server from configuration.
-
-    Args:
-        config_path: Path to the main configuration file
-
-    Returns:
-        str: The default auxiliary server name from configuration
-    """
+def get_default_search_server() -> str:
+    """Return the default auxiliary search server name from runtime config."""
     try:
-        if os.path.exists(config_path):
-            with open(config_path, "r", encoding="utf-8") as f:
-                config = yaml.safe_load(f)
+        from core.compat.runtime import get_runtime
 
-            default_server = config.get("default_search_server", "filesystem")
-            print(f"🔍 Using search server: {default_server}")
-            return default_server
-        else:
-            print(f"⚠️ Config file {config_path} not found, using default: filesystem")
-            return "filesystem"
+        default_server = (
+            get_runtime().config.tools.default_search_server or "filesystem"
+        )
+        print(f"🔍 Using search server: {default_server}")
+        return default_server
     except Exception as e:
-        print(f"⚠️ Error reading config file {config_path}: {e}")
+        print(f"⚠️ Could not read default search server from config: {e}")
         print("🔍 Falling back to default search server: filesystem")
         return "filesystem"
 
@@ -307,351 +508,95 @@ def get_search_server_names(
     return server_names
 
 
-def extract_clean_json(llm_output: str) -> str:
+_URL_RE = re.compile(r"https?://|www\.", re.IGNORECASE)
+_CHAT_PLANNING_WEB_KEYWORDS = (
+    "url",
+    "link",
+    "web",
+    "website",
+    "fetch",
+    "download",
+    "github",
+    "gitlab",
+    "arxiv",
+    "链接",
+    "网址",
+    "网页",
+    "联网",
+    "在线",
+    "下载",
+)
+
+
+def _chat_planning_needs_fetch(user_input: str) -> bool:
+    """Return whether chat planning needs network-backed fetch tools."""
+    text = user_input or ""
+    if _URL_RE.search(text):
+        return True
+    lowered = text.lower()
+    return any(keyword in lowered for keyword in _CHAT_PLANNING_WEB_KEYWORDS)
+
+
+def get_chat_planning_server_names(user_input: str) -> List[str]:
+    """Expose fetch to chat planning only when the request asks for web context."""
+    return ["fetch"] if _chat_planning_needs_fetch(user_input) else []
+
+
+async def acquire_input_artifact(ctx: WorkflowContext, logger) -> None:
+    """Phase 2 - deterministic input acquisition.
+
+    Routes ``ctx.input_source`` to the right MCP file-downloader tool purely
+    based on ``ctx.input_kind`` (already classified by Phase 0+1 in
+    :func:`workflows.environment.prepare_workflow_environment`). No LLM
+    call, no JSON parsing, no fallback heuristics. On failure it raises so
+    that ``execute_multi_agent_research_pipeline``'s outer ``try/except``
+    reports it through the standard error path.
+
+    Replaces the legacy ``run_research_analyzer`` (LLM-classify) +
+    ``run_resource_processor`` (LLM-fallback wrapper) +
+    ``orchestrate_research_analysis_agent`` (sequencer) trio. Saves about
+    one LLM round-trip and 10 s of artificial sleep per task.
     """
-    Extract clean JSON from LLM output, removing all extra text and formatting.
 
-    Args:
-        llm_output: Raw LLM output
+    paper_dir = str(ctx.task_dir)
+    target_pdf_name = "paper.pdf"
 
-    Returns:
-        str: Clean JSON string
-    """
-    try:
-        # Try to parse the entire output as JSON first
-        json.loads(llm_output.strip())
-        return llm_output.strip()
-    except json.JSONDecodeError:
-        pass
-
-    # Remove markdown code blocks
-    if "```json" in llm_output:
-        pattern = r"```json\s*(.*?)\s*```"
-        match = re.search(pattern, llm_output, re.DOTALL)
-        if match:
-            json_text = match.group(1).strip()
-            try:
-                json.loads(json_text)
-                return json_text
-            except json.JSONDecodeError:
-                pass
-
-    # Find JSON object starting with {
-    lines = llm_output.split("\n")
-    json_lines = []
-    in_json = False
-    brace_count = 0
-
-    for line in lines:
-        stripped = line.strip()
-        if not in_json and stripped.startswith("{"):
-            in_json = True
-            json_lines = [line]
-            brace_count = stripped.count("{") - stripped.count("}")
-        elif in_json:
-            json_lines.append(line)
-            brace_count += stripped.count("{") - stripped.count("}")
-            if brace_count == 0:
-                break
-
-    if json_lines:
-        json_text = "\n".join(json_lines).strip()
-        try:
-            json.loads(json_text)
-            return json_text
-        except json.JSONDecodeError:
-            pass
-
-    # Last attempt: use regex to find JSON
-    pattern = r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}"
-    matches = re.findall(pattern, llm_output, re.DOTALL)
-    for match in matches:
-        try:
-            json.loads(match)
-            return match
-        except json.JSONDecodeError:
-            continue
-
-    # If all methods fail, return original output
-    return llm_output
-
-
-async def run_research_analyzer(prompt_text: str, logger) -> str:
-    """
-    Run the research analysis workflow using ResearchAnalyzerAgent.
-
-    Args:
-        prompt_text: Input prompt text containing research information
-        logger: Logger instance for logging information
-
-    Returns:
-        str: Analysis result from the agent
-    """
-    try:
-        # Log input information for debugging
-        print("📊 Starting research analysis...")
-        print(f"Input prompt length: {len(prompt_text) if prompt_text else 0}")
-        print(f"Input preview: {prompt_text[:200] if prompt_text else 'None'}...")
-
-        if not prompt_text or prompt_text.strip() == "":
-            raise ValueError(
-                "Empty or None prompt_text provided to run_research_analyzer"
-            )
-
-        analyzer_agent = Agent(
-            name="ResearchAnalyzerAgent",
-            instruction=PAPER_INPUT_ANALYZER_PROMPT,
-            server_names=get_search_server_names(),
-        )
-
-        async with analyzer_agent:
-            print("analyzer: Connected to server, calling list_tools...")
-            try:
-                tools = await analyzer_agent.list_tools()
-                print(
-                    "Tools available:",
-                    tools.model_dump() if hasattr(tools, "model_dump") else str(tools),
-                )
-            except Exception as e:
-                print(f"Failed to list tools: {e}")
-
-            try:
-                analyzer = await analyzer_agent.attach_llm(get_preferred_llm_class())
-                print("✅ LLM attached successfully")
-            except Exception as e:
-                print(f"❌ Failed to attach LLM: {e}")
-                raise
-
-            # Set higher token output for research analysis
-            analysis_params = RequestParams(
-                maxTokens=6144,  # Using camelCase
-                temperature=0.3,
-            )
-
-            print(
-                f"🔄 Making LLM request with params: maxTokens={analysis_params.maxTokens}, temperature={analysis_params.temperature}"
-            )
-
-            try:
-                raw_result = await analyzer.generate_str(
-                    message=prompt_text, request_params=analysis_params
-                )
-
-                print("✅ LLM request completed")
-                print(f"Raw result type: {type(raw_result)}")
-                print(f"Raw result length: {len(raw_result) if raw_result else 0}")
-
-                if not raw_result:
-                    print("❌ CRITICAL: raw_result is empty or None!")
-                    print("This could indicate:")
-                    print("1. LLM API call failed silently")
-                    print("2. API rate limiting or quota exceeded")
-                    print("3. Network connectivity issues")
-                    print("4. MCP server communication problems")
-                    raise ValueError("LLM returned empty result")
-
-            except Exception as e:
-                print(f"❌ LLM generation failed: {e}")
-                print(f"Exception type: {type(e)}")
-                raise
-
-            # Clean LLM output to ensure only pure JSON is returned
-            try:
-                clean_result = extract_clean_json(raw_result)
-                print(f"Raw LLM output: {raw_result}")
-                print(f"Cleaned JSON output: {clean_result}")
-
-                # Log to SimpleLLMLogger
-                if hasattr(logger, "log_response"):
-                    logger.log_response(
-                        clean_result,
-                        model="ResearchAnalyzer",
-                        agent="ResearchAnalyzerAgent",
-                    )
-
-                if not clean_result or clean_result.strip() == "":
-                    print("❌ CRITICAL: clean_result is empty after JSON extraction!")
-                    print(f"Original raw_result was: {raw_result}")
-                    raise ValueError("JSON extraction resulted in empty output")
-
-                return clean_result
-
-            except Exception as e:
-                print(f"❌ JSON extraction failed: {e}")
-                print(f"Raw result was: {raw_result}")
-                raise
-
-    except Exception as e:
-        print(f"❌ run_research_analyzer failed: {e}")
-        print(f"Exception details: {type(e).__name__}: {str(e)}")
-        raise
-
-
-async def run_resource_processor(analysis_result: str, logger) -> str:
-    """
-    Run the resource processing workflow - deterministic file operations without LLM.
-
-    This function handles file downloading/moving using direct logic rather than LLM,
-    since the paper directory structure and ID are pre-computed and deterministic.
-
-    Args:
-        analysis_result: Result from the research analyzer (contains file path/URL)
-        logger: Logger instance for logging information
-
-    Returns:
-        str: Processing result with paper directory path
-    """
-    # Pre-compute paper ID - deterministic, no LLM needed
-    papers_dir = "./deepcode_lab/papers"
-    os.makedirs(papers_dir, exist_ok=True)
-    existing_ids = [
-        int(d)
-        for d in os.listdir(papers_dir)
-        if os.path.isdir(os.path.join(papers_dir, d)) and d.isdigit()
-    ]
-    next_id = max(existing_ids) + 1 if existing_ids else 1
-    paper_dir = os.path.join(papers_dir, str(next_id))
-    os.makedirs(paper_dir, exist_ok=True)
-
-    logger.info(f"📋 Paper ID: {next_id}")
+    logger.info(f"📋 Paper ID: {ctx.task_id}")
     logger.info(f"📂 Paper directory: {paper_dir}")
+    logger.info(f"📥 Processing {ctx.input_kind}: {ctx.input_source}")
 
-    # Extract file path/URL from analysis_result - simple parsing, no LLM needed
-    # The analysis_result should contain the path/URL identified by the analyzer
-    try:
-        # Parse the analysis result to extract path
-        analysis_data = json.loads(analysis_result)
-        source_path = analysis_data.get("path") or analysis_data.get("input_path")
-        input_type = analysis_data.get("input_type", "unknown")
-
-        logger.info(f"📥 Processing {input_type}: {source_path}")
-
-        # Try direct function calls first - no LLM needed for deterministic operations
-        direct_call_success = False
-        operation_result = None
-
-        # 1. Handle local file - direct copy
-        if input_type == "file" and source_path and os.path.exists(source_path):
-            logger.info(f"📄 Direct file copy: {source_path} -> {paper_dir}")
-            try:
-                operation_result = await move_file_to(
-                    source=source_path, destination=paper_dir, filename=f"{next_id}.pdf"
-                )
-                # Check if operation succeeded
-                if (
-                    "[SUCCESS]" in operation_result
-                    and "[ERROR]" not in operation_result
-                ):
-                    direct_call_success = True
-                    logger.info(f"✅ Direct file copy succeeded:\n{operation_result}")
-                else:
-                    logger.warning(f"⚠️ Direct file copy had issues: {operation_result}")
-            except Exception as e:
-                logger.warning(f"⚠️ Direct file copy failed: {e}")
-
-        # 2. Handle URL - direct download
-        elif input_type == "url" and source_path:
-            logger.info(f"🌐 Direct URL download: {source_path} -> {paper_dir}")
-            try:
-                operation_result = await download_file_to(
-                    url=source_path,
-                    destination=paper_dir,
-                    filename=f"{next_id}.pdf",  # Default to PDF, conversion will handle it
-                )
-                # Check if operation succeeded
-                if (
-                    "[SUCCESS]" in operation_result
-                    and "[ERROR]" not in operation_result
-                ):
-                    direct_call_success = True
-                    logger.info(f"✅ Direct download succeeded:\n{operation_result}")
-                else:
-                    logger.warning(f"⚠️ Direct download had issues: {operation_result}")
-            except Exception as e:
-                logger.warning(f"⚠️ Direct download failed: {e}")
-
-        # 3. If direct call succeeded, format result
-        if direct_call_success:
-            dest_path = os.path.join(paper_dir, f"{next_id}.md")
-            result = json.dumps(
-                {
-                    "status": "success",
-                    "paper_id": next_id,
-                    "paper_dir": paper_dir,
-                    "file_path": dest_path,
-                    "message": f"File successfully processed to {paper_dir}",
-                    "operation_details": operation_result,
-                }
-            )
-        else:
-            # 4. Fallback to LLM agent if direct call failed or unsupported type
-            logger.info(
-                f"🤖 Falling back to LLM agent for: {input_type} - {source_path}"
-            )
-            processor_agent = Agent(
-                name="ResourceProcessorAgent",
-                instruction=PAPER_DOWNLOADER_PROMPT,
-                server_names=["file-downloader"],
-            )
-
-            async with processor_agent:
-                processor = await processor_agent.attach_llm(get_preferred_llm_class())
-                processor_params = RequestParams(
-                    maxTokens=4096,
-                    temperature=0.2,
-                    tool_filter={
-                        "file-downloader": {"download_file_to", "move_file_to"}
-                    },
-                )
-
-                # Provide context about what failed if available
-                context = (
-                    f"\nPrevious attempt result: {operation_result}"
-                    if operation_result
-                    else ""
-                )
-                message = f"""Download/move the file to paper directory: {paper_dir}
-Source: {source_path}
-Input Type: {input_type}
-Paper ID: {next_id}
-Target filename: {next_id}.md (after conversion){context}
-
-Use the appropriate tool to complete this task."""
-
-                result = await processor.generate_str(
-                    message=message, request_params=processor_params
-                )
-
-        return result
-
-    except (json.JSONDecodeError, KeyError, Exception) as e:
-        logger.error(f"❌ Error processing resource: {e}")
-        # Fallback - return paper directory for manual processing
-        return json.dumps(
-            {
-                "status": "partial",
-                "paper_id": next_id,
-                "paper_dir": paper_dir,
-                "message": f"Paper directory created at {paper_dir}, manual file placement may be needed",
-            }
+    if ctx.input_kind == "url":
+        operation_result = await download_file_to(
+            url=ctx.input_source,
+            destination=paper_dir,
+            filename=target_pdf_name,
         )
+    else:
+        operation_result = await move_file_to(
+            source=ctx.input_source,
+            destination=paper_dir,
+            filename=target_pdf_name,
+        )
+
+    if "[SUCCESS]" not in operation_result or "[ERROR]" in operation_result:
+        logger.error(f"❌ Input acquisition failed: {operation_result}")
+        raise RuntimeError(
+            f"Failed to acquire input artifact for task {ctx.task_id}: "
+            f"{operation_result}"
+        )
+
+    logger.info(f"✅ Input acquired:\n{operation_result}")
 
 
 async def run_code_analyzer(
     paper_dir: str, logger, use_segmentation: bool = True
 ) -> str:
     """
-    Run the adaptive code analysis workflow with optimized file reading.
+    Run code planning through a single authoritative planner.
 
-    This function minimizes LLM tool calls by:
-    1. Reading paper file directly (deterministic, no LLM needed)
-    2. Passing paper content directly to agents
-    3. LLM only used for analysis and search decisions
-
-    Orchestrates three specialized agents:
-    - ConceptAnalysisAgent: Analyzes system architecture and conceptual framework
-    - AlgorithmAnalysisAgent: Extracts algorithms, formulas, and technical details
-    - CodePlannerAgent: Integrates outputs into a comprehensive implementation plan
+    Segmentation may be used to prepare a compact deterministic context, but
+    final plan generation is always performed by one planner agent. This keeps
+    planning architecture consistent and avoids fan-out deadlocks.
 
     Args:
         paper_dir: Directory path containing the research paper and related resources
@@ -659,202 +604,285 @@ async def run_code_analyzer(
         use_segmentation: Whether to use document segmentation capabilities
 
     Returns:
-        str: Comprehensive analysis result from the coordinated agents
+        str: Comprehensive implementation plan generated by the planner
     """
     print(
-        f"📊 Code analysis mode: {'Segmented' if use_segmentation else 'Traditional'}"
+        f"?? Code analysis mode: {'Segmented' if use_segmentation else 'Traditional'}"
     )
-    print("   🔧 Optimized workflow: Direct file reading, LLM only for analysis")
+    print("   ?? Planner architecture: single authoritative planner")
 
-    # STEP 1: Read paper file directly - no LLM needed for deterministic file operations
-    paper_content = None
-    paper_file_path = None
+    paper_file_path, paper_content = _load_paper_markdown_content(paper_dir, logger)
+    logger.info(f"Planning source markdown: {paper_file_path}")
 
-    try:
-        # Find .md file in paper directory - simple file system operation
-        for filename in os.listdir(paper_dir):
-            if filename.endswith(".md"):
-                paper_file_path = os.path.join(paper_dir, filename)
-                with open(paper_file_path, "r", encoding="utf-8") as f:
-                    paper_content = f.read()
-                logger.info(
-                    f"📄 Paper file loaded: {paper_file_path} ({len(paper_content)} chars)"
-                )
-                break
-
-        if not paper_content:
-            logger.warning(
-                f"⚠️ No .md file found in {paper_dir}, agents will search for it"
+    segmented_context = None
+    if use_segmentation:
+        segmented_context = _load_document_segments_context(paper_dir)
+        if segmented_context:
+            logger.info(
+                "Using segmented planner context derived from document_index.json"
             )
-    except Exception as e:
-        logger.warning(f"⚠️ Error reading paper file: {e}, agents will search for it")
+        else:
+            logger.warning(
+                "Segmented planning requested but no usable segments were found; falling back to full-document planning context"
+            )
+            use_segmentation = False
 
-    # STEP 2: Configure agents with minimal tool access
-    search_server_names = get_search_server_names()
-    agent_config = get_adaptive_agent_config(use_segmentation, search_server_names)
     prompts = get_adaptive_prompts(use_segmentation)
-
-    if paper_content:
-        # When paper content is already loaded, agents don't need search tools
-        agent_config = {
-            "concept_analysis": [],
-            "algorithm_analysis": search_server_names,
-            "code_planner": search_server_names,
-        }
-    else:
-        agent_config = {
-            "concept_analysis": ["filesystem"],
-            "algorithm_analysis": search_server_names + ["filesystem"],
-            "code_planner": search_server_names + ["filesystem"],
-        }
-
-    print(f"   Agent configurations: {agent_config}")
-
-    concept_analysis_agent = Agent(
-        name="ConceptAnalysisAgent",
-        instruction=prompts["concept_analysis"],
-        server_names=agent_config["concept_analysis"],
-    )
-    algorithm_analysis_agent = Agent(
-        name="AlgorithmAnalysisAgent",
-        instruction=prompts["algorithm_analysis"],
-        server_names=agent_config["algorithm_analysis"],
-    )
     code_planner_agent = Agent(
         name="CodePlannerAgent",
-        instruction=prompts["code_planning"],
-        server_names=agent_config["code_planner"],
-    )
-
-    code_aggregator_agent = ParallelLLM(
-        fan_in_agent=code_planner_agent,
-        fan_out_agents=[concept_analysis_agent, algorithm_analysis_agent],
-        llm_factory=get_preferred_llm_class(),
+        instruction=_planner_instruction(
+            prompts["code_planning"], use_segmentation=use_segmentation
+        ),
+        server_names=[],
     )
 
     base_max_tokens, _ = get_token_limits()
-
-    # STEP 3: Configure parameters - minimal tool filter since paper content is provided
-    if use_segmentation:
-        max_tokens_limit = base_max_tokens
-        temperature = 0.2
-        max_iterations = 5
-        print(
-            f"🧠 Using SEGMENTED mode: max_tokens={base_max_tokens} for complete YAML output"
-        )
-
-        # Segmentation mode: Only use segmentation tools if needed (paper content already provided)
-        tool_filter = {
-            "document-segmentation": {"read_document_segments", "get_document_overview"}
-            if not paper_content
-            else set(),  # Empty if paper already loaded
-        }
-    else:
-        max_tokens_limit = base_max_tokens
-        temperature = 0.3
-        max_iterations = 2
-        print(
-            f"🧠 Using TRADITIONAL mode: max_tokens={base_max_tokens} for complete YAML output"
-        )
-
-        # Traditional mode: No filesystem tools needed (paper content already provided)
-        if paper_content:
-            tool_filter = {"fetch": {"fetch"}}
-        else:
-            tool_filter = {
-                "fetch": {"fetch"},
-                "filesystem": {
-                    "read_text_file",
-                    "list_directory",
-                },
-            }
-
-    enhanced_params = RequestParams(
-        maxTokens=max_tokens_limit,
-        temperature=temperature,
-        max_iterations=max_iterations,
-        tool_filter=tool_filter
-        if tool_filter
-        else None,  # None = all tools, empty dict = no filtering
+    max_iterations = 5 if use_segmentation else 2
+    current_max_tokens = base_max_tokens
+    current_temperature = 0.2 if use_segmentation else 0.3
+    planning_mode = "segmented" if use_segmentation else "traditional"
+    message = _build_planning_message(
+        paper_dir=paper_dir,
+        paper_content=paper_content,
+        use_segmentation=use_segmentation,
+        segmented_context=segmented_context,
     )
-
-    # STEP 4: Construct message with paper content directly included
-    if paper_content:
-        # Paper content provided directly - LLM only needs to analyze, not read files
-        message = f"""Analyze the research paper provided below. The paper file has been pre-loaded for you.
-
-=== PAPER CONTENT START ===
-{paper_content}
-=== PAPER CONTENT END ===
-
-Based on this paper, generate a comprehensive code reproduction plan that includes:
-
-1. Complete system architecture and component breakdown
-2. All algorithms, formulas, and implementation details
-3. Detailed file structure and implementation roadmap
-
-The goal is to create a reproduction plan detailed enough for independent implementation."""
-    else:
-        # Fallback: paper not found, agents will need to find it
-        message = f"""Analyze the research paper in directory: {paper_dir}
-
-Please locate and analyze the markdown (.md) file containing the research paper. Based on your analysis, generate a comprehensive code reproduction plan that includes:
-
-1. Complete system architecture and component breakdown
-2. All algorithms, formulas, and implementation details
-3. Detailed file structure and implementation roadmap
-
-The goal is to create a reproduction plan detailed enough for independent implementation."""
 
     max_retries = 3
     retry_count = 0
+    best_invalid_result = ""
+    best_invalid_score = -1.0
+    best_invalid_validation: Dict[str, Any] | None = None
+    final_planning_error: str | None = None
+    request_timeout_s = _get_code_analyzer_timeout_s()
+    logger.info(
+        "Using single planner path "
+        f"(segmentation={use_segmentation}, segmented_context={bool(segmented_context)})"
+    )
 
     while retry_count < max_retries:
+        attempt = retry_count + 1
+        attempt_record: Dict[str, Any] = {
+            "attempt": attempt,
+            "max_retries": max_retries,
+            "mode": planning_mode,
+            "segmentation": use_segmentation,
+            "segmented_context": bool(segmented_context),
+            "max_iterations": max_iterations,
+            "max_tokens": current_max_tokens,
+            "temperature": current_temperature,
+        }
+        attempt_logged = False
         try:
-            print(
-                f"🚀 Attempting code analysis (attempt {retry_count + 1}/{max_retries})"
+            print(f"?? Attempting code analysis (attempt {attempt}/{max_retries})")
+            logger.info(
+                f"Code planning attempt {attempt}/{max_retries} started "
+                f"(timeout={request_timeout_s}s, segmentation={use_segmentation}, "
+                f"paper_content_loaded={bool(paper_content)})"
             )
-            result = await code_aggregator_agent.generate_str(
-                message=message, request_params=enhanced_params
+            enhanced_params = RequestParams(
+                maxTokens=current_max_tokens,
+                temperature=current_temperature,
+                max_iterations=max_iterations,
+                llm_timeout_s=request_timeout_s,
+                enforce_default_max_iterations=False,
+                checkpoint_callback=build_planning_checkpoint_callback(
+                    paper_dir,
+                    attempt=attempt,
+                    mode=planning_mode,
+                ),
+            )
+            run_result = await _generate_plan_with_single_agent(
+                code_planner_agent,
+                message=message,
+                request_params=enhanced_params,
+                timeout_s=request_timeout_s,
+                logger=logger,
+            )
+            result = (run_result.final_content or "").strip()
+            attempt_record.update(
+                {
+                    "status": run_result.stop_reason,
+                    "result_chars": len(result),
+                    "tools_used": run_result.tools_used,
+                    "usage": run_result.usage,
+                    "runner_error": run_result.error,
+                }
             )
 
-            print(f"🔍 Code analysis result:\n{result}")
+            if not result:
+                attempt_record["error"] = "Code planning agent returned empty output"
+                append_planning_attempt(paper_dir, attempt_record)
+                attempt_logged = True
+                raise ValueError("Code planning agent returned empty output")
 
-            completeness_score = _assess_output_completeness(
-                result
-            )  # need to add file structure val
-            print(f"📊 Output completeness score: {completeness_score:.2f}/1.0")
-
-            if completeness_score >= 0.8:
-                print(
-                    f"✅ Code analysis completed successfully (length: {len(result)} chars)"
+            normalized_result = result.strip()
+            if normalized_result.lower().startswith("error calling llm:"):
+                attempt_record["error"] = normalized_result
+                append_planning_attempt(paper_dir, attempt_record)
+                attempt_logged = True
+                raise RuntimeError(normalized_result)
+            if normalized_result.lower().startswith("error:"):
+                attempt_record["error"] = normalized_result
+                append_planning_attempt(paper_dir, attempt_record)
+                attempt_logged = True
+                raise RuntimeError(normalized_result)
+            if run_result.stop_reason == "max_iterations":
+                attempt_record["error"] = (
+                    f"planner reached max_iterations={max_iterations}"
                 )
+                append_planning_attempt(paper_dir, attempt_record)
+                attempt_logged = True
+                raise RuntimeError(attempt_record["error"])
+
+            print(f"?? Code analysis result:\n{result}")
+
+            completeness_score = _assess_output_completeness(result)
+            plan_validation = validate_plan_text(result)
+            print(f"?? Output completeness score: {completeness_score:.2f}/1.0")
+            attempt_record.update(
+                {
+                    "completeness_score": completeness_score,
+                    "plan_validation": plan_validation,
+                }
+            )
+
+            if completeness_score >= 0.8 and plan_validation.get("valid", False):
+                print(
+                    f"??Code analysis completed successfully (length: {len(result)} chars)"
+                )
+                attempt_record["status"] = "success"
+                append_planning_attempt(paper_dir, attempt_record)
+                write_planning_meta(
+                    paper_dir,
+                    {
+                        "status": "success",
+                        "source": "generated",
+                        "mode": planning_mode,
+                        "attempts": attempt,
+                        "stop_reason": run_result.stop_reason,
+                        "completeness_score": completeness_score,
+                        "plan_validation": plan_validation,
+                        "tools_used": run_result.tools_used,
+                        "usage": run_result.usage,
+                        "plan_chars": len(result),
+                    },
+                )
+                clear_planning_checkpoint(paper_dir)
                 return result
-            else:
-                print(
-                    f"⚠️ Output appears truncated (score: {completeness_score:.2f}), retrying with enhanced parameters..."
-                )
-                new_max_tokens, new_temperature = _adjust_params_for_retry(
-                    enhanced_params, retry_count
-                )
-                enhanced_params = RequestParams(
-                    maxTokens=new_max_tokens,
-                    temperature=new_temperature,
-                    max_iterations=max_iterations,
-                    tool_filter=tool_filter
-                    if tool_filter
-                    else None,  # None = all tools, empty dict = no filtering
-                )
-                retry_count += 1
 
-        except Exception as e:
-            print(f"❌ Error in code analysis attempt {retry_count + 1}: {e}")
+            if _is_deferred_planning_output(result):
+                logger.warning(
+                    "Code planner deferred to unavailable tools; using provided segmented context for fallback plan"
+                )
+                best_invalid_result = (
+                    segmented_context or paper_content[:6000] or result
+                ).strip()
+                best_invalid_score = max(best_invalid_score, completeness_score)
+                best_invalid_validation = plan_validation
+                retry_count = max_retries
+                break
+
+            if len(result) > 200 and completeness_score > best_invalid_score:
+                best_invalid_result = result
+                best_invalid_score = completeness_score
+                best_invalid_validation = plan_validation
+
+            attempt_record["status"] = "incomplete"
+            append_planning_attempt(paper_dir, attempt_record)
+            attempt_logged = True
+            print(
+                f"??? Output appears truncated (score: {completeness_score:.2f}), retrying with enhanced parameters..."
+            )
+            missing = plan_validation.get("missing_sections") or []
+            if missing:
+                logger.warning(f"Code planning missing required sections: {missing}")
+            new_max_tokens, new_temperature = _adjust_params_for_retry(
+                enhanced_params, retry_count
+            )
+            current_max_tokens = new_max_tokens
+            current_temperature = new_temperature
+            retry_count += 1
+
+        except asyncio.TimeoutError:
+            timeout_msg = (
+                f"Code planning attempt {attempt}/{max_retries} timed out "
+                f"after {request_timeout_s}s while waiting for the LLM response"
+            )
+            logger.error(timeout_msg)
+            print(f"Timeout: {timeout_msg}")
+            if not attempt_logged:
+                attempt_record.update({"status": "timeout", "error": timeout_msg})
+                append_planning_attempt(paper_dir, attempt_record)
             retry_count += 1
             if retry_count >= max_retries:
-                raise
+                final_planning_error = timeout_msg
+                break
+        except Exception as e:
+            logger.error(
+                f"Code planning attempt {attempt}/{max_retries} failed: {type(e).__name__}: {e}"
+            )
+            print(f"??Error in code analysis attempt {attempt}: {e}")
+            if not attempt_logged:
+                attempt_record.update(
+                    {
+                        "status": "error",
+                        "error": f"{type(e).__name__}: {e}",
+                    }
+                )
+                append_planning_attempt(paper_dir, attempt_record)
+            retry_count += 1
+            if retry_count >= max_retries:
+                final_planning_error = f"{type(e).__name__}: {e}"
+                break
 
-    print(f"⚠️ Returning potentially incomplete result after {max_retries} attempts")
-    return result
+    fallback_source = best_invalid_result
+    if len(fallback_source.strip()) < 500:
+        fallback_source = (
+            segmented_context or paper_content[:6000] or fallback_source
+        ).strip()
+
+    if fallback_source:
+        coerced_plan = coerce_text_to_minimal_plan(fallback_source, paper_dir=paper_dir)
+        coerced_validation = validate_plan_text(coerced_plan)
+        if coerced_validation.get("valid", False):
+            logger.warning(
+                "Code planning fell back to minimal schema wrapper after "
+                f"{max_retries} invalid attempts; previous validation={best_invalid_validation}; "
+                f"final_error={final_planning_error}"
+            )
+            write_planning_meta(
+                paper_dir,
+                {
+                    "status": "success",
+                    "source": "coerced_from_freeform",
+                    "mode": planning_mode,
+                    "attempts": max_retries,
+                    "completeness_score": best_invalid_score,
+                    "plan_validation": coerced_validation,
+                    "original_plan_validation": best_invalid_validation,
+                    "final_error": final_planning_error,
+                    "plan_chars": len(coerced_plan),
+                },
+            )
+            clear_planning_checkpoint(paper_dir)
+            return coerced_plan
+
+    print(f"??? Returning potentially incomplete result after {max_retries} attempts")
+    write_planning_meta(
+        paper_dir,
+        {
+            "status": "error",
+            "source": "generated",
+            "mode": planning_mode,
+            "attempts": max_retries,
+            "error": final_planning_error or "exhausted retries without usable plan",
+        },
+    )
+    raise RuntimeError(
+        final_planning_error
+        or f"Code planning exhausted {max_retries} attempts without producing a usable plan"
+    )
 
 
 async def github_repo_download(search_result: str, paper_dir: str, logger) -> str:
@@ -879,7 +907,10 @@ async def github_repo_download(search_result: str, paper_dir: str, logger) -> st
 
     async with github_download_agent:
         print("GitHub downloader: Downloading repositories...")
-        downloader = await github_download_agent.attach_llm(get_preferred_llm_class())
+        downloader = await attach_workflow_llm(
+            github_download_agent,
+            phase="planning",
+        )
 
         # Set higher token output for GitHub download
         github_params = RequestParams(
@@ -916,7 +947,10 @@ Goal: Find the most valuable GitHub repositories from the paper's reference list
 
     async with reference_analysis_agent:
         print("Reference analyzer: Connected to server, analyzing references...")
-        analyzer = await reference_analysis_agent.attach_llm(get_preferred_llm_class())
+        analyzer = await attach_workflow_llm(
+            reference_analysis_agent,
+            phase="planning",
+        )
 
         # Filter tools to only essential ones for reference analysis
         reference_params = RequestParams(
@@ -934,104 +968,37 @@ Goal: Find the most valuable GitHub repositories from the paper's reference list
         return reference_result
 
 
-async def _process_input_source(input_source: str, logger) -> str:
-    """
-    Process and validate input source (file path or URL).
-
-    Args:
-        input_source: Input source (file path or analysis result)
-        logger: Logger instance
-
-    Returns:
-        str: Processed input source
-    """
-    if input_source.startswith("file://"):
-        file_path = input_source[7:]
-        if os.name == "nt" and file_path.startswith("/"):
-            file_path = file_path.lstrip("/")
-        return file_path
-    return input_source
-
-
-async def orchestrate_research_analysis_agent(
-    input_source: str, logger, progress_callback: Optional[Callable] = None
-) -> Tuple[str, str]:
-    """
-    Orchestrate intelligent research analysis and resource processing automation.
-
-    This agent coordinates multiple AI components to analyze research content
-    and process associated resources with automated workflow management.
-
-    Args:
-        input_source: Research input source for analysis
-        logger: Logger instance for process tracking
-        progress_callback: Progress callback function for workflow monitoring
-
-    Returns:
-        tuple: (analysis_result, resource_processing_result)
-    """
-    # Step 1: Research Analysis
-    if progress_callback:
-        progress_callback(
-            10, "📊 Analyzing research content and extracting key information..."
-        )
-    analysis_result = await run_research_analyzer(input_source, logger)
-
-    # Add brief pause for system stability
-    await asyncio.sleep(5)
-
-    # Step 2: Download Processing
-    if progress_callback:
-        progress_callback(
-            25, "📥 Processing downloads and preparing document structure..."
-        )
-    download_result = await run_resource_processor(analysis_result, logger)
-    print("download result:", download_result)
-
-    return analysis_result, download_result
-
-
 async def synthesize_workspace_infrastructure_agent(
-    download_result: str, logger, workspace_dir: Optional[str] = None
+    ctx: WorkflowContext, logger
 ) -> Dict[str, str]:
     """
-    Synthesize intelligent research workspace infrastructure with automated structure generation.
+    Synthesize the per-task workspace by reading the converted markdown into ``ctx``.
 
-    This agent autonomously creates and configures the optimal workspace architecture
-    for research project implementation with AI-driven path optimization.
-
-    Args:
-        download_result: Resource processing result from analysis agent
-        logger: Logger instance for infrastructure tracking
-        workspace_dir: Optional workspace directory path for environment customization
-
-    Returns:
-        dict: Comprehensive workspace infrastructure metadata
+    All directory allocation and path resolution is owned by
+    :func:`workflows.environment.prepare_workflow_environment`; this function
+    only loads the markdown body (Phase 2 wrote it to ``ctx.task_dir``) and
+    fills ``ctx.paper_md_path`` / ``ctx.standardized_text``. The legacy
+    ``dir_info`` dict is then derived from ``ctx`` for downstream phases.
     """
-    # Parse download result to get file information
-    result = await FileProcessor.process_file_input(
-        download_result, base_dir=workspace_dir
-    )
-    paper_dir = result["paper_dir"]
+    md_path = FileProcessor.find_markdown_file(str(ctx.task_dir))
+    if not md_path:
+        raise ValueError(f"No markdown file found in task directory: {ctx.task_dir}")
 
-    # Log workspace infrastructure synthesis
+    content = await FileProcessor.read_file_content(md_path)
+    structured_content = FileProcessor.parse_markdown_sections(content)
+    standardized_text = FileProcessor.standardize_output(structured_content)
+
+    ctx.paper_md_path = Path(md_path)
+    ctx.standardized_text = standardized_text
+    if ctx.paper_path is None:
+        ctx.paper_path = ctx.paper_md_path
+
     print("🏗️ Intelligent workspace infrastructure synthesized:")
-    print(f"   Base workspace environment: {workspace_dir or 'auto-detected'}")
-    print(f"   Research workspace: {paper_dir}")
-    print("   AI-driven path optimization: active")
+    print(f"   Workspace root : {ctx.workspace_root}")
+    print(f"   Task directory : {ctx.task_dir}")
+    print(f"   Markdown source: {ctx.paper_md_path}")
 
-    return {
-        "paper_dir": paper_dir,
-        "standardized_text": result["standardized_text"],
-        "reference_path": os.path.join(paper_dir, "reference.txt"),
-        "initial_plan_path": os.path.join(paper_dir, "initial_plan.txt"),
-        "download_path": os.path.join(paper_dir, "github_download.txt"),
-        "index_report_path": os.path.join(paper_dir, "codebase_index_report.txt"),
-        "implementation_report_path": os.path.join(
-            paper_dir, "code_implementation_report.txt"
-        ),
-        "workspace_dir": workspace_dir,
-    }
+    return ctx.to_dir_info()
 
 
 async def orchestrate_reference_intelligence_agent(
@@ -1253,12 +1220,36 @@ async def orchestrate_code_planning_agent(
         progress_callback: Progress callback function for monitoring
     """
     if progress_callback:
-        progress_callback(40, "🏗️ Synthesizing intelligent code architecture...")
+        progress_callback(65, "📋 Generating implementation plan and code structure...")
 
     initial_plan_path = dir_info["initial_plan_path"]
+    reusable, reuse_info = is_existing_plan_usable(
+        initial_plan_path,
+        paper_dir=dir_info["paper_dir"],
+    )
+    if reusable:
+        print(f"Found reusable initial plan at {initial_plan_path}")
+        if not reuse_info.get("meta") or reuse_info["meta"].get("status") != "success":
+            write_planning_meta(
+                dir_info["paper_dir"],
+                {
+                    "status": "success",
+                    "source": "existing",
+                    "initial_plan_path": initial_plan_path,
+                    "plan_chars": reuse_info.get("plan_chars", 0),
+                    "plan_validation": reuse_info.get("plan_validation"),
+                },
+            )
+        return
 
-    # Check if initial plan already exists
-    if not os.path.exists(initial_plan_path):
+    if os.path.exists(initial_plan_path):
+        print(
+            f"Existing initial plan is not reusable; regenerating ({reuse_info.get('reason', 'unknown')})"
+        )
+    should_generate_plan = not reusable
+
+    # Generate or regenerate the plan after resume validation.
+    if should_generate_plan:
         # Use segmentation setting from preprocessing phase
         use_segmentation = dir_info.get("use_segmentation", True)
         print(f"📊 Planning mode: {'Segmented' if use_segmentation else 'Traditional'}")
@@ -1300,8 +1291,29 @@ async def orchestrate_code_planning_agent(
             print(error_msg)
             raise ValueError(error_msg)
 
+        plan_validation = validate_plan_text(initial_plan_result)
+        if not plan_validation.get("valid", False):
+            missing = plan_validation.get("missing_sections") or []
+            raise ValueError(
+                f"Code planning produced invalid plan; missing sections: {missing}"
+            )
+
         with open(initial_plan_path, "w", encoding="utf-8") as f:
             f.write(initial_plan_result)
+        current_meta = read_planning_meta(dir_info["paper_dir"]) or {}
+        write_planning_meta(
+            dir_info["paper_dir"],
+            {
+                **current_meta,
+                "status": "success",
+                "source": current_meta.get("source", "generated"),
+                "initial_plan_path": initial_plan_path,
+                "plan_saved": True,
+                "plan_chars": len(initial_plan_result),
+                "plan_validation": plan_validation,
+            },
+        )
+        clear_planning_checkpoint(dir_info["paper_dir"])
         print(
             f"✅ Initial plan saved to {initial_plan_path} ({len(initial_plan_result)} chars)"
         )
@@ -1465,7 +1477,6 @@ async def orchestrate_codebase_intelligence_agent(
         index_result = await run_codebase_indexing(
             paper_dir=dir_info["paper_dir"],
             initial_plan_path=dir_info["initial_plan_path"],
-            config_path="mcp_agent.secrets.yaml",
             logger=logger,
         )
 
@@ -1561,26 +1572,45 @@ async def synthesize_code_implementation_agent(
                 plan_file_path=dir_info["initial_plan_path"],
                 target_directory=dir_info["paper_dir"],
                 pure_code_mode=True,  # Focus on code implementation, skip testing
+                progress_callback=progress_callback,
             )
 
-            # Log implementation results
-            if implementation_result["status"] == "success":
-                print("Code implementation completed successfully!")
-                print(f"Code directory: {implementation_result['code_directory']}")
-
-                # Save implementation results to file
-                with open(
-                    dir_info["implementation_report_path"], "w", encoding="utf-8"
-                ) as f:
-                    f.write(str(implementation_result))
+            # Log implementation results truthfully — distinguish full
+            # completion from an early termination (loop_detector abort,
+            # max_iterations, max_time, etc.). The legacy code unconditionally
+            # printed "completed successfully!" which masked partial output.
+            inner_status = implementation_result.get(
+                "inner_status"
+            ) or implementation_result.get("status")
+            files_done = implementation_result.get("files_completed", 0)
+            unimpl = implementation_result.get("unimplemented_files", []) or []
+            if inner_status == "completed":
                 print(
-                    f"Implementation report saved to {dir_info['implementation_report_path']}"
+                    "✅ Code implementation completed successfully (all planned files written)!"
                 )
-
+                print(f"   Code directory : {implementation_result['code_directory']}")
+                print(f"   Files written  : {files_done}")
             else:
+                reason = implementation_result.get("abort_reason") or "unknown"
                 print(
-                    f"Code implementation failed: {implementation_result.get('message', 'Unknown error')}"
+                    f"⚠️  Code implementation finished EARLY — status={inner_status}, "
+                    f"files_written={files_done}, unimplemented={len(unimpl)}"
                 )
+                print(f"   Reason         : {reason}")
+                print(f"   Code directory : {implementation_result['code_directory']}")
+                if unimpl:
+                    sample = ", ".join(unimpl[:5])
+                    if len(unimpl) > 5:
+                        sample += f", ... (+{len(unimpl) - 5} more)"
+                    print(f"   Missing files  : {sample}")
+
+            with open(
+                dir_info["implementation_report_path"], "w", encoding="utf-8"
+            ) as f:
+                f.write(str(implementation_result))
+            print(
+                f"Implementation report saved to {dir_info['implementation_report_path']}"
+            )
 
             return implementation_result
         else:
@@ -1626,7 +1656,7 @@ async def run_chat_planning_agent(user_input: str, logger) -> str:
         chat_planning_agent = Agent(
             name="ChatPlanningAgent",
             instruction=CHAT_AGENT_PLANNING_PROMPT,
-            server_names=get_search_server_names(),  # Dynamic search server configuration
+            server_names=get_chat_planning_server_names(user_input),
         )
 
         async with chat_planning_agent:
@@ -1641,8 +1671,9 @@ async def run_chat_planning_agent(user_input: str, logger) -> str:
                 print(f"Failed to list tools: {e}")
 
             try:
-                planner = await chat_planning_agent.attach_llm(
-                    get_preferred_llm_class()
+                planner = await attach_workflow_llm(
+                    chat_planning_agent,
+                    phase="planning",
                 )
                 print("✅ LLM attached successfully")
             except Exception as e:
@@ -1685,11 +1716,10 @@ Please provide a detailed implementation plan that covers all aspects needed for
                 print(f"Exception type: {type(e)}")
                 raise
 
-            # Log to SimpleLLMLogger
-            if hasattr(logger, "log_response"):
-                logger.log_response(
-                    raw_result, model="ChatPlanningAgent", agent="ChatPlanningAgent"
-                )
+            # NOTE: Per-call structured logging is handled centrally by
+            # core.observability (see core/providers/openai_compat.py and
+            # anthropic.py — every chat() call writes a record to the
+            # task-scoped llm.jsonl).
 
             if not raw_result or raw_result.strip() == "":
                 print("❌ CRITICAL: Planning result is empty!")
@@ -1711,6 +1741,8 @@ async def execute_multi_agent_research_pipeline(
     logger,
     progress_callback: Optional[Callable] = None,
     enable_indexing: bool = True,
+    task_id: Optional[str] = None,
+    plan_review_callback: Optional[PlanReviewCallback] = None,
 ) -> str:
     """
     Execute the complete intelligent multi-agent research orchestration pipeline.
@@ -1732,110 +1764,53 @@ async def execute_multi_agent_research_pipeline(
     Returns:
         str: The comprehensive pipeline execution result with status and outcomes
     """
+    # Track the final status so the finally block can persist it back to the
+    # session store regardless of which branch (return / except / cancel) we
+    # take. Also remember the resolved task_id, since `ctx` may not exist if
+    # prepare_workflow_environment raises before assignment.
+    _resolved_task_id: Optional[str] = task_id
+    _final_status: str = "running"
+
     try:
-        # Phase 0: Workspace Setup (5%)
-        if progress_callback:
-            progress_callback(5, "🔄 Setting up workspace for file processing...")
-
+        # Phase 0+1: Unified workspace + input housekeeping (no LLM)
         print("🚀 Initializing intelligent multi-agent research orchestration system")
-        print("📊 Progress: 5% - Workspace Setup")
-
-        # Setup local workspace directory
-        workspace_dir = os.path.join(os.getcwd(), "deepcode_lab")
-        os.makedirs(workspace_dir, exist_ok=True)
-
-        print("📁 Working environment: local")
-        print(f"📂 Workspace directory: {workspace_dir}")
-        print("✅ Workspace status: ready")
-
-        # Log intelligence functionality status
         if enable_indexing:
             print("🧠 Advanced intelligence analysis enabled - comprehensive workflow")
         else:
             print("⚡ Optimized mode - advanced intelligence analysis disabled")
 
-        # Phase 1: Input Processing and Validation (10%)
+        ctx = await prepare_workflow_environment(
+            raw_input=input_source,
+            enable_indexing=enable_indexing,
+            task_kind="paper2code",
+            task_id=task_id,
+            progress_cb=progress_callback,
+            logger=logger,
+        )
+
+        # Bind the resolved task_id into the async context so every loguru
+        # call below routes to <task_dir>/logs/system.jsonl. Safe even when
+        # an outer caller (UI WorkflowService) has already bound: ContextVar
+        # tokens stack and we restore on exit.
+        from core.observability import bind_task as _bind_task
+        from core.observability import pop_task as _pop_task
+
+        _task_token = _bind_task(ctx.task_id)
+        _resolved_task_id = ctx.task_id
+
+        print(f"📁 Workspace : {ctx.workspace_root}")
+        print(f"📂 Task dir  : {ctx.task_dir}")
+        print(f"🔖 Task ID   : {ctx.task_id}")
+
+        # Phase 2: Input Acquisition (25%)
         if progress_callback:
-            progress_callback(10, "📄 Processing and validating input source...")
-        print("📊 Progress: 10% - Input Processing")
+            progress_callback(25, "📥 Acquiring input artifact...")
+        print("📊 Progress: 25% - Input Acquisition")
 
-        input_source = await _process_input_source(input_source, logger)
-
-        # Phase 2: Research Analysis and Resource Processing (25%)
-        if progress_callback:
-            progress_callback(
-                25, "🔍 Analyzing research content and downloading resources..."
-            )
-        print("📊 Progress: 25% - Research Analysis")
-
-        # Check if input_source is already a JSON with paper_path in a paper_{timestamp} folder
-        skip_processing = False
-        if isinstance(input_source, str):
-            try:
-                import json
-                import re
-
-                input_dict = json.loads(input_source)
-                if "paper_path" in input_dict:
-                    paper_path = input_dict["paper_path"]
-                    paper_dir = os.path.dirname(paper_path)
-                    # Check if already in a paper_{timestamp} folder
-                    if re.match(r"paper_\d+$", os.path.basename(paper_dir)):
-                        print(f"✅ File already in organized folder: {paper_dir}")
-                        print(
-                            "   Skipping research analysis phase (file already processed)"
-                        )
-
-                        # Convert PDF to markdown if not already done
-                        if paper_path.endswith(".pdf"):
-                            print("🔄 Converting PDF to markdown...")
-                            try:
-                                from tools.pdf_downloader import SimplePdfConverter
-
-                                converter = SimplePdfConverter()
-                                conversion_result = converter.convert_pdf_to_markdown(
-                                    paper_path
-                                )
-                                if conversion_result["success"]:
-                                    print(
-                                        f"✅ PDF converted to markdown: {conversion_result['output_file']}"
-                                    )
-                                    # Update paper_path to point to markdown file
-                                    input_dict["paper_path"] = conversion_result[
-                                        "output_file"
-                                    ]
-                                    download_result = json.dumps(input_dict)
-                                else:
-                                    print(
-                                        f"⚠️ PDF conversion failed: {conversion_result.get('error')}"
-                                    )
-                                    download_result = input_source
-                            except Exception as e:
-                                print(f"⚠️ PDF conversion error: {e}")
-                                download_result = input_source
-                        else:
-                            download_result = input_source
-
-                        skip_processing = True
-            except Exception:
-                pass  # Not JSON, continue normal processing
-
-        if (
-            not skip_processing
-            and isinstance(input_source, str)
-            and (
-                input_source.endswith((".pdf", ".docx", ".txt", ".html", ".md"))
-                or input_source.startswith(("http", "file://"))
-            )
-        ):
-            (
-                analysis_result,
-                download_result,
-            ) = await orchestrate_research_analysis_agent(
-                input_source, logger, progress_callback
-            )
-        elif not skip_processing:
-            download_result = input_source  # Use input directly if already processed
+        if ctx.skip_research_analysis:
+            print(f"✅ Resume mode: reusing existing task directory {ctx.task_dir}")
+        else:
+            await acquire_input_artifact(ctx, logger)
 
         # Phase 3: Workspace Infrastructure Synthesis (40%)
         if progress_callback:
@@ -1844,10 +1819,7 @@ async def execute_multi_agent_research_pipeline(
             )
         print("📊 Progress: 40% - Workspace Setup")
 
-        dir_info = await synthesize_workspace_infrastructure_agent(
-            download_result, logger, workspace_dir
-        )
-        await asyncio.sleep(5)
+        dir_info = await synthesize_workspace_infrastructure_agent(ctx, logger)
 
         # Phase 4: Document Segmentation and Preprocessing (50%)
         if progress_callback:
@@ -1858,8 +1830,11 @@ async def execute_multi_agent_research_pipeline(
             dir_info, logger
         )
 
-        # Handle segmentation result
-        if segmentation_result["status"] == "success":
+        # Handle segmentation result. Each known status has its own message;
+        # the catch-all fallback now reports the actual status + every key in
+        # the result dict so future surprises don't silently log "Unknown".
+        seg_status = segmentation_result.get("status", "missing")
+        if seg_status == "success":
             print("✅ Document preprocessing completed successfully!")
             print(
                 f"   📊 Using segmentation: {dir_info.get('use_segmentation', False)}"
@@ -1868,15 +1843,36 @@ async def execute_multi_agent_research_pipeline(
                 print(
                     f"   📁 Segments directory: {segmentation_result.get('segments_dir', 'N/A')}"
                 )
-        elif segmentation_result["status"] == "fallback_to_traditional":
-            print("⚠️ Document segmentation failed, using traditional processing")
+        elif seg_status == "traditional":
+            print("📖 Document preprocessing: using traditional full-document workflow")
+            print(f"   Reason: {segmentation_result.get('reason', 'n/a')}")
             print(
-                f"   Original error: {segmentation_result.get('original_error', 'Unknown')}"
+                f"   Document size: {segmentation_result.get('document_size', 0)} chars"
+            )
+        elif seg_status == "skipped":
+            print(
+                f"ℹ️ Document preprocessing skipped — {segmentation_result.get('reason', 'n/a')}"
+            )
+        elif seg_status == "fallback_to_traditional":
+            print(
+                "⚠️ Document segmentation failed, falling back to traditional processing"
+            )
+            print(
+                f"   Original error: {segmentation_result.get('original_error', 'n/a')}"
+            )
+            print(
+                f"   Fallback reason: {segmentation_result.get('fallback_reason', 'n/a')}"
+            )
+        elif seg_status == "error":
+            print(
+                f"⚠️ Document preprocessing failed: {segmentation_result.get('error_message', 'no error_message provided')}"
             )
         else:
+            # Unknown status — dump the entire result so we can diagnose later.
             print(
-                f"⚠️ Document preprocessing encountered issues: {segmentation_result.get('error_message', 'Unknown')}"
+                f"⚠️ Document preprocessing returned unrecognised status='{seg_status}'."
             )
+            print(f"   Full result: {segmentation_result}")
 
         # Phase 5: Code Planning Orchestration (65%)
         if progress_callback:
@@ -1886,6 +1882,22 @@ async def execute_multi_agent_research_pipeline(
         print("📊 Progress: 65% - Code Planning")
 
         await orchestrate_code_planning_agent(dir_info, logger, progress_callback)
+        if not os.path.exists(dir_info["initial_plan_path"]):
+            raise RuntimeError(
+                "Code planning did not produce initial_plan.txt; aborting the pipeline before any subsequent phase"
+            )
+
+        if plan_review_callback:
+            if progress_callback:
+                progress_callback(66, "Reviewing implementation plan...")
+            print("Progress: 66% - Plan Review")
+            review_result = await run_plan_review_gate(
+                initial_plan_path=dir_info["initial_plan_path"],
+                paper_dir=dir_info["paper_dir"],
+                callback=plan_review_callback,
+                logger=logger,
+            )
+            print(f"Plan review completed: {review_result.get('status')}")
 
         # Phase 6: Reference Intelligence (only when indexing is enabled) (70%)
         if progress_callback:
@@ -1924,6 +1936,16 @@ async def execute_multi_agent_research_pipeline(
         if progress_callback:
             progress_callback(80, "🧠 Analyzing codebase intelligence and indexing...")
         print("📊 Progress: 80% - Codebase Intelligence")
+
+        # Diagnostic stop-probe: lets developers halt the pipeline right at the
+        # phase 8 entry to inspect intermediate state. Inactive unless the
+        # environment variable is explicitly set to "8". Safe to leave in place.
+        if os.getenv("DEEPCODE_STOP_AT_PHASE") == "8":
+            print("🛑 [STOP_AT_PHASE_8] halt requested via DEEPCODE_STOP_AT_PHASE")
+            raise RuntimeError(
+                "[STOP_AT_PHASE_8] Pipeline halted at phase 8 entry as requested "
+                "(DEEPCODE_STOP_AT_PHASE=8). Phase 1-7 outputs are preserved in the task dir."
+            )
 
         if enable_indexing:
             index_result = await orchestrate_codebase_intelligence_agent(
@@ -1978,25 +2000,57 @@ async def execute_multi_agent_research_pipeline(
         elif index_result["status"] == "success":
             pipeline_summary += "\n✅ Codebase indexing completed successfully"
 
-        # Add implementation status to summary
-        if implementation_result["status"] == "success":
+        # Add implementation status to summary — distinguish "all done" from
+        # "stopped early but partial output exists".
+        impl_status = implementation_result["status"]
+        impl_inner = implementation_result.get("inner_status", impl_status)
+        implementation_metadata = {
+            "status": impl_status,
+            "inner_status": impl_inner,
+            "abort_reason": implementation_result.get("abort_reason"),
+            "files_completed": implementation_result.get("files_completed", 0),
+            "total_files": implementation_result.get("total_files", 0),
+            "unimplemented_files": implementation_result.get("unimplemented_files", [])
+            or [],
+            "code_directory": implementation_result.get("code_directory"),
+        }
+        if impl_inner == "completed":
             pipeline_summary += "\n🎉 Code implementation completed successfully!"
             pipeline_summary += (
                 f"\n📁 Code generated in: {implementation_result['code_directory']}"
             )
-            return pipeline_summary
-        elif implementation_result["status"] == "warning":
+            pipeline_status = "completed"
+        elif impl_status == "incomplete":
+            files_done = implementation_result.get("files_completed", 0)
+            unimpl = implementation_result.get("unimplemented_files", []) or []
             pipeline_summary += (
-                f"\n⚠️ Code implementation: {implementation_result['message']}"
+                f"\n⚠️ Code implementation finished EARLY — wrote {files_done} files, "
+                f"{len(unimpl)} unimplemented (status={impl_inner}, "
+                f"reason={implementation_result.get('abort_reason', 'unknown')})"
             )
-            return pipeline_summary
+            pipeline_summary += (
+                f"\n📁 Partial code in: {implementation_result['code_directory']}"
+            )
+            pipeline_status = "incomplete"
+        elif impl_status == "warning":
+            pipeline_summary += f"\n⚠️ Code implementation: {implementation_result.get('message', 'see logs')}"
+            pipeline_status = "completed_with_warnings"
         else:
-            pipeline_summary += (
-                f"\n❌ Code implementation failed: {implementation_result['message']}"
-            )
-            return pipeline_summary
+            pipeline_summary += f"\n❌ Code implementation failed: {implementation_result.get('message', 'see logs')}"
+            pipeline_status = "error"
+        _final_status = pipeline_status
+        return {
+            "status": pipeline_status,
+            "summary": pipeline_summary,
+            "implementation": implementation_metadata,
+            "paper_dir": dir_info["paper_dir"],
+        }
 
+    except PlanReviewCancelled:
+        _final_status = "cancelled"
+        raise
     except Exception as e:
+        _final_status = "error"
         error_msg = f"Error in execute_multi_agent_research_pipeline: {e}"
         print(f"❌ {error_msg}")
         print(f"   Error type: {type(e).__name__}")
@@ -2011,6 +2065,34 @@ async def execute_multi_agent_research_pipeline(
 
         gc.collect()
         raise e
+    finally:
+        # Persist final task status into the session store so the on-disk
+        # tasks.jsonl reflects reality (CLI/Backend share this codepath, so
+        # both surfaces benefit). Best-effort — never let it mask the real
+        # error.
+        if _resolved_task_id and _final_status != "running":
+            try:
+                from core.observability import current_session_id as _cur_sid
+                from core.sessions import get_default_store as _get_session_store
+
+                _sid = _cur_sid()
+                if _sid:
+                    _metadata = None
+                    if "implementation_metadata" in locals():
+                        _metadata = {"implementation": implementation_metadata}
+                    _get_session_store().update_task_status(
+                        _sid, _resolved_task_id, _final_status, metadata=_metadata
+                    )
+            except Exception:
+                pass
+
+        # Always release the task contextvar so subsequent runs in the same
+        # process (CLI loop, background job pool) start with a clean slate.
+        # The token may not exist if prepare_workflow_environment failed.
+        try:
+            _pop_task(_task_token)  # type: ignore[name-defined]
+        except (NameError, ValueError):
+            pass
 
 
 # Backward compatibility alias (deprecated)
@@ -2041,6 +2123,8 @@ async def execute_chat_based_planning_pipeline(
     logger,
     progress_callback: Optional[Callable] = None,
     enable_indexing: bool = True,
+    task_id: Optional[str] = None,
+    plan_review_callback: Optional[PlanReviewCallback] = None,
 ) -> str:
     """
     Execute the chat-based planning and implementation pipeline.
@@ -2095,20 +2179,25 @@ async def execute_chat_based_planning_pipeline(
                 50, "🏗️ Synthesizing intelligent workspace infrastructure..."
             )
 
-        # Create workspace directory structure for chat mode
-        # First, let's create a temporary directory structure that mimics a paper workspace
+        # Create workspace directory structure for chat mode using the same
+        # ``tasks/<prefix>_<uuid>/`` naming as paper2code, but with the
+        # ``chat_`` prefix so the directory's modality is obvious at a glance.
         import time
+        import uuid as _uuid
 
-        # Generate a unique paper directory name
+        from workflows.workflow_context import TASKS_DIRNAME, TASK_KIND_PREFIX
+
         timestamp = str(int(time.time()))
-        paper_name = f"chat_project_{timestamp}"
+        chat_id = task_id or _uuid.uuid4().hex[:8]
+        prefix = TASK_KIND_PREFIX["chat2code"]  # "chat"
+        task_dirname = f"{prefix}_{chat_id}"
 
-        # Use workspace directory
-        chat_paper_dir = os.path.join(workspace_dir, "papers", paper_name)
-
+        chat_paper_dir = os.path.join(workspace_dir, TASKS_DIRNAME, task_dirname)
         os.makedirs(chat_paper_dir, exist_ok=True)
 
-        # Create a synthetic markdown file with user requirements
+        # Use the same ``paper.md`` filename the paper2code flow standardised
+        # on, so downstream dir_info / Phase 4-10 code can stay unaware of
+        # which modality produced the markdown.
         markdown_content = f"""# User Coding Requirements
 
 ## Project Description
@@ -2128,33 +2217,30 @@ The following implementation plan was generated by the AI chat planning agent:
 - **Input Type**: Chat Input
 - **Generation Method**: AI Chat Planning Agent
 - **Timestamp**: {timestamp}
+- **Task ID**: {chat_id}
 """
 
-        # Save the markdown file
-        markdown_file_path = os.path.join(chat_paper_dir, f"{paper_name}.md")
+        markdown_file_path = os.path.join(chat_paper_dir, "paper.md")
         with open(markdown_file_path, "w", encoding="utf-8") as f:
             f.write(markdown_content)
 
         print(f"💾 Created chat project workspace: {chat_paper_dir}")
         print(f"📄 Saved requirements to: {markdown_file_path}")
 
-        # Create a download result that matches FileProcessor expectations
-        synthetic_download_result = json.dumps(
-            {
-                "status": "success",
-                "paper_path": markdown_file_path,
-                "input_type": "chat_input",
-                "paper_info": {
-                    "title": "User-Provided Coding Requirements",
-                    "source": "chat_input",
-                    "description": "Implementation plan generated from user requirements",
-                },
-            }
+        # Build a synthetic WorkflowContext so the chat pipeline can reuse
+        # the same Phase 3 path-derivation logic the file pipeline uses.
+        chat_ctx = WorkflowContext(
+            task_id=chat_id,
+            input_source=markdown_file_path,
+            input_kind="md",
+            workspace_root=Path(workspace_dir).resolve(),
+            task_dir=Path(chat_paper_dir).resolve(),
+            enable_indexing=enable_indexing,
+            task_kind="chat2code",
+            paper_path=Path(markdown_file_path),
+            paper_md_path=Path(markdown_file_path),
         )
-
-        dir_info = await synthesize_workspace_infrastructure_agent(
-            synthetic_download_result, logger, workspace_dir
-        )
+        dir_info = await synthesize_workspace_infrastructure_agent(chat_ctx, logger)
         await asyncio.sleep(10)  # Brief pause for file system operations
 
         # Phase 3: Save Planning Result
@@ -2167,6 +2253,18 @@ The following implementation plan was generated by the AI chat planning agent:
             f.write(planning_result)
         print(f"💾 Implementation plan saved to {initial_plan_path}")
 
+        if plan_review_callback:
+            if progress_callback:
+                progress_callback(75, "Reviewing implementation plan...")
+            print("Progress: 75% - Plan Review")
+            review_result = await run_plan_review_gate(
+                initial_plan_path=initial_plan_path,
+                paper_dir=dir_info["paper_dir"],
+                callback=plan_review_callback,
+                logger=logger,
+            )
+            print(f"Plan review completed: {review_result.get('status')}")
+
         # Phase 4: Code Implementation Synthesis (same as Phase 8 in original pipeline)
         if progress_callback:
             progress_callback(85, "🔬 Synthesizing intelligent code implementation...")
@@ -2178,8 +2276,11 @@ The following implementation plan was generated by the AI chat planning agent:
         # Final Status Report
         pipeline_summary = f"Chat-based planning and implementation pipeline completed for {dir_info['paper_dir']}"
 
-        # Add implementation status to summary
-        if implementation_result["status"] == "success":
+        # Add implementation status to summary — distinguish full completion
+        # from an early termination (loop_detector abort, max_iterations, etc.).
+        impl_status = implementation_result["status"]
+        impl_inner = implementation_result.get("inner_status", impl_status)
+        if impl_inner == "completed":
             pipeline_summary += "\n🎉 Code implementation completed successfully!"
             pipeline_summary += (
                 f"\n📁 Code generated in: {implementation_result['code_directory']}"
@@ -2187,18 +2288,25 @@ The following implementation plan was generated by the AI chat planning agent:
             pipeline_summary += (
                 "\n💬 Generated from user requirements via chat interface"
             )
-            return pipeline_summary
-        elif implementation_result["status"] == "warning":
+        elif impl_status == "incomplete":
+            files_done = implementation_result.get("files_completed", 0)
+            unimpl = implementation_result.get("unimplemented_files", []) or []
             pipeline_summary += (
-                f"\n⚠️ Code implementation: {implementation_result['message']}"
+                f"\n⚠️ Code implementation finished EARLY — wrote {files_done} files, "
+                f"{len(unimpl)} unimplemented (status={impl_inner}, "
+                f"reason={implementation_result.get('abort_reason', 'unknown')})"
             )
-            return pipeline_summary
+            pipeline_summary += (
+                f"\n📁 Partial code in: {implementation_result['code_directory']}"
+            )
+        elif impl_status == "warning":
+            pipeline_summary += f"\n⚠️ Code implementation: {implementation_result.get('message', 'see logs')}"
         else:
-            pipeline_summary += (
-                f"\n❌ Code implementation failed: {implementation_result['message']}"
-            )
-            return pipeline_summary
+            pipeline_summary += f"\n❌ Code implementation failed: {implementation_result.get('message', 'see logs')}"
+        return pipeline_summary
 
+    except PlanReviewCancelled:
+        raise
     except Exception as e:
         print(f"Error in execute_chat_based_planning_pipeline: {e}")
         raise e

@@ -9,6 +9,8 @@ class TaskResponse(BaseModel):
     """Response model for task creation"""
 
     task_id: str
+    session_id: Optional[str] = None
+    task_short_id: Optional[str] = None
     status: str = "created"
     message: str = "Task created successfully"
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -57,6 +59,28 @@ class SettingsResponse(BaseModel):
     models: Dict[str, str]
     indexing_enabled: bool
     document_segmentation: Dict[str, Any]
+
+
+class OpenRouterModelInfo(BaseModel):
+    """One OpenRouter model option shown in the settings UI."""
+
+    id: str
+    name: str
+    context_length: Optional[int] = None
+    top_provider: Dict[str, Any] = Field(default_factory=dict)
+    supported_parameters: List[str] = Field(default_factory=list)
+    pricing: Dict[str, Any] = Field(default_factory=dict)
+    expiration_date: Optional[str] = None
+    source: str = "openrouter"
+
+
+class OpenRouterModelsResponse(BaseModel):
+    """Response model for OpenRouter model catalog."""
+
+    models: List[OpenRouterModelInfo]
+    source: str
+    cached_at: Optional[int] = None
+    stale: bool = False
 
 
 class ErrorResponse(BaseModel):

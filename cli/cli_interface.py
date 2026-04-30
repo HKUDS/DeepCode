@@ -42,6 +42,7 @@ class CLIInterface:
         self.enable_indexing = (
             False  # Default configuration (matching UI: fast mode by default)
         )
+        self.enable_plan_review = True
 
         # Load segmentation config from the same source as UI
         self._load_segmentation_config()
@@ -50,7 +51,7 @@ class CLIInterface:
         self._init_tkinter()
 
     def _load_segmentation_config(self):
-        """Load segmentation configuration from mcp_agent.config.yaml"""
+        """Load segmentation configuration from deepcode_config.json."""
         try:
             from utils.llm_utils import get_document_segmentation_config
 
@@ -59,38 +60,41 @@ class CLIInterface:
             self.segmentation_threshold = seg_config.get("size_threshold_chars", 50000)
         except Exception as e:
             print(f"⚠️ Warning: Failed to load segmentation config: {e}")
-            # Fall back to defaults
             self.segmentation_enabled = True
             self.segmentation_threshold = 50000
 
     def _save_segmentation_config(self):
-        """Save segmentation configuration to mcp_agent.config.yaml"""
-        import yaml
+        """Persist segmentation configuration to deepcode_config.json.
+
+        We only touch the ``documentSegmentation`` block; everything else
+        in the JSON file is preserved exactly as-is. The runtime is then
+        invalidated so subsequent reads see the new values.
+        """
+        import json
         import os
 
-        # Get the project root directory (where mcp_agent.config.yaml is located)
-        current_file = os.path.abspath(__file__)
-        cli_dir = os.path.dirname(current_file)  # cli directory
-        project_root = os.path.dirname(cli_dir)  # project root
-        config_path = os.path.join(project_root, "mcp_agent.config.yaml")
+        from core.config import default_config_path
+        from core.compat.runtime import set_runtime
+
+        config_path = default_config_path()
 
         try:
-            # Read current config
-            with open(config_path, "r", encoding="utf-8") as f:
-                config = yaml.safe_load(f)
+            if config_path.exists():
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f) or {}
+            else:
+                config = {}
+                os.makedirs(config_path.parent, exist_ok=True)
 
-            # Update document segmentation settings
-            if "document_segmentation" not in config:
-                config["document_segmentation"] = {}
+            seg = config.setdefault("documentSegmentation", {})
+            seg["enabled"] = self.segmentation_enabled
+            seg["sizeThresholdChars"] = self.segmentation_threshold
 
-            config["document_segmentation"]["enabled"] = self.segmentation_enabled
-            config["document_segmentation"]["size_threshold_chars"] = (
-                self.segmentation_threshold
-            )
-
-            # Write updated config
             with open(config_path, "w", encoding="utf-8") as f:
-                yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
+                json.dump(config, f, indent=2, ensure_ascii=False)
+                f.write("\n")
+
+            set_runtime(None)
 
             print(
                 f"{Colors.OKGREEN}✅ Document segmentation configuration updated{Colors.ENDC}"
@@ -222,14 +226,120 @@ class CLIInterface:
 ║  {Colors.OKCYAN}🔄 Processing Pipeline:{Colors.CYAN}                                                    ║
 ║  {Colors.OKCYAN}   ▶ Intelligent agent orchestration → Code synthesis                     {Colors.CYAN}║
 ║  {Colors.OKCYAN}   ▶ Multi-agent coordination with progress tracking                     {Colors.CYAN}║
+║                                                                               ║
+║  {Colors.GREEN}💡 Slash commands:{Colors.CYAN}  {Colors.GREEN}/resume  /new  /session  /help{Colors.CYAN}                       ║
+║  {Colors.GREEN}📎 Inline input :{Colors.CYAN}   {Colors.GREEN}@<file-path>   or   @<url>{Colors.CYAN}                          ║
 ╚═══════════════════════════════════════════════════════════════════════════════╝{Colors.ENDC}
 """
         print(menu)
 
     def get_user_input(self):
-        """Get user input with styled prompt"""
+        """Get user input with styled prompt.
+
+        Returns the **raw** trimmed text (case preserved) so
+        ``@<path>`` / ``@<url>`` shortcuts retain their original
+        casing — Windows paths are case-insensitive but URL path
+        components are not. The dispatcher in ``cli_app`` lower-cases
+        the value itself before matching against menu letters /
+        slash-commands.
+        """
         print(f"\n{Colors.BOLD}{Colors.OKCYAN}➤ Your choice: {Colors.ENDC}", end="")
-        return input().strip().lower()
+        return input().strip()
+
+    # ------------------------------------------------------------------
+    # Slash command UI helpers (rendering only — dispatch lives in
+    # ``cli_app.py`` so this module stays pure presentation).
+    # ------------------------------------------------------------------
+
+    def print_slash_help(self) -> None:
+        """List all available slash commands."""
+        print(
+            f"\n{Colors.BOLD}{Colors.CYAN}Slash commands:{Colors.ENDC}\n"
+            f"  {Colors.GREEN}/resume{Colors.ENDC}             "
+            f"List recent sessions and pick one to load\n"
+            f"  {Colors.GREEN}/sessions{Colors.ENDC}           "
+            f"Alias of /resume\n"
+            f"  {Colors.GREEN}/new [title]{Colors.ENDC}        "
+            f"Start a fresh session (optionally name it)\n"
+            f"  {Colors.GREEN}/session{Colors.ENDC}            "
+            f"Show the currently active session\n"
+            f"  {Colors.GREEN}/whoami{Colors.ENDC}             "
+            f"Alias of /session\n"
+            f"  {Colors.GREEN}/help{Colors.ENDC}               "
+            f"Show this help\n"
+        )
+
+    def print_active_session(
+        self, session_id: str | None, title: str | None = None
+    ) -> None:
+        """Render the currently bound session so the user knows where they are."""
+        if not session_id:
+            print(
+                f"\n{Colors.WARNING}⚠️  No active session is currently bound.{Colors.ENDC}"
+            )
+            return
+        suffix = f" — {title}" if title else ""
+        print(
+            f"\n{Colors.OKGREEN}🗂️  Active session: "
+            f"{Colors.CYAN}{session_id}{Colors.ENDC}{suffix}\n"
+        )
+
+    def pick_session_interactive(self, summaries) -> Optional[str]:
+        """Render a numbered table of sessions and prompt the user to pick one.
+
+        ``summaries`` is the list returned by ``SessionStore.list_sessions``.
+        Returns the chosen ``session_id`` or ``None`` if the user cancels.
+        """
+        if not summaries:
+            self.print_status(
+                "No previous sessions found — use /new to create one.", "warning"
+            )
+            return None
+
+        print(
+            f"\n{Colors.BOLD}{Colors.CYAN}📂 Recent sessions "
+            f"({len(summaries)} total){Colors.ENDC}"
+        )
+        header = (
+            f"  {'#':<3} {'ID':<10} {'Updated':<26} " f"{'Tasks':<6} {'Msgs':<6} Title"
+        )
+        print(f"{Colors.BOLD}{header}{Colors.ENDC}")
+        print("  " + "-" * (len(header) - 2))
+        for i, s in enumerate(summaries):
+            title = s.title or "(untitled)"
+            if len(title) > 50:
+                title = title[:47] + "..."
+            print(
+                f"  {Colors.YELLOW}{i:<3}{Colors.ENDC} "
+                f"{Colors.CYAN}{s.session_id:<10}{Colors.ENDC} "
+                f"{s.updated_at:<26} "
+                f"{s.task_count:<6} {s.message_count:<6} {title}"
+            )
+
+        prompt = (
+            f"\n{Colors.BOLD}{Colors.OKCYAN}"
+            f"➤ Pick a session by # or paste an ID (Enter to cancel): "
+            f"{Colors.ENDC}"
+        )
+        raw = input(prompt).strip()
+        if not raw:
+            self.print_status("Resume cancelled.", "info")
+            return None
+
+        # Numeric index?
+        if raw.isdigit():
+            idx = int(raw)
+            if 0 <= idx < len(summaries):
+                return summaries[idx].session_id
+            self.print_status(
+                f"Index {idx} is out of range (0..{len(summaries) - 1}).",
+                "warning",
+            )
+            return None
+
+        # Treat as a (possibly truncated) session id — let the caller
+        # validate against the store.
+        return raw
 
     def upload_file_gui(self) -> Optional[str]:
         """Enhanced file upload interface with better error handling"""

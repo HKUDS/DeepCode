@@ -112,6 +112,14 @@ class WorkflowPluginIntegration:
         task_id = context.get("task_id")
         return await self._registry.run_hook(hook_point, context, task_id)
 
+    async def request_interaction(
+        self,
+        task_id: str,
+        request: InteractionRequest,
+    ) -> InteractionResponse:
+        """Request one user interaction without running plugin mutation logic."""
+        return await self._handle_interaction(task_id, request)
+
     async def _handle_interaction(
         self,
         task_id: str,

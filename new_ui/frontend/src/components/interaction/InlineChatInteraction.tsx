@@ -5,7 +5,7 @@
  * Designed to look like an AI assistant message with interactive elements.
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Send,
@@ -37,7 +37,17 @@ export default function InlineChatInteraction({
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [feedback, setFeedback] = useState('');
   const [showModify, setShowModify] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [editedPlan, setEditedPlan] = useState('');
   const { clearInteraction, addActivityLog } = useWorkflowStore();
+
+  useEffect(() => {
+    const plan = String(interaction.data?.plan || interaction.data?.plan_preview || '');
+    setEditedPlan(plan);
+    setFeedback('');
+    setShowModify(false);
+    setShowEdit(false);
+  }, [interaction]);
 
   const handleSubmit = useCallback(async (action: string, data: Record<string, unknown> = {}) => {
     setIsSubmitting(true);
@@ -148,15 +158,31 @@ export default function InlineChatInteraction({
 
   // Render plan review type
   const renderPlanReview = () => {
-    const plan = interaction.data?.plan || interaction.data?.plan_preview || '';
+    const plan = String(interaction.data?.plan || interaction.data?.plan_preview || '');
+    const lastError = interaction.data?.last_error ? String(interaction.data.last_error) : '';
 
     return (
       <div className="space-y-3">
-        <div className="bg-gray-900 rounded-lg p-3 max-h-60 overflow-y-auto">
-          <pre className="text-xs text-gray-300 font-mono whitespace-pre-wrap">
-            {plan}
-          </pre>
-        </div>
+        {lastError && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            {lastError}
+          </div>
+        )}
+
+        {showEdit ? (
+          <textarea
+            className="w-full min-h-60 px-3 py-2 text-xs border border-gray-200 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-gray-50 font-mono"
+            value={editedPlan}
+            onChange={(e) => setEditedPlan(e.target.value)}
+            disabled={isSubmitting}
+          />
+        ) : (
+          <div className="bg-gray-900 rounded-lg p-3 max-h-60 overflow-y-auto">
+            <pre className="text-xs text-gray-300 font-mono whitespace-pre-wrap">
+              {plan}
+            </pre>
+          </div>
+        )}
 
         <AnimatePresence>
           {showModify && (
@@ -192,7 +218,10 @@ export default function InlineChatInteraction({
             <Button
               variant="secondary"
               size="sm"
-              onClick={() => setShowModify(true)}
+              onClick={() => {
+                setShowModify(true);
+                setShowEdit(false);
+              }}
               disabled={isSubmitting}
             >
               <Edit className="h-3.5 w-3.5 mr-1.5" />
@@ -213,6 +242,37 @@ export default function InlineChatInteraction({
             >
               <Send className="h-3.5 w-3.5 mr-1.5" />
               Submit Changes
+            </Button>
+          )}
+
+          {!showEdit ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setShowEdit(true);
+                setShowModify(false);
+              }}
+              disabled={isSubmitting}
+            >
+              <Edit className="h-3.5 w-3.5 mr-1.5" />
+              Edit Plan
+            </Button>
+          ) : (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                if (editedPlan.trim()) {
+                  handleSubmit('replace', { plan: editedPlan });
+                } else {
+                  toast.warning('Plan cannot be empty', 'Paste or write a complete plan');
+                }
+              }}
+              disabled={isSubmitting || !editedPlan.trim()}
+            >
+              <Send className="h-3.5 w-3.5 mr-1.5" />
+              Save Plan
             </Button>
           )}
 

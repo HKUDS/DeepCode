@@ -7,6 +7,13 @@ import type {
   ConfigResponse,
   SettingsResponse,
   FileUploadResponse,
+  LLMModelsUpdateRequest,
+  OpenRouterModelsResponse,
+  SessionDetail,
+  SessionDeleteReport,
+  SessionMessage,
+  SessionSummary,
+  SessionTask,
 } from '../types/api';
 
 const api = axios.create({
@@ -22,23 +29,31 @@ export const workflowsApi = {
   startPaperToCode: async (
     inputSource: string,
     inputType: 'file' | 'url',
-    enableIndexing: boolean = false
+    enableIndexing: boolean = false,
+    enableUserInteraction: boolean = true,
+    sessionId?: string | null
   ): Promise<TaskResponse> => {
     const response = await api.post<TaskResponse>('/workflows/paper-to-code', {
       input_source: inputSource,
       input_type: inputType,
       enable_indexing: enableIndexing,
+      enable_user_interaction: enableUserInteraction,
+      session_id: sessionId ?? null,
     });
     return response.data;
   },
 
   startChatPlanning: async (
     requirements: string,
-    enableIndexing: boolean = false
+    enableIndexing: boolean = false,
+    enableUserInteraction: boolean = true,
+    sessionId?: string | null
   ): Promise<TaskResponse> => {
     const response = await api.post<TaskResponse>('/workflows/chat-planning', {
       requirements,
       enable_indexing: enableIndexing,
+      enable_user_interaction: enableUserInteraction,
+      session_id: sessionId ?? null,
     });
     return response.data;
   },
@@ -112,6 +127,66 @@ export const workflowsApi = {
   },
 };
 
+// Sessions API
+export const sessionsApi = {
+  list: async (
+    limit: number = 50,
+    order: 'recent' | 'created' = 'recent'
+  ): Promise<{ sessions: SessionSummary[] }> => {
+    const response = await api.get('/sessions', { params: { limit, order } });
+    return response.data;
+  },
+
+  create: async (title: string = ''): Promise<SessionDetail> => {
+    const response = await api.post<SessionDetail>('/sessions', { title });
+    return response.data;
+  },
+
+  get: async (sessionId: string): Promise<SessionDetail> => {
+    const response = await api.get<SessionDetail>(`/sessions/${sessionId}`);
+    return response.data;
+  },
+
+  delete: async (sessionId: string): Promise<SessionDeleteReport> => {
+    const response = await api.delete<SessionDeleteReport>(
+      `/sessions/${sessionId}`
+    );
+    return response.data;
+  },
+
+  appendMessage: async (
+    sessionId: string,
+    role: string,
+    content: string
+  ): Promise<SessionMessage> => {
+    const response = await api.post<SessionMessage>(
+      `/sessions/${sessionId}/messages`,
+      { role, content }
+    );
+    return response.data;
+  },
+
+  branch: async (
+    sessionId: string,
+    fromMessageIndex: number,
+    title?: string
+  ): Promise<SessionDetail> => {
+    const response = await api.post<SessionDetail>(
+      `/sessions/${sessionId}/branch`,
+      {
+        from_message_index: fromMessageIndex,
+        title,
+      }
+    );
+    return response.data;
+  },
+
+  getTasks: async (sessionId: string): Promise<{ tasks: SessionTask[] }> => {
+    const response = await api.get(`/sessions/${sessionId}/tasks`);
+    return response.data;
+  },
+};
+
 // Requirements API
 export const requirementsApi = {
   generateQuestions: async (
@@ -166,6 +241,20 @@ export const configApi = {
 
   setLLMProvider: async (provider: string): Promise<void> => {
     await api.put('/config/llm-provider', { provider });
+  },
+
+  getOpenRouterModels: async (
+    supportedParameters?: string
+  ): Promise<OpenRouterModelsResponse> => {
+    const response = await api.get<OpenRouterModelsResponse>(
+      '/config/openrouter/models',
+      { params: { supported_parameters: supportedParameters } }
+    );
+    return response.data;
+  },
+
+  setLLMModels: async (request: LLMModelsUpdateRequest): Promise<void> => {
+    await api.put('/config/llm-models', request);
   },
 };
 

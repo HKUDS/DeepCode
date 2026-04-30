@@ -1,0 +1,152 @@
+{
+  "$comment": "Single source of truth for DeepCode. Copy to deepcode_config.json and fill in at least one provider apiKey. Inline strings work; environment variable references with the dollar-brace syntax are also resolved at load time (see README).",
+
+  "agents": {
+    "defaults": {
+      "provider": "auto",
+      "model": "openai/gpt-5.4",
+      "maxTokens": 40000,
+      "temperature": 0.1,
+      "reasoningEffort": "low",
+      "baseMaxTokens": 40000,
+      "retryMaxTokens": 32768,
+      "maxTokensPolicy": "adaptive",
+      "maxToolIterations": 200,
+      "maxToolResultChars": 16000,
+      "contextWindowTokens": 65536
+    },
+    "planning": {
+      "model": "openai/gpt-5.4"
+    },
+    "implementation": {
+      "model": "openai/gpt-5.4"
+    }
+  },
+
+  "providers": {
+    "openai": {
+      "apiKey": "${OPENAI_API_KEY}"
+    },
+    "anthropic": {
+      "apiKey": ""
+    },
+    "openrouter": {
+      "apiKey": "",
+      "apiBase": "https://openrouter.ai/api/v1"
+    },
+    "gemini": {
+      "apiKey": ""
+    },
+    "deepseek": {
+      "apiKey": ""
+    },
+    "zhipu": {
+      "apiKey": ""
+    },
+    "dashscope": {
+      "apiKey": ""
+    },
+    "ollama": {
+      "apiBase": "http://localhost:11434/v1"
+    },
+    "vllm": {
+      "apiBase": ""
+    }
+  },
+
+  "tools": {
+    "defaultSearchServer": "filesystem",
+    "mcpServers": {
+      "code-implementation": {
+        "type": "stdio",
+        "command": "python",
+        "args": ["tools/code_implementation_server.py"],
+        "env": {"PYTHONPATH": "."},
+        "description": "Paper code reproduction tool server - file operations, code execution, search, etc."
+      },
+      "code-reference-indexer": {
+        "type": "stdio",
+        "command": "python",
+        "args": ["tools/code_reference_indexer.py"],
+        "env": {"PYTHONPATH": "."},
+        "description": "Code reference indexer - intelligent code reference search from indexed repositories"
+      },
+      "command-executor": {
+        "type": "stdio",
+        "command": "python",
+        "args": ["tools/command_executor.py"],
+        "env": {"PYTHONPATH": "."}
+      },
+      "document-segmentation": {
+        "type": "stdio",
+        "command": "python",
+        "args": ["tools/document_segmentation_server.py"],
+        "env": {"PYTHONPATH": "."},
+        "description": "Document segmentation server - intelligent document analysis and segmented reading"
+      },
+      "fetch": {
+        "type": "stdio",
+        "command": "uvx",
+        "args": ["mcp-server-fetch"]
+      },
+      "file-downloader": {
+        "type": "stdio",
+        "command": "python",
+        "args": ["tools/pdf_downloader.py"],
+        "env": {"PYTHONPATH": "."}
+      },
+      "filesystem": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", ".", "./deepcode_lab"]
+      },
+      "github-downloader": {
+        "type": "stdio",
+        "command": "python",
+        "args": ["tools/git_command.py"],
+        "env": {"PYTHONPATH": "."}
+      }
+    }
+  },
+
+  "workspace": {
+    "root": "./deepcode_lab",
+    "maxInputMb": 100
+  },
+
+  "documentSegmentation": {
+    "enabled": true,
+    "sizeThresholdChars": 50000
+  },
+
+  "logger": {
+    "$comment": "Dual-layer observability. Global file rotates daily under logs/. Per-task files land in deepcode_lab/tasks/<task_id>/logs/{system,llm,mcp}.jsonl and are streamable via the /ws/tasks/{id}/logs WebSocket. Sessions are persisted to ~/.deepcode/sessions/ (override with DEEPCODE_SESSIONS_DIR).",
+    "level": "info",
+    "progressDisplay": false,
+    "transports": ["console", "global_file", "task_file"],
+    "globalFile": {
+      "enabled": true,
+      "pathPattern": "logs/server-{date}.jsonl",
+      "rotation": "00:00",
+      "retention": "14 days"
+    },
+    "taskFile": {
+      "enabled": true
+    },
+    "llm": {
+      "enabled": true,
+      "truncatePreviewChars": 2000
+    }
+  },
+
+  "llmLogger": {
+    "$comment": "Legacy block kept for backward compatibility; the active LLM recorder now lives in core.observability and writes per-task llm.jsonl directly.",
+    "enabled": true,
+    "outputFormat": "json",
+    "logLevel": "basic",
+    "logDirectory": "logs/llm_responses",
+    "filenamePattern": "llm_responses_{timestamp}.jsonl",
+    "includeModels": [],
+    "minResponseLength": 50
+  }
+}

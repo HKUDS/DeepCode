@@ -19,6 +19,15 @@ router = APIRouter()
 _file_registry: dict = {}
 
 
+def _is_git_lfs_pointer(file_path: Path) -> bool:
+    """Return True when the uploaded file is a Git LFS pointer, not real content."""
+    try:
+        header = file_path.read_bytes()[:256]
+    except OSError:
+        return False
+    return header.startswith(b"version https://git-lfs.github.com/spec/")
+
+
 @router.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
     """Upload a file (PDF, markdown, etc.)"""
@@ -47,6 +56,16 @@ async def upload_file(file: UploadFile = File(...)):
 
         # Get file size
         file_size = file_path.stat().st_size
+
+        if _is_git_lfs_pointer(file_path):
+            file_path.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Uploaded file is a Git LFS pointer, not the real document. "
+                    "Run `git lfs pull` in the source repository or upload the actual PDF."
+                ),
+            )
 
         # Check size limit
         if file_size > settings.max_upload_size:

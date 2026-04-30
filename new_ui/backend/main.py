@@ -35,6 +35,10 @@ if str(PROJECT_ROOT) not in sys.path:
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(1, str(BACKEND_DIR))
 
+from core.platform_compat import configure_utf8_stdio
+
+configure_utf8_stdio()
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,7 +46,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from settings import settings
-from api.routes import workflows, requirements, config as config_routes, files
+from api.routes import (
+    workflows,
+    requirements,
+    config as config_routes,
+    files,
+    sessions as sessions_routes,
+)
 from api.websockets import workflow_ws, code_stream_ws, logs_ws
 
 # Check if running in Docker/production mode
@@ -59,6 +69,28 @@ async def lifespan(app: FastAPI):
     print(f"  Backend dir:  {BACKEND_DIR}")
     print(f"  Mode:         {'Docker/Production' if IS_DOCKER else 'Development'}")
 
+    # Wire loguru sinks (console + global JSONL + per-task JSONL).
+    # Done lazily here rather than at import time so that test harnesses
+    # can opt out by mocking out setup_logging.
+    try:
+        from core.config import load_config
+        from core.observability import setup_logging
+
+        cfg = load_config()
+        setup_logging(cfg.logger, workspace_root=PROJECT_ROOT)
+    except Exception as exc:
+        print(f"  Logging:      failed to initialise observability ({exc})")
+
+    # Rebuild the in-memory task index from persisted sessions so a
+    # backend restart does not drop visibility of previous runs.
+    try:
+        from services.workflow_service import workflow_service
+
+        restored = workflow_service.hydrate_from_sessions()
+        print(f"  Sessions:     restored {restored} task(s) from disk")
+    except Exception as exc:
+        print(f"  Sessions:     hydration skipped ({exc})")
+
     if IS_DOCKER and FRONTEND_DIST.exists():
         print(f"  Frontend:     Serving static files from {FRONTEND_DIST}")
     elif IS_DOCKER:
@@ -72,6 +104,12 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     print("Shutting down DeepCode New UI Backend...")
+    try:
+        from core.observability import shutdown_logging
+
+        shutdown_logging()
+    except Exception:
+        pass
 
 
 app = FastAPI(
@@ -99,6 +137,7 @@ app.include_router(
     config_routes.router, prefix="/api/v1/config", tags=["Configuration"]
 )
 app.include_router(files.router, prefix="/api/v1/files", tags=["Files"])
+app.include_router(sessions_routes.router, prefix="/api/v1/sessions", tags=["Sessions"])
 
 # Include WebSocket routes
 app.include_router(workflow_ws.router, prefix="/ws", tags=["WebSocket"])

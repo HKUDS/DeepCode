@@ -1,18 +1,25 @@
+"""Model capability + cost lookup, backed by ``deepcode_config.json``.
+
+This module owns the small per-model database used by retry / cost
+calculations. The configured model name is read from
+:class:`core.config.DeepCodeConfig` (lazily, via the runtime singleton)
+so callers do not need to know where the JSON lives.
 """
-Model Limits and Capabilities Detection
 
-This module provides utilities to detect LLM model capabilities and limits
-dynamically, avoiding hardcoded values and supporting model changes.
-"""
+from __future__ import annotations
 
-from typing import Dict, Optional
-import yaml
+from typing import Dict, Optional, Set
+
+from core.config import DeepCodeConfig
 
 
-# Model capability database
-# Format: {model_name_pattern: {max_completion_tokens, max_context_tokens, cost_per_1m_input, cost_per_1m_output}}
-MODEL_LIMITS = {
-    # OpenAI Models
+_UNKNOWN_MODELS_WARNED: Set[str] = set()
+
+
+# Per-model capability database.
+# Format: {model_name_pattern: {max_completion_tokens, max_context_tokens, cost_per_1m_input, cost_per_1m_output, provider}}
+MODEL_LIMITS: Dict[str, Dict] = {
+    # OpenAI
     "gpt-4o-mini": {
         "max_completion_tokens": 16384,
         "max_context_tokens": 128000,
@@ -62,7 +69,17 @@ MODEL_LIMITS = {
         "output_cost_per_1m": 60.00,
         "provider": "openai",
     },
-    # Anthropic Models
+    # GPT-5 family. Substring lookup also catches Poe-routed aliases such as
+    # ``gpt-5.4``. Per-token costs left at 0.0 because Poe / proxy gateways
+    # bill per-message, so downstream cost reports show $0 instead of guessing.
+    "gpt-5": {
+        "max_completion_tokens": 32768,
+        "max_context_tokens": 400000,
+        "input_cost_per_1m": 0.0,
+        "output_cost_per_1m": 0.0,
+        "provider": "openai",
+    },
+    # Anthropic
     "claude-3-5-sonnet": {
         "max_completion_tokens": 8192,
         "max_context_tokens": 200000,
@@ -94,50 +111,39 @@ MODEL_LIMITS = {
 }
 
 
-def get_model_from_config(config_path: str = "mcp_agent.config.yaml") -> Optional[str]:
-    """
-    Get the default model from configuration file.
-
-    Args:
-        config_path: Path to the configuration file
-
-    Returns:
-        Model name or None if not found
-    """
+def _resolve_config(config: DeepCodeConfig | None = None) -> DeepCodeConfig | None:
+    if config is not None:
+        return config
     try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            config = yaml.safe_load(f)
+        from core.compat.runtime import get_runtime
 
-        # Check OpenAI config first
-        if "openai" in config and "default_model" in config["openai"]:
-            return config["openai"]["default_model"]
-
-        # Check Anthropic config
-        if "anthropic" in config and "default_model" in config["anthropic"]:
-            return config["anthropic"]["default_model"]
-
+        return get_runtime().config
+    except Exception:
         return None
-    except Exception as e:
-        print(f"⚠️ Warning: Could not read model from config: {e}")
+
+
+def get_model_from_config(
+    config: DeepCodeConfig | None = None, *, phase: str = "default"
+) -> Optional[str]:
+    """Return the resolved model for *phase* from the runtime config."""
+    cfg = _resolve_config(config)
+    if cfg is None:
+        return None
+    try:
+        return cfg.resolve_phase(phase).model
+    except Exception:
         return None
 
 
 def get_model_limits(
-    model_name: Optional[str] = None, config_path: str = "mcp_agent.config.yaml"
+    model_name: Optional[str] = None,
+    config: DeepCodeConfig | None = None,
+    *,
+    phase: str = "default",
 ) -> Dict:
-    """
-    Get the limits and capabilities for a specific model.
-
-    Args:
-        model_name: Name of the model (if None, reads from config)
-        config_path: Path to the configuration file
-
-    Returns:
-        Dictionary with model limits and capabilities
-    """
-    # Get model name from config if not provided
+    """Return the capability/cost record for *model_name*."""
     if not model_name:
-        model_name = get_model_from_config(config_path)
+        model_name = get_model_from_config(config, phase=phase)
 
     if not model_name:
         print("⚠️ Warning: Could not determine model, using safe defaults")
@@ -149,18 +155,28 @@ def get_model_limits(
             "provider": "unknown",
         }
 
-    # Find matching model in database
+    # Prefer the longest matching pattern so ``gpt-5.4`` matches the
+    # ``gpt-5`` family entry rather than no entry, and ``gpt-4o`` matches
+    # ``gpt-4o`` rather than the generic ``gpt-4``.
+    best_pattern: Optional[str] = None
+    best_limits: Optional[Dict] = None
+    lowered = model_name.lower()
     for pattern, limits in MODEL_LIMITS.items():
-        if pattern.lower() in model_name.lower():
-            print(f"📊 Detected model: {model_name} → {pattern}")
-            print(f"   Max completion tokens: {limits['max_completion_tokens']}")
-            print(f"   Max context tokens: {limits['max_context_tokens']}")
-            return limits.copy()
+        if pattern.lower() in lowered:
+            if best_pattern is None or len(pattern) > len(best_pattern):
+                best_pattern = pattern
+                best_limits = limits
+    if best_limits is not None:
+        return best_limits.copy()
 
-    # Model not in database - use conservative defaults
-    print(
-        f"⚠️ Warning: Model '{model_name}' not in database, using conservative defaults"
-    )
+    # Warn at most once per unknown model so a long-running pipeline does
+    # not spam dozens of identical messages.
+    if model_name not in _UNKNOWN_MODELS_WARNED:
+        _UNKNOWN_MODELS_WARNED.add(model_name)
+        print(
+            f"⚠️ Warning: Model '{model_name}' not in database, using conservative "
+            "defaults (this warning will not repeat for this model)"
+        )
     return {
         "max_completion_tokens": 4096,
         "max_context_tokens": 8192,
@@ -172,24 +188,15 @@ def get_model_limits(
 
 def get_safe_max_tokens(
     model_name: Optional[str] = None,
-    config_path: str = "mcp_agent.config.yaml",
+    config: DeepCodeConfig | None = None,
     safety_margin: float = 0.9,
 ) -> int:
-    """
-    Get a safe max_tokens value for the model with a safety margin.
-
-    Args:
-        model_name: Name of the model (if None, reads from config)
-        config_path: Path to the configuration file
-        safety_margin: Percentage of max to use (0.9 = 90% of max)
-
-    Returns:
-        Safe max_tokens value
-    """
-    limits = get_model_limits(model_name, config_path)
+    """Return ``int(max_completion_tokens * safety_margin)`` for *model_name*."""
+    limits = get_model_limits(model_name, config)
     safe_tokens = int(limits["max_completion_tokens"] * safety_margin)
     print(
-        f"🔧 Safe max_tokens for {model_name or 'current model'}: {safe_tokens} ({safety_margin*100:.0f}% of {limits['max_completion_tokens']})"
+        f"🔧 Safe max_tokens for {model_name or 'current model'}: {safe_tokens} "
+        f"({safety_margin*100:.0f}% of {limits['max_completion_tokens']})"
     )
     return safe_tokens
 
@@ -198,83 +205,43 @@ def calculate_token_cost(
     input_tokens: int,
     output_tokens: int,
     model_name: Optional[str] = None,
-    config_path: str = "mcp_agent.config.yaml",
+    config: DeepCodeConfig | None = None,
 ) -> float:
-    """
-    Calculate the cost for a given number of tokens.
-
-    Args:
-        input_tokens: Number of input/prompt tokens
-        output_tokens: Number of output/completion tokens
-        model_name: Name of the model (if None, reads from config)
-        config_path: Path to the configuration file
-
-    Returns:
-        Total cost in dollars
-    """
-    limits = get_model_limits(model_name, config_path)
-
+    """Return the dollar cost of *input_tokens* + *output_tokens* on *model_name*."""
+    limits = get_model_limits(model_name, config)
     input_cost = (input_tokens / 1_000_000) * limits["input_cost_per_1m"]
     output_cost = (output_tokens / 1_000_000) * limits["output_cost_per_1m"]
-    total_cost = input_cost + output_cost
-
-    return total_cost
+    return input_cost + output_cost
 
 
 def get_retry_token_limits(
     base_tokens: int,
     retry_count: int,
     model_name: Optional[str] = None,
-    config_path: str = "mcp_agent.config.yaml",
+    config: DeepCodeConfig | None = None,
 ) -> int:
-    """
-    Get adjusted token limits for retries, respecting model maximum.
-
-    Args:
-        base_tokens: Base token limit
-        retry_count: Current retry attempt (0, 1, 2, ...)
-        model_name: Name of the model (if None, reads from config)
-        config_path: Path to the configuration file
-
-    Returns:
-        Adjusted token limit for retry
-    """
-    limits = get_model_limits(model_name, config_path)
+    """Return retry-adjusted token limits, capped at the model maximum."""
+    limits = get_model_limits(model_name, config)
     max_allowed = limits["max_completion_tokens"]
 
-    # Increase tokens with each retry, but cap at model maximum
     if retry_count == 0:
-        # First retry: 87.5% of max
         new_tokens = int(max_allowed * 0.875)
     elif retry_count == 1:
-        # Second retry: 95% of max
         new_tokens = int(max_allowed * 0.95)
     else:
-        # Third+ retry: Use max with small safety margin
         new_tokens = int(max_allowed * 0.98)
 
-    # Ensure we don't exceed the model's hard limit
     new_tokens = min(new_tokens, max_allowed)
-
     print(
-        f"🔧 Retry {retry_count + 1}: Adjusting tokens from {base_tokens} → {new_tokens} (max: {max_allowed})"
+        f"🔧 Retry {retry_count + 1}: Adjusting tokens from {base_tokens} → {new_tokens} "
+        f"(max: {max_allowed})"
     )
-
     return new_tokens
 
 
 def get_provider_from_model(
-    model_name: Optional[str] = None, config_path: str = "mcp_agent.config.yaml"
+    model_name: Optional[str] = None, config: DeepCodeConfig | None = None
 ) -> str:
-    """
-    Determine the provider (openai/anthropic) for a given model.
-
-    Args:
-        model_name: Name of the model (if None, reads from config)
-        config_path: Path to the configuration file
-
-    Returns:
-        Provider name: "openai", "anthropic", or "unknown"
-    """
-    limits = get_model_limits(model_name, config_path)
+    """Return the provider label associated with *model_name* in MODEL_LIMITS."""
+    limits = get_model_limits(model_name, config)
     return limits.get("provider", "unknown")

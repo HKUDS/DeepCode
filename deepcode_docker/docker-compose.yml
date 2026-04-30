@@ -7,9 +7,8 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      # Configuration (required)
-      - ../mcp_agent.config.yaml:/app/mcp_agent.config.yaml:ro
-      - ../mcp_agent.secrets.yaml:/app/mcp_agent.secrets.yaml:ro
+      # Configuration (required) — single JSON file with providers + MCP servers
+      - ../deepcode_config.json:/app/deepcode_config.json:ro
 
       # Persistent data
       - ../deepcode_lab:/app/deepcode_lab

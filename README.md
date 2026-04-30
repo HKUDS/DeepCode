@@ -159,13 +159,34 @@
 
 ## 📰 News
 
+🧭 **[2026-05-01] OpenRouter model selector, session cleanup & workflow UX hardening**
+
+- 🧠 **OpenRouter model catalog in Settings.** The new UI can now fetch OpenRouter model metadata from `https://openrouter.ai/api/v1/models`, cache it locally, and expose searchable model selectors for the Default, Planning, and Implementation phases. Use exact OpenRouter model ids such as `z-ai/glm-5.1` without editing JSON by hand.
+- 🔄 **Runtime model switching.** Saving model choices from Settings updates `deepcode_config.json` and reloads the in-process LLM runtime so newly started workflows pick up the selected provider/model combination immediately.
+- 🗑️ **Session deletion now performs safe cascade cleanup.** Deleting a session from the UI removes its persistent session store and associated `deepcode_lab/tasks/<task_id>/` workspaces, while preserving shared `uploads/` source files. Sessions with `pending`, `running`, or `waiting_for_input` tasks are blocked with a clear `409 Conflict`.
+- 📊 **More accurate Paper2Code progress.** The frontend now shows backend stage messages and avoids marking intermediate phases as fully "Done" while long LLM work is still running.
+- 🛡️ **Workflow robustness fixes.** Uploads now reject Git LFS pointer files, cancelled tasks stop backend work promptly, stale browser session ids recover cleanly, planner retries fall back to a minimal valid plan when a model defers/tool-calls incorrectly, and document segmentation skips an extra validation LLM call that could stall progress.
+
+---
+
+🗂️ **[2026-04-28] Persistent sessions & dual-layer logging**
+
+- 🆕 **Sessions are now persistent.** Every CLI / UI run is automatically attached to a session under `~/.deepcode/sessions/<id>/` (override with `DEEPCODE_SESSIONS_DIR`). Sessions are JSONL — `tail -f session.jsonl` works out of the box. List / inspect / branch them with `python cli/main_cli.py session list|show <id>|new|resume <id>|delete <id>`, or via `GET /api/v1/sessions` from the backend.
+- 🔄 **Resume a previous run** by passing `--session <id>` to the CLI or `session_id` to `POST /api/v1/workflows/paper-to-code` (or `chat-planning`). Backend restarts no longer drop task history; running tasks left over from a crash are surfaced as `interrupted`.
+- 💻 **CLI session UX.** The interactive CLI now supports Cursor-style slash commands: `/resume` opens a numbered session picker, `/new [title]` creates and switches sessions, `/session` shows the active session, and `/help` lists commands. You can also paste inline inputs directly at the menu prompt with `@/path/to/paper.pdf`, `@"C:\path with spaces\paper.pdf"`, or `@https://...`.
+- 📜 **Two-layer structured logging.** A global rotating JSONL lives at `logs/server-YYYYMMDD.jsonl`; per-task logs at `deepcode_lab/tasks/<task_id>/logs/{system,llm,mcp}.jsonl`. Every `loguru.logger` call automatically picks up the active `task_id` via a contextvar — business code did not have to change. Configure via the new `logger.{globalFile,taskFile,llm}` block in `deepcode_config.json`.
+- 📡 **WebSocket log streaming.** Tail one task with `/ws/tasks/{task_id}/logs?channel=llm`, or merge every task in a session via `/ws/sessions/{session_id}/logs`. The legacy `/ws/logs/{session_id}` endpoint that silently ignored its parameter has been removed.
+- 🧹 **Dead code removed.** `utils/simple_llm_logger.py`, `utils/dialogue_logger.py`, and the in-memory `services/session_service.py` implementation are gone (the latter is now a thin re-export of `core.sessions.SessionStore`).
+
+---
+
 🛠️ **[2026-04-17] Stability, Windows compatibility & secrets hygiene update**
 
 - 🐛 **Code Implementation no longer crashes** with `name 'LoopDetector' is not defined` — added the missing `LoopDetector`/`ProgressTracker` imports in both `workflows/code_implementation_workflow.py` and `workflows/code_implementation_workflow_index.py`.
 - 🪟 **Windows: `mkdir -p` / `touch` / `rm -rf` / `cp -r` / `mv` now work natively.** `tools/command_executor.py` translates these common Unix file-tree commands via `pathlib`/`shutil` on every platform, eliminating the bug where `cmd.exe` would create a literal `-p` directory and stall the workflow.
-- 🚀 **Removed Brave Search end-to-end.** All Python code, MCP server config, Dockerfile pre-installs, nanobot integration and docs are scrubbed of `brave`/`BRAVE_API_KEY`/`WebSearchTool`. Web fetching keeps working via the built-in `fetch` MCP server; `bocha-mcp` is the recommended search backend.
-- 🔌 **OpenAI-compatible providers documented.** New `Quick Start → Configuration` snippet shows how to point the `openai` block at Poe (`https://api.poe.com/v1`), OpenRouter, or Alibaba DashScope, plus how to set `default_model`/`planning_model`/`implementation_model` (e.g. `gpt-5.4`).
-- 🔐 **Secrets hygiene.** `.gitignore` now covers `*.secrets.yaml`, `*.secrets.yml`, `secrets.json`, `*credentials*.json`, `.env`, `.env.*` (with `*.env.example` whitelisted). `mcp_agent.secrets.yaml` was also `git rm --cached`'d so existing checkouts stop tracking it.
+- 🚀 **Removed Brave Search end-to-end.** All Python code, MCP server config, Dockerfile pre-installs, nanobot integration and docs are scrubbed of `brave`/`BRAVE_API_KEY`/`WebSearchTool`. Web fetching now relies entirely on the built-in `fetch` MCP server.
+- 🔌 **OpenAI-compatible providers documented.** New `Quick Start → Configuration` snippet shows how to point the `openai`/`openrouter` blocks at Poe (`https://api.poe.com/v1`), OpenRouter, or Alibaba DashScope, plus how to set `agents.defaults.model` / `agents.planning.model` / `agents.implementation.model` (e.g. `openai/gpt-5.4`).
+- 🔐 **Secrets hygiene.** All YAML config has been collapsed into a single `deepcode_config.json` (nanobot-style), and `.gitignore` now ignores it alongside `secrets.json`, `*credentials*.json`, `.env`, `.env.*` (with `*.env.example` whitelisted).
 - 📝 **Launch table fixed.** `deepcode` (no flags) actually starts Docker mode — the README now shows `deepcode --local` for the no-Docker path and adds explicit Troubleshooting rows for "Docker is installed but not running", Windows GBK encoding, and the issues fixed above.
 - 🧹 **Misc:** auto-create `logs/` directory so JSONL logging never fails on a fresh checkout, replace bare `except:` with `except Exception:` in `agent_orchestration_engine.py` (Ruff E722), `command_executor` MCP tool descriptions now embed the host OS so the LLM picks compatible commands.
 
@@ -444,7 +465,6 @@ DeepCode leverages the **Model Context Protocol (MCP)** standard to seamlessly i
 
 | 🛠️ **MCP Server** | 🔧 **Primary Function** | 💡 **Purpose & Capabilities** |
 |-------------------|-------------------------|-------------------------------|
-| **🌐 bocha-mcp** | Alternative Search | Secondary search option with independent API access |
 | **📂 filesystem** | File System Operations | Local file and directory management, read/write operations |
 | **🌐 fetch** | Web Content Retrieval | Fetch and extract content from URLs and web resources |
 | **📥 github-downloader** | Repository Management | Clone and download GitHub repositories for analysis |
@@ -625,9 +645,9 @@ Choose one of the following installation methods:
 # 🚀 Install DeepCode package directly
 pip install deepcode-hku
 
-# 🔑 Download configuration files
-curl -O https://raw.githubusercontent.com/HKUDS/DeepCode/main/mcp_agent.config.yaml
-curl -O https://raw.githubusercontent.com/HKUDS/DeepCode/main/mcp_agent.secrets.yaml
+# 🔑 Download the unified configuration template
+curl -O https://raw.githubusercontent.com/HKUDS/DeepCode/main/deepcode_config.json.example
+cp deepcode_config.json.example deepcode_config.json
 ```
 
 #### 🔧 **Development Installation (From Source)**
@@ -683,91 +703,82 @@ immediately on next launch — no reinstall needed.
 
 ### 🔧 **Step 2: Configuration**
 
-> The following configuration applies to **all installation methods** (pip, UV, source, and Docker).
+> The following configuration applies to **all installation methods** (pip, UV, source, and Docker). Everything lives in **one** file: `deepcode_config.json` (single source of truth, nanobot-style).
 
 #### 🔑 API Keys *(required)*
 
-Edit `mcp_agent.secrets.yaml` with your API keys:
+Edit `deepcode_config.json` and fill in at least one provider key. Inline strings work, and `${ENV_VAR}` references are resolved at load time.
 
-```yaml
-# At least ONE provider API key is required
-openai:
-  api_key: "your_openai_api_key"
-  base_url: "https://openrouter.ai/api/v1"  # Optional: for OpenRouter or custom endpoints
-
-anthropic:
-  api_key: "your_anthropic_api_key"  # For Claude models
-
-google:
-  api_key: "your_google_api_key"     # For Gemini models
+```json
+{
+  "providers": {
+    "openai":    { "apiKey": "your_openai_api_key" },
+    "anthropic": { "apiKey": "${ANTHROPIC_API_KEY}" },
+    "gemini":    { "apiKey": "" }
+  }
+}
 ```
 
 <details>
 <summary><strong>🔌 Using OpenAI-compatible providers (OpenRouter / Poe / DashScope / etc.)</strong></summary>
 
-The `openai` block accepts any OpenAI-compatible endpoint. Just override
-`base_url`. Then in `mcp_agent.config.yaml` set the model name your provider
-expects (the `default_model`, `planning_model`, and `implementation_model`
-fields under the `openai:` section).
+Any OpenAI-compatible endpoint is supported by overriding `apiBase` on the matching provider entry. Then set the model name on the `agents` block (using `provider/model` slugs):
 
-```yaml
-# mcp_agent.secrets.yaml
-openai:
-  api_key: "your_provider_api_key"
-  base_url: "https://api.poe.com/v1"            # Poe
-  # base_url: "https://openrouter.ai/api/v1"    # OpenRouter
-  # base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"  # Alibaba DashScope
+```json
+{
+  "agents": {
+    "defaults": {
+      "provider": "openrouter",
+      "model": "z-ai/glm-5.1"
+    },
+    "planning":       { "provider": "openrouter", "model": "z-ai/glm-5.1" },
+    "implementation": { "provider": "openrouter", "model": "z-ai/glm-5.1" }
+  },
+  "providers": {
+    "openai":     { "apiKey": "your_openai_api_key" },
+    "openrouter": { "apiKey": "your_openrouter_key", "apiBase": "https://openrouter.ai/api/v1" }
+  }
+}
 ```
 
-```yaml
-# mcp_agent.config.yaml — pick the model your provider supports
-openai:
-  default_model: "gpt-5.4"
-  planning_model: "gpt-5.4"
-  implementation_model: "gpt-5.4"
-```
+OpenRouter model ids must use the exact `id` returned by OpenRouter, for example
+`z-ai/glm-5.1`, `anthropic/claude-sonnet-4.5`, or
+`google/gemini-2.5-pro`. In the new UI, open **Settings → OpenRouter Models**
+to search the live OpenRouter catalog and update the Default, Planning, and
+Implementation models without editing this file manually. Saving from the UI
+reloads the runtime for newly started workflows.
 
-> **🔐 Never commit `mcp_agent.secrets.yaml`.** The provided `.gitignore`
-> excludes it, but if you cloned an older snapshot, also run
-> `git rm --cached mcp_agent.secrets.yaml` before your next push.
+> **🔐 Never commit `deepcode_config.json`.** It is already in `.gitignore`.
 
 </details>
 
 #### 🤖 LLM Provider *(optional)*
 
-Edit `mcp_agent.config.yaml` to choose your preferred LLM provider (line ~106):
+The provider is inferred from the `model` slug (`openai/...`, `anthropic/...`, `gemini/...`, etc.). To force a specific backend, set `agents.defaults.provider`:
 
-```yaml
-# Options: "google", "anthropic", "openai"
-# If not set or unavailable, will automatically fallback to first available provider
-llm_provider: "google"
-```
-
-#### 🔍 Search API Keys *(optional)*
-
-Configure web search in `mcp_agent.config.yaml`:
-
-```yaml
-# For Bocha-MCP (optional) — set in bocha-mcp.env section
-bocha-mcp:
-  env:
-    BOCHA_API_KEY: "your_bocha_api_key_here"
+```json
+{
+  "agents": {
+    "defaults": { "provider": "openai" }
+  }
+}
 ```
 
 #### 📄 Document Segmentation *(optional)*
 
-Control document processing in `mcp_agent.config.yaml`:
-
-```yaml
-document_segmentation:
-  enabled: true          # true/false — whether to use intelligent document segmentation
-  size_threshold_chars: 50000  # Document size threshold to trigger segmentation
+```json
+{
+  "documentSegmentation": {
+    "enabled": true,
+    "sizeThresholdChars": 50000
+  }
+}
 ```
 
 <details>
 <summary><strong>🪟 Windows Users: Additional MCP Server Configuration</strong></summary>
 
-If you're using Windows, you may need to configure MCP servers manually in `mcp_agent.config.yaml`:
+On Windows you may need to configure MCP servers manually in `deepcode_config.json` (`tools.mcpServers`):
 
 ```bash
 # 1. Install MCP servers globally
@@ -777,46 +788,36 @@ npm i -g @modelcontextprotocol/server-filesystem
 npm -g root
 ```
 
-Then update your `mcp_agent.config.yaml` to use absolute paths:
-
-```yaml
-mcp:
-  servers:
-    filesystem:
-      command: "node"
-      args: ["C:/Program Files/nodejs/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js", "."]
+```json
+{
+  "tools": {
+    "mcpServers": {
+      "filesystem": {
+        "type": "stdio",
+        "command": "node",
+        "args": ["C:/Program Files/nodejs/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js", "."]
+      }
+    }
+  }
+}
 ```
 
-> **Note**: Replace the path with your actual global node_modules path from step 2.
+> Replace the path with the actual global `node_modules` path from step 2.
 
 </details>
 
 <details>
-<summary><strong>🔍 Search Server Configuration (Optional)</strong></summary>
+<summary><strong>🔍 Web Search Configuration</strong></summary>
 
-DeepCode supports optional Bocha search plus built-in `fetch` for web content retrieval:
+DeepCode performs web content retrieval through the built-in `fetch` MCP server (no API key required) and reads local files via `filesystem`. The auxiliary search server defaults to `filesystem`:
 
-```yaml
-# Default search server configuration
-# Option: "bocha-mcp"
-default_search_server: "bocha-mcp"
+```json
+{
+  "tools": { "defaultSearchServer": "filesystem" }
+}
 ```
 
-**Available Options:**
-- **🌐 Bocha-MCP** (`"bocha-mcp"`): Alternative search server. Requires `BOCHA_API_KEY`. Uses local Python server implementation.
-
-**Full MCP server configuration in mcp_agent.config.yaml:**
-```yaml
-# For Bocha-MCP (optional)
-bocha-mcp:
-  command: "python"
-  args: ["tools/bocha_search_server.py"]
-  env:
-    PYTHONPATH: "."
-    BOCHA_API_KEY: "your_bocha_api_key_here"
-```
-
-> **💡 Tip**: Both search servers require API key configuration. Choose the one that best fits your API access and requirements.
+> **💡 Tip**: To plug in another search backend, add it under `tools.mcpServers` in `deepcode_config.json` and set `tools.defaultSearchServer` to its name.
 
 </details>
 
@@ -837,9 +838,9 @@ No Python/Node needed — everything in container.
 ```bash
 git clone https://github.com/HKUDS/DeepCode.git
 cd DeepCode/
-cp mcp_agent.secrets.yaml.example \
-   mcp_agent.secrets.yaml
-# Edit secrets with your API keys
+cp deepcode_config.json.example \
+   deepcode_config.json
+# Edit deepcode_config.json with your API keys
 
 ./deepcode_docker/run_docker.sh
 # Access → http://localhost:8000
@@ -885,6 +886,40 @@ deepcode --cli
 
 </td></tr>
 </table>
+
+#### 💻 **CLI sessions & inline inputs**
+
+The CLI is session-aware by default. A run without `--session` creates a new
+persistent session under `~/.deepcode/sessions/<id>/`; pass `--session <id>` to
+attach a new task to an existing session.
+
+```bash
+# Session management from the shell
+python cli/main_cli.py session list
+python cli/main_cli.py session show <session_id>
+python cli/main_cli.py session resume <session_id>   # show history, then enter interactive mode
+python cli/main_cli.py --session <session_id> --file paper.pdf
+```
+
+Inside `python cli/main_cli.py`, type these at the main menu prompt:
+
+```text
+/resume                 # pick a previous session from a numbered list
+/new My experiment      # create and switch to a fresh session
+/session                # show the currently active session
+@/absolute/path.pdf     # process a file without opening the file picker
+@"C:\path with spaces\paper.pdf"
+@https://arxiv.org/pdf/....
+```
+
+Every task created from these flows inherits the active `session_id`; per-task
+logs are written to `deepcode_lab/tasks/<task>/logs/`.
+
+In the web UI, use the **Sessions** menu in the header to resume or delete a
+session. Deleting a session removes its JSONL session record and associated task
+workspace under `deepcode_lab/tasks/`, but keeps original files in `uploads/`.
+If the session still has `pending`, `running`, or `waiting_for_input` tasks, the
+backend rejects the deletion until the task is cancelled or completed.
 
 <details>
 <summary><strong>🐳 Docker Management Commands</strong></summary>
@@ -1042,7 +1077,7 @@ Edit `nanobot_config.json` — fill in the 3 required fields:
 
 ### Step 3 · Launch
 
-Make sure `mcp_agent.secrets.yaml` has your DeepCode API keys (see [Configuration](#-step-2-configuration)), then:
+Make sure `deepcode_config.json` has your DeepCode API keys (see [Configuration](#-step-2-configuration)), then:
 
 ```bash
 ./nanobot/run_nanobot.sh -d          # Start both DeepCode + nanobot in background

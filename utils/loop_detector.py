@@ -23,8 +23,8 @@ class LoopDetector:
     def __init__(
         self,
         max_repeats: int = 5,
-        timeout_seconds: int = 300,
-        stall_threshold: int = 180,
+        timeout_seconds: int = 600,
+        stall_threshold: int = 300,
         max_errors: int = 10,
     ):
         """
@@ -32,8 +32,12 @@ class LoopDetector:
 
         Args:
             max_repeats: Maximum consecutive calls to same tool before flagging
-            timeout_seconds: Maximum time per file/operation (5 minutes default)
-            stall_threshold: Maximum time without progress (3 minutes default)
+            timeout_seconds: Maximum time per file/operation (10 minutes default)
+            stall_threshold: Maximum time without progress (5 minutes default).
+                Increased from the original 180s because slow LLM calls (large
+                contexts, transient retries, network blips) can routinely take
+                several minutes — counting that idle wait as a "stall" used to
+                kill mid-run pipelines.
             max_errors: Maximum consecutive errors before force stop
         """
         self.max_repeats = max_repeats
@@ -48,6 +52,10 @@ class LoopDetector:
         self.consecutive_errors = 0
         self.current_file = None
         self.file_start_time = None
+        # Wall-clock budget that *excludes* LLM-call time. ``note_llm_wait``
+        # adds the elapsed LLM seconds back to ``last_progress_time`` so the
+        # stall check only penalises true tool-side inactivity.
+        self._pending_llm_offset_s: float = 0.0
 
     def start_file(self, filename: str):
         """Start tracking a new file."""
@@ -116,6 +124,20 @@ class LoopDetector:
         """Record that progress has been made."""
         self.last_progress_time = time.time()
         self.consecutive_errors = 0  # Reset error counter on progress
+        self._pending_llm_offset_s = 0.0
+
+    def note_llm_wait(self, elapsed_seconds: float) -> None:
+        """Exclude an LLM-call wait from the stall budget.
+
+        Call this with ``time.time() - llm_start`` after every LLM
+        request/response cycle (including retries). The detector forwards
+        ``last_progress_time`` by that amount so a slow LLM round-trip is
+        not mistaken for a frozen workflow. Has no effect if the call
+        completed quickly.
+        """
+        if elapsed_seconds <= 0:
+            return
+        self.last_progress_time += elapsed_seconds
 
     def record_error(self, error_message: str):
         """Record an error occurred."""
@@ -165,6 +187,7 @@ class ProgressTracker:
     def __init__(self, total_files: int = 0):
         self.total_files = total_files
         self.completed_files = 0
+        self.completed_file_paths = set()
         self.current_phase = "Initializing"
         self.phase_progress = 0
         self.start_time = time.time()
@@ -175,12 +198,35 @@ class ProgressTracker:
         self.phase_progress = progress_percent
         print(f"📊 Progress: {progress_percent}% - {phase_name}")
 
-    def complete_file(self, filename: str):
-        """Record completion of a file."""
+    @staticmethod
+    def _normalize_file_path(filename: str) -> str:
+        """Normalize file paths so repeated writes do not inflate progress."""
+        return str(filename or "").replace("\\", "/").strip().strip("/")
+
+    def set_total_files(self, total_files: int):
+        """Set the real planned file count."""
+        self.total_files = max(0, int(total_files or 0))
+
+    def complete_file(self, filename: str) -> bool:
+        """Record completion of a unique file.
+
+        Returns ``True`` when this is the first completed write for the file,
+        ``False`` when the same file was already counted.
+        """
+        normalized = self._normalize_file_path(filename)
+        if normalized and normalized in self.completed_file_paths:
+            print(
+                f"ℹ️  File already counted: {filename} "
+                f"({self.completed_files}/{self.total_files})"
+            )
+            return False
+        if normalized:
+            self.completed_file_paths.add(normalized)
         self.completed_files += 1
         print(
             f"✅ Completed file {self.completed_files}/{self.total_files}: {filename}"
         )
+        return True
 
     def get_progress_info(self) -> Dict[str, Any]:
         """Get current progress information."""

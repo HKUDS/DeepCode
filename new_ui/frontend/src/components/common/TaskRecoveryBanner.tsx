@@ -25,7 +25,7 @@ export function TaskRecoveryBanner({
 
   const handleGoToTask = () => {
     if (workflowType === 'chat-planning') {
-      navigate('/chat-planning');
+      navigate('/chat');
     } else if (workflowType === 'paper-to-code') {
       navigate('/paper-to-code');
     }

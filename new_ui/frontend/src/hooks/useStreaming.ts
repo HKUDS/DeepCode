@@ -5,11 +5,13 @@ import type {
   WSProgressMessage,
   WSCompleteMessage,
   WSErrorMessage,
+  WSCancelledMessage,
   WSCodeChunkMessage,
   WSInteractionMessage,
+  WSInterruptedMessage,
 } from '../types/api';
 
-type WSMessage = WSProgressMessage | WSCompleteMessage | WSErrorMessage | WSCodeChunkMessage | WSInteractionMessage;
+type WSMessage = WSProgressMessage | WSCompleteMessage | WSErrorMessage | WSCancelledMessage | WSInterruptedMessage | WSCodeChunkMessage | WSInteractionMessage;
 
 export function useStreaming(taskId: string | null) {
   const {
@@ -30,7 +32,13 @@ export function useStreaming(taskId: string | null) {
   const prevTaskIdRef = useRef<string | null>(null);
 
   // Determine if finished based on store status (persisted state)
-  const isFinished = status === 'completed' || status === 'error';
+  const isFinished =
+    status === 'completed' ||
+    status === 'completed_with_warnings' ||
+    status === 'incomplete' ||
+    status === 'interrupted' ||
+    status === 'error' ||
+    status === 'cancelled';
 
   const handleMessage = useCallback(
     (message: WSMessage) => {
@@ -66,6 +74,7 @@ export function useStreaming(taskId: string | null) {
               console.log('[useStreaming] Task already errored (from status message)');
             } else if (taskStatus === 'waiting_for_input') {
               console.log('[useStreaming] Task waiting for input');
+              setStatus('waiting_for_input');
               // The interaction details will come in a separate interaction_required message
             }
           }
@@ -88,12 +97,28 @@ export function useStreaming(taskId: string | null) {
         case 'complete':
           console.log('[useStreaming] Workflow complete!');
           console.log('[useStreaming] Result:', JSON.stringify(message.result, null, 2));
-          setStatus('completed');  // This will make isFinished = true
+          setStatus(
+            (message.status as typeof status) === 'incomplete' ||
+              (message.status as typeof status) === 'completed_with_warnings'
+              ? (message.status as typeof status)
+              : 'completed'
+          );  // This will make isFinished = true
           setResult(message.result);
           clearInteraction(); // Clear any pending interaction
           // Update progress to 100% to mark all steps as complete
-          updateProgress(100, 'Workflow completed successfully');
-          addActivityLog('✅ Workflow completed successfully!', 100, 'success');
+          updateProgress(
+            message.status === 'incomplete' ? 95 : 100,
+            message.status === 'incomplete'
+              ? 'Workflow finished with incomplete implementation'
+              : 'Workflow completed successfully'
+          );
+          addActivityLog(
+            message.status === 'incomplete'
+              ? 'Workflow finished with incomplete implementation.'
+              : 'Workflow completed successfully!',
+            message.status === 'incomplete' ? 95 : 100,
+            message.status === 'incomplete' ? 'warning' : 'success'
+          );
           break;
 
         case 'error':
@@ -109,6 +134,19 @@ export function useStreaming(taskId: string | null) {
             clearInteraction(); // Clear any pending interaction
             addActivityLog(`❌ Error: ${message.error}`, 0, 'error');
           }
+          break;
+
+        case 'cancelled':
+          setStatus('cancelled');
+          clearInteraction();
+          addActivityLog(`Workflow cancelled: ${message.reason}`, 0, 'warning');
+          break;
+
+        case 'interrupted':
+          setStatus('interrupted');
+          clearInteraction();
+          setError(message.reason);
+          addActivityLog(`Workflow interrupted: ${message.reason}`, 0, 'warning');
           break;
 
         case 'code_chunk':

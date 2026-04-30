@@ -23,6 +23,10 @@ from typing import Dict, List, Tuple
 from dataclasses import dataclass
 import logging
 
+from core.platform_compat import configure_utf8_stdio
+
+configure_utf8_stdio()
+
 # Import MCP modules
 from mcp.server.fastmcp import FastMCP
 

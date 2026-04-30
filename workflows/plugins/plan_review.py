@@ -12,7 +12,11 @@ Flow:
 5. Code generation proceeds with approved plan
 """
 
+from pathlib import Path
 from typing import Any, Dict, Optional
+
+from workflows.planning_runtime import validate_plan_text
+from workflows.plan_review_runtime import revise_plan_with_feedback
 from .base import (
     InteractionPlugin,
     InteractionPoint,
@@ -94,19 +98,22 @@ class PlanReviewPlugin(InteractionPlugin):
 
         return InteractionRequest(
             interaction_type="plan_review",
-            title="🔍 Review Implementation Plan",
+            title="Review Implementation Plan",
             description=description,
             data={
                 "plan": plan,
                 "plan_preview": plan_preview,
                 "plan_path": context.get("initial_plan_path"),
+                "plan_validation": validate_plan_text(str(plan)),
+                "last_error": context.get("plan_modification_error"),
                 "modification_round": modification_round,
                 "max_rounds": self._max_modification_rounds,
             },
             options={
-                "confirm": "✓ Approve & Continue",
-                "modify": "✎ Request Changes",
-                "cancel": "✕ Cancel Workflow",
+                "confirm": "Approve & Continue",
+                "modify": "Request Changes",
+                "replace": "Replace Plan",
+                "cancel": "Cancel Workflow",
             },
             required=False,  # Can be skipped (auto-approve)
             timeout_seconds=600,  # 10 minutes for review
@@ -143,6 +150,11 @@ class PlanReviewPlugin(InteractionPlugin):
                 modified_plan = await self._modify_plan(
                     context.get("implementation_plan", ""), feedback, context
                 )
+                modified_validation = validate_plan_text(modified_plan)
+                if not modified_validation.get("valid", False):
+                    raise ValueError(
+                        f"Modified plan failed validation: {modified_validation}"
+                    )
 
                 context["implementation_plan"] = modified_plan
                 context["planning_result"] = modified_plan
@@ -163,8 +175,29 @@ class PlanReviewPlugin(InteractionPlugin):
             except Exception as e:
                 self.logger.error(f"Failed to modify plan: {e}")
                 context["plan_modification_error"] = str(e)
-                # Auto-approve to continue
-                context["plan_approved"] = True
+                context["plan_approved"] = False
+
+        elif action in {"replace", "edit"}:
+            replacement = (
+                response.data.get("plan") or response.data.get("replacement_plan") or ""
+            )
+            replacement = str(replacement).strip()
+            validation = validate_plan_text(replacement)
+            if replacement and validation.get("valid", False):
+                modification_round = context.get("plan_modification_round", 0) + 1
+                context["implementation_plan"] = replacement
+                context["planning_result"] = replacement
+                context["plan_modification_round"] = modification_round
+                context["plan_modification_error"] = None
+                plan_path = context.get("initial_plan_path")
+                if plan_path:
+                    with open(plan_path, "w", encoding="utf-8") as f:
+                        f.write(replacement)
+            else:
+                context["plan_modification_error"] = (
+                    "Replacement plan failed validation"
+                )
+                context["plan_approved"] = False
 
         elif action == "cancel":
             # User wants to cancel
@@ -186,16 +219,17 @@ class PlanReviewPlugin(InteractionPlugin):
     ) -> str:
         """
         Modify the implementation plan based on user feedback.
-        Uses RequirementAnalysisAgent's modify_requirements method.
         """
         try:
-            from workflows.agents.requirement_analysis_agent import (
-                RequirementAnalysisAgent,
+            paper_dir = context.get("paper_dir")
+            if not paper_dir and context.get("initial_plan_path"):
+                paper_dir = str(Path(context["initial_plan_path"]).parent)
+            return await revise_plan_with_feedback(
+                current_plan,
+                feedback,
+                paper_dir=paper_dir or ".",
+                logger=self.logger,
             )
-
-            async with RequirementAnalysisAgent() as agent:
-                modified = await agent.modify_requirements(current_plan, feedback)
-                return modified
 
         except Exception as e:
             self.logger.error(f"Plan modification failed: {e}")

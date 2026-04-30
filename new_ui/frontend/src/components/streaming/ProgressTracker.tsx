@@ -5,12 +5,16 @@ import type { WorkflowStep } from '../../types/workflow';
 interface ProgressTrackerProps {
   steps: WorkflowStep[];
   currentProgress: number;
+  currentMessage?: string;
 }
 
 export default function ProgressTracker({
   steps,
   currentProgress,
+  currentMessage,
 }: ProgressTrackerProps) {
+  const isTerminalProgress = currentProgress >= 100;
+
   const getStepIcon = (status: WorkflowStep['status']) => {
     switch (status) {
       case 'completed':
@@ -32,6 +36,11 @@ export default function ProgressTracker({
           <span className="font-medium text-gray-700">Progress</span>
           <span className="text-gray-500">{currentProgress}%</span>
         </div>
+        {currentMessage ? (
+          <div className="mb-3 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700">
+            Current backend stage: {currentMessage}
+          </div>
+        ) : null}
         <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
           <motion.div
             className="h-full bg-primary-500 rounded-full"
@@ -78,7 +87,9 @@ export default function ProgressTracker({
               <p className="text-xs text-gray-400">{step.subtitle}</p>
             </div>
             {step.status === 'completed' && (
-              <span className="text-xs text-green-600 font-medium">Done</span>
+              <span className="text-xs text-green-600 font-medium">
+                {isTerminalProgress ? 'Done' : 'Reached'}
+              </span>
             )}
           </motion.div>
         ))}

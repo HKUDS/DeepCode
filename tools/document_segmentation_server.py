@@ -52,7 +52,7 @@ large research papers and technical documents that exceed LLM token limits.
 - Concept-implementation relationship mapping
 - Multi-level relevance scoring (content type, importance, keyword matching)
 - Backward compatibility with existing document indexes
-- Configurable via mcp_agent.config.yaml (enabled/disabled, size thresholds)
+- Configurable via deepcode_config.json (documentSegmentation.enabled / sizeThresholdChars)
 
 Usage:
 python tools/document_segmentation_server.py
@@ -61,25 +61,15 @@ python tools/document_segmentation_server.py
 import os
 import re
 import json
-import sys
-import io
 from typing import Dict, List, Tuple
 import hashlib
 import logging
 from datetime import datetime
 from dataclasses import dataclass, asdict
 
-# Set standard output encoding to UTF-8
-if sys.stdout.encoding != "utf-8":
-    try:
-        if hasattr(sys.stdout, "reconfigure"):
-            sys.stdout.reconfigure(encoding="utf-8")
-            sys.stderr.reconfigure(encoding="utf-8")
-        else:
-            sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding="utf-8")
-            sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding="utf-8")
-    except Exception as e:
-        print(f"Warning: Could not set UTF-8 encoding: {e}")
+from core.platform_compat import configure_utf8_stdio
+
+configure_utf8_stdio()
 
 # Import MCP related modules
 from mcp.server.fastmcp import FastMCP
@@ -1443,6 +1433,36 @@ def ensure_segments_dir_exists(segments_dir: str):
     os.makedirs(segments_dir, exist_ok=True)
 
 
+def _build_fallback_segments(
+    content: str, segmenter: "DocumentSegmenter"
+) -> Tuple[List[DocumentSegment], str]:
+    """Guarantee a usable segmentation result for downstream planning."""
+    fallback_strategies = [
+        ("header_fallback", segmenter._segment_by_headers),
+        ("academic_fallback", segmenter._segment_academic_paper),
+        ("semantic_chunk_fallback", segmenter._segment_by_enhanced_semantic_chunks),
+        ("content_aware_fallback", segmenter._segment_content_aware),
+        ("paragraph_fallback", segmenter._segment_by_paragraphs),
+    ]
+
+    for strategy_name, strategy_fn in fallback_strategies:
+        try:
+            segments = strategy_fn(content)
+        except Exception as exc:
+            logger.warning(f"Segmentation fallback {strategy_name} failed: {exc}")
+            continue
+
+        usable_segments = [
+            segment
+            for segment in segments
+            if (segment.content or "").strip() and segment.char_count > 0
+        ]
+        if usable_segments:
+            return usable_segments, strategy_name
+
+    raise ValueError("All segmentation strategies produced zero usable segments")
+
+
 @mcp.tool()
 async def analyze_and_segment_document(
     paper_dir: str, force_refresh: bool = False
@@ -1538,6 +1558,11 @@ async def analyze_and_segment_document(
 
         # Create segments
         segments = segmenter.segment_document(content, strategy)
+        if not segments:
+            logger.warning(
+                f"Primary segmentation strategy '{strategy}' produced zero segments; applying deterministic fallback"
+            )
+            segments, strategy = _build_fallback_segments(content, segmenter)
 
         # Create document index
         document_index = DocumentIndex(

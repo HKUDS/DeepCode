@@ -43,6 +43,15 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+TERMINAL_STATUSES = {
+    "completed",
+    "error",
+    "cancelled",
+    "interrupted",
+    "incomplete",
+    "completed_with_warnings",
+}
+
 
 @router.websocket("/workflow/{task_id}")
 async def workflow_websocket(websocket: WebSocket, task_id: str):
@@ -70,7 +79,7 @@ async def workflow_websocket(websocket: WebSocket, task_id: str):
 
     # Subscribe to get our own queue for this task
     queue = workflow_service.subscribe(task_id)
-    task = workflow_service.get_task(task_id)
+    task = workflow_service.get_task_by_any_id(task_id)
     print(
         f"[WorkflowWS] Subscribed: task={task_id[:8]}... queue={queue is not None} task={task is not None}"
     )
@@ -119,12 +128,17 @@ async def workflow_websocket(websocket: WebSocket, task_id: str):
 
     try:
         # If task is already completed, send final status and close
-        if task.status in ("completed", "error", "cancelled"):
-            if task.status == "completed":
+        if task.status in TERMINAL_STATUSES:
+            if task.status in {
+                "completed",
+                "incomplete",
+                "completed_with_warnings",
+            }:
                 await websocket.send_json(
                     {
                         "type": "complete",
                         "task_id": task_id,
+                        "status": task.status,
                         "result": task.result,
                         "timestamp": datetime.utcnow().isoformat(),
                     }
@@ -135,6 +149,27 @@ async def workflow_websocket(websocket: WebSocket, task_id: str):
                         "type": "error",
                         "task_id": task_id,
                         "error": task.error,
+                        "timestamp": datetime.utcnow().isoformat(),
+                    }
+                )
+            elif task.status == "cancelled":
+                await websocket.send_json(
+                    {
+                        "type": "cancelled",
+                        "task_id": task_id,
+                        "status": "cancelled",
+                        "reason": task.message or "Task cancelled",
+                        "timestamp": datetime.utcnow().isoformat(),
+                    }
+                )
+            elif task.status == "interrupted":
+                await websocket.send_json(
+                    {
+                        "type": "interrupted",
+                        "task_id": task_id,
+                        "status": "interrupted",
+                        "reason": task.message
+                        or "Task was interrupted by a backend restart.",
                         "timestamp": datetime.utcnow().isoformat(),
                     }
                 )
@@ -155,7 +190,7 @@ async def workflow_websocket(websocket: WebSocket, task_id: str):
                     await websocket.send_json(message)
 
                     # Check if workflow is complete
-                    if msg_type in ("complete", "error"):
+                    if msg_type in ("complete", "error", "cancelled"):
                         print(
                             f"[WorkflowWS] Workflow finished: task={task_id[:8]}... type={msg_type}"
                         )

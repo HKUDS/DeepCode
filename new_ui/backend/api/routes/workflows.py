@@ -26,7 +26,10 @@ async def start_paper_to_code(
     Start a paper-to-code workflow.
     Returns a task ID that can be used to track progress via WebSocket.
     """
-    task = workflow_service.create_task()
+    task = workflow_service.create_task(
+        session_id=request.session_id,
+        task_kind="paper" if request.input_type != "url" else "url",
+    )
 
     # Run workflow in background
     background_tasks.add_task(
@@ -35,10 +38,13 @@ async def start_paper_to_code(
         request.input_source,
         request.input_type,
         request.enable_indexing,
+        request.enable_user_interaction,
     )
 
     return TaskResponse(
         task_id=task.task_id,
+        session_id=task.session_id,
+        task_short_id=task.task_short_id or task.task_id[:8],
         status="started",
         message="Paper-to-code workflow started",
     )
@@ -53,7 +59,10 @@ async def start_chat_planning(
     Start a chat-based planning workflow.
     Returns a task ID that can be used to track progress via WebSocket.
     """
-    task = workflow_service.create_task()
+    task = workflow_service.create_task(
+        session_id=request.session_id,
+        task_kind="chat",
+    )
 
     # Run workflow in background
     background_tasks.add_task(
@@ -61,10 +70,13 @@ async def start_chat_planning(
         task.task_id,
         request.requirements,
         request.enable_indexing,
+        request.enable_user_interaction,
     )
 
     return TaskResponse(
         task_id=task.task_id,
+        session_id=task.session_id,
+        task_short_id=task.task_short_id or task.task_id[:8],
         status="started",
         message="Chat planning workflow started",
     )
@@ -73,13 +85,15 @@ async def start_chat_planning(
 @router.get("/status/{task_id}")
 async def get_workflow_status(task_id: str):
     """Get the status of a workflow task"""
-    task = workflow_service.get_task(task_id)
+    task = workflow_service.get_task_by_any_id(task_id)
 
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
     response = {
         "task_id": task.task_id,
+        "session_id": task.session_id,
+        "task_short_id": task.task_short_id or task.task_id[:8],
         "status": task.status,
         "progress": task.progress,
         "message": task.message,
@@ -119,7 +133,7 @@ async def respond_to_interaction(task_id: str, request: InteractionResponseReque
     pauses to ask the user for input (e.g., requirement questions,
     plan confirmation).
     """
-    task = workflow_service.get_task(task_id)
+    task = workflow_service.get_task_by_any_id(task_id)
 
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -131,12 +145,13 @@ async def respond_to_interaction(task_id: str, request: InteractionResponseReque
         )
 
     # Check if plugin integration is available
-    if not hasattr(workflow_service, "_plugin_integration"):
+    plugin_integration = getattr(workflow_service, "_plugin_integration", None)
+    if plugin_integration is None:
         raise HTTPException(
             status_code=501, detail="User-in-Loop plugin system not enabled"
         )
 
-    success = workflow_service._plugin_integration.submit_response(
+    success = plugin_integration.submit_response(
         task_id=task_id,
         action=request.action,
         data=request.data,
@@ -162,7 +177,7 @@ async def get_pending_interaction(task_id: str):
 
     Returns the interaction data that needs user response.
     """
-    task = workflow_service.get_task(task_id)
+    task = workflow_service.get_task_by_any_id(task_id)
 
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -193,6 +208,8 @@ async def get_active_tasks():
         "tasks": [
             {
                 "task_id": task.task_id,
+                "session_id": task.session_id,
+                "task_short_id": task.task_short_id or task.task_id[:8],
                 "status": task.status,
                 "progress": task.progress,
                 "message": task.message,
@@ -214,6 +231,8 @@ async def get_recent_tasks(limit: int = 10):
         "tasks": [
             {
                 "task_id": task.task_id,
+                "session_id": task.session_id,
+                "task_short_id": task.task_short_id or task.task_id[:8],
                 "status": task.status,
                 "progress": task.progress,
                 "message": task.message,
