@@ -46,6 +46,9 @@
     "dashscope": {
       "apiKey": ""
     },
+    "minimax": {
+      "apiKey": "${MINIMAX_API_KEY}"
+    },
     "ollama": {
       "apiBase": "http://localhost:11434/v1"
     },

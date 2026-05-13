@@ -714,7 +714,8 @@ Edit `deepcode_config.json` and fill in at least one provider key. Inline string
   "providers": {
     "openai":    { "apiKey": "your_openai_api_key" },
     "anthropic": { "apiKey": "${ANTHROPIC_API_KEY}" },
-    "gemini":    { "apiKey": "" }
+    "gemini":    { "apiKey": "" },
+    "minimax":  { "apiKey": "${MINIMAX_API_KEY}" }
   }
 }
 ```
