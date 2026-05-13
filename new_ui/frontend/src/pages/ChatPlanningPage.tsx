@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Card } from '../components/common';
 import { ChatInput } from '../components/input';
-import { ProgressTracker, ActivityLogViewer } from '../components/streaming';
+import { ProgressTracker, ActivityLogViewer, WorkflowErrorDetails } from '../components/streaming';
 import { FileTree } from '../components/results';
 import { InlineChatInteraction } from '../components/interaction';
 import { useWorkflowStore } from '../stores/workflowStore';
@@ -37,6 +37,7 @@ export default function ChatPlanningPage() {
     isWaitingForInput,
     result,
     error,
+    errorDetails,
     setActiveTask,
     setSteps,
     setStatus,
@@ -407,9 +408,9 @@ export default function ChatPlanningPage() {
                     <h3 className="font-medium text-red-900">
                       Generation Failed
                     </h3>
-                    <p className="text-sm text-red-700 mt-1">
-                      {error}
-                    </p>
+                    <div className="mt-1">
+                      <WorkflowErrorDetails error={error} details={errorDetails} />
+                    </div>
                   </div>
                 </div>
               </Card>

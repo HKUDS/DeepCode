@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Card, Button } from '../components/common';
 import { FileUploader, UrlInput } from '../components/input';
-import { ProgressTracker, ActivityLogViewer } from '../components/streaming';
+import { ProgressTracker, ActivityLogViewer, WorkflowErrorDetails } from '../components/streaming';
 import { FileTree } from '../components/results';
 import { InteractionPanel } from '../components/interaction';
 import { useWorkflowStore } from '../stores/workflowStore';
@@ -35,6 +35,7 @@ export default function PaperToCodePage() {
     isWaitingForInput,
     result,
     error,
+    errorDetails,
     setActiveTask,
     setSteps,
     setStatus,
@@ -348,9 +349,9 @@ export default function PaperToCodePage() {
                     <h3 className="font-medium text-red-900">
                       Processing Failed
                     </h3>
-                    <p className="text-sm text-red-700 mt-1">
-                      {error}
-                    </p>
+                    <div className="mt-1">
+                      <WorkflowErrorDetails error={error} details={errorDetails} />
+                    </div>
                   </div>
                 </div>
               </Card>

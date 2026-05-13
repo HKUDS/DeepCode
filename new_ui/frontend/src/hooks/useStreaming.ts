@@ -95,6 +95,14 @@ export function useStreaming(taskId: string | null) {
           break;
 
         case 'complete':
+          if (message.status === 'error') {
+            const fallbackError = 'Workflow failed; see task logs for details';
+            setStatus('error');
+            setError(fallbackError);
+            clearInteraction();
+            addActivityLog(`Error: ${fallbackError}`, 0, 'error');
+            break;
+          }
           console.log('[useStreaming] Workflow complete!');
           console.log('[useStreaming] Result:', JSON.stringify(message.result, null, 2));
           setStatus(
@@ -130,7 +138,7 @@ export function useStreaming(taskId: string | null) {
           } else {
             // Real error - mark as error state
             setStatus('error');  // This will make isFinished = true
-            setError(message.error);
+            setError(message.error, message.error_details ?? null);
             clearInteraction(); // Clear any pending interaction
             addActivityLog(`❌ Error: ${message.error}`, 0, 'error');
           }

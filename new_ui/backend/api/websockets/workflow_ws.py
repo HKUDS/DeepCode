@@ -102,11 +102,13 @@ async def workflow_websocket(websocket: WebSocket, task_id: str):
             "type": "status",
             "task_id": task_id,
             "status": task.status,
-            "progress": task.progress,
-            "message": task.message,
-            "timestamp": datetime.utcnow().isoformat(),
-        }
-    )
+                "progress": task.progress,
+                "message": task.message,
+                "error": task.error,
+                "error_details": task.error_details,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        )
 
     # Send pending interaction if any (fixes race condition where interaction_required
     # was broadcast before WebSocket connected)
@@ -149,6 +151,7 @@ async def workflow_websocket(websocket: WebSocket, task_id: str):
                         "type": "error",
                         "task_id": task_id,
                         "error": task.error,
+                        "error_details": task.error_details,
                         "timestamp": datetime.utcnow().isoformat(),
                     }
                 )
