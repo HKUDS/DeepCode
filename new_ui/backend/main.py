@@ -167,12 +167,17 @@ if IS_DOCKER and FRONTEND_DIST.exists():
     @app.get("/{full_path:path}")
     async def serve_spa(request: Request, full_path: str):
         """Serve frontend SPA - fallback to index.html for client-side routing"""
-        # Check if a static file exists at the requested path
-        file_path = FRONTEND_DIST / full_path
-        if full_path and file_path.exists() and file_path.is_file():
-            return FileResponse(file_path)
+        frontend_root = FRONTEND_DIST.resolve()
+        if full_path:
+            # Resolve and confirm the path stays inside the build dir before
+            # serving: pathlib "/" join keeps ".." segments and percent-encoded
+            # separators (%2F, %2E%2E) survive Starlette routing, so an
+            # unchecked join allows reading arbitrary files outside the dist dir.
+            requested = (frontend_root / full_path).resolve()
+            if requested.is_relative_to(frontend_root) and requested.is_file():
+                return FileResponse(requested)
         # Otherwise return index.html (SPA routing)
-        return FileResponse(FRONTEND_DIST / "index.html")
+        return FileResponse(frontend_root / "index.html")
 else:
     # Development mode endpoints
     @app.get("/")
