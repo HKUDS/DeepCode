@@ -48,6 +48,11 @@ class TestCoreRegistry:
         assert spec.default_api_base == "https://api.minimax.io/v1"
 
     def test_find_by_model_minimax(self):
+        spec = find_by_model("minimax/MiniMax-M3")
+        assert spec is not None
+        assert spec.name == "minimax"
+
+    def test_find_by_model_minimax_m27(self):
         spec = find_by_model("minimax/MiniMax-M2.7")
         assert spec is not None
         assert spec.name == "minimax"
