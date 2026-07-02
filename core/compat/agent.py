@@ -257,7 +257,7 @@ class AugmentedLLM:
         checkpoints, or token accounting.
         """
         params = request_params or RequestParams()
-        tools = self.agent._tool_registry  # noqa: SLF001 - intentional shim access
+        tools = self.agent.tool_registry
         tools = _apply_tool_filter(
             tools,
             params.tool_filter,
@@ -570,6 +570,26 @@ class Agent:
             provider_name=effective_provider,
             phase=phase,
         )
+
+    @property
+    def tool_registry(self) -> ToolRegistry:
+        """Public accessor for the agent's live tool registry.
+
+        Workflows use this to build model-facing registries (aliasing,
+        instrumentation) on top of the MCP tools this agent owns, instead
+        of poking the private attribute.
+        """
+        return self._tool_registry
+
+    def register_tool(self, tool: Any) -> None:
+        """Register an additional tool at runtime (dynamic tool acquisition).
+
+        Unlike the legacy shim contract — where the toolset was frozen to
+        the ``server_names`` declared at construction — tools may now be
+        added while the agent is live; the registry invalidates its schema
+        cache automatically.
+        """
+        self._tool_registry.register(tool)
 
     async def list_tools(self) -> dict[str, Any]:
         """Return a ``{"tools": [...]}`` mapping mirroring the legacy interface."""

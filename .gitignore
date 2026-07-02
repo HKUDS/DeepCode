@@ -62,8 +62,9 @@ TODO.md
 ignore_this.txt
 *.ignore.*
 
-# unit-test files
+# scratch test files (but real suites under tests/ ARE tracked)
 test_*
+!tests/test_*
 run_indexer_with_filtering.py
 
 # Cline files

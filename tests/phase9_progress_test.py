@@ -2,17 +2,18 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from types import SimpleNamespace
-
-import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from workflows.agents.memory_agent_concise import ConciseMemoryAgent  # noqa: E402
-from workflows.implementation_llm_runtime import call_provider_with_legacy_tools  # noqa: E402
 from utils.loop_detector import ProgressTracker  # noqa: E402
+
+# NOTE: the legacy ``call_provider_with_legacy_tools`` retry-surfacing test was
+# removed together with ``workflows/implementation_llm_runtime.py`` — the
+# implementation loop now runs on ``core.agent_runtime.runner.AgentRunner``;
+# provider-error handling is covered by tests/test_unified_impl_workflow.py.
 
 
 def make_memory_agent(tmp_path: Path) -> ConciseMemoryAgent:
@@ -70,42 +71,3 @@ def test_progress_tracker_counts_unique_files_only():
     assert info["files_completed"] == 2
     assert info["total_files"] == 2
     assert info["file_progress"] == 100
-
-
-class AlwaysFailProvider:
-    def get_default_model(self) -> str:
-        return "fake-model"
-
-    async def chat_with_retry(self, **kwargs):
-        on_retry_wait = kwargs.get("on_retry_wait")
-        if on_retry_wait:
-            await on_retry_wait("attempt 1 failed; retrying")
-        return SimpleNamespace(
-            finish_reason="error",
-            content="provider exhausted retry budget",
-            usage={},
-            tool_calls=[],
-        )
-
-
-@pytest.mark.asyncio
-async def test_implementation_runtime_surfaces_bounded_retry_failure():
-    provider = AlwaysFailProvider()
-    retry_messages: list[str] = []
-
-    async def on_retry_wait(message: str):
-        retry_messages.append(message)
-
-    with pytest.raises(RuntimeError, match="provider exhausted retry budget"):
-        await call_provider_with_legacy_tools(
-            provider,
-            system_message="system",
-            messages=[{"role": "user", "content": "implement"}],
-            tools=[],
-            max_tokens=128,
-            validate_messages=lambda messages: messages,
-            retry_mode="standard",
-            on_retry_wait=on_retry_wait,
-        )
-
-    assert retry_messages == ["attempt 1 failed; retrying"]

@@ -47,9 +47,6 @@ from prompts.code_prompts import (
 from utils.file_processor import FileProcessor
 from workflows.code_implementation_workflow import CodeImplementationWorkflow
 from tools.pdf_downloader import move_file_to, download_file_to
-from workflows.code_implementation_workflow_index import (
-    CodeImplementationWorkflowWithIndex,
-)
 from utils.llm_utils import (
     should_use_document_segmentation,
     get_adaptive_prompts,
@@ -208,12 +205,12 @@ def _load_document_segments_context(
             textwrap.dedent(
                 f"""\
                 --- SEGMENT {idx} ---
-                title: {segment.get('title', f'Segment {idx}')}
-                content_type: {segment.get('content_type', 'general')}
+                title: {segment.get("title", f"Segment {idx}")}
+                content_type: {segment.get("content_type", "general")}
                 code_planning_relevance: {relevance}
-                keywords: {", ".join((segment.get('keywords') or [])[:12])}
+                keywords: {", ".join((segment.get("keywords") or [])[:12])}
                 content:
-                {segment.get('content', '').strip()}
+                {segment.get("content", "").strip()}
                 """
             ).strip()
         )
@@ -1549,15 +1546,14 @@ async def synthesize_code_implementation_agent(
     await asyncio.sleep(3)  # Brief pause before starting implementation
 
     try:
-        # Create code implementation workflow instance based on indexing preference
+        # One unified workflow class; indexing is a mode flag (P0 unification)
         if enable_indexing:
             print(
                 "🔍 Using enhanced code implementation workflow with reference indexing..."
             )
-            code_workflow = CodeImplementationWorkflowWithIndex()
         else:
             print("⚡ Using standard code implementation workflow (fast mode)...")
-            code_workflow = CodeImplementationWorkflow()
+        code_workflow = CodeImplementationWorkflow(enable_indexing=enable_indexing)
 
         # Check if initial plan file exists
         if os.path.exists(dir_info["initial_plan_path"]):
