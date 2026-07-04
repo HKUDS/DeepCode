@@ -170,6 +170,95 @@ async def test_injection_cycles_default_cap_is_five():
 
 
 @pytest.mark.asyncio
+async def test_denied_tool_becomes_error_result_not_crash():
+    """A permission denial must feed back as an errors-as-data tool result
+    and let the loop continue — never raise, never abort the run."""
+    provider = ScriptedProvider(
+        [
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(id="c1", name="echo", arguments={"text": "secret"})
+                ],
+                finish_reason="tool_calls",
+            ),
+            LLMResponse(content="ok, backing off", finish_reason="stop"),
+        ]
+    )
+
+    def deny_all(tool_name, arguments):
+        return ("deny", "blocked by test policy")
+
+    result = await AgentRunner(provider).run(
+        _spec(provider, permission_checker=deny_all)
+    )
+
+    assert result.stop_reason == "completed"
+    assert result.final_content == "ok, backing off"
+    tool_messages = [m for m in result.messages if m.get("role") == "tool"]
+    assert len(tool_messages) == 1
+    assert "permission denied" in tool_messages[0]["content"]
+    assert "blocked by test policy" in tool_messages[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_ask_without_approver_is_denied():
+    provider = ScriptedProvider(
+        [
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(id="c1", name="echo", arguments={"text": "x"})
+                ],
+                finish_reason="tool_calls",
+            ),
+            LLMResponse(content="done", finish_reason="stop"),
+        ]
+    )
+
+    def ask_always(tool_name, arguments):
+        return ("ask", "needs confirmation")
+
+    result = await AgentRunner(provider).run(
+        _spec(provider, permission_checker=ask_always)
+    )
+    tool_messages = [m for m in result.messages if m.get("role") == "tool"]
+    assert "permission denied" in tool_messages[0]["content"]
+    assert "no approver" in tool_messages[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_ask_with_approver_allows():
+    provider = ScriptedProvider(
+        [
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(id="c1", name="echo", arguments={"text": "hi"})
+                ],
+                finish_reason="tool_calls",
+            ),
+            LLMResponse(content="done", finish_reason="stop"),
+        ]
+    )
+    approvals: list[str] = []
+
+    def ask_always(tool_name, arguments):
+        return ("ask", "needs confirmation")
+
+    async def approve(tool_name, arguments, reason):
+        approvals.append(tool_name)
+        return True
+
+    result = await AgentRunner(provider).run(
+        _spec(provider, permission_checker=ask_always, approval_callback=approve)
+    )
+    tool_messages = [m for m in result.messages if m.get("role") == "tool"]
+    assert tool_messages[0]["content"] == "echo: hi"
+    assert approvals == ["echo"]
+
+
+@pytest.mark.asyncio
 async def test_max_injection_cycles_override_extends_continuation():
     provider = ScriptedProvider([LLMResponse(content="final", finish_reason="stop")])
     injections_left = {"count": 8}

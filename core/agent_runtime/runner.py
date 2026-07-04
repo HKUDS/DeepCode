@@ -95,6 +95,14 @@ class AgentRunSpec:
     llm_timeout_s: float | None = None
     should_stop_callback: Any | None = None
     max_injection_cycles: int | None = None
+    # Permission seam (P1 security base). A callable
+    # ``(tool_name, arguments) -> (decision, reason)`` where ``decision`` is
+    # one of "allow"/"ask"/"deny" (str or enum with a ``.value``). Called
+    # before each tool executes. "deny" and unresolved "ask" turn into an
+    # errors-as-data tool result fed back to the model — never a crash.
+    # ``ask`` is resolved by ``approval_callback`` if provided, else denied.
+    permission_checker: Any | None = None
+    approval_callback: Any | None = None
 
 
 @dataclass(slots=True)
@@ -758,6 +766,19 @@ class AgentRunner:
             if spec.fail_on_tool_error:
                 return lookup_error + _HINT, event, RuntimeError(lookup_error)
             return lookup_error + _HINT, event, None
+
+        # Permission gate (P1 security base). Denials and unresolved asks
+        # become errors-as-data results the model can read and react to,
+        # never exceptions — a blocked tool must not abort the run.
+        denial = await self._check_permission(spec, tool_call)
+        if denial is not None:
+            event = {
+                "name": tool_call.name,
+                "status": "denied",
+                "detail": denial.replace("\n", " ").strip()[:120],
+            }
+            return f"Error: permission denied: {denial}" + _HINT, event, None
+
         prepare_call = getattr(spec.tools, "prepare_call", None)
         tool, params, prep_error = None, tool_call.arguments, None
         if callable(prepare_call):
@@ -812,6 +833,63 @@ class AgentRunner:
         elif len(detail) > 120:
             detail = detail[:120] + "..."
         return result, {"name": tool_call.name, "status": "ok", "detail": detail}, None
+
+    @staticmethod
+    def _decision_value(decision: Any) -> str:
+        return getattr(decision, "value", decision)
+
+    async def _check_permission(
+        self,
+        spec: AgentRunSpec,
+        tool_call: ToolCallRequest,
+    ) -> str | None:
+        """Return a denial reason, or ``None`` if the call is permitted.
+
+        ``allow`` → ``None``. ``deny`` → its reason. ``ask`` → resolved via
+        ``approval_callback`` (approved → ``None``, rejected → reason);
+        with no approval callback (headless runs) an ``ask`` is denied with
+        an explanatory reason, so autonomy never silently escalates.
+        """
+        checker = spec.permission_checker
+        if checker is None:
+            return None
+        try:
+            outcome = checker(tool_call.name, tool_call.arguments)
+            if inspect.isawaitable(outcome):
+                outcome = await outcome
+            decision, reason = outcome
+        except Exception:
+            logger.exception(
+                "permission_checker failed for {}; denying by default",
+                tool_call.name,
+            )
+            return "permission check errored (fail-closed)"
+
+        value = self._decision_value(decision)
+        if value == "allow":
+            return None
+        if value == "deny":
+            return reason or "denied by policy"
+
+        # ask
+        approver = spec.approval_callback
+        if approver is None:
+            return (
+                (reason or "requires confirmation")
+                + " — no approver attached (non-interactive run), so this "
+                "action is blocked. Choose a path/command inside the allowed "
+                "workspace, or ask the user to approve it."
+            )
+        try:
+            approved = approver(tool_call.name, tool_call.arguments, reason)
+            if inspect.isawaitable(approved):
+                approved = await approved
+        except Exception:
+            logger.exception("approval_callback failed for {}", tool_call.name)
+            return "approval request errored (fail-closed)"
+        if approved:
+            return None
+        return f"user rejected: {reason or 'action not approved'}"
 
     async def _emit_checkpoint(
         self,

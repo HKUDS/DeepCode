@@ -38,9 +38,12 @@ from core.agent_runtime.hook import AgentHook, AgentHookContext
 from core.agent_runtime.runner import AgentRunner, AgentRunSpec
 from core.agent_runtime.tools.alias import AliasedTool, build_aliased_registry
 from core.agent_runtime.tools.registry import ToolRegistry
+from core.harness.approval import TerminalApprover
+from core.harness.permissions import PermissionMode
+from core.harness.policy import build_permission_engine
 
 # DeepCode-native compat layer (owns the MCP server lifecycle)
-from core.compat import Agent
+from core.compat import Agent, get_runtime
 from core.llm_runtime import attach_workflow_llm, get_workflow_provider
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -812,6 +815,25 @@ Requirements:
             self.logger.warning("Implementation LLM retry: %s", message)
             state.emit_progress(f"Retrying implementation LLM call: {message}")
 
+        # Security base (P1). The implementation phase is autonomous, so it
+        # defaults to FULL_AUTO — no per-tool prompts — while the
+        # non-overridable sensitive-path denylist always applies (the agent
+        # can never read/write credential stores even if a plan asks).
+        #
+        # Mode + rules come from the ``security`` config block, overridable by
+        # DEEPCODE_PERMISSION_MODE. Any non-full_auto mode attaches a terminal
+        # approver so an `ask` becomes an interactive confirmation. Unknown
+        # values fall back to full_auto so a typo never blocks an unattended run.
+        security_cfg = getattr(get_runtime().config, "security", None)
+        permission_engine = build_permission_engine(security_cfg, cwd=code_directory)
+        mode = permission_engine.mode
+        approval_cb = None
+        if mode is not PermissionMode.FULL_AUTO:
+            approval_cb = TerminalApprover().as_async()
+            self.logger.info(
+                "🔐 Permission mode: %s (interactive approval)", mode.value
+            )
+
         spec = AgentRunSpec(
             initial_messages=initial_messages,
             tools=self._build_model_registry(state),
@@ -826,6 +848,8 @@ Requirements:
             retry_wait_callback=on_retry_wait,
             injection_callback=inject_followups,
             should_stop_callback=should_stop,
+            permission_checker=permission_engine.evaluate,
+            approval_callback=approval_cb,
             # The implementation phase owns its own budgets (wall clock +
             # iteration caps); no per-call timeout, like the legacy loop.
             llm_timeout_s=0,

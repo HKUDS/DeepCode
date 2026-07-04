@@ -29,6 +29,7 @@ from core.platform_compat import (
     subprocess_env,
     subprocess_text_kwargs,
 )
+from core.harness.sandbox import build_exec_command, describe_backend
 
 configure_utf8_stdio()
 
@@ -702,15 +703,25 @@ async def execute_python(code: str, timeout: int = 30) -> str:
             # Ensure workspace directory exists
             ensure_workspace_exists()
 
-            # Execute Python code
-            result = subprocess.run(
-                [sys.executable, temp_file],
-                cwd=WORKSPACE_DIR,
-                capture_output=True,
-                timeout=timeout,
-                env=subprocess_env(),
-                **subprocess_text_kwargs(),
+            # Execute Python code inside the workspace write-fence sandbox
+            # (P1 security base). Reads stay unrestricted and the network is
+            # left open so pip/downloads work; only writes outside the
+            # workspace are blocked. Degrades to a bare run when no sandbox
+            # backend is available.
+            wrapped = build_exec_command(
+                argv=[sys.executable, temp_file], workspace=str(WORKSPACE_DIR)
             )
+            try:
+                result = subprocess.run(
+                    wrapped.argv,
+                    cwd=WORKSPACE_DIR,
+                    capture_output=True,
+                    timeout=timeout,
+                    env=subprocess_env(),
+                    **subprocess_text_kwargs(),
+                )
+            finally:
+                wrapped.cleanup()
 
             execution_result = {
                 "status": "success" if result.returncode == 0 else "error",
@@ -718,6 +729,7 @@ async def execute_python(code: str, timeout: int = 30) -> str:
                 "stdout": result.stdout,
                 "stderr": result.stderr,
                 "timeout": timeout,
+                "sandbox": wrapped.backend,
             }
 
             if result.returncode != 0:
@@ -787,16 +799,24 @@ async def execute_bash(command: str, timeout: int = 30) -> str:
         # Ensure workspace directory exists
         ensure_workspace_exists()
 
-        # Execute command
-        result = subprocess.run(
-            command,
-            shell=True,
-            cwd=WORKSPACE_DIR,
-            capture_output=True,
-            timeout=timeout,
-            env=subprocess_env(),
-            **subprocess_text_kwargs(),
-        )
+        # Execute inside the workspace write-fence sandbox (P1 security base).
+        # The pre-existing dangerous-command blocklist above stays as cheap
+        # defense-in-depth; the sandbox additionally prevents any write
+        # outside the workspace (e.g. tampering with the repo or $HOME) even
+        # if a command slips past the blocklist. Degrades to a bare run when
+        # no sandbox backend is available.
+        wrapped = build_exec_command(command=command, workspace=str(WORKSPACE_DIR))
+        try:
+            result = subprocess.run(
+                wrapped.argv,
+                cwd=WORKSPACE_DIR,
+                capture_output=True,
+                timeout=timeout,
+                env=subprocess_env(),
+                **subprocess_text_kwargs(),
+            )
+        finally:
+            wrapped.cleanup()
 
         execution_result = {
             "status": "success" if result.returncode == 0 else "error",
@@ -805,6 +825,7 @@ async def execute_bash(command: str, timeout: int = 30) -> str:
             "stderr": result.stderr,
             "command": command,
             "timeout": timeout,
+            "sandbox": wrapped.backend,
         }
 
         if result.returncode != 0:
@@ -1412,11 +1433,16 @@ async def set_workspace(workspace_path: str) -> str:
         WORKSPACE_DIR = new_workspace
 
         logger.info(f"New Workspace: {WORKSPACE_DIR}")
+        logger.info(
+            "Command execution sandbox: %s (writes fenced to workspace)",
+            describe_backend(),
+        )
 
         result = {
             "status": "success",
             "message": f"Workspace setup successful: {workspace_path}",
             "new_workspace": str(WORKSPACE_DIR),
+            "sandbox_backend": describe_backend(),
         }
 
         log_operation(

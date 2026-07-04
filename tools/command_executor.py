@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from core.platform_compat import configure_utf8_stdio, subprocess_env
+from core.harness.sandbox import build_exec_command
 
 configure_utf8_stdio()
 
@@ -278,17 +279,22 @@ async def execute_command_batch(
                 continue
 
             try:
-                result = subprocess.run(
-                    command,
-                    shell=True,
-                    cwd=working_directory,
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    encoding="utf-8",
-                    errors="replace",
-                    env=subprocess_env(),
+                wrapped = build_exec_command(
+                    command=command, workspace=working_directory
                 )
+                try:
+                    result = subprocess.run(
+                        wrapped.argv,
+                        cwd=working_directory,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        encoding="utf-8",
+                        errors="replace",
+                        env=subprocess_env(),
+                    )
+                finally:
+                    wrapped.cleanup()
 
                 if result.returncode == 0:
                     results.append(f"✅ Command {i}: {command}")
@@ -347,17 +353,20 @@ async def execute_single_command(
                 args=command, returncode=rc, stdout=out, stderr=err
             )
         else:
-            result = subprocess.run(
-                command,
-                shell=True,
-                cwd=working_directory,
-                capture_output=True,
-                text=True,
-                timeout=30,
-                encoding="utf-8",
-                errors="replace",
-                env=subprocess_env(),
-            )
+            wrapped = build_exec_command(command=command, workspace=working_directory)
+            try:
+                result = subprocess.run(
+                    wrapped.argv,
+                    cwd=working_directory,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    encoding="utf-8",
+                    errors="replace",
+                    env=subprocess_env(),
+                )
+            finally:
+                wrapped.cleanup()
 
         output = format_single_command_result(command, working_directory, result)
 
@@ -394,15 +403,15 @@ def generate_execution_summary(
     native_count = stats.get("native", 0)
     return f"""
 Command Execution Summary:
-{'='*50}
+{"=" * 50}
 Working Directory: {working_directory}
 Total Commands: {len(command_lines)}
-Successful: {stats['successful']} (native: {native_count})
-Failed: {stats['failed']}
-Timeout: {stats['timeout']}
+Successful: {stats["successful"]} (native: {native_count})
+Failed: {stats["failed"]}
+Timeout: {stats["timeout"]}
 
 Detailed Results:
-{'-'*50}"""
+{"-" * 50}"""
 
 
 def format_single_command_result(
@@ -421,7 +430,7 @@ def format_single_command_result(
     """
     output = f"""
 Single Command Execution:
-{'='*40}
+{"=" * 40}
 Working Directory: {working_directory}
 Command: {command}
 Return Code: {result.returncode}
