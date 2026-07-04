@@ -159,6 +159,16 @@
 
 ## 📰 News
 
+**[2026-07-04] V2 foundation: unified agent kernel, security sandbox & event protocol**
+
+- **Three execution stacks unified into one kernel.** The fixed 800-iteration implementation loop, the legacy compat shim, and duplicated memory-agent / tool-schema code are gone — every phase now runs on the shared `core/agent_runtime` `AgentRunner`. Net -5,586 lines, tool schemas are sourced directly from the MCP servers (single source of truth), and the indexed workflow folds into `CodeImplementationWorkflow(enable_indexing=True)`. Paper2Code behavior is unchanged (validated 37/37 on a full reproduction run).
+- **Security base (new).** Tool calls now pass a three-valued permission engine (allow / ask / deny) with a non-overridable credential denylist (`.ssh`, `.aws/credentials`, `.env`, `*.pem`, ...), and shell/Python execution runs inside a platform sandbox (macOS seatbelt / Linux bubblewrap) write-fenced to the workspace. Control it via `DEEPCODE_SANDBOX` / `DEEPCODE_PERMISSION_MODE` or the new `security` block in `deepcode_config.json`; opt into interactive per-tool approval with `DEEPCODE_PERMISSION_MODE=default`.
+- **Kernel protocol layer (new).** A declarative `ModelCompat` resolver replaces scattered `model_id` string checks in the OpenAI-compatible provider; a normalized `LLMEvent` stream, a structured message-parts model (with a `pending -> running -> completed | error` tool state machine), and an `AgentSession` over an SQ/EQ event protocol give every frontend one shared contract to build on.
+- **Chat planning reliability.** Web chat planning now runs autonomously by default (requirements -> plan -> implementation), avoiding a pre-existing clarifying-questions interaction that could surface as "error processing your request".
+- **Validated.** 97 offline unit tests (including real macOS seatbelt enforcement and real-provider wire-shape equivalence); the P1 exit criteria were verified end-to-end with a live model.
+
+---
+
 🧭 **[2026-05-01] OpenRouter model selector, session cleanup & workflow UX hardening**
 
 - 🧠 **OpenRouter model catalog in Settings.** The new UI can now fetch OpenRouter model metadata from `https://openrouter.ai/api/v1/models`, cache it locally, and expose searchable model selectors for the Default, Planning, and Implementation phases. Use exact OpenRouter model ids such as `z-ai/glm-5.1` without editing JSON by hand.
