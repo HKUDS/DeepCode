@@ -38,6 +38,7 @@ from core.agent_runtime.hook import AgentHook, AgentHookContext
 from core.agent_runtime.runner import AgentRunner, AgentRunSpec
 from core.agent_runtime.tools.alias import AliasedTool, build_aliased_registry
 from core.agent_runtime.tools.registry import ToolRegistry
+from core.harness.permissions import PermissionEngine, PermissionMode
 
 # DeepCode-native compat layer (owns the MCP server lifecycle)
 from core.compat import Agent
@@ -812,6 +813,16 @@ Requirements:
             self.logger.warning("Implementation LLM retry: %s", message)
             state.emit_progress(f"Retrying implementation LLM call: {message}")
 
+        # Security base (P1): the implementation phase is autonomous, so it
+        # runs FULL_AUTO — no per-tool prompts — but the non-overridable
+        # sensitive-path denylist still applies. Net behavior vs. before:
+        # identical, except the agent can no longer read/write credential
+        # stores (.ssh, .env, deepcode_config.json, *.pem, ...) even if a
+        # plan or model asks it to.
+        permission_engine = PermissionEngine(
+            mode=PermissionMode.FULL_AUTO, cwd=code_directory
+        )
+
         spec = AgentRunSpec(
             initial_messages=initial_messages,
             tools=self._build_model_registry(state),
@@ -826,6 +837,7 @@ Requirements:
             retry_wait_callback=on_retry_wait,
             injection_callback=inject_followups,
             should_stop_callback=should_stop,
+            permission_checker=permission_engine.evaluate,
             # The implementation phase owns its own budgets (wall clock +
             # iteration caps); no per-call timeout, like the legacy loop.
             llm_timeout_s=0,
