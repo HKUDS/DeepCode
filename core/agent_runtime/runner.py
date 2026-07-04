@@ -93,6 +93,8 @@ class AgentRunSpec:
     checkpoint_callback: Any | None = None
     injection_callback: Any | None = None
     llm_timeout_s: float | None = None
+    should_stop_callback: Any | None = None
+    max_injection_cycles: int | None = None
 
 
 @dataclass(slots=True)
@@ -165,7 +167,12 @@ class AgentRunner:
         phase: str = "after error",
         iteration: int | None = None,
     ) -> tuple[bool, int]:
-        if injection_cycles >= _MAX_INJECTION_CYCLES:
+        max_cycles = (
+            spec.max_injection_cycles
+            if spec.max_injection_cycles is not None
+            else _MAX_INJECTION_CYCLES
+        )
+        if injection_cycles >= max_cycles:
             return False, injection_cycles
         injections = await self._drain_injections(spec)
         if not injections:
@@ -191,7 +198,7 @@ class AgentRunner:
             len(injections),
             phase,
             injection_cycles,
-            _MAX_INJECTION_CYCLES,
+            max_cycles,
         )
         return True, injection_cycles
 
@@ -252,6 +259,23 @@ class AgentRunner:
         injection_cycles = 0
 
         for iteration in range(spec.max_iterations):
+            if spec.should_stop_callback is not None:
+                try:
+                    stop_requested = await spec.should_stop_callback()
+                except Exception:
+                    logger.exception(
+                        "should_stop_callback failed for {}; continuing run",
+                        spec.session_key or "default",
+                    )
+                    stop_requested = None
+                if stop_requested:
+                    stop_reason = "callback_stop"
+                    logger.info(
+                        "Run stopped by callback for {}: {}",
+                        spec.session_key or "default",
+                        stop_requested,
+                    )
+                    break
             try:
                 messages_for_model = self._drop_orphan_tool_results(messages)
                 messages_for_model = self._backfill_missing_tool_results(
