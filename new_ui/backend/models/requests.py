@@ -24,8 +24,14 @@ class ChatPlanningRequest(BaseModel):
 
     requirements: str = Field(..., description="User requirements text")
     enable_indexing: bool = Field(default=False, description="Enable code indexing")
+    # Default OFF: the web "clarifying questions" interaction (user-in-loop)
+    # has a pre-existing frontend delivery bug that surfaces as "error
+    # processing your request". Until that WS interaction is fixed, chat
+    # planning runs fully autonomously (requirements -> plan -> implement),
+    # matching the working CLI --chat path. The frontend does not send this
+    # field, so this default governs the web UI.
     enable_user_interaction: bool = Field(
-        default=True, description="Enable user review and approval steps"
+        default=False, description="Enable user review and approval steps"
     )
     session_id: Optional[str] = Field(
         default=None,
