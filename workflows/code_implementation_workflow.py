@@ -39,10 +39,11 @@ from core.agent_runtime.runner import AgentRunner, AgentRunSpec
 from core.agent_runtime.tools.alias import AliasedTool, build_aliased_registry
 from core.agent_runtime.tools.registry import ToolRegistry
 from core.harness.approval import TerminalApprover
-from core.harness.permissions import PermissionEngine, PermissionMode
+from core.harness.permissions import PermissionMode
+from core.harness.policy import build_permission_engine
 
 # DeepCode-native compat layer (owns the MCP server lifecycle)
-from core.compat import Agent
+from core.compat import Agent, get_runtime
 from core.llm_runtime import attach_workflow_llm, get_workflow_provider
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -88,22 +89,6 @@ _MAX_ITERATIONS = 800
 _MAX_WALL_SECONDS = 7200  # 120 minutes (2 hours)
 _EMERGENCY_TRIM_THRESHOLD = 50
 _MAX_TOOL_RESULT_CHARS = 60_000
-
-
-def _resolve_permission_mode() -> PermissionMode:
-    """Permission mode for the implementation phase (env-gated).
-
-    ``DEEPCODE_PERMISSION_MODE`` = ``full_auto`` (default) / ``default`` /
-    ``plan``. Unknown or empty values resolve to ``full_auto`` so a typo
-    never silently blocks an unattended reproduction run.
-    """
-    import os
-
-    raw = os.environ.get("DEEPCODE_PERMISSION_MODE", "").strip().lower()
-    try:
-        return PermissionMode(raw) if raw else PermissionMode.FULL_AUTO
-    except ValueError:
-        return PermissionMode.FULL_AUTO
 
 
 @dataclass
@@ -835,12 +820,13 @@ Requirements:
         # non-overridable sensitive-path denylist always applies (the agent
         # can never read/write credential stores even if a plan asks).
         #
-        # A security-conscious user can set DEEPCODE_PERMISSION_MODE=default
-        # (or plan) to get interactive per-mutation approval on the terminal;
-        # in that case an approver is attached. Unknown values fall back to
-        # full_auto so a typo never silently blocks an unattended run.
-        mode = _resolve_permission_mode()
-        permission_engine = PermissionEngine(mode=mode, cwd=code_directory)
+        # Mode + rules come from the ``security`` config block, overridable by
+        # DEEPCODE_PERMISSION_MODE. Any non-full_auto mode attaches a terminal
+        # approver so an `ask` becomes an interactive confirmation. Unknown
+        # values fall back to full_auto so a typo never blocks an unattended run.
+        security_cfg = getattr(get_runtime().config, "security", None)
+        permission_engine = build_permission_engine(security_cfg, cwd=code_directory)
+        mode = permission_engine.mode
         approval_cb = None
         if mode is not PermissionMode.FULL_AUTO:
             approval_cb = TerminalApprover().as_async()

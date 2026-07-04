@@ -32,6 +32,7 @@ else:
     from openai import AsyncOpenAI
 
 from core.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from core.providers.model_compat import resolve_model_compat
 from core.providers.openai_responses import (
     consume_sdk_stream,
     convert_messages,
@@ -62,37 +63,9 @@ _DEFAULT_OPENROUTER_HEADERS = {
     "X-OpenRouter-Title": "DeepCode",
     "X-OpenRouter-Categories": "cli-agent,research-agent",
 }
-_KIMI_THINKING_MODELS: frozenset[str] = frozenset(
-    {
-        "kimi-k2.5",
-        "kimi-k2.6",
-        "k2.6-code-preview",
-    }
-)
-_THINKING_STYLE_MAP: dict[str, Any] = {
-    "thinking_type": lambda on: {"thinking": {"type": "enabled" if on else "disabled"}},
-    "enable_thinking": lambda on: {"enable_thinking": on},
-    "reasoning_split": lambda on: {"reasoning_split": on},
-}
-
-
-def _is_kimi_thinking_model(model_name: str) -> bool:
-    """Return True if model_name refers to a Kimi thinking-capable model.
-
-    Supports two forms:
-    - Exact match: kimi-k2.5 in _KIMI_THINKING_MODELS
-    - Slug match:  moonshotai/kimi-k2.5 -> the part after the last "/"
-                   is checked against _KIMI_THINKING_MODELS
-
-    This covers both the native Moonshot provider (bare slug) and
-    OpenRouter-style names (``"publisher/slug"``).
-    """
-    name = model_name.lower()
-    if name in _KIMI_THINKING_MODELS:
-        return True
-    if "/" in name and name.rsplit("/", 1)[1] in _KIMI_THINKING_MODELS:
-        return True
-    return False
+# Per-model thinking / reasoning quirks now live declaratively in
+# ``core.providers.model_compat`` (resolved via ``resolve_model_compat``);
+# this module only assembles requests from the resolved value.
 
 
 def _short_tool_id() -> str:
@@ -394,21 +367,6 @@ class OpenAICompatProvider(LLMProvider):
     # Build kwargs
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _supports_temperature(
-        model_name: str,
-        reasoning_effort: str | None = None,
-    ) -> bool:
-        """Return True when the model accepts a temperature parameter.
-
-        GPT-5 family and reasoning models (o1/o3/o4) reject temperature
-        when reasoning_effort is set to anything other than ``"none"``.
-        """
-        if reasoning_effort and reasoning_effort.lower() != "none":
-            return False
-        name = model_name.lower()
-        return not any(token in name for token in ("gpt-5", "o1", "o3", "o4"))
-
     def _build_kwargs(
         self,
         messages: list[dict[str, Any]],
@@ -419,92 +377,48 @@ class OpenAICompatProvider(LLMProvider):
         reasoning_effort: str | None,
         tool_choice: str | dict[str, Any] | None,
     ) -> dict[str, Any]:
+        """Assemble the request from a resolved :class:`ModelCompat`.
+
+        All per-model quirk decisions (temperature, token field, effort
+        spelling, thinking injection) are resolved once in
+        :func:`resolve_model_compat`; this method only assembles the payload
+        from that value — no ``model_name.lower()`` branching inline.
+        """
         model_name = model or self.default_model
         spec = self._spec
 
         if spec and spec.supports_prompt_caching:
-            model_name = model or self.default_model
             if any(model_name.lower().startswith(k) for k in ("anthropic/", "claude")):
                 messages, tools = self._apply_cache_control(messages, tools)
 
-        if spec and spec.strip_model_prefix:
-            model_name = model_name.split("/")[-1]
+        compat = resolve_model_compat(
+            model_name=model_name, spec=spec, reasoning_effort=reasoning_effort
+        )
 
         kwargs: dict[str, Any] = {
-            "model": model_name,
+            "model": compat.model_name,
             "messages": self._sanitize_messages(self._sanitize_empty_content(messages)),
         }
 
-        # GPT-5 and reasoning models (o1/o3/o4) reject temperature when
-        # reasoning_effort is active.  Only include it when safe.
-        if self._supports_temperature(model_name, reasoning_effort):
+        if compat.include_temperature:
             kwargs["temperature"] = temperature
 
-        if spec and getattr(spec, "supports_max_completion_tokens", False):
-            kwargs["max_completion_tokens"] = max(1, max_tokens)
-        else:
-            kwargs["max_tokens"] = max(1, max_tokens)
+        kwargs[compat.token_limit_field] = max(1, max_tokens)
 
-        if spec:
-            model_lower = model_name.lower()
-            for pattern, overrides in spec.model_overrides:
-                if pattern in model_lower:
-                    kwargs.update(overrides)
-                    break
+        if compat.model_overrides:
+            kwargs.update(compat.model_overrides)
 
-        semantic_effort: str | None = None
-        if isinstance(reasoning_effort, str):
-            semantic_effort = reasoning_effort.lower()
-            if semantic_effort == "minimum":
-                semantic_effort = "minimal"
+        if compat.reasoning_effort_wire:
+            kwargs["reasoning_effort"] = compat.reasoning_effort_wire
 
-        wire_effort = reasoning_effort
-        if spec and spec.name == "dashscope" and semantic_effort == "minimal":
-            # DashScope accepts "minimum"; OpenAI-compatible models commonly
-            # use "minimal". Keep semantic checks normalized while sending the
-            # provider's wire spelling.
-            wire_effort = "minimum"
-
-        if wire_effort:
-            kwargs["reasoning_effort"] = wire_effort
-
-        # Provider-specific thinking parameters.
-        # Only sent when reasoning_effort is explicitly configured so that
-        # the provider default is preserved otherwise.
-        if spec and spec.thinking_style and reasoning_effort is not None:
-            thinking_enabled = semantic_effort != "minimal"
-            extra = _THINKING_STYLE_MAP.get(
-                spec.thinking_style,
-                lambda _: None,
-            )(thinking_enabled)
-            if extra:
-                kwargs.setdefault("extra_body", {}).update(extra)
-
-        # Model-level thinking injection for Kimi thinking-capable models.
-        # Strip any provider prefix (e.g. "moonshotai/") before the set lookup
-        # so that OpenRouter-style names like "moonshotai/kimi-k2.5" are handled
-        # identically to bare names like "kimi-k2.5".
-        if reasoning_effort is not None and _is_kimi_thinking_model(model_name):
-            thinking_enabled = semantic_effort != "minimal"
-            kwargs.setdefault("extra_body", {}).update(
-                {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
-            )
+        if compat.thinking_extra_body:
+            kwargs.setdefault("extra_body", {}).update(compat.thinking_extra_body)
 
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice or "auto"
 
-        thinking_active = (
-            spec
-            and spec.thinking_style
-            and reasoning_effort is not None
-            and semantic_effort != "minimal"
-        ) or (
-            reasoning_effort is not None
-            and _is_kimi_thinking_model(model_name)
-            and semantic_effort != "minimal"
-        )
-        if thinking_active:
+        if compat.inject_empty_reasoning_content:
             for msg in kwargs["messages"]:
                 if msg.get("role") == "assistant" and "reasoning_content" not in msg:
                     msg["reasoning_content"] = ""
@@ -616,7 +530,13 @@ class OpenAICompatProvider(LLMProvider):
             "stream": False,
         }
 
-        if self._supports_temperature(model_name, reasoning_effort):
+        # Reuse the single reasoning-model source of truth for the
+        # temperature decision (the Responses body keeps its own token /
+        # reasoning shape).
+        compat = resolve_model_compat(
+            model_name=model_name, spec=self._spec, reasoning_effort=reasoning_effort
+        )
+        if compat.include_temperature:
             body["temperature"] = temperature
 
         if reasoning_effort and reasoning_effort.lower() != "none":

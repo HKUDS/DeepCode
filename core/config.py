@@ -180,6 +180,23 @@ class ToolsConfig(_Base):
 # ---------------------------------------------------------------------------
 
 
+class SecurityConfig(_Base):
+    """Permission + sandbox policy (P1 security base).
+
+    - ``permission_mode``: ``full_auto`` (default) / ``default`` / ``plan``.
+    - ``permissions``: nested ``{tool: {pattern: action}}`` ruleset consumed
+      by :func:`core.harness.permissions.rules_from_config`. Rules can only
+      tighten or relax *within* the non-overridable sensitive-path denylist,
+      never past it.
+    - ``sandbox``: turn command sandboxing on/off (mirrors the
+      ``DEEPCODE_SANDBOX`` env gate; env wins when set).
+    """
+
+    permission_mode: str = "full_auto"
+    permissions: dict[str, Any] = Field(default_factory=dict)
+    sandbox: bool = True
+
+
 class WorkspaceConfig(_Base):
     root: str = "./deepcode_lab"
     max_input_mb: int = 100
@@ -266,6 +283,7 @@ class DeepCodeConfig(BaseSettings):
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    security: SecurityConfig = Field(default_factory=SecurityConfig)
     workspace: WorkspaceConfig = Field(default_factory=WorkspaceConfig)
     document_segmentation: DocumentSegmentationConfig = Field(
         default_factory=DocumentSegmentationConfig,

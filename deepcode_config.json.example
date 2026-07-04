@@ -54,6 +54,13 @@
     }
   },
 
+  "security": {
+    "$comment": "P1 security base. permissionMode: full_auto (default, autonomous) | default (mutating tools prompt for approval) | plan (mutating tools denied). The DEEPCODE_PERMISSION_MODE env var overrides this. permissions is a {tool: {argPattern: allow|ask|deny}} ruleset (specific patterns win); it can never override the built-in credential denylist. sandbox toggles command sandboxing (DEEPCODE_SANDBOX env wins).",
+    "permissionMode": "full_auto",
+    "permissions": {},
+    "sandbox": true
+  },
+
   "tools": {
     "defaultSearchServer": "filesystem",
     "mcpServers": {
