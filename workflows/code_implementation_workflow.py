@@ -38,6 +38,7 @@ from core.agent_runtime.hook import AgentHook, AgentHookContext
 from core.agent_runtime.runner import AgentRunner, AgentRunSpec
 from core.agent_runtime.tools.alias import AliasedTool, build_aliased_registry
 from core.agent_runtime.tools.registry import ToolRegistry
+from core.harness.approval import TerminalApprover
 from core.harness.permissions import PermissionEngine, PermissionMode
 
 # DeepCode-native compat layer (owns the MCP server lifecycle)
@@ -87,6 +88,22 @@ _MAX_ITERATIONS = 800
 _MAX_WALL_SECONDS = 7200  # 120 minutes (2 hours)
 _EMERGENCY_TRIM_THRESHOLD = 50
 _MAX_TOOL_RESULT_CHARS = 60_000
+
+
+def _resolve_permission_mode() -> PermissionMode:
+    """Permission mode for the implementation phase (env-gated).
+
+    ``DEEPCODE_PERMISSION_MODE`` = ``full_auto`` (default) / ``default`` /
+    ``plan``. Unknown or empty values resolve to ``full_auto`` so a typo
+    never silently blocks an unattended reproduction run.
+    """
+    import os
+
+    raw = os.environ.get("DEEPCODE_PERMISSION_MODE", "").strip().lower()
+    try:
+        return PermissionMode(raw) if raw else PermissionMode.FULL_AUTO
+    except ValueError:
+        return PermissionMode.FULL_AUTO
 
 
 @dataclass
@@ -813,15 +830,23 @@ Requirements:
             self.logger.warning("Implementation LLM retry: %s", message)
             state.emit_progress(f"Retrying implementation LLM call: {message}")
 
-        # Security base (P1): the implementation phase is autonomous, so it
-        # runs FULL_AUTO — no per-tool prompts — but the non-overridable
-        # sensitive-path denylist still applies. Net behavior vs. before:
-        # identical, except the agent can no longer read/write credential
-        # stores (.ssh, .env, deepcode_config.json, *.pem, ...) even if a
-        # plan or model asks it to.
-        permission_engine = PermissionEngine(
-            mode=PermissionMode.FULL_AUTO, cwd=code_directory
-        )
+        # Security base (P1). The implementation phase is autonomous, so it
+        # defaults to FULL_AUTO — no per-tool prompts — while the
+        # non-overridable sensitive-path denylist always applies (the agent
+        # can never read/write credential stores even if a plan asks).
+        #
+        # A security-conscious user can set DEEPCODE_PERMISSION_MODE=default
+        # (or plan) to get interactive per-mutation approval on the terminal;
+        # in that case an approver is attached. Unknown values fall back to
+        # full_auto so a typo never silently blocks an unattended run.
+        mode = _resolve_permission_mode()
+        permission_engine = PermissionEngine(mode=mode, cwd=code_directory)
+        approval_cb = None
+        if mode is not PermissionMode.FULL_AUTO:
+            approval_cb = TerminalApprover().as_async()
+            self.logger.info(
+                "🔐 Permission mode: %s (interactive approval)", mode.value
+            )
 
         spec = AgentRunSpec(
             initial_messages=initial_messages,
@@ -838,6 +863,7 @@ Requirements:
             injection_callback=inject_followups,
             should_stop_callback=should_stop,
             permission_checker=permission_engine.evaluate,
+            approval_callback=approval_cb,
             # The implementation phase owns its own budgets (wall clock +
             # iteration caps); no per-call timeout, like the legacy loop.
             llm_timeout_s=0,

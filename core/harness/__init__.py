@@ -12,13 +12,19 @@ they never talk to models or UIs. Enforcement points live in the kernel
 (``AgentRunSpec.permission_checker``) and in tool executors.
 """
 
+from core.harness.approval import TerminalApprover
 from core.harness.permissions import (
     PermissionDecision,
     PermissionEngine,
     PermissionMode,
     PermissionRule,
 )
-from core.harness.sandbox import SandboxPolicy, sandbox_backend, wrap_shell_command
+from core.harness.sandbox import (
+    SandboxPolicy,
+    build_exec_command,
+    sandbox_backend,
+    wrap_shell_command,
+)
 
 __all__ = [
     "PermissionDecision",
@@ -26,6 +32,8 @@ __all__ = [
     "PermissionMode",
     "PermissionRule",
     "SandboxPolicy",
+    "TerminalApprover",
+    "build_exec_command",
     "sandbox_backend",
     "wrap_shell_command",
 ]

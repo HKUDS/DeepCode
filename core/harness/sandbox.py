@@ -116,6 +116,38 @@ class WrappedCommand:
                 pass
 
 
+def wrap_argv_command(
+    inner_argv: list[str],
+    policy: SandboxPolicy,
+) -> WrappedCommand:
+    """Wrap an already-tokenized command (argv list) inside the sandbox.
+
+    Use this for commands that aren't a shell string — e.g. running an
+    interpreter on a script file (``[sys.executable, "/tmp/x.py"]``). When
+    no backend is available the inner argv is returned unchanged with
+    ``backend="none"`` (caller degrades safely).
+    """
+    backend = sandbox_backend()
+
+    if backend == "seatbelt":
+        profile_path = _write_seatbelt_profile(policy)
+        argv = [_MACOS_SANDBOX_EXEC, "-f", profile_path, *inner_argv]
+        return WrappedCommand(argv=argv, cleanup_path=profile_path, backend=backend)
+
+    if backend == "bwrap":
+        argv = ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"]
+        argv += ["--tmpfs", "/tmp"]
+        for root in policy.normalized_roots():
+            if os.path.exists(root):
+                argv += ["--bind", root, root]
+        if not policy.allow_network:
+            argv += ["--unshare-net"]
+        argv += ["--die-with-parent", *inner_argv]
+        return WrappedCommand(argv=argv, backend=backend)
+
+    return WrappedCommand(argv=list(inner_argv), backend="none")
+
+
 def wrap_shell_command(
     command: str,
     policy: SandboxPolicy,
@@ -129,30 +161,56 @@ def wrap_shell_command(
     the caller is responsible for degrading safely (e.g. requiring approval
     or refusing network-touching commands).
     """
-    backend = sandbox_backend()
-
-    if backend == "seatbelt":
-        profile_path = _write_seatbelt_profile(policy)
-        argv = [_MACOS_SANDBOX_EXEC, "-f", profile_path, shell, "-c", command]
-        return WrappedCommand(argv=argv, cleanup_path=profile_path, backend=backend)
-
-    if backend == "bwrap":
-        argv = ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"]
-        argv += ["--tmpfs", "/tmp"]
-        for root in policy.normalized_roots():
-            if os.path.exists(root):
-                argv += ["--bind", root, root]
-        if not policy.allow_network:
-            argv += ["--unshare-net"]
-        argv += ["--die-with-parent", shell, "-c", command]
-        return WrappedCommand(argv=argv, backend=backend)
-
-    # No sandbox available — return the bare command, flagged as unsandboxed.
-    return WrappedCommand(argv=[shell, "-c", command], backend="none")
+    return wrap_argv_command([shell, "-c", command], policy)
 
 
 def sandbox_available() -> bool:
     return sandbox_backend() != "none"
+
+
+def sandbox_enabled() -> bool:
+    """Whether command sandboxing is turned on (env-gated, default ON).
+
+    ``DEEPCODE_SANDBOX`` accepts ``0``/``false``/``off``/``no`` to disable;
+    anything else (incl. unset) means enabled. Disabling is an escape hatch
+    for environments where the sandbox misbehaves — it does not affect the
+    permission engine's file-tool denylist, which is always active.
+    """
+    raw = os.environ.get("DEEPCODE_SANDBOX", "").strip().lower()
+    return raw not in ("0", "false", "off", "no")
+
+
+def build_exec_command(
+    *,
+    command: str | None = None,
+    argv: list[str] | None = None,
+    workspace: str | os.PathLike[str],
+    allow_network: bool = True,
+    shell: str = "/bin/bash",
+) -> WrappedCommand:
+    """Build the (possibly sandboxed) command a tool executor should run.
+
+    Exactly one of ``command`` (shell string) or ``argv`` (token list) must
+    be given. Applies the workspace write-fence when sandboxing is enabled
+    and a backend is available; otherwise returns the bare command flagged
+    ``backend="none"``/``"disabled"`` so the caller can log the degradation.
+
+    ``allow_network`` defaults to ``True``: coding tasks routinely need pip /
+    downloads, so the executor keeps the filesystem write-fence (the high-
+    value, low-breakage protection) while leaving the network open. Callers
+    that want strict isolation pass ``allow_network=False``.
+    """
+    if (command is None) == (argv is None):
+        raise ValueError("provide exactly one of command= or argv=")
+
+    if not sandbox_enabled():
+        bare = [shell, "-c", command] if command is not None else list(argv or [])
+        return WrappedCommand(argv=bare, backend="disabled")
+
+    policy = SandboxPolicy.for_workspace(workspace, allow_network=allow_network)
+    if command is not None:
+        return wrap_shell_command(command, policy, shell=shell)
+    return wrap_argv_command(list(argv or []), policy)
 
 
 def describe_backend() -> str:
