@@ -14,6 +14,7 @@ These are pure mechanism: file I/O + the permission/sandbox seams from P1.
 """
 
 from core.harness.tools.files import EditTool, ReadTool, WriteTool
+from core.harness.tools.patch import ApplyPatchTool, PatchError, parse_patch
 from core.harness.tools.replace import (
     DisproportionateMatchError,
     MultipleMatchesError,
@@ -27,10 +28,13 @@ __all__ = [
     "ReadTool",
     "WriteTool",
     "EditTool",
+    "ApplyPatchTool",
     "BashTool",
     "GrepTool",
     "GlobTool",
     "replace",
+    "parse_patch",
+    "PatchError",
     "NotFoundError",
     "MultipleMatchesError",
     "DisproportionateMatchError",
@@ -41,9 +45,9 @@ __all__ = [
 def default_coding_tools(workspace):
     """Build a :class:`ToolRegistry` with the native coding tool set.
 
-    read / write / edit / bash / grep / glob over ``workspace``. ``workspace``
-    is the root the tools resolve relative paths against and, for write / edit
-    / bash, the boundary they are fenced to.
+    read / write / edit / apply_patch / bash / grep / glob over ``workspace``.
+    ``workspace`` is the root the tools resolve relative paths against and, for
+    write / edit / apply_patch / bash, the boundary they are fenced to.
     """
     from core.agent_runtime.tools.registry import ToolRegistry
 
@@ -52,6 +56,7 @@ def default_coding_tools(workspace):
         ReadTool(workspace),
         WriteTool(workspace),
         EditTool(workspace),
+        ApplyPatchTool(workspace),
         BashTool(workspace),
         GrepTool(workspace),
         GlobTool(workspace),

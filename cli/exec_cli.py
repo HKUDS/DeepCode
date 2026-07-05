@@ -33,11 +33,12 @@ from core.llm_runtime import get_workflow_provider
 
 _SYSTEM_PROMPT = (
     "You are a coding agent working in a workspace directory. You have tools: "
-    "read, write, edit, bash, grep, glob. Navigate with grep/glob, inspect "
-    "with read, make targeted changes with edit (or write for new files), and "
-    "run commands/tests with bash. After a write or edit, check the tool "
-    "result for a 'Diagnostics detected' block and fix any reported errors. "
-    "When the task is done, reply with a short summary."
+    "read, write, edit, apply_patch, bash, grep, glob. Navigate with grep/glob, "
+    "inspect with read, make targeted changes with edit (or write for new "
+    "files), and use apply_patch when one change spans several files or must "
+    "land all-or-nothing. Run commands/tests with bash. After a write, edit, or "
+    "apply_patch, check the tool result for a 'Diagnostics detected' block and "
+    "fix any reported errors. When the task is done, reply with a short summary."
 )
 
 
