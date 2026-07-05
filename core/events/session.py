@@ -24,6 +24,7 @@ from typing import Any
 from core.agent_runtime.hook import AgentHook, AgentHookContext
 from core.agent_runtime.runner import AgentRunner, AgentRunSpec
 from core.agent_runtime.tools.registry import ToolRegistry
+from core.providers.catalog import context_window_for
 from core.events.protocol import (
     AgentMessage,
     ErrorEvent,
@@ -86,6 +87,7 @@ class AgentSession:
         max_iterations: int = _DEFAULT_MAX_ITERATIONS,
         permission_checker: Any | None = None,
         approval_callback: Any | None = None,
+        context_window_tokens: int | None = None,
     ) -> None:
         self._runner = AgentRunner(provider)
         self._provider = provider
@@ -95,6 +97,12 @@ class AgentSession:
         self._max_iterations = max_iterations
         self._permission_checker = permission_checker
         self._approval_callback = approval_callback
+        # Context-window budget that arms the runner's compaction ladder
+        # (_snip_history / _microcompact). Left unset it stays dormant and a
+        # long enough session overflows the model; resolving it from the
+        # model catalog is what makes "long sessions don't crash" (P2 exit
+        # criterion) true for every AgentSession frontend — exec, TUI, web.
+        self._context_window_tokens = context_window_tokens or context_window_for(model)
 
         self._events: asyncio.Queue[Event] = asyncio.Queue()
         self._history: list[dict[str, Any]] = []
@@ -177,6 +185,7 @@ class AgentSession:
             model=self._model,
             max_iterations=self._max_iterations,
             max_tool_result_chars=_DEFAULT_MAX_TOOL_RESULT_CHARS,
+            context_window_tokens=self._context_window_tokens,
             hook=_EventEmittingHook(self._emit),
             permission_checker=self._permission_checker,
             approval_callback=self._approval_callback,
