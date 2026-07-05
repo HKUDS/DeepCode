@@ -1,12 +1,19 @@
-"""Filesystem-backed session store (JSONL, no SQLite).
+"""Filesystem-backed session store (JSONL source of truth + SQLite index).
 
 The store directory layout is::
 
     <root>/
+      index.db          # derived SQLite index (disposable; rebuilt from JSONL)
       <session_id>/
         session.jsonl   # first line = metadata, subsequent lines = messages
         tasks.jsonl     # one line per attached SessionTask
         settings.json   # optional, per-session preferences
+
+The JSONL files stay the single source of truth (human-readable, survive a
+corrupt index). ``index.db`` is a derived cache maintained incrementally on
+each mutation so list/lookup queries don't rescan every session; it is always
+optional — see :mod:`core.sessions.index`. Any index failure silently falls
+back to the JSONL scan.
 
 Concurrency model: :class:`threading.RLock` covers in-process
 serialisation; we additionally re-read metadata before every write so
@@ -24,6 +31,7 @@ import threading
 from pathlib import Path
 from typing import Iterable
 
+from core.sessions.index import SessionIndex
 from core.sessions.models import (
     Session,
     SessionMessage,
@@ -40,10 +48,19 @@ _DEFAULT_ROOT = Path.home() / ".deepcode" / "sessions"
 class SessionStore:
     """Read/write JSONL sessions under a configurable root directory."""
 
-    def __init__(self, root: Path | str | None = None) -> None:
+    def __init__(
+        self, root: Path | str | None = None, *, use_index: bool = True
+    ) -> None:
         self.root = Path(root).expanduser().resolve() if root else _DEFAULT_ROOT
         self._lock = threading.RLock()
         self._cache: dict[str, Session] = {}
+        # Derived SQLite index; disposable and self-healing. Disable with
+        # use_index=False to force the pure-JSONL scan (used in tests to
+        # exercise the fallback path).
+        self._index: SessionIndex | None = (
+            SessionIndex(self.root / "index.db") if use_index else None
+        )
+        self._reconciled = False
 
     # ------------------------------------------------------------------
     # Path helpers
@@ -94,6 +111,7 @@ class SessionStore:
             self._session_dir(sid).mkdir(parents=True, exist_ok=True)
             self._rewrite_metadata(session)
             self._cache[sid] = session
+            self._index_session(session)
             return session
 
     def get_session(self, session_id: str) -> Session | None:
@@ -113,7 +131,21 @@ class SessionStore:
         limit: int = 50,
         order: str = "recent",
     ) -> list[SessionSummary]:
-        """Return summaries for the ``limit`` most recent sessions."""
+        """Return summaries for the ``limit`` most recent sessions.
+
+        Served from the SQLite index (one query) when available, falling back
+        to a full JSONL scan otherwise.
+        """
+        with self._lock:
+            if self._index is not None and self._index.available:
+                self._ensure_reconciled()
+                summaries = self._index.list_summaries(limit=limit, order=order)
+                if summaries is not None:
+                    return summaries
+            return self._list_sessions_scan(limit=limit, order=order)
+
+    def _list_sessions_scan(self, *, limit: int, order: str) -> list[SessionSummary]:
+        """The pure-JSONL listing (fallback + index-rebuild source)."""
         with self._lock:
             if not self.root.exists():
                 return []
@@ -176,6 +208,7 @@ class SessionStore:
             )
             self._append_jsonl(self._session_jsonl(session_id), msg.to_dict())
             self._rewrite_metadata(session)
+            self._index_session(session)
             return msg
 
     def attach_task(
@@ -206,6 +239,7 @@ class SessionStore:
                     existing.metadata = {**(existing.metadata or {}), **metadata}
                 self._rewrite_tasks(session_id, session.tasks)
                 self._rewrite_metadata(session)
+                self._index_session(session)
                 return existing
 
             task = session.attach_task(
@@ -217,6 +251,7 @@ class SessionStore:
             )
             self._append_jsonl(self._tasks_jsonl(session_id), task.to_dict())
             self._rewrite_metadata(session)
+            self._index_session(session)
             return task
 
     def update_task_status(
@@ -235,6 +270,7 @@ class SessionStore:
                 return None
             self._rewrite_tasks(session_id, session.tasks)
             self._rewrite_metadata(session)
+            self._index_session(session)
             return task
 
     # ------------------------------------------------------------------
@@ -294,6 +330,8 @@ class SessionStore:
             except OSError:
                 return False
             self._cache.pop(session_id, None)
+            if self._index is not None:
+                self._index.remove_session(session_id)
             return True
 
     # ------------------------------------------------------------------
@@ -325,9 +363,21 @@ class SessionStore:
     # ------------------------------------------------------------------
 
     def find_session_by_task(self, task_id: str) -> Session | None:
-        """Linear scan — fine for the typical session count (<100s)."""
+        """Resolve a task to its owning session via the index (O(1) lookup),
+        falling back to a linear scan when no index is available.
+        """
         with self._lock:
-            for summary in self.list_sessions(limit=10_000):
+            if self._index is not None and self._index.available:
+                self._ensure_reconciled()
+                sid = self._index.session_id_for_task(task_id)
+                if sid is not None:
+                    session = self.get_session(sid)
+                    # Trust but verify: the JSONL remains source of truth.
+                    if session is not None and any(
+                        t.task_id == task_id for t in session.tasks
+                    ):
+                        return session
+            for summary in self._list_sessions_scan(limit=10_000, order="recent"):
                 session = self.get_session(summary.session_id)
                 if session is None:
                     continue
@@ -338,19 +388,111 @@ class SessionStore:
     def list_attached_tasks(self) -> list[tuple[Session, SessionTask]]:
         """Return every (session, task) pair stored. Used at backend boot
         to rebuild the in-memory ``WorkflowTask`` cache after a restart.
+
+        With an index, only sessions that actually own tasks are loaded (each
+        once); without one, every session is scanned.
         """
-        out: list[tuple[Session, SessionTask]] = []
-        for summary in self.list_sessions(limit=10_000):
-            session = self.get_session(summary.session_id)
-            if session is None:
-                continue
-            for task in session.tasks:
-                out.append((session, task))
-        return out
+        with self._lock:
+            out: list[tuple[Session, SessionTask]] = []
+            if self._index is not None and self._index.available:
+                self._ensure_reconciled()
+                links = self._index.all_task_links()
+                if links is not None:
+                    for sid in dict.fromkeys(link[0] for link in links):
+                        session = self.get_session(sid)
+                        if session is None:
+                            continue
+                        for task in session.tasks:
+                            out.append((session, task))
+                    return out
+            for summary in self._list_sessions_scan(limit=10_000, order="recent"):
+                session = self.get_session(summary.session_id)
+                if session is None:
+                    continue
+                for task in session.tasks:
+                    out.append((session, task))
+            return out
+
+    def reindex(self) -> int:
+        """Force a full rebuild of the SQLite index from JSONL on disk.
+
+        Returns the number of sessions indexed (0 if no index is active).
+        Useful after bulk external changes or a manual ``index.db`` delete.
+        """
+        with self._lock:
+            if self._index is None or not self._index.available:
+                return 0
+            summaries: list[SessionSummary] = []
+            task_links: list[tuple[str, SessionTask]] = []
+            for sid in self._disk_session_ids():
+                session = self.get_session(sid)
+                if session is None:
+                    continue
+                summaries.append(self._summary_of(session))
+                for task in session.tasks:
+                    task_links.append((sid, task))
+            self._index.rebuild(summaries, task_links)
+            self._reconciled = True
+            return len(summaries)
 
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+
+    # -- index maintenance (derived, disposable) -----------------------
+
+    @staticmethod
+    def _summary_of(session: Session) -> SessionSummary:
+        """Build a listing summary from an in-memory session (no disk reads)."""
+        return SessionSummary(
+            session_id=session.session_id,
+            title=session.title,
+            created_at=session.created_at,
+            updated_at=session.updated_at,
+            message_count=len(session.messages),
+            task_count=len(session.tasks),
+        )
+
+    def _index_session(self, session: Session) -> None:
+        """Push a session (and its tasks) into the index, if one is active."""
+        if self._index is None or not self._index.available:
+            return
+        self._index.upsert_session(self._summary_of(session))
+        for task in session.tasks:
+            self._index.upsert_task(session.session_id, task)
+
+    def _ensure_reconciled(self) -> None:
+        """Rebuild the index once if it has drifted from what's on disk.
+
+        Cheap guard: compare the index's session count to the number of
+        session directories present. A mismatch (e.g. sessions written by an
+        older build with no index, or a deleted ``index.db``) triggers one
+        full rebuild from JSONL, after which incremental upserts keep it fresh.
+        """
+        if self._index is None or not self._index.available or self._reconciled:
+            return
+        disk_ids = self._disk_session_ids()
+        if self._index.session_count() != len(disk_ids):
+            summaries: list[SessionSummary] = []
+            task_links: list[tuple[str, SessionTask]] = []
+            for sid in disk_ids:
+                session = self.get_session(sid)
+                if session is None:
+                    continue
+                summaries.append(self._summary_of(session))
+                for task in session.tasks:
+                    task_links.append((sid, task))
+            self._index.rebuild(summaries, task_links)
+        self._reconciled = True
+
+    def _disk_session_ids(self) -> list[str]:
+        if not self.root.exists():
+            return []
+        return [
+            entry.name
+            for entry in self.root.iterdir()
+            if entry.is_dir() and (entry / "session.jsonl").exists()
+        ]
 
     def _append_jsonl(self, path: Path, payload: dict) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
