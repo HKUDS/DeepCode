@@ -111,6 +111,25 @@ class AgentSession:
     async def next_event(self) -> Event:
         return await self._events.get()
 
+    async def run_stream(self, op: Op):
+        """Submit ``op`` and yield events live until the turn ends.
+
+        The streaming consumer API every frontend uses (``deepcode exec``,
+        a TUI, the web backend): events arrive as they happen rather than
+        all at once. A ``UserInput`` turn always ends with ``task_complete``
+        (even on interrupt/error), and ``Shutdown`` with ``shutdown_complete``,
+        so the loop terminates.
+        """
+        task = asyncio.ensure_future(self.submit(op))
+        try:
+            while True:
+                event = await self.next_event()
+                yield event
+                if event.msg.type in ("task_complete", "shutdown_complete"):
+                    break
+        finally:
+            await task
+
     def drain_events(self) -> list[Event]:
         """Non-blocking: pop all currently queued events (handy for tests)."""
         out: list[Event] = []

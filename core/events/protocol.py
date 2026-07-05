@@ -17,8 +17,8 @@ touches a model or a terminal — this is pure protocol.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Union
+from dataclasses import asdict, dataclass, field
+from typing import Any, Union
 
 # --------------------------------------------------------------------------
 # Submission Queue — commands the UI sends the engine.
@@ -118,3 +118,11 @@ EventMsg = Union[
 class Event:
     id: str
     msg: EventMsg
+
+
+def serialize_event(event: Event) -> dict[str, Any]:
+    """Serialize an event to a plain dict (``msg.type`` discriminator kept).
+
+    Suitable for NDJSON transport (``deepcode exec --json``) or an SSE frame.
+    """
+    return asdict(event)

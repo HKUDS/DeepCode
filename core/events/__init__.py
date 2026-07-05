@@ -52,6 +52,7 @@ from core.events.protocol import (
     ToolStarted,
     TurnStarted,
     UserInput,
+    serialize_event,
 )
 from core.events.session import AgentSession
 
@@ -90,4 +91,5 @@ __all__ = [
     "ToolCompleted",
     "TaskComplete",
     "AgentSession",
+    "serialize_event",
 ]
