@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from core.agent_runtime.tools.base import Tool, tool_parameters
+from core.harness.tools.diagnostics import format_diagnostics, run_diagnostics
 from core.harness.tools.replace import ReplaceError, replace
 
 # Read limits (mirror the proven opencode defaults).
@@ -128,8 +129,11 @@ class ReadTool(Tool):
 class WriteTool(Tool):
     """Create or overwrite a file with the given content."""
 
-    def __init__(self, workspace: str):
+    def __init__(self, workspace: str, diagnostics=run_diagnostics):
         self._workspace = str(workspace)
+        # Injected post-write checker (default: the declarative registry).
+        # Pass ``lambda _p: []`` to disable; a fake in tests to assert wiring.
+        self._diagnostics = diagnostics
 
     @property
     def name(self) -> str:
@@ -156,7 +160,9 @@ class WriteTool(Tool):
             target.write_text(content, encoding="utf-8")
         except OSError as exc:
             return f"Error: could not write {file_path}: {exc}"
-        return f"Wrote {len(content)} bytes to {file_path}"
+        result = f"Wrote {len(content)} bytes to {file_path}"
+        report = format_diagnostics(self._diagnostics(str(target)))
+        return f"{result}\n\n{report}" if report else result
 
 
 @tool_parameters(
@@ -186,8 +192,9 @@ class WriteTool(Tool):
 class EditTool(Tool):
     """Replace ``old_string`` with ``new_string`` using fuzzy matching."""
 
-    def __init__(self, workspace: str):
+    def __init__(self, workspace: str, diagnostics=run_diagnostics):
         self._workspace = str(workspace)
+        self._diagnostics = diagnostics
 
     @property
     def name(self) -> str:
@@ -238,4 +245,6 @@ class EditTool(Tool):
         if replace_all:
             # Report how many were changed for transparency.
             occurrences = content.count(old_string) or "multiple"
-        return f"Edited {file_path} ({occurrences} replacement(s))."
+        result = f"Edited {file_path} ({occurrences} replacement(s))."
+        report = format_diagnostics(self._diagnostics(str(target)))
+        return f"{result}\n\n{report}" if report else result
