@@ -25,21 +25,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.compat import get_runtime
-from core.events import AgentSession, UserInput, serialize_event
-from core.harness.policy import build_permission_engine
-from core.harness.tools import default_coding_tools
-from core.llm_runtime import get_workflow_provider
-
-_SYSTEM_PROMPT = (
-    "You are a coding agent working in a workspace directory. You have tools: "
-    "read, write, edit, apply_patch, bash, grep, glob. Navigate with grep/glob, "
-    "inspect with read, make targeted changes with edit (or write for new "
-    "files), and use apply_patch when one change spans several files or must "
-    "land all-or-nothing. Run commands/tests with bash. After a write, edit, or "
-    "apply_patch, check the tool result for a 'Diagnostics detected' block and "
-    "fix any reported errors. When the task is done, reply with a short summary."
-)
+from cli.agent_setup import build_agent_session
+from core.events import UserInput, serialize_event
 
 
 def _emit_human(event) -> None:
@@ -61,23 +48,12 @@ def _emit_human(event) -> None:
 
 
 async def _run(args: argparse.Namespace) -> int:
-    workspace = os.path.abspath(args.workspace)
-    os.makedirs(workspace, exist_ok=True)
-
-    provider, profile = get_workflow_provider(phase="implementation", model=args.model)
-    model = args.model or profile.model
-
-    security_cfg = getattr(get_runtime().config, "security", None)
-    engine = build_permission_engine(security_cfg, cwd=workspace)
-
-    session = AgentSession(
-        provider,
-        default_coding_tools(workspace),
-        model=model,
-        system_prompt=_SYSTEM_PROMPT,
+    session, model, engine = build_agent_session(
+        workspace=args.workspace,
+        model=args.model,
         max_iterations=args.max_iterations,
-        permission_checker=engine.evaluate,
     )
+    workspace = os.path.abspath(args.workspace)
 
     if not args.json:
         print(

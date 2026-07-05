@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import cli.agent_setup as agent_setup  # noqa: E402
 import cli.exec_cli as exec_cli  # noqa: E402
 from core.providers.base import LLMResponse, ToolCallRequest  # noqa: E402
 
@@ -39,12 +40,13 @@ class _Profile:
 
 
 def _patch(monkeypatch, provider):
+    # exec now builds its session via cli.agent_setup; patch there.
     monkeypatch.setattr(
-        exec_cli, "get_workflow_provider", lambda **kw: (provider, _Profile())
+        agent_setup, "get_workflow_provider", lambda **kw: (provider, _Profile())
     )
     # security config: none -> full_auto engine (still enforces denylist)
     monkeypatch.setattr(
-        exec_cli,
+        agent_setup,
         "get_runtime",
         lambda: type("R", (), {"config": type("C", (), {"security": None})()})(),
     )
