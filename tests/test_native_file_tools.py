@@ -103,8 +103,9 @@ async def test_edit_outside_workspace_refused(tmp_path):
 
 def test_default_coding_tools_registry(tmp_path):
     reg = default_coding_tools(str(tmp_path))
-    assert set(reg.tool_names) == {"read", "write", "edit"}
+    expected = {"read", "write", "edit", "bash", "grep", "glob"}
+    assert set(reg.tool_names) == expected
     # schemas self-generate from the tool classes (single source of truth)
     defs = reg.get_definitions()
     names = {d["function"]["name"] for d in defs}
-    assert names == {"read", "write", "edit"}
+    assert names == expected
