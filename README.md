@@ -159,6 +159,14 @@
 
 ## 📰 News
 
+**[2026-07-08] Loop engineering: hand it a goal, it works until the tests pass**
+
+- **Autonomous, test-driven loops.** `python -m cli.loop_cli "build X with tests" -w ./proj --test-cmd "python -m pytest -q"` drives a goal to completion on its own: each round the agent works, the loop **actually runs your tests** (never trusts the model's word), and — if they fail — the real failure feeds the next round until they pass. A failure ratchet nudges it to change approach when a fix doesn't stick; circuit breakers stop it when the tests go green, the round budget runs out, or it stalls. Progress is durable JSON at `.deepcode/loop/state.json`, with a shadow-git checkpoint per round.
+- **Memory that tidies itself.** A background consolidation pass merges duplicate notes, drops stale ones, and keeps `MEMORY.md` a tight index — so the agent's memory stays sharp over many sessions.
+- **Put it on a schedule.** `python -m cli.schedule_cli` runs a loop or memory consolidation on an interval with a keepalive gate: it self-wakes and keeps going only while the work isn't done, the last run exited cleanly, and it's under its run cap — no early death, no runaway.
+
+---
+
 **[2026-07-08] Agent Chat, polished: memory, folder picker, session management**
 
 - **The agent remembers across sessions.** Drop an `AGENTS.md` (or `DEEPCODE.md`) at your project root for standing instructions, and the agent keeps its own persistent notes under `.deepcode/memory/` — so a fact it learned yesterday is there today. Works the same in the CLI, the web chat, and headless runs.
