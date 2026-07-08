@@ -10,6 +10,6 @@ first):
 - ``python -m cli.exec_cli`` — headless one-shot: run a task, stream NDJSON
   events, exit. The CI / harness / scripting entry.
 
-Shared session assembly lives in :mod:`cli.agent_setup` so the two entries
-cannot drift.
+Shared session assembly lives in :mod:`core.agent_setup` (frontend-neutral,
+also used by the web backend) so the entries cannot drift.
 """

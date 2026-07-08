@@ -2,7 +2,7 @@
 
 The web analogue of the TUI: each chat is one persistent
 :class:`~core.events.session.AgentSession` (kernel + native tools + P1
-permissions, assembled by the same :func:`cli.agent_setup.build_agent_session`
+permissions, assembled by the same :func:`core.agent_setup.build_agent_session`
 the CLI uses, so frontends cannot drift). This service owns:
 
 - the registry of live sessions (keyed by the *stored* session id, so a chat
@@ -23,7 +23,7 @@ import threading
 from pathlib import Path
 from typing import Any, AsyncIterator
 
-from cli.agent_setup import build_agent_session
+from core.agent_setup import build_agent_session
 from core.events import AgentSession, Interrupt, UserInput, serialize_event
 from core.sessions import get_default_store
 

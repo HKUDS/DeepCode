@@ -1,10 +1,17 @@
-"""Shared construction of an agent :class:`AgentSession` for the CLI entries.
+"""Shared assembly of a coding :class:`AgentSession` for every frontend.
 
-Both the headless ``deepcode exec`` and the interactive ``deepcode chat`` need
-the same wiring: resolve a provider, build the native tool set, attach the P1
-permission engine, and construct an :class:`AgentSession` armed with the model
-catalog's context window. Factoring it here keeps the two entries in lockstep
-and avoids duplicating the setup (anti-redundancy, /goal).
+The TUI (``cli.tui``), the headless entry (``cli.exec_cli``), and the web
+backend (``agent_chat_service``) all need the same wiring: resolve a
+provider, build the native tool set, attach the P1 permission engine, and
+construct an :class:`AgentSession` armed with the model catalog's context
+window. One assembly function keeps them in lockstep.
+
+Lives in ``core`` (not ``cli``) deliberately: it is frontend-neutral, and
+the web backend must not import through the top-level ``cli`` package —
+that name is generic enough to be shadowed by third-party ``cli``
+distributions on some interpreters (observed in the conda env), which is
+exactly the module-shadowing failure mode the backend's path setup warns
+about.
 """
 
 from __future__ import annotations

@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import cli.agent_setup as agent_setup  # noqa: E402
+import core.agent_setup as agent_setup  # noqa: E402
 import cli.exec_cli as exec_cli  # noqa: E402
 from core.providers.base import LLMResponse, ToolCallRequest  # noqa: E402
 
@@ -40,7 +40,7 @@ class _Profile:
 
 
 def _patch(monkeypatch, provider):
-    # exec now builds its session via cli.agent_setup; patch there.
+    # exec now builds its session via core.agent_setup; patch there.
     monkeypatch.setattr(
         agent_setup, "get_workflow_provider", lambda **kw: (provider, _Profile())
     )

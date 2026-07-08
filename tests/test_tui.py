@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import cli.agent_setup as agent_setup  # noqa: E402
+import core.agent_setup as agent_setup  # noqa: E402
 import cli.tui.app as tui_app  # noqa: E402
 from cli.tui.input import expand_file_refs  # noqa: E402
 from core.providers.base import LLMResponse  # noqa: E402

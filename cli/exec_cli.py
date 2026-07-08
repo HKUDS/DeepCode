@@ -25,7 +25,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from cli.agent_setup import build_agent_session
+from core.agent_setup import build_agent_session
 from core.events import UserInput, serialize_event
 
 
