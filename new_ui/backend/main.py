@@ -53,6 +53,7 @@ from api.routes import (
     files,
     sessions as sessions_routes,
     agent_chats,
+    agent_fs,
 )
 from api.websockets import workflow_ws, code_stream_ws, logs_ws, agent_ws
 
@@ -142,6 +143,7 @@ app.include_router(sessions_routes.router, prefix="/api/v1/sessions", tags=["Ses
 app.include_router(
     agent_chats.router, prefix="/api/v1/agent/chats", tags=["Agent Chat"]
 )
+app.include_router(agent_fs.router, prefix="/api/v1/agent/fs", tags=["Agent Chat"])
 
 # Include WebSocket routes
 app.include_router(workflow_ws.router, prefix="/ws", tags=["WebSocket"])

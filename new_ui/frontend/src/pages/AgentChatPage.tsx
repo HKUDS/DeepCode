@@ -8,15 +8,17 @@
  * page is composition only.
  */
 import { useState } from 'react'
-import { Bot, FolderOpen, MessageSquarePlus } from 'lucide-react'
+import { Bot, FolderOpen, FolderSearch, MessageSquarePlus } from 'lucide-react'
 import { useAgentChat } from '../hooks/useAgentChat'
 import ChatSidebar from '../components/agent/ChatSidebar'
 import MessageList from '../components/agent/MessageList'
 import Composer from '../components/agent/Composer'
+import WorkspacePicker from '../components/agent/WorkspacePicker'
 
 export default function AgentChatPage() {
   const chat = useAgentChat()
   const [wsInput, setWsInput] = useState('')
+  const [pickerOpen, setPickerOpen] = useState(false)
 
   const startNew = () => {
     chat.startDraft(wsInput.trim())
@@ -27,13 +29,22 @@ export default function AgentChatPage() {
   const composerDisabled = isDraft ? false : chat.activeId === null || !chat.isConnected
 
   const workspaceSlot = (
-    <input
-      value={wsInput}
-      onChange={(e) => setWsInput(e.target.value)}
-      placeholder="Workspace folder (optional)"
-      title="Directory the agent works in for the next new chat; blank = an isolated per-chat dir"
-      className="w-full rounded-lg border border-gray-200 bg-transparent px-3 py-1.5 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-800"
-    />
+    <div className="flex items-center gap-1">
+      <input
+        value={wsInput}
+        onChange={(e) => setWsInput(e.target.value)}
+        placeholder="Workspace folder (optional)"
+        title="Directory the agent works in for the next new chat; blank = an isolated per-chat dir"
+        className="min-w-0 flex-1 rounded-lg border border-gray-200 bg-transparent px-3 py-1.5 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-800"
+      />
+      <button
+        onClick={() => setPickerOpen(true)}
+        title="Browse folders"
+        className="shrink-0 rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:border-gray-800 dark:hover:bg-gray-800"
+      >
+        <FolderSearch size={15} />
+      </button>
+    </div>
   )
 
   return (
@@ -76,6 +87,16 @@ export default function AgentChatPage() {
           </>
         )}
       </section>
+
+      {pickerOpen && (
+        <WorkspacePicker
+          onSelect={(path) => {
+            setWsInput(path)
+            setPickerOpen(false)
+          }}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
     </div>
   )
 }
