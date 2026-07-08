@@ -52,8 +52,9 @@ from api.routes import (
     config as config_routes,
     files,
     sessions as sessions_routes,
+    agent_chats,
 )
-from api.websockets import workflow_ws, code_stream_ws, logs_ws
+from api.websockets import workflow_ws, code_stream_ws, logs_ws, agent_ws
 
 # Check if running in Docker/production mode
 IS_DOCKER = os.environ.get("DEEPCODE_ENV") == "docker"
@@ -138,11 +139,15 @@ app.include_router(
 )
 app.include_router(files.router, prefix="/api/v1/files", tags=["Files"])
 app.include_router(sessions_routes.router, prefix="/api/v1/sessions", tags=["Sessions"])
+app.include_router(
+    agent_chats.router, prefix="/api/v1/agent/chats", tags=["Agent Chat"]
+)
 
 # Include WebSocket routes
 app.include_router(workflow_ws.router, prefix="/ws", tags=["WebSocket"])
 app.include_router(code_stream_ws.router, prefix="/ws", tags=["WebSocket"])
 app.include_router(logs_ws.router, prefix="/ws", tags=["WebSocket"])
+app.include_router(agent_ws.router, prefix="/ws", tags=["WebSocket"])
 
 
 # ============================================================

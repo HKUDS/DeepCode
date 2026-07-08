@@ -4,6 +4,7 @@ import Layout from './components/layout/Layout'
 import HomePage from './pages/HomePage'
 import PaperToCodePage from './pages/PaperToCodePage'
 import ChatPlanningPage from './pages/ChatPlanningPage'
+import AgentChatPage from './pages/AgentChatPage'
 import WorkflowEditorPage from './pages/WorkflowEditorPage'
 import SettingsPage from './pages/SettingsPage'
 
@@ -13,6 +14,7 @@ function App() {
       <Layout>
         <Routes>
           <Route path="/" element={<HomePage />} />
+          <Route path="/agent" element={<AgentChatPage />} />
           <Route path="/paper-to-code" element={<PaperToCodePage />} />
           <Route path="/chat" element={<ChatPlanningPage />} />
           <Route path="/workflow" element={<WorkflowEditorPage />} />

@@ -1,5 +1,6 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
+  Bot,
   FileText,
   MessageSquare,
   GitBranch,
@@ -27,6 +28,12 @@ export default function Sidebar() {
   } = useSessionStore();
 
   const menuItems = [
+    {
+      path: '/agent',
+      icon: Bot,
+      label: 'Agent Chat',
+      description: 'Converse with the coding agent',
+    },
     {
       path: '/paper-to-code',
       icon: FileText,
