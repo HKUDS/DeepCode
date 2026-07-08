@@ -159,6 +159,15 @@
 
 ## 📰 News
 
+**[2026-07-08] Agent Chat, polished: memory, folder picker, session management**
+
+- **The agent remembers across sessions.** Drop an `AGENTS.md` (or `DEEPCODE.md`) at your project root for standing instructions, and the agent keeps its own persistent notes under `.deepcode/memory/` — so a fact it learned yesterday is there today. Works the same in the CLI, the web chat, and headless runs.
+- **Point it at a real project folder.** New chats get a workspace picker — browse and choose the directory the agent works in (fenced to your home), instead of typing a path blind.
+- **Manage your conversations.** Rename or delete any chat from the sidebar; a new chat stays a draft until you send the first message, so the list no longer fills with empty sessions. Each chat's folder is shown and remembered across restarts.
+- **Replies you can actually read.** Assistant messages render as markdown (code blocks, lists, tables); every tool call is an expandable card showing what it did (e.g. "Wrote 163 bytes to plan.md"); errors read as errors, not as a fake answer.
+
+---
+
 **[2026-07-08] General coding agent: interactive CLI, web Agent Chat & native tools**
 
 - **Talk to DeepCode in your terminal.** `python -m cli.tui` (or `deepcode --cli` in Docker) opens a free-form, multi-turn coding conversation — describe any task in natural language and watch the agent stream its reply, edit files, and run commands with live progress cards. Steer with `/new`, `/resume`, `/model`, `/clear`, `/help`, and attach files with `@path`. (Replaces the previous menu-driven CLI.)
