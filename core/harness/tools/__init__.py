@@ -45,11 +45,13 @@ __all__ = [
 def default_coding_tools(workspace):
     """Build a :class:`ToolRegistry` with the native coding tool set.
 
-    read / write / edit / apply_patch / bash / grep / glob over ``workspace``.
-    ``workspace`` is the root the tools resolve relative paths against and, for
-    write / edit / apply_patch / bash, the boundary they are fenced to.
+    read / write / edit / apply_patch / bash / grep / glob / memory over
+    ``workspace``. ``workspace`` is the root the tools resolve relative paths
+    against and, for write / edit / apply_patch / bash, the boundary they are
+    fenced to. ``memory`` persists notes under ``.deepcode/memory/``.
     """
     from core.agent_runtime.tools.registry import ToolRegistry
+    from core.harness.memory import MemoryTool
 
     registry = ToolRegistry()
     for tool in (
@@ -60,6 +62,7 @@ def default_coding_tools(workspace):
         BashTool(workspace),
         GrepTool(workspace),
         GlobTool(workspace),
+        MemoryTool(workspace),
     ):
         registry.register(tool)
     return registry

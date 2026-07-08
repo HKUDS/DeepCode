@@ -59,11 +59,19 @@ def build_agent_session(
     security_cfg = getattr(get_runtime().config, "security", None)
     engine = build_permission_engine(security_cfg, cwd=workspace)
 
+    # Memory: project instructions (AGENTS.md) + the persistent memory index
+    # are injected here, the single assembly point, so every frontend gets
+    # them identically. The memory tool itself is in default_coding_tools.
+    from core.harness.memory import system_preamble
+
+    preamble = system_preamble(workspace)
+    full_system_prompt = f"{system_prompt}\n\n{preamble}" if preamble else system_prompt
+
     session = AgentSession(
         provider,
         default_coding_tools(workspace),
         model=resolved_model,
-        system_prompt=system_prompt,
+        system_prompt=full_system_prompt,
         max_iterations=max_iterations,
         permission_checker=engine.evaluate,
         approval_callback=approval_callback,
