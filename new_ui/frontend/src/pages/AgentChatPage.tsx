@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Bot,
+  FolderOpen,
   Loader2,
   MessageSquarePlus,
   Send,
@@ -27,6 +28,7 @@ interface ChatSummary {
   title: string
   updated_at: string
   message_count: number
+  workspace: string
 }
 
 type ThreadItem =
@@ -48,6 +50,7 @@ export default function AgentChatPage() {
   const [thread, setThread] = useState<ThreadItem[]>([])
   const [streamText, setStreamText] = useState('')
   const [input, setInput] = useState('')
+  const [wsInput, setWsInput] = useState('')
   const [running, setRunning] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const streamRef = useRef('')
@@ -144,14 +147,29 @@ export default function AgentChatPage() {
   )
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    // inline: 'nearest' keeps auto-scroll strictly vertical — it must never
+    // drag the page horizontally.
+    bottomRef.current?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'end',
+      inline: 'nearest',
+    })
   }, [thread, streamText])
 
   const newChat = async () => {
-    const res = await api.post('/agent/chats', {})
+    // Optional workspace: work on a real project directory (Claude Code
+    // desktop-style); blank = an isolated per-chat directory.
+    const workspace = wsInput.trim()
+    const res = await api.post(
+      '/agent/chats',
+      workspace ? { workspace } : {},
+    )
+    setWsInput('')
     await refreshChats()
     setActiveId(res.data.session_id)
   }
+
+  const activeWorkspace = chats.find((c) => c.session_id === activeId)?.workspace
 
   const send = () => {
     const text = input.trim()
@@ -167,13 +185,21 @@ export default function AgentChatPage() {
   // ---- render ----------------------------------------------------------------
 
   return (
-    // Fill the viewport below the 4rem header exactly; the negative margins
-    // cancel Layout's main padding so the thread scrolls inside this panel,
-    // never the page (which would slide messages under the sticky header).
-    <div className="flex h-[calc(100vh-4rem)] -m-6 lg:-m-8 overflow-hidden">
+    // Panel height = viewport − 4rem header − Layout's main padding
+    // (p-6 = 3rem, lg:p-8 = 4rem vertically), so the thread scrolls inside
+    // this panel and the page itself never scrolls (in either axis —
+    // negative-margin tricks widen the content and cause horizontal drift).
+    <div className="flex h-[calc(100vh-7rem)] lg:h-[calc(100vh-8rem)] overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
       {/* Sidebar: chat list */}
       <aside className="w-64 shrink-0 border-r border-gray-200 dark:border-gray-800 flex flex-col">
-        <div className="p-3">
+        <div className="p-3 space-y-2">
+          <input
+            value={wsInput}
+            onChange={(e) => setWsInput(e.target.value)}
+            placeholder="Workspace folder (optional)"
+            title="Directory the agent works in; blank = isolated per-chat dir"
+            className="w-full rounded-lg border border-gray-200 dark:border-gray-800 bg-transparent px-3 py-1.5 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
           <button
             onClick={newChat}
             className="w-full flex items-center justify-center gap-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-2"
@@ -219,6 +245,15 @@ export default function AgentChatPage() {
           </div>
         ) : (
           <>
+            {activeWorkspace && (
+              <div className="flex items-center gap-2 overflow-hidden border-b border-gray-200 dark:border-gray-800 px-6 py-2 text-xs font-mono text-gray-400">
+                <FolderOpen size={13} className="shrink-0" />
+                {/* min-w-0 lets truncate actually shrink inside flex */}
+                <span className="min-w-0 flex-1 truncate" title={activeWorkspace}>
+                  {activeWorkspace}
+                </span>
+              </div>
+            )}
             <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
               {thread.map((item, i) => (
                 <ThreadRow key={i} item={item} />

@@ -929,7 +929,8 @@ Inside the conversation:
 ```text
 /help                   # list all commands
 /new [title]            # start a fresh conversation
-/resume                 # list stored sessions; /resume <id> restores one
+/resume                 # list THIS directory's sessions; /resume <id> restores one
+/resume all             # list sessions from every directory (origins shown)
 /model [id]             # show or switch the model (history preserved)
 /clear                  # clear the conversation context
 @src/main.py            # attach a file's content to your message

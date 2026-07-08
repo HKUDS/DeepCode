@@ -41,23 +41,37 @@ async def _cmd_new(app, args: str) -> str | None:
 
 async def _cmd_resume(app, args: str) -> str | None:
     target = args.strip()
-    if not target:
-        rows = app.bridge.list_recent(limit=15)
+    if not target or target.lower() == "all":
+        # Default view is scoped to the current directory (the Claude Code /
+        # Codex convention); `all` lifts the filter and shows origins.
+        show_all = target.lower() == "all"
+        rows = app.bridge.list_recent(limit=15, include_all=show_all)
         if not rows:
-            return "no stored sessions yet"
-        lines = ["", "recent sessions (resume with /resume <id>):"]
+            return (
+                "no stored sessions yet"
+                if show_all
+                else "no sessions for this directory — try /resume all"
+            )
+        scope = "all sessions" if show_all else f"sessions in {app.workspace}"
+        lines = ["", f"recent {scope} (resume with /resume <id>):"]
         for s in rows:
             title = s.title or "(untitled)"
-            lines.append(
-                f"  {s.session_id}  {title[:44]:<44} {s.message_count:>3} msgs"
-            )
+            line = f"  {s.session_id}  {title[:40]:<40} {s.message_count:>3} msgs"
+            if show_all:
+                origin = app.bridge.workspace_of(s.session_id)
+                line += f"  [{origin or 'no workspace recorded'}]"
+            lines.append(line)
         lines.append("")
         return "\n".join(lines)
     try:
         turns = app.resume_conversation(target)
     except ValueError as exc:
         return str(exc)
-    return f"resumed {target} ({turns} messages restored)"
+    status = f"resumed {target} ({turns} messages restored)"
+    origin = app.bridge.stored_workspace()
+    if origin and origin != app.workspace:
+        status += f"\nnote: this conversation was started in {origin}"
+    return status
 
 
 async def _cmd_model(app, args: str) -> str | None:
@@ -83,7 +97,12 @@ REGISTRY: dict[str, Command] = {
     for c in (
         Command("help", "/help", "show this help", _cmd_help),
         Command("new", "/new [title]", "start a new conversation", _cmd_new),
-        Command("resume", "/resume [id]", "list sessions / resume one", _cmd_resume),
+        Command(
+            "resume",
+            "/resume [id|all]",
+            "list this directory's sessions / resume one",
+            _cmd_resume,
+        ),
         Command("model", "/model [id]", "show or switch the model", _cmd_model),
         Command("clear", "/clear", "clear the conversation context", _cmd_clear),
         Command("exit", "/exit", "quit (ctrl-d also works)", _cmd_exit),

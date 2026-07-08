@@ -59,7 +59,10 @@ export default function Layout({ children }: LayoutProps) {
       <Header />
       <div className="flex">
         <Sidebar />
-        <main className="flex-1 p-6 lg:p-8">
+        {/* min-w-0: flex items default to min-width:auto, so wide
+            min-content (long unbroken paths/code) would blow the page open
+            horizontally instead of truncating inside the content pane. */}
+        <main className="min-w-0 flex-1 p-6 lg:p-8">
           <div className="mx-auto max-w-7xl">{children}</div>
         </main>
       </div>

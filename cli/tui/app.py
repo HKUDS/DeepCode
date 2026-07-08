@@ -29,6 +29,7 @@ sys.path.insert(
 )
 
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 
 from cli.agent_setup import build_agent_session
@@ -81,11 +82,13 @@ class TuiApp:
         self.agent = agent
         self.model = resolved_model
         self.engine = engine
+        # workspace is always the scoping context for the resume picker;
+        # it is stamped into metadata only when creating a new session.
         if resume_id is not None:
-            self.bridge = SessionBridge(session_id=resume_id)
+            self.bridge = SessionBridge(session_id=resume_id, workspace=self.workspace)
             self.bridge.load_into(agent)
         else:
-            self.bridge = SessionBridge(title=title)
+            self.bridge = SessionBridge(title=title, workspace=self.workspace)
             if carry_history:
                 agent.load_history(carry_history)
 
@@ -103,8 +106,10 @@ class TuiApp:
         history = self.agent.history
         current_session = self.bridge.session_id
         self._rebuild_agent(carry_history=history)
-        # Keep recording into the same stored session.
-        self.bridge = SessionBridge(session_id=current_session)
+        # Keep recording into the same stored session (scoping unchanged).
+        self.bridge = SessionBridge(
+            session_id=current_session, workspace=self.workspace
+        )
 
     def clear_conversation(self) -> None:
         self.agent.load_history([])
@@ -178,7 +183,14 @@ class TuiApp:
             if text.startswith("/"):
                 status = await commands.dispatch(self, text)
                 if status:
-                    self.console.print(f"[{theme.META_STYLE}]{status}[/]")
+                    # escape(): statuses carry user data (paths, titles) that
+                    # must never be parsed as rich markup. soft_wrap: long
+                    # paths must not be hard-wrapped mid-line.
+                    self.console.print(
+                        f"[{theme.META_STYLE}]{escape(status)}[/]",
+                        soft_wrap=True,
+                        highlight=False,
+                    )
                 continue
             await self.run_turn(expand_file_refs(text, self.workspace))
         if self.reader.interactive:

@@ -425,6 +425,22 @@ class SessionStore:
             self._index_session(session)
             return True
 
+    def update_metadata(self, session_id: str, updates: dict) -> bool:
+        """Merge keys into a session's metadata. False when missing.
+
+        Used for facts only known after creation (e.g. a workspace path
+        derived from the freshly minted session id).
+        """
+        with self._lock:
+            session = self.get_session(session_id)
+            if session is None:
+                return False
+            session.metadata = {**(session.metadata or {}), **updates}
+            session.updated_at = _utcnow_iso()
+            self._rewrite_metadata(session)
+            self._index_session(session)
+            return True
+
     def reindex(self) -> int:
         """Force a full rebuild of the SQLite index from JSONL on disk.
 

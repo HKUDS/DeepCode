@@ -53,7 +53,11 @@ def _patch_provider(monkeypatch, provider):
 
 
 def _run_tui(
-    monkeypatch, tmp_path, stdin_text: str, replies: list[str]
+    monkeypatch,
+    tmp_path,
+    stdin_text: str,
+    replies: list[str],
+    workspace: str = "ws",
 ) -> tuple[int, Any]:
     provider = _ScriptedProvider(replies)
     _patch_provider(monkeypatch, provider)
@@ -63,7 +67,7 @@ def _run_tui(
 
     monkeypatch.setattr(store_mod, "_DEFAULT_STORE", None)
     monkeypatch.setattr("sys.stdin", io.StringIO(stdin_text))
-    rc = tui_app.main(["--workspace", str(tmp_path / "ws")])
+    rc = tui_app.main(["--workspace", str(tmp_path / workspace)])
     return rc, provider
 
 
@@ -141,6 +145,70 @@ def test_resume_without_arg_lists_sessions(monkeypatch, tmp_path, capsys):
     rc, _ = _run_tui(monkeypatch, tmp_path, "/resume\n/exit\n", ["unused"])
     assert rc == 0
     assert "recent sessions" in capsys.readouterr().out
+
+
+# --- directory scoping (P2-L5c: central storage, per-directory view) --------
+
+
+def test_session_metadata_stamped(monkeypatch, tmp_path, capsys):
+    _run_tui(monkeypatch, tmp_path, "hello\n/exit\n", ["hi"], workspace="A")
+    from core.sessions.store import SessionStore
+
+    store = SessionStore(tmp_path / "sessions")
+    stored = store.get_session(store.list_sessions()[0].session_id)
+    assert stored.metadata.get("kind") == "tui"
+    assert stored.metadata.get("workspace") == str(tmp_path / "A")
+
+
+def test_resume_scoped_to_directory(monkeypatch, tmp_path, capsys):
+    # A conversation born in directory A...
+    _run_tui(monkeypatch, tmp_path, "task in A\n/exit\n", ["done A"], workspace="A")
+    capsys.readouterr()
+    # ...is invisible from directory B's default picker, visible via `all`
+    # with its origin annotated.
+    rc, _ = _run_tui(
+        monkeypatch,
+        tmp_path,
+        "/resume\n/resume all\n/exit\n",
+        ["unused"],
+        workspace="B",
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "no sessions for this directory" in out
+    assert "task in A" in out  # shown in the `all` view
+    assert str(tmp_path / "A") in out  # origin directory annotated
+
+
+def test_cross_directory_resume_hints_origin(monkeypatch, tmp_path, capsys):
+    _run_tui(monkeypatch, tmp_path, "remember A\n/exit\n", ["ok"], workspace="A")
+    capsys.readouterr()
+    from core.sessions.store import SessionStore
+
+    store = SessionStore(tmp_path / "sessions")
+    sid = store.list_sessions()[0].session_id
+    rc, _ = _run_tui(
+        monkeypatch, tmp_path, f"/resume {sid}\n/exit\n", ["unused"], workspace="B"
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert f"resumed {sid}" in out
+    assert "started in" in out and str(tmp_path / "A") in out
+
+
+def test_same_directory_resume_has_no_hint(monkeypatch, tmp_path, capsys):
+    _run_tui(monkeypatch, tmp_path, "stay here\n/exit\n", ["ok"], workspace="A")
+    capsys.readouterr()
+    from core.sessions.store import SessionStore
+
+    store = SessionStore(tmp_path / "sessions")
+    sid = store.list_sessions()[0].session_id
+    _run_tui(
+        monkeypatch, tmp_path, f"/resume {sid}\n/exit\n", ["unused"], workspace="A"
+    )
+    out = capsys.readouterr().out
+    assert f"resumed {sid}" in out
+    assert "started in" not in out
 
 
 def test_expand_file_refs(tmp_path):

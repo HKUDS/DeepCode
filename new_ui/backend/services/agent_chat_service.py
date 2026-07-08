@@ -18,6 +18,7 @@ This is *additive*: the legacy workflow pipeline endpoints are untouched.
 
 from __future__ import annotations
 
+import os
 import threading
 from pathlib import Path
 from typing import Any, AsyncIterator
@@ -58,7 +59,14 @@ class AgentChatService:
             title=title, metadata={"kind": _CHAT_KIND, "model": model or ""}
         )
         sid = stored.session_id
-        ws = workspace or str(_default_workspace_root() / sid)
+        ws = (
+            os.path.abspath(workspace)
+            if workspace
+            else str(_default_workspace_root() / sid)
+        )
+        # Persist the workspace so a backend restart revives the chat in the
+        # SAME directory — critical for custom workspaces (P2-L5c).
+        self.store.update_metadata(sid, {"workspace": ws})
         agent, resolved_model, engine = build_agent_session(
             workspace=ws, model=model, streaming=True
         )
@@ -78,8 +86,11 @@ class AgentChatService:
         stored = self.store.get_session(session_id)
         if stored is None:
             raise KeyError(f"no such session: {session_id}")
-        model = (stored.metadata or {}).get("model") or None
-        ws = str(_default_workspace_root() / session_id)
+        meta = stored.metadata or {}
+        model = meta.get("model") or None
+        # Prefer the recorded workspace; fall back to the derived default
+        # for chats stored before workspaces were persisted.
+        ws = meta.get("workspace") or str(_default_workspace_root() / session_id)
         agent, resolved_model, _engine = build_agent_session(
             workspace=ws, model=model, streaming=True
         )
@@ -115,6 +126,8 @@ class AgentChatService:
                     "title": summary.title or "(untitled)",
                     "updated_at": summary.updated_at,
                     "message_count": summary.message_count,
+                    "workspace": (stored.metadata or {}).get("workspace")
+                    or str(_default_workspace_root() / summary.session_id),
                 }
             )
             if len(out) >= limit:

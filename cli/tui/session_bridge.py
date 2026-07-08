@@ -5,7 +5,16 @@ Responsibilities (and nothing else):
 - record each completed turn (user text + assistant reply) into
   :mod:`core.sessions` — JSONL on disk, listed via the SQLite index;
 - resume: load a stored transcript back into an
-  :class:`~core.events.session.AgentSession` as chat history.
+  :class:`~core.events.session.AgentSession` as chat history;
+- scope the resume picker to the current directory.
+
+Directory scoping follows the convention Claude Code and Codex converged on
+(DEEPCODE_V2_MASTER_PLAN.md P2-L5c): storage stays *central* under
+``~/.deepcode/sessions`` (never files dropped into the project), but the
+*view* is per-directory — a new session records its ``workspace`` in
+metadata, and the default listing shows only sessions born in the current
+workspace. ``include_all`` lifts the filter (legacy sessions without a
+recorded workspace, and other frontends' sessions, appear only there).
 
 Resume fidelity: the store keeps the *visible* conversation (user/assistant
 text), not the internal tool-call messages — resuming restores conversational
@@ -15,12 +24,16 @@ semantics of comparable CLIs and keeps the on-disk format tool-agnostic.
 
 from __future__ import annotations
 
+import os
+
 from core.events.session import AgentSession
 from core.sessions import SessionStore, SessionSummary, get_default_store
 
+_KIND = "tui"
+
 
 class SessionBridge:
-    """Persist turns of one TUI conversation and support resume."""
+    """Persist turns of one TUI conversation and support scoped resume."""
 
     def __init__(
         self,
@@ -28,15 +41,22 @@ class SessionBridge:
         *,
         session_id: str | None = None,
         title: str = "",
+        workspace: str | None = None,
     ) -> None:
         self.store = store or get_default_store()
+        self.workspace = os.path.abspath(workspace) if workspace else None
         if session_id is not None:
             existing = self.store.get_session(session_id)
             if existing is None:
                 raise ValueError(f"no such session: {session_id}")
             self.session_id = existing.session_id
         else:
-            self.session_id = self.store.create_session(title=title).session_id
+            metadata: dict = {"kind": _KIND}
+            if self.workspace:
+                metadata["workspace"] = self.workspace
+            self.session_id = self.store.create_session(
+                title=title, metadata=metadata
+            ).session_id
 
     # -- write path ----------------------------------------------------------
 
@@ -74,7 +94,38 @@ class SessionBridge:
         agent.load_history(history)
         return len(history)
 
-    def list_recent(self, limit: int = 20) -> list[SessionSummary]:
-        """Recent *resumable* sessions — empty ones are noise, not history."""
-        rows = self.store.list_sessions(limit=max(limit * 3, 30))
-        return [s for s in rows if s.message_count > 0][:limit]
+    def workspace_of(self, session_id: str) -> str | None:
+        """The workspace a stored session was created in, if recorded."""
+        stored = self.store.get_session(session_id)
+        if stored is None:
+            return None
+        return (stored.metadata or {}).get("workspace") or None
+
+    def stored_workspace(self) -> str | None:
+        """This session's recorded workspace (for cross-directory hints)."""
+        return self.workspace_of(self.session_id)
+
+    def list_recent(
+        self, limit: int = 20, *, include_all: bool = False
+    ) -> list[SessionSummary]:
+        """Recent *resumable* sessions, scoped to this bridge's workspace.
+
+        Default view lists only sessions whose recorded workspace matches
+        (the per-directory picker). ``include_all=True`` lists every
+        non-empty session regardless of origin. Empty sessions are noise,
+        not history, and never appear.
+
+        The workspace lives in each session's metadata line, so scoping
+        reads sessions through the store's cache — same pattern the web
+        chat listing uses; fine at CLI session counts.
+        """
+        rows = [
+            s
+            for s in self.store.list_sessions(limit=max(limit * 4, 60))
+            if s.message_count > 0
+        ]
+        if include_all or self.workspace is None:
+            return rows[:limit]
+        return [s for s in rows if self.workspace_of(s.session_id) == self.workspace][
+            :limit
+        ]

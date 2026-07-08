@@ -872,7 +872,8 @@ python -m cli.tui --resume <session_id>    # 恢复历史对话
 ```text
 /help                   # 列出所有命令
 /new [标题]              # 新开一个对话
-/resume                 # 列出历史会话;/resume <id> 恢复指定会话
+/resume                 # 列出「当前目录」的会话;/resume <id> 恢复指定会话
+/resume all             # 列出所有目录的会话(标注来源目录)
 /model [id]             # 查看或切换模型(保留对话历史)
 /clear                  # 清空当前对话上下文
 @src/main.py            # 把文件内容附加到消息里
