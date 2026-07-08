@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Card } from '../components/common';
 import { ChatInput } from '../components/input';
@@ -196,6 +197,25 @@ export default function ChatPlanningPage() {
           Session:{' '}
           <span className="ml-1 font-medium text-gray-700">
             {activeSession?.title || activeSessionId || 'New session will be created'}
+          </span>
+        </div>
+
+        {/* Guidance: this page is a one-shot generator, not a conversation.
+            Users looking for back-and-forth coding belong in Agent Chat. */}
+        <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          <Bot className="h-4 w-4 shrink-0 text-blue-500" />
+          <span className="min-w-0">
+            This page turns <strong>one project description</strong> into a
+            complete generated codebase (plan&nbsp;&rarr;&nbsp;review&nbsp;&rarr;&nbsp;code)
+            &mdash; it is not a conversation. For back-and-forth coding with the
+            agent, use{' '}
+            <Link
+              to="/agent"
+              className="font-semibold underline underline-offset-2 hover:text-blue-700"
+            >
+              Agent Chat
+            </Link>
+            .
           </span>
         </div>
       </motion.div>
