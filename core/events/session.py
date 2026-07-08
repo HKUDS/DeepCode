@@ -27,6 +27,7 @@ from core.agent_runtime.tools.registry import ToolRegistry
 from core.providers.catalog import context_window_for
 from core.events.protocol import (
     AgentMessage,
+    AgentMessageDelta,
     ErrorEvent,
     Event,
     Interrupt,
@@ -39,6 +40,7 @@ from core.events.protocol import (
     ToolStarted,
     TurnStarted,
     UserInput,
+    summarize_call,
 )
 from core.providers.base import LLMProvider
 
@@ -55,13 +57,29 @@ def _is_error_result(result: Any) -> bool:
 class _EventEmittingHook(AgentHook):
     """Bridge kernel hook callbacks onto the event queue in real time."""
 
-    def __init__(self, emit) -> None:
+    def __init__(self, emit, *, streaming: bool = False) -> None:
         super().__init__()
         self._emit = emit
+        self._streaming = streaming
+
+    def wants_streaming(self) -> bool:
+        # Routes the kernel through chat_stream_with_retry so assistant text
+        # arrives as deltas; each delta is forwarded onto the event queue.
+        return self._streaming
+
+    async def on_stream(self, context: AgentHookContext, delta: str) -> None:
+        if delta:
+            self._emit(AgentMessageDelta(delta=delta))
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         for call in context.tool_calls:
-            self._emit(ToolStarted(call_id=call.id, name=call.name))
+            self._emit(
+                ToolStarted(
+                    call_id=call.id,
+                    name=call.name,
+                    detail=summarize_call(call.name, call.arguments),
+                )
+            )
 
     async def after_iteration(self, context: AgentHookContext) -> None:
         for call, result in zip(context.tool_calls, context.tool_results):
@@ -88,6 +106,7 @@ class AgentSession:
         permission_checker: Any | None = None,
         approval_callback: Any | None = None,
         context_window_tokens: int | None = None,
+        streaming: bool = False,
     ) -> None:
         self._runner = AgentRunner(provider)
         self._provider = provider
@@ -103,6 +122,10 @@ class AgentSession:
         # model catalog is what makes "long sessions don't crash" (P2 exit
         # criterion) true for every AgentSession frontend — exec, TUI, web.
         self._context_window_tokens = context_window_tokens or context_window_for(model)
+        # When on, assistant text streams out as AgentMessageDelta events
+        # (terminated by the authoritative AgentMessage). Interactive
+        # frontends enable this; headless NDJSON consumers leave it off.
+        self._streaming = streaming
 
         self._events: asyncio.Queue[Event] = asyncio.Queue()
         self._history: list[dict[str, Any]] = []
@@ -149,6 +172,14 @@ class AgentSession:
     def history(self) -> list[dict[str, Any]]:
         return list(self._history)
 
+    def load_history(self, messages: list[dict[str, Any]]) -> None:
+        """Replace the conversation history (session resume).
+
+        ``messages`` are chat-format dicts (``{"role", "content"}``); the
+        system prompt is prepended per turn, so it must not be included.
+        """
+        self._history = [dict(m) for m in messages]
+
     # -- submission handling ----------------------------------------------
 
     async def submit(self, op: Op) -> None:
@@ -186,7 +217,7 @@ class AgentSession:
             max_iterations=self._max_iterations,
             max_tool_result_chars=_DEFAULT_MAX_TOOL_RESULT_CHARS,
             context_window_tokens=self._context_window_tokens,
-            hook=_EventEmittingHook(self._emit),
+            hook=_EventEmittingHook(self._emit, streaming=self._streaming),
             permission_checker=self._permission_checker,
             approval_callback=self._approval_callback,
         )

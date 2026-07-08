@@ -71,10 +71,48 @@ class AgentMessage:
 
 
 @dataclass(frozen=True)
+class AgentMessageDelta:
+    """A streaming increment of assistant text (emitted only when the
+    session has streaming enabled).
+
+    A delta sequence is always followed by the authoritative full
+    ``AgentMessage``, so consumers may render deltas live and reconcile on
+    the final text — or ignore deltas entirely (as headless NDJSON
+    consumers do).
+    """
+
+    delta: str
+    type: str = field(default="agent_message_delta", init=False)
+
+
+@dataclass(frozen=True)
 class ToolStarted:
     call_id: str
     name: str
+    # Short human-readable argument summary ("pytest -q", "mathlib.py"),
+    # so a frontend can render Claude Code-style `bash(pytest -q)` cards
+    # without re-deriving it from raw arguments.
+    detail: str = ""
     type: str = field(default="tool_started", init=False)
+
+
+def summarize_call(name: str, arguments: dict[str, Any] | None) -> str:
+    """One-line argument summary for a tool call (pure, best-effort).
+
+    Picks the most informative argument by a preference order shared by all
+    tools (command for bash, path for file tools, pattern for search), so
+    frontends render consistent cards without per-tool special cases.
+    """
+    if not isinstance(arguments, dict) or not arguments:
+        return ""
+    for key in ("command", "file_path", "pattern", "prompt", "patch", "text"):
+        value = arguments.get(key)
+        if isinstance(value, str) and value.strip():
+            first_line = value.strip().splitlines()[0]
+            return first_line[:80] + ("…" if len(first_line) > 80 else "")
+    value = next(iter(arguments.values()))
+    text = str(value).strip().splitlines()[0] if value is not None else ""
+    return text[:80] + ("…" if len(text) > 80 else "")
 
 
 @dataclass(frozen=True)
@@ -106,6 +144,7 @@ class ShutdownComplete:
 EventMsg = Union[
     TurnStarted,
     AgentMessage,
+    AgentMessageDelta,
     ToolStarted,
     ToolCompleted,
     ErrorEvent,

@@ -41,6 +41,7 @@ from core.events.parts import (
 )
 from core.events.protocol import (
     AgentMessage,
+    AgentMessageDelta,
     Event,
     EventMsg,
     Interrupt,
@@ -87,6 +88,7 @@ __all__ = [
     "Shutdown",
     "TurnStarted",
     "AgentMessage",
+    "AgentMessageDelta",
     "ToolStarted",
     "ToolCompleted",
     "TaskComplete",

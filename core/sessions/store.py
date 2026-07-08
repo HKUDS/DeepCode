@@ -413,6 +413,18 @@ class SessionStore:
                     out.append((session, task))
             return out
 
+    def rename_session(self, session_id: str, title: str) -> bool:
+        """Set a session's title. Returns False when the session is missing."""
+        with self._lock:
+            session = self.get_session(session_id)
+            if session is None:
+                return False
+            session.title = title
+            session.updated_at = _utcnow_iso()
+            self._rewrite_metadata(session)
+            self._index_session(session)
+            return True
+
     def reindex(self) -> int:
         """Force a full rebuild of the SQLite index from JSONL on disk.
 

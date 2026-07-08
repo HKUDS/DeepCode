@@ -36,6 +36,7 @@ def build_agent_session(
     max_iterations: int = 40,
     system_prompt: str = SYSTEM_PROMPT,
     approval_callback: Any | None = None,
+    streaming: bool = False,
 ) -> tuple[AgentSession, str, Any]:
     """Build an :class:`AgentSession` over ``workspace``.
 
@@ -59,5 +60,6 @@ def build_agent_session(
         max_iterations=max_iterations,
         permission_checker=engine.evaluate,
         approval_callback=approval_callback,
+        streaming=streaming,
     )
     return session, resolved_model, engine

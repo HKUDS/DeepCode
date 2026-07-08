@@ -21,14 +21,14 @@ fi
 # ------ Ensure directories exist ------
 mkdir -p deepcode_lab uploads logs
 
-# ------ CLI mode: launch interactive CLI ------
+# ------ CLI mode: launch the interactive TUI ------
 if [ "$1" = "cli" ]; then
     shift
     echo ""
     echo "🖥️  Starting DeepCode CLI..."
     echo "============================================"
     echo ""
-    exec python cli/main_cli.py "$@"
+    exec python -m cli.tui "$@"
 fi
 
 # ------ Web mode (default): start backend + frontend ------

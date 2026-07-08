@@ -1,18 +1,15 @@
+"""DeepCode CLI entries (P2, L5).
+
+Two frontends, both pure consumers of the SQ/EQ event stream — neither
+touches the kernel directly (DEEPCODE_V2_MASTER_PLAN.md §3 event-sourcing
+first):
+
+- ``python -m cli.tui`` — the interactive terminal UI: free-form multi-turn
+  conversation, streaming output, tool progress, slash commands, session
+  resume. The Claude Code / Codex CLI analogue.
+- ``python -m cli.exec_cli`` — headless one-shot: run a task, stream NDJSON
+  events, exit. The CI / harness / scripting entry.
+
+Shared session assembly lives in :mod:`cli.agent_setup` so the two entries
+cannot drift.
 """
-CLI Module for DeepCode Agent
-DeepCode智能体CLI模块
-
-包含以下组件 / Contains the following components:
-- cli_app: CLI应用主程序 / CLI application main program
-- cli_interface: CLI界面组件 / CLI interface components
-- cli_launcher: CLI启动器 / CLI launcher
-"""
-
-__version__ = "1.0.0"
-__author__ = "DeepCode Team - Data Intelligence Lab @ HKU"
-
-from .cli_app import main as cli_main
-from .cli_interface import CLIInterface
-from .cli_launcher import main as launcher_main
-
-__all__ = ["cli_main", "CLIInterface", "launcher_main"]
