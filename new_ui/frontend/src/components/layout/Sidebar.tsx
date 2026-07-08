@@ -17,6 +17,9 @@ import type { SessionSummary } from '../../types/api';
 export default function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
+  // Agent Chat owns its own conversation sidebar; the workflow-session list
+  // here would only duplicate and confuse it, so hide it on that route.
+  const isAgentPage = location.pathname === '/agent';
   const [sessionToDelete, setSessionToDelete] = useState<SessionSummary | null>(null);
   const {
     activeSessionId,
@@ -135,7 +138,8 @@ export default function Sidebar() {
           </nav>
         </div>
 
-        {/* Sessions */}
+        {/* Sessions (hidden on Agent Chat — it manages its own) */}
+        {!isAgentPage && (
         <div>
           <div className="px-3 mb-2 flex items-center justify-between">
             <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center">
@@ -207,6 +211,7 @@ export default function Sidebar() {
             </div>
           )}
         </div>
+        )}
       </div>
 
       {/* Footer */}

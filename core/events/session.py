@@ -41,6 +41,7 @@ from core.events.protocol import (
     TurnStarted,
     UserInput,
     summarize_call,
+    summarize_result,
 )
 from core.providers.base import LLMProvider
 
@@ -88,6 +89,7 @@ class _EventEmittingHook(AgentHook):
                     call_id=call.id,
                     name=call.name,
                     is_error=_is_error_result(result),
+                    result_preview=summarize_result(result),
                 )
             )
 
@@ -227,6 +229,16 @@ class AgentSession:
             result = await self._current_task
         except asyncio.CancelledError:
             self._emit(TaskComplete(final_text=None, stop_reason="interrupted"))
+            self._busy = False
+            self._current_task = None
+            return
+        except Exception as exc:  # noqa: BLE001
+            # The runner should return errors as data, but a truly unexpected
+            # exception must still terminate the turn — otherwise a consumer
+            # blocked on the next event (run_stream) would hang forever. Always
+            # close the turn with an error + task_complete.
+            self._emit(ErrorEvent(message=f"{type(exc).__name__}: {exc}"))
+            self._emit(TaskComplete(final_text=None, stop_reason="error"))
             self._busy = False
             self._current_task = None
             return

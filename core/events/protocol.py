@@ -120,7 +120,24 @@ class ToolCompleted:
     call_id: str
     name: str
     is_error: bool
+    # A short preview of the tool's result (first lines, truncated), so a
+    # frontend can show "what came back" on an expandable card without the
+    # full — possibly huge — payload. Empty when the result was empty.
+    result_preview: str = ""
     type: str = field(default="tool_completed", init=False)
+
+
+def summarize_result(result: Any, limit: int = 400) -> str:
+    """A compact, single-block preview of a tool result for display.
+
+    Collapses to the leading ``limit`` characters with an elision marker.
+    Pure and defensive: any value becomes a string, never raises.
+    """
+    text = result if isinstance(result, str) else str(result)
+    text = text.strip()
+    if len(text) > limit:
+        return text[:limit].rstrip() + " …"
+    return text
 
 
 @dataclass(frozen=True)

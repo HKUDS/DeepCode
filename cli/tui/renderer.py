@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from rich.console import Console
 from rich.markdown import Markdown
+from rich.markup import escape
 
 from cli.tui import theme
 from core.events.protocol import Event
@@ -90,6 +91,13 @@ class EventRenderer:
                 f"[{theme.TOOL_OK_STYLE}]{theme.DONE_OK}[/] "
                 f"[{theme.META_STYLE}]{msg.name}[/]"
             )
+        # First line of the result, dimmed, next to the mark (Claude Code's
+        # ⎿-result convention). getattr keeps older event shapes working.
+        preview = getattr(msg, "result_preview", "") or ""
+        first_line = preview.splitlines()[0] if preview else ""
+        if first_line:
+            snippet = first_line[:100] + ("…" if len(first_line) > 100 else "")
+            mark += f"  [{theme.TOOL_DETAIL_STYLE}]{escape(snippet)}[/]"
         self.console.print(f"{theme.TOOL_RESULT_ELBOW} {mark}", highlight=False)
 
     def _on_error(self, msg) -> None:

@@ -158,15 +158,21 @@ class AgentChatService:
                 self.store.rename_session(session_id, first_line)
 
         final_text: str | None = None
+        stop_reason = "completed"
         async for event in agent.run_stream(UserInput(text=text)):
             if event.msg.type == "task_complete":
                 final_text = event.msg.final_text
+                stop_reason = event.msg.stop_reason
             yield serialize_event(event)
 
         # Persist the visible turn (best-effort, never breaks the stream).
+        # An errored turn is NOT persisted as an assistant reply — otherwise
+        # a transient "Error calling LLM..." would masquerade as a real
+        # answer on reload. The live error event already showed it; the user
+        # message is kept so the turn can simply be retried.
         try:
             self.store.append_message(session_id, "user", text)
-            if final_text:
+            if final_text and stop_reason == "completed":
                 self.store.append_message(session_id, "assistant", final_text)
         except Exception:  # noqa: BLE001
             pass
@@ -176,6 +182,24 @@ class AgentChatService:
             agent = self._live.get(session_id)
         if agent is not None:
             await agent.submit(Interrupt())
+
+    # -- management -----------------------------------------------------------
+
+    def rename_chat(self, session_id: str, title: str) -> bool:
+        """Set a chat's title. False when the session does not exist."""
+        return self.store.rename_session(session_id, title.strip())
+
+    def delete_chat(self, session_id: str) -> bool:
+        """Delete a chat: drop the live agent and remove the stored session.
+
+        The per-chat workspace under ``deepcode_lab/chats/`` is intentionally
+        left on disk (it may hold generated code the user still wants);
+        only the conversation record goes.
+        """
+        with self._lock:
+            self._live.pop(session_id, None)
+            self._meta.pop(session_id, None)
+        return self.store.delete_session(session_id)
 
 
 agent_chat_service = AgentChatService()

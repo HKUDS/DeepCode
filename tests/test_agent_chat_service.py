@@ -98,3 +98,125 @@ def test_list_chats_includes_workspace_and_filters_kind(monkeypatch, tmp_path):
     rows = svc.list_chats()
     assert [r["session_id"] for r in rows] == [card["session_id"]]
     assert rows[0]["workspace"] == card["workspace"]
+
+
+def test_rename_chat(monkeypatch, tmp_path):
+    _patch(monkeypatch, tmp_path)
+    svc = _service()
+    sid = svc.create_chat()["session_id"]
+    assert svc.rename_chat(sid, "  Renamed  ") is True
+    assert svc.store.get_session(sid).title == "Renamed"
+    assert svc.rename_chat("nope", "x") is False
+
+
+class _ErrorProvider:
+    """Returns a connection error as data on both the plain and streaming
+    paths — exactly how the real provider signals an LLM outage."""
+
+    def get_default_model(self):
+        return "fake-model"
+
+    async def chat_with_retry(self, **kwargs: Any):
+        return self._error()
+
+    async def chat_stream_with_retry(self, **kwargs: Any):
+        return self._error()
+
+    @staticmethod
+    def _error():
+        return LLMResponse(
+            content="Error calling LLM: Connection error.",
+            finish_reason="error",
+            error_kind="connection",
+        )
+
+
+class _RaisingProvider:
+    """Raises unexpectedly — the session must still close the turn."""
+
+    def get_default_model(self):
+        return "fake-model"
+
+    async def chat_with_retry(self, **kwargs: Any):
+        raise RuntimeError("boom")
+
+    async def chat_stream_with_retry(self, **kwargs: Any):
+        raise RuntimeError("boom")
+
+
+def test_errored_turn_persists_user_but_not_assistant(monkeypatch, tmp_path):
+    import asyncio
+
+    monkeypatch.setattr(
+        agent_setup,
+        "get_workflow_provider",
+        lambda **kw: (_ErrorProvider(), _Profile()),
+    )
+    monkeypatch.setattr(
+        agent_setup,
+        "get_runtime",
+        lambda: type("R", (), {"config": type("C", (), {"security": None})()})(),
+    )
+    monkeypatch.setenv("DEEPCODE_SESSIONS_DIR", str(tmp_path / "sessions"))
+    import core.sessions.store as store_mod
+
+    monkeypatch.setattr(store_mod, "_DEFAULT_STORE", None)
+    svc = _service()
+    sid = svc.create_chat()["session_id"]
+
+    async def _drive():
+        return [e async for e in svc.run_turn(sid, "hi there")]
+
+    events = asyncio.run(_drive())
+    kinds = [e["msg"]["type"] for e in events]
+    assert "error" in kinds  # the live error event was emitted
+    assert kinds[-1] == "task_complete"  # turn always terminates
+
+    roles = [m["role"] for m in svc.transcript(sid)]
+    # User message kept (turn is retryable); the error is NOT a fake assistant reply.
+    assert roles == ["user"]
+
+
+def test_raising_provider_still_terminates_turn(monkeypatch, tmp_path):
+    """Robustness: an unexpected exception in the runner must not hang the
+    stream — the turn closes with error + task_complete."""
+    import asyncio
+
+    monkeypatch.setattr(
+        agent_setup,
+        "get_workflow_provider",
+        lambda **kw: (_RaisingProvider(), _Profile()),
+    )
+    monkeypatch.setattr(
+        agent_setup,
+        "get_runtime",
+        lambda: type("R", (), {"config": type("C", (), {"security": None})()})(),
+    )
+    monkeypatch.setenv("DEEPCODE_SESSIONS_DIR", str(tmp_path / "sessions"))
+    import core.sessions.store as store_mod
+
+    monkeypatch.setattr(store_mod, "_DEFAULT_STORE", None)
+    svc = _service()
+    sid = svc.create_chat()["session_id"]
+
+    async def _drive():
+        return [e async for e in svc.run_turn(sid, "hi")]
+
+    events = asyncio.wait_for(_drive(), timeout=10)
+    result = asyncio.run(events)
+    kinds = [e["msg"]["type"] for e in result]
+    assert "error" in kinds
+    assert kinds[-1] == "task_complete"
+
+
+def test_delete_chat_removes_session_and_live_agent(monkeypatch, tmp_path):
+    _patch(monkeypatch, tmp_path)
+    svc = _service()
+    sid = svc.create_chat()["session_id"]
+    svc.get_agent(sid)  # materialize a live agent
+    assert sid in svc._live
+
+    assert svc.delete_chat(sid) is True
+    assert sid not in svc._live and sid not in svc._meta
+    assert svc.store.get_session(sid) is None
+    assert svc.delete_chat(sid) is False  # already gone

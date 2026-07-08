@@ -44,3 +44,21 @@ async def chat_messages(session_id: str):
         return {"messages": agent_chat_service.transcript(session_id)}
     except KeyError:
         raise HTTPException(status_code=404, detail="session not found")
+
+
+class ChatRenameRequest(BaseModel):
+    title: str
+
+
+@router.patch("/{session_id}")
+async def rename_chat(session_id: str, request: ChatRenameRequest):
+    if not agent_chat_service.rename_chat(session_id, request.title):
+        raise HTTPException(status_code=404, detail="session not found")
+    return {"session_id": session_id, "title": request.title.strip()}
+
+
+@router.delete("/{session_id}")
+async def delete_chat(session_id: str):
+    if not agent_chat_service.delete_chat(session_id):
+        raise HTTPException(status_code=404, detail="session not found")
+    return {"deleted": session_id}
