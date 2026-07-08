@@ -160,7 +160,22 @@ export default function ChatPlanningPage() {
     role: msg.role,
     content: msg.content,
   }));
-  const chatMessages = [...sessionMessages, ...localMessages];
+  // Deduplicate optimistic echoes: a submitted message is appended locally
+  // for instant feedback AND persisted server-side into the session. Once
+  // the session copy is being rendered, the local copy must not render a
+  // second time (the "message shows twice" bug). Assistant placeholders
+  // ("Starting code generation...") are local-only and always kept.
+  const sessionUserContents = new Set(
+    (activeSession?.messages ?? [])
+      .filter((m) => m.role === 'user')
+      .map((m) => m.content),
+  );
+  const chatMessages = [
+    ...sessionMessages,
+    ...localMessages.filter(
+      (lm) => !(lm.role === 'user' && sessionUserContents.has(lm.content)),
+    ),
+  ];
   const implementationResult =
     result?.implementation && typeof result.implementation === 'object'
       ? (result.implementation as Record<string, unknown>)

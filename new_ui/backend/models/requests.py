@@ -24,12 +24,12 @@ class ChatPlanningRequest(BaseModel):
 
     requirements: str = Field(..., description="User requirements text")
     enable_indexing: bool = Field(default=False, description="Enable code indexing")
-    # Default OFF: the web "clarifying questions" interaction (user-in-loop)
-    # has a pre-existing frontend delivery bug that surfaces as "error
-    # processing your request". Until that WS interaction is fixed, chat
-    # planning runs fully autonomously (requirements -> plan -> implement),
-    # matching the working CLI --chat path. The frontend does not send this
-    # field, so this default governs the web UI.
+    # NOTE: the web frontend explicitly sends this field as `true`
+    # (services/api.ts startChatPlanning), so in practice this default only
+    # governs raw API callers that omit it. With interaction ON the pipeline
+    # pauses once, at "Review Implementation Plan" (plan_review_runtime);
+    # there is no requirements-clarification pause — any input is treated as
+    # the project requirement and planning starts immediately.
     enable_user_interaction: bool = Field(
         default=False, description="Enable user review and approval steps"
     )
