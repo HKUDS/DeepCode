@@ -161,22 +161,25 @@
 
 **[2026-07-08] General coding agent: interactive CLI, web Agent Chat & native tools**
 
-- **Interactive CLI, rebuilt.** `python -m cli.tui` (or `deepcode --cli` in Docker) opens a free-form, multi-turn coding conversation: describe any task in natural language and watch the agent stream its reply, edit files, and run commands with live tool progress cards. Slash commands `/new`, `/resume`, `/model`, `/clear`, `/help`; attach files inline with `@path`. The previous menu-driven CLI has been removed.
-- **Web Agent Chat (new).** The web UI gains an "Agent Chat" page: continuous conversations with the coding agent, a sidebar of past chats with one-click "New chat", streamed replies, tool progress, and mid-run interrupt. Chats persist and can be reopened any time; each chat works in its own workspace under `deepcode_lab/chats/`.
-- **Native coding tools.** The agent now ships first-class `read` / `write` / `edit` (fuzzy, whitespace-tolerant matching) / `apply_patch` (multi-file atomic patches) / `bash` / `grep` / `glob` tools, with automatic post-edit diagnostics (syntax/lint feedback the agent fixes on the spot).
-- **Headless entry.** `python -m cli.exec_cli "task" --json` runs one task end-to-end and emits a machine-readable event stream — for CI, scripting, and benchmarks.
-- **Context that scales.** Model-aware context windows (per-model catalog) with automatic history compaction keep long conversations stable, and sessions are indexed in SQLite for instant listing/resume.
+- **Talk to DeepCode in your terminal.** `python -m cli.tui` (or `deepcode --cli` in Docker) opens a free-form, multi-turn coding conversation — describe any task in natural language and watch the agent stream its reply, edit files, and run commands with live progress cards. Steer with `/new`, `/resume`, `/model`, `/clear`, `/help`, and attach files with `@path`. (Replaces the previous menu-driven CLI.)
+- **Chat with the agent in your browser.** The new "Agent Chat" page keeps continuous conversations: a sidebar of past chats, one-click New chat, streamed replies with tool progress, and mid-run interrupt. Every chat persists, reopens any time, and works in its own workspace under `deepcode_lab/chats/`.
+- **Edits that land on the first try.** First-class `read` / `write` / `edit` / `apply_patch` / `bash` / `grep` / `glob` tools: whitespace-tolerant fuzzy edits, multi-file atomic patches, and automatic post-edit diagnostics the agent fixes on the spot.
+- **Script any task.** `python -m cli.exec_cli "task" --json` runs one task end-to-end and emits a machine-readable event stream — drop it straight into CI or your own pipelines.
+- **Long conversations stay fast and stable.** Context windows resolve per model with automatic history compaction, and sessions are SQLite-indexed so listing and resume are instant.
 
 ---
 
 **[2026-07-04] V2 foundation: unified agent kernel, security sandbox & event protocol**
 
-- **Unified agent kernel.** All coding phases now run on a single shared agent runtime, with tool definitions sourced directly from the MCP servers as the single source of truth. Paper2Code behavior is unchanged.
-- **Security sandbox (new).** Tool calls pass a three-valued permission engine (allow / ask / deny) with a non-overridable credential denylist (`.ssh`, `.aws/credentials`, `.env`, `*.pem`, ...), and shell/Python execution runs inside a platform sandbox (macOS seatbelt / Linux bubblewrap) fenced to the workspace. Control it via `DEEPCODE_SANDBOX` / `DEEPCODE_PERMISSION_MODE` or the new `security` block in `deepcode_config.json`; opt into interactive per-tool approval with `DEEPCODE_PERMISSION_MODE=default`.
-- **Kernel protocol layer (new).** Declarative per-model provider settings, a normalized model-event stream, a structured message model (with a `pending -> running -> completed | error` tool state machine), and an `AgentSession` over an event protocol give every frontend — CLI, web, and headless — one shared contract to build on.
-- **Chat planning reliability.** Web chat planning now runs autonomously by default (requirements -> plan -> implementation), avoiding a clarifying-questions step that could surface as "error processing your request".
+- **Every coding phase behaves the same.** All phases now run on one shared agent runtime, with tool definitions sourced straight from the MCP servers as the single source of truth — Paper2Code results unchanged.
+- **Your credentials stay yours.** Every tool call passes a three-valued permission engine (allow / ask / deny) with a non-overridable credential denylist (`.ssh`, `.aws/credentials`, `.env`, `*.pem`, ...), and shell/Python execution runs inside a platform sandbox (macOS seatbelt / Linux bubblewrap) fenced to the workspace. Tune it via `DEEPCODE_SANDBOX` / `DEEPCODE_PERMISSION_MODE` or the `security` block in `deepcode_config.json`.
+- **Build any frontend on one contract.** Declarative per-model provider settings, a normalized model-event stream, a structured message model, and an `AgentSession` event protocol back the CLI, the web UI, and headless runs alike.
+- **Web chat planning just runs.** It now proceeds autonomously by default (requirements -> plan -> implementation) instead of stalling on a clarifying-questions step.
 
 ---
+
+<details>
+<summary><strong>Earlier news</strong></summary>
 
 🧭 **[2026-05-01] OpenRouter model selector, session cleanup & workflow UX hardening**
 
@@ -263,6 +266,8 @@ DeepCode sets new benchmarks on OpenAI's PaperBench Code-Dev across all categori
 - 🥇 **Outperforms SOTA Commercial Code Agents**: **84.8%** (DeepCode) vs Leading Commercial Code Agents (+26.1%) (Cursor, Claude Code, and Codex).
 - 🔬 **Advances Scientific Coding**: **73.5%** (DeepCode) vs PaperCoder 51.1% (+22.4%).
 - 🚀 **Beats LLM Agents**: **73.5%** (DeepCode) vs best LLM frameworks 43.3% (+30.2%).
+
+</details>
 
 ---
 

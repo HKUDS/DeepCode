@@ -159,13 +159,16 @@
 
 **[2026-07-08] 通用编码 agent:交互式 CLI、Web Agent Chat 与原生工具**
 
-- **全新交互式 CLI。** `python -m cli.tui`(Docker 内 `deepcode --cli`)进入自由多轮编码对话:用自然语言描述任意任务,实时看到流式回复与工具执行进度卡。支持 `/new`、`/resume`、`/model`、`/clear`、`/help` 命令与 `@路径` 文件引用。原菜单式 CLI 已移除。
-- **Web Agent Chat(新)。** Web UI 新增 "Agent Chat" 页面:与编码 agent 持续多轮对话,侧栏展示历史会话并支持一键新建;流式回复、工具进度、运行中可中断。会话持久化、随时可恢复,每个会话拥有独立工作目录(`deepcode_lab/chats/`)。
-- **原生编码工具。** agent 内置 `read` / `write` / `edit`(容忍空白缩进漂移的模糊匹配)/ `apply_patch`(多文件原子补丁)/ `bash` / `grep` / `glob` 工具,写入后自动进行语法/静态检查并即时修复。
-- **无头入口。** `python -m cli.exec_cli "任务" --json` 一次性执行任务并输出机器可读事件流,适用于 CI 与脚本。
-- **上下文自动伸缩。** 按模型解析上下文窗口(每模型目录),长对话自动压缩历史不崩溃;会话经 SQLite 索引,列表/恢复即时。
+- **在终端里直接和 DeepCode 对话。** `python -m cli.tui`(Docker 内 `deepcode --cli`)进入自由多轮编码对话——用自然语言描述任意任务,实时看到流式回复、文件修改与命令执行进度卡。`/new`、`/resume`、`/model`、`/clear`、`/help` 随时掌控,`@路径` 直接附加文件。(替代原菜单式 CLI。)
+- **在浏览器里持续对话。** 全新 "Agent Chat" 页面:历史会话侧栏、一键新建对话、流式回复与工具进度、运行中随时中断。每个对话都持久保存、随时续聊,并拥有独立工作目录(`deepcode_lab/chats/`)。
+- **改代码一次到位。** 内置 `read` / `write` / `edit` / `apply_patch` / `bash` / `grep` / `glob` 工具:模糊匹配容忍空白缩进漂移、多文件补丁原子落盘、写入后自动诊断并当场修复。
+- **一条命令跑任务。** `python -m cli.exec_cli "任务" --json` 端到端执行并输出机器可读事件流,可直接接入 CI 与自动化脚本。
+- **聊多久都稳。** 上下文窗口按模型自动解析、历史自动压缩,长对话不崩;会话经 SQLite 索引,列表与恢复即时响应。
 
 ---
+
+<details>
+<summary><strong>更早的更新</strong></summary>
 
 🧭 **[2026-05-01] OpenRouter 模型选择器、session 清理与工作流体验增强**
 
@@ -240,6 +243,8 @@ DeepCode在OpenAI的PaperBench Code-Dev所有类别中创造新基准：
 - 🥇 **超越最先进商业代码智能体**: **84.8%** (DeepCode) vs 领先商业代码智能体 (+26.1%) (Cursor, Claude Code, 和 Codex)。
 - 🔬 **推进科学编程**: **73.5%** (DeepCode) vs PaperCoder 51.1% (+22.4%)。
 - 🚀 **击败LLM智能体**: **73.5%** (DeepCode) vs 最佳LLM框架 43.3% (+30.2%)。
+
+</details>
 
 ---
 
