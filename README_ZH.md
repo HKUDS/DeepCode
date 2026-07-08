@@ -157,6 +157,16 @@
 
 ## 📰 新闻
 
+**[2026-07-08] 通用编码 agent:交互式 CLI、Web Agent Chat 与原生工具**
+
+- **全新交互式 CLI。** `python -m cli.tui`(Docker 内 `deepcode --cli`)进入自由多轮编码对话:用自然语言描述任意任务,实时看到流式回复与工具执行进度卡。支持 `/new`、`/resume`、`/model`、`/clear`、`/help` 命令与 `@路径` 文件引用。原菜单式 CLI 已移除。
+- **Web Agent Chat(新)。** Web UI 新增 "Agent Chat" 页面:与编码 agent 持续多轮对话,侧栏展示历史会话并支持一键新建;流式回复、工具进度、运行中可中断。会话持久化、随时可恢复,每个会话拥有独立工作目录(`deepcode_lab/chats/`)。
+- **原生编码工具。** agent 内置 `read` / `write` / `edit`(容忍空白缩进漂移的模糊匹配)/ `apply_patch`(多文件原子补丁)/ `bash` / `grep` / `glob` 工具,写入后自动进行语法/静态检查并即时修复。
+- **无头入口。** `python -m cli.exec_cli "任务" --json` 一次性执行任务并输出机器可读事件流,适用于 CI 与脚本。
+- **上下文自动伸缩。** 按模型解析上下文窗口(每模型目录),长对话自动压缩历史不崩溃;会话经 SQLite 索引,列表/恢复即时。
+
+---
+
 🧭 **[2026-05-01] OpenRouter 模型选择器、session 清理与工作流体验增强**
 
 - 🧠 **Settings 中新增 OpenRouter 模型目录。** 新版 UI 可以从 `https://openrouter.ai/api/v1/models` 获取 OpenRouter 模型元数据，本地缓存后提供可搜索的 Default、Planning、Implementation 三阶段模型下拉框。用户可以直接选择 `z-ai/glm-5.1` 这类 OpenRouter 精确模型 id，无需手动编辑 JSON。
@@ -832,41 +842,47 @@ run.bat
 # 经典 Streamlit UI
 deepcode --classic
 
-# CLI 模式
+# 交互式 CLI(Docker 内)
 deepcode --cli
-# 或: python cli/main_cli.py
+# 或本地: python -m cli.tui
 ```
 
 </td></tr>
 </table>
 
-#### 💻 **CLI session 与内联输入**
+#### 💻 **交互式 CLI(多轮编码 agent)**
 
-CLI 默认带 session。没有传 `--session` 时会自动创建新 session，并保存在
-`~/.deepcode/sessions/<id>/`；传 `--session <id>` 时，新 task 会追加到已有
-session。
+`python -m cli.tui` 会在终端里打开一个 Claude Code 风格的对话:用自然语言
+描述任意编码任务,实时看到 agent 的流式回复与工具执行进度,并可连续多轮对话。
 
 ```bash
-# 在 shell 中管理 session
-python cli/main_cli.py session list
-python cli/main_cli.py session show <session_id>
-python cli/main_cli.py session resume <session_id>   # 显示历史后进入交互模式
-python cli/main_cli.py --session <session_id> --file paper.pdf
+python -m cli.tui                          # 在当前目录开始对话
+python -m cli.tui -w ./my-project          # 指定工作目录
+python -m cli.tui -m gpt-5.4               # 指定模型
+python -m cli.tui --resume <session_id>    # 恢复历史对话
 ```
 
-进入 `python cli/main_cli.py` 后，可以在主菜单直接输入：
+对话中可用命令:
 
 ```text
-/resume                 # 从编号列表中选择历史 session
-/new 我的实验            # 新建并切换到一个 session
-/session                # 显示当前活跃 session
-@/absolute/path.pdf     # 不弹文件选择框，直接处理文件
-@"C:\path with spaces\paper.pdf"
-@https://arxiv.org/pdf/....
+/help                   # 列出所有命令
+/new [标题]              # 新开一个对话
+/resume                 # 列出历史会话;/resume <id> 恢复指定会话
+/model [id]             # 查看或切换模型(保留对话历史)
+/clear                  # 清空当前对话上下文
+@src/main.py            # 把文件内容附加到消息里
 ```
 
-这些入口创建的 task 都会继承当前 `session_id`；per-task 日志会写入
-`deepcode_lab/tasks/<task>/logs/`。
+对话保存在 `~/.deepcode/sessions/<id>/`(JSONL 存储 + SQLite 索引),并根据
+首条消息自动命名。
+
+脚本 / CI 场景可用无头一次性入口:
+
+```bash
+python -m cli.exec_cli "修复 mathlib.py 里失败的测试" --json
+```
+
+以 NDJSON 输出机器可读事件流,完成后以退出码 0 结束。
 
 在 Web UI 中，可以通过顶部 **Sessions** 菜单恢复或删除 session。删除
 session 会移除 JSONL session 记录和对应的 `deepcode_lab/tasks/` 工作目录，

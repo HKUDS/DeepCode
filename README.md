@@ -159,6 +159,16 @@
 
 ## 📰 News
 
+**[2026-07-08] General coding agent: interactive CLI, web Agent Chat & native tools**
+
+- **Interactive CLI, rebuilt.** `python -m cli.tui` (or `deepcode --cli` in Docker) opens a free-form, multi-turn coding conversation: describe any task in natural language and watch the agent stream its reply, edit files, and run commands with live tool progress cards. Slash commands `/new`, `/resume`, `/model`, `/clear`, `/help`; attach files inline with `@path`. The previous menu-driven CLI has been removed.
+- **Web Agent Chat (new).** The web UI gains an "Agent Chat" page: continuous conversations with the coding agent, a sidebar of past chats with one-click "New chat", streamed replies, tool progress, and mid-run interrupt. Chats persist and can be reopened any time; each chat works in its own workspace under `deepcode_lab/chats/`.
+- **Native coding tools.** The agent now ships first-class `read` / `write` / `edit` (fuzzy, whitespace-tolerant matching) / `apply_patch` (multi-file atomic patches) / `bash` / `grep` / `glob` tools, with automatic post-edit diagnostics (syntax/lint feedback the agent fixes on the spot).
+- **Headless entry.** `python -m cli.exec_cli "task" --json` runs one task end-to-end and emits a machine-readable event stream — for CI, scripting, and benchmarks.
+- **Context that scales.** Model-aware context windows (per-model catalog) with automatic history compaction keep long conversations stable, and sessions are indexed in SQLite for instant listing/resume.
+
+---
+
 **[2026-07-04] V2 foundation: unified agent kernel, security sandbox & event protocol**
 
 - **Unified agent kernel.** All coding phases now run on a single shared agent runtime, with tool definitions sourced directly from the MCP servers as the single source of truth. Paper2Code behavior is unchanged.
@@ -888,41 +898,49 @@ run.bat
 # Classic Streamlit UI
 deepcode --classic
 
-# CLI mode
+# Interactive CLI (in Docker)
 deepcode --cli
-# or: python cli/main_cli.py
+# or locally: python -m cli.tui
 ```
 
 </td></tr>
 </table>
 
-#### 💻 **CLI sessions & inline inputs**
+#### 💻 **Interactive CLI (multi-turn coding agent)**
 
-The CLI is session-aware by default. A run without `--session` creates a new
-persistent session under `~/.deepcode/sessions/<id>/`; pass `--session <id>` to
-attach a new task to an existing session.
+`python -m cli.tui` opens a Claude Code-style conversation in your terminal:
+describe any coding task in natural language, watch the agent stream its
+reply and tool progress live, and keep the conversation going across turns.
 
 ```bash
-# Session management from the shell
-python cli/main_cli.py session list
-python cli/main_cli.py session show <session_id>
-python cli/main_cli.py session resume <session_id>   # show history, then enter interactive mode
-python cli/main_cli.py --session <session_id> --file paper.pdf
+python -m cli.tui                          # converse in the current directory
+python -m cli.tui -w ./my-project          # explicit workspace
+python -m cli.tui -m gpt-5.4               # explicit model
+python -m cli.tui --resume <session_id>    # pick up a stored conversation
 ```
 
-Inside `python cli/main_cli.py`, type these at the main menu prompt:
+Inside the conversation:
 
 ```text
-/resume                 # pick a previous session from a numbered list
-/new My experiment      # create and switch to a fresh session
-/session                # show the currently active session
-@/absolute/path.pdf     # process a file without opening the file picker
-@"C:\path with spaces\paper.pdf"
-@https://arxiv.org/pdf/....
+/help                   # list all commands
+/new [title]            # start a fresh conversation
+/resume                 # list stored sessions; /resume <id> restores one
+/model [id]             # show or switch the model (history preserved)
+/clear                  # clear the conversation context
+@src/main.py            # attach a file's content to your message
 ```
 
-Every task created from these flows inherits the active `session_id`; per-task
-logs are written to `deepcode_lab/tasks/<task>/logs/`.
+Conversations persist under `~/.deepcode/sessions/<id>/` (JSONL, with a SQLite
+index for instant listing) and are titled automatically from your first
+message.
+
+For scripting and CI there is a headless one-shot entry:
+
+```bash
+python -m cli.exec_cli "fix the failing test in mathlib.py" --json
+```
+
+which streams machine-readable events (NDJSON) and exits 0 on completion.
 
 In the web UI, use the **Sessions** menu in the header to resume or delete a
 session. Deleting a session removes its JSONL session record and associated task
