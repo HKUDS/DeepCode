@@ -747,7 +747,8 @@ Edit `deepcode_config.json` and fill in at least one provider key. Inline string
   "providers": {
     "openai":    { "apiKey": "your_openai_api_key" },
     "anthropic": { "apiKey": "${ANTHROPIC_API_KEY}" },
-    "gemini":    { "apiKey": "" }
+    "gemini":    { "apiKey": "" },
+    "minimax":  { "apiKey": "${MINIMAX_API_KEY}" }
   }
 }
 ```
@@ -1113,7 +1114,7 @@ Edit `nanobot_config.json` — fill in the 3 required fields:
 }
 ```
 
-> **Model choice**: Any model on [openrouter.ai/models](https://openrouter.ai/models). Use `anthropic/claude-sonnet-4-20250514` for English, `minimax/minimax-m2.1` for Chinese.
+> **Model choice**: Any model on [openrouter.ai/models](https://openrouter.ai/models). Use `anthropic/claude-sonnet-4-20250514` for English, `minimax/MiniMax-M3` for Chinese.
 
 ---
 
@@ -1157,7 +1158,7 @@ Now open Feishu → find your bot → send a message!
 |---|---|
 | Feishu bot doesn't respond | Check logs (`./nanobot/run_nanobot.sh logs`), verify `appId`/`appSecret`, ensure app is published with Long Connection mode |
 | Can't connect to DeepCode | Verify `deepcode` container is healthy: `curl http://localhost:8000/health` |
-| Wrong language output | Switch model — `minimax-m2.1` defaults to Chinese, use Claude/GPT for English |
+| Wrong language output | Switch model — `MiniMax-M3` defaults to Chinese, use Claude/GPT for English |
 | Config not taking effect | Just restart: `./nanobot/run_nanobot.sh restart` (no rebuild needed) |
 | Clear chat history | Send `/clear` in chat, or: `docker exec nanobot sh -c 'rm -rf /root/.nanobot/sessions/*.jsonl'` |
 

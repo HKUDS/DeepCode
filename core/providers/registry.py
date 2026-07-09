@@ -141,6 +141,14 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         is_local=True,
     ),
     ProviderSpec(
+        name="minimax",
+        keywords=("minimax", "abab"),
+        env_key="MINIMAX_API_KEY",
+        display_name="MiniMax",
+        backend="openai_compat",
+        default_api_base="https://api.minimax.io/v1",
+    ),
+    ProviderSpec(
         name="ollama",
         keywords=("ollama", "nemotron"),
         env_key="OLLAMA_API_KEY",
