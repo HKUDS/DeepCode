@@ -159,7 +159,7 @@
 
 ## 📰 News
 
-**[2026-07-08] Loop engineering: hand it a goal, it works until the tests pass**
+**[2026-07-10] Loop engineering: hand it a goal, it works until the tests pass**
 
 - **Autonomous, test-driven loops.** `python -m cli.loop_cli "build X with tests" -w ./proj --test-cmd "python -m pytest -q"` drives a goal to completion on its own: each round the agent works, the loop **actually runs your tests** (never trusts the model's word), and — if they fail — the real failure feeds the next round until they pass. A failure ratchet nudges it to change approach when a fix doesn't stick; circuit breakers stop it when the tests go green, the round budget runs out, or it stalls. Progress is durable JSON at `.deepcode/loop/state.json`, with a shadow-git checkpoint per round.
 - **Memory that tidies itself.** A background consolidation pass merges duplicate notes, drops stale ones, and keeps `MEMORY.md` a tight index — so the agent's memory stays sharp over many sessions.
