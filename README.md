@@ -159,11 +159,11 @@
 
 ## 📰 News
 
-**[2026-07-10] Loop engineering: hand it a goal, it works until the tests pass**
+**[2026-07-10] Loop engineering: give it a goal, it works until the tests pass**
 
-- **Autonomous, test-driven loops.** `python -m cli.loop_cli "build X with tests" -w ./proj --test-cmd "python -m pytest -q"` drives a goal to completion on its own: each round the agent works, the loop **actually runs your tests** (never trusts the model's word), and — if they fail — the real failure feeds the next round until they pass. A failure ratchet nudges it to change approach when a fix doesn't stick; circuit breakers stop it when the tests go green, the round budget runs out, or it stalls. Progress is durable JSON at `.deepcode/loop/state.json`, with a shadow-git checkpoint per round.
-- **Memory that tidies itself.** A background consolidation pass merges duplicate notes, drops stale ones, and keeps `MEMORY.md` a tight index — so the agent's memory stays sharp over many sessions.
-- **Put it on a schedule.** `python -m cli.schedule_cli` runs a loop or memory consolidation on an interval with a keepalive gate: it self-wakes and keeps going only while the work isn't done, the last run exited cleanly, and it's under its run cap — no early death, no runaway.
+- **Autonomous coding loops.** Hand DeepCode a goal and a test command — it works, runs your tests, and keeps fixing until they pass, on its own.
+- **Self-tidying memory.** The agent periodically cleans up its own notes, so its memory stays sharp across sessions.
+- **Run it on a schedule.** Kick off a loop or a memory tidy-up on an interval, with sensible stop conditions so it never runs away.
 
 ---
 
