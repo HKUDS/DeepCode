@@ -159,6 +159,14 @@
 
 ## 📰 News
 
+**[2026-07-10] Team mode: split a big feature across parallel workers**
+
+- **A team, not just one agent.** Hand DeepCode a larger feature and it breaks the work into pieces, builds them at the same time, and combines the results — each piece checked against your tests as it goes.
+- **Parallel work that never collides.** Every worker builds on its own isolated copy of your project, so simultaneous changes can't corrupt each other; when two pieces touch the same code, the overlap is flagged instead of silently overwritten.
+- **Only ships when the tests pass.** Once everything is combined, the whole feature runs against your test command — the team reports success only when the tests are actually green.
+
+---
+
 **[2026-07-10] Loop engineering: give it a goal, it works until the tests pass**
 
 - **Autonomous coding loops.** Hand DeepCode a goal and a test command — it works, runs your tests, and keeps fixing until they pass, on its own.
