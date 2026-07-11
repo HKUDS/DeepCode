@@ -44,6 +44,17 @@ exec(command: str, working_dir: str = None) -> str
 
 ## Web Access
 
+### web_search
+Search the web for information. Returns a list of results with titles, URLs, and snippets.
+```
+web_search(query: str, topK: int = 10) -> str
+```
+
+**Notes:**
+- Uses the Metaso search API
+- Results limited to 1-100, defaults to 10
+- Useful for finding current information and researching topics
+
 ### web_fetch
 Fetch and extract main content from a URL.
 ```
