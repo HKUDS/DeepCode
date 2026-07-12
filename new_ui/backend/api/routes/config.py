@@ -25,6 +25,7 @@ from settings import (
     list_available_providers,
 )
 from services.openrouter_models import list_openrouter_models
+from services.requesty_models import list_requesty_models
 from models.requests import LLMModelsUpdateRequest, LLMProviderUpdateRequest
 from models.responses import (
     ConfigResponse,
@@ -67,6 +68,18 @@ async def get_openrouter_models(
 ):
     """Return OpenRouter model ids and metadata for the settings UI."""
     return list_openrouter_models(
+        supported_parameters=supported_parameters,
+        force_refresh=force_refresh,
+    )
+
+
+@router.get("/requesty/models", response_model=OpenRouterModelsResponse)
+async def get_requesty_models(
+    supported_parameters: str | None = None,
+    force_refresh: bool = False,
+):
+    """Return Requesty model ids and metadata for the settings UI."""
+    return list_requesty_models(
         supported_parameters=supported_parameters,
         force_refresh=force_refresh,
     )
