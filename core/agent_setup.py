@@ -54,6 +54,8 @@ def build_agent_session(
     system_prompt: str = SYSTEM_PROMPT,
     approval_callback: Any | None = None,
     ask_user_callback: Any | None = None,
+    allow_spawn: bool = True,
+    injection_callback: Any | None = None,
     streaming: bool = False,
 ) -> tuple[AgentSession, str, Any]:
     """Build an :class:`AgentSession` over ``workspace``.
@@ -61,7 +63,9 @@ def build_agent_session(
     Returns ``(session, resolved_model, permission_engine)``. The workspace is
     created if missing; the permission engine is fenced to it. Pass
     ``ask_user_callback`` from an interactive frontend to give the agent the
-    ``request_user_input`` tool; headless callers omit it.
+    ``request_user_input`` tool; headless callers omit it. ``allow_spawn`` gives
+    the agent the ``spawn_agent`` delegation tool (a spawned sub-agent is built
+    with it False so delegation cannot recurse).
     """
     workspace = os.path.abspath(workspace)
     os.makedirs(workspace, exist_ok=True)
@@ -90,14 +94,37 @@ def build_agent_session(
     addendum = "\n\n".join(a for a in addenda if a)
     full_system_prompt = f"{system_prompt}\n\n{addendum}" if addendum else system_prompt
 
+    # Delegation: one AgentControl per top-level session drives spawn_agent /
+    # wait_agent and feeds sub-agent results back through the injection seam.
+    # A spawned sub-agent is built with allow_spawn=False (no control), capping
+    # delegation depth at one.
+    control = None
+    if allow_spawn:
+        from core.harness.agents import AgentControl
+
+        control = AgentControl(workspace, resolved_model)
+
     session = AgentSession(
         provider,
-        default_coding_tools(workspace, skills=skills, ask_user=ask_user_callback),
+        default_coding_tools(
+            workspace,
+            skills=skills,
+            ask_user=ask_user_callback,
+            agent_control=control,
+        ),
         model=resolved_model,
         system_prompt=full_system_prompt,
         max_iterations=max_iterations,
         permission_checker=engine.evaluate,
         approval_callback=approval_callback,
+        # Top-level session: results from its own sub-agents. Sub-agent session
+        # (no control of its own): an explicit inbox drainer for send_message.
+        injection_callback=control.drain_injections if control else injection_callback,
         streaming=streaming,
     )
+    if control is not None:
+        # `session.history` is a @property (a list), so it must be wrapped in a
+        # callable — passing its value would make fork_turns call a list.
+        control.set_history_provider(lambda: session.history)
+        session._agent_control = control  # for fork_turns wiring + teardown
     return session, resolved_model, engine

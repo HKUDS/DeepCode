@@ -42,7 +42,7 @@ __all__ = [
 ]
 
 
-def default_coding_tools(workspace, *, skills=None, ask_user=None):
+def default_coding_tools(workspace, *, skills=None, ask_user=None, agent_control=None):
     """Build a :class:`ToolRegistry` with the native coding tool set.
 
     read / write / edit / apply_patch / bash / grep / glob / memory / update_plan
@@ -59,11 +59,23 @@ def default_coding_tools(workspace, *, skills=None, ask_user=None):
     ``ask_user``: an optional callback that prompts a human. When provided (an
     interactive frontend), the ``request_user_input`` tool is registered so the
     agent can ask when blocked; headless runs pass none and the tool is absent.
+
+    ``agent_control``: an :class:`~core.harness.agents.control.AgentControl`.
+    When provided (a top-level session), the ``spawn_agent`` + ``wait_agent``
+    delegation tools are registered; a spawned sub-agent gets no control, so
+    delegation cannot recurse.
     """
     from core.agent_runtime.tools.registry import ToolRegistry
     from core.harness.memory import MemoryTool
     from core.harness.skills import SkillTool, discover_skills
     from core.harness.tools.plan import UpdatePlanTool
+    from core.harness.tools.spawn_agent import (
+        InterruptAgentTool,
+        ListAgentsTool,
+        SendMessageTool,
+        SpawnAgentTool,
+        WaitAgentTool,
+    )
     from core.harness.tools.user_input import RequestUserInputTool
 
     registry = ToolRegistry()
@@ -87,6 +99,12 @@ def default_coding_tools(workspace, *, skills=None, ask_user=None):
         tools.append(SkillTool(skill_registry))
     if ask_user is not None:
         tools.append(RequestUserInputTool(ask_user))
+    if agent_control is not None:
+        tools.append(SpawnAgentTool(agent_control))
+        tools.append(WaitAgentTool(agent_control))
+        tools.append(ListAgentsTool(agent_control))
+        tools.append(InterruptAgentTool(agent_control))
+        tools.append(SendMessageTool(agent_control))
     for tool in tools:
         registry.register(tool)
     return registry

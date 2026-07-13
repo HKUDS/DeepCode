@@ -107,6 +107,7 @@ class AgentSession:
         max_iterations: int = _DEFAULT_MAX_ITERATIONS,
         permission_checker: Any | None = None,
         approval_callback: Any | None = None,
+        injection_callback: Any | None = None,
         context_window_tokens: int | None = None,
         streaming: bool = False,
     ) -> None:
@@ -118,6 +119,8 @@ class AgentSession:
         self._max_iterations = max_iterations
         self._permission_checker = permission_checker
         self._approval_callback = approval_callback
+        # Drains delegated sub-agents' results into this turn (see AgentControl).
+        self._injection_callback = injection_callback
         # Context-window budget that arms the runner's compaction ladder
         # (_snip_history / _microcompact). Left unset it stays dormant and a
         # long enough session overflows the model; resolving it from the
@@ -222,6 +225,7 @@ class AgentSession:
             hook=_EventEmittingHook(self._emit, streaming=self._streaming),
             permission_checker=self._permission_checker,
             approval_callback=self._approval_callback,
+            injection_callback=self._injection_callback,
         )
 
         try:
