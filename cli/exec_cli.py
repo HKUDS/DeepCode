@@ -25,7 +25,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.agent_setup import build_agent_session
+from core.agent_setup import DEFAULT_MAX_ITERATIONS, build_agent_session
 from core.events import UserInput, serialize_event
 
 
@@ -94,7 +94,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--model", "-m", default=None, help="Override the model id.")
     parser.add_argument(
-        "--max-iterations", type=int, default=40, help="Max agent turns (default 40)."
+        "--max-iterations",
+        type=int,
+        default=DEFAULT_MAX_ITERATIONS,
+        help=f"Max agent turns, a runaway backstop (default {DEFAULT_MAX_ITERATIONS}).",
     )
     args = parser.parse_args(argv)
     return asyncio.run(_run(args))

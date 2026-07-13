@@ -25,14 +25,24 @@ from core.harness.policy import build_permission_engine
 from core.harness.tools import default_coding_tools
 from core.llm_runtime import get_workflow_provider
 
+# A general coding task can legitimately need many tool-call turns. This is a
+# runaway backstop, not a task budget — the reference agents run effectively
+# unbounded, relying on the model to stop and on context compaction to stay in
+# window; DeepCode's per-turn history snipping already prevents overflow, so we
+# set a high ceiling instead of cutting real work off early.
+DEFAULT_MAX_ITERATIONS = 200
+
 SYSTEM_PROMPT = (
     "You are a coding agent working in a workspace directory. You have tools: "
-    "read, write, edit, apply_patch, bash, grep, glob. Navigate with grep/glob, "
-    "inspect with read, make targeted changes with edit (or write for new "
-    "files), and use apply_patch when one change spans several files or must "
-    "land all-or-nothing. Run commands/tests with bash. After a write, edit, or "
-    "apply_patch, check the tool result for a 'Diagnostics detected' block and "
-    "fix any reported errors. When the task is done, reply with a short summary."
+    "read, write, edit, apply_patch, bash, grep, glob, update_plan. Navigate "
+    "with grep/glob, inspect with read, make targeted changes with edit (or "
+    "write for new files), and use apply_patch when one change spans several "
+    "files or must land all-or-nothing. Run commands/tests with bash. For a "
+    "multi-step task, use update_plan to lay out and track your steps (one "
+    "in_progress at a time), and keep it current as you go. After a write, "
+    "edit, or apply_patch, check the tool result for a 'Diagnostics detected' "
+    "block and fix any reported errors. When the task is done, reply with a "
+    "short summary."
 )
 
 
@@ -40,15 +50,18 @@ def build_agent_session(
     *,
     workspace: str,
     model: str | None = None,
-    max_iterations: int = 40,
+    max_iterations: int = DEFAULT_MAX_ITERATIONS,
     system_prompt: str = SYSTEM_PROMPT,
     approval_callback: Any | None = None,
+    ask_user_callback: Any | None = None,
     streaming: bool = False,
 ) -> tuple[AgentSession, str, Any]:
     """Build an :class:`AgentSession` over ``workspace``.
 
     Returns ``(session, resolved_model, permission_engine)``. The workspace is
-    created if missing; the permission engine is fenced to it.
+    created if missing; the permission engine is fenced to it. Pass
+    ``ask_user_callback`` from an interactive frontend to give the agent the
+    ``request_user_input`` tool; headless callers omit it.
     """
     workspace = os.path.abspath(workspace)
     os.makedirs(workspace, exist_ok=True)
@@ -59,17 +72,27 @@ def build_agent_session(
     security_cfg = getattr(get_runtime().config, "security", None)
     engine = build_permission_engine(security_cfg, cwd=workspace)
 
-    # Memory: project instructions (AGENTS.md) + the persistent memory index
-    # are injected here, the single assembly point, so every frontend gets
-    # them identically. The memory tool itself is in default_coding_tools.
+    # The system prompt is assembled once, here, so every frontend gets the
+    # same behavior: working-style (collaboration mode, keyed off the resolved
+    # permission mode) + memory (AGENTS.md + persistent index) + skills (SKILL.md
+    # playbooks). Skills are discovered once and shared by the preamble and the
+    # `skill` tool so the two never drift.
+    from core.harness.collaboration import collaboration_preamble
     from core.harness.memory import system_preamble
+    from core.harness.skills import discover_skills, skills_preamble
 
-    preamble = system_preamble(workspace)
-    full_system_prompt = f"{system_prompt}\n\n{preamble}" if preamble else system_prompt
+    skills = discover_skills(workspace)
+    addenda = [
+        collaboration_preamble(engine.mode),
+        system_preamble(workspace),
+        skills_preamble(skills),
+    ]
+    addendum = "\n\n".join(a for a in addenda if a)
+    full_system_prompt = f"{system_prompt}\n\n{addendum}" if addendum else system_prompt
 
     session = AgentSession(
         provider,
-        default_coding_tools(workspace),
+        default_coding_tools(workspace, skills=skills, ask_user=ask_user_callback),
         model=resolved_model,
         system_prompt=full_system_prompt,
         max_iterations=max_iterations,

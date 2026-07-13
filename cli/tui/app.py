@@ -32,7 +32,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
 
-from core.agent_setup import build_agent_session
+from core.agent_setup import DEFAULT_MAX_ITERATIONS, build_agent_session
 from cli.tui import commands, theme
 from cli.tui.input import InputReader, expand_file_refs
 from cli.tui.renderer import EventRenderer
@@ -206,7 +206,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workspace", "-w", default=os.getcwd())
     parser.add_argument("--model", "-m", default=None)
     parser.add_argument("--resume", "-r", default=None, help="Session id to resume.")
-    parser.add_argument("--max-iterations", type=int, default=40)
+    parser.add_argument("--max-iterations", type=int, default=DEFAULT_MAX_ITERATIONS)
     args = parser.parse_args(argv)
 
     app = TuiApp(

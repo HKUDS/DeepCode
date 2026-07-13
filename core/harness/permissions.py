@@ -82,8 +82,9 @@ SENSITIVE_PATH_PATTERNS: tuple[str, ...] = (
 # Argument keys inspected to find the "path" a tool touches.
 _PATH_ARG_KEYS = ("file_path", "path", "root", "workspace_path", "target", "filename")
 
-# Tool names that only read state; safe to auto-allow in default mode and
-# never blocked by plan mode. Bare names + common MCP suffixes are matched.
+# Tool names that read state, or are otherwise side-effect-free w.r.t. the
+# workspace and security posture; safe to auto-allow in default mode and never
+# blocked by plan mode. Bare names + common MCP suffixes are matched.
 _READ_ONLY_TOOLS = frozenset(
     {
         "read_file",
@@ -100,6 +101,7 @@ _READ_ONLY_TOOLS = frozenset(
         "list_dir",
         "web_fetch",
         "web_search",
+        "update_plan",  # self-maintained TODO plan — pure session state
     }
 )
 
