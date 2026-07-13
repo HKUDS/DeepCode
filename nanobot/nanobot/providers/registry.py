@@ -80,6 +80,26 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
     ),
+    # Forge: OpenAI-compatible gateway.
+    ProviderSpec(
+        name="forge",
+        keywords=("forge",),
+        env_key="FORGE_API_KEY",
+        display_name="Forge",
+        litellm_prefix="openai",  # route via OpenAI-compatible API
+        skip_prefixes=(),
+        env_extras=(
+            ("OPENAI_API_KEY", "{api_key}"),
+            ("FORGE_API_BASE", "{api_base}"),
+        ),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="forge.tensorblock.co",
+        default_api_base="https://api.forge.tensorblock.co/v1",
+        strip_model_prefix=True,
+        model_overrides=(),
+    ),
     # AiHubMix: global gateway, OpenAI-compatible interface.
     # strip_model_prefix=True: it doesn't understand "anthropic/claude-3",
     # so we strip to bare "claude-3" then re-prefix as "openai/claude-3".

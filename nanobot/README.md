@@ -516,6 +516,7 @@ Config file: `~/.nanobot/config.json`
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
 | `openrouter` | LLM (recommended, access to all models) | [openrouter.ai](https://openrouter.ai) |
+| `forge` | LLM (API gateway, OpenAI-compatible) | [forge.tensorblock.co](https://forge.tensorblock.co) |
 | `anthropic` | LLM (Claude direct) | [console.anthropic.com](https://console.anthropic.com) |
 | `openai` | LLM (GPT direct) | [platform.openai.com](https://platform.openai.com) |
 | `deepseek` | LLM (DeepSeek direct) | [platform.deepseek.com](https://platform.deepseek.com) |
