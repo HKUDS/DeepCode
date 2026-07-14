@@ -74,6 +74,14 @@ class StopOutcome:
     block_reason: str | None = None
 
 
+@dataclass(slots=True)
+class PermissionRequestOutcome:
+    """A hook verdict in the approval path: allow / deny / no verdict (None)."""
+
+    decision: str | None = None  # "allow" | "deny" | None
+    message: str = ""
+
+
 class HooksEngine:
     """Per-session dispatcher over discovered hook handlers."""
 
@@ -172,9 +180,65 @@ class HooksEngine:
             additional_contexts=folded.additional_contexts,
         )
 
-    async def run_stop(self) -> StopOutcome:
-        payload = {"hook_event_name": "Stop"}
+    async def run_stop(self, stop_hook_active: bool = False) -> StopOutcome:
+        payload = {"hook_event_name": "Stop", "stop_hook_active": stop_hook_active}
         folded = await self._dispatch("Stop", None, payload)
+        return StopOutcome(block=folded.block, block_reason=folded.block_reason)
+
+    async def run_permission_request(
+        self, tool_name: str, tool_input: Any, *, tool_use_id: str = ""
+    ) -> PermissionRequestOutcome:
+        payload = {
+            "hook_event_name": "PermissionRequest",
+            "tool_name": tool_name,
+            "tool_input": tool_input,
+            "tool_use_id": tool_use_id,
+        }
+        completions = await self._run_handlers("PermissionRequest", tool_name, payload)
+        # Fold conservatively: any deny wins immediately (declaration order);
+        # otherwise the last allow wins; otherwise no verdict.
+        resolved_allow = False
+        for _order, dec in sorted(completions, key=lambda item: item[0]):
+            if dec.status == "failed":
+                continue
+            if dec.permission == "deny":
+                return PermissionRequestOutcome(
+                    decision="deny", message=dec.block_reason or "denied by hook"
+                )
+            if dec.permission == "allow":
+                resolved_allow = True
+        return PermissionRequestOutcome(decision="allow" if resolved_allow else None)
+
+    # SubagentStart / SubagentStop mirror SessionStart / Stop but for a spawned
+    # sub-agent's own session; the caller passes the sub-agent's id/type as
+    # context so hooks can tell which sub-agent they are running inside.
+
+    async def run_subagent_start(
+        self, agent_id: str, agent_type: str = "subagent", source: str = "startup"
+    ) -> ContextOutcome:
+        payload = {
+            "hook_event_name": "SubagentStart",
+            "source": source,
+            "agent_id": agent_id,
+            "agent_type": agent_type,
+        }
+        folded = await self._dispatch("SubagentStart", source, payload)
+        return ContextOutcome(
+            block=folded.block,
+            block_reason=folded.block_reason,
+            additional_contexts=folded.additional_contexts,
+        )
+
+    async def run_subagent_stop(
+        self, agent_id: str, agent_type: str = "subagent", stop_hook_active: bool = False
+    ) -> StopOutcome:
+        payload = {
+            "hook_event_name": "SubagentStop",
+            "agent_id": agent_id,
+            "agent_type": agent_type,
+            "stop_hook_active": stop_hook_active,
+        }
+        folded = await self._dispatch("SubagentStop", None, payload)
         return StopOutcome(block=folded.block, block_reason=folded.block_reason)
 
     # -- dispatch core ---------------------------------------------------------
@@ -186,12 +250,17 @@ class HooksEngine:
             if h.event_name == event_name and matches_matcher(h.matcher, matcher_input)
         ]
 
-    async def _dispatch(
+    async def _run_handlers(
         self, event_name: str, matcher_input: str | None, payload_fields: dict
-    ) -> _FoldedOutcome:
+    ) -> list[tuple[int, HandlerDecision]]:
+        """Select, execute (concurrently), and return per-handler decisions.
+
+        Returns ``(display_order, decision)`` pairs in completion order — the
+        caller folds them. Empty when no handler matches.
+        """
         selected = self._select(event_name, matcher_input)
         if not selected:
-            return _FoldedOutcome()
+            return []
 
         payload = {
             "session_id": self._session_id,
@@ -201,18 +270,19 @@ class HooksEngine:
             **payload_fields,
         }
         payload_json = json.dumps(payload)
-
-        # Execute concurrently; record completion order for the last-writer rule.
         completions: list[tuple[int, HandlerDecision]] = []
 
         async def _run_one(handler: Handler) -> None:
             result = await run_command(handler, payload_json, self._cwd)
-            decision = parse_handler_output(event_name, result)
-            completions.append((handler.display_order, decision))
+            completions.append((handler.display_order, parse_handler_output(event_name, result)))
 
         await asyncio.gather(*(_run_one(h) for h in selected))
+        return completions
 
-        return self._fold(completions)
+    async def _dispatch(
+        self, event_name: str, matcher_input: str | None, payload_fields: dict
+    ) -> _FoldedOutcome:
+        return self._fold(await self._run_handlers(event_name, matcher_input, payload_fields))
 
     @staticmethod
     def _fold(completions: list[tuple[int, HandlerDecision]]) -> _FoldedOutcome:

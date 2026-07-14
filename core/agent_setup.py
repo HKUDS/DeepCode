@@ -58,6 +58,7 @@ def build_agent_session(
     ask_user_callback: Any | None = None,
     allow_spawn: bool = True,
     injection_callback: Any | None = None,
+    agent_context: tuple[str, str] | None = None,
     streaming: bool = False,
 ) -> tuple[AgentSession, str, Any]:
     """Build an :class:`AgentSession` over ``workspace``.
@@ -139,6 +140,7 @@ def build_agent_session(
         # (no control of its own): an explicit inbox drainer for send_message.
         injection_callback=control.drain_injections if control else injection_callback,
         hooks_engine=hooks_engine,
+        agent_context=agent_context,
         streaming=streaming,
     )
     if control is not None:

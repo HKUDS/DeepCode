@@ -242,6 +242,7 @@ class AgentControl:
                     self._workspace,
                     seed_history=sub.seed_history,
                     inbox_drainer=self._make_inbox_drainer(sub),
+                    agent_id=sub.id,
                 )
             sub.status = _DONE
         except asyncio.CancelledError:
@@ -268,6 +269,7 @@ class AgentControl:
                 tree,
                 seed_history=sub.seed_history,
                 inbox_drainer=self._make_inbox_drainer(sub),
+                agent_id=sub.id,
             )
             async with self._git_lock:
                 merge = wt.merge(sub.id)
@@ -297,6 +299,7 @@ class AgentControl:
         *,
         seed_history: list | None = None,
         inbox_drainer=None,
+        agent_id: str = "subagent",
     ) -> str:
         from core.agent_setup import build_agent_session
         from core.events import UserInput
@@ -306,6 +309,7 @@ class AgentControl:
             model=self._model,
             allow_spawn=False,  # depth cap: sub-agents cannot spawn again
             injection_callback=inbox_drainer,  # receives parent's send_message
+            agent_context=(agent_id, "subagent"),  # fires SubagentStart/Stop hooks
         )
         if seed_history:
             session.load_history(seed_history)  # fork_turns: inherit parent context

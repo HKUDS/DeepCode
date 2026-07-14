@@ -14,6 +14,7 @@ from core.harness.hooks.discovery import Handler, DiscoveryResult, discover_hook
 from core.harness.hooks.engine import (
     ContextOutcome,
     HooksEngine,
+    PermissionRequestOutcome,
     PostToolUseOutcome,
     PreToolUseOutcome,
     StopOutcome,
@@ -28,4 +29,5 @@ __all__ = [
     "PostToolUseOutcome",
     "ContextOutcome",
     "StopOutcome",
+    "PermissionRequestOutcome",
 ]

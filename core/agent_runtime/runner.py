@@ -114,6 +114,16 @@ class AgentRunSpec:
     # result the model reads. Absent (None) means no hooks — zero cost.
     pre_tool_hook: Any | None = None
     post_tool_hook: Any | None = None
+    # PermissionRequest hook (C3.1): fires in the approval path when a tool
+    # needs confirmation ("ask"), before the human approver. A hook verdict
+    # (``.decision`` "allow"/"deny" + ``.message``) short-circuits the prompt;
+    # no verdict falls through to ``approval_callback``.
+    permission_request_hook: Any | None = None
+    # Stop hook (C3.1): fires when the turn would end cleanly. If it asks to
+    # continue (``.block`` with ``.block_reason``), the reason is injected as a
+    # follow-up prompt and the loop keeps going. ``stop_hook_active`` is passed
+    # so a well-behaved hook stops blocking after its first continuation.
+    stop_hook: Any | None = None
 
 
 @dataclass(slots=True)
@@ -276,6 +286,7 @@ class AgentRunner:
         length_recovery_count = 0
         had_injections = False
         injection_cycles = 0
+        stop_hook_active = False  # C3.1: set once a Stop hook has forced a continuation
 
         for iteration in range(spec.max_iterations):
             if spec.should_stop_callback is not None:
@@ -587,6 +598,19 @@ class AgentRunner:
             context.final_content = final_content
             context.stop_reason = stop_reason
             await hook.after_iteration(context)
+            # Stop hook (C3.1): a last chance to keep the turn going. If it asks
+            # to continue, inject its reason as a follow-up and loop again. The
+            # `stop_hook_active` flag lets a well-behaved hook stand down after
+            # one continuation; max_iterations remains the hard backstop.
+            continuation = await self._run_stop_hook(spec, stop_hook_active)
+            if continuation is not None:
+                stop_hook_active = True
+                had_injections = True
+                self._append_injected_messages(
+                    messages, [{"role": "user", "content": continuation}]
+                )
+                await hook.after_iteration(context)
+                continue
             break
         else:
             stop_reason = "max_iterations"
@@ -911,6 +935,23 @@ class AgentRunner:
             return None
 
     @staticmethod
+    async def _run_stop_hook(spec: AgentRunSpec, stop_hook_active: bool) -> str | None:
+        """Run the Stop hook; return a continuation prompt if it wants to keep
+        going (block + reason), else ``None``. A failure is logged, never fatal."""
+        if spec.stop_hook is None:
+            return None
+        try:
+            outcome = await spec.stop_hook(stop_hook_active)
+        except Exception:
+            logger.exception("stop hook failed")
+            return None
+        if outcome is not None and getattr(outcome, "block", False):
+            reason = getattr(outcome, "block_reason", None)
+            if reason and reason.strip():
+                return reason
+        return None
+
+    @staticmethod
     def _compose_hook_context(result: Any, contexts: list[str]) -> Any:
         """Append accumulated hook context to a tool result the model will read."""
         if not contexts:
@@ -955,7 +996,19 @@ class AgentRunner:
         if value == "deny":
             return reason or "denied by policy"
 
-        # ask
+        # ask — a PermissionRequest hook may resolve it before the human is
+        # prompted: a hook "deny" blocks, "allow" permits, no verdict falls
+        # through to the approver below.
+        if spec.permission_request_hook is not None:
+            verdict = await self._call_tool_hook(
+                spec.permission_request_hook, tool_call.name, tool_call.arguments
+            )
+            if verdict is not None:
+                if getattr(verdict, "decision", None) == "deny":
+                    return getattr(verdict, "message", None) or reason or "denied by hook"
+                if getattr(verdict, "decision", None) == "allow":
+                    return None
+
         approver = spec.approval_callback
         if approver is None:
             return (

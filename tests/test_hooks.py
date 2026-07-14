@@ -440,7 +440,7 @@ def test_runner_no_hooks_is_unchanged():
 # -- session wiring (SessionStart / UserPromptSubmit) ----------------------
 
 
-def _session(hooks_engine):
+def _session(hooks_engine, agent_context=None):
     from core.events.session import AgentSession
 
     return AgentSession(
@@ -448,6 +448,7 @@ def _session(hooks_engine):
         tools=_FakeTools(),
         model="m",
         hooks_engine=hooks_engine,
+        agent_context=agent_context,
         context_window_tokens=8000,
     )
 
@@ -472,12 +473,256 @@ def test_session_start_and_prompt_context_injected():
     assert contexts2 == ["PROMPT CTX"]
 
 
+# -- SubagentStart / SubagentStop (#86) ------------------------------------
+
+
+def test_subagent_start_payload_and_plaintext_context(tmp_path):
+    capture = tmp_path / "p.json"
+    eng = _engine([_handler("SubagentStart", f"cat > {capture}; echo sub-context")])
+    res = asyncio.run(eng.run_subagent_start("worker-7", "subagent"))
+    assert res.additional_contexts == ["sub-context"]  # plain-text context works
+    p = json.loads(capture.read_text())
+    assert p["hook_event_name"] == "SubagentStart"
+    assert p["agent_id"] == "worker-7" and p["agent_type"] == "subagent"
+
+
+def test_subagent_stop_block_keeps_it_going():
+    out = json.dumps({"decision": "block", "reason": "keep working"})
+    eng = _engine([_handler("SubagentStop", f"echo '{out}'")])
+    res = asyncio.run(eng.run_subagent_stop("w1"))
+    assert res.block is True and res.block_reason == "keep working"
+
+
+def test_subagent_session_fires_subagent_start_not_session_start():
+    s = json.dumps({"hookSpecificOutput": {"additionalContext": "SESSION"}})
+    sub = json.dumps({"hookSpecificOutput": {"additionalContext": "SUBAGENT"}})
+    eng = _engine(
+        [
+            _handler("SessionStart", f"echo '{s}'"),
+            _handler("SubagentStart", f"echo '{sub}'"),
+        ]
+    )
+    session = _session(eng, agent_context=("w1", "subagent"))
+    contexts: list[str] = []
+    asyncio.run(session._run_prompt_hooks("go", contexts))
+    # A sub-agent session uses SubagentStart, never the main SessionStart.
+    assert contexts == ["SUBAGENT"]
+
+
+def test_main_session_still_fires_session_start_not_subagent():
+    s = json.dumps({"hookSpecificOutput": {"additionalContext": "SESSION"}})
+    sub = json.dumps({"hookSpecificOutput": {"additionalContext": "SUBAGENT"}})
+    eng = _engine(
+        [
+            _handler("SessionStart", f"echo '{s}'"),
+            _handler("SubagentStart", f"echo '{sub}'"),
+        ]
+    )
+    session = _session(eng)  # no agent_context → main session
+    contexts: list[str] = []
+    asyncio.run(session._run_prompt_hooks("go", contexts))
+    assert contexts == ["SESSION"]
+
+
 def test_user_prompt_submit_blocks_turn():
     out = json.dumps({"decision": "block", "reason": "not allowed"})
     eng = _engine([_handler("UserPromptSubmit", f"echo '{out}'")])
     session = _session(eng)
     blocked = asyncio.run(session._run_prompt_hooks("bad", []))
     assert blocked == "not allowed"
+
+
+# -- PermissionRequest (#88) -----------------------------------------------
+
+
+def test_permission_request_deny_wins_over_allow():
+    deny = json.dumps({"hookSpecificOutput": {"decision": {"behavior": "deny", "message": "policy X"}}})
+    allow = json.dumps({"hookSpecificOutput": {"decision": {"behavior": "allow"}}})
+    eng = _engine(
+        [
+            _handler("PermissionRequest", f"echo '{allow}'", matcher="*", order=0),
+            _handler("PermissionRequest", f"echo '{deny}'", matcher="*", order=1),
+        ]
+    )
+    res = asyncio.run(eng.run_permission_request("bash", {"command": "x"}))
+    assert res.decision == "deny" and res.message == "policy X"
+
+
+def test_permission_request_allow_and_no_verdict():
+    allow = json.dumps({"hookSpecificOutput": {"decision": {"behavior": "allow"}}})
+    eng = _engine([_handler("PermissionRequest", f"echo '{allow}'", matcher="*")])
+    assert asyncio.run(eng.run_permission_request("bash", {})).decision == "allow"
+    eng2 = _engine([_handler("PermissionRequest", "echo '{}'", matcher="*")])
+    assert asyncio.run(eng2.run_permission_request("bash", {})).decision is None
+
+
+def test_permission_request_exit2_denies_with_stderr():
+    eng = _engine([_handler("PermissionRequest", "echo blocked-by-policy >&2; exit 2", matcher="*")])
+    res = asyncio.run(eng.run_permission_request("bash", {}))
+    assert res.decision == "deny" and res.message == "blocked-by-policy"
+
+
+class _Scripted:
+    """Provider returning a fixed sequence of responses (repeats the last)."""
+
+    def __init__(self, responses):
+        self.responses = responses
+        self.calls = 0
+
+    def get_default_model(self):
+        return "fake-model"
+
+    async def chat_with_retry(self, **kwargs):
+        index = min(self.calls, len(self.responses) - 1)
+        self.calls += 1
+        return self.responses[index]
+
+
+def _recording_registry(tool_name, sink):
+    """A real ToolRegistry with one tool that records the params it ran with."""
+    from core.agent_runtime.tools.base import Tool, tool_parameters
+    from core.agent_runtime.tools.registry import ToolRegistry
+
+    @tool_parameters(
+        {"type": "object", "properties": {"command": {"type": "string"}}, "required": []}
+    )
+    class _Rec(Tool):
+        @property
+        def name(self):
+            return tool_name
+
+        @property
+        def description(self):
+            return "recording tool"
+
+        async def execute(self, **kwargs):
+            sink.append((tool_name, kwargs))
+            return f"ran {tool_name}"
+
+    reg = ToolRegistry()
+    reg.register(_Rec())
+    return reg
+
+
+def _run_spec(**overrides):
+    from core.agent_runtime.runner import AgentRunSpec
+    from core.agent_runtime.tools.registry import ToolRegistry
+
+    base = {
+        "initial_messages": [{"role": "user", "content": "go"}],
+        "tools": ToolRegistry(),
+        "model": "fake-model",
+        "max_iterations": 6,
+        "max_tool_result_chars": 100000,
+    }
+    base.update(overrides)
+    return AgentRunSpec(**base)
+
+
+def test_runner_permission_request_hook_denies_an_ask():
+    from core.agent_runtime.runner import AgentRunner
+    from core.providers.base import LLMResponse, ToolCallRequest
+
+    deny = json.dumps({"hookSpecificOutput": {"decision": {"behavior": "deny", "message": "hook says no"}}})
+    eng = _engine([_handler("PermissionRequest", f"echo '{deny}'", matcher="*")])
+    provider = _Scripted(
+        [
+            LLMResponse(
+                content="",
+                tool_calls=[ToolCallRequest(id="c1", name="bash", arguments={"command": "x"})],
+                finish_reason="tool_calls",
+            ),
+            LLMResponse(content="ok, backing off", finish_reason="stop"),
+        ]
+    )
+
+    async def ask(name, args):
+        return ("ask", "confirm?")
+
+    sink = []
+    spec = _run_spec(
+        tools=_recording_registry("bash", sink),
+        permission_checker=ask,
+        permission_request_hook=eng.run_permission_request,
+    )
+    result = asyncio.run(AgentRunner(provider).run(spec))
+    tool_msgs = [str(m["content"]) for m in result.messages if m.get("role") == "tool"]
+    assert any("hook says no" in c for c in tool_msgs)
+    assert sink == []  # denied → the tool never ran
+
+
+def test_runner_permission_request_hook_allows_an_ask():
+    from core.agent_runtime.runner import AgentRunner
+    from core.providers.base import LLMResponse, ToolCallRequest
+
+    allow = json.dumps({"hookSpecificOutput": {"decision": {"behavior": "allow"}}})
+    eng = _engine([_handler("PermissionRequest", f"echo '{allow}'", matcher="*")])
+    provider = _Scripted(
+        [
+            LLMResponse(
+                content="",
+                tool_calls=[ToolCallRequest(id="c1", name="bash", arguments={"command": "ls"})],
+                finish_reason="tool_calls",
+            ),
+            LLMResponse(content="done", finish_reason="stop"),
+        ]
+    )
+
+    async def ask(name, args):
+        return ("ask", "confirm?")
+
+    sink = []
+    spec = _run_spec(
+        tools=_recording_registry("bash", sink),
+        permission_checker=ask,
+        permission_request_hook=eng.run_permission_request,
+    )
+    asyncio.run(AgentRunner(provider).run(spec))
+    assert sink == [("bash", {"command": "ls"})]  # allowed → the tool ran
+
+
+# -- Stop hook wired into the loop (#87) -----------------------------------
+
+
+def test_stop_payload_carries_stop_hook_active(tmp_path):
+    capture = tmp_path / "p.json"
+    eng = _engine([_handler("Stop", f"cat > {capture}")])
+    asyncio.run(eng.run_stop(stop_hook_active=True))
+    p = json.loads(capture.read_text())
+    assert p["hook_event_name"] == "Stop" and p["stop_hook_active"] is True
+
+
+def test_runner_stop_hook_forces_continuation_then_stands_down():
+    from core.agent_runtime.runner import AgentRunner
+    from core.harness.hooks.engine import StopOutcome
+    from core.providers.base import LLMResponse
+
+    provider = _Scripted([LLMResponse(content="done", finish_reason="stop")])
+    fired = {"n": 0}
+
+    async def stop_hook(stop_hook_active):
+        fired["n"] += 1
+        if stop_hook_active:
+            return StopOutcome(block=False)
+        return StopOutcome(block=True, block_reason="you forgot to write tests")
+
+    result = asyncio.run(AgentRunner(provider).run(_run_spec(stop_hook=stop_hook)))
+    assert provider.calls == 2  # continued exactly once
+    assert result.final_content == "done"
+    assert any(
+        m.get("role") == "user" and "forgot to write tests" in str(m["content"])
+        for m in result.messages
+    )
+    assert fired["n"] == 2  # blocked once, then stood down (stop_hook_active)
+
+
+def test_runner_no_stop_hook_ends_normally():
+    from core.agent_runtime.runner import AgentRunner
+    from core.providers.base import LLMResponse
+
+    provider = _Scripted([LLMResponse(content="done", finish_reason="stop")])
+    result = asyncio.run(AgentRunner(provider).run(_run_spec()))
+    assert provider.calls == 1 and result.final_content == "done"
 
 
 def test_blocked_prompt_ends_turn_without_calling_the_model():

@@ -19,6 +19,7 @@ Design:
 from __future__ import annotations
 
 import asyncio
+from functools import partial
 from typing import Any
 
 from loguru import logger
@@ -111,6 +112,7 @@ class AgentSession:
         approval_callback: Any | None = None,
         injection_callback: Any | None = None,
         hooks_engine: Any | None = None,
+        agent_context: tuple[str, str] | None = None,
         context_window_tokens: int | None = None,
         streaming: bool = False,
     ) -> None:
@@ -129,6 +131,9 @@ class AgentSession:
         # no hooks are configured, so the whole feature is dormant at zero cost.
         self._hooks_engine = hooks_engine
         self._session_started = False
+        # When this session is a spawned sub-agent, (agent_id, agent_type) — its
+        # lifecycle fires SubagentStart/SubagentStop instead of SessionStart/Stop.
+        self._agent_context = agent_context
         # Context-window budget that arms the runner's compaction ladder
         # (_snip_history / _microcompact). Left unset it stays dormant and a
         # long enough session overflows the model; resolving it from the
@@ -210,6 +215,26 @@ class AgentSession:
     async def submit_envelope(self, submission: Submission) -> None:
         await self.submit(submission.op)
 
+    async def _run_start_hook(self):
+        """Run SessionStart, or SubagentStart when this is a sub-agent session.
+
+        Returns the start outcome (context + optional block) or ``None`` if the
+        event isn't configured / the hook failed (failures are logged, not fatal).
+        """
+        engine = self._hooks_engine
+        try:
+            if self._agent_context is not None:
+                if not engine.has_event("SubagentStart"):
+                    return None
+                agent_id, agent_type = self._agent_context
+                return await engine.run_subagent_start(agent_id, agent_type)
+            if not engine.has_event("SessionStart"):
+                return None
+            return await engine.run_session_start("startup")
+        except Exception:
+            logger.exception("start hook failed")
+            return None
+
     async def _run_prompt_hooks(self, text: str, hook_contexts: list[str]) -> str | None:
         """Run SessionStart (once) + UserPromptSubmit hooks.
 
@@ -220,14 +245,11 @@ class AgentSession:
         engine = self._hooks_engine
         if not self._session_started:
             self._session_started = True
-            if engine.has_event("SessionStart"):
-                try:
-                    out = await engine.run_session_start("startup")
-                    hook_contexts.extend(out.additional_contexts)
-                    if out.block:
-                        return out.block_reason or "Session blocked by a SessionStart hook."
-                except Exception:
-                    logger.exception("SessionStart hook failed")
+            out = await self._run_start_hook()
+            if out is not None:
+                hook_contexts.extend(out.additional_contexts)
+                if out.block:
+                    return out.block_reason or "Session blocked by a start hook."
         if engine.has_event("UserPromptSubmit"):
             try:
                 out = await engine.run_user_prompt_submit(text)
@@ -268,12 +290,22 @@ class AgentSession:
             initial.append({"role": "system", "content": ctx})
         initial.extend(self._history)
 
-        pre_tool_hook = post_tool_hook = None
+        pre_tool_hook = post_tool_hook = permission_request_hook = stop_hook = None
         if self._hooks_engine is not None:
             if self._hooks_engine.has_event("PreToolUse"):
                 pre_tool_hook = self._hooks_engine.run_pre_tool_use
             if self._hooks_engine.has_event("PostToolUse"):
                 post_tool_hook = self._hooks_engine.run_post_tool_use
+            if self._hooks_engine.has_event("PermissionRequest"):
+                permission_request_hook = self._hooks_engine.run_permission_request
+            if self._agent_context is not None:
+                if self._hooks_engine.has_event("SubagentStop"):
+                    agent_id, agent_type = self._agent_context
+                    stop_hook = partial(
+                        self._hooks_engine.run_subagent_stop, agent_id, agent_type
+                    )
+            elif self._hooks_engine.has_event("Stop"):
+                stop_hook = self._hooks_engine.run_stop
 
         spec = AgentRunSpec(
             initial_messages=initial,
@@ -288,6 +320,8 @@ class AgentSession:
             injection_callback=self._injection_callback,
             pre_tool_hook=pre_tool_hook,
             post_tool_hook=post_tool_hook,
+            permission_request_hook=permission_request_hook,
+            stop_hook=stop_hook,
         )
 
         try:

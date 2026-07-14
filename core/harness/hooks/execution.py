@@ -44,6 +44,7 @@ class HandlerDecision:
     block_reason: str | None = None
     additional_context: str | None = None
     updated_input: dict[str, Any] | None = None
+    permission: str | None = None  # PermissionRequest: "allow" | "deny"
     system_message: str | None = None
     invalid_reason: str | None = None
     error: str | None = None
@@ -208,19 +209,43 @@ def _decode_additional_context_only(obj: dict) -> HandlerDecision:
     return dec
 
 
+def _decode_permission_request(obj: dict) -> HandlerDecision:
+    """PermissionRequest: ``hookSpecificOutput.decision.behavior`` allow/deny."""
+    dec = HandlerDecision()
+    hook_specific = obj.get("hookSpecificOutput")
+    decision = hook_specific.get("decision") if isinstance(hook_specific, dict) else None
+    if not isinstance(decision, dict):
+        return dec
+    behavior = decision.get("behavior")
+    if behavior == "allow":
+        dec.permission = "allow"
+    elif behavior == "deny":
+        dec.permission = "deny"
+        dec.block_reason = (
+            _trimmed_reason(decision.get("message")) or "PermissionRequest hook denied approval"
+        )
+    return dec
+
+
 _DECODERS = {
     "PreToolUse": _decode_pre_tool_use,
     "PostToolUse": lambda o: _block_from_decision(o, "PostToolUse"),
     "UserPromptSubmit": lambda o: _block_from_decision(o, "UserPromptSubmit"),
     "Stop": lambda o: _block_from_decision(o, "Stop"),
+    "SubagentStop": lambda o: _block_from_decision(o, "SubagentStop"),
     "SessionStart": _decode_additional_context_only,
+    "SubagentStart": _decode_additional_context_only,
+    "PermissionRequest": _decode_permission_request,
 }
+
+# Events where a bare exit-2 (with a stderr reason) means "block".
+_EXIT2_BLOCK_EVENTS = frozenset({"PreToolUse", "PostToolUse", "UserPromptSubmit", "Stop", "SubagentStop"})
 
 # Events whose plain-text (non-JSON) stdout is injected verbatim as context —
 # the canonical ``echo "some context"`` hook. Other events ignore plain stdout.
-_TEXT_CONTEXT_EVENTS = frozenset({"SessionStart", "UserPromptSubmit"})
+_TEXT_CONTEXT_EVENTS = frozenset({"SessionStart", "SubagentStart", "UserPromptSubmit"})
 # Events where ``continue: false`` halts the turn (mapped to a block/stop).
-_STOP_ON_DISCONTINUE_EVENTS = frozenset({"SessionStart", "UserPromptSubmit"})
+_STOP_ON_DISCONTINUE_EVENTS = frozenset({"SessionStart", "SubagentStart", "UserPromptSubmit"})
 # Events where ``continue: false`` is unsupported and fails the handler.
 _REJECT_DISCONTINUE_EVENTS = frozenset({"PreToolUse", "PermissionRequest"})
 
@@ -237,7 +262,12 @@ def parse_handler_output(event_name: str, result: CommandResult) -> HandlerDecis
                 status="failed",
                 error=f"{event_name} hook exited with code 2 without a stderr reason",
             )
-        return HandlerDecision(status="blocked", block=True, block_reason=reason)
+        if event_name == "PermissionRequest":
+            return HandlerDecision(status="blocked", permission="deny", block_reason=reason)
+        if event_name in _EXIT2_BLOCK_EVENTS:
+            return HandlerDecision(status="blocked", block=True, block_reason=reason)
+        # SessionStart / SubagentStart have no block channel — exit 2 is a failure.
+        return HandlerDecision(status="failed", error=f"{event_name} hook exited with code 2")
 
     if result.exit_code != 0:
         code = result.exit_code
