@@ -103,6 +103,17 @@ class AgentRunSpec:
     # ``ask`` is resolved by ``approval_callback`` if provided, else denied.
     permission_checker: Any | None = None
     approval_callback: Any | None = None
+    # External-command hook seams (C3). Optional async callables invoked around
+    # each tool call, mirroring ``permission_checker``:
+    #   ``pre_tool_hook(tool_name, arguments)`` -> outcome with ``.block`` /
+    #     ``.block_reason`` / ``.additional_contexts`` / ``.updated_input``.
+    #   ``post_tool_hook(tool_name, arguments, result)`` -> outcome with
+    #     ``.block`` / ``.block_reason`` / ``.additional_contexts``.
+    # A blocking PreToolUse becomes an errors-as-data result (the tool never
+    # runs); ``updated_input`` rewrites the call; contexts are appended to the
+    # result the model reads. Absent (None) means no hooks — zero cost.
+    pre_tool_hook: Any | None = None
+    post_tool_hook: Any | None = None
 
 
 @dataclass(slots=True)
@@ -767,6 +778,28 @@ class AgentRunner:
                 return lookup_error + _HINT, event, RuntimeError(lookup_error)
             return lookup_error + _HINT, event, None
 
+        # PreToolUse hook (C3). Fires before the permission gate — it may block
+        # the call (errors-as-data, tool never runs), rewrite its arguments, or
+        # attach context the model reads with the result.
+        pre_contexts: list[str] = []
+        if spec.pre_tool_hook is not None:
+            pre = await self._call_tool_hook(
+                spec.pre_tool_hook, tool_call.name, tool_call.arguments
+            )
+            if pre is not None:
+                if getattr(pre, "block", False):
+                    reason = getattr(pre, "block_reason", None) or "blocked by hook"
+                    event = {
+                        "name": tool_call.name,
+                        "status": "denied",
+                        "detail": reason.replace("\n", " ").strip()[:120],
+                    }
+                    return f"Error: blocked by PreToolUse hook: {reason}" + _HINT, event, None
+                updated = getattr(pre, "updated_input", None)
+                if isinstance(updated, dict):
+                    tool_call.arguments = updated
+                pre_contexts = list(getattr(pre, "additional_contexts", None) or [])
+
         # Permission gate (P1 security base). Denials and unresolved asks
         # become errors-as-data results the model can read and react to,
         # never exceptions — a blocked tool must not abort the run.
@@ -777,7 +810,10 @@ class AgentRunner:
                 "status": "denied",
                 "detail": denial.replace("\n", " ").strip()[:120],
             }
-            return f"Error: permission denied: {denial}" + _HINT, event, None
+            result = self._compose_hook_context(
+                f"Error: permission denied: {denial}" + _HINT, pre_contexts
+            )
+            return result, event, None
 
         prepare_call = getattr(spec.tools, "prepare_call", None)
         tool, params, prep_error = None, tool_call.arguments, None
@@ -794,8 +830,9 @@ class AgentRunner:
                 "status": "error",
                 "detail": prep_error.split(": ", 1)[-1][:120],
             }
+            # Tool never ran (bad args) — surface pre-hook context, no PostToolUse.
             return (
-                prep_error + _HINT,
+                self._compose_hook_context(prep_error + _HINT, pre_contexts),
                 event,
                 RuntimeError(prep_error) if spec.fail_on_tool_error else None,
             )
@@ -812,9 +849,10 @@ class AgentRunner:
                 "status": "error",
                 "detail": str(exc),
             }
-            if spec.fail_on_tool_error:
-                return f"Error: {type(exc).__name__}: {exc}", event, exc
-            return f"Error: {type(exc).__name__}: {exc}", event, None
+            message = f"Error: {type(exc).__name__}: {exc}"
+            return await self._finish_tool(
+                spec, tool_call, message, event, exc if spec.fail_on_tool_error else None, pre_contexts
+            )
 
         if isinstance(result, str) and result.startswith("Error"):
             event = {
@@ -822,9 +860,14 @@ class AgentRunner:
                 "status": "error",
                 "detail": result.replace("\n", " ").strip()[:120],
             }
-            if spec.fail_on_tool_error:
-                return result + _HINT, event, RuntimeError(result)
-            return result + _HINT, event, None
+            return await self._finish_tool(
+                spec,
+                tool_call,
+                result + _HINT,
+                event,
+                RuntimeError(result) if spec.fail_on_tool_error else None,
+                pre_contexts,
+            )
 
         detail = "" if result is None else str(result)
         detail = detail.replace("\n", " ").strip()
@@ -832,7 +875,48 @@ class AgentRunner:
             detail = "(empty)"
         elif len(detail) > 120:
             detail = detail[:120] + "..."
-        return result, {"name": tool_call.name, "status": "ok", "detail": detail}, None
+        event = {"name": tool_call.name, "status": "ok", "detail": detail}
+        return await self._finish_tool(spec, tool_call, result, event, None, pre_contexts)
+
+    async def _finish_tool(
+        self,
+        spec: AgentRunSpec,
+        tool_call: ToolCallRequest,
+        result: Any,
+        event: dict[str, str],
+        error: BaseException | None,
+        pre_contexts: list[str],
+    ) -> tuple[Any, dict[str, str], BaseException | None]:
+        """Apply PostToolUse (the tool ran) and fold hook context into the result."""
+        contexts = list(pre_contexts)
+        if spec.post_tool_hook is not None:
+            post = await self._call_tool_hook(
+                spec.post_tool_hook, tool_call.name, tool_call.arguments, result
+            )
+            if post is not None:
+                contexts.extend(getattr(post, "additional_contexts", None) or [])
+                if getattr(post, "block", False):
+                    reason = getattr(post, "block_reason", None)
+                    if reason:
+                        contexts.append(f"PostToolUse hook feedback: {reason}")
+        return self._compose_hook_context(result, contexts), event, error
+
+    @staticmethod
+    async def _call_tool_hook(hook: Any, *args: Any) -> Any:
+        """Invoke a tool hook; a hook failure is logged and ignored, never fatal."""
+        try:
+            return await hook(*args)
+        except Exception:
+            logger.exception("tool hook failed")
+            return None
+
+    @staticmethod
+    def _compose_hook_context(result: Any, contexts: list[str]) -> Any:
+        """Append accumulated hook context to a tool result the model will read."""
+        if not contexts:
+            return result
+        joined = "\n\n".join(f"[hook] {c}" for c in contexts)
+        return f"{result}\n\n{joined}"
 
     @staticmethod
     def _decision_value(decision: Any) -> str:

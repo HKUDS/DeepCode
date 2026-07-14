@@ -21,6 +21,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from loguru import logger
+
 from core.agent_runtime.hook import AgentHook, AgentHookContext
 from core.agent_runtime.runner import AgentRunner, AgentRunSpec
 from core.agent_runtime.tools.registry import ToolRegistry
@@ -108,6 +110,7 @@ class AgentSession:
         permission_checker: Any | None = None,
         approval_callback: Any | None = None,
         injection_callback: Any | None = None,
+        hooks_engine: Any | None = None,
         context_window_tokens: int | None = None,
         streaming: bool = False,
     ) -> None:
@@ -121,6 +124,11 @@ class AgentSession:
         self._approval_callback = approval_callback
         # Drains delegated sub-agents' results into this turn (see AgentControl).
         self._injection_callback = injection_callback
+        # External-command hooks (C3). Fires SessionStart (once) + UserPromptSubmit
+        # (each prompt) here, and PreToolUse/PostToolUse in the runner. None when
+        # no hooks are configured, so the whole feature is dormant at zero cost.
+        self._hooks_engine = hooks_engine
+        self._session_started = False
         # Context-window budget that arms the runner's compaction ladder
         # (_snip_history / _microcompact). Left unset it stays dormant and a
         # long enough session overflows the model; resolving it from the
@@ -202,18 +210,70 @@ class AgentSession:
     async def submit_envelope(self, submission: Submission) -> None:
         await self.submit(submission.op)
 
+    async def _run_prompt_hooks(self, text: str, hook_contexts: list[str]) -> str | None:
+        """Run SessionStart (once) + UserPromptSubmit hooks.
+
+        Appends any injected context to ``hook_contexts`` and returns a block
+        message if UserPromptSubmit blocked the turn, else ``None``. A hook
+        failure is logged and ignored — hooks never crash a turn.
+        """
+        engine = self._hooks_engine
+        if not self._session_started:
+            self._session_started = True
+            if engine.has_event("SessionStart"):
+                try:
+                    out = await engine.run_session_start("startup")
+                    hook_contexts.extend(out.additional_contexts)
+                    if out.block:
+                        return out.block_reason or "Session blocked by a SessionStart hook."
+                except Exception:
+                    logger.exception("SessionStart hook failed")
+        if engine.has_event("UserPromptSubmit"):
+            try:
+                out = await engine.run_user_prompt_submit(text)
+            except Exception:
+                logger.exception("UserPromptSubmit hook failed")
+                return None
+            hook_contexts.extend(out.additional_contexts)
+            if out.block:
+                return out.block_reason or "Prompt blocked by a UserPromptSubmit hook."
+        return None
+
     async def _run_user_input(self, text: str) -> None:
         if self._busy:
             self._emit(ErrorEvent(message="a turn is already in progress"))
             return
         self._busy = True
         self._emit(TurnStarted())
+
+        # External-command hooks (C3): SessionStart (once) + UserPromptSubmit
+        # (every prompt). UserPromptSubmit may block the turn outright or inject
+        # context; SessionStart injects session context. Injected context rides
+        # as system messages ahead of history so the model reads it this turn.
+        hook_contexts: list[str] = []
+        if self._hooks_engine is not None:
+            blocked = await self._run_prompt_hooks(text, hook_contexts)
+            if blocked is not None:
+                self._history.append({"role": "user", "content": text})
+                self._emit(TaskComplete(final_text=blocked, stop_reason="blocked_by_hook"))
+                self._busy = False
+                return
+
         self._history.append({"role": "user", "content": text})
 
         initial: list[dict[str, Any]] = []
         if self._system_prompt:
             initial.append({"role": "system", "content": self._system_prompt})
+        for ctx in hook_contexts:
+            initial.append({"role": "system", "content": ctx})
         initial.extend(self._history)
+
+        pre_tool_hook = post_tool_hook = None
+        if self._hooks_engine is not None:
+            if self._hooks_engine.has_event("PreToolUse"):
+                pre_tool_hook = self._hooks_engine.run_pre_tool_use
+            if self._hooks_engine.has_event("PostToolUse"):
+                post_tool_hook = self._hooks_engine.run_post_tool_use
 
         spec = AgentRunSpec(
             initial_messages=initial,
@@ -226,6 +286,8 @@ class AgentSession:
             permission_checker=self._permission_checker,
             approval_callback=self._approval_callback,
             injection_callback=self._injection_callback,
+            pre_tool_hook=pre_tool_hook,
+            post_tool_hook=post_tool_hook,
         )
 
         try:

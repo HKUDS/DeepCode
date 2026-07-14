@@ -19,6 +19,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from loguru import logger
+
 from core.compat import get_runtime
 from core.events import AgentSession
 from core.harness.policy import build_permission_engine
@@ -104,6 +106,22 @@ def build_agent_session(
 
         control = AgentControl(workspace, resolved_model)
 
+    # External-command hooks (C3): discover Claude-Code-compatible hooks.json in
+    # the workspace. None when no hooks are configured (the common case), so the
+    # feature stays dormant at zero cost. Warnings surface misconfigured hooks.
+    import uuid
+
+    from core.harness.hooks import HooksEngine
+
+    hooks_engine, hook_warnings = HooksEngine.discover(
+        workspace,
+        session_id=uuid.uuid4().hex,
+        model=resolved_model,
+        permission_mode=getattr(engine.mode, "value", str(engine.mode)),
+    )
+    for warning in hook_warnings:
+        logger.warning("hooks config: {}", warning)
+
     session = AgentSession(
         provider,
         default_coding_tools(
@@ -120,6 +138,7 @@ def build_agent_session(
         # Top-level session: results from its own sub-agents. Sub-agent session
         # (no control of its own): an explicit inbox drainer for send_message.
         injection_callback=control.drain_injections if control else injection_callback,
+        hooks_engine=hooks_engine,
         streaming=streaming,
     )
     if control is not None:
