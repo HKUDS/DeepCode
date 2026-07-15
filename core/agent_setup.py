@@ -48,6 +48,47 @@ SYSTEM_PROMPT = (
 )
 
 
+# Tools callable from inside code mode (C5b): file / shell / search — the ones
+# worth batching in a loop. Meta tools (plan, delegation, hooks, memory) are
+# intentionally not exposed to the code.
+_CODE_MODE_TOOLS = frozenset({"read", "write", "edit", "apply_patch", "bash", "grep", "glob"})
+
+
+def _wire_code_mode(tool_registry: Any, workspace: str, engine: Any, hooks_engine: Any) -> None:
+    """Register the ``code`` tool (C5b): a Python program that orchestrates the
+    file/shell/search tools in one turn. Each tool call the code makes is run in
+    the parent and governed exactly like a normal tool call — PreToolUse hook →
+    permission → execute → PostToolUse hook — so code mode never bypasses policy.
+    An ``ask`` decision has no human in the code loop, so it fails closed (deny).
+    """
+    from core.harness.code_mode import CodeModeTool, api_from_definitions
+
+    api = api_from_definitions(tool_registry.get_definitions(), _CODE_MODE_TOOLS)
+    if not api:
+        return
+
+    async def _execute(tool_name: str, arguments: dict[str, Any]) -> str:
+        args = dict(arguments)
+        if hooks_engine is not None and hooks_engine.has_event("PreToolUse"):
+            pre = await hooks_engine.run_pre_tool_use(tool_name, args)
+            if pre.block:
+                return f"Error: blocked by PreToolUse hook: {pre.block_reason}"
+            if pre.updated_input:
+                args = pre.updated_input
+        decision, reason = engine.evaluate(tool_name, args)
+        if getattr(decision, "value", decision) != "allow":
+            return f"Error: permission denied: {reason}"
+        result = await tool_registry.execute(tool_name, args)
+        if hooks_engine is not None and hooks_engine.has_event("PostToolUse"):
+            post = await hooks_engine.run_post_tool_use(tool_name, args, result)
+            if post.additional_contexts:
+                joined = "\n".join(f"[hook] {c}" for c in post.additional_contexts)
+                result = f"{result}\n\n{joined}"
+        return result
+
+    tool_registry.register(CodeModeTool(workspace, _execute, api))
+
+
 def build_agent_session(
     *,
     workspace: str,
@@ -123,14 +164,17 @@ def build_agent_session(
     for warning in hook_warnings:
         logger.warning("hooks config: {}", warning)
 
+    tool_registry = default_coding_tools(
+        workspace,
+        skills=skills,
+        ask_user=ask_user_callback,
+        agent_control=control,
+    )
+    _wire_code_mode(tool_registry, workspace, engine, hooks_engine)
+
     session = AgentSession(
         provider,
-        default_coding_tools(
-            workspace,
-            skills=skills,
-            ask_user=ask_user_callback,
-            agent_control=control,
-        ),
+        tool_registry,
         model=resolved_model,
         system_prompt=full_system_prompt,
         max_iterations=max_iterations,
