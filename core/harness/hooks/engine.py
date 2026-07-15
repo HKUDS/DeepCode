@@ -185,6 +185,19 @@ class HooksEngine:
         folded = await self._dispatch("Stop", None, payload)
         return StopOutcome(block=folded.block, block_reason=folded.block_reason)
 
+    async def run_pre_compact(self, trigger: str = "auto") -> ContextOutcome:
+        """Before a summarization pass. A ``block`` (continue:false) asks to skip
+        compaction this turn; the matcher runs against ``trigger`` (auto/manual)."""
+        payload = {"hook_event_name": "PreCompact", "trigger": trigger}
+        folded = await self._dispatch("PreCompact", trigger, payload)
+        return ContextOutcome(block=folded.block, block_reason=folded.block_reason)
+
+    async def run_post_compact(self, trigger: str = "auto") -> ContextOutcome:
+        """After a summarization pass — a notification hook (state saved, etc.)."""
+        payload = {"hook_event_name": "PostCompact", "trigger": trigger}
+        await self._dispatch("PostCompact", trigger, payload)
+        return ContextOutcome()
+
     async def run_permission_request(
         self, tool_name: str, tool_input: Any, *, tool_use_id: str = ""
     ) -> PermissionRequestOutcome:

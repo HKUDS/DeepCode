@@ -52,6 +52,30 @@ _MAX_INJECTION_CYCLES = 5
 _SNIP_SAFETY_BUFFER = 1024
 _MICROCOMPACT_KEEP_RECENT = 10
 _MICROCOMPACT_MIN_CHARS = 500
+
+# Summarization-based compaction (C4a). When the prompt nears the context
+# budget, a model call condenses the conversation into a handoff summary that
+# replaces old turns — semantic compaction, unlike the drop-based _snip_history
+# fallback. The compacted history is returned and persisted by the session, so
+# it survives across turns and is not re-summarized every step.
+_COMPACT_TRIGGER_FRACTION = 0.9  # summarize once the prompt exceeds 90% of budget
+_COMPACT_KEEP_USER_CHARS = 60_000  # recent user messages kept verbatim before the summary
+_SUMMARIZATION_PROMPT = (
+    "You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff "
+    "summary for another agent that will resume this task.\n\n"
+    "Include:\n"
+    "- Current progress and key decisions made\n"
+    "- Important context, constraints, or user preferences\n"
+    "- What remains to be done (clear next steps)\n"
+    "- Any critical data, examples, file paths, or references needed to continue\n\n"
+    "Be concise, structured, and focused on helping the next agent seamlessly "
+    "continue the work."
+)
+_SUMMARY_PREFIX = (
+    "An earlier agent worked on this task and produced the summary below of its "
+    "progress and the state of the tools it used. Build on this work and avoid "
+    "duplicating it. Here is the summary:"
+)
 _COMPACTABLE_TOOLS = frozenset(
     {
         "read_file",
@@ -119,6 +143,12 @@ class AgentRunSpec:
     # (``.decision`` "allow"/"deny" + ``.message``) short-circuits the prompt;
     # no verdict falls through to ``approval_callback``.
     permission_request_hook: Any | None = None
+    # Compaction hooks (C4a). ``pre_compact_hook(trigger)`` fires before a
+    # summarization pass — a ``.block`` outcome skips compaction this turn;
+    # ``post_compact_hook(trigger)`` fires after. Both optional; ``trigger`` is
+    # "auto" (only automatic compaction exists so far).
+    pre_compact_hook: Any | None = None
+    post_compact_hook: Any | None = None
     # Stop hook (C3.1): fires when the turn would end cleanly. If it asks to
     # continue (``.block`` with ``.block_reason``), the reason is injected as a
     # follow-up prompt and the loop keeps going. ``stop_hook_active`` is passed
@@ -306,6 +336,12 @@ class AgentRunner:
                         stop_requested,
                     )
                     break
+
+            # Summarization-based compaction (C4a): when the running history
+            # nears the budget, replace old turns with a model summary. Persisted
+            # in `messages` so later iterations (and turns) reuse it.
+            messages = await self._maybe_compact(spec, messages)
+
             try:
                 messages_for_model = self._drop_orphan_tool_results(messages)
                 messages_for_model = self._backfill_missing_tool_results(
@@ -1210,14 +1246,14 @@ class AgentRunner:
                 updated[idx]["content"] = normalized
         return updated
 
-    def _snip_history(
-        self,
-        spec: AgentRunSpec,
-        messages: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        if not messages or not spec.context_window_tokens:
-            return messages
+    def _context_budget(self, spec: AgentRunSpec) -> int | None:
+        """Token budget for the model prompt (context window − output − buffer).
 
+        ``None`` when unknown/non-positive. Shared by ``_snip_history`` and
+        ``_maybe_compact`` so both agree on when the prompt is "too big".
+        """
+        if not spec.context_window_tokens:
+            return None
         provider_max_tokens = getattr(
             getattr(self.provider, "generation", None), "max_tokens", 4096
         )
@@ -1229,7 +1265,115 @@ class AgentRunner:
         budget = spec.context_block_limit or (
             spec.context_window_tokens - max_output - _SNIP_SAFETY_BUFFER
         )
-        if budget <= 0:
+        return budget if budget > 0 else None
+
+    async def _maybe_compact(
+        self, spec: AgentRunSpec, messages: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Summarize the conversation into a handoff summary when it nears the
+        context budget (C4a) — semantic compaction that replaces old turns,
+        unlike the drop-based ``_snip_history`` fallback that still follows.
+
+        PreCompact/PostCompact hooks fire around it; a PreCompact ``block`` skips
+        compaction this turn. Any failure returns the history unchanged so the
+        drop-based fallback still keeps the prompt in-window. The compacted list
+        is persisted by the session, so it survives across turns.
+        """
+        budget = self._context_budget(spec)
+        if budget is None:
+            return messages
+        # Need a few real turns before a summary is worth a model round-trip.
+        if sum(1 for m in messages if m.get("role") != "system") < 4:
+            return messages
+        try:
+            estimate, _ = estimate_prompt_tokens_chain(
+                self.provider, spec.model, messages, spec.tools.get_definitions()
+            )
+        except Exception:
+            return messages
+        if estimate <= int(budget * _COMPACT_TRIGGER_FRACTION):
+            return messages
+
+        if spec.pre_compact_hook is not None:
+            pre = await self._call_tool_hook(spec.pre_compact_hook, "auto")
+            if pre is not None and getattr(pre, "block", False):
+                return messages  # a PreCompact hook aborted compaction this turn
+
+        summary = await self._summarize(spec, messages)
+        if not summary:
+            return messages  # summarization failed → leave it to _snip_history
+
+        compacted = self._build_compacted_history(messages, summary)
+        if spec.post_compact_hook is not None:
+            await self._call_tool_hook(spec.post_compact_hook, "auto")
+        logger.info(
+            "Compacted context for {}: {} → {} messages (est {} > {}·{:.0%} budget)",
+            spec.session_key or "default",
+            len(messages),
+            len(compacted),
+            estimate,
+            budget,
+            _COMPACT_TRIGGER_FRACTION,
+        )
+        return compacted
+
+    async def _summarize(
+        self, spec: AgentRunSpec, messages: list[dict[str, Any]]
+    ) -> str | None:
+        """Ask the model for a handoff summary of ``messages`` (no tools)."""
+        request = list(messages) + [{"role": "user", "content": _SUMMARIZATION_PROMPT}]
+        # Fit the summarization request itself within budget, and keep it valid.
+        request = self._snip_history(spec, request)
+        request = self._drop_orphan_tool_results(request)
+        request = self._backfill_missing_tool_results(request)
+        kwargs = self._build_request_kwargs(spec, request, tools=None)
+        try:
+            response = await self.provider.chat_with_retry(**kwargs)
+        except Exception:
+            logger.exception("compaction summarization call failed")
+            return None
+        if getattr(response, "finish_reason", None) == "error":
+            return None
+        content = getattr(response, "content", None)
+        return content.strip() if isinstance(content, str) and content.strip() else None
+
+    @staticmethod
+    def _build_compacted_history(
+        messages: list[dict[str, Any]], summary: str
+    ) -> list[dict[str, Any]]:
+        """Replacement history: system messages + recent user messages (verbatim,
+        within a char budget) + the summary as a final user message. Assistant
+        and tool turns are dropped — the summary stands in for them."""
+        system = [dict(m) for m in messages if m.get("role") == "system"]
+        non_system = [m for m in messages if m.get("role") != "system"]
+        kept_users: list[dict[str, Any]] = []
+        remaining = _COMPACT_KEEP_USER_CHARS
+        for message in reversed(non_system):
+            if message.get("role") != "user":
+                continue
+            content = message.get("content")
+            if not isinstance(content, str):
+                continue
+            if len(content) > remaining:
+                if remaining > 0:
+                    kept_users.append({"role": "user", "content": content[-remaining:]})
+                break
+            kept_users.append({"role": "user", "content": content})
+            remaining -= len(content)
+        kept_users.reverse()
+        summary_message = {"role": "user", "content": f"{_SUMMARY_PREFIX}\n{summary}"}
+        return system + kept_users + [summary_message]
+
+    def _snip_history(
+        self,
+        spec: AgentRunSpec,
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if not messages or not spec.context_window_tokens:
+            return messages
+
+        budget = self._context_budget(spec)
+        if budget is None:
             return messages
 
         estimate, _ = estimate_prompt_tokens_chain(

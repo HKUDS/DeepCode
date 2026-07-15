@@ -244,8 +244,11 @@ _EXIT2_BLOCK_EVENTS = frozenset({"PreToolUse", "PostToolUse", "UserPromptSubmit"
 # Events whose plain-text (non-JSON) stdout is injected verbatim as context —
 # the canonical ``echo "some context"`` hook. Other events ignore plain stdout.
 _TEXT_CONTEXT_EVENTS = frozenset({"SessionStart", "SubagentStart", "UserPromptSubmit"})
-# Events where ``continue: false`` halts the turn (mapped to a block/stop).
-_STOP_ON_DISCONTINUE_EVENTS = frozenset({"SessionStart", "SubagentStart", "UserPromptSubmit"})
+# Events where ``continue: false`` halts the action (turn stop, or "skip
+# compaction" for PreCompact) — mapped to a block.
+_STOP_ON_DISCONTINUE_EVENTS = frozenset(
+    {"SessionStart", "SubagentStart", "UserPromptSubmit", "PreCompact"}
+)
 # Events where ``continue: false`` is unsupported and fails the handler.
 _REJECT_DISCONTINUE_EVENTS = frozenset({"PreToolUse", "PermissionRequest"})
 

@@ -291,6 +291,7 @@ class AgentSession:
         initial.extend(self._history)
 
         pre_tool_hook = post_tool_hook = permission_request_hook = stop_hook = None
+        pre_compact_hook = post_compact_hook = None
         if self._hooks_engine is not None:
             if self._hooks_engine.has_event("PreToolUse"):
                 pre_tool_hook = self._hooks_engine.run_pre_tool_use
@@ -298,6 +299,10 @@ class AgentSession:
                 post_tool_hook = self._hooks_engine.run_post_tool_use
             if self._hooks_engine.has_event("PermissionRequest"):
                 permission_request_hook = self._hooks_engine.run_permission_request
+            if self._hooks_engine.has_event("PreCompact"):
+                pre_compact_hook = self._hooks_engine.run_pre_compact
+            if self._hooks_engine.has_event("PostCompact"):
+                post_compact_hook = self._hooks_engine.run_post_compact
             if self._agent_context is not None:
                 if self._hooks_engine.has_event("SubagentStop"):
                     agent_id, agent_type = self._agent_context
@@ -322,6 +327,8 @@ class AgentSession:
             post_tool_hook=post_tool_hook,
             permission_request_hook=permission_request_hook,
             stop_hook=stop_hook,
+            pre_compact_hook=pre_compact_hook,
+            post_compact_hook=post_compact_hook,
         )
 
         try:

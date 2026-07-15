@@ -681,6 +681,34 @@ def test_runner_permission_request_hook_allows_an_ask():
     assert sink == [("bash", {"command": "ls"})]  # allowed → the tool ran
 
 
+# -- PreCompact / PostCompact (#89 / C4a) ----------------------------------
+
+
+def test_pre_compact_hook_block_skips_and_payload(tmp_path):
+    capture = tmp_path / "p.json"
+    out = json.dumps({"continue": False})
+    eng = _engine([_handler("PreCompact", f"cat > {capture}; echo '{out}'")])
+    res = asyncio.run(eng.run_pre_compact("auto"))
+    assert res.block is True  # continue:false → skip compaction
+    p = json.loads(capture.read_text())
+    assert p["hook_event_name"] == "PreCompact" and p["trigger"] == "auto"
+
+
+def test_pre_compact_matcher_matches_trigger():
+    out = json.dumps({"continue": False})
+    eng = _engine([_handler("PreCompact", f"echo '{out}'", matcher="manual")])
+    assert asyncio.run(eng.run_pre_compact("manual")).block is True
+    assert asyncio.run(eng.run_pre_compact("auto")).block is False  # matcher misses
+
+
+def test_post_compact_hook_fires_with_trigger(tmp_path):
+    capture = tmp_path / "p.json"
+    eng = _engine([_handler("PostCompact", f"cat > {capture}")])
+    asyncio.run(eng.run_post_compact("auto"))
+    p = json.loads(capture.read_text())
+    assert p["hook_event_name"] == "PostCompact" and p["trigger"] == "auto"
+
+
 # -- Stop hook wired into the loop (#87) -----------------------------------
 
 

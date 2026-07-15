@@ -38,19 +38,26 @@ def test_wrap_returns_runnable_argv(tmp_path):
     assert wrapped.backend in ("seatbelt", "bwrap", "none")
 
 
-def test_seatbelt_profile_grants_only_workspace_writes(tmp_path):
+def test_seatbelt_profile_is_deny_default_and_grants_workspace_writes(tmp_path):
     policy = SandboxPolicy.for_workspace(tmp_path)
     profile = _seatbelt_profile(policy)
-    assert "(deny file-write*)" in profile
+    # C4b: closed-by-default (deny everything), not an allow-default write-fence.
+    assert "(deny default)" in profile
+    assert "(allow default)" not in profile
+    assert "(allow file-read*)" in profile  # reads still broad
     assert (
         f'(allow file-write* (subpath "{os.path.abspath(str(tmp_path))}"))' in profile
     )
-    assert "(deny network*)" in profile  # network denied by default
+    # Under deny-default, no network allows means network is denied.
+    assert "network-outbound" not in profile
 
 
 def test_seatbelt_profile_network_toggle(tmp_path):
     policy = SandboxPolicy.for_workspace(tmp_path, allow_network=True)
-    assert "(deny network*)" not in _seatbelt_profile(policy)
+    # Network is re-granted only when the policy allows it.
+    assert "(allow network-outbound)" in _seatbelt_profile(policy)
+    off = SandboxPolicy.for_workspace(tmp_path, allow_network=False)
+    assert "network-outbound" not in _seatbelt_profile(off)
 
 
 def test_none_backend_is_flagged(monkeypatch, tmp_path):
