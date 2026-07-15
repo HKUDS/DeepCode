@@ -33,6 +33,8 @@ from rich.markup import escape
 from rich.panel import Panel
 
 from core.agent_setup import DEFAULT_MAX_ITERATIONS, build_agent_session
+from cli.config_errors import format_config_error
+from core.config import ConfigError
 from cli.tui import commands, theme
 from cli.tui.input import InputReader, expand_file_refs
 from cli.tui.renderer import EventRenderer
@@ -209,12 +211,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-iterations", type=int, default=DEFAULT_MAX_ITERATIONS)
     args = parser.parse_args(argv)
 
-    app = TuiApp(
-        workspace=args.workspace,
-        model=args.model,
-        max_iterations=args.max_iterations,
-        resume_id=args.resume,
-    )
+    try:
+        app = TuiApp(
+            workspace=args.workspace,
+            model=args.model,
+            max_iterations=args.max_iterations,
+            resume_id=args.resume,
+        )
+    except ConfigError as exc:
+        print(format_config_error(exc), file=sys.stderr)
+        return 1
     return asyncio.run(app.repl())
 
 

@@ -26,6 +26,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.agent_setup import DEFAULT_MAX_ITERATIONS, build_agent_session
+from cli.config_errors import format_config_error
+from core.config import ConfigError
 from core.events import UserInput, serialize_event
 
 
@@ -48,11 +50,15 @@ def _emit_human(event) -> None:
 
 
 async def _run(args: argparse.Namespace) -> int:
-    session, model, engine = build_agent_session(
-        workspace=args.workspace,
-        model=args.model,
-        max_iterations=args.max_iterations,
-    )
+    try:
+        session, model, engine = build_agent_session(
+            workspace=args.workspace,
+            model=args.model,
+            max_iterations=args.max_iterations,
+        )
+    except ConfigError as exc:
+        print(format_config_error(exc), file=sys.stderr, flush=True)
+        return 1
     workspace = os.path.abspath(args.workspace)
 
     if not args.json:

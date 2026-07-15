@@ -469,6 +469,17 @@ class DeepCodeConfig(BaseSettings):
 # ---------------------------------------------------------------------------
 
 
+class ConfigError(ValueError):
+    """A configuration problem the user must fix — no provider matches the
+    model, a required ``apiKey`` is missing, etc.
+
+    Subclasses :class:`ValueError` so existing ``except ValueError`` handlers
+    and tests keep working, while CLI entrypoints can catch it specifically to
+    print a clean, actionable message (pointing at ``deepcode init``) instead
+    of a traceback.
+    """
+
+
 def _resolve_workspace_path(start: Path | None = None) -> Path:
     """Find the project root by looking for ``deepcode_config.json`` upwards."""
     here = (start or Path.cwd()).resolve()
@@ -592,7 +603,7 @@ def _resolve_spec_for_phase(
     settings = config.resolve_phase(phase)
     chosen_model = (model_override or settings.model or "").strip()
     if not chosen_model:
-        raise ValueError(f"No model configured for phase '{phase}'")
+        raise ConfigError(f"No model configured for phase '{phase}'")
 
     forced = (provider_override or settings.provider or "auto").lower()
     if forced != "auto":
@@ -627,7 +638,7 @@ def make_llm_provider(
         config, phase, provider_override=provider_name, model_override=model
     )
     if spec is None:
-        raise ValueError(
+        raise ConfigError(
             f"Could not match a provider for model '{chosen_model}' (phase '{phase}'). "
             "Set agents.defaults.provider or fill in the matching providers.<name>.apiKey."
         )
@@ -639,7 +650,7 @@ def make_llm_provider(
 
     needs_key = not (spec.is_oauth or spec.is_local or spec.is_direct)
     if needs_key and not api_key:
-        raise ValueError(
+        raise ConfigError(
             f"Provider '{spec.name}' (phase '{phase}') requires providers.{spec.name}.apiKey "
             "in deepcode_config.json"
         )
@@ -695,6 +706,7 @@ __all__ = [
     "ProvidersConfig",
     "ResolvedAgentSettings",
     "ToolsConfig",
+    "ConfigError",
     "DEEPCODE_HOME_ENV",
     "WorkspaceConfig",
     "deepcode_home",
