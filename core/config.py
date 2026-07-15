@@ -1,10 +1,14 @@
-"""DeepCode runtime configuration (single JSON file, nanobot-style).
+"""DeepCode runtime configuration (layered JSON, home base + project override).
 
-This module is the single source of truth for DeepCode's runtime settings.
-A user keeps everything in one ``deepcode_config.json`` next to the project
-root (or any directory above the current working directory): provider keys,
-phase-specific models, MCP servers, workspace, document segmentation, and
-logger options all live in the same file.
+This module is the single source of truth for DeepCode's runtime settings:
+provider keys, phase-specific models, MCP servers, workspace, document
+segmentation, and logger options, all in ``deepcode_config.json``.
+
+Resolution mirrors Codex / Claude Code so ``deepcode`` runs in *any* directory:
+a user-level base at ``deepcode_home()`` (``$DEEPCODE_HOME`` or ``~/.deepcode``,
+cwd-independent — this is where provider keys live) is deep-merged with an
+optional project-level file walked up from the cwd, which overrides the base
+key by key. An explicit ``config_path`` bypasses the layering.
 
 The schema mirrors ``nanobot.config.schema`` (camelCase keys, Pydantic
 ``BaseModel`` per section) and is extended with DeepCode-specific blocks
@@ -473,8 +477,54 @@ def _resolve_workspace_path(start: Path | None = None) -> Path:
 
 
 def default_config_path() -> Path:
-    """Return the resolved default ``deepcode_config.json`` location."""
+    """The project-level ``deepcode_config.json`` (walked up from the cwd)."""
     return _resolve_workspace_path() / _DEFAULT_CONFIG_FILENAME
+
+
+def deepcode_home() -> Path:
+    """The fixed user config directory, independent of the cwd.
+
+    ``$DEEPCODE_HOME`` if set, else ``~/.deepcode``. This is where a user keeps
+    one config (with provider keys) so ``deepcode`` runs in *any* directory —
+    the same idea as Codex's ``CODEX_HOME`` / Claude Code's ``~/.claude``.
+    """
+    env = os.environ.get("DEEPCODE_HOME")
+    return (Path(env).expanduser() if env else Path.home() / ".deepcode").resolve()
+
+
+def home_config_path() -> Path:
+    """The user-level (home) ``deepcode_config.json`` — the base config layer."""
+    return deepcode_home() / _DEFAULT_CONFIG_FILENAME
+
+
+def _load_raw(path: Path) -> dict[str, Any]:
+    """Read one config file into a dict; ``{}`` when it is absent."""
+    if not path.exists():
+        logger.debug("deepcode_config.json not found at {}; skipping layer", path)
+        return {}
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            data = json.load(fh) or {}
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid JSON in {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"Top-level of {path} must be a JSON object (got {type(data).__name__})"
+        )
+    return data
+
+
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Recursively merge ``override`` onto ``base``; ``override`` wins. Nested
+    objects merge key-by-key so a project layer can override one setting without
+    dropping the rest of the base (e.g. keep home's provider keys, swap a model)."""
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
 
 
 def _resolve_env_refs(value: Any, *, path: str = "") -> Any:
@@ -506,29 +556,19 @@ def _resolve_env_refs(value: Any, *, path: str = "") -> Any:
 def load_config(config_path: str | Path | None = None) -> DeepCodeConfig:
     """Load and parse ``deepcode_config.json``.
 
-    When ``config_path`` is ``None`` the loader walks up from the current
-    working directory looking for ``deepcode_config.json``. When the file is
-    absent, defaults are returned (no provider keys, no MCP servers) so the
-    process can still boot for diagnostic commands.
+    With an explicit ``config_path`` that single file is used. Otherwise the
+    config is layered like Codex / Claude Code: the user-level base at
+    ``deepcode_home()/deepcode_config.json`` (always readable, so ``deepcode``
+    works in any directory) with a project-level file — walked up from the cwd
+    — deep-merged on top (project overrides the base, key by key). When neither
+    exists, defaults are returned so the process still boots for diagnostics.
     """
-    if config_path is None:
-        resolved = _resolve_workspace_path() / _DEFAULT_CONFIG_FILENAME
+    if config_path is not None:
+        raw = _load_raw(Path(config_path).expanduser().resolve())
     else:
-        resolved = Path(config_path).expanduser().resolve()
-
-    raw: dict[str, Any] = {}
-    if resolved.exists():
-        try:
-            with resolved.open("r", encoding="utf-8") as fh:
-                raw = json.load(fh) or {}
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"Invalid JSON in {resolved}: {exc}") from exc
-        if not isinstance(raw, dict):
-            raise ValueError(
-                f"Top-level of {resolved} must be a JSON object (got {type(raw).__name__})"
-            )
-    else:
-        logger.debug("deepcode_config.json not found at {}; using defaults", resolved)
+        base = _load_raw(home_config_path())  # user-level, cwd-independent
+        project = _load_raw(default_config_path())  # cwd-scoped override
+        raw = _deep_merge(base, project)
 
     raw = _resolve_env_refs(raw)
     return DeepCodeConfig.model_validate(raw)
@@ -654,7 +694,9 @@ __all__ = [
     "ResolvedAgentSettings",
     "ToolsConfig",
     "WorkspaceConfig",
+    "deepcode_home",
     "default_config_path",
+    "home_config_path",
     "load_config",
     "make_llm_provider",
 ]

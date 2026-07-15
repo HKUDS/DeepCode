@@ -2,9 +2,11 @@
 
 Two layers, aligned with Claude Code (DEEPCODE_V2_MASTER_PLAN.md P2-L5d(c)):
 
-1. **Project instructions** — an ``AGENTS.md`` / ``DEEPCODE.md`` / ``CLAUDE.md``
-   at the workspace root, authored by the user and injected verbatim into the
-   system prompt. Standing guidance the agent should always honor.
+1. **Project instructions** — ``AGENTS.md`` / ``DEEPCODE.md`` / ``CLAUDE.md``
+   discovered from the enclosing repo root down to the workspace (so a nested
+   subdirectory inherits the project's root instructions), plus a user-global
+   file (``~/.deepcode/AGENTS.md`` or ``~/.claude/CLAUDE.md``). Injected verbatim
+   into the system prompt as standing guidance the agent should always honor.
 
 2. **Persistent memory** — ``<workspace>/.deepcode/memory/``, which the agent
    reads and writes through the :class:`MemoryTool`. ``MEMORY.md`` is the
@@ -29,6 +31,12 @@ from core.agent_runtime.tools.base import Tool, tool_parameters
 _MEMORY_SUBDIR = ".deepcode/memory"
 _INDEX_FILE = "MEMORY.md"
 _PROJECT_FILES = ("AGENTS.md", "DEEPCODE.md", "CLAUDE.md")
+# Markers that identify the enclosing project root when the workspace is a
+# subdirectory (mirrors the reference agent walking up to the repo root).
+_PROJECT_ROOT_MARKERS = (".git",)
+# User-level standing instructions that apply across every project (lowest
+# precedence). Native first, then Claude Code interop.
+_USER_GLOBAL_FILES = ((".deepcode", "AGENTS.md"), (".claude", "CLAUDE.md"))
 _MAX_INJECT_CHARS = 8000  # keep the preamble bounded; the tool reads the rest
 
 
@@ -44,15 +52,62 @@ def _read_capped(path: Path, cap: int) -> str:
     return text[:cap] + "\n…[truncated]" if len(text) > cap else text
 
 
+def _find_project_root(start: Path) -> Path | None:
+    """The nearest ancestor of ``start`` (inclusive) holding a project marker
+    (``.git``) — i.e. the enclosing repo root, or ``None`` if there is none."""
+    for directory in (start, *start.parents):
+        if any((directory / marker).exists() for marker in _PROJECT_ROOT_MARKERS):
+            return directory
+    return None
+
+
 def project_instructions(workspace: str | Path) -> str:
-    """Return the first project-instructions file found at the workspace root."""
-    root = Path(workspace)
-    for name in _PROJECT_FILES:
-        candidate = root / name
+    """Project-instruction files from the repo root down to the workspace.
+
+    Mirrors the reference agent's AGENTS.md discovery: find the enclosing repo
+    root, then read the first matching instructions file in each directory from
+    the root down to the workspace, so a monorepo-root file and a nearer
+    subdirectory one both apply (nearest last, highest precedence). When the
+    workspace is not inside a repo, only the workspace directory is read.
+    """
+    workspace = Path(workspace).resolve()
+    root = _find_project_root(workspace)
+    if root is None or root == workspace:
+        search_dirs = [workspace]
+    else:
+        chain, cursor = [workspace], workspace
+        while cursor != root and cursor.parent != cursor:
+            cursor = cursor.parent
+            chain.append(cursor)
+        search_dirs = list(reversed(chain))  # root first → workspace last
+
+    blocks: list[str] = []
+    remaining = _MAX_INJECT_CHARS
+    for directory in search_dirs:
+        for name in _PROJECT_FILES:
+            candidate = directory / name
+            if candidate.is_file():
+                body = _read_capped(candidate, remaining).strip()
+                if body:
+                    label = name if directory == workspace else f"{directory}/{name}"
+                    blocks.append(f"## Project instructions (from {label})\n\n{body}")
+                    remaining -= len(body)
+                break  # one file per directory: AGENTS.md > DEEPCODE.md > CLAUDE.md
+        if remaining <= 0:
+            break
+    return "\n\n".join(blocks)
+
+
+def user_global_instructions(home: str | Path | None = None) -> str:
+    """User-level standing instructions that apply across every project
+    (``~/.deepcode/AGENTS.md`` or ``~/.claude/CLAUDE.md``) — lowest precedence."""
+    base = Path(home) if home is not None else Path.home()
+    for subdir, name in _USER_GLOBAL_FILES:
+        candidate = base / subdir / name
         if candidate.is_file():
-            body = _read_capped(candidate, _MAX_INJECT_CHARS)
-            if body.strip():
-                return f"## Project instructions (from {name})\n\n{body.strip()}"
+            body = _read_capped(candidate, _MAX_INJECT_CHARS).strip()
+            if body:
+                return f"## User instructions (from ~/{subdir}/{name})\n\n{body}"
     return ""
 
 
@@ -76,10 +131,19 @@ _MEMORY_USAGE = (
 )
 
 
-def system_preamble(workspace: str | Path) -> str:
+def system_preamble(workspace: str | Path, home: str | Path | None = None) -> str:
     """The memory addendum to append to the system prompt (may be empty of
-    content but always states the memory tool exists)."""
-    parts = [project_instructions(workspace), memory_index(workspace), _MEMORY_USAGE]
+    content but always states the memory tool exists).
+
+    Precedence, lowest to highest: user-global instructions, project
+    instructions (repo root → workspace), then the persistent memory index.
+    """
+    parts = [
+        user_global_instructions(home),
+        project_instructions(workspace),
+        memory_index(workspace),
+        _MEMORY_USAGE,
+    ]
     return "\n\n".join(p for p in parts if p)
 
 
