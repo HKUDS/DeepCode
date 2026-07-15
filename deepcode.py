@@ -461,6 +461,12 @@ def main():
             print_banner()
             launch_paper_test(paper_name, fast_mode)
             return
+        elif sys.argv[1] == "init":
+            # One-time setup: create the user-level config base (~/.deepcode) so
+            # `deepcode` runs in any directory. Cross-platform (Win/mac/Linux).
+            from cli.init_config import run as init_run
+
+            raise SystemExit(init_run(sys.argv[2:]))
         elif sys.argv[1] == "mcp":
             # Expose DeepCode as an MCP server over stdio (no banner — stdout is
             # the JSON-RPC channel).
@@ -482,6 +488,7 @@ def main():
                         "",
                         "Usage:",
                         row("deepcode", "Interactive coding agent (TUI, default)"),
+                        row("deepcode init", "Set up ~/.deepcode so deepcode runs anywhere"),
                         row("deepcode --local", "Launch the web UI locally (Python + Node.js)"),
                         row("deepcode test <paper>", "Test paper reproduction"),
                         row("deepcode test <paper> --fast", "Test paper (fast mode)"),

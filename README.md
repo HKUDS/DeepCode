@@ -656,9 +656,8 @@ Choose one of the following installation methods:
 # Install DeepCode package directly
 pip install deepcode-hku
 
-# Download the unified configuration template
-curl -O https://raw.githubusercontent.com/HKUDS/DeepCode/main/deepcode_config.json.example
-cp deepcode_config.json.example deepcode_config.json
+# One-time setup: create ~/.deepcode/deepcode_config.json (then add a key)
+deepcode init
 ```
 
 #### Development Installation (From Source)
@@ -714,7 +713,34 @@ immediately on next launch — no reinstall needed.
 
 ### Step 2: Configuration
 
-> The following configuration applies to **all installation methods** (pip, UV, source). Everything lives in **one** file: `deepcode_config.json` (single source of truth).
+> The following configuration applies to **all installation methods** (pip, UV, source). Everything lives in a single `deepcode_config.json` file.
+
+#### Where the config lives — and how to run `deepcode` from any directory
+
+DeepCode resolves its config in two layers, the same way Codex and Claude Code do:
+
+| Layer | Location | Role |
+|-------|----------|------|
+| **User base** | `~/.deepcode/deepcode_config.json` (or `$DEEPCODE_HOME`) | Read from **any** working directory. Keep your provider keys here. |
+| **Project override** | `deepcode_config.json` in the current directory (or any parent) | Optional. Deep-merged on top of the base, overriding it key by key. |
+
+Run the one-time setup and you can launch `deepcode` anywhere:
+
+```bash
+deepcode init      # creates ~/.deepcode/deepcode_config.json
+```
+
+`deepcode init` is a single cross-platform command (Windows, macOS, Linux). Run
+from a checkout that already has a `deepcode_config.json`, it lifts that config —
+keys and all — into the user base; run elsewhere, it drops the template there for
+you to fill in. It never overwrites an existing base (use `--force` to reseed,
+which keeps a `.bak`), and on Unix it locks the file to `600`. To relocate the
+base, set `DEEPCODE_HOME` (`export DEEPCODE_HOME=...` on macOS/Linux,
+`setx DEEPCODE_HOME ...` on Windows).
+
+> If you prefer to keep the config only next to a specific project, skip
+> `deepcode init` and just create `deepcode_config.json` in that directory — it
+> is picked up whenever you launch from there.
 
 #### API Keys *(required)*
 

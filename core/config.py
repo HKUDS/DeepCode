@@ -50,6 +50,8 @@ from core.providers.registry import (
 
 
 _DEFAULT_CONFIG_FILENAME = "deepcode_config.json"
+# Env var that relocates the user-level config base (cf. Codex's CODEX_HOME).
+DEEPCODE_HOME_ENV = "DEEPCODE_HOME"
 _ENV_REF_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
@@ -488,7 +490,7 @@ def deepcode_home() -> Path:
     one config (with provider keys) so ``deepcode`` runs in *any* directory —
     the same idea as Codex's ``CODEX_HOME`` / Claude Code's ``~/.claude``.
     """
-    env = os.environ.get("DEEPCODE_HOME")
+    env = os.environ.get(DEEPCODE_HOME_ENV)
     return (Path(env).expanduser() if env else Path.home() / ".deepcode").resolve()
 
 
@@ -693,6 +695,7 @@ __all__ = [
     "ProvidersConfig",
     "ResolvedAgentSettings",
     "ToolsConfig",
+    "DEEPCODE_HOME_ENV",
     "WorkspaceConfig",
     "deepcode_home",
     "default_config_path",
