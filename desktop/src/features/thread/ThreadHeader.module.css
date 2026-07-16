@@ -1,45 +1,30 @@
 .header {
   position: relative;
   display: flex;
-  min-height: 72px;
+  min-height: 60px;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
-  padding: 11px 20px 11px 28px;
+  gap: 16px;
+  padding: 8px 16px 8px 22px;
   border-bottom: 1px solid var(--border-subtle);
   background: var(--surface-overlay);
-  backdrop-filter: blur(22px) saturate(1.15);
-}
-
-.header::after {
-  position: absolute;
-  right: 0;
-  bottom: -1px;
-  left: 0;
-  height: 1px;
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--signal) 48%, transparent),
-    transparent 38%
-  );
-  content: "";
-  pointer-events: none;
+  backdrop-filter: blur(18px);
 }
 
 .identity {
   display: grid;
   min-width: 0;
-  gap: 5px;
+  gap: 3px;
 }
 
 .breadcrumb {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   overflow: hidden;
   color: var(--text-tertiary);
-  font: 9.5px var(--font-mono);
+  font: 8.5px var(--font-mono);
   white-space: nowrap;
 }
 
@@ -52,7 +37,7 @@
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
 }
 
 .titleRow h1 {
@@ -61,7 +46,7 @@
   overflow: hidden;
   color: var(--text-primary);
   font-family: var(--font-display);
-  font-size: 17px;
+  font-size: 15.5px;
   font-weight: 650;
   letter-spacing: -0.025em;
   text-overflow: ellipsis;
@@ -69,8 +54,8 @@
 }
 
 .beacon {
-  width: 9px;
-  height: 9px;
+  width: 8px;
+  height: 8px;
   flex: 0 0 auto;
   border: 1.5px solid var(--success);
   border-radius: 50%;
@@ -99,20 +84,21 @@
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 7px;
+  gap: 4px;
 }
 
 .actions button,
-.trustState {
+.trustState,
+.unavailableState {
   display: inline-flex;
-  min-height: 34px;
+  min-height: 30px;
   align-items: center;
-  gap: 7px;
-  padding: 0 10px;
+  gap: 6px;
+  padding: 0 8px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 7px;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 590;
 }
 
@@ -124,6 +110,10 @@
 
 .trustState {
   color: var(--success);
+}
+
+.unavailableState {
+  color: var(--text-tertiary);
 }
 
 .actions .attentionAction {
@@ -148,7 +138,8 @@
   }
 
   .actions button:not(.reviewAction),
-  .trustState {
+  .trustState,
+  .unavailableState {
     display: none;
   }
 

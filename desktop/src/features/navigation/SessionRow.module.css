@@ -2,14 +2,14 @@
   position: relative;
   display: grid;
   width: 100%;
-  grid-template-columns: minmax(0, 1fr) 28px;
+  grid-template-columns: minmax(0, 1fr) 25px;
   align-items: center;
-  border-radius: 8px;
+  border-radius: 6px;
   color: var(--text-secondary);
 }
 
 .row:hover {
-  background: color-mix(in srgb, var(--surface-raised) 62%, transparent);
+  background: color-mix(in srgb, var(--surface-raised) 52%, transparent);
   color: var(--text-primary);
 }
 
@@ -21,9 +21,9 @@
 .row[data-active="true"]::before {
   position: absolute;
   z-index: 2;
-  top: 9px;
-  bottom: 9px;
-  left: -10px;
+  top: 8px;
+  bottom: 8px;
+  left: -8px;
   width: 2px;
   border-radius: 4px;
   background: var(--signal);
@@ -33,11 +33,11 @@
 .sessionButton {
   display: grid;
   min-width: 0;
-  min-height: 42px;
-  grid-template-columns: 10px minmax(0, 1fr);
+  min-height: 36px;
+  grid-template-columns: 9px minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
-  padding: 6px 3px 6px 9px;
+  gap: 7px;
+  padding: 4px 2px 4px 7px;
   color: inherit;
   text-align: left;
 }
@@ -45,7 +45,7 @@
 .copy {
   display: grid;
   min-width: 0;
-  gap: 3px;
+  gap: 2px;
 }
 
 .copy strong,
@@ -56,18 +56,18 @@
 }
 
 .copy strong {
-  font-size: 11.5px;
-  font-weight: 570;
+  font-size: 10.5px;
+  font-weight: 560;
 }
 
 .copy small {
   color: var(--text-tertiary);
-  font: 8.5px var(--font-mono);
+  font: 7.5px var(--font-mono);
 }
 
 .beacon {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border: 1.5px solid var(--border-emphasis);
   border-radius: 999px;
   background: var(--surface-sidebar);
@@ -96,10 +96,10 @@
 
 .moreButton {
   display: grid;
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   place-items: center;
-  border-radius: 6px;
+  border-radius: 5px;
   color: var(--text-tertiary);
   opacity: 0;
 }

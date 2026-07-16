@@ -114,6 +114,14 @@ export function SettingsPage({
     () => settings?.providers.map((provider) => provider.name) ?? [],
     [settings?.providers],
   );
+  const providers = useMemo(() => {
+    const activeProvider = agents.provider;
+    return [...(settings?.providers ?? [])].sort((left, right) => {
+      const leftRank = providerRank(left, activeProvider);
+      const rightRank = providerRank(right, activeProvider);
+      return leftRank - rightRank || left.label.localeCompare(right.label);
+    });
+  }, [agents.provider, settings?.providers]);
 
   const saveAgents = async () => {
     if (!maxTokensValid) return;
@@ -446,7 +454,7 @@ export function SettingsPage({
           </div>
         </header>
         <div className={styles.cardList}>
-          {settings?.providers.map((provider) => (
+          {providers.map((provider) => (
             <article className={styles.card} key={provider.name}>
               <header>
                 <div>
@@ -455,9 +463,9 @@ export function SettingsPage({
                 </div>
                 <span
                   className={styles.badge}
-                  data-status={provider.configured ? "configured" : "invalid"}
+                  data-status={providerBadgeStatus(provider.credentialSource)}
                 >
-                  {provider.credentialSource.replace("_", " ")}
+                  {providerCredentialLabel(provider.credentialSource)}
                 </span>
               </header>
               <p>{provider.apiBase ?? "Provider default endpoint"}</p>
@@ -597,6 +605,38 @@ function updateProgressLabel(progress: DesktopUpdateProgress | null): string {
     Math.round((progress.downloadedBytes / progress.totalBytes) * 100),
   );
   return `Downloading ${percentage}%`;
+}
+
+function providerRank(
+  provider: SettingsSnapshot["providers"][number],
+  activeProvider: string,
+): number {
+  if (provider.name === activeProvider) return 0;
+  if (
+    provider.credentialSource === "config" ||
+    provider.credentialSource === "environment"
+  ) {
+    return 1;
+  }
+  if (provider.credentialSource === "not_required") return 2;
+  return 3;
+}
+
+function providerBadgeStatus(
+  source: SettingsSnapshot["providers"][number]["credentialSource"],
+): "configured" | "neutral" | "invalid" {
+  if (source === "config" || source === "environment") return "configured";
+  if (source === "not_required") return "neutral";
+  return "invalid";
+}
+
+function providerCredentialLabel(
+  source: SettingsSnapshot["providers"][number]["credentialSource"],
+): string {
+  if (source === "config") return "Configured";
+  if (source === "environment") return "Environment";
+  if (source === "not_required") return "No key needed";
+  return "Missing key";
 }
 
 function updateStatusMessage(

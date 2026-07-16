@@ -49,6 +49,21 @@ const activityKinds = new Set<Item["kind"]>([
   "workflow_stage",
 ]);
 
+function approvalOutcome(status: Approval["status"]): string {
+  switch (status) {
+    case "approved_once":
+      return "Allowed once";
+    case "approved_session":
+      return "Allowed for this Session";
+    case "denied":
+      return "Denied";
+    case "cancelled":
+      return "Cancelled";
+    default:
+      return "Approval resolved";
+  }
+}
+
 function ActivityIcon({ kind }: { kind: Item["kind"] }) {
   const props = { size: 15, strokeWidth: 1.8 };
   switch (kind) {
@@ -115,19 +130,17 @@ export function ThreadConversation({
   if (ordered.length === 0) {
     return (
       <div className={styles.empty}>
-        <div className={styles.emptyMark} aria-hidden="true">
-          <ListChecks size={21} strokeWidth={1.7} />
-        </div>
-        <h2>What should DeepCode build?</h2>
+        <span className={styles.emptyRail} aria-hidden="true">
+          <i />
+          <i />
+          <i />
+        </span>
+        <h2>Start with a task.</h2>
         <p>
-          Describe the outcome, constraints, and how the result should be verified.
-          DeepCode will keep the work and review trail in this Session.
+          Describe the outcome, the constraints, and how DeepCode should verify
+          the result.
         </p>
-        <div className={styles.examples} aria-label="Example tasks">
-          <span>Fix a failing test and verify the regression</span>
-          <span>Review this branch for unsafe behavior</span>
-          <span>Implement the next milestone from the plan</span>
-        </div>
+        <small>Conversation, tools, approvals, and review stay in this Session.</small>
       </div>
     );
   }
@@ -193,20 +206,44 @@ export function ThreadConversation({
         }
 
         if (item.kind === "approval_request" && approval) {
+          const pending = approval.status === "pending";
+          const toolName =
+            typeof approval.request.toolName === "string"
+              ? approval.request.toolName
+              : "operation";
           return (
-            <section className={styles.approval} key={item.id}>
+            <section
+              className={styles.approval}
+              data-pending={pending}
+              data-status={approval.status}
+              key={item.id}
+            >
               <div className={styles.approvalHeading}>
-                <AlertTriangle size={17} />
+                {pending ? (
+                  <AlertTriangle size={17} />
+                ) : (
+                  <CheckCircle2 size={17} />
+                )}
                 <span>
-                  <strong>Approval required</strong>
-                  <small>{item.summary}</small>
+                  <strong>
+                    {pending
+                      ? "Approval required"
+                      : approvalOutcome(approval.status)}
+                  </strong>
+                  <small>{pending ? item.summary : toolName}</small>
                 </span>
               </div>
-              <ApprovalCard
-                approval={approval}
-                busy={busy}
-                onRespond={onRespondToApproval}
-              />
+              {pending ? (
+                <ApprovalCard
+                  approval={approval}
+                  busy={busy}
+                  onRespond={onRespondToApproval}
+                />
+              ) : (
+                <span className={styles.approvalDecision}>
+                  Decision: {approval.status.replaceAll("_", " ")}
+                </span>
+              )}
             </section>
           );
         }

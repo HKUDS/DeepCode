@@ -2,9 +2,9 @@
   display: grid;
   height: 100vh;
   min-width: 0;
-  grid-template-rows: 52px minmax(0, 1fr);
+  grid-template-rows: 48px minmax(0, 1fr);
   overflow: hidden;
-  background: var(--surface-sidebar);
+  background: var(--surface-canvas);
 }
 
 .tabs {
@@ -12,7 +12,7 @@
   min-width: 0;
   align-items: flex-end;
   gap: 3px;
-  padding: 0 46px 0 13px;
+  padding: 0 43px 0 11px;
   overflow-x: auto;
   border-bottom: 1px solid var(--border-subtle);
   scrollbar-width: none;
@@ -24,11 +24,11 @@
 
 .tabs button {
   flex: 0 0 auto;
-  padding: 13px 8px 11px;
+  padding: 11px 7px 10px;
   border-bottom: 2px solid transparent;
   border-radius: 0;
   color: var(--text-tertiary);
-  font: 9.5px var(--font-mono);
+  font: 9px var(--font-mono);
   text-transform: capitalize;
 }
 
@@ -40,8 +40,8 @@
 .close {
   position: absolute;
   z-index: 4;
-  top: 11px;
-  right: 10px;
+  top: 9px;
+  right: 8px;
   display: grid;
   width: 28px;
   height: 28px;
@@ -63,7 +63,7 @@
 
 .content {
   height: 100%;
-  padding: 26px 21px;
+  padding: 22px 18px;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -72,7 +72,7 @@
   margin: 0 0 16px;
   color: var(--text-primary);
   font-family: var(--font-display);
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 640;
   letter-spacing: -0.025em;
   line-height: 1.35;

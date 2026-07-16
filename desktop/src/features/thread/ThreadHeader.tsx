@@ -1,5 +1,6 @@
 import {
   Files,
+  FolderX,
   GitFork,
   PanelRight,
   PanelRightClose,
@@ -8,6 +9,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 
+import { isRecoveredHistoryProject } from "../../app/projectPresentation";
 import type { Project, Thread } from "../../generated/app-server";
 import type { SidecarStatus } from "../../rpc/contracts";
 import styles from "./ThreadHeader.module.css";
@@ -26,6 +28,7 @@ interface ThreadHeaderProps {
 }
 
 function workspaceLabel(thread: Thread | null, project: Project | null): string {
+  if (isRecoveredHistoryProject(project)) return "Folder unavailable";
   const path = thread?.workspacePath ?? project?.canonicalPath;
   if (!path) return "No local folder";
   const parts = path.split("/").filter(Boolean);
@@ -44,11 +47,16 @@ export function ThreadHeader({
   onCreatePaperThread,
   onToggleInspector,
 }: ThreadHeaderProps) {
+  const recoveredHistory = isRecoveredHistoryProject(project);
   return (
     <header className={styles.header}>
       <div className={styles.identity}>
         <div className={styles.breadcrumb}>
-          <span>{project?.displayName ?? "DeepCode"}</span>
+          <span>
+            {recoveredHistory
+              ? "Previous sessions"
+              : (project?.displayName ?? "DeepCode")}
+          </span>
           {thread ? <span aria-hidden="true">/</span> : null}
           {thread ? <span>{workspaceLabel(thread, project)}</span> : null}
         </div>
@@ -63,7 +71,15 @@ export function ThreadHeader({
       </div>
 
       <div className={styles.actions}>
-        {project?.trustState === "untrusted" ? (
+        {recoveredHistory ? (
+          <span
+            className={styles.unavailableState}
+            title="The original Session folder is no longer available"
+          >
+            <FolderX size={14} />
+            Folder unavailable
+          </span>
+        ) : project?.trustState === "untrusted" ? (
           <button
             className={styles.attentionAction}
             type="button"
@@ -80,7 +96,7 @@ export function ThreadHeader({
           </span>
         ) : null}
 
-        {thread && project?.trustState === "trusted" ? (
+        {thread && project?.trustState === "trusted" && !recoveredHistory ? (
           <>
             {thread.mode !== "paper" ? (
               <button

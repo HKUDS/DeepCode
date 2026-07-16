@@ -1,5 +1,6 @@
 import {
   Folder,
+  FolderClock,
   FolderOpen,
   MessageSquare,
   Plug,
@@ -12,6 +13,10 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 
+import {
+  isRecoveredHistoryProject,
+  projectCanExecute,
+} from "../../app/projectPresentation";
 import type { Project, Thread } from "../../generated/app-server";
 import type { DesktopDestination } from "../../app/useDesktopUi";
 import type { SidecarStatus } from "../../rpc/contracts";
@@ -40,6 +45,15 @@ interface DesktopSidebarProps {
 interface ThreadBucket {
   label: string;
   threads: Thread[];
+}
+
+interface SidebarProjectGroup {
+  key: string;
+  project: Project | null;
+  displayName: string;
+  subtitle: string;
+  threads: Thread[];
+  active: boolean;
 }
 
 function threadBuckets(threads: Thread[]): ThreadBucket[] {
@@ -96,17 +110,57 @@ export function DesktopSidebar({
 }: DesktopSidebarProps) {
   const searchRef = useRef<HTMLInputElement | null>(null);
   const normalizedQuery = query.trim().toLocaleLowerCase();
-  const visibleProjectCount = useMemo(
-    () =>
-      projects.filter((project) =>
-        threads.some(
-          (thread) =>
-            thread.projectId === project.id &&
-            matches(project, thread, normalizedQuery),
+  const selectedProject =
+    projects.find((project) => project.id === selectedProjectId) ?? null;
+  const canCreateThread = projectCanExecute(selectedProject);
+  const projectGroups = useMemo<SidebarProjectGroup[]>(() => {
+    const projectById = new Map(projects.map((project) => [project.id, project]));
+    const recoveredProjectIds = new Set(
+      projects
+        .filter(isRecoveredHistoryProject)
+        .map((project) => project.id),
+    );
+    const regularGroups: SidebarProjectGroup[] = projects
+      .filter((project) => !recoveredProjectIds.has(project.id))
+      .map((project) => {
+        const projectThreads = threads
+          .filter((thread) => thread.projectId === project.id)
+          .filter((thread) => matches(project, thread, normalizedQuery))
+          .sort((left, right) =>
+            right.updatedAt.localeCompare(left.updatedAt),
+          );
+        return {
+          key: project.id,
+          project,
+          displayName: project.displayName,
+          subtitle: projectSubtitle(project),
+          threads: projectThreads,
+          active: project.id === selectedProjectId,
+        };
+      })
+      .filter((group) => !normalizedQuery || group.threads.length > 0);
+
+    const recoveredThreads = threads
+      .filter((thread) => recoveredProjectIds.has(thread.projectId))
+      .filter((thread) => {
+        const project = projectById.get(thread.projectId);
+        return project ? matches(project, thread, normalizedQuery) : false;
+      })
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    if (recoveredThreads.length > 0) {
+      regularGroups.push({
+        key: "recovered-history",
+        project: null,
+        displayName: "Previous sessions",
+        subtitle: "Original folders unavailable",
+        threads: recoveredThreads,
+        active: recoveredThreads.some(
+          (thread) => thread.projectId === selectedProjectId,
         ),
-      ).length,
-    [normalizedQuery, projects, threads],
-  );
+      });
+    }
+    return regularGroups;
+  }, [normalizedQuery, projects, selectedProjectId, threads]);
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
@@ -118,7 +172,7 @@ export function DesktopSidebar({
       }
       if (
         event.key.toLocaleLowerCase() === "n" &&
-        selectedProjectId &&
+        canCreateThread &&
         !busy
       ) {
         event.preventDefault();
@@ -127,7 +181,7 @@ export function DesktopSidebar({
     };
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
-  }, [busy, onCreateThread, selectedProjectId]);
+  }, [busy, canCreateThread, onCreateThread]);
 
   return (
     <aside className={styles.sidebar} aria-label="Projects and Sessions">
@@ -141,6 +195,40 @@ export function DesktopSidebar({
           <small>Local agent</small>
         </span>
       </div>
+
+      {destination === "threads" ? (
+        <>
+          <button
+            className={styles.newThread}
+            type="button"
+            onClick={onCreateThread}
+            disabled={busy || !canCreateThread}
+          >
+            <Plus size={16} strokeWidth={1.9} />
+            New thread
+            <kbd>⌘N</kbd>
+          </button>
+
+          <label className={styles.search}>
+            <Search size={15} strokeWidth={1.8} aria-hidden="true" />
+            <span className={styles.srOnly}>Search Sessions</span>
+            <input
+              ref={searchRef}
+              value={query}
+              onChange={(event) => onQueryChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  onQueryChange("");
+                  event.currentTarget.blur();
+                }
+              }}
+              placeholder="Search Sessions"
+              spellCheck={false}
+            />
+            <kbd>⌘K</kbd>
+          </label>
+        </>
+      ) : null}
 
       <nav className={styles.destinations} aria-label="DeepCode destinations">
         <button
@@ -185,40 +273,6 @@ export function DesktopSidebar({
         </button>
       </nav>
 
-      {destination === "threads" ? (
-        <>
-          <button
-            className={styles.newThread}
-            type="button"
-            onClick={onCreateThread}
-            disabled={busy || !selectedProjectId}
-          >
-            <Plus size={16} strokeWidth={1.9} />
-            New thread
-            <kbd>⌘N</kbd>
-          </button>
-
-          <label className={styles.search}>
-            <Search size={15} strokeWidth={1.8} aria-hidden="true" />
-            <span className={styles.srOnly}>Search Sessions</span>
-            <input
-              ref={searchRef}
-              value={query}
-              onChange={(event) => onQueryChange(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") {
-                  onQueryChange("");
-                  event.currentTarget.blur();
-                }
-              }}
-              placeholder="Search Sessions"
-              spellCheck={false}
-            />
-            <kbd>⌘K</kbd>
-          </label>
-        </>
-      ) : null}
-
       <div className={styles.sectionHeading}>
         <span>Projects</span>
         <button
@@ -241,44 +295,57 @@ export function DesktopSidebar({
               <small>Your CLI Sessions will appear here.</small>
             </span>
           </button>
-        ) : normalizedQuery && visibleProjectCount === 0 ? (
+        ) : normalizedQuery && projectGroups.length === 0 ? (
           <div className={styles.noResults}>
             <Search size={16} />
             <strong>No matching Sessions</strong>
             <small>Search by title, project, or workspace path.</small>
           </div>
         ) : (
-          projects.map((project) => {
-            const projectThreads = threads
-              .filter((thread) => thread.projectId === project.id)
-              .filter((thread) => matches(project, thread, normalizedQuery))
-              .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-            if (normalizedQuery && projectThreads.length === 0) return null;
-            const active = project.id === selectedProjectId;
+          projectGroups.map((group) => {
+            const project = group.project;
             return (
-              <section className={styles.projectGroup} key={project.id}>
-                <button
-                  type="button"
-                  className={styles.projectButton}
-                  data-active={active}
-                  onClick={() => onSelectProject(project.id)}
-                  title={project.canonicalPath}
-                >
-                  {active ? <FolderOpen size={15} /> : <Folder size={15} />}
-                  <span>
-                    <strong>{project.displayName}</strong>
-                    <small>{projectSubtitle(project)}</small>
-                  </span>
-                  {project.trustState === "untrusted" ? (
-                    <ShieldAlert
-                      size={14}
-                      className={styles.untrusted}
-                      aria-label="Project not trusted"
-                    />
-                  ) : null}
-                </button>
+              <section className={styles.projectGroup} key={group.key}>
+                {project ? (
+                  <button
+                    type="button"
+                    className={styles.projectButton}
+                    data-active={group.active}
+                    onClick={() => onSelectProject(project.id)}
+                    title={project.canonicalPath}
+                  >
+                    {group.active ? (
+                      <FolderOpen size={15} />
+                    ) : (
+                      <Folder size={15} />
+                    )}
+                    <span>
+                      <strong>{group.displayName}</strong>
+                      <small>{group.subtitle}</small>
+                    </span>
+                    {project.trustState === "untrusted" ? (
+                      <ShieldAlert
+                        size={14}
+                        className={styles.untrusted}
+                        aria-label="Project not trusted"
+                      />
+                    ) : null}
+                  </button>
+                ) : (
+                  <div
+                    className={styles.projectButton}
+                    data-active={group.active}
+                    data-static="true"
+                  >
+                    <FolderClock size={15} />
+                    <span>
+                      <strong>{group.displayName}</strong>
+                      <small>{group.subtitle}</small>
+                    </span>
+                  </div>
+                )}
 
-                {threadBuckets(projectThreads).map((bucket) => (
+                {threadBuckets(group.threads).map((bucket) => (
                   <div className={styles.threadBucket} key={bucket.label}>
                     <p>{bucket.label}</p>
                     {bucket.threads.map((thread) => (

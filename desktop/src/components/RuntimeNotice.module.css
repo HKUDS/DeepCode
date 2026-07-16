@@ -1,20 +1,19 @@
 .notice {
   position: absolute;
   z-index: 40;
-  top: 12px;
-  left: 50%;
+  top: 10px;
+  right: 12px;
   display: grid;
-  width: min(660px, calc(100vw - 48px));
+  width: min(440px, calc(100vw - 28px));
   grid-template-columns: 20px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   padding: 12px 13px;
   border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border-subtle));
-  border-radius: 11px;
-  background: color-mix(in srgb, var(--danger-soft) 92%, white);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface-raised) 92%, var(--danger-soft));
   box-shadow: var(--shadow-menu);
   color: var(--danger);
-  transform: translateX(-50%);
 }
 
 .copy {
@@ -25,13 +24,13 @@
 
 .copy strong {
   color: var(--text-primary);
-  font: 10px var(--font-mono);
+  font: 9px var(--font-mono);
 }
 
 .copy span {
   overflow: hidden;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 10.5px;
   line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -72,7 +71,8 @@
 
 @media (max-width: 720px) {
   .notice {
-    width: calc(100vw - 24px);
+    right: 8px;
+    width: calc(100vw - 16px);
   }
 
   .copy span {

@@ -1,21 +1,17 @@
 .region {
   width: 100%;
-  padding: 12px 22px 16px;
-  background: linear-gradient(
-    to bottom,
-    transparent,
-    color-mix(in srgb, var(--surface-canvas) 96%, transparent) 24%
-  );
+  padding: 10px 20px 14px;
+  background: var(--surface-canvas);
 }
 
 .composer {
-  width: min(820px, 100%);
+  width: min(780px, 100%);
   margin: 0 auto;
   overflow: hidden;
   border: 1px solid var(--border-strong);
-  border-radius: 15px;
+  border-radius: 16px;
   background: var(--surface-raised);
-  box-shadow: var(--shadow-float);
+  box-shadow: 0 8px 26px rgb(20 22 26 / 9%);
   transition:
     border-color 150ms ease,
     box-shadow 150ms ease;
@@ -24,8 +20,8 @@
 .composer:focus-within {
   border-color: var(--signal);
   box-shadow:
-    0 0 0 3px var(--signal-soft),
-    var(--shadow-float);
+    0 0 0 2px var(--signal-soft),
+    0 10px 30px rgb(20 22 26 / 11%);
 }
 
 .composer label {
@@ -39,16 +35,16 @@
 .composer textarea {
   display: block;
   width: 100%;
-  min-height: 62px;
-  max-height: 190px;
+  min-height: 56px;
+  max-height: 176px;
   resize: none;
-  padding: 16px 17px 8px;
+  padding: 14px 16px 7px;
   overflow-y: auto;
   border: 0;
   outline: 0;
   background: transparent;
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: 13.5px;
   line-height: 1.58;
 }
 
@@ -58,11 +54,11 @@
 
 .toolbar {
   display: flex;
-  min-height: 45px;
+  min-height: 41px;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 5px 8px 8px 14px;
+  padding: 4px 8px 7px 12px;
 }
 
 .attachments {
@@ -172,16 +168,16 @@
   min-width: 0;
   align-items: center;
   gap: 4px;
-  padding: 5px 7px;
+  padding: 4px 6px;
   border-radius: 6px;
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: 9.5px;
   white-space: nowrap;
 }
 
 .context > span {
   overflow: hidden;
-  background: var(--surface-hover);
+  background: transparent;
   color: var(--text-secondary);
   text-overflow: ellipsis;
 }
@@ -191,7 +187,7 @@
   min-width: 0;
   align-items: center;
   gap: 4px;
-  padding: 5px 6px;
+  padding: 4px 6px;
   border-radius: 6px;
   color: var(--text-tertiary);
 }
@@ -208,7 +204,7 @@
   appearance: none;
   background: transparent;
   color: inherit;
-  font-size: 10px;
+  font-size: 9.5px;
   text-overflow: ellipsis;
 }
 
@@ -230,7 +226,7 @@
 }
 
 .queueButton {
-  min-height: 34px;
+  min-height: 32px;
   padding: 0 11px;
   border: 1px solid var(--border-strong);
   background: var(--surface-raised);
@@ -244,8 +240,8 @@
 }
 
 .sendButton {
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   background: var(--text-primary);
   color: var(--text-inverse);
 }
@@ -256,7 +252,7 @@
 }
 
 .stopButton {
-  min-height: 34px;
+  min-height: 32px;
   gap: 6px;
   padding: 0 10px;
   border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--border-subtle));
@@ -268,12 +264,12 @@
 
 .hint {
   display: flex;
-  width: min(802px, calc(100% - 16px));
+  width: min(756px, calc(100% - 20px));
   justify-content: space-between;
   gap: 12px;
-  margin: 7px auto 0;
+  margin: 6px auto 0;
   color: var(--text-tertiary);
-  font-size: 9px;
+  font-size: 8.5px;
 }
 
 .hint span {

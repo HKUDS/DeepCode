@@ -1,8 +1,8 @@
 .page {
-  width: min(1120px, 100%);
+  width: min(1040px, 100%);
   height: 100%;
   margin: 0 auto;
-  padding: 42px clamp(28px, 5vw, 64px) 82px;
+  padding: 32px clamp(24px, 4vw, 52px) 70px;
   overflow-y: auto;
 }
 
@@ -17,16 +17,16 @@
 }
 
 .pageHeader {
-  margin-bottom: 30px;
+  margin-bottom: 24px;
 }
 
 .pageHeader h1 {
   margin: 5px 0 9px;
   color: var(--text-primary);
   font-family: var(--font-display);
-  font-size: 36px;
-  font-weight: 640;
-  letter-spacing: -0.05em;
+  font-size: 28px;
+  font-weight: 650;
+  letter-spacing: -0.04em;
 }
 
 .pageHeader p,
@@ -34,7 +34,7 @@
   max-width: 660px;
   margin: 0;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 12.5px;
   line-height: 1.65;
 }
 
@@ -67,7 +67,7 @@
   gap: 6px;
   padding: 0 12px;
   border: 1px solid var(--border-strong);
-  border-radius: 7px;
+  border-radius: 8px;
   background: var(--surface-raised);
   color: var(--text-secondary);
   font-size: 11px;
@@ -91,15 +91,15 @@
 .contextBar,
 .scopeBar {
   display: flex;
-  min-height: 48px;
+  min-height: 42px;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 22px;
-  padding: 9px 13px;
+  margin-bottom: 18px;
+  padding: 7px 11px;
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
-  background: var(--surface-sidebar);
+  background: color-mix(in srgb, var(--surface-sidebar) 72%, transparent);
 }
 
 .contextBar strong {
@@ -158,7 +158,7 @@
   grid-template-columns: minmax(220px, 0.38fr) minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid var(--border-subtle);
-  border-radius: 9px;
+  border-radius: 11px;
   background: var(--surface-raised);
 }
 
@@ -204,7 +204,7 @@
 
 .detailPane {
   min-width: 0;
-  padding: 28px;
+  padding: 24px;
   overflow-y: auto;
 }
 
@@ -214,7 +214,7 @@
 .card h2 {
   margin: 3px 0 8px;
   color: var(--text-primary);
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 640;
   letter-spacing: -0.025em;
 }
@@ -230,16 +230,16 @@
 .cardList {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
-  gap: 14px;
+  gap: 11px;
 }
 
 .card,
 .formCard {
   min-width: 0;
-  padding: 18px;
+  padding: 16px;
   border: 1px solid var(--border-subtle);
-  border-radius: 9px;
-  background: var(--surface-raised);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--surface-raised) 78%, var(--surface-sidebar));
 }
 
 .card > code {
@@ -267,6 +267,11 @@
 .badge[data-status="configured"] {
   border-color: color-mix(in srgb, var(--success) 45%, var(--border-subtle));
   color: var(--success);
+}
+
+.badge[data-status="neutral"] {
+  border-color: var(--border-strong);
+  color: var(--text-tertiary);
 }
 
 .badge[data-status="invalid"] {
@@ -460,7 +465,7 @@
 .settingsGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  gap: 11px;
 }
 
 .settingsGrid .formCard {

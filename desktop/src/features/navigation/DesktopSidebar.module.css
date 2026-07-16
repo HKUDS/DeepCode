@@ -3,42 +3,36 @@
   min-width: 0;
   height: 100vh;
   flex-direction: column;
-  padding: 16px 11px 11px;
+  padding: 12px 9px 9px;
   overflow: hidden;
   border-right: 1px solid var(--border-subtle);
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--surface-sidebar) 96%, var(--surface-raised)),
-      var(--surface-sidebar) 38%
-    );
+  background: var(--surface-sidebar);
   color: var(--text-primary);
 }
 
 .brandRow {
   display: flex;
-  min-height: 42px;
+  min-height: 38px;
   align-items: center;
-  gap: 10px;
-  padding: 0 7px;
+  gap: 9px;
+  padding: 0 6px;
 }
 
 .brandMark {
   position: relative;
   display: flex;
-  width: 29px;
-  height: 29px;
+  width: 26px;
+  height: 26px;
   align-items: center;
   justify-content: center;
   gap: 4px;
-  border-radius: 9px;
+  border-radius: 8px;
   background: var(--text-primary);
-  box-shadow: 0 5px 14px rgb(26 31 41 / 14%);
 }
 
 .brandMark i {
   width: 3px;
-  height: 13px;
+  height: 12px;
   border-radius: 4px;
   background: var(--text-inverse);
   transform: rotate(18deg);
@@ -57,14 +51,14 @@
 
 .brandCopy strong {
   font-family: var(--font-display);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 650;
   letter-spacing: -0.025em;
 }
 
 .brandCopy small {
   color: var(--text-tertiary);
-  font: 8px var(--font-mono);
+  font: 7.5px var(--font-mono);
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
@@ -72,22 +66,22 @@
 .destinations {
   display: grid;
   gap: 3px;
-  margin: 13px 2px 15px;
-  padding-bottom: 14px;
+  margin: 8px 2px 12px;
+  padding-bottom: 10px;
   border-bottom: 1px solid var(--border-subtle);
 }
 
 .destinations button {
   position: relative;
   display: grid;
-  min-height: 36px;
-  grid-template-columns: 20px minmax(0, 1fr);
+  min-height: 32px;
+  grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
-  padding: 0 10px;
-  border-radius: 8px;
+  padding: 0 8px;
+  border-radius: 7px;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 520;
   text-align: left;
 }
@@ -106,10 +100,10 @@
 
 .destinations button[data-active="true"]::before {
   position: absolute;
-  top: 9px;
-  bottom: 9px;
-  left: 1px;
-  width: 3px;
+  top: 8px;
+  bottom: 8px;
+  left: 0;
+  width: 2px;
   border-radius: 4px;
   background: var(--signal);
   content: "";
@@ -117,25 +111,24 @@
 
 .newThread {
   display: grid;
-  min-height: 40px;
+  min-height: 36px;
   grid-template-columns: 18px 1fr auto;
   align-items: center;
   gap: 8px;
-  margin: 0 3px 9px;
-  padding: 0 11px;
-  border: 1px solid var(--border-strong);
-  border-radius: 10px;
+  margin: 9px 2px 6px;
+  padding: 0 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
   background: var(--surface-raised);
-  box-shadow: 0 2px 7px rgb(26 31 41 / 5%);
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 640;
   text-align: left;
 }
 
 .newThread:hover:not(:disabled) {
   border-color: var(--border-emphasis);
-  background: color-mix(in srgb, var(--surface-raised) 90%, var(--signal-soft));
+  background: var(--surface-hover);
 }
 
 .newThread kbd,
@@ -147,22 +140,22 @@
 
 .search {
   display: grid;
-  min-height: 37px;
+  min-height: 33px;
   grid-template-columns: 18px 1fr auto;
   align-items: center;
   gap: 7px;
-  margin: 0 3px 17px;
-  padding: 0 10px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--surface-raised) 72%, transparent);
+  margin: 0 2px 3px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-raised) 48%, transparent);
   color: var(--text-tertiary);
 }
 
 .search:focus-within {
   border-color: var(--signal);
   background: var(--surface-raised);
-  box-shadow: 0 0 0 3px var(--signal-soft);
+  box-shadow: 0 0 0 2px var(--signal-soft);
   color: var(--text-secondary);
 }
 
@@ -172,7 +165,7 @@
   outline: 0;
   background: transparent;
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: 11.5px;
 }
 
 .search input::placeholder {
@@ -183,10 +176,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 7px 8px 9px;
+  padding: 0 6px 7px 8px;
   color: var(--text-tertiary);
-  font: 600 9px var(--font-mono);
-  letter-spacing: 0.08em;
+  font: 560 8px var(--font-mono);
+  letter-spacing: 0.07em;
   text-transform: uppercase;
 }
 
@@ -207,36 +200,32 @@
 .projectList {
   min-height: 0;
   flex: 1;
-  padding: 0 1px 18px;
+  padding: 0 1px 12px;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
 }
 
 .projectGroup {
-  margin-bottom: 15px;
+  margin-bottom: 11px;
 }
 
 .projectButton {
   display: grid;
   width: 100%;
-  min-height: 43px;
+  min-height: 38px;
   grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
-  padding: 6px 9px;
-  border-radius: 9px;
+  gap: 7px;
+  padding: 5px 7px;
+  border-radius: 7px;
   color: var(--text-secondary);
   text-align: left;
 }
 
 .projectButton:hover,
 .projectButton[data-active="true"] {
-  background: color-mix(
-    in srgb,
-    var(--surface-hover) 72%,
-    var(--surface-raised)
-  );
+  background: var(--surface-hover);
   color: var(--text-primary);
 }
 
@@ -254,13 +243,21 @@
 }
 
 .projectButton strong {
-  font-size: 12px;
-  font-weight: 640;
+  font-size: 11.5px;
+  font-weight: 620;
 }
 
 .projectButton small {
   color: var(--text-tertiary);
-  font: 9px var(--font-mono);
+  font: 8px var(--font-mono);
+}
+
+.projectButton[data-static="true"] {
+  cursor: default;
+}
+
+.projectButton[data-static="true"]:not([data-active="true"]) {
+  background: transparent;
 }
 
 .untrusted {
@@ -269,16 +266,16 @@
 
 .threadBucket {
   position: relative;
-  margin: 6px 0 10px 17px;
-  padding-left: 9px;
-  border-left: 1px solid var(--border-strong);
+  margin: 4px 0 8px 15px;
+  padding-left: 7px;
+  border-left: 1px solid var(--border-subtle);
 }
 
 .threadBucket > p {
   margin: 0;
-  padding: 7px 8px 4px;
+  padding: 6px 7px 3px;
   color: var(--text-tertiary);
-  font: 9px var(--font-mono);
+  font: 8px var(--font-mono);
 }
 
 .emptyProject {
@@ -315,11 +312,11 @@
 
 .footer {
   display: grid;
-  min-height: 52px;
+  min-height: 44px;
   grid-template-columns: 18px minmax(0, 1fr) 8px;
   align-items: center;
   gap: 8px;
-  padding: 10px 9px 4px;
+  padding: 8px 7px 2px;
   border-top: 1px solid var(--border-subtle);
   color: var(--text-secondary);
 }
@@ -330,14 +327,14 @@
 }
 
 .footer strong {
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 620;
   text-transform: capitalize;
 }
 
 .footer small {
   color: var(--text-tertiary);
-  font-size: 9px;
+  font-size: 8px;
 }
 
 .runtimeDot {

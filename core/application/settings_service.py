@@ -55,7 +55,7 @@ class SettingsService:
         workspace = self._workspace(project_id)
         config = (
             load_config_for_workspace(workspace)
-            if workspace is not None
+            if workspace is not None and workspace.is_dir()
             else load_config(config_path=self.store.path)
         )
         return self._view(config)
@@ -78,7 +78,7 @@ class SettingsService:
         if self.projects is None:
             raise InvalidArgumentError("project-scoped settings are unavailable")
         project = self.projects.read(project_id)
-        return Path(project.canonical_path).resolve(strict=True)
+        return Path(project.canonical_path).resolve(strict=False)
 
     def _store(self, scope: str, project_id: str | None) -> ConfigStore:
         if scope == "user":
@@ -94,9 +94,15 @@ class SettingsService:
             raise ProjectNotTrustedError(
                 "project must be trusted before its settings can be changed"
             )
-        return ConfigStore(
-            Path(project.canonical_path).resolve(strict=True) / home_config_path().name
-        )
+        try:
+            workspace = Path(project.canonical_path).resolve(strict=True)
+        except OSError as exc:
+            raise InvalidArgumentError(
+                f"project path does not exist: {project.canonical_path}"
+            ) from exc
+        if not workspace.is_dir():
+            raise InvalidArgumentError("project path must be a directory")
+        return ConfigStore(workspace / home_config_path().name)
 
     def _view(self, config: DeepCodeConfig) -> dict[str, Any]:
         providers = []

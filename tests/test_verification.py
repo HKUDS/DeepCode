@@ -22,6 +22,40 @@ def test_discovers_real_test_scripts_and_rejects_npm_placeholder(
     assert [command.id for command in commands] == ["pytest", "npm-test"]
 
 
+def test_discovers_root_level_unittest_without_pytest_project_markers(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "test_slugger.py").write_text(
+        "import unittest\n\n"
+        "class SluggerTests(unittest.TestCase):\n"
+        "    def test_slug(self):\n"
+        "        self.assertEqual('slug', 'slug')\n",
+        encoding="utf-8",
+    )
+
+    commands = discover_verification_commands(tmp_path)
+
+    assert [command.id for command in commands] == ["unittest"]
+    assert commands[0].argv == (
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-v",
+    )
+
+
+def test_root_level_pytest_style_files_keep_pytest_runner(tmp_path: Path) -> None:
+    (tmp_path / "test_slugger.py").write_text(
+        "def test_slug():\n    assert 'slug' == 'slug'\n",
+        encoding="utf-8",
+    )
+
+    commands = discover_verification_commands(tmp_path)
+
+    assert [command.id for command in commands] == ["pytest"]
+
+
 def test_verification_reports_pass_and_keeps_output_bounded(tmp_path: Path) -> None:
     tests_dir = tmp_path / "tests"
     tests_dir.mkdir()

@@ -959,6 +959,50 @@ describe("desktop command center", () => {
     });
   });
 
+  it("keeps missing-workspace Sessions readable and non-executable", async () => {
+    const recoveredProject: Project = {
+      ...project,
+      id: "project-recovered-history",
+      canonicalPath:
+        "/tmp/.deepcode/sessions/.missing-workspaces/session-77f8ff1b",
+      displayName: "session-77f8ff1b",
+    };
+    const recoveredThread: Thread = {
+      ...thread,
+      id: "session-77f8ff1b",
+      projectId: recoveredProject.id,
+      title: "Session 77f8ff1b",
+      workspacePath: recoveredProject.canonicalPath,
+    };
+    const runtime = new TestRuntime(
+      [recoveredProject],
+      [recoveredThread],
+      [],
+    );
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Session 77f8ff1b" });
+
+    expect(screen.getAllByText("Previous sessions").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Folder unavailable").length).toBeGreaterThan(0);
+    expect(
+      screen.getByText(
+        "The original folder is unavailable. This Session remains readable.",
+      ),
+    ).toBeTruthy();
+    expect(
+      (screen.getByRole("textbox", {
+        name: "Task instruction",
+      }) as HTMLTextAreaElement).disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByRole("button", {
+        name: /New thread/,
+      }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(screen.queryByText("Trusted")).toBeNull();
+  });
+
   it("searches Sessions across projects and changes project context atomically", async () => {
     const secondProject: Project = {
       ...project,
@@ -1032,7 +1076,7 @@ describe("desktop command center", () => {
     await waitFor(() => {
       expect(
         screen.getByRole("heading", {
-          name: "Start the first thread in DeepCode.",
+          name: "No Sessions here yet.",
         }),
       ).toBeTruthy();
       expect(

@@ -13,6 +13,8 @@ from pathlib import Path
 
 
 MAX_VERIFICATION_OUTPUT = 64 * 1024
+MAX_DISCOVERY_FILES = 256
+MAX_DISCOVERY_CHARS = 64 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,13 +41,19 @@ class VerificationResult:
 
 def discover_verification_commands(root: Path) -> tuple[VerificationCommand, ...]:
     commands: list[VerificationCommand] = []
-    if any(
-        (root / name).exists()
-        for name in ("pytest.ini", "pyproject.toml", "setup.cfg", "tests")
-    ):
+    python_tests = _discover_python_tests(root)
+    if python_tests == "pytest":
         commands.append(
             VerificationCommand(
                 "pytest", "Python tests", ("python3", "-m", "pytest", "-q")
+            )
+        )
+    elif python_tests == "unittest":
+        commands.append(
+            VerificationCommand(
+                "unittest",
+                "Python unittest",
+                ("python3", "-m", "unittest", "discover", "-v"),
             )
         )
     if _has_npm_test_script(root / "package.json"):
@@ -55,6 +63,39 @@ def discover_verification_commands(root: Path) -> tuple[VerificationCommand, ...
             VerificationCommand("cargo-test", "Rust tests", ("cargo", "test"))
         )
     return tuple(commands)
+
+
+def _discover_python_tests(root: Path) -> str | None:
+    """Choose one bounded, deterministic Python test runner for ``root``.
+
+    Explicit project markers retain the existing pytest behavior. Small
+    script-style projects often keep ``test_*.py`` beside the implementation
+    and depend only on the standard library, so detect an actual ``unittest``
+    import before falling back to pytest for those root-level files.
+    """
+    if any(
+        (root / name).exists()
+        for name in ("pytest.ini", "pyproject.toml", "setup.cfg", "tests")
+    ):
+        return "pytest"
+
+    test_files = sorted(
+        {
+            *root.glob("test_*.py"),
+            *root.glob("*_test.py"),
+        }
+    )
+    if not test_files:
+        return None
+    for path in test_files[:MAX_DISCOVERY_FILES]:
+        try:
+            with path.open(encoding="utf-8") as handle:
+                source = handle.read(MAX_DISCOVERY_CHARS)
+        except (OSError, UnicodeDecodeError):
+            continue
+        if "import unittest" in source or "from unittest" in source:
+            return "unittest"
+    return "pytest"
 
 
 def run_verification(

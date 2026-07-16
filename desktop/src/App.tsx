@@ -1,6 +1,7 @@
 import { FolderOpen, MessageSquarePlus } from "lucide-react";
 import { lazy, Suspense } from "react";
 
+import { projectCanExecute } from "./app/projectPresentation";
 import { useDesktopUi } from "./app/useDesktopUi";
 import { useComposerCommands } from "./app/useComposerCommands";
 import { useWorkspaceController } from "./app/useWorkspaceController";
@@ -66,8 +67,10 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
   const activeWorkflow = latestWorkflow
     ? ["queued", "running", "waiting"].includes(latestWorkflow.status)
     : false;
+  const workspaceAvailable = projectCanExecute(selectedProject);
   const composerEnabled =
     state.runtime.phase === "ready" &&
+    workspaceAvailable &&
     selectedProject?.trustState === "trusted" &&
     selectedThread !== null;
   const disabledReason =
@@ -75,6 +78,8 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
       ? "Waiting for the local App Server."
       : !selectedProject
         ? "Open a project to begin."
+        : !workspaceAvailable
+          ? "The original folder is unavailable. This Session remains readable."
         : selectedProject.trustState !== "trusted"
           ? "Trust this folder before agent execution."
           : !selectedThread
@@ -180,21 +185,11 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
             <section className={styles.threadViewport}>
               {!selectedProject ? (
                 <div className={styles.startState}>
-                  <div className={styles.startSignal} aria-hidden="true">
-                    <span />
-                    <span />
-                    <span />
-                  </div>
-                  <p className={styles.startEyebrow}>Local coding workspace</p>
-                  <h2>
-                    Open a project.
-                    <br />
-                    Pick up any Session.
-                  </h2>
+                  <p className={styles.startEyebrow}>Local coding agent</p>
+                  <h2>Open a folder to begin.</h2>
                   <p>
-                    DeepCode Desktop reads the same local history as the CLI. Choose
-                    a folder once, then continue an existing Session or start a new
-                    task without importing or duplicating anything.
+                    Continue the same Sessions from DeepCode CLI, with tools,
+                    approvals, changes, and tests kept in one local workspace.
                   </p>
                   <div className={styles.startActions}>
                     <button
@@ -210,36 +205,18 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
                       <FolderOpen size={16} />
                       Open project folder
                     </button>
-                    <span>Runs locally · no web server</span>
-                  </div>
-                  <div className={styles.startTrace} aria-label="Workspace guarantees">
-                    <span>
-                      <i data-tone="signal" />
-                      Shared CLI history
-                    </span>
-                    <span>
-                      <i data-tone="success" />
-                      Project-scoped tools
-                    </span>
-                    <span>
-                      <i />
-                      Recoverable Sessions
-                    </span>
+                    <span>Local runtime · shared Session history</span>
                   </div>
                 </div>
               ) : !selectedThread ? (
                 <div className={styles.startState}>
-                  <div className={styles.startSignal} aria-hidden="true">
-                    <span />
-                    <span />
-                    <span />
-                  </div>
-                  <p className={styles.startEyebrow}>{selectedProject.displayName}</p>
-                  <h2>Start the first thread in {selectedProject.displayName}.</h2>
+                  <p className={styles.startEyebrow}>
+                    {selectedProject.displayName}
+                  </p>
+                  <h2>No Sessions here yet.</h2>
                   <p>
-                    Give the task a clear outcome and verification target. The
-                    thread keeps its own Agent context while remaining part of the
-                    same canonical Session history.
+                    Start with a clear outcome and a way to verify it. DeepCode
+                    will keep the conversation and execution trail together.
                   </p>
                   <div className={styles.startActions}>
                     <button
@@ -256,20 +233,6 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
                       New thread
                     </button>
                     <span>⌘N from anywhere</span>
-                  </div>
-                  <div className={styles.startTrace} aria-label="Thread guarantees">
-                    <span>
-                      <i data-tone="signal" />
-                      One Agent context
-                    </span>
-                    <span>
-                      <i data-tone="success" />
-                      Durable review trail
-                    </span>
-                    <span>
-                      <i />
-                      Safe restart recovery
-                    </span>
                   </div>
                 </div>
               ) : (

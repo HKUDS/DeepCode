@@ -17,6 +17,8 @@ from core.harness.permissions import (  # noqa: E402
     make_engine,
     rules_from_config,
 )
+from core.agent_setup import _wire_tool_permissions  # noqa: E402
+from core.harness.tools import default_coding_tools  # noqa: E402
 
 ALLOW = PermissionDecision.ALLOW
 ASK = PermissionDecision.ASK
@@ -72,6 +74,18 @@ def test_default_mode_reads_allow_writes_ask():
     assert _decide(engine, "read_file", file_path="/w/a.py") is ALLOW
     assert _decide(engine, "write_file", file_path="/w/a.py") is ASK
     assert _decide(engine, "execute_bash", command="pytest") is ASK
+
+
+def test_native_tool_read_only_metadata_drives_default_mode(tmp_path):
+    engine = PermissionEngine(mode=PermissionMode.DEFAULT, cwd=str(tmp_path))
+    registry = default_coding_tools(tmp_path)
+
+    _wire_tool_permissions(registry, engine)
+
+    assert _decide(engine, "read", file_path="a.py") is ALLOW
+    assert _decide(engine, "grep", pattern="needle") is ALLOW
+    assert _decide(engine, "write", file_path="a.py") is ASK
+    assert _decide(engine, "bash", command="python -m unittest") is ASK
 
 
 def test_plan_mode_denies_mutations_allows_reads():

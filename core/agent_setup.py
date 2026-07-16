@@ -94,6 +94,13 @@ def _wire_code_mode(
     tool_registry.register(CodeModeTool(workspace, _execute, api))
 
 
+def _wire_tool_permissions(tool_registry: Any, engine: Any) -> None:
+    """Make tool-declared read-only metadata authoritative for this session."""
+    engine.read_only_tools = engine.read_only_tools.union(
+        tool_registry.read_only_tool_names
+    )
+
+
 def build_agent_session(
     *,
     workspace: str,
@@ -196,6 +203,7 @@ def build_agent_session(
         agent_control=control,
     )
     _wire_code_mode(tool_registry, workspace, engine, hooks_engine)
+    _wire_tool_permissions(tool_registry, engine)
 
     session = AgentSession(
         provider,
