@@ -43,7 +43,13 @@ class _HeldControl(AgentControl):
         self.last_seed = None
 
     async def _run_subagent(
-        self, task, workspace, *, seed_history=None, inbox_drainer=None, agent_id="subagent"
+        self,
+        task,
+        workspace,
+        *,
+        seed_history=None,
+        inbox_drainer=None,
+        agent_id="subagent",
     ):
         self.last_seed = seed_history
         await self.release.wait()
@@ -54,7 +60,13 @@ class _WritingControl(AgentControl):
     """Sub-agent writes a file (to exercise isolate + merge)."""
 
     async def _run_subagent(
-        self, task, workspace, *, seed_history=None, inbox_drainer=None, agent_id="subagent"
+        self,
+        task,
+        workspace,
+        *,
+        seed_history=None,
+        inbox_drainer=None,
+        agent_id="subagent",
     ):
         (Path(workspace) / "feature.py").write_text("VALUE = 1\n")
         return "wrote feature.py"
@@ -308,17 +320,64 @@ def test_send_message_unknown_and_empty(tmp_path):
     )
 
 
-def test_build_wires_callable_history_provider(tmp_path):
+def test_build_wires_callable_history_provider(tmp_path, monkeypatch):
     # Regression: session.history is a @property (a list), so build_agent_session
     # must wrap it in a callable. Passing the value made fork_turns call a list
     # → "TypeError: 'list' object is not callable" on every forked spawn.
-    from core.agent_setup import build_agent_session
+    import core.agent_setup as agent_setup
 
-    session, _m, _e = build_agent_session(workspace=str(tmp_path), allow_spawn=True)
+    profile = type("Profile", (), {"model": "test-model"})()
+    monkeypatch.setattr(
+        agent_setup,
+        "get_workflow_provider",
+        lambda **_kwargs: (object(), profile),
+    )
+    monkeypatch.setattr(
+        agent_setup,
+        "get_runtime",
+        lambda: type("Runtime", (), {"config": object()})(),
+    )
+
+    session, _m, _e = agent_setup.build_agent_session(
+        workspace=str(tmp_path),
+        allow_spawn=True,
+    )
     ctrl = session._agent_control
     assert callable(ctrl._history_provider)
     assert ctrl._history_provider() == session.history
     assert isinstance(ctrl._fork_history("all"), list)  # would raise before the fix
+
+
+def test_subagent_inherits_parent_permission_and_approval(tmp_path, monkeypatch):
+    from core.events import Event, TaskComplete
+    from core.harness.permissions import PermissionMode
+
+    captured = {}
+
+    class Session:
+        def load_history(self, _messages):
+            return None
+
+        async def run_stream(self, _op):
+            yield Event("1", TaskComplete("done", "completed"))
+
+    def build(**kwargs):
+        captured.update(kwargs)
+        return Session(), "model", object()
+
+    monkeypatch.setattr("core.agent_setup.build_agent_session", build)
+    approval = object()
+    control = AgentControl(
+        str(tmp_path),
+        permission_mode=PermissionMode.DEFAULT,
+        approval_callback=approval,
+    )
+
+    result = asyncio.run(control._run_subagent("task", str(tmp_path), agent_id="child"))
+
+    assert result == "done"
+    assert captured["permission_mode_override"] is PermissionMode.DEFAULT
+    assert captured["approval_callback"] is approval
 
 
 def test_wiring_and_depth_cap():

@@ -1,0 +1,55 @@
+.panel {
+  display: none;
+  height: 100%;
+  grid-template-rows: 36px auto minmax(0, 1fr);
+  overflow: hidden;
+  background: #171a20;
+}
+
+.panel[data-active="true"] {
+  display: grid;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px 5px 12px;
+  border-bottom: 1px solid #30343d;
+  color: #aeb5c1;
+  font: 8px var(--font-mono);
+}
+
+.toolbar button {
+  min-height: 25px;
+  padding: 0 7px;
+  border: 1px solid #444a56;
+  border-radius: 5px;
+  color: #e8ebf0;
+  font-size: 8px;
+}
+
+.toolbar button:hover:not(:disabled) {
+  background: #242832;
+}
+
+.error {
+  margin: 8px;
+  padding: 7px 9px;
+  border-left: 2px solid #e17a72;
+  background: #342021;
+  color: #f2aaa4;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.host {
+  min-width: 0;
+  min-height: 0;
+  padding: 8px 4px 4px 8px;
+  overflow: hidden;
+}
+
+.host :global(.xterm) {
+  height: 100%;
+}

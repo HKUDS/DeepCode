@@ -21,8 +21,9 @@ from typing import Any
 
 from loguru import logger
 
-from core.compat import get_runtime
+from core.compat import DeepCodeRuntime, get_runtime
 from core.events import AgentSession
+from core.harness.permissions import PermissionMode
 from core.harness.policy import build_permission_engine
 from core.harness.tools import default_coding_tools
 from core.llm_runtime import get_workflow_provider
@@ -51,10 +52,14 @@ SYSTEM_PROMPT = (
 # Tools callable from inside code mode (C5b): file / shell / search — the ones
 # worth batching in a loop. Meta tools (plan, delegation, hooks, memory) are
 # intentionally not exposed to the code.
-_CODE_MODE_TOOLS = frozenset({"read", "write", "edit", "apply_patch", "bash", "grep", "glob"})
+_CODE_MODE_TOOLS = frozenset(
+    {"read", "write", "edit", "apply_patch", "bash", "grep", "glob"}
+)
 
 
-def _wire_code_mode(tool_registry: Any, workspace: str, engine: Any, hooks_engine: Any) -> None:
+def _wire_code_mode(
+    tool_registry: Any, workspace: str, engine: Any, hooks_engine: Any
+) -> None:
     """Register the ``code`` tool (C5b): a Python program that orchestrates the
     file/shell/search tools in one turn. Each tool call the code makes is run in
     the parent and governed exactly like a normal tool call — PreToolUse hook →
@@ -101,6 +106,9 @@ def build_agent_session(
     injection_callback: Any | None = None,
     agent_context: tuple[str, str] | None = None,
     streaming: bool = False,
+    default_permission_mode: PermissionMode = PermissionMode.FULL_AUTO,
+    permission_mode_override: PermissionMode | None = None,
+    runtime: DeepCodeRuntime | None = None,
 ) -> tuple[AgentSession, str, Any]:
     """Build an :class:`AgentSession` over ``workspace``.
 
@@ -109,16 +117,27 @@ def build_agent_session(
     ``ask_user_callback`` from an interactive frontend to give the agent the
     ``request_user_input`` tool; headless callers omit it. ``allow_spawn`` gives
     the agent the ``spawn_agent`` delegation tool (a spawned sub-agent is built
-    with it False so delegation cannot recurse).
+    with it False so delegation cannot recurse). ``default_permission_mode`` is
+    a client default only; environment and explicit config still win.
     """
     workspace = os.path.abspath(workspace)
     os.makedirs(workspace, exist_ok=True)
 
-    provider, profile = get_workflow_provider(phase="implementation", model=model)
+    active_runtime = runtime or get_runtime()
+    provider, profile = get_workflow_provider(
+        phase="implementation",
+        model=model,
+        runtime=active_runtime,
+    )
     resolved_model = model or profile.model
 
-    security_cfg = getattr(get_runtime().config, "security", None)
-    engine = build_permission_engine(security_cfg, cwd=workspace)
+    security_cfg = getattr(active_runtime.config, "security", None)
+    engine = build_permission_engine(
+        security_cfg,
+        cwd=workspace,
+        default_mode=default_permission_mode,
+        mode_override=permission_mode_override,
+    )
 
     # The system prompt is assembled once, here, so every frontend gets the
     # same behavior: working-style (collaboration mode, keyed off the resolved
@@ -146,7 +165,13 @@ def build_agent_session(
     if allow_spawn:
         from core.harness.agents import AgentControl
 
-        control = AgentControl(workspace, resolved_model)
+        control = AgentControl(
+            workspace,
+            resolved_model,
+            permission_mode=engine.mode,
+            approval_callback=approval_callback,
+            runtime=active_runtime,
+        )
 
     # External-command hooks (C3): discover Claude-Code-compatible hooks.json in
     # the workspace. None when no hooks are configured (the common case), so the

@@ -14,21 +14,28 @@ Features:
 - Multi-format support with fallback options
 """
 
+import asyncio
+import ipaddress
 import os
 import re
+import socket
 import aiohttp
 import aiofiles
 import shutil
 import sys
+from importlib import import_module
 from typing import List, Dict, Optional, Any
-from urllib.parse import urlparse, unquote
+from urllib.parse import unquote, urljoin, urlparse
 from datetime import datetime
 
 from core.platform_compat import configure_utf8_stdio
+from tools.document_conversion import (
+    DocumentConversionError,
+    convert_to_markdown,
+    detect_document_kind,
+)
 
 configure_utf8_stdio()
-
-from mcp.server import FastMCP
 
 # Docling imports for document conversion
 try:
@@ -41,25 +48,107 @@ try:
 except ImportError:
     DOCLING_AVAILABLE = False
     print(
-        "Warning: docling package not available. Document conversion will be disabled.",
+        "Info: docling is unavailable; built-in document converters remain enabled.",
         file=sys.stderr,
     )
 
 # Fallback PDF text extraction
 try:
-    import PyPDF2
+    import pypdf
 
-    PYPDF2_AVAILABLE = True
+    PDF_FALLBACK_AVAILABLE = True
 except ImportError:
-    PYPDF2_AVAILABLE = False
+    PDF_FALLBACK_AVAILABLE = False
     print(
-        "Warning: PyPDF2 package not available. Fallback PDF extraction will be disabled.",
+        "Warning: pypdf is not available. Fallback PDF extraction is disabled.",
         file=sys.stderr,
     )
 
 # 设置标准输出编码为UTF-8
-# 创建 FastMCP 实例
-mcp = FastMCP("smart-pdf-downloader")
+_MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024
+_MAX_REDIRECTS = 5
+
+
+class _SafeResolver(aiohttp.abc.AbstractResolver):
+    """Resolve only public IPs so the connection cannot DNS-rebind to localhost."""
+
+    async def resolve(self, host, port=0, family=socket.AF_UNSPEC):
+        loop = asyncio.get_running_loop()
+        records = await loop.getaddrinfo(
+            host, port, type=socket.SOCK_STREAM, family=family
+        )
+        results = []
+        for resolved_family, _, proto, _, address in records:
+            ip = ipaddress.ip_address(address[0])
+            if not _is_public_ip(ip):
+                raise OSError(f"URL resolves to a non-public address: {ip}")
+            results.append(
+                {
+                    "hostname": host,
+                    "host": str(ip),
+                    "port": address[1],
+                    "family": resolved_family,
+                    "proto": proto,
+                    "flags": socket.AI_NUMERICHOST,
+                }
+            )
+        if not results:
+            raise OSError(f"URL host did not resolve: {host}")
+        return results
+
+    async def close(self):
+        return None
+
+
+def _is_public_ip(value: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    if isinstance(value, ipaddress.IPv6Address) and value.ipv4_mapped is not None:
+        value = value.ipv4_mapped
+    return not (
+        value.is_private
+        or value.is_loopback
+        or value.is_link_local
+        or value.is_multicast
+        or value.is_reserved
+        or value.is_unspecified
+    )
+
+
+def _validate_public_url(url: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("only HTTP and HTTPS URLs are supported")
+    if parsed.username or parsed.password:
+        raise ValueError("URL credentials are not allowed")
+    try:
+        literal = ipaddress.ip_address(parsed.hostname)
+    except ValueError:
+        literal = None
+    if literal is not None and not _is_public_ip(literal):
+        raise ValueError("URL host must use a public address")
+
+
+async def _request_with_safe_redirects(
+    session: aiohttp.ClientSession, method: str, url: str
+) -> aiohttp.ClientResponse:
+    current = url
+    for redirect_count in range(_MAX_REDIRECTS + 1):
+        _validate_public_url(current)
+        response = await session.request(method, current, allow_redirects=False)
+        if response.status not in {301, 302, 303, 307, 308}:
+            return response
+        location = response.headers.get("Location")
+        response.release()
+        if not location:
+            raise aiohttp.ClientResponseError(
+                response.request_info,
+                response.history,
+                status=response.status,
+                message="redirect response has no Location header",
+            )
+        if redirect_count == _MAX_REDIRECTS:
+            raise ValueError("URL exceeded the redirect limit")
+        current = urljoin(current, location)
+    raise AssertionError("unreachable redirect loop")
 
 
 # 辅助函数
@@ -79,7 +168,9 @@ def format_warning_message(action: str, warning: str) -> str:
 
 
 async def perform_document_conversion(
-    file_path: str, extract_images: bool = True
+    file_path: str,
+    extract_images: bool = True,
+    output_path: str | None = None,
 ) -> Optional[str]:
     """
     执行文档转换的共用逻辑
@@ -94,70 +185,105 @@ async def perform_document_conversion(
     if not file_path:
         return None
 
-    conversion_msg = ""
-
-    # 首先尝试使用简单的PDF转换器（对于PDF文件）
-    # 检查文件是否实际为PDF（无论扩展名如何）
-    is_pdf_file = False
-    if PYPDF2_AVAILABLE:
+    warnings: list[str] = []
+    if DOCLING_AVAILABLE:
         try:
-            with open(file_path, "rb") as f:
-                header = f.read(8)
-                is_pdf_file = header.startswith(b"%PDF")
-        except Exception:
-            is_pdf_file = file_path.lower().endswith(".pdf")
+            converter = DoclingConverter()
+            if converter.is_supported_format(file_path):
+                conversion_options: dict[str, Any] = {"extract_images": extract_images}
+                if output_path is not None:
+                    conversion_options["output_file"] = output_path
+                result = await asyncio.to_thread(
+                    converter.convert_to_markdown,
+                    file_path,
+                    **conversion_options,
+                )
+                if result["success"]:
+                    message = "\n   [INFO] Document converted to Markdown (Docling)"
+                    message += f"\n   Markdown file: {result['output_file']}"
+                    message += f"\n   Conversion time: {result['duration']:.2f} seconds"
+                    if result.get("images_extracted", 0):
+                        message += (
+                            f"\n   Images extracted: {result['images_extracted']}"
+                        )
+                    return message
+                warnings.append(f"Docling conversion failed: {result['error']}")
+        except Exception as exc:
+            warnings.append(f"Docling conversion error: {exc}")
 
-    if is_pdf_file and PYPDF2_AVAILABLE:
+    try:
+        detected_kind = detect_document_kind(file_path)
+    except DocumentConversionError as exc:
+        detected_kind = None
+        warnings.append(f"Could not identify document: {exc}")
+
+    if detected_kind == "pdf" and PDF_FALLBACK_AVAILABLE:
         try:
-            simple_converter = SimplePdfConverter()
-            conversion_result = simple_converter.convert_pdf_to_markdown(file_path)
-            if conversion_result["success"]:
-                conversion_msg = "\n   [INFO] PDF converted to Markdown (PyPDF2)"
-                conversion_msg += (
-                    f"\n   Markdown file: {conversion_result['output_file']}"
-                )
-                conversion_msg += (
-                    f"\n   Conversion time: {conversion_result['duration']:.2f} seconds"
-                )
-                conversion_msg += (
-                    f"\n   Pages extracted: {conversion_result['pages_extracted']}"
-                )
+            result = await asyncio.to_thread(
+                SimplePdfConverter().convert_pdf_to_markdown,
+                file_path,
+                output_path,
+            )
+            if result["success"]:
+                message = "\n   [INFO] PDF converted to Markdown (pypdf fallback)"
+                message += f"\n   Markdown file: {result['output_file']}"
+                message += f"\n   Conversion time: {result['duration']:.2f} seconds"
+                message += f"\n   Pages extracted: {result['pages_extracted']}"
+                return message
+            warnings.append(f"PDF conversion failed: {result['error']}")
+        except Exception as exc:
+            warnings.append(f"PDF conversion error: {exc}")
+    elif detected_kind is not None:
+        started = datetime.now()
+        try:
+            result = await asyncio.to_thread(
+                convert_to_markdown,
+                file_path,
+                output_path,
+            )
+            duration = (datetime.now() - started).total_seconds()
+            message = "\n   [INFO] Document converted to Markdown (built-in)"
+            message += f"\n   Markdown file: {result.output_file}"
+            message += f"\n   Source format: {result.input_kind}"
+            message += f"\n   Conversion time: {duration:.2f} seconds"
+            message += f"\n   Characters extracted: {result.character_count}"
+            return message
+        except DocumentConversionError as exc:
+            warnings.append(f"Built-in conversion failed: {exc}")
+    return "\n   [WARNING] " + "; ".join(warnings) if warnings else None
 
-            else:
-                conversion_msg = f"\n   [WARNING] PDF conversion failed: {conversion_result['error']}"
-        except Exception as conv_error:
-            conversion_msg = f"\n   [WARNING] PDF conversion error: {str(conv_error)}"
 
-    # 如果简单转换失败，尝试使用docling（支持图片提取）
-    # if not conversion_success and DOCLING_AVAILABLE:
-    #     try:
-    #         converter = DoclingConverter()
-    #         if converter.is_supported_format(file_path):
-    #             conversion_result = converter.convert_to_markdown(
-    #                 file_path, extract_images=extract_images
-    #             )
-    #             if conversion_result["success"]:
-    #                 conversion_msg = (
-    #                     "\n   [INFO] Document converted to Markdown (docling)"
-    #                 )
-    #                 conversion_msg += (
-    #                     f"\n   Markdown file: {conversion_result['output_file']}"
-    #                 )
-    #                 conversion_msg += f"\n   Conversion time: {conversion_result['duration']:.2f} seconds"
-    #                 if conversion_result.get("images_extracted", 0) > 0:
-    #                     conversion_msg += f"\n   Images extracted: {conversion_result['images_extracted']}"
-    #                     images_dir = os.path.join(
-    #                         os.path.dirname(conversion_result["output_file"]), "images"
-    #                     )
-    #                     conversion_msg += f"\n   Images saved to: {images_dir}"
-    #             else:
-    #                 conversion_msg = f"\n   [WARNING] Docling conversion failed: {conversion_result['error']}"
-    #     except Exception as conv_error:
-    #         conversion_msg = (
-    #             f"\n   [WARNING] Docling conversion error: {str(conv_error)}"
-    #         )
+async def convert_document_to_markdown(
+    file_path: str,
+    output_path: str | None = None,
+    extract_images: bool = True,
+) -> str:
+    """Convert one local supported document through the shared conversion path."""
 
-    return conversion_msg if conversion_msg else None
+    parsed = urlparse(file_path)
+    if parsed.scheme in {"http", "https"}:
+        return format_error_message(
+            "Conversion aborted",
+            "download the URL with download_file_to before converting it",
+        )
+    source = os.path.abspath(os.path.expanduser(file_path))
+    if not os.path.isfile(source):
+        return format_error_message(
+            "Conversion aborted",
+            f"Input file not found: {source}",
+        )
+    destination = (
+        os.path.abspath(os.path.expanduser(output_path)) if output_path else None
+    )
+    result = await perform_document_conversion(
+        source,
+        extract_images=extract_images,
+        output_path=destination,
+    )
+    if not result or "[WARNING]" in result:
+        detail = result.strip() if result else "no converter accepted the document"
+        return format_error_message("Conversion failed", detail)
+    return f"[SUCCESS] Document converted successfully!{result}"
 
 
 def format_file_operation_result(
@@ -433,13 +559,13 @@ class PathExtractor:
 
 
 class SimplePdfConverter:
-    """简单的PDF转换器，使用PyPDF2提取文本"""
+    """简单的PDF转换器，使用 pypdf 提取文本"""
 
     def convert_pdf_to_markdown(
         self, input_file: str, output_file: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        使用PyPDF2将PDF转换为Markdown格式
+        使用 pypdf 将 PDF 转换为 Markdown 格式
 
         Args:
             input_file: 输入PDF文件路径
@@ -448,8 +574,8 @@ class SimplePdfConverter:
         Returns:
             转换结果字典
         """
-        if not PYPDF2_AVAILABLE:
-            return {"success": False, "error": "PyPDF2 package is not available"}
+        if not PDF_FALLBACK_AVAILABLE:
+            return {"success": False, "error": "pypdf is not available"}
 
         try:
             # 检查输入文件是否存在
@@ -474,7 +600,7 @@ class SimplePdfConverter:
 
             # 读取PDF文件
             with open(input_file, "rb") as file:
-                pdf_reader = PyPDF2.PdfReader(file)
+                pdf_reader = pypdf.PdfReader(file)
                 text_content = []
 
                 # 提取每页文本
@@ -590,7 +716,7 @@ class DoclingConverter:
                         ext = "png"
 
                     # 生成文件名
-                    filename = f"image_{idx+1}.{ext}"
+                    filename = f"image_{idx + 1}.{ext}"
                     filepath = os.path.join(images_dir, filename)
 
                     # 保存图片数据
@@ -606,7 +732,7 @@ class DoclingConverter:
 
                 except Exception as img_error:
                     print(
-                        f"Warning: Failed to extract image {idx+1}: {img_error}",
+                        f"Warning: Failed to extract image {idx + 1}: {img_error}",
                         file=sys.stderr,
                     )
                     continue
@@ -762,15 +888,22 @@ async def check_url_accessible(url: str) -> Dict[str, Any]:
     """检查URL是否可访问"""
     try:
         timeout = aiohttp.ClientTimeout(total=10)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.head(url, allow_redirects=True) as response:
+        connector = aiohttp.TCPConnector(resolver=_SafeResolver(), use_dns_cache=False)
+        async with aiohttp.ClientSession(
+            timeout=timeout, connector=connector
+        ) as session:
+            response = await _request_with_safe_redirects(session, "HEAD", url)
+            async with response:
+                raw_length = response.headers.get("Content-Length", "0")
+                content_length = int(raw_length) if raw_length.isdigit() else 0
+                allowed_size = content_length <= _MAX_DOWNLOAD_BYTES
                 return {
-                    "accessible": response.status < 400,
-                    "status": response.status,
+                    "accessible": response.status < 400 and allowed_size,
+                    "status": response.status if allowed_size else 413,
                     "content_type": response.headers.get("Content-Type", ""),
-                    "content_length": response.headers.get("Content-Length", 0),
+                    "content_length": content_length,
                 }
-    except Exception:
+    except (aiohttp.ClientError, OSError, ValueError):
         return {
             "accessible": False,
             "status": 0,
@@ -786,10 +919,21 @@ async def download_file(url: str, destination: str) -> Dict[str, Any]:
 
     try:
         timeout = aiohttp.ClientTimeout(total=300)  # 5分钟超时
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(url) as response:
+        connector = aiohttp.TCPConnector(resolver=_SafeResolver(), use_dns_cache=False)
+        async with aiohttp.ClientSession(
+            timeout=timeout, connector=connector
+        ) as session:
+            response = await _request_with_safe_redirects(session, "GET", url)
+            async with response:
                 # 检查响应状态
                 response.raise_for_status()
+
+                raw_length = response.headers.get("Content-Length", "0")
+                content_length = int(raw_length) if raw_length.isdigit() else 0
+                if content_length > _MAX_DOWNLOAD_BYTES:
+                    raise ValueError(
+                        f"download exceeds {_MAX_DOWNLOAD_BYTES // (1024 * 1024)} MiB limit"
+                    )
 
                 # 获取文件信息
                 content_type = response.headers.get(
@@ -803,10 +947,23 @@ async def download_file(url: str, destination: str) -> Dict[str, Any]:
 
                 # 下载文件
                 downloaded = 0
-                async with aiofiles.open(destination, "wb") as file:
-                    async for chunk in response.content.iter_chunked(chunk_size):
-                        await file.write(chunk)
-                        downloaded += len(chunk)
+                partial_path = f"{destination}.part"
+                try:
+                    async with aiofiles.open(partial_path, "wb") as file:
+                        async for chunk in response.content.iter_chunked(chunk_size):
+                            downloaded += len(chunk)
+                            if downloaded > _MAX_DOWNLOAD_BYTES:
+                                raise ValueError(
+                                    "download exceeded the configured size limit"
+                                )
+                            await file.write(chunk)
+                    os.replace(partial_path, destination)
+                except BaseException:
+                    try:
+                        os.remove(partial_path)
+                    except FileNotFoundError:
+                        pass
+                    raise
 
                 # 计算下载时间
                 duration = (datetime.now() - start_time).total_seconds()
@@ -883,7 +1040,6 @@ async def move_local_file(source_path: str, destination: str) -> Dict[str, Any]:
         }
 
 
-@mcp.tool()
 async def download_files(instruction: str) -> str:
     """
     Download files from URLs or move local files mentioned in natural language instructions.
@@ -1032,7 +1188,6 @@ async def download_files(instruction: str) -> str:
     return "\n\n".join(results)
 
 
-@mcp.tool()
 async def parse_download_urls(text: str) -> str:
     """
     Extract URLs, local paths and target paths from text without downloading or moving.
@@ -1079,7 +1234,6 @@ async def parse_download_urls(text: str) -> str:
     return content
 
 
-@mcp.tool()
 async def download_file_to(
     url: str, destination: Optional[str] = None, filename: Optional[str] = None
 ) -> str:
@@ -1188,7 +1342,6 @@ async def download_file_to(
         return msg + f"[ERROR] Download failed!\n   Error: {result['error']}"
 
 
-@mcp.tool()
 async def move_file_to(
     source: str, destination: Optional[str] = None, filename: Optional[str] = None
 ) -> str:
@@ -1282,139 +1435,5 @@ async def move_file_to(
         return msg + f"[ERROR] Copy failed!\n   Error: {result['error']}"
 
 
-# @mcp.tool()
-# async def convert_document_to_markdown(
-#     file_path: str, output_path: Optional[str] = None, extract_images: bool = True
-# ) -> str:
-#     """
-#     Convert a document to Markdown format with image extraction support.
-
-#     Supports both local files and URLs. Uses docling for advanced conversion with image extraction,
-#     or falls back to PyPDF2 for simple PDF text extraction.
-
-#     Args:
-#         file_path: Path to the input document file or URL (supports PDF, DOCX, PPTX, HTML, TXT, MD)
-#         output_path: Path for the output Markdown file (optional, auto-generated if not provided)
-#         extract_images: Whether to extract images from the document (default: True)
-
-#     Returns:
-#         Status message about the conversion operation with preview of converted content
-
-#     Examples:
-#         - "convert_document_to_markdown('paper.pdf')"
-#         - "convert_document_to_markdown('https://example.com/doc.pdf', 'output.md')"
-#         - "convert_document_to_markdown('presentation.pptx', extract_images=False)"
-#     """
-#     # 检查是否为URL
-#     is_url_input = False
-#     try:
-#         parsed = urlparse(file_path)
-#         is_url_input = parsed.scheme in ("http", "https")
-#     except Exception:
-#         is_url_input = False
-
-#     # 检查文件是否存在（如果不是URL）
-#     if not is_url_input and not os.path.exists(file_path):
-#         return f"[ERROR] Input file not found: {file_path}"
-
-#     # 检查是否是PDF文件，优先使用简单转换器（仅对本地文件）
-#     if (
-#         not is_url_input
-#         and file_path.lower().endswith(".pdf")
-#         and PYPDF2_AVAILABLE
-#         and not extract_images
-#     ):
-#         try:
-#             simple_converter = SimplePdfConverter()
-#             result = simple_converter.convert_pdf_to_markdown(file_path, output_path)
-#         except Exception as e:
-#             return f"[ERROR] PDF conversion error: {str(e)}"
-#     elif DOCLING_AVAILABLE:
-#         try:
-#             converter = DoclingConverter()
-
-#             # 检查文件格式是否支持
-#             if not is_url_input and not converter.is_supported_format(file_path):
-#                 supported_formats = [".pdf", ".docx", ".pptx", ".html", ".md", ".txt"]
-#                 return f"[ERROR] Unsupported file format. Supported formats: {', '.join(supported_formats)}"
-#             elif is_url_input and not file_path.lower().endswith(
-#                 (".pdf", ".docx", ".pptx", ".html", ".md", ".txt")
-#             ):
-#                 return f"[ERROR] Unsupported URL format: {file_path}"
-
-#             # 执行转换（支持图片提取）
-#             result = converter.convert_to_markdown(
-#                 file_path, output_path, extract_images
-#             )
-#         except Exception as e:
-#             return f"[ERROR] Docling conversion error: {str(e)}"
-#     else:
-#         return (
-#             "[ERROR] No conversion tools available. Please install docling or PyPDF2."
-#         )
-
-#     if result["success"]:
-#         msg = "[SUCCESS] Document converted successfully!\n"
-#         msg += f"   Input: {result['input_file']}\n"
-#         msg += f"   Output file: {result['output_file']}\n"
-#         msg += f"   Conversion time: {result['duration']:.2f} seconds\n"
-
-#         if result["input_size"] > 0:
-#             msg += f"   Original size: {result['input_size'] / 1024:.1f} KB\n"
-#         msg += f"   Markdown size: {result['output_size'] / 1024:.1f} KB\n"
-
-#         # 显示图片提取信息
-#         if extract_images and "images_extracted" in result:
-#             images_count = result["images_extracted"]
-#             if images_count > 0:
-#                 msg += f"   Images extracted: {images_count}\n"
-#                 msg += f"   Images saved to: {os.path.join(os.path.dirname(result['output_file']), 'images')}\n"
-#             else:
-#                 msg += "   No images found in document\n"
-
-#         # 显示Markdown内容的前几行作为预览
-#         content_lines = result["markdown_content"].split("\n")
-#         preview_lines = content_lines[:5]
-#         if len(content_lines) > 5:
-#             preview_lines.append("...")
-
-#         msg += "\n[PREVIEW] First few lines of converted Markdown:\n"
-#         for line in preview_lines:
-#             msg += f"   {line}\n"
-#     else:
-#         msg = "[ERROR] Conversion failed!\n"
-#         msg += f"   Error: {result['error']}"
-
-#     return msg
-
-
 if __name__ == "__main__":
-    _mcp_stdout = sys.stdout
-    sys.stdout = sys.stderr
-    print("📄 Smart PDF Downloader MCP Tool")
-    print("📝 Starting server with FastMCP...")
-
-    if DOCLING_AVAILABLE:
-        print("✅ Document conversion to Markdown is ENABLED (docling available)")
-    else:
-        print("❌ Document conversion to Markdown is DISABLED (docling not available)")
-        print("   Install docling to enable: pip install docling")
-
-    print("\nAvailable tools:")
-    print(
-        "  • download_files - Download files or move local files from natural language"
-    )
-    print("  • parse_download_urls - Extract URLs, local paths and destination paths")
-    print("  • download_file_to - Download a specific file with options")
-    print("  • move_file_to - Move a specific local file with options")
-    print("  • convert_document_to_markdown - Convert documents to Markdown format")
-
-    if DOCLING_AVAILABLE:
-        print("\nSupported formats: PDF, DOCX, PPTX, HTML, TXT, MD")
-        print("Features: Image extraction, Layout preservation, Automatic conversion")
-
-    print("")
-
-    # 运行服务器
-    sys.stdout = _mcp_stdout
-    mcp.run()
+    import_module("tools.pdf_downloader_server").run()

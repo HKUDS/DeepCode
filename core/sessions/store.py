@@ -28,9 +28,12 @@ from __future__ import annotations
 import json
 import os
 import threading
+import uuid
 from pathlib import Path
 from typing import Iterable
 
+from core.config import deepcode_home
+from core.file_lock import exclusive_file_lock
 from core.sessions.index import SessionIndex
 from core.sessions.models import (
     Session,
@@ -42,32 +45,48 @@ from core.sessions.models import (
 )
 
 
-_DEFAULT_ROOT = Path.home() / ".deepcode" / "sessions"
-
-
 class SessionStore:
     """Read/write JSONL sessions under a configurable root directory."""
 
     def __init__(
         self, root: Path | str | None = None, *, use_index: bool = True
     ) -> None:
-        self.root = Path(root).expanduser().resolve() if root else _DEFAULT_ROOT
+        self.root = (
+            Path(root).expanduser().resolve()
+            if root
+            else (deepcode_home() / "sessions").resolve()
+        )
         self._lock = threading.RLock()
         self._cache: dict[str, Session] = {}
+        self._cache_signatures: dict[str, tuple[int, int, int, int]] = {}
         # Derived SQLite index; disposable and self-healing. Disable with
         # use_index=False to force the pure-JSONL scan (used in tests to
         # exercise the fallback path).
         self._index: SessionIndex | None = (
             SessionIndex(self.root / "index.db") if use_index else None
         )
-        self._reconciled = False
+        self._disk_signatures: dict[str, tuple[int, int, int, int]] | None = None
 
     # ------------------------------------------------------------------
     # Path helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _validated_session_id(session_id: str) -> str:
+        value = str(session_id).strip()
+        if (
+            not value
+            or value in {".", ".."}
+            or len(value) > 255
+            or "\x00" in value
+            or "/" in value
+            or "\\" in value
+        ):
+            raise ValueError("invalid session id")
+        return value
+
     def _session_dir(self, session_id: str) -> Path:
-        return self.root / session_id
+        return self.root / self._validated_session_id(session_id)
 
     def _session_jsonl(self, session_id: str) -> Path:
         return self._session_dir(session_id) / "session.jsonl"
@@ -77,6 +96,13 @@ class SessionStore:
 
     def _settings_json(self, session_id: str) -> Path:
         return self._session_dir(session_id) / "settings.json"
+
+    def _session_lock(self, session_id: str) -> Path:
+        safe_id = self._validated_session_id(session_id)
+        return self.root / ".locks" / f"{safe_id}.lock"
+
+    def _store_lock(self) -> Path:
+        return self.root / ".store.lock"
 
     # ------------------------------------------------------------------
     # Create / read
@@ -92,12 +118,15 @@ class SessionStore:
         """Create and persist a new empty session.
 
         Picks an unused ``session_id`` (8-char hex) when not given.
-        Always re-rolls if there is a collision on disk.
+        Generated ids re-roll on collision; an explicit existing id raises
+        ``FileExistsError`` so projection recovery can remain idempotent.
         """
-        with self._lock:
+        with self._lock, exclusive_file_lock(self._store_lock()):
             sid = session_id or _new_session_id()
             attempts = 0
             while self._session_dir(sid).exists():
+                if session_id is not None:
+                    raise FileExistsError(f"session already exists: {sid}")
                 sid = _new_session_id()
                 attempts += 1
                 if attempts > 8:
@@ -108,21 +137,32 @@ class SessionStore:
                 title=title,
                 metadata=dict(metadata or {}),
             )
-            self._session_dir(sid).mkdir(parents=True, exist_ok=True)
+            self._session_dir(sid).mkdir(parents=True, exist_ok=False)
             self._rewrite_metadata(session)
             self._cache[sid] = session
+            self._remember_signature(sid)
             self._index_session(session)
             return session
 
     def get_session(self, session_id: str) -> Session | None:
         """Load a session from disk (cached on subsequent calls)."""
         with self._lock:
+            signature = self._disk_signature(session_id)
             cached = self._cache.get(session_id)
-            if cached is not None:
+            if (
+                cached is not None
+                and signature is not None
+                and self._cache_signatures.get(session_id) == signature
+            ):
                 return cached
             session = self._load(session_id)
             if session is not None:
                 self._cache[session_id] = session
+                if signature is not None:
+                    self._cache_signatures[session_id] = signature
+            else:
+                self._cache.pop(session_id, None)
+                self._cache_signatures.pop(session_id, None)
             return session
 
     def list_sessions(
@@ -196,7 +236,9 @@ class SessionStore:
 
         Returns ``None`` when the session does not exist.
         """
-        with self._lock:
+        with self._lock, exclusive_file_lock(self._session_lock(session_id)):
+            self._cache.pop(session_id, None)
+            self._cache_signatures.pop(session_id, None)
             session = self.get_session(session_id)
             if session is None:
                 return None
@@ -208,6 +250,7 @@ class SessionStore:
             )
             self._append_jsonl(self._session_jsonl(session_id), msg.to_dict())
             self._rewrite_metadata(session)
+            self._remember_signature(session_id)
             self._index_session(session)
             return msg
 
@@ -226,7 +269,9 @@ class SessionStore:
         Idempotent: re-attaching the same ``task_id`` updates its row
         rather than producing a duplicate.
         """
-        with self._lock:
+        with self._lock, exclusive_file_lock(self._session_lock(session_id)):
+            self._cache.pop(session_id, None)
+            self._cache_signatures.pop(session_id, None)
             session = self.get_session(session_id)
             if session is None:
                 return None
@@ -239,6 +284,7 @@ class SessionStore:
                     existing.metadata = {**(existing.metadata or {}), **metadata}
                 self._rewrite_tasks(session_id, session.tasks)
                 self._rewrite_metadata(session)
+                self._remember_signature(session_id)
                 self._index_session(session)
                 return existing
 
@@ -251,6 +297,7 @@ class SessionStore:
             )
             self._append_jsonl(self._tasks_jsonl(session_id), task.to_dict())
             self._rewrite_metadata(session)
+            self._remember_signature(session_id)
             self._index_session(session)
             return task
 
@@ -261,7 +308,9 @@ class SessionStore:
         status: str,
         metadata: dict | None = None,
     ) -> SessionTask | None:
-        with self._lock:
+        with self._lock, exclusive_file_lock(self._session_lock(session_id)):
+            self._cache.pop(session_id, None)
+            self._cache_signatures.pop(session_id, None)
             session = self.get_session(session_id)
             if session is None:
                 return None
@@ -270,6 +319,7 @@ class SessionStore:
                 return None
             self._rewrite_tasks(session_id, session.tasks)
             self._rewrite_metadata(session)
+            self._remember_signature(session_id)
             self._index_session(session)
             return task
 
@@ -314,7 +364,7 @@ class SessionStore:
 
     def delete_session(self, session_id: str) -> bool:
         """Remove a session directory recursively. Returns True on success."""
-        with self._lock:
+        with self._lock, exclusive_file_lock(self._session_lock(session_id)):
             d = self._session_dir(session_id)
             if not d.exists():
                 return False
@@ -330,6 +380,9 @@ class SessionStore:
             except OSError:
                 return False
             self._cache.pop(session_id, None)
+            self._cache_signatures.pop(session_id, None)
+            if self._disk_signatures is not None:
+                self._disk_signatures.pop(session_id, None)
             if self._index is not None:
                 self._index.remove_session(session_id)
             return True
@@ -348,14 +401,16 @@ class SessionStore:
             return {}
 
     def update_settings(self, session_id: str, **values) -> dict:
-        with self._lock:
+        with self._lock, exclusive_file_lock(self._session_lock(session_id)):
             current = self.get_settings(session_id)
             current.update(values)
             self._session_dir(session_id).mkdir(parents=True, exist_ok=True)
-            self._settings_json(session_id).write_text(
-                json.dumps(current, ensure_ascii=False, indent=2),
-                encoding="utf-8",
+            path = self._settings_json(session_id)
+            temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+            temporary.write_text(
+                json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8"
             )
+            os.replace(temporary, path)
             return current
 
     # ------------------------------------------------------------------
@@ -415,13 +470,16 @@ class SessionStore:
 
     def rename_session(self, session_id: str, title: str) -> bool:
         """Set a session's title. Returns False when the session is missing."""
-        with self._lock:
+        with self._lock, exclusive_file_lock(self._session_lock(session_id)):
+            self._cache.pop(session_id, None)
+            self._cache_signatures.pop(session_id, None)
             session = self.get_session(session_id)
             if session is None:
                 return False
             session.title = title
             session.updated_at = _utcnow_iso()
             self._rewrite_metadata(session)
+            self._remember_signature(session_id)
             self._index_session(session)
             return True
 
@@ -431,13 +489,16 @@ class SessionStore:
         Used for facts only known after creation (e.g. a workspace path
         derived from the freshly minted session id).
         """
-        with self._lock:
+        with self._lock, exclusive_file_lock(self._session_lock(session_id)):
+            self._cache.pop(session_id, None)
+            self._cache_signatures.pop(session_id, None)
             session = self.get_session(session_id)
             if session is None:
                 return False
             session.metadata = {**(session.metadata or {}), **updates}
             session.updated_at = _utcnow_iso()
             self._rewrite_metadata(session)
+            self._remember_signature(session_id)
             self._index_session(session)
             return True
 
@@ -460,7 +521,7 @@ class SessionStore:
                 for task in session.tasks:
                     task_links.append((sid, task))
             self._index.rebuild(summaries, task_links)
-            self._reconciled = True
+            self._disk_signatures = self._all_disk_signatures()
             return len(summaries)
 
     # ------------------------------------------------------------------
@@ -490,20 +551,23 @@ class SessionStore:
             self._index.upsert_task(session.session_id, task)
 
     def _ensure_reconciled(self) -> None:
-        """Rebuild the index once if it has drifted from what's on disk.
+        """Scan JSONL signatures and repair the disposable index when needed.
 
-        Cheap guard: compare the index's session count to the number of
-        session directories present. A mismatch (e.g. sessions written by an
-        older build with no index, or a deleted ``index.db``) triggers one
-        full rebuild from JSONL, after which incremental upserts keep it fresh.
+        The first call rebuilds from canonical files. Later calls only reload
+        sessions whose transcript/task signatures changed, which lets a
+        long-lived Desktop process observe concurrent CLI writes.
         """
-        if self._index is None or not self._index.available or self._reconciled:
+        if self._index is None or not self._index.available:
             return
-        disk_ids = self._disk_session_ids()
-        if self._index.session_count() != len(disk_ids):
+        current = self._all_disk_signatures()
+        previous = self._disk_signatures
+        disk_ids = list(current)
+        if previous is None or set(previous) != set(current):
             summaries: list[SessionSummary] = []
             task_links: list[tuple[str, SessionTask]] = []
             for sid in disk_ids:
+                self._cache.pop(sid, None)
+                self._cache_signatures.pop(sid, None)
                 session = self.get_session(sid)
                 if session is None:
                     continue
@@ -511,7 +575,16 @@ class SessionStore:
                 for task in session.tasks:
                     task_links.append((sid, task))
             self._index.rebuild(summaries, task_links)
-        self._reconciled = True
+        else:
+            for sid, signature in current.items():
+                if previous.get(sid) == signature:
+                    continue
+                self._cache.pop(sid, None)
+                self._cache_signatures.pop(sid, None)
+                session = self.get_session(sid)
+                if session is not None:
+                    self._index_session(session)
+        self._disk_signatures = current
 
     def _disk_session_ids(self) -> list[str]:
         if not self.root.exists():
@@ -522,11 +595,41 @@ class SessionStore:
             if entry.is_dir() and (entry / "session.jsonl").exists()
         ]
 
+    def _all_disk_signatures(self) -> dict[str, tuple[int, int, int, int]]:
+        return {
+            sid: signature
+            for sid in self._disk_session_ids()
+            if (signature := self._disk_signature(sid)) is not None
+        }
+
+    def _disk_signature(self, session_id: str) -> tuple[int, int, int, int] | None:
+        try:
+            session_stat = self._session_jsonl(session_id).stat()
+        except OSError:
+            return None
+        try:
+            task_stat = self._tasks_jsonl(session_id).stat()
+            task_mtime, task_size = task_stat.st_mtime_ns, task_stat.st_size
+        except OSError:
+            task_mtime = task_size = 0
+        return (
+            session_stat.st_mtime_ns,
+            session_stat.st_size,
+            task_mtime,
+            task_size,
+        )
+
+    def _remember_signature(self, session_id: str) -> None:
+        signature = self._disk_signature(session_id)
+        if signature is not None:
+            self._cache_signatures[session_id] = signature
+            if self._disk_signatures is not None:
+                self._disk_signatures[session_id] = signature
+
     def _append_jsonl(self, path: Path, payload: dict) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(payload, ensure_ascii=False, default=str))
-            fh.write("\n")
+            fh.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
 
     def _read_metadata(self, session_id: str) -> dict | None:
         path = self._session_jsonl(session_id)
@@ -568,7 +671,7 @@ class SessionStore:
                     if parsed.get("_type") == "metadata":
                         continue
                     message_lines.append(line)
-        tmp = path.with_suffix(".jsonl.tmp")
+        tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
         with tmp.open("w", encoding="utf-8") as fh:
             fh.write(session.metadata_line())
             fh.write("\n")
@@ -580,7 +683,7 @@ class SessionStore:
     def _rewrite_tasks(self, session_id: str, tasks: Iterable[SessionTask]) -> None:
         path = self._tasks_jsonl(session_id)
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".jsonl.tmp")
+        tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
         with tmp.open("w", encoding="utf-8") as fh:
             for task in tasks:
                 fh.write(json.dumps(task.to_dict(), ensure_ascii=False, default=str))

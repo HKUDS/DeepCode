@@ -3,7 +3,7 @@ PDF utility functions for the DeepCode agent system.
 """
 
 from pathlib import Path
-import PyPDF2
+import pypdf
 
 
 def read_pdf_metadata(file_path: Path) -> dict:
@@ -11,7 +11,7 @@ def read_pdf_metadata(file_path: Path) -> dict:
     try:
         print(f"\nAttempting to read PDF metadata from: {file_path}")
         with open(file_path, "rb") as file:
-            pdf_reader = PyPDF2.PdfReader(file)
+            pdf_reader = pypdf.PdfReader(file)
             info = pdf_reader.metadata
             first_page = pdf_reader.pages[0]
             text = first_page.extract_text()

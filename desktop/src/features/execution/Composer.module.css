@@ -1,0 +1,292 @@
+.region {
+  width: 100%;
+  padding: 12px 22px 16px;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in srgb, var(--surface-canvas) 96%, transparent) 24%
+  );
+}
+
+.composer {
+  width: min(820px, 100%);
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 15px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-float);
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.composer:focus-within {
+  border-color: var(--signal);
+  box-shadow:
+    0 0 0 3px var(--signal-soft),
+    var(--shadow-float);
+}
+
+.composer label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.composer textarea {
+  display: block;
+  width: 100%;
+  min-height: 62px;
+  max-height: 190px;
+  resize: none;
+  padding: 16px 17px 8px;
+  overflow-y: auto;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.58;
+}
+
+.composer textarea::placeholder {
+  color: var(--text-tertiary);
+}
+
+.toolbar {
+  display: flex;
+  min-height: 45px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 8px 8px 14px;
+}
+
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 0 12px 5px;
+}
+
+.commandMenu {
+  display: grid;
+  max-height: 190px;
+  margin: 0 9px 7px;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--surface-code);
+}
+
+.commandMenu button {
+  display: grid;
+  min-height: 38px;
+  grid-template-columns: 100px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.commandMenu button:hover {
+  background: var(--surface-raised);
+  color: var(--text-primary);
+}
+
+.commandMenu code {
+  color: var(--signal);
+  font: 10px var(--font-mono);
+}
+
+.commandMenu span {
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachments > span {
+  display: inline-flex;
+  max-width: 210px;
+  min-height: 27px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 4px 0 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: var(--surface-code);
+  color: var(--text-secondary);
+  font: 9.5px var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachments > span button {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 4px;
+  color: var(--text-tertiary);
+}
+
+.attachments > span button:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.context {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+}
+
+.attachButton {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--text-tertiary);
+}
+
+.attachButton:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.context span {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 7px;
+  border-radius: 6px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.context > span {
+  overflow: hidden;
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+}
+
+.selector {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  color: var(--text-tertiary);
+}
+
+.selector:hover {
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+}
+
+.selector select {
+  max-width: 180px;
+  border: 0;
+  outline: 0;
+  appearance: none;
+  background: transparent;
+  color: inherit;
+  font-size: 10px;
+  text-overflow: ellipsis;
+}
+
+.sendButton,
+.stopButton,
+.queueButton {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+}
+
+.activeActions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+}
+
+.queueButton {
+  min-height: 34px;
+  padding: 0 11px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 620;
+}
+
+.queueButton:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.sendButton {
+  width: 36px;
+  height: 36px;
+  background: var(--text-primary);
+  color: var(--text-inverse);
+}
+
+.sendButton:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--text-primary) 88%, var(--signal));
+}
+
+.stopButton {
+  min-height: 34px;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--border-subtle));
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: 620;
+}
+
+.hint {
+  display: flex;
+  width: min(802px, calc(100% - 16px));
+  justify-content: space-between;
+  gap: 12px;
+  margin: 7px auto 0;
+  color: var(--text-tertiary);
+  font-size: 9px;
+}
+
+.hint span {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+}
+
+@media (max-width: 680px) {
+  .region {
+    padding-inline: 10px;
+  }
+
+  .context > :nth-child(n + 2) {
+    display: none;
+  }
+}

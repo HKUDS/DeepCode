@@ -1,0 +1,155 @@
+name: Desktop CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Desktop quality gates
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install frontend dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Verify frontend and protocol
+        working-directory: desktop
+        run: |
+          npm run check:version
+          npm run check:protocol
+          npm run typecheck
+          npm run lint
+          npm test
+          npm run build
+
+      - name: Verify Tauri crate
+        working-directory: desktop/src-tauri
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test --all-targets
+
+  bundle:
+    name: Bundle ${{ matrix.name }}
+    needs: quality
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64
+            runner: macos-15
+            bundle: app
+          - name: macOS x64
+            runner: macos-15-intel
+            bundle: app
+          - name: Windows x64
+            runner: windows-2022
+            bundle: nsis
+          - name: Linux x64
+            runner: ubuntu-22.04
+            bundle: deb
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Tauri Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Set up Python for App Server sidecar
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: desktop/sidecar-requirements.lock
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Create locked sidecar environment
+        working-directory: desktop
+        run: npm run setup:sidecar
+
+      - name: Build platform bundle
+        working-directory: desktop
+        run: npm run tauri -- build --bundles ${{ matrix.bundle }}
+
+      - name: Verify bundle resources and runtime
+        working-directory: desktop
+        run: >-
+          node scripts/run-python.mjs scripts/verify-release-bundle.py
+          --bundle ${{ matrix.bundle }}
+
+      - name: Upload bundle smoke artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepcode-${{ matrix.name }}
+          path: desktop/src-tauri/target/release/bundle/
+          if-no-files-found: error
+          retention-days: 7

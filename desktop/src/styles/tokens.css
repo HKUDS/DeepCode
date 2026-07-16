@@ -1,0 +1,178 @@
+:root {
+  color: #191b20;
+  background: #f7f8fa;
+  color-scheme: light dark;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text",
+    "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+
+  --font-display:
+    "Avenir Next", "Segoe UI Variable Display", -apple-system, BlinkMacSystemFont,
+    sans-serif;
+  --font-mono:
+    "SFMono-Regular", ui-monospace, "Cascadia Code", Consolas, monospace;
+
+  --surface-canvas: #f7f8fa;
+  --surface-sidebar: #eef0f3;
+  --surface-sidebar-strong: #e7e9ed;
+  --surface-raised: #ffffff;
+  --surface-overlay: rgb(255 255 255 / 88%);
+  --surface-hover: #e5e8ed;
+  --surface-selected: #dfe4f4;
+  --surface-user: #edf0f5;
+  --surface-code: #f1f3f6;
+  --surface-inset: #e9ecf1;
+
+  --text-primary: #191b20;
+  --text-secondary: #5c626d;
+  --text-tertiary: #858c98;
+  --text-inverse: #f7f8fa;
+  --text-on-accent: #ffffff;
+
+  --border-subtle: #dfe2e7;
+  --border-strong: #cbd0d8;
+  --border-emphasis: #aeb5c0;
+
+  --signal: #5267f5;
+  --signal-strong: #4054dd;
+  --signal-soft: rgb(82 103 245 / 12%);
+  --signal-faint: rgb(82 103 245 / 6%);
+  --success: #228064;
+  --success-soft: #e8f5f0;
+  --attention: #a9602e;
+  --attention-soft: #fff2e7;
+  --danger: #b54c51;
+  --danger-soft: #fcecee;
+
+  --shadow-float:
+    0 20px 55px rgb(28 34 46 / 10%), 0 2px 8px rgb(28 34 46 / 5%);
+  --shadow-menu:
+    0 16px 40px rgb(28 34 46 / 14%), 0 2px 7px rgb(28 34 46 / 7%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color: #f2f4f7;
+    background: #15171b;
+
+    --surface-canvas: #17191e;
+    --surface-sidebar: #111318;
+    --surface-sidebar-strong: #191c22;
+    --surface-raised: #202329;
+    --surface-overlay: rgb(32 35 41 / 90%);
+    --surface-hover: #262a31;
+    --surface-selected: #29304c;
+    --surface-user: #252a34;
+    --surface-code: #1b1e24;
+    --surface-inset: #15181d;
+
+    --text-primary: #f2f4f7;
+    --text-secondary: #b0b6c0;
+    --text-tertiary: #7d8591;
+    --text-inverse: #15171b;
+    --text-on-accent: #15171b;
+
+    --border-subtle: #2c3038;
+    --border-strong: #3b414b;
+    --border-emphasis: #555d69;
+
+    --signal: #8291ff;
+    --signal-strong: #a3adff;
+    --signal-soft: rgb(130 145 255 / 16%);
+    --signal-faint: rgb(130 145 255 / 8%);
+    --success: #5fbc98;
+    --success-soft: rgb(54 144 108 / 14%);
+    --attention: #e09a64;
+    --attention-soft: rgb(197 110 49 / 15%);
+    --danger: #eb858b;
+    --danger-soft: rgb(190 68 77 / 15%);
+
+    --shadow-float:
+      0 24px 64px rgb(0 0 0 / 34%), 0 2px 8px rgb(0 0 0 / 22%);
+    --shadow-menu:
+      0 18px 46px rgb(0 0 0 / 42%), 0 2px 8px rgb(0 0 0 / 25%);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 320px;
+  height: 100%;
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  background: var(--surface-canvas);
+  color: var(--text-primary);
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--signal) 28%, transparent);
+}
+
+* {
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 99px;
+  background: var(--border-strong);
+  background-clip: padding-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

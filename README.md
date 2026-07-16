@@ -64,10 +64,6 @@
 
 ### 🖥️ **Interface Showcase**
 
-<table align="center" width="100%" style="border: none; border-collapse: collapse; margin: 30px 0;">
-<tr>
-<td width="50%" align="center" style="vertical-align: top; padding: 20px;">
-
 #### 🖥️ **CLI Interface**
 **Terminal-Based Development**
 
@@ -83,27 +79,10 @@
   *Professional terminal interface for advanced users and CI/CD integration*
 </div>
 
-</td>
-<td width="50%" align="center" style="vertical-align: top; padding: 20px;">
-
-#### 🌐 **Web Interface**
-**Visual Interactive Experience**
-
-<div align="center">
-
-  <img src="https://github.com/Zongwei9888/Experiment_Images/raw/8882a7313c504ca97ead6e7b36c51aa761b6a4f3/DeepCode_images/UI.gif" alt="Web Interface Demo" width="100%" style="border-radius: 10px; box-shadow: 0 8px 20px rgba(14,165,233,0.3); margin: 15px 0;"/>
-
-  <div style="background: linear-gradient(135deg, #0EA5E9 0%, #00D4FF 100%); border-radius: 12px; padding: 15px; margin: 15px 0; color: white;">
-    <strong>🎨 Modern Web Dashboard</strong><br/>
-    <small>🖱️ Intuitive drag-and-drop<br/>📱 Responsive design<br/>🎯 Visual progress tracking</small>
-  </div>
-
-  *Beautiful web interface with streamlined workflow for all skill levels*
-</div>
-
-</td>
-</tr>
-</table>
+The legacy browser UI has been removed. The Tauri 2 workbench and its durable
+stdio App Server are under active development; see the
+[`P1 architecture`](docs/P1_APP_SERVER_ARCHITECTURE.md) and
+[`desktop rebuild plan`](docs/TAURI_DESKTOP_REBUILD_PLAN.md).
 
 ---
 
@@ -174,19 +153,16 @@
 
 ---
 
-**[2026-07-08] Agent Chat, polished: memory, folder picker, session management**
+**[2026-07-08] Persistent agent sessions and memory**
 
-- **The agent remembers across sessions.** Drop an `AGENTS.md` (or `DEEPCODE.md`) at your project root for standing instructions, and the agent keeps its own persistent notes under `.deepcode/memory/` — so a fact it learned yesterday is there today. Works the same in the CLI, the web chat, and headless runs.
-- **Point it at a real project folder.** New chats get a workspace picker — browse and choose the directory the agent works in (fenced to your home), instead of typing a path blind.
-- **Manage your conversations.** Rename or delete any chat from the sidebar; a new chat stays a draft until you send the first message, so the list no longer fills with empty sessions. Each chat's folder is shown and remembered across restarts.
-- **Replies you can actually read.** Assistant messages render as markdown (code blocks, lists, tables); every tool call is an expandable card showing what it did (e.g. "Wrote 163 bytes to plan.md"); errors read as errors, not as a fake answer.
+- **The agent remembers across sessions.** Drop an `AGENTS.md` (or `DEEPCODE.md`) at your project root for standing instructions, and the agent keeps persistent notes under `.deepcode/memory/`.
+- **Sessions survive restarts.** Workspaces, messages, titles, and task references are persisted under `~/.deepcode/sessions/` and can be resumed from the TUI.
 
 ---
 
-**[2026-07-08] General coding agent: interactive CLI, web Agent Chat & native tools**
+**[2026-07-08] General coding agent: interactive CLI and native tools**
 
 - **Talk to DeepCode in your terminal.** `python -m cli.tui` (or just `deepcode`) opens a free-form, multi-turn coding conversation — describe any task in natural language and watch the agent stream its reply, edit files, and run commands with live progress cards. Steer with `/new`, `/resume`, `/model`, `/clear`, `/help`, and attach files with `@path`. (Replaces the previous menu-driven CLI.)
-- **Chat with the agent in your browser.** The new "Agent Chat" page keeps continuous conversations: a sidebar of past chats, one-click New chat, streamed replies with tool progress, and mid-run interrupt. Every chat persists, reopens any time, and works in its own workspace under `deepcode_lab/chats/`.
 - **Edits that land on the first try.** First-class `read` / `write` / `edit` / `apply_patch` / `bash` / `grep` / `glob` tools: whitespace-tolerant fuzzy edits, multi-file atomic patches, and automatic post-edit diagnostics the agent fixes on the spot.
 - **Script any task.** `python -m cli.exec_cli "task" --json` runs one task end-to-end and emits a machine-readable event stream — drop it straight into CI or your own pipelines.
 - **Long conversations stay fast and stable.** Context windows resolve per model with automatic history compaction, and sessions are SQLite-indexed so listing and resume are instant.
@@ -197,8 +173,7 @@
 
 - **Every coding phase behaves the same.** All phases now run on one shared agent runtime, with tool definitions sourced straight from the MCP servers as the single source of truth — Paper2Code results unchanged.
 - **Your credentials stay yours.** Every tool call passes a three-valued permission engine (allow / ask / deny) with a non-overridable credential denylist (`.ssh`, `.aws/credentials`, `.env`, `*.pem`, ...), and shell/Python execution runs inside a platform sandbox (macOS seatbelt / Linux bubblewrap) fenced to the workspace. Tune it via `DEEPCODE_SANDBOX` / `DEEPCODE_PERMISSION_MODE` or the `security` block in `deepcode_config.json`.
-- **Build any frontend on one contract.** Declarative per-model provider settings, a normalized model-event stream, a structured message model, and an `AgentSession` event protocol back the CLI, the web UI, and headless runs alike.
-- **Web chat planning just runs.** It now proceeds autonomously by default (requirements -> plan -> implementation) instead of stalling on a clarifying-questions step.
+- **Build every client on one contract.** Declarative per-model provider settings, a normalized model-event stream, a structured message model, and an `AgentSession` event protocol back the CLI and headless runs. The desktop application is being rebuilt on the same core.
 
 ---
 
@@ -207,22 +182,19 @@
 
 🧭 **[2026-05-01] OpenRouter model selector, session cleanup & workflow UX hardening**
 
-- 🧠 **OpenRouter model catalog in Settings.** The new UI can now fetch OpenRouter model metadata from `https://openrouter.ai/api/v1/models`, cache it locally, and expose searchable model selectors for the Default, Planning, and Implementation phases. Use exact OpenRouter model ids such as `z-ai/glm-5.1` without editing JSON by hand.
-- 🔄 **Runtime model switching.** Saving model choices from Settings updates `deepcode_config.json` and reloads the in-process LLM runtime so newly started workflows pick up the selected provider/model combination immediately.
-- 🗑️ **Session deletion now performs safe cascade cleanup.** Deleting a session from the UI removes its persistent session store and associated `deepcode_lab/tasks/<task_id>/` workspaces, while preserving shared `uploads/` source files. Sessions with `pending`, `running`, or `waiting_for_input` tasks are blocked with a clear `409 Conflict`.
-- 📊 **More accurate Paper2Code progress.** The frontend now shows backend stage messages and avoids marking intermediate phases as fully "Done" while long LLM work is still running.
+- 🧠 **OpenRouter model catalog support.** DeepCode can fetch and cache OpenRouter model metadata and use exact model ids such as `z-ai/glm-5.1`.
+- 🔄 **Runtime model switching.** Model choices in `deepcode_config.json` apply to newly started workflows.
 - 🛡️ **Workflow robustness fixes.** Uploads now reject Git LFS pointer files, cancelled tasks stop backend work promptly, stale browser session ids recover cleanly, planner retries fall back to a minimal valid plan when a model defers/tool-calls incorrectly, and document segmentation skips an extra validation LLM call that could stall progress.
 
 ---
 
 🗂️ **[2026-04-28] Persistent sessions & dual-layer logging**
 
-- 🆕 **Sessions are now persistent.** Every CLI / UI run is automatically attached to a session under `~/.deepcode/sessions/<id>/` (override with `DEEPCODE_SESSIONS_DIR`). Sessions are JSONL — `tail -f session.jsonl` works out of the box. List / inspect / branch them with `python cli/main_cli.py session list|show <id>|new|resume <id>|delete <id>`, or via `GET /api/v1/sessions` from the backend.
-- 🔄 **Resume a previous run** by passing `--session <id>` to the CLI or `session_id` to `POST /api/v1/workflows/paper-to-code` (or `chat-planning`). Backend restarts no longer drop task history; running tasks left over from a crash are surfaced as `interrupted`.
+- 🆕 **Sessions are now persistent.** Every CLI run can attach to a session under `~/.deepcode/sessions/<id>/` (override with `DEEPCODE_SESSIONS_DIR`). Sessions are JSONL and indexed with SQLite.
+- 🔄 **Resume a previous run** from the TUI with `/resume` or start it with `--resume <session_id>`.
 - 💻 **CLI session UX.** The interactive CLI now supports Cursor-style slash commands: `/resume` opens a numbered session picker, `/new [title]` creates and switches sessions, `/session` shows the active session, and `/help` lists commands. You can also paste inline inputs directly at the menu prompt with `@/path/to/paper.pdf`, `@"C:\path with spaces\paper.pdf"`, or `@https://...`.
 - 📜 **Two-layer structured logging.** A global rotating JSONL lives at `logs/server-YYYYMMDD.jsonl`; per-task logs at `deepcode_lab/tasks/<task_id>/logs/{system,llm,mcp}.jsonl`. Every `loguru.logger` call automatically picks up the active `task_id` via a contextvar — business code did not have to change. Configure via the new `logger.{globalFile,taskFile,llm}` block in `deepcode_config.json`.
-- 📡 **WebSocket log streaming.** Tail one task with `/ws/tasks/{task_id}/logs?channel=llm`, or merge every task in a session via `/ws/sessions/{session_id}/logs`. The legacy `/ws/logs/{session_id}` endpoint that silently ignored its parameter has been removed.
-- 🧹 **Dead code removed.** `utils/simple_llm_logger.py`, `utils/dialogue_logger.py`, and the in-memory `services/session_service.py` implementation are gone (the latter is now a thin re-export of `core.sessions.SessionStore`).
+- 🧹 **Dead code removed.** Legacy in-memory session code was replaced by `core.sessions.SessionStore`.
 
 ---
 
@@ -233,24 +205,7 @@
 - 🚀 **Removed Brave Search end-to-end.** All Python code, MCP server config, and docs are scrubbed of `brave`/`BRAVE_API_KEY`/`WebSearchTool`. Web fetching now relies entirely on the built-in `fetch` MCP server.
 - 🔌 **OpenAI-compatible providers documented.** New `Quick Start → Configuration` snippet shows how to point the `openai`/`openrouter` blocks at Poe (`https://api.poe.com/v1`), OpenRouter, or Alibaba DashScope, plus how to set `agents.defaults.model` / `agents.planning.model` / `agents.implementation.model` (e.g. `openai/gpt-5.4`).
 - 🔐 **Secrets hygiene.** All YAML config has been collapsed into a single `deepcode_config.json`, and `.gitignore` now ignores it alongside `secrets.json`, `*credentials*.json`, `.env`, `.env.*` (with `*.env.example` whitelisted).
-- 📝 **Launch table fixed.** The README now documents `deepcode --local` for the web UI path and adds explicit Troubleshooting rows for Windows GBK encoding and the issues fixed above.
 - 🧹 **Misc:** auto-create `logs/` directory so JSONL logging never fails on a fresh checkout, replace bare `except:` with `except Exception:` in `agent_orchestration_engine.py` (Ruff E722), `command_executor` MCP tool descriptions now embed the host OS so the LLM picks compatible commands.
-
----
-
-🎉 **[2026-02] New Web UI Experience Upgrade!**
-
-- 🔄 **User-in-Loop Interaction**: Support real-time user interaction during workflows - AI asks clarifying questions directly in the chat
-- 💬 **Inline Interaction Design**: Interaction prompts appear naturally within the chat flow for a seamless experience
-- 🚀 **One-Click Launch**: Simply run `deepcode` to start the new UI (cross-platform: Windows/macOS/Linux)
-- 🔧 **Improved Process Management**: Enhanced service start/stop mechanism with automatic port cleanup
-- 📡 **WebSocket Real-time Communication**: Fixed message loss issues, ensuring proper interaction state synchronization
-
-<div align="center">
-  <img src="./assets/NewUI.png" alt="DeepCode New UI" width="85%" style="border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15);" />
-  <br/>
-  <sub><em>DeepCode New Web UI - Modern React-based Interface</em></sub>
-</div>
 
 ---
 
@@ -508,8 +463,8 @@ DeepCode leverages the **Model Context Protocol (MCP)** standard to seamlessly i
 
 ---
 
-🎛️ **Multi-Interface Framework**<br>
-RESTful API with CLI and web frontends featuring real-time code streaming, interactive debugging, and extensible plugin architecture for CI/CD integration.
+🎛️ **Shared Agent Runtime**<br>
+CLI and headless execution share one event-driven Agent runtime. The Tauri desktop client is being rebuilt on the same application layer.
 
 **🚀 Multi-Agent Intelligent Pipeline:**
 
@@ -627,31 +582,27 @@ Before installing DeepCode, ensure you have the following:
 
 | Requirement | Version | Purpose |
 |-------------|---------|---------|
-| **Python** | 3.9+ | Core runtime |
-| **Node.js** | 18+ | New UI frontend |
-| **npm** | 8+ | Package management |
+| **Python** | 3.12+ | Core runtime and CLI |
+| **Node.js** | 22+ | Desktop UI development only |
+| **Rust** | stable | Tauri desktop development only |
 
 ```bash
 # Check your versions
-python --version   # Should be 3.9+
-node --version     # Should be 18+
-npm --version      # Should be 8+
+python --version   # Should be 3.12+
 ```
 
 <details>
-<summary><strong>📥 Install Node.js (if not installed)</strong></summary>
+<summary><strong>📥 Desktop development prerequisites</strong></summary>
 
 ```bash
-# macOS (using Homebrew)
-brew install node
-
-# Ubuntu/Debian
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt-get install -y nodejs
-
-# Windows
-# Download from https://nodejs.org/
+node --version
+npm --version
+rustc --version
+cargo --version
 ```
+
+Node and Rust are not required for the Python CLI. Follow the official Tauri
+prerequisites when working on `desktop/`.
 
 </details>
 
@@ -684,9 +635,6 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv venv --python=3.13
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 uv pip install -r requirements.txt
-
-# Install frontend dependencies
-npm install --prefix new_ui/frontend
 ```
 
 ##### 🐍 **Using Traditional pip**
@@ -696,9 +644,6 @@ git clone https://github.com/HKUDS/DeepCode.git
 cd DeepCode/
 
 pip install -r requirements.txt
-
-# Install frontend dependencies
-npm install --prefix new_ui/frontend
 ```
 
 ##### 🧪 **Editable install (lets `deepcode` always run THIS checkout)**
@@ -717,6 +662,25 @@ immediately on next launch — no reinstall needed.
 > If you maintain multiple DeepCode checkouts, only one of them can own the
 > `deepcode` command at a time (the most recent `pip install -e .` wins).
 > Reinstall in the checkout you currently want to be active.
+
+##### 🖥️ **Desktop and App Server foundation**
+
+The legacy browser UI has been removed. To work on the new Tauri desktop shell:
+
+```bash
+cd desktop
+npm ci
+npm run tauri dev
+```
+
+See [`desktop/README.md`](desktop/README.md) for verification commands and the
+current phase boundary.
+
+The P1 App Server can be exercised independently of the desktop shell:
+
+```bash
+python -m app_server
+```
 
 </details>
 
@@ -869,19 +833,12 @@ DeepCode performs web content retrieval through the built-in `fetch` MCP server 
 
 ### ⚡ **Step 3: Launch Application**
 
-DeepCode runs three ways, all on the same agent core:
+DeepCode currently exposes two supported CLI surfaces on the same agent core:
 
 **🖥️ Interactive agent (default).** A multi-turn coding conversation in your terminal:
 
 ```bash
 deepcode                 # equivalent to: python -m cli.tui
-```
-
-**🌐 Local web UI.** React frontend + FastAPI backend on your host:
-
-```bash
-deepcode --local
-# Frontend → http://localhost:5173    Backend → http://localhost:8000
 ```
 
 **🤖 Headless (scripting / CI).** One task, machine-readable output:
@@ -927,12 +884,6 @@ python -m cli.exec_cli "fix the failing test in mathlib.py" --json
 
 which streams machine-readable events (NDJSON) and exits 0 on completion.
 
-In the web UI, use the **Sessions** menu in the header to resume or delete a
-session. Deleting a session removes its JSONL session record and associated task
-workspace under `deepcode_lab/tasks/`, but keeps original files in `uploads/`.
-If the session still has `pending`, `running`, or `waiting_for_input` tasks, the
-backend rejects the deletion until the task is cancelled or completed.
-
 ### 🎯 **Step 4: Generate Code**
 
 1. **📄 Input** — Upload a research paper, type requirements, or paste a URL
@@ -948,9 +899,6 @@ backend rejects the deletion until the task is cancelled or completed.
 
 | Problem | Cause | Fix |
 |---|---|---|
-| Frontend blank page | Corrupted `node_modules` | `cd new_ui/frontend && rm -rf node_modules && npm install` |
-| `ERR_CONNECTION_REFUSED` | Wrong port / backend not running | With `--local`: frontend `http://localhost:5173`, backend `http://localhost:8000` |
-| `npm install` → `Could not read package.json` | Wrong directory | Use `npm install --prefix new_ui/frontend` |
 | Windows: MCP servers not working | Need absolute paths | See [Windows MCP Configuration](#-step-2-configuration) above |
 | Windows: `UnicodeEncodeError: 'gbk' codec can't encode...` on launch | Default GBK console can't render emoji in startup banner | Set UTF-8 first: `set PYTHONIOENCODING=utf-8 && set PYTHONUTF8=1` (cmd) or `$env:PYTHONIOENCODING="utf-8"; $env:PYTHONUTF8="1"` (PowerShell) |
 | Windows: code-implementation stage hangs / produces a `-p` directory | LLM emitted `mkdir -p ...` and `cmd.exe` treated `-p` as a folder name | Already fixed in `tools/command_executor.py` — common Unix commands (`mkdir -p`, `touch`, `rm -rf`, `cp -r`, `mv`) are now executed natively via `pathlib`/`shutil`, no shell needed |

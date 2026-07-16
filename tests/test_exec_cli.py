@@ -44,7 +44,8 @@ def _patch(monkeypatch, provider):
     monkeypatch.setattr(
         agent_setup, "get_workflow_provider", lambda **kw: (provider, _Profile())
     )
-    # security config: none -> full_auto engine (still enforces denylist)
+    # Lock the P0 contract: an unconfigured headless CLI remains autonomous.
+    monkeypatch.delenv("DEEPCODE_PERMISSION_MODE", raising=False)
     monkeypatch.setattr(
         agent_setup,
         "get_runtime",
@@ -70,7 +71,6 @@ def test_exec_writes_file_and_exits_zero(tmp_path, monkeypatch, capsys):
         ]
     )
     _patch(monkeypatch, provider)
-
     rc = exec_cli.main(
         ["--workspace", str(tmp_path), "--json", "create hello.py that prints hi"]
     )
@@ -81,6 +81,7 @@ def test_exec_writes_file_and_exits_zero(tmp_path, monkeypatch, capsys):
     lines = [ln for ln in capsys.readouterr().out.splitlines() if ln.strip()]
     events = [json.loads(ln) for ln in lines]
     kinds = [e["msg"]["type"] for e in events]
+    assert all(set(event) == {"id", "msg"} for event in events)
     assert kinds[0] == "turn_started"
     assert "tool_started" in kinds and "tool_completed" in kinds
     assert kinds[-1] == "task_complete"

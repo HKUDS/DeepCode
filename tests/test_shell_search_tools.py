@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -62,6 +64,36 @@ async def test_bash_large_output_spilled(tmp_path):
     # produce > 30k chars
     out = await b.execute(command="python -c \"print('x' * 40000)\"")
     assert "output truncated" in out and "saved to:" in out
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group assertion")
+@pytest.mark.asyncio
+async def test_bash_cancellation_terminates_child_process_tree(tmp_path, monkeypatch):
+    monkeypatch.setenv("DEEPCODE_SANDBOX", "0")
+    tool = BashTool(str(tmp_path))
+    pid_file = tmp_path / "child.pid"
+    task = asyncio.create_task(
+        tool.execute(command="sleep 30 & echo $! > child.pid; wait")
+    )
+    for _ in range(100):
+        if pid_file.exists():
+            break
+        await asyncio.sleep(0.01)
+    assert pid_file.exists()
+    child_pid = int(pid_file.read_text().strip())
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    for _ in range(100):
+        try:
+            os.kill(child_pid, 0)
+        except ProcessLookupError:
+            break
+        await asyncio.sleep(0.01)
+    else:
+        pytest.fail("child process survived cancellation")
 
 
 # --- grep -------------------------------------------------------------------

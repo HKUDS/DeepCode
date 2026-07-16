@@ -26,7 +26,15 @@ from core.config import (  # noqa: E402
     deepcode_home,
     home_config_path,
     load_config,
+    load_config_for_workspace,
+    project_config_path,
 )
+from core.compat.runtime import (  # noqa: E402
+    DeepCodeRuntime,
+    get_runtime,
+    use_runtime,
+)
+import core.compat.runtime as runtime_module  # noqa: E402
 
 
 def _write_config(directory: Path, data: dict) -> Path:
@@ -89,7 +97,9 @@ def test_load_raw_rejects_non_object(tmp_path):
 def test_deepcode_home_env_override(tmp_path, monkeypatch):
     monkeypatch.setenv("DEEPCODE_HOME", str(tmp_path / "custom"))
     assert deepcode_home() == (tmp_path / "custom").resolve()
-    assert home_config_path() == (tmp_path / "custom" / _DEFAULT_CONFIG_FILENAME).resolve()
+    assert (
+        home_config_path() == (tmp_path / "custom" / _DEFAULT_CONFIG_FILENAME).resolve()
+    )
 
 
 def test_deepcode_home_defaults_to_dot_deepcode(monkeypatch):
@@ -123,6 +133,34 @@ def test_project_overrides_home_deep_merge(layered):
     assert cfg.providers.openai.api_key == "sk-home"
 
 
+def test_explicit_workspace_layer_does_not_depend_on_process_cwd(
+    layered, tmp_path, monkeypatch
+):
+    home, _cwd_project = layered
+    target = tmp_path / "target" / "nested"
+    target.mkdir(parents=True)
+    _write_config(
+        home,
+        {
+            "providers": {"openai": {"apiKey": "sk-home"}},
+            "agents": {"defaults": {"model": "openai/home"}},
+        },
+    )
+    target_config = _write_config(
+        target.parent,
+        {"agents": {"defaults": {"model": "openai/target"}}},
+    )
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    monkeypatch.chdir(unrelated)
+
+    cfg = load_config_for_workspace(target)
+
+    assert cfg.providers.openai.api_key == "sk-home"
+    assert cfg.agents.defaults.model == "openai/target"
+    assert project_config_path(target) == target_config
+
+
 def test_project_only_when_no_home(layered):
     _home, project = layered
     _write_config(project, {"providers": {"openai": {"apiKey": "sk-proj"}}})
@@ -134,7 +172,9 @@ def test_explicit_path_bypasses_layering(layered, tmp_path):
     home, project = layered
     _write_config(home, {"providers": {"openai": {"apiKey": "sk-home"}}})
     _write_config(project, {"providers": {"openai": {"apiKey": "sk-proj"}}})
-    explicit = _write_config(tmp_path / "elsewhere", {"providers": {"openai": {"apiKey": "sk-explicit"}}})
+    explicit = _write_config(
+        tmp_path / "elsewhere", {"providers": {"openai": {"apiKey": "sk-explicit"}}}
+    )
     cfg = load_config(config_path=explicit)
     assert cfg.providers.openai.api_key == "sk-explicit"  # neither layer consulted
 
@@ -143,3 +183,17 @@ def test_neither_present_returns_defaults(layered):
     # Nothing on disk in either layer → defaults, so the process still boots.
     cfg = load_config()
     assert not cfg.providers.openai.api_key
+
+
+def test_context_runtime_override_restores_process_default(layered, monkeypatch):
+    home, project = layered
+    _write_config(home, {"agents": {"defaults": {"model": "openai/user"}}})
+    _write_config(project, {"agents": {"defaults": {"model": "openai/project"}}})
+    default_runtime = DeepCodeRuntime(load_config(config_path=home_config_path()))
+    project_runtime = DeepCodeRuntime(load_config_for_workspace(project))
+    monkeypatch.setattr(runtime_module, "_runtime", default_runtime)
+
+    assert get_runtime() is default_runtime
+    with use_runtime(project_runtime):
+        assert get_runtime() is project_runtime
+    assert get_runtime() is default_runtime

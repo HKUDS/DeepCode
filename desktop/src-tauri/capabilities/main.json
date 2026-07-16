@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Minimum permissions for the DeepCode main window",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:allow-open",
+    "dialog:allow-message",
+    "opener:allow-default-urls",
+    "process:allow-restart",
+    "updater:allow-check",
+    "updater:allow-download-and-install"
+  ]
+}

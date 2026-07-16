@@ -17,8 +17,9 @@ incrementally on each store mutation and can be rebuilt from disk at any time
 Reliability stance (mechanism, DEEPCODE_V2_MASTER_PLAN.md §3.4): the index is
 an *optimisation*, never a correctness dependency. Every store method that
 uses it falls back to the JSONL scan if SQLite is unavailable or errors, and
-reconciles itself when it notices the on-disk session count has drifted (e.g.
-sessions written by an older build that had no index).
+reconciles itself against canonical file signatures so a long-lived process
+observes sessions and task/message updates written by another CLI or Desktop
+process.
 """
 
 from __future__ import annotations

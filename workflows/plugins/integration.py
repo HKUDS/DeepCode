@@ -129,7 +129,7 @@ class WorkflowPluginIntegration:
         Handle interaction request from a plugin.
 
         This method:
-        1. Broadcasts the interaction request to frontend via WebSocket
+        1. Publishes the interaction request through the workflow event sink
         2. Waits for user response (via submit_response)
         3. Returns the response to the plugin
         """
@@ -154,7 +154,7 @@ class WorkflowPluginIntegration:
         response_future: asyncio.Future = loop.create_future()
         self._pending_interactions[task_id] = response_future
 
-        # Broadcast to frontend
+        # Publish through the service-owned event sink.
         await self._workflow_service._broadcast(
             task_id,
             {

@@ -111,6 +111,22 @@ def test_new_resets_history_and_model_switch_keeps_it(monkeypatch, tmp_path, cap
     assert "model switched to other-model" in out
 
 
+def test_clear_keeps_the_same_persistent_session(monkeypatch, tmp_path, capsys):
+    rc, _ = _run_tui(
+        monkeypatch,
+        tmp_path,
+        "before clear\n/clear\nafter clear\n/exit\n",
+        ["first reply", "second reply"],
+    )
+    assert rc == 0
+
+    from core.sessions.store import SessionStore
+
+    sessions = SessionStore(tmp_path / "sessions").list_sessions()
+    assert len(sessions) == 1
+    assert sessions[0].message_count == 4
+
+
 def test_session_persisted_and_resumable(monkeypatch, tmp_path, capsys):
     # Conversation 1: one turn, then read the store to find the session id.
     rc, _ = _run_tui(

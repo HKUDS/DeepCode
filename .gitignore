@@ -19,6 +19,11 @@ venv/
 dist/
 build/
 site/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+desktop/src-tauri/binaries/*
+!desktop/src-tauri/binaries/.gitkeep
+desktop/build/sidecar/
 
 # Logs / Reports
 *.log

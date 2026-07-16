@@ -1,0 +1,3968 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://deepcode.dev/schema/app-server-v1.json",
+  "title": "DeepCode App Server Protocol",
+  "description": "Canonical JSON-RPC data contracts for the DeepCode desktop client.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "methodParams": {
+      "$ref": "#/$defs/MethodParams"
+    },
+    "methodResults": {
+      "$ref": "#/$defs/MethodResults"
+    },
+    "notifications": {
+      "$ref": "#/$defs/Notifications"
+    }
+  },
+  "required": [
+    "methodParams",
+    "methodResults",
+    "notifications"
+  ],
+  "$defs": {
+    "JsonValue": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/JsonValue"
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          }
+        }
+      ]
+    },
+    "JsonObject": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      }
+    },
+    "TrustState": {
+      "type": "string",
+      "enum": [
+        "untrusted",
+        "trusted"
+      ]
+    },
+    "ThreadMode": {
+      "type": "string",
+      "enum": [
+        "code",
+        "paper",
+        "brief",
+        "review",
+        "goal"
+      ]
+    },
+    "ThreadStatus": {
+      "type": "string",
+      "enum": [
+        "idle",
+        "running",
+        "waiting",
+        "failed",
+        "archived"
+      ]
+    },
+    "TurnStatus": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "running",
+        "waiting_approval",
+        "completed",
+        "failed",
+        "interrupted"
+      ]
+    },
+    "WorkflowStatus": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "running",
+        "waiting",
+        "completed",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "AutomationStatus": {
+      "type": "string",
+      "enum": [
+        "enabled",
+        "paused"
+      ]
+    },
+    "AutomationScheduleKind": {
+      "type": "string",
+      "enum": [
+        "manual",
+        "interval"
+      ]
+    },
+    "AutomationTrigger": {
+      "type": "string",
+      "enum": [
+        "manual",
+        "scheduled"
+      ]
+    },
+    "AutomationRunStatus": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "running",
+        "waiting",
+        "completed",
+        "failed",
+        "interrupted",
+        "skipped"
+      ]
+    },
+    "ItemKind": {
+      "type": "string",
+      "enum": [
+        "user_message",
+        "assistant_message",
+        "reasoning_summary",
+        "plan",
+        "tool_call",
+        "command_execution",
+        "file_change",
+        "diff",
+        "test_result",
+        "approval_request",
+        "workflow_stage",
+        "artifact",
+        "error",
+        "completion"
+      ]
+    },
+    "ItemStatus": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "in_progress",
+        "completed",
+        "failed",
+        "declined"
+      ]
+    },
+    "ApprovalStatus": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "approved_once",
+        "approved_session",
+        "denied",
+        "cancelled",
+        "expired"
+      ]
+    },
+    "ApprovalDecision": {
+      "type": "string",
+      "enum": [
+        "approved_once",
+        "approved_session",
+        "denied"
+      ]
+    },
+    "ClientInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ]
+    },
+    "Project": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^proj_"
+        },
+        "canonicalPath": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "trustState": {
+          "$ref": "#/$defs/TrustState"
+        },
+        "settings": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lastOpenedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "canonicalPath",
+        "displayName",
+        "trustState",
+        "settings",
+        "createdAt",
+        "updatedAt",
+        "lastOpenedAt"
+      ]
+    },
+    "Thread": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "projectId": {
+          "type": "string",
+          "pattern": "^proj_"
+        },
+        "parentThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/ThreadMode"
+        },
+        "status": {
+          "$ref": "#/$defs/ThreadStatus"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workspacePath": {
+          "type": "string"
+        },
+        "worktreePath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "archivedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "projectId",
+        "parentThreadId",
+        "title",
+        "mode",
+        "status",
+        "model",
+        "workspacePath",
+        "worktreePath",
+        "createdAt",
+        "updatedAt",
+        "archivedAt"
+      ]
+    },
+    "Turn": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^turn_"
+        },
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "ordinal": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/TurnStatus"
+        },
+        "stopReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "errorCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "errorMessage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "startedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "completedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "threadId",
+        "ordinal",
+        "prompt",
+        "status",
+        "stopReason",
+        "errorCode",
+        "errorMessage",
+        "startedAt",
+        "completedAt"
+      ]
+    },
+    "Item": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^item_"
+        },
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "turnId": {
+          "type": "string",
+          "pattern": "^turn_"
+        },
+        "ordinal": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "kind": {
+          "$ref": "#/$defs/ItemKind"
+        },
+        "status": {
+          "$ref": "#/$defs/ItemStatus"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "threadId",
+        "turnId",
+        "ordinal",
+        "kind",
+        "status",
+        "summary",
+        "payload",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^apr_"
+        },
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "turnId": {
+          "type": "string",
+          "pattern": "^turn_"
+        },
+        "itemId": {
+          "type": "string",
+          "pattern": "^item_"
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "command",
+            "file_write",
+            "network",
+            "external_tool",
+            "destructive"
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/ApprovalStatus"
+        },
+        "request": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "decision": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/JsonObject"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requestedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "resolvedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "threadId",
+        "turnId",
+        "itemId",
+        "category",
+        "status",
+        "request",
+        "decision",
+        "requestedAt",
+        "resolvedAt"
+      ]
+    },
+    "WorkflowRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^wfr_"
+        },
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "turnId": {
+          "type": "string",
+          "pattern": "^turn_"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "paper2code"
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/WorkflowStatus"
+        },
+        "input": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "result": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "retryOf": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "currentStage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "progressCurrent": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "progressTotal": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "startedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "completedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "errorCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "errorMessage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "threadId",
+        "turnId",
+        "kind",
+        "status",
+        "input",
+        "result",
+        "attempt",
+        "retryOf",
+        "currentStage",
+        "progressCurrent",
+        "progressTotal",
+        "checkpoint",
+        "createdAt",
+        "updatedAt",
+        "startedAt",
+        "completedAt",
+        "errorCode",
+        "errorMessage"
+      ]
+    },
+    "Artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^art_"
+        },
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "turnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workflowRunId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "mediaType": {
+          "type": "string"
+        },
+        "storagePath": {
+          "type": "string"
+        },
+        "byteSize": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "metadata": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "threadId",
+        "turnId",
+        "workflowRunId",
+        "kind",
+        "name",
+        "mediaType",
+        "storagePath",
+        "byteSize",
+        "metadata",
+        "createdAt"
+      ]
+    },
+    "Event": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "eventId": {
+          "type": "string",
+          "pattern": "^evt_"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "type": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "turnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "itemId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "payload": {
+          "$ref": "#/$defs/JsonObject"
+        }
+      },
+      "required": [
+        "eventId",
+        "sequence",
+        "type",
+        "threadId",
+        "turnId",
+        "itemId",
+        "timestamp",
+        "payload"
+      ]
+    },
+    "InitializeParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "protocolVersion": {
+          "const": "1.0"
+        },
+        "clientInfo": {
+          "$ref": "#/$defs/ClientInfo"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "clientInfo"
+      ]
+    },
+    "InitializeResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "protocolVersion": {
+          "const": "1.0"
+        },
+        "serverInfo": {
+          "$ref": "#/$defs/ClientInfo"
+        },
+        "clientInfo": {
+          "$ref": "#/$defs/ClientInfo"
+        },
+        "capabilities": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "methods": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "eventReplay": {
+              "type": "boolean"
+            },
+            "liveEvents": {
+              "type": "boolean"
+            },
+            "maxMessageBytes": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "methods",
+            "eventReplay",
+            "liveEvents",
+            "maxMessageBytes"
+          ]
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "serverInfo",
+        "clientInfo",
+        "capabilities"
+      ]
+    },
+    "EmptyParams": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "SettingsProvider": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "configured": {
+          "type": "boolean"
+        },
+        "credentialSource": {
+          "enum": [
+            "environment",
+            "config",
+            "not_required",
+            "missing"
+          ]
+        },
+        "apiBase": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "local": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "label",
+        "configured",
+        "credentialSource",
+        "apiBase",
+        "local"
+      ]
+    },
+    "SettingsModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "contextWindow": {
+          "type": "integer"
+        },
+        "maxOutputTokens": {
+          "type": "integer"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "contextWindow",
+        "maxOutputTokens",
+        "source"
+      ]
+    },
+    "SettingsSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "configPath": {
+          "type": "string"
+        },
+        "agents": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "security": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "permissionModeExplicit": {
+          "type": "boolean"
+        },
+        "providers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SettingsProvider"
+          }
+        },
+        "models": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SettingsModel"
+          }
+        }
+      },
+      "required": [
+        "configPath",
+        "agents",
+        "security",
+        "permissionModeExplicit",
+        "providers",
+        "models"
+      ]
+    },
+    "SettingsUpdateParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "patch": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "scope": {
+          "$ref": "#/$defs/ConfigScope"
+        },
+        "projectId": {
+          "type": "string",
+          "pattern": "^proj_"
+        }
+      },
+      "required": [
+        "patch"
+      ]
+    },
+    "OptionalProjectParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^proj_"
+        }
+      }
+    },
+    "SkillReadParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^proj_"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "projectId",
+        "name"
+      ]
+    },
+    "ConfigScope": {
+      "type": "string",
+      "enum": [
+        "user",
+        "project"
+      ]
+    },
+    "McpUpsertParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^proj_"
+        },
+        "scope": {
+          "$ref": "#/$defs/ConfigScope"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "server": {
+          "$ref": "#/$defs/JsonObject"
+        }
+      },
+      "required": [
+        "scope",
+        "name",
+        "server"
+      ]
+    },
+    "McpRemoveParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^proj_"
+        },
+        "scope": {
+          "$ref": "#/$defs/ConfigScope"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "scope",
+        "name"
+      ]
+    },
+    "SkillInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "allowedTools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "directory": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "allowedTools",
+        "directory",
+        "source"
+      ]
+    },
+    "SkillDetail": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "allowedTools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "directory": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "instructions": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "allowedTools",
+        "directory",
+        "source",
+        "instructions",
+        "truncated"
+      ]
+    },
+    "HookInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "eventName": {
+          "type": "string"
+        },
+        "matcher": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "command": {
+          "type": "string"
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "user",
+            "project"
+          ]
+        },
+        "sourcePath": {
+          "type": "string"
+        },
+        "displayOrder": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "statusMessage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "eventName",
+        "matcher",
+        "command",
+        "timeoutSeconds",
+        "source",
+        "sourcePath",
+        "displayOrder",
+        "statusMessage"
+      ]
+    },
+    "McpServerInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "transport": {
+          "type": "string",
+          "enum": [
+            "stdio",
+            "sse",
+            "streamableHttp"
+          ]
+        },
+        "command": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabledTools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "toolTimeout": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "envKeys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "headerKeys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "user",
+            "project",
+            "default"
+          ]
+        },
+        "configurationState": {
+          "type": "string",
+          "enum": [
+            "configured",
+            "invalid"
+          ]
+        },
+        "configurationMessage": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "transport",
+        "command",
+        "args",
+        "url",
+        "enabledTools",
+        "toolTimeout",
+        "description",
+        "envKeys",
+        "headerKeys",
+        "source",
+        "configurationState",
+        "configurationMessage"
+      ]
+    },
+    "McpInventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "servers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/McpServerInfo"
+          }
+        },
+        "userConfigPath": {
+          "type": "string"
+        },
+        "projectConfigPath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "servers",
+        "userConfigPath",
+        "projectConfigPath"
+      ]
+    },
+    "DiagnosticsCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ok",
+            "warning",
+            "error"
+          ]
+        },
+        "detail": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "status",
+        "detail"
+      ]
+    },
+    "DiagnosticsSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "appVersion": {
+          "type": "string"
+        },
+        "pythonVersion": {
+          "type": "string"
+        },
+        "pythonExecutable": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "architecture": {
+          "type": "string"
+        },
+        "processId": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "databasePath": {
+          "type": "string"
+        },
+        "databaseSchemaVersion": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "databaseBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sessionStorePath": {
+          "type": "string"
+        },
+        "sessionCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "projectCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "threadCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "workflowCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "automationCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "userConfigPath": {
+          "type": "string"
+        },
+        "projectConfigPath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "projectPath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "projectTrust": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/TrustState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "configError": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DiagnosticsCheck"
+          }
+        }
+      },
+      "required": [
+        "appVersion",
+        "pythonVersion",
+        "pythonExecutable",
+        "platform",
+        "architecture",
+        "processId",
+        "databasePath",
+        "databaseSchemaVersion",
+        "databaseBytes",
+        "sessionStorePath",
+        "sessionCount",
+        "projectCount",
+        "threadCount",
+        "workflowCount",
+        "automationCount",
+        "userConfigPath",
+        "projectConfigPath",
+        "projectPath",
+        "projectTrust",
+        "configError",
+        "checks"
+      ]
+    },
+    "Automation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^auto_"
+        },
+        "projectId": {
+          "type": "string",
+          "pattern": "^proj_"
+        },
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "name": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/AutomationStatus"
+        },
+        "scheduleKind": {
+          "$ref": "#/$defs/AutomationScheduleKind"
+        },
+        "intervalSeconds": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 60,
+          "maximum": 31622400
+        },
+        "nextRunAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "lastRunAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "projectId",
+        "threadId",
+        "name",
+        "prompt",
+        "status",
+        "scheduleKind",
+        "intervalSeconds",
+        "nextRunAt",
+        "lastRunAt",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AutomationRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^arun_"
+        },
+        "automationId": {
+          "type": "string",
+          "pattern": "^auto_"
+        },
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "turnId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^turn_"
+        },
+        "trigger": {
+          "$ref": "#/$defs/AutomationTrigger"
+        },
+        "status": {
+          "$ref": "#/$defs/AutomationRunStatus"
+        },
+        "scheduledFor": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "startedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "completedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "automationId",
+        "threadId",
+        "turnId",
+        "trigger",
+        "status",
+        "scheduledFor",
+        "detail",
+        "createdAt",
+        "updatedAt",
+        "startedAt",
+        "completedAt"
+      ]
+    },
+    "AutomationCreateParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^proj_"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        },
+        "scheduleKind": {
+          "$ref": "#/$defs/AutomationScheduleKind"
+        },
+        "intervalSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 31622400
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "projectId",
+        "name",
+        "prompt",
+        "scheduleKind"
+      ]
+    },
+    "AutomationIdentityParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "automationId": {
+          "type": "string",
+          "pattern": "^auto_"
+        }
+      },
+      "required": [
+        "automationId"
+      ]
+    },
+    "AutomationUpdateParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "automationId": {
+          "type": "string",
+          "pattern": "^auto_"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        },
+        "status": {
+          "$ref": "#/$defs/AutomationStatus"
+        },
+        "scheduleKind": {
+          "$ref": "#/$defs/AutomationScheduleKind"
+        },
+        "intervalSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 31622400
+        }
+      },
+      "required": [
+        "automationId"
+      ]
+    },
+    "AutomationRunsParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "automationId": {
+          "type": "string",
+          "pattern": "^auto_"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500
+        }
+      },
+      "required": [
+        "automationId"
+      ]
+    },
+    "ProjectListParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "ProjectAddParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "trustState": {
+          "$ref": "#/$defs/TrustState"
+        }
+      },
+      "required": [
+        "path"
+      ]
+    },
+    "ProjectReadParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^proj_"
+        }
+      },
+      "required": [
+        "projectId"
+      ]
+    },
+    "ProjectUpdateParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^proj_"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "trustState": {
+          "$ref": "#/$defs/TrustState"
+        },
+        "settings": {
+          "$ref": "#/$defs/JsonObject"
+        }
+      },
+      "required": [
+        "projectId"
+      ]
+    },
+    "ThreadStartParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^proj_"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "$ref": "#/$defs/ThreadMode"
+        },
+        "model": {
+          "type": "string"
+        },
+        "workspacePath": {
+          "type": "string"
+        },
+        "parentThreadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        }
+      },
+      "required": [
+        "projectId",
+        "title"
+      ]
+    },
+    "ThreadListParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^proj_"
+        },
+        "includeArchived": {
+          "type": "boolean"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cwd": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "ThreadReadParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        }
+      },
+      "required": [
+        "threadId"
+      ]
+    },
+    "ThreadRenameParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "threadId",
+        "title"
+      ]
+    },
+    "ThreadModelParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        }
+      },
+      "required": [
+        "threadId",
+        "model"
+      ]
+    },
+    "ThreadForkParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "threadId"
+      ]
+    },
+    "TurnStartParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "threadId",
+        "prompt"
+      ]
+    },
+    "TurnReadParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "turnId": {
+          "type": "string",
+          "pattern": "^turn_"
+        }
+      },
+      "required": [
+        "turnId"
+      ]
+    },
+    "WorkflowStartParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "kind": {
+          "const": "paper2code"
+        },
+        "sourceType": {
+          "type": "string",
+          "enum": [
+            "local",
+            "url",
+            "repository",
+            "requirement"
+          ]
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        },
+        "options": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enableIndexing": {
+              "type": "boolean"
+            },
+            "planReview": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "required": [
+        "threadId",
+        "kind",
+        "sourceType",
+        "source"
+      ]
+    },
+    "WorkflowRunParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workflowRunId": {
+          "type": "string",
+          "pattern": "^wfr_"
+        }
+      },
+      "required": [
+        "workflowRunId"
+      ]
+    },
+    "WorkflowRespondParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workflowRunId": {
+          "type": "string",
+          "pattern": "^wfr_"
+        },
+        "interactionId": {
+          "type": "string",
+          "pattern": "^wfi_"
+        },
+        "response": {
+          "$ref": "#/$defs/JsonObject"
+        }
+      },
+      "required": [
+        "workflowRunId",
+        "interactionId",
+        "response"
+      ]
+    },
+    "ArtifactReadParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "artifactId": {
+          "type": "string",
+          "pattern": "^art_"
+        },
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 131072
+        }
+      },
+      "required": [
+        "artifactId"
+      ]
+    },
+    "ApprovalRespondParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "approvalId": {
+          "type": "string",
+          "pattern": "^apr_"
+        },
+        "decision": {
+          "$ref": "#/$defs/ApprovalDecision"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "approvalId",
+        "decision"
+      ]
+    },
+    "TurnSnapshotResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "turn": {
+          "$ref": "#/$defs/Turn"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Item"
+          }
+        },
+        "approvals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Approval"
+          }
+        }
+      },
+      "required": [
+        "turn",
+        "items",
+        "approvals"
+      ]
+    },
+    "WorkflowSnapshotResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workflow": {
+          "$ref": "#/$defs/WorkflowRun"
+        },
+        "turn": {
+          "$ref": "#/$defs/Turn"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Item"
+          }
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Artifact"
+          }
+        }
+      },
+      "required": [
+        "workflow",
+        "turn",
+        "items",
+        "artifacts"
+      ]
+    },
+    "EventReplayParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "after": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
+      },
+      "required": [
+        "threadId"
+      ]
+    },
+    "FileListParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "path": {
+          "type": "string"
+        },
+        "depth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 750
+        }
+      },
+      "required": [
+        "threadId"
+      ]
+    },
+    "FileReadParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 131072
+        }
+      },
+      "required": [
+        "threadId",
+        "path"
+      ]
+    },
+    "FileWriteParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "content": {
+          "type": "string"
+        },
+        "expectedSha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "threadId",
+        "path",
+        "content",
+        "expectedSha256"
+      ]
+    },
+    "FileEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "file",
+            "directory",
+            "symlink"
+          ]
+        },
+        "size": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "modifiedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "hidden": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path",
+        "name",
+        "kind",
+        "size",
+        "modifiedAt",
+        "hidden"
+      ]
+    },
+    "FileContent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        },
+        "byteSize": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lineCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path",
+        "content",
+        "byteSize",
+        "sha256",
+        "lineCount",
+        "truncated"
+      ]
+    },
+    "GitDiffParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "all",
+            "staged",
+            "working"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "threadId"
+      ]
+    },
+    "GitDiscardParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expectedRevision": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "threadId",
+        "path",
+        "expectedRevision"
+      ]
+    },
+    "GitStatusEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "originalPath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "indexStatus": {
+          "type": "string"
+        },
+        "worktreeStatus": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "originalPath",
+        "indexStatus",
+        "worktreeStatus",
+        "kind"
+      ]
+    },
+    "GitStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repositoryRoot": {
+          "type": "string"
+        },
+        "branch": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "upstream": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ahead": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "behind": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "detached": {
+          "type": "boolean"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/GitStatusEntry"
+          }
+        }
+      },
+      "required": [
+        "repositoryRoot",
+        "branch",
+        "upstream",
+        "ahead",
+        "behind",
+        "detached",
+        "entries"
+      ]
+    },
+    "DiffLine": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "context",
+            "addition",
+            "deletion",
+            "meta"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "oldLine": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "newLine": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "text",
+        "oldLine",
+        "newLine"
+      ]
+    },
+    "DiffHunk": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "oldStart": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "oldLines": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "newStart": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "newLines": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "heading": {
+          "type": "string"
+        },
+        "lines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DiffLine"
+          }
+        }
+      },
+      "required": [
+        "oldStart",
+        "oldLines",
+        "newStart",
+        "newLines",
+        "heading",
+        "lines"
+      ]
+    },
+    "FileDiff": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "originalPath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "binary": {
+          "type": "boolean"
+        },
+        "additions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "deletions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64
+        },
+        "hunks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DiffHunk"
+          }
+        }
+      },
+      "required": [
+        "path",
+        "originalPath",
+        "status",
+        "binary",
+        "additions",
+        "deletions",
+        "revision",
+        "hunks"
+      ]
+    },
+    "WorktreeRemoveParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "disposition": {
+          "type": "string",
+          "enum": [
+            "keep",
+            "clean"
+          ]
+        },
+        "force": {
+          "type": "boolean"
+        },
+        "deleteBranch": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "threadId",
+        "disposition"
+      ]
+    },
+    "WorktreeResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "thread": {
+          "$ref": "#/$defs/Thread"
+        },
+        "path": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "disposition": {
+          "type": "string",
+          "enum": [
+            "created",
+            "reclaimed",
+            "kept",
+            "cleaned"
+          ]
+        },
+        "dirty": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "thread",
+        "path",
+        "branch",
+        "disposition",
+        "dirty"
+      ]
+    },
+    "TerminalCreateParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "columns": {
+          "type": "integer",
+          "minimum": 20,
+          "maximum": 500
+        },
+        "rows": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 200
+        }
+      },
+      "required": [
+        "threadId"
+      ]
+    },
+    "TerminalIdentityParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "terminalId": {
+          "type": "string",
+          "pattern": "^term_"
+        }
+      },
+      "required": [
+        "threadId",
+        "terminalId"
+      ]
+    },
+    "TerminalWriteParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "terminalId": {
+          "type": "string",
+          "pattern": "^term_"
+        },
+        "data": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "threadId",
+        "terminalId",
+        "data"
+      ]
+    },
+    "TerminalResizeParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "terminalId": {
+          "type": "string",
+          "pattern": "^term_"
+        },
+        "columns": {
+          "type": "integer",
+          "minimum": 20,
+          "maximum": 500
+        },
+        "rows": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 200
+        }
+      },
+      "required": [
+        "threadId",
+        "terminalId",
+        "columns",
+        "rows"
+      ]
+    },
+    "TerminalInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "terminalId": {
+          "type": "string",
+          "pattern": "^term_"
+        },
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "columns": {
+          "type": "integer"
+        },
+        "rows": {
+          "type": "integer"
+        },
+        "workspacePath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "terminalId",
+        "threadId",
+        "pid",
+        "columns",
+        "rows",
+        "workspacePath"
+      ]
+    },
+    "TestRunParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "turnId": {
+          "type": "string",
+          "pattern": "^turn_"
+        },
+        "commandId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1800
+        }
+      },
+      "required": [
+        "threadId",
+        "turnId",
+        "commandId"
+      ]
+    },
+    "TestCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "argv": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "argv"
+      ]
+    },
+    "MethodParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "initialize": {
+          "$ref": "#/$defs/InitializeParams"
+        },
+        "shutdown": {
+          "$ref": "#/$defs/EmptyParams"
+        },
+        "project/list": {
+          "$ref": "#/$defs/ProjectListParams"
+        },
+        "project/add": {
+          "$ref": "#/$defs/ProjectAddParams"
+        },
+        "project/read": {
+          "$ref": "#/$defs/ProjectReadParams"
+        },
+        "project/update": {
+          "$ref": "#/$defs/ProjectUpdateParams"
+        },
+        "project/remove": {
+          "$ref": "#/$defs/ProjectReadParams"
+        },
+        "settings/read": {
+          "$ref": "#/$defs/OptionalProjectParams"
+        },
+        "settings/update": {
+          "$ref": "#/$defs/SettingsUpdateParams"
+        },
+        "skills/list": {
+          "$ref": "#/$defs/ProjectReadParams"
+        },
+        "skill/read": {
+          "$ref": "#/$defs/SkillReadParams"
+        },
+        "hooks/list": {
+          "$ref": "#/$defs/ProjectReadParams"
+        },
+        "mcp/list": {
+          "$ref": "#/$defs/OptionalProjectParams"
+        },
+        "mcp/upsert": {
+          "$ref": "#/$defs/McpUpsertParams"
+        },
+        "mcp/remove": {
+          "$ref": "#/$defs/McpRemoveParams"
+        },
+        "diagnostics/read": {
+          "$ref": "#/$defs/OptionalProjectParams"
+        },
+        "automation/list": {
+          "$ref": "#/$defs/OptionalProjectParams"
+        },
+        "automation/create": {
+          "$ref": "#/$defs/AutomationCreateParams"
+        },
+        "automation/update": {
+          "$ref": "#/$defs/AutomationUpdateParams"
+        },
+        "automation/remove": {
+          "$ref": "#/$defs/AutomationIdentityParams"
+        },
+        "automation/run": {
+          "$ref": "#/$defs/AutomationIdentityParams"
+        },
+        "automation/runs": {
+          "$ref": "#/$defs/AutomationRunsParams"
+        },
+        "thread/start": {
+          "$ref": "#/$defs/ThreadStartParams"
+        },
+        "thread/list": {
+          "$ref": "#/$defs/ThreadListParams"
+        },
+        "thread/read": {
+          "$ref": "#/$defs/ThreadReadParams"
+        },
+        "thread/rename": {
+          "$ref": "#/$defs/ThreadRenameParams"
+        },
+        "thread/model": {
+          "$ref": "#/$defs/ThreadModelParams"
+        },
+        "thread/archive": {
+          "$ref": "#/$defs/ThreadReadParams"
+        },
+        "thread/fork": {
+          "$ref": "#/$defs/ThreadForkParams"
+        },
+        "turn/start": {
+          "$ref": "#/$defs/TurnStartParams"
+        },
+        "turn/enqueue": {
+          "$ref": "#/$defs/TurnStartParams"
+        },
+        "turn/read": {
+          "$ref": "#/$defs/TurnReadParams"
+        },
+        "turn/interrupt": {
+          "$ref": "#/$defs/TurnReadParams"
+        },
+        "workflow/start": {
+          "$ref": "#/$defs/WorkflowStartParams"
+        },
+        "workflow/read": {
+          "$ref": "#/$defs/WorkflowRunParams"
+        },
+        "workflow/list": {
+          "$ref": "#/$defs/ThreadReadParams"
+        },
+        "workflow/interrupt": {
+          "$ref": "#/$defs/WorkflowRunParams"
+        },
+        "workflow/retry": {
+          "$ref": "#/$defs/WorkflowRunParams"
+        },
+        "workflow/respond": {
+          "$ref": "#/$defs/WorkflowRespondParams"
+        },
+        "artifact/list": {
+          "$ref": "#/$defs/ThreadReadParams"
+        },
+        "artifact/read": {
+          "$ref": "#/$defs/ArtifactReadParams"
+        },
+        "approval/respond": {
+          "$ref": "#/$defs/ApprovalRespondParams"
+        },
+        "event/replay": {
+          "$ref": "#/$defs/EventReplayParams"
+        },
+        "file/list": {
+          "$ref": "#/$defs/FileListParams"
+        },
+        "file/read": {
+          "$ref": "#/$defs/FileReadParams"
+        },
+        "file/write": {
+          "$ref": "#/$defs/FileWriteParams"
+        },
+        "git/status": {
+          "$ref": "#/$defs/ThreadReadParams"
+        },
+        "git/diff": {
+          "$ref": "#/$defs/GitDiffParams"
+        },
+        "git/discard": {
+          "$ref": "#/$defs/GitDiscardParams"
+        },
+        "git/worktree/create": {
+          "$ref": "#/$defs/ThreadReadParams"
+        },
+        "git/worktree/remove": {
+          "$ref": "#/$defs/WorktreeRemoveParams"
+        },
+        "terminal/create": {
+          "$ref": "#/$defs/TerminalCreateParams"
+        },
+        "terminal/write": {
+          "$ref": "#/$defs/TerminalWriteParams"
+        },
+        "terminal/resize": {
+          "$ref": "#/$defs/TerminalResizeParams"
+        },
+        "terminal/close": {
+          "$ref": "#/$defs/TerminalIdentityParams"
+        },
+        "test/discover": {
+          "$ref": "#/$defs/ThreadReadParams"
+        },
+        "test/run": {
+          "$ref": "#/$defs/TestRunParams"
+        },
+        "thread/resume": {
+          "$ref": "#/$defs/ThreadResumeParams"
+        }
+      },
+      "required": [
+        "initialize",
+        "shutdown",
+        "project/list",
+        "project/add",
+        "project/read",
+        "project/update",
+        "project/remove",
+        "settings/read",
+        "settings/update",
+        "skills/list",
+        "skill/read",
+        "hooks/list",
+        "mcp/list",
+        "mcp/upsert",
+        "mcp/remove",
+        "diagnostics/read",
+        "automation/list",
+        "automation/create",
+        "automation/update",
+        "automation/remove",
+        "automation/run",
+        "automation/runs",
+        "thread/start",
+        "thread/resume",
+        "thread/list",
+        "thread/read",
+        "thread/rename",
+        "thread/model",
+        "thread/archive",
+        "thread/fork",
+        "turn/start",
+        "turn/enqueue",
+        "turn/read",
+        "turn/interrupt",
+        "workflow/start",
+        "workflow/read",
+        "workflow/list",
+        "workflow/interrupt",
+        "workflow/retry",
+        "workflow/respond",
+        "artifact/list",
+        "artifact/read",
+        "approval/respond",
+        "event/replay",
+        "file/list",
+        "file/read",
+        "file/write",
+        "git/status",
+        "git/diff",
+        "git/discard",
+        "git/worktree/create",
+        "git/worktree/remove",
+        "terminal/create",
+        "terminal/write",
+        "terminal/resize",
+        "terminal/close",
+        "test/discover",
+        "test/run"
+      ]
+    },
+    "MethodResults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "initialize": {
+          "$ref": "#/$defs/InitializeResult"
+        },
+        "shutdown": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "accepted": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "accepted"
+          ]
+        },
+        "project/list": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "projects": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Project"
+              }
+            }
+          },
+          "required": [
+            "projects"
+          ]
+        },
+        "project/add": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project": {
+              "$ref": "#/$defs/Project"
+            }
+          },
+          "required": [
+            "project"
+          ]
+        },
+        "project/read": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project": {
+              "$ref": "#/$defs/Project"
+            }
+          },
+          "required": [
+            "project"
+          ]
+        },
+        "project/update": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project": {
+              "$ref": "#/$defs/Project"
+            }
+          },
+          "required": [
+            "project"
+          ]
+        },
+        "project/remove": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "removed": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "removed"
+          ]
+        },
+        "settings/read": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "settings": {
+              "$ref": "#/$defs/SettingsSnapshot"
+            }
+          },
+          "required": [
+            "settings"
+          ]
+        },
+        "settings/update": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "settings": {
+              "$ref": "#/$defs/SettingsSnapshot"
+            }
+          },
+          "required": [
+            "settings"
+          ]
+        },
+        "skills/list": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "skills": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/SkillInfo"
+              }
+            },
+            "warnings": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "skills",
+            "warnings"
+          ]
+        },
+        "skill/read": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "skill": {
+              "$ref": "#/$defs/SkillDetail"
+            }
+          },
+          "required": [
+            "skill"
+          ]
+        },
+        "hooks/list": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "hooks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/HookInfo"
+              }
+            },
+            "warnings": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "hooks",
+            "warnings",
+            "truncated"
+          ]
+        },
+        "mcp/list": {
+          "$ref": "#/$defs/McpInventory"
+        },
+        "mcp/upsert": {
+          "$ref": "#/$defs/McpInventory"
+        },
+        "mcp/remove": {
+          "$ref": "#/$defs/McpInventory"
+        },
+        "diagnostics/read": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "diagnostics": {
+              "$ref": "#/$defs/DiagnosticsSnapshot"
+            }
+          },
+          "required": [
+            "diagnostics"
+          ]
+        },
+        "automation/list": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "automations": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Automation"
+              }
+            },
+            "latestRuns": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AutomationRun"
+              }
+            },
+            "schedulerActive": {
+              "type": "boolean"
+            },
+            "executionMode": {
+              "const": "while_app_running"
+            }
+          },
+          "required": [
+            "automations",
+            "latestRuns",
+            "schedulerActive",
+            "executionMode"
+          ]
+        },
+        "automation/create": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "automation": {
+              "$ref": "#/$defs/Automation"
+            },
+            "thread": {
+              "$ref": "#/$defs/Thread"
+            }
+          },
+          "required": [
+            "automation",
+            "thread"
+          ]
+        },
+        "automation/update": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "automation": {
+              "$ref": "#/$defs/Automation"
+            }
+          },
+          "required": [
+            "automation"
+          ]
+        },
+        "automation/remove": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "removed": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "removed"
+          ]
+        },
+        "automation/run": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "run": {
+              "$ref": "#/$defs/AutomationRun"
+            },
+            "turn": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/Turn"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "run",
+            "turn"
+          ]
+        },
+        "automation/runs": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "runs": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AutomationRun"
+              }
+            }
+          },
+          "required": [
+            "runs"
+          ]
+        },
+        "thread/start": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "thread": {
+              "$ref": "#/$defs/Thread"
+            }
+          },
+          "required": [
+            "thread"
+          ]
+        },
+        "thread/list": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "threads": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Thread"
+              }
+            }
+          },
+          "required": [
+            "threads"
+          ]
+        },
+        "thread/read": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "thread": {
+              "$ref": "#/$defs/Thread"
+            }
+          },
+          "required": [
+            "thread"
+          ]
+        },
+        "thread/rename": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "thread": {
+              "$ref": "#/$defs/Thread"
+            }
+          },
+          "required": [
+            "thread"
+          ]
+        },
+        "thread/model": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "thread": {
+              "$ref": "#/$defs/Thread"
+            }
+          },
+          "required": [
+            "thread"
+          ]
+        },
+        "thread/archive": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "thread": {
+              "$ref": "#/$defs/Thread"
+            }
+          },
+          "required": [
+            "thread"
+          ]
+        },
+        "thread/fork": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "thread": {
+              "$ref": "#/$defs/Thread"
+            }
+          },
+          "required": [
+            "thread"
+          ]
+        },
+        "turn/start": {
+          "$ref": "#/$defs/TurnSnapshotResult"
+        },
+        "turn/enqueue": {
+          "$ref": "#/$defs/TurnSnapshotResult"
+        },
+        "turn/read": {
+          "$ref": "#/$defs/TurnSnapshotResult"
+        },
+        "turn/interrupt": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "accepted": {
+              "type": "boolean"
+            },
+            "turn": {
+              "$ref": "#/$defs/Turn"
+            }
+          },
+          "required": [
+            "accepted",
+            "turn"
+          ]
+        },
+        "workflow/start": {
+          "$ref": "#/$defs/WorkflowSnapshotResult"
+        },
+        "workflow/read": {
+          "$ref": "#/$defs/WorkflowSnapshotResult"
+        },
+        "workflow/list": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "workflows": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/WorkflowRun"
+              }
+            }
+          },
+          "required": [
+            "workflows"
+          ]
+        },
+        "workflow/interrupt": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "accepted": {
+              "type": "boolean"
+            },
+            "workflow": {
+              "$ref": "#/$defs/WorkflowRun"
+            }
+          },
+          "required": [
+            "accepted",
+            "workflow"
+          ]
+        },
+        "workflow/retry": {
+          "$ref": "#/$defs/WorkflowSnapshotResult"
+        },
+        "workflow/respond": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "workflow": {
+              "$ref": "#/$defs/WorkflowRun"
+            }
+          },
+          "required": [
+            "workflow"
+          ]
+        },
+        "artifact/list": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "artifacts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Artifact"
+              }
+            }
+          },
+          "required": [
+            "artifacts"
+          ]
+        },
+        "artifact/read": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "artifact": {
+              "$ref": "#/$defs/Artifact"
+            },
+            "content": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "truncated": {
+              "type": "boolean"
+            },
+            "directory": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "artifact",
+            "content",
+            "truncated",
+            "directory"
+          ]
+        },
+        "approval/respond": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "approval": {
+              "$ref": "#/$defs/Approval"
+            }
+          },
+          "required": [
+            "approval"
+          ]
+        },
+        "event/replay": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "events": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Event"
+              }
+            }
+          },
+          "required": [
+            "events"
+          ]
+        },
+        "file/list": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "entries": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/FileEntry"
+              }
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "entries",
+            "truncated"
+          ]
+        },
+        "file/read": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "file": {
+              "$ref": "#/$defs/FileContent"
+            }
+          },
+          "required": [
+            "file"
+          ]
+        },
+        "file/write": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "file": {
+              "$ref": "#/$defs/FileContent"
+            }
+          },
+          "required": [
+            "file"
+          ]
+        },
+        "git/status": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "status": {
+              "$ref": "#/$defs/GitStatus"
+            }
+          },
+          "required": [
+            "status"
+          ]
+        },
+        "git/diff": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "files": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/FileDiff"
+              }
+            }
+          },
+          "required": [
+            "files"
+          ]
+        },
+        "git/discard": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "discarded": {
+              "type": "boolean"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "discarded",
+            "path"
+          ]
+        },
+        "git/worktree/create": {
+          "$ref": "#/$defs/WorktreeResult"
+        },
+        "git/worktree/remove": {
+          "$ref": "#/$defs/WorktreeResult"
+        },
+        "terminal/create": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "terminal": {
+              "$ref": "#/$defs/TerminalInfo"
+            }
+          },
+          "required": [
+            "terminal"
+          ]
+        },
+        "terminal/write": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "written": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "written"
+          ]
+        },
+        "terminal/resize": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "terminal": {
+              "$ref": "#/$defs/TerminalInfo"
+            }
+          },
+          "required": [
+            "terminal"
+          ]
+        },
+        "terminal/close": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "accepted": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "accepted"
+          ]
+        },
+        "test/discover": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "commands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/TestCommand"
+              }
+            }
+          },
+          "required": [
+            "commands"
+          ]
+        },
+        "test/run": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "item": {
+              "$ref": "#/$defs/Item"
+            },
+            "command": {
+              "$ref": "#/$defs/TestCommand"
+            },
+            "exitCode": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "timedOut": {
+              "type": "boolean"
+            },
+            "durationMs": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "stdout": {
+              "type": "string"
+            },
+            "stderr": {
+              "type": "string"
+            },
+            "outputTruncated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "item",
+            "command",
+            "exitCode",
+            "timedOut",
+            "durationMs",
+            "stdout",
+            "stderr",
+            "outputTruncated"
+          ]
+        },
+        "thread/resume": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "thread": {
+              "$ref": "#/$defs/Thread"
+            }
+          },
+          "required": [
+            "thread"
+          ]
+        }
+      },
+      "required": [
+        "initialize",
+        "shutdown",
+        "project/list",
+        "project/add",
+        "project/read",
+        "project/update",
+        "project/remove",
+        "settings/read",
+        "settings/update",
+        "skills/list",
+        "skill/read",
+        "hooks/list",
+        "mcp/list",
+        "mcp/upsert",
+        "mcp/remove",
+        "diagnostics/read",
+        "automation/list",
+        "automation/create",
+        "automation/update",
+        "automation/remove",
+        "automation/run",
+        "automation/runs",
+        "thread/start",
+        "thread/resume",
+        "thread/list",
+        "thread/read",
+        "thread/rename",
+        "thread/model",
+        "thread/archive",
+        "thread/fork",
+        "turn/start",
+        "turn/enqueue",
+        "turn/read",
+        "turn/interrupt",
+        "workflow/start",
+        "workflow/read",
+        "workflow/list",
+        "workflow/interrupt",
+        "workflow/retry",
+        "workflow/respond",
+        "artifact/list",
+        "artifact/read",
+        "approval/respond",
+        "event/replay",
+        "file/list",
+        "file/read",
+        "file/write",
+        "git/status",
+        "git/diff",
+        "git/discard",
+        "git/worktree/create",
+        "git/worktree/remove",
+        "terminal/create",
+        "terminal/write",
+        "terminal/resize",
+        "terminal/close",
+        "test/discover",
+        "test/run"
+      ]
+    },
+    "Notifications": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "thread.updated": {
+          "$ref": "#/$defs/Event"
+        },
+        "turn.started": {
+          "$ref": "#/$defs/Event"
+        },
+        "turn.updated": {
+          "$ref": "#/$defs/Event"
+        },
+        "turn.completed": {
+          "$ref": "#/$defs/Event"
+        },
+        "turn.recovered": {
+          "$ref": "#/$defs/Event"
+        },
+        "item.created": {
+          "$ref": "#/$defs/Event"
+        },
+        "item.updated": {
+          "$ref": "#/$defs/Event"
+        },
+        "approval.requested": {
+          "$ref": "#/$defs/Event"
+        },
+        "approval.resolved": {
+          "$ref": "#/$defs/Event"
+        },
+        "workflow.started": {
+          "$ref": "#/$defs/Event"
+        },
+        "workflow.updated": {
+          "$ref": "#/$defs/Event"
+        },
+        "workflow.interaction_requested": {
+          "$ref": "#/$defs/Event"
+        },
+        "workflow.completed": {
+          "$ref": "#/$defs/Event"
+        },
+        "artifact.created": {
+          "$ref": "#/$defs/Event"
+        },
+        "automation.updated": {
+          "$ref": "#/$defs/Event"
+        },
+        "terminal.output": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "terminalId": {
+              "type": "string",
+              "pattern": "^term_"
+            },
+            "threadId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            },
+            "data": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "terminalId",
+            "threadId",
+            "data"
+          ]
+        },
+        "terminal.exit": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "terminalId": {
+              "type": "string",
+              "pattern": "^term_"
+            },
+            "threadId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            },
+            "exitCode": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "terminalId",
+            "threadId",
+            "exitCode"
+          ]
+        },
+        "server.warning": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "dropped": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "replayRequired": {
+              "const": true
+            }
+          },
+          "required": [
+            "code",
+            "dropped",
+            "replayRequired"
+          ]
+        }
+      },
+      "required": [
+        "thread.updated",
+        "turn.started",
+        "turn.updated",
+        "turn.completed",
+        "turn.recovered",
+        "item.created",
+        "item.updated",
+        "approval.requested",
+        "approval.resolved",
+        "workflow.started",
+        "workflow.updated",
+        "workflow.interaction_requested",
+        "workflow.completed",
+        "artifact.created",
+        "automation.updated",
+        "terminal.output",
+        "terminal.exit",
+        "server.warning"
+      ]
+    },
+    "ThreadResumeParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "workspacePath": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "sessionId"
+      ]
+    }
+  }
+}

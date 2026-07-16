@@ -7,6 +7,7 @@ and a fake tool, proving the SQ/EQ protocol + kernel bridge work end to end.
 from __future__ import annotations
 
 import sys
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,7 @@ from core.events import (  # noqa: E402
     AgentSession,
     Interrupt,
     Shutdown,
+    Submission,
     TaskComplete,
     ToolCompleted,
     ToolStarted,
@@ -187,3 +189,50 @@ async def test_interrupt_when_idle_is_noop():
     session = _session(provider)
     await session.submit(Interrupt())  # nothing running
     assert session.drain_events() == []
+
+
+@pytest.mark.asyncio
+async def test_envelope_correlates_events_and_busy_turn_terminates():
+    provider = ScriptedProvider([LLMResponse(content="x", finish_reason="stop")])
+    session = _session(provider)
+
+    events = [
+        event
+        async for event in session.run_stream_envelope(
+            Submission(id="submission-1", op=UserInput(text="hi"))
+        )
+    ]
+    assert events[-1].msg.type == "task_complete"
+    assert {event.submission_id for event in events} == {"submission-1"}
+
+    session._busy = True
+    busy_events = [
+        event
+        async for event in session.run_stream_envelope(
+            Submission(id="submission-2", op=UserInput(text="again"))
+        )
+    ]
+    assert _types(busy_events) == ["error", "task_complete"]
+    assert busy_events[-1].msg.stop_reason == "busy"
+
+
+@pytest.mark.asyncio
+async def test_interrupt_terminates_the_active_submission_with_original_id():
+    class BlockingProvider(ScriptedProvider):
+        async def chat_with_retry(self, **kwargs: Any) -> LLMResponse:
+            await asyncio.Event().wait()
+
+    session = _session(BlockingProvider([]))
+    stream = session.run_stream_envelope(
+        Submission(id="turn-submission", op=UserInput(text="wait"))
+    )
+    started = await anext(stream)
+    assert started.msg.type == "turn_started"
+
+    await session.submit_envelope(Submission(id="control-submission", op=Interrupt()))
+    terminal = await anext(stream)
+
+    assert terminal.msg.stop_reason == "interrupted"
+    assert terminal.submission_id == "turn-submission"
+    with pytest.raises(StopAsyncIteration):
+        await anext(stream)

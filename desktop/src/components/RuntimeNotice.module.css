@@ -1,0 +1,81 @@
+.notice {
+  position: absolute;
+  z-index: 40;
+  top: 12px;
+  left: 50%;
+  display: grid;
+  width: min(660px, calc(100vw - 48px));
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 13px;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border-subtle));
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--danger-soft) 92%, white);
+  box-shadow: var(--shadow-menu);
+  color: var(--danger);
+  transform: translateX(-50%);
+}
+
+.copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.copy strong {
+  color: var(--text-primary);
+  font: 10px var(--font-mono);
+}
+
+.copy span {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.actions button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--danger) 24%, var(--border-subtle));
+  border-radius: 7px;
+  background: var(--surface-raised);
+  color: var(--danger);
+  font-size: 10px;
+  font-weight: 580;
+}
+
+.actions button:hover:not(:disabled) {
+  border-color: var(--danger);
+}
+
+.actions .dismiss {
+  width: 28px;
+  padding: 0;
+  justify-content: center;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-tertiary);
+}
+
+@media (max-width: 720px) {
+  .notice {
+    width: calc(100vw - 24px);
+  }
+
+  .copy span {
+    white-space: normal;
+  }
+}

@@ -1,0 +1,66 @@
+import type {
+  ConfigScope,
+  JsonObject,
+  Project,
+  SettingsSnapshot,
+  Thread,
+} from "../../generated/app-server";
+import type { DesktopDestination } from "../../app/useDesktopUi";
+import type { DesktopRuntime } from "../../rpc/contracts";
+import { ExtensionsPage } from "../extensions/ExtensionsPage";
+import { AutomationsPage } from "../automations/AutomationsPage";
+import { McpPage } from "../extensions/McpPage";
+import { SettingsPage } from "../settings/SettingsPage";
+
+interface ManagementWorkspaceProps {
+  destination: DesktopDestination;
+  runtime: DesktopRuntime;
+  project: Project | null;
+  settings: SettingsSnapshot | null;
+  busy: boolean;
+  onRefreshSettings(): Promise<void>;
+  onUpdateSettings(patch: JsonObject, scope: ConfigScope): Promise<void>;
+  onThreadCreated(thread: Thread): void;
+  onOpenThread(threadId: string): void;
+}
+
+export function ManagementWorkspace({
+  destination,
+  runtime,
+  project,
+  settings,
+  busy,
+  onRefreshSettings,
+  onUpdateSettings,
+  onThreadCreated,
+  onOpenThread,
+}: ManagementWorkspaceProps) {
+  if (destination === "automations") {
+    return (
+      <AutomationsPage
+        key={project?.id ?? "global"}
+        runtime={runtime}
+        project={project}
+        onThreadCreated={onThreadCreated}
+        onOpenThread={onOpenThread}
+      />
+    );
+  }
+  if (destination === "skills") {
+    return <ExtensionsPage runtime={runtime} project={project} />;
+  }
+  if (destination === "mcp") {
+    return <McpPage runtime={runtime} project={project} />;
+  }
+  return (
+    <SettingsPage
+      key={project?.id ?? "global"}
+      runtime={runtime}
+      project={project}
+      settings={settings}
+      busy={busy}
+      onRefresh={onRefreshSettings}
+      onUpdate={onUpdateSettings}
+    />
+  );
+}

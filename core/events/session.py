@@ -19,8 +19,10 @@ Design:
 from __future__ import annotations
 
 import asyncio
+from contextvars import ContextVar
 from functools import partial
 from typing import Any
+from uuid import uuid4
 
 from loguru import logger
 
@@ -150,12 +152,22 @@ class AgentSession:
         self._seq = 0
         self._busy = False
         self._current_task: asyncio.Task | None = None
+        self._active_turn_task: asyncio.Task | None = None
+        self._submission_id: ContextVar[str | None] = ContextVar(
+            f"deepcode_submission_{id(self)}", default=None
+        )
 
     # -- event queue -------------------------------------------------------
 
     def _emit(self, msg) -> None:
         self._seq += 1
-        self._events.put_nowait(Event(id=str(self._seq), msg=msg))
+        self._events.put_nowait(
+            Event(
+                id=str(self._seq),
+                msg=msg,
+                submission_id=self._submission_id.get(),
+            )
+        )
 
     async def next_event(self) -> Event:
         return await self._events.get()
@@ -169,12 +181,22 @@ class AgentSession:
         (even on interrupt/error), and ``Shutdown`` with ``shutdown_complete``,
         so the loop terminates.
         """
-        task = asyncio.ensure_future(self.submit(op))
+        submission = Submission(id=uuid4().hex, op=op)
+        async for event in self.run_stream_envelope(submission):
+            yield event
+
+    async def run_stream_envelope(self, submission: Submission):
+        """Submit one SQ envelope and stream through its terminal event."""
+
+        task = asyncio.ensure_future(self.submit_envelope(submission))
         try:
             while True:
                 event = await self.next_event()
                 yield event
-                if event.msg.type in ("task_complete", "shutdown_complete"):
+                if event.submission_id == submission.id and event.msg.type in (
+                    "task_complete",
+                    "shutdown_complete",
+                ):
                     break
         finally:
             await task
@@ -205,15 +227,32 @@ class AgentSession:
         if isinstance(op, UserInput):
             await self._run_user_input(op.text)
         elif isinstance(op, Interrupt):
-            if self._current_task is not None and not self._current_task.done():
-                self._current_task.cancel()
+            task = self._active_turn_task or self._current_task
+            if task is not None and not task.done():
+                task.cancel()
         elif isinstance(op, Shutdown):
             self._emit(ShutdownComplete())
         else:  # pragma: no cover - exhaustive guard
             self._emit(ErrorEvent(message=f"unknown op: {op!r}"))
 
     async def submit_envelope(self, submission: Submission) -> None:
-        await self.submit(submission.op)
+        token = self._submission_id.set(submission.id)
+        try:
+            await self.submit(submission.op)
+        finally:
+            self._submission_id.reset(token)
+
+    async def aclose(self) -> None:
+        """Cancel active work and release session-owned tool processes."""
+
+        task = self._active_turn_task or self._current_task
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        control = getattr(self, "_agent_control", None)
+        if control is not None:
+            await control.close()
+        await self._tools.aclose()
 
     async def _run_start_hook(self):
         """Run SessionStart, or SubagentStart when this is a sub-agent session.
@@ -235,7 +274,9 @@ class AgentSession:
             logger.exception("start hook failed")
             return None
 
-    async def _run_prompt_hooks(self, text: str, hook_contexts: list[str]) -> str | None:
+    async def _run_prompt_hooks(
+        self, text: str, hook_contexts: list[str]
+    ) -> str | None:
         """Run SessionStart (once) + UserPromptSubmit hooks.
 
         Appends any injected context to ``hook_contexts`` and returns a block
@@ -264,8 +305,10 @@ class AgentSession:
     async def _run_user_input(self, text: str) -> None:
         if self._busy:
             self._emit(ErrorEvent(message="a turn is already in progress"))
+            self._emit(TaskComplete(final_text=None, stop_reason="busy"))
             return
         self._busy = True
+        self._active_turn_task = asyncio.current_task()
         self._emit(TurnStarted())
 
         # External-command hooks (C3): SessionStart (once) + UserPromptSubmit
@@ -274,11 +317,20 @@ class AgentSession:
         # as system messages ahead of history so the model reads it this turn.
         hook_contexts: list[str] = []
         if self._hooks_engine is not None:
-            blocked = await self._run_prompt_hooks(text, hook_contexts)
+            try:
+                blocked = await self._run_prompt_hooks(text, hook_contexts)
+            except asyncio.CancelledError:
+                self._emit(TaskComplete(final_text=None, stop_reason="interrupted"))
+                self._busy = False
+                self._active_turn_task = None
+                return
             if blocked is not None:
                 self._history.append({"role": "user", "content": text})
-                self._emit(TaskComplete(final_text=blocked, stop_reason="blocked_by_hook"))
+                self._emit(
+                    TaskComplete(final_text=blocked, stop_reason="blocked_by_hook")
+                )
                 self._busy = False
+                self._active_turn_task = None
                 return
 
         self._history.append({"role": "user", "content": text})
@@ -338,6 +390,7 @@ class AgentSession:
             self._emit(TaskComplete(final_text=None, stop_reason="interrupted"))
             self._busy = False
             self._current_task = None
+            self._active_turn_task = None
             return
         except Exception as exc:  # noqa: BLE001
             # The runner should return errors as data, but a truly unexpected
@@ -348,6 +401,7 @@ class AgentSession:
             self._emit(TaskComplete(final_text=None, stop_reason="error"))
             self._busy = False
             self._current_task = None
+            self._active_turn_task = None
             return
         finally:
             self._current_task = None
@@ -365,3 +419,4 @@ class AgentSession:
             )
         )
         self._busy = False
+        self._active_turn_task = None

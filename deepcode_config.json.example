@@ -55,7 +55,7 @@
   },
 
   "security": {
-    "$comment": "P1 security base. permissionMode: full_auto (default, autonomous) | default (mutating tools prompt for approval) | plan (mutating tools denied). The DEEPCODE_PERMISSION_MODE env var overrides this. permissions is a {tool: {argPattern: allow|ask|deny}} ruleset (specific patterns win); it can never override the built-in credential denylist. sandbox toggles command sandboxing (DEEPCODE_SANDBOX env wins).",
+    "$comment": "Security base. permissionMode: full_auto (legacy CLI default) | default (mutating tools prompt for approval) | plan (mutating tools denied). Desktop uses approval-first when this field is omitted; an explicit value applies to both CLI and Desktop. The DEEPCODE_PERMISSION_MODE env var overrides this. permissions is a {tool: {argPattern: allow|ask|deny}} ruleset (specific patterns win); it can never override the built-in credential denylist. sandbox toggles command sandboxing (DEEPCODE_SANDBOX env wins).",
     "permissionMode": "full_auto",
     "permissions": {},
     "sandbox": true
@@ -127,7 +127,7 @@
   },
 
   "logger": {
-    "$comment": "Dual-layer observability. Global file rotates daily under logs/. Per-task files land in deepcode_lab/tasks/<task_id>/logs/{system,llm,mcp}.jsonl and are streamable via the /ws/tasks/{id}/logs WebSocket. Sessions are persisted to ~/.deepcode/sessions/ (override with DEEPCODE_SESSIONS_DIR).",
+    "$comment": "Dual-layer observability. Global files rotate daily under logs/. Per-task files live at deepcode_lab/tasks/<task_id>/logs/{system,llm,mcp}.jsonl. Sessions persist under ~/.deepcode/sessions/ (override with DEEPCODE_SESSIONS_DIR).",
     "level": "info",
     "progressDisplay": false,
     "transports": ["console", "global_file", "task_file"],

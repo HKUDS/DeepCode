@@ -1,0 +1,181 @@
+import { describe, expect, it } from "vitest";
+
+import type {
+  Event,
+  Item,
+  JsonValue,
+  Thread,
+  Turn,
+  WorkflowRun,
+} from "../generated/app-server";
+import {
+  initialWorkspaceState,
+  workspaceReducer,
+} from "./workspaceState";
+
+const turn: Turn = {
+  id: "turn-1",
+  threadId: "thread-1",
+  ordinal: 1,
+  prompt: "test",
+  status: "running",
+  stopReason: null,
+  errorCode: null,
+  errorMessage: null,
+  startedAt: "2026-07-16T00:00:00Z",
+  completedAt: null,
+};
+
+function item(status: Item["status"], text: string): Item {
+  return {
+    id: "item-1",
+    threadId: "thread-1",
+    turnId: turn.id,
+    ordinal: 1,
+    kind: "assistant_message",
+    status,
+    summary: text,
+    payload: { text },
+    createdAt: "2026-07-16T00:00:00Z",
+    updatedAt: "2026-07-16T00:00:00Z",
+  };
+}
+
+function event(sequence: number, value: Item): Event {
+  return {
+    eventId: `event-${sequence}`,
+    sequence,
+    type: "item.updated",
+    threadId: "thread-1",
+    turnId: turn.id,
+    itemId: value.id,
+    timestamp: "2026-07-16T00:00:00Z",
+    payload: { item: value as unknown as JsonValue },
+  };
+}
+
+describe("workspace event projection", () => {
+  const thread: Thread = {
+    id: "thread-1",
+    projectId: "project-1",
+    parentThreadId: null,
+    title: "Session",
+    mode: "code",
+    status: "idle",
+    model: null,
+    workspacePath: "/workspace/project-1",
+    worktreePath: null,
+    createdAt: "2026-07-16T00:00:00Z",
+    updatedAt: "2026-07-16T00:00:00Z",
+    archivedAt: null,
+  };
+
+  it("does not let replayed older events overwrite newer live state", () => {
+    const live = workspaceReducer(initialWorkspaceState, {
+      type: "event",
+      event: event(20, item("completed", "final")),
+    });
+    const replayed = workspaceReducer(live, {
+      type: "event",
+      event: event(10, item("in_progress", "partial")),
+    });
+
+    expect(replayed.items[0].status).toBe("completed");
+    expect(replayed.items[0].payload.text).toBe("final");
+    expect(replayed.lastSequence).toBe(20);
+  });
+
+  it("does not let an older request snapshot overwrite a live update", () => {
+    const live = workspaceReducer(initialWorkspaceState, {
+      type: "event",
+      event: event(20, item("completed", "final")),
+    });
+    const snapshotted = workspaceReducer(live, {
+      type: "snapshot",
+      snapshot: {
+        turn,
+        items: [item("in_progress", "partial")],
+        approvals: [],
+      },
+    });
+
+    expect(snapshotted.items[0].status).toBe("completed");
+    expect(snapshotted.items[0].payload.text).toBe("final");
+  });
+
+  it("projects workflow state from the same durable event stream", () => {
+    const workflow: WorkflowRun = {
+      id: "workflow-1",
+      threadId: turn.threadId,
+      turnId: turn.id,
+      kind: "paper2code",
+      status: "running",
+      input: { sourceType: "requirement", source: "Build", options: {} },
+      result: {},
+      attempt: 1,
+      retryOf: null,
+      currentStage: "testing",
+      progressCurrent: 90,
+      progressTotal: 100,
+      checkpoint: {},
+      createdAt: "2026-07-16T00:00:00Z",
+      updatedAt: "2026-07-16T00:00:00Z",
+      startedAt: "2026-07-16T00:00:00Z",
+      completedAt: null,
+      errorCode: null,
+      errorMessage: null,
+    };
+    const projected = workspaceReducer(initialWorkspaceState, {
+      type: "event",
+      event: {
+        eventId: "event-workflow",
+        sequence: 21,
+        type: "workflow.updated",
+        threadId: turn.threadId,
+        turnId: turn.id,
+        itemId: null,
+        timestamp: workflow.updatedAt,
+        payload: { workflow: workflow as unknown as JsonValue },
+      },
+    });
+
+    expect(projected.workflows).toEqual([workflow]);
+    expect(projected.lastSequence).toBe(21);
+  });
+
+  it("keeps the global Session index when project context changes", () => {
+    const changed = workspaceReducer(
+      {
+        ...initialWorkspaceState,
+        threads: [thread],
+        selectedProjectId: thread.projectId,
+        selectedThreadId: thread.id,
+      },
+      { type: "select-project", projectId: "project-2" },
+    );
+
+    expect(changed.threads).toEqual([thread]);
+    expect(changed.selectedProjectId).toBe("project-2");
+    expect(changed.selectedThreadId).toBeNull();
+  });
+
+  it("clears only the selected Session trace when a Session is removed", () => {
+    const removed = workspaceReducer(
+      {
+        ...initialWorkspaceState,
+        threads: [thread],
+        selectedThreadId: thread.id,
+        turns: [turn],
+        items: [item("completed", "done")],
+        lastSequence: 4,
+      },
+      { type: "thread-remove", threadId: thread.id },
+    );
+
+    expect(removed.threads).toEqual([]);
+    expect(removed.selectedThreadId).toBeNull();
+    expect(removed.turns).toEqual([]);
+    expect(removed.items).toEqual([]);
+    expect(removed.lastSequence).toBe(0);
+  });
+});

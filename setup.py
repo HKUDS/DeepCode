@@ -62,6 +62,7 @@ setuptools.setup(
     url=metadata["__url__"],
     version=metadata["__version__"],
     author=metadata["__author__"],
+    license="MIT",
     description="AI Research Engine - Transform research papers into working code automatically",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -72,7 +73,6 @@ setuptools.setup(
     classifiers=[
         "Development Status :: 4 - Beta",
         "Programming Language :: Python :: 3",
-        "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
         "Intended Audience :: Developers",
         "Intended Audience :: Science/Research",
@@ -80,12 +80,16 @@ setuptools.setup(
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
         "Topic :: Text Processing :: Linguistic",
     ],
-    python_requires=">=3.9",
+    python_requires=">=3.12",
     install_requires=requirements,
+    extras_require={
+        "advanced-documents": ["docling>=2.113.0"],
+    },
     include_package_data=True,
     entry_points={
         "console_scripts": [
             "deepcode=deepcode:main",
+            "deepcode-app-server=app_server.__main__:main",
         ],
     },
     project_urls={

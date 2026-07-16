@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from core.compat.runtime import get_runtime
+from core.compat.runtime import DeepCodeRuntime, get_runtime
 from core.providers.base import LLMProvider
 
 if TYPE_CHECKING:
@@ -36,6 +36,7 @@ def get_workflow_provider(
     phase: str,
     provider_name: str | None = None,
     model: str | None = None,
+    runtime: DeepCodeRuntime | None = None,
 ) -> tuple[LLMProvider, LLMProfile]:
     """Resolve a provider for non-AgentRunner workflow code.
 
@@ -43,16 +44,16 @@ def get_workflow_provider(
     for legacy loops that still manage tool execution manually but should not
     instantiate OpenAI/Anthropic/Google SDK clients themselves.
     """
-    runtime = get_runtime()
-    provider = runtime.provider_for(
+    active_runtime = runtime or get_runtime()
+    provider = active_runtime.provider_for(
         provider_name=provider_name,
         phase=phase,
         model=model,
     )
     resolved_provider = (
         provider_name
-        or runtime.config.get_provider_name(model)
-        or runtime.config.llm_provider
+        or active_runtime.config.get_provider_name(model)
+        or active_runtime.config.llm_provider
         or "auto"
     ).lower()
     profile = LLMProfile(

@@ -23,6 +23,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
+from core.agent_runtime.processes import (
+    subprocess_group_kwargs,
+    terminate_process_tree,
+)
 from core.agent_runtime.tools.base import Tool, tool_parameters
 from core.harness.sandbox import build_exec_command
 
@@ -112,7 +116,10 @@ class CodeModeTool(Tool):
 
     @property
     def description(self) -> str:
-        lines = [spec.signature + (f"  # {spec.doc}" if spec.doc else "") for spec in self._api]
+        lines = [
+            spec.signature + (f"  # {spec.doc}" if spec.doc else "")
+            for spec in self._api
+        ]
         api_block = "\n".join(lines) if lines else "(no tools exposed)"
         return (
             "Code mode: write a Python program that calls the tools below as "
@@ -155,6 +162,7 @@ class CodeModeTool(Tool):
                 cwd=self._workspace,
                 env={**os.environ},
                 limit=_STREAM_LIMIT,
+                **subprocess_group_kwargs(),
             )
         except OSError as exc:
             return f"Error: could not start code-mode runtime: {exc}"
@@ -165,9 +173,13 @@ class CodeModeTool(Tool):
         try:
             done = await asyncio.wait_for(self._rpc_loop(proc), timeout=self._timeout_s)
         except asyncio.TimeoutError:
-            proc.kill()
+            await terminate_process_tree(proc)
             await self._reap(proc)
             return f"Error: code timed out after {self._timeout_s:g}s (a tool call or loop hung)."
+        except asyncio.CancelledError:
+            await terminate_process_tree(proc)
+            await self._reap(proc)
+            raise
 
         stderr = (await self._reap(proc)).strip()
         if done is None:
@@ -193,7 +205,9 @@ class CodeModeTool(Tool):
             elif msg.get("done"):
                 return msg
 
-    async def _dispatch(self, tool_name: str, arguments: dict) -> tuple[str | None, str | None]:
+    async def _dispatch(
+        self, tool_name: str, arguments: dict
+    ) -> tuple[str | None, str | None]:
         if tool_name not in self._api_by_name:
             return None, f"unknown tool {tool_name!r} (not exposed to code mode)"
         try:

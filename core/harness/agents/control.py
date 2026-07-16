@@ -26,6 +26,12 @@ from __future__ import annotations
 import asyncio
 import re
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
+
+from core.harness.permissions import PermissionMode
+
+if TYPE_CHECKING:
+    from core.compat.runtime import DeepCodeRuntime
 
 # Max sub-agents running at once. A small fan-out (3-5 independent subtasks) is
 # the common case, so the default fits it without forcing a wait-and-retry,
@@ -87,10 +93,16 @@ class AgentControl:
         model: str | None = None,
         *,
         max_threads: int = MAX_CONCURRENT_SUBAGENTS,
+        permission_mode: PermissionMode = PermissionMode.FULL_AUTO,
+        approval_callback: Any | None = None,
+        runtime: "DeepCodeRuntime | None" = None,
     ) -> None:
         self._workspace = workspace
         self._model = model
         self._max_threads = max(1, max_threads)
+        self._permission_mode = permission_mode
+        self._approval_callback = approval_callback
+        self._runtime = runtime
         self._agents: dict[str, SubAgent] = {}
         self._seq = 0
         self._mailbox: list[str] = []
@@ -310,6 +322,9 @@ class AgentControl:
             allow_spawn=False,  # depth cap: sub-agents cannot spawn again
             injection_callback=inbox_drainer,  # receives parent's send_message
             agent_context=(agent_id, "subagent"),  # fires SubagentStart/Stop hooks
+            approval_callback=self._approval_callback,
+            permission_mode_override=self._permission_mode,
+            runtime=self._runtime,
         )
         if seed_history:
             session.load_history(seed_history)  # fork_turns: inherit parent context

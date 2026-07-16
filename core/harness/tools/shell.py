@@ -14,6 +14,10 @@ import os
 import tempfile
 from typing import Any
 
+from core.agent_runtime.processes import (
+    subprocess_group_kwargs,
+    terminate_process_tree,
+)
 from core.agent_runtime.tools.base import Tool, tool_parameters
 from core.harness.sandbox import build_exec_command
 
@@ -92,13 +96,16 @@ class BashTool(Tool):
                 cwd=self._workspace,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
+                **subprocess_group_kwargs(),
             )
             try:
                 out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
+                await terminate_process_tree(proc)
                 return f"Error: command timed out after {timeout}s: {command}"
+            except asyncio.CancelledError:
+                await terminate_process_tree(proc)
+                raise
         except OSError as exc:
             return f"Error: could not run command: {exc}"
         finally:

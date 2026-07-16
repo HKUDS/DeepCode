@@ -172,13 +172,24 @@ EventMsg = Union[
 
 @dataclass(frozen=True)
 class Event:
+    """One ordered session event correlated to its source submission."""
+
     id: str
     msg: EventMsg
+    submission_id: str | None = None
 
 
-def serialize_event(event: Event) -> dict[str, Any]:
-    """Serialize an event to a plain dict (``msg.type`` discriminator kept).
+def serialize_event(
+    event: Event, *, include_submission_id: bool = False
+) -> dict[str, Any]:
+    """Serialize an event while preserving the legacy CLI wire shape.
 
-    Suitable for NDJSON transport (``deepcode exec --json``) or an SSE frame.
+    ``submission_id`` is an internal correlation field used by the application
+    layer. Existing ``deepcode exec --json`` consumers receive the original
+    ``{"id", "msg"}`` object unless a versioned caller opts in explicitly.
     """
-    return asdict(event)
+
+    payload = {"id": event.id, "msg": asdict(event.msg)}
+    if include_submission_id:
+        payload["submission_id"] = event.submission_id
+    return payload

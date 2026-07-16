@@ -1,0 +1,7 @@
+# Historical mcp_agent.secrets.yaml findings. The file has long been removed
+# and current secret files are ignored. The exposed credentials must be
+# rotated/revoked before release; these fingerprints prevent acknowledged
+# history from masking new leaks in CI.
+b2dccbe6d37e74e98b8a57593c1a5bb4994fba59:mcp_agent.secrets.yaml:generic-api-key:9
+420d07580e83885cdf784115131aea884e704a8f:mcp_agent.secrets.yaml:generic-api-key:2
+225e344437173185f22f30cbac58fc82f9fbe3ed:mcp_agent.secrets.yaml:generic-api-key:2

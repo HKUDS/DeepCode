@@ -176,6 +176,9 @@ def _tool_call(call_id: str, name: str, arguments: dict[str, Any]) -> ToolCallRe
 
 
 def _make_workflow(monkeypatch) -> CodeImplementationWorkflow:
+    # Do not force the permission mode here: these tests also lock the legacy
+    # autonomous default used by unconfigured CLI/batch workflows.
+    monkeypatch.delenv("DEEPCODE_PERMISSION_MODE", raising=False)
     monkeypatch.setattr(
         ConciseMemoryAgent,
         "_extract_all_files",
@@ -328,3 +331,85 @@ async def test_loop_detector_blocks_repeated_tool_batch(tmp_path, monkeypatch):
     assert state["status"] == "aborted"
     assert "loop_detector" in (state["reason"] or "")
     assert provider.loop_calls == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("with_tests", "expected_status", "expected_inner"),
+    [
+        (False, "incomplete", "unverified"),
+        (True, "success", "completed"),
+    ],
+)
+async def test_public_workflow_requires_passing_discovered_tests(
+    tmp_path, monkeypatch, with_tests, expected_status, expected_inner
+):
+    plan = tmp_path / "initial_plan.txt"
+    plan.write_text("validated plan", encoding="utf-8")
+    code_dir = tmp_path / "generate_code"
+    code_dir.mkdir()
+    (code_dir / "implementation.py").write_text("VALUE = 1\n", encoding="utf-8")
+    if with_tests:
+        tests_dir = code_dir / "tests"
+        tests_dir.mkdir()
+        (tests_dir / "test_generated.py").write_text(
+            "def test_generated():\n    assert True\n", encoding="utf-8"
+        )
+
+    workflow = CodeImplementationWorkflow(require_verification=True)
+
+    async def implement(*_args, **_kwargs):
+        workflow._last_run_state = {
+            "status": "completed",
+            "reason": "all planned files implemented",
+            "iterations": 1,
+            "elapsed_seconds": 0.1,
+            "files_completed": 1,
+            "total_files": 1,
+            "unimplemented_files": [],
+        }
+        return "implemented"
+
+    monkeypatch.setattr(workflow, "implement_code_pure", implement)
+    result = await workflow.run_workflow(
+        str(plan), target_directory=str(tmp_path), pure_code_mode=True
+    )
+
+    assert result["status"] == expected_status
+    assert result["inner_status"] == expected_inner
+    assert bool(result["verification"]) is with_tests
+
+
+@pytest.mark.asyncio
+async def test_legacy_public_workflow_keeps_p0_completion_semantics(
+    tmp_path, monkeypatch
+):
+    plan = tmp_path / "initial_plan.txt"
+    plan.write_text("validated plan", encoding="utf-8")
+    code_dir = tmp_path / "generate_code"
+    code_dir.mkdir()
+    (code_dir / "implementation.py").write_text("VALUE = 1\n", encoding="utf-8")
+    workflow = CodeImplementationWorkflow()
+
+    async def implement(*_args, **_kwargs):
+        workflow._last_run_state = {
+            "status": "completed",
+            "reason": "all planned files implemented",
+            "iterations": 1,
+            "elapsed_seconds": 0.1,
+            "files_completed": 1,
+            "total_files": 1,
+            "unimplemented_files": [],
+        }
+        return "implemented"
+
+    monkeypatch.setattr(workflow, "implement_code_pure", implement)
+    result = await workflow.run_workflow(
+        str(plan),
+        target_directory=str(tmp_path),
+        pure_code_mode=True,
+    )
+
+    assert result["status"] == "success"
+    assert result["inner_status"] == "completed"
+    assert result["verification"] == []

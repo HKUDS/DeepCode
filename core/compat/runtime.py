@@ -18,6 +18,9 @@ even though the underlying loader is now nanobot-style JSON.
 from __future__ import annotations
 
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 
 from loguru import logger
@@ -113,14 +116,33 @@ class DeepCodeRuntime:
         return self._mcp_servers
 
 
+_runtime_override: ContextVar[DeepCodeRuntime | None] = ContextVar(
+    "deepcode_runtime_override",
+    default=None,
+)
+
+
 def get_runtime() -> DeepCodeRuntime:
-    """Return the process-wide runtime, loading lazily on first use."""
+    """Return the context-bound runtime or the lazy process-wide default."""
+    override = _runtime_override.get()
+    if override is not None:
+        return override
     global _runtime
     if _runtime is None:
         with _runtime_lock:
             if _runtime is None:
                 _runtime = DeepCodeRuntime.load()
     return _runtime
+
+
+@contextmanager
+def use_runtime(runtime: DeepCodeRuntime) -> Iterator[DeepCodeRuntime]:
+    """Bind ``runtime`` to the current async/thread context and restore it."""
+    token = _runtime_override.set(runtime)
+    try:
+        yield runtime
+    finally:
+        _runtime_override.reset(token)
 
 
 def set_runtime(runtime: DeepCodeRuntime | None) -> None:

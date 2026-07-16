@@ -1,12 +1,9 @@
 # Core Dependencies
 aiofiles>=0.8.0
-aiohttp>=3.8.0
+aiohttp>=3.14.1
 anthropic>=0.40.0
 asyncio-mqtt
-docling
 
-# New UI Backend Dependencies
-fastapi>=0.104.0
 google-genai
 httpx>=0.27.0
 json-repair>=0.30.0
@@ -20,12 +17,8 @@ openai>=1.55.0
 openapi
 pathlib2
 prompt_toolkit>=3.0.0
-pydantic-settings>=2.0.0
-PyPDF2>=2.0.0
-python-multipart>=0.0.6
+pydantic-settings>=2.14.2
+pypdf>=6.14.2
 PyYAML>=6.0
 reportlab>=3.5.0
 rich>=13.0.0
-streamlit
-uvicorn>=0.24.0
-websockets>=12.0

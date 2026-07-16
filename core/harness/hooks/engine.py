@@ -146,7 +146,12 @@ class HooksEngine:
         )
 
     async def run_post_tool_use(
-        self, tool_name: str, tool_input: Any, tool_response: Any, *, tool_use_id: str = ""
+        self,
+        tool_name: str,
+        tool_input: Any,
+        tool_response: Any,
+        *,
+        tool_use_id: str = "",
     ) -> PostToolUseOutcome:
         payload = {
             "hook_event_name": "PostToolUse",
@@ -243,7 +248,10 @@ class HooksEngine:
         )
 
     async def run_subagent_stop(
-        self, agent_id: str, agent_type: str = "subagent", stop_hook_active: bool = False
+        self,
+        agent_id: str,
+        agent_type: str = "subagent",
+        stop_hook_active: bool = False,
     ) -> StopOutcome:
         payload = {
             "hook_event_name": "SubagentStop",
@@ -287,7 +295,9 @@ class HooksEngine:
 
         async def _run_one(handler: Handler) -> None:
             result = await run_command(handler, payload_json, self._cwd)
-            completions.append((handler.display_order, parse_handler_output(event_name, result)))
+            completions.append(
+                (handler.display_order, parse_handler_output(event_name, result))
+            )
 
         await asyncio.gather(*(_run_one(h) for h in selected))
         return completions
@@ -295,7 +305,9 @@ class HooksEngine:
     async def _dispatch(
         self, event_name: str, matcher_input: str | None, payload_fields: dict
     ) -> _FoldedOutcome:
-        return self._fold(await self._run_handlers(event_name, matcher_input, payload_fields))
+        return self._fold(
+            await self._run_handlers(event_name, matcher_input, payload_fields)
+        )
 
     @staticmethod
     def _fold(completions: list[tuple[int, HandlerDecision]]) -> _FoldedOutcome:

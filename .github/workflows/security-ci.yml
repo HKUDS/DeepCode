@@ -1,0 +1,129 @@
+name: Security CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secret-scan:
+    name: Secret history scan
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install pinned Gitleaks
+        run: |
+          curl --fail --silent --show-error --location \
+            --output gitleaks.tar.gz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks.tar.gz" \
+            | sha256sum --check
+          tar -xzf gitleaks.tar.gz gitleaks
+          ./gitleaks git --redact --no-banner --exit-code 1
+
+  dependency-audit:
+    name: Dependency and license audit
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            desktop/sidecar-requirements.lock
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Audit Node dependencies
+        working-directory: desktop
+        run: |
+          npm ci
+          npm audit --audit-level=high
+          mkdir -p build/security
+          npm sbom --sbom-format cyclonedx > build/security/node-sbom.json
+
+      - name: Audit Python package dependencies
+        run: |
+          python -m pip install --upgrade pip pip-audit==2.10.1
+          mkdir -p desktop/build/security
+          python -m venv desktop/build/python-audit-env
+          desktop/build/python-audit-env/bin/python -m pip install -e .
+          desktop/build/python-audit-env/bin/python -m pip check
+          python desktop/scripts/audit-python-environment.py \
+            --python desktop/build/python-audit-env/bin/python \
+            --output desktop/build/security/python-sbom.json
+          rm -rf desktop/build/python-audit-env
+
+      - name: Audit locked App Server environment
+        working-directory: desktop
+        run: |
+          npm run setup:sidecar
+          node scripts/run-python.mjs scripts/audit-python-environment.py \
+            --python build/sidecar/.venv/bin/python \
+            --output build/security/sidecar-sbom.json
+
+      - name: Audit Rust dependencies
+        run: |
+          cargo install cargo-audit --version 0.22.2 --locked
+          cargo audit --file desktop/src-tauri/Cargo.lock
+
+      - name: Audit dependency licenses
+        working-directory: desktop
+        run: npm run audit:licenses
+
+      - name: Upload audit reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-security-reports
+          path: |
+            desktop/build/security/
+            desktop/build/licenses/dependencies.json
+          if-no-files-found: error
+          retention-days: 30
+
+  dependency-review:
+    name: Pull request dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high

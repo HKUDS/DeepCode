@@ -55,7 +55,6 @@ def test_loop_cli_succeeds_on_green(monkeypatch, tmp_path, capsys):
         "get_runtime",
         lambda: type("R", (), {"config": type("C", (), {"security": None})()})(),
     )
-
     rc = loop_cli.main(
         [
             "keep calc.add working",

@@ -63,10 +63,6 @@
 
 ### 🖥️ **界面展示**
 
-<table align="center" width="100%" style="border: none; border-collapse: collapse; margin: 30px 0;">
-<tr>
-<td width="50%" align="center" style="vertical-align: top; padding: 20px;">
-
 #### 🖥️ **命令行界面**
 **基于终端的开发环境**
 
@@ -82,27 +78,9 @@
   *专业终端界面，适合高级用户和CI/CD集成*
 </div>
 
-</td>
-<td width="50%" align="center" style="vertical-align: top; padding: 20px;">
-
-#### 🌐 **Web界面**
-**可视化交互体验**
-
-<div align="center">
-
-  <img src="https://github.com/Zongwei9888/Experiment_Images/raw/8882a7313c504ca97ead6e7b36c51aa761b6a4f3/DeepCode_images/UI.gif" alt="Web Interface Demo" width="100%" style="border-radius: 10px; box-shadow: 0 8px 20px rgba(14,165,233,0.3); margin: 15px 0;"/>
-
-  <div style="background: linear-gradient(135deg, #0EA5E9 0%, #00D4FF 100%); border-radius: 12px; padding: 15px; margin: 15px 0; color: white;">
-    <strong>🎨 现代化Web仪表板</strong><br/>
-    <small>🖱️ 直观的拖拽操作<br/>📱 响应式设计<br/>🎯 可视化进度跟踪</small>
-  </div>
-
-  *美观的Web界面，为所有技能水平用户提供流畅的工作流程*
-</div>
-
-</td>
-</tr>
-</table>
+旧浏览器界面已经移除。新的 Tauri 2 桌面工作台和持久化 stdio App Server
+正在开发，详见 [`P1 架构`](docs/P1_APP_SERVER_ARCHITECTURE.md)与
+[`完整路线`](docs/TAURI_DESKTOP_REBUILD_PLAN.md)。
 
 ---
 
@@ -147,7 +125,6 @@
 - [🏗️ 架构](#️-架构)
 - [📊 实验结果](#-实验结果)
 - [🚀 快速开始](#-快速开始)
-- [🤖 nanobot 集成（飞书聊天机器人）](#-nanobot-集成飞书聊天机器人)
 - [💡 示例](#-示例)
   - [🎬 实时演示](#-实时演示)
 - [⭐ 星标历史](#-星标历史)
@@ -165,19 +142,16 @@
 
 ---
 
-**[2026-07-08] Agent Chat 产品化打磨:记忆、目录选择器、会话管理**
+**[2026-07-08] 持久会话与记忆**
 
-- **agent 跨会话有记忆。** 在项目根放一个 `AGENTS.md`(或 `DEEPCODE.md`)写长期指令,agent 还会把自己的持久笔记存在 `.deepcode/memory/`——昨天学到的事实今天还在。CLI、Web 对话、无头运行三端行为一致。
-- **让它在真实项目目录上干活。** 新建对话时有了目录选择器——浏览并选择 agent 的工作目录(限制在你的 home 内),不用再盲填路径。
-- **管理你的对话。** 侧栏可重命名/删除任意对话;New chat 在你发出第一条消息前只是草稿,列表不再堆满空会话。每个对话的工作目录会显示并在重启后保留。
-- **能读的回复。** 助手消息以 markdown 渲染(代码块/列表/表格);每次工具调用是可展开的卡片,显示它做了什么(如 "Wrote 163 bytes to plan.md");错误以错误样式呈现,不再伪装成回答。
+- **agent 跨会话有记忆。** 在项目根放一个 `AGENTS.md`（或 `DEEPCODE.md`）写长期指令；持久笔记保存在 `.deepcode/memory/`。
+- **会话跨重启恢复。** 工作目录、消息、标题和任务引用保存在 `~/.deepcode/sessions/`，可从 TUI 恢复。
 
 ---
 
-**[2026-07-08] 通用编码 agent:交互式 CLI、Web Agent Chat 与原生工具**
+**[2026-07-08] 通用编码 agent：交互式 CLI 与原生工具**
 
 - **在终端里直接和 DeepCode 对话。** `python -m cli.tui`(Docker 内 `deepcode --cli`)进入自由多轮编码对话——用自然语言描述任意任务,实时看到流式回复、文件修改与命令执行进度卡。`/new`、`/resume`、`/model`、`/clear`、`/help` 随时掌控,`@路径` 直接附加文件。(替代原菜单式 CLI。)
-- **在浏览器里持续对话。** 全新 "Agent Chat" 页面:历史会话侧栏、一键新建对话、流式回复与工具进度、运行中随时中断。每个对话都持久保存、随时续聊,并拥有独立工作目录(`deepcode_lab/chats/`)。
 - **改代码一次到位。** 内置 `read` / `write` / `edit` / `apply_patch` / `bash` / `grep` / `glob` 工具:模糊匹配容忍空白缩进漂移、多文件补丁原子落盘、写入后自动诊断并当场修复。
 - **一条命令跑任务。** `python -m cli.exec_cli "任务" --json` 端到端执行并输出机器可读事件流,可直接接入 CI 与自动化脚本。
 - **聊多久都稳。** 上下文窗口按模型自动解析、历史自动压缩,长对话不崩;会话经 SQLite 索引,列表与恢复即时响应。
@@ -189,66 +163,19 @@
 
 🧭 **[2026-05-01] OpenRouter 模型选择器、session 清理与工作流体验增强**
 
-- 🧠 **Settings 中新增 OpenRouter 模型目录。** 新版 UI 可以从 `https://openrouter.ai/api/v1/models` 获取 OpenRouter 模型元数据，本地缓存后提供可搜索的 Default、Planning、Implementation 三阶段模型下拉框。用户可以直接选择 `z-ai/glm-5.1` 这类 OpenRouter 精确模型 id，无需手动编辑 JSON。
-- 🔄 **运行时模型切换。** 在 Settings 保存模型选择后，会更新 `deepcode_config.json` 并刷新进程内 LLM runtime；之后新启动的 workflow 会立即使用新的 provider/model 组合。
-- 🗑️ **Session 删除改为安全级联清理。** 在 UI 中删除 session 时，会删除持久化 session 记录和对应的 `deepcode_lab/tasks/<task_id>/` 工作目录，但保留可被多个 session 共享的 `uploads/` 原始文件。若 session 下仍有 `pending`、`running` 或 `waiting_for_input` task，后端会返回明确的 `409 Conflict`。
-- 📊 **Paper2Code 进度显示更准确。** 前端现在会展示后端阶段消息，并避免在长时间 LLM 阶段尚未完成时，把中间步骤误标记为完全 Done。
+- 🧠 **OpenRouter 模型目录支持。** DeepCode 可以获取并缓存 OpenRouter 模型元数据，支持 `z-ai/glm-5.1` 等精确模型 id。
+- 🔄 **运行时模型切换。** 修改 `deepcode_config.json` 后，新启动的 workflow 会使用新的 provider/model 组合。
 - 🛡️ **工作流稳定性修复。** 上传阶段会拒绝 Git LFS pointer 文件；取消任务会及时中断后端工作；浏览器中的过期 session id 会自动恢复；planner 在模型输出错误的工具调用/延迟执行文本时会回退到最小合法 plan；文档分割阶段跳过额外质量验证 LLM 调用，减少卡在 50% 的概率。
 
 ---
 
 🗂️ **[2026-04-28] 持久化 session 与双层结构化日志**
 
-- 🆕 **Session 现在会持久化。** 每次 CLI / UI 运行都会自动挂到一个 session，默认保存在 `~/.deepcode/sessions/<id>/`（可用 `DEEPCODE_SESSIONS_DIR` 覆盖）。session 使用 JSONL 存储，支持 `python cli/main_cli.py session list|show <id>|new|resume <id>|delete <id>`，后端也提供 `GET /api/v1/sessions`。
-- 🔄 **恢复历史任务。** CLI 可以用 `--session <id>` 把新任务挂到旧 session；UI / API 可以在 `POST /api/v1/workflows/paper-to-code` 或 `chat-planning` 中传 `session_id`。后端重启后会从磁盘恢复历史 task，崩溃前仍在运行的 task 会标记为 `interrupted`。
+- 🆕 **Session 现在会持久化。** CLI session 默认保存在 `~/.deepcode/sessions/<id>/`（可用 `DEEPCODE_SESSIONS_DIR` 覆盖），使用 JSONL 存储并由 SQLite 索引。
+- 🔄 **恢复历史任务。** TUI 可以通过 `/resume` 或 `--resume <id>` 恢复历史对话。
 - 💻 **CLI 交互增强。** 进入 `python cli/main_cli.py` 后，可以在主菜单输入 `/resume` 打开历史 session 选择器，`/new [title]` 新建并切换 session，`/session` 查看当前 session，`/help` 查看命令。也支持 Cursor/Codex 风格的内联输入：`@/path/to/paper.pdf`、`@"C:\path with spaces\paper.pdf"`、`@https://...`。
 - 📜 **双层结构化日志。** 全局日志写入 `logs/server-YYYYMMDD.jsonl`；每个任务的日志写入 `deepcode_lab/tasks/<task_id>/logs/{system,llm,mcp}.jsonl`。所有 `loguru.logger` 调用都会通过 contextvar 自动带上 `task_id` / `session_id`，LLM/MCP 调用还会记录耗时、token、请求/响应摘要。
-- 📡 **WebSocket 日志流。** 单 task 日志流：`/ws/tasks/{task_id}/logs?channel=llm`；按 session 聚合多个 task：`/ws/sessions/{session_id}/logs`。旧的假 `/ws/logs/{session_id}` 已移除。
 - 🧹 **清理旧实现。** 删除 `utils/simple_llm_logger.py`、`utils/dialogue_logger.py`，原内存版 `services/session_service.py` 改为 `core.sessions.SessionStore` 的 thin facade。
-
----
-
-🎉 **[2026-02] DeepCode + nanobot 集成 — 通过飞书聊天使用 DeepCode！**
-
-<div align="center">
-<table><tr>
-<td align="center"><a href="https://github.com/HKUDS/DeepCode"><img src="./assets/logo.png" alt="DeepCode" height="60"/></a></td>
-<td align="center"><h2>✦</h2></td>
-<td align="center"><a href="https://github.com/HKUDS/nanobot"><img src="./assets/nanobot.png" alt="nanobot" height="60"/></a></td>
-</tr></table>
-</div>
-
-- [nanobot](https://github.com/HKUDS/nanobot) 现已连接到 DeepCode — 在**飞书**中发送消息即可自动生成代码
-- 支持**论文转代码**和**对话转代码**，以及实时任务跟踪，全部在聊天应用中完成
-- 一键部署：`./nanobot/run_nanobot.sh` → **[设置指南 →](#-nanobot-集成飞书聊天机器人)**
-
-<div align="center">
-<table width="100%"><tr>
-<td width="50%" align="center">
-  <img src="./assets/IMG_8098.jpeg" alt="飞书聊天示例 1" width="95%" style="border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.2);"/>
-</td>
-<td width="50%" align="center">
-  <img src="./assets/IMG_8099.jpeg" alt="飞书聊天示例 2" width="95%" style="border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.2);"/>
-</td>
-</tr></table>
-<sub><em>飞书机器人实战 — 自然语言 → 完整代码生成，带设置说明</em></sub>
-</div>
-
----
-
-🎉 **[2026-02] 全新 Web UI 体验升级！**
-
-- 🔄 **用户交互循环 (User-in-Loop)**: 支持工作流程中的实时用户交互，AI 会在对话中向您提问以澄清需求
-- 💬 **内联交互设计**: 交互问题直接显示在对话框中，体验更自然流畅
-- 🚀 **一键启动**: 运行 `deepcode` 即可启动新版 UI（跨平台支持：Windows/macOS/Linux）
-- 🔧 **优化的进程管理**: 改进了服务启停机制，自动清理端口占用
-- 📡 **WebSocket 实时通信**: 修复了消息丢失问题，确保交互状态正确同步
-
-<div align="center">
-  <img src="./assets/NewUI.png" alt="DeepCode 全新 UI" width="85%" style="border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15);" />
-  <br/>
-  <sub><em>DeepCode 全新 Web UI - 基于 React 的现代界面</em></sub>
-</div>
 
 ---
 
@@ -624,31 +551,26 @@ DeepCode利用**模型上下文协议 (MCP)** 标准与各种工具和服务无�
 
 | 要求 | 版本 | 用途 |
 |------|------|------|
-| **Python** | 3.9+ | 核心运行环境 |
-| **Node.js** | 18+ | 新版 UI 前端 |
-| **npm** | 8+ | 包管理工具 |
+| **Python** | 3.12+ | 核心运行环境与 CLI |
+| **Node.js** | 22+ | 仅桌面端 UI 开发需要 |
+| **Rust** | stable | 仅 Tauri 桌面开发需要 |
 
 ```bash
 # 检查您的版本
-python --version   # 应为 3.9+
-node --version     # 应为 18+
-npm --version      # 应为 8+
+python --version   # 应为 3.12+
 ```
 
 <details>
-<summary><strong>📥 安装 Node.js（如果未安装）</strong></summary>
+<summary><strong>📥 桌面开发前置条件</strong></summary>
 
 ```bash
-# macOS (使用 Homebrew)
-brew install node
-
-# Ubuntu/Debian
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt-get install -y nodejs
-
-# Windows
-# 从 https://nodejs.org/ 下载安装
+node --version
+npm --version
+rustc --version
+cargo --version
 ```
+
+Python CLI 不需要 Node 或 Rust。开发 `desktop/` 时请遵循 Tauri 官方前置条件。
 
 </details>
 
@@ -682,9 +604,6 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv venv --python=3.13
 source .venv/bin/activate  # Windows下: .venv\Scripts\activate
 uv pip install -r requirements.txt
-
-# 安装前端依赖
-npm install --prefix new_ui/frontend
 ```
 
 ##### 🐍 **使用传统 pip**
@@ -694,9 +613,24 @@ git clone https://github.com/HKUDS/DeepCode.git
 cd DeepCode/
 
 pip install -r requirements.txt
+```
 
-# 安装前端依赖
-npm install --prefix new_ui/frontend
+##### 🖥️ **桌面端与 App Server 工程基线**
+
+旧浏览器 UI 已移除。开发新的 Tauri 桌面空壳：
+
+```bash
+cd desktop
+npm ci
+npm run tauri dev
+```
+
+验证命令和当前阶段边界见 [`desktop/README.md`](desktop/README.md)。
+
+P1 App Server 可以脱离桌面空壳独立运行：
+
+```bash
+python -m app_server
 ```
 
 </details>
@@ -746,11 +680,10 @@ DeepCode 会根据 `model` 前缀（例如 `openai/...`、`anthropic/...`、`gem
 }
 ```
 
-OpenRouter 模型必须使用 OpenRouter 官方模型目录返回的精确 `id`，例如
+OpenRouter 模型必须使用官方模型目录返回的精确 `id`，例如
 `z-ai/glm-5.1`、`anthropic/claude-sonnet-4.5` 或
-`google/gemini-2.5-pro`。在新版 UI 中，可以打开 **Settings → OpenRouter
-Models** 搜索实时模型目录，并分别更新 Default、Planning、Implementation
-模型。保存后会刷新 runtime，之后新启动的 workflow 会使用新的模型配置。
+`google/gemini-2.5-pro`。分别修改 Default、Planning、Implementation 配置后，
+新启动的 workflow 会使用新的模型配置。
 
 #### 📄 文档分割 *（可选）*
 
@@ -811,66 +744,14 @@ DeepCode 通过内置的 `fetch` MCP 服务器（无需 API key）抓取网页�
 
 ### ⚡ **步骤3: 启动应用程序**
 
-选择您偏好的启动方式：
-
-<table width="100%">
-<tr>
-<th width="33%">🐳 Docker (推荐)</th>
-<th width="33%">🚀 本地 — 不使用 Docker</th>
-<th width="33%">🛠️ 其他方式</th>
-</tr>
-<tr><td>
-
-无需 Python/Node — 一切在容器内。
+DeepCode 当前提供交互式 TUI 和无头执行两种正式入口，两者使用相同 Agent 核心。
 
 ```bash
-git clone https://github.com/HKUDS/DeepCode.git
-cd DeepCode/
-cp deepcode_config.json.example \
-   deepcode_config.json
-# 编辑 deepcode_config.json 填入 API Key
-
-./deepcode_docker/run_docker.sh
-# 访问 → http://localhost:8000
+deepcode
+python -m cli.exec_cli "修复失败的测试" --json
 ```
 
-</td><td>
-
-直接在宿主机运行新版 UI（前端 + 后端，不使用容器）。
-
-```bash
-deepcode --local
-# 前端 → http://localhost:5173
-# 后端 → http://localhost:8000
-# Ctrl+C 停止
-```
-
-特性：用户交互循环、实时进度、内联对话。
-
-> 注意：不带参数的 `deepcode` 会走 Docker 启动路径。如果 Docker Desktop
-> 没有运行，请使用上面的 `deepcode --local`。
-
-</td><td>
-
-```bash
-# macOS / Linux
-./run.sh
-# 或: python deepcode.py --local
-
-# Windows
-run.bat
-# 或: python deepcode.py --local
-
-# 经典 Streamlit UI
-deepcode --classic
-
-# 交互式 CLI(Docker 内)
-deepcode --cli
-# 或本地: python -m cli.tui
-```
-
-</td></tr>
-</table>
+旧 Web UI 已移除。Tauri 桌面端目前处于工程基线阶段，尚未作为正式入口发布。
 
 #### 💻 **交互式 CLI(多轮编码 agent)**
 
@@ -907,35 +788,6 @@ python -m cli.exec_cli "修复 mathlib.py 里失败的测试" --json
 
 以 NDJSON 输出机器可读事件流,完成后以退出码 0 结束。
 
-在 Web UI 中，可以通过顶部 **Sessions** 菜单恢复或删除 session。删除
-session 会移除 JSONL session 记录和对应的 `deepcode_lab/tasks/` 工作目录，
-但不会删除 `uploads/` 中的原始上传文件。如果该 session 仍有 `pending`、
-`running` 或 `waiting_for_input` task，后端会拒绝删除，直到任务被取消或完成。
-
-<details>
-<summary><strong>🐳 Docker 管理命令</strong></summary>
-
-```bash
-./deepcode_docker/run_docker.sh stop      # 停止
-./deepcode_docker/run_docker.sh restart   # 重启（配置更改无需重建）
-./deepcode_docker/run_docker.sh --build   # 强制重建
-./deepcode_docker/run_docker.sh logs      # 实时日志
-./deepcode_docker/run_docker.sh status    # 健康检查
-./deepcode_docker/run_docker.sh clean     # 删除容器和镜像
-```
-
-或直接使用 Docker Compose：
-```bash
-docker compose -f deepcode_docker/docker-compose.yml up --build   # 构建并启动
-docker compose -f deepcode_docker/docker-compose.yml down         # 停止
-docker compose -f deepcode_docker/docker-compose.yml logs -f      # 查看日志
-```
-
-> **💡** 配置文件以卷方式挂载 — 编辑后重启即可，无需重建。
-> **💡** Windows 用户：如果脚本不可用，可直接运行 `docker compose` 命令。
-
-</details>
-
 ### 🎯 **步骤4: 生成代码**
 
 1. **📄 输入** — 上传研究论文、输入需求，或粘贴 URL
@@ -951,204 +803,11 @@ docker compose -f deepcode_docker/docker-compose.yml logs -f      # 查看日志
 
 | 问题 | 原因 | 解决方案 |
 |---|---|---|
-| Docker 构建失败 `tsc: not found` | 构建缓存损坏 | `docker builder prune -f` 然后用 `--no-cache` 重建 |
-| `error during connect` / `cannot find the file` | Docker Desktop 未运行 | 启动 Docker Desktop，等待就绪后重试 |
-| 前端空白页面 | `node_modules` 损坏 | `cd new_ui/frontend && rm -rf node_modules && npm install` |
-| `ERR_CONNECTION_REFUSED` | 端口错误/后端未运行 | Docker: `http://localhost:8000`。本地: `http://localhost:5173` |
-| `npm install` → `Could not read package.json` | 目录错误 | 使用 `npm install --prefix new_ui/frontend` |
 | Windows: MCP 服务器无法工作 | 需要绝对路径 | 参见上方 [Windows MCP 配置](#-步骤2-配置) |
 
 </details>
 
 ---
-
-## 🤖 nanobot 集成（飞书聊天机器人）
-
-**直接在飞书中使用 DeepCode — 发送消息，获取代码！**
-
-[nanobot](https://github.com/HKUDS/nanobot) 是一个超轻量级 AI 助手，现已与 DeepCode 深度集成。通过飞书聊天，您可以：
-- 🚀 提交**论文转代码**任务（`paper2code`）— 粘贴 arXiv 链接即可
-- 💬 启动**对话转代码**（`chat2code`）— 用自然语言描述需求
-- 📊 实时查询任务状态（`deepcode_status`）— 获取进度和结果
-- ✅ 响应 DeepCode 交互提示 — 当 AI 需要澄清需求时直接在聊天中回答
-
-### 🏗️ 架构概览
-
-```mermaid
-flowchart TB
-    subgraph ChatPlatforms[💬 聊天平台]
-        Feishu[<b>飞书</b><br/>📱 当前支持]
-        Telegram[Telegram<br/>🔜 即将支持]
-        Discord[Discord<br/>🔜 即将支持]
-    end
-
-    subgraph NanobotCore[🤖 Nanobot 核心]
-        LLM[LLM 推理引擎<br/>Claude / GPT / Minimax]
-        Tools[工具层<br/>web_fetch / code_executor / deepcode]
-    end
-
-    subgraph DeepCodeEngine[⚡ DeepCode 引擎]
-        API[HTTP API<br/>任务提交 & 查询]
-        Agents[多智能体系统<br/>规划 / 分析 / 生成]
-        Output[代码输出<br/>测试 + 文档]
-    end
-
-    Feishu -->|WebSocket| NanobotCore
-    Telegram -.->|未来集成| NanobotCore
-    Discord -.->|未来集成| NanobotCore
-
-    NanobotCore -->|调用 deepcode_* 工具| DeepCodeEngine
-    DeepCodeEngine -->|返回结果 & 进度| NanobotCore
-    NanobotCore -->|推送消息| Feishu
-
-    style Feishu fill:#0EA5E9,stroke:#0284c7,stroke-width:3px,color:#fff
-    style NanobotCore fill:#8b5cf6,stroke:#7c3aed,stroke-width:2px,color:#fff
-    style DeepCodeEngine fill:#10b981,stroke:#059669,stroke-width:2px,color:#fff
-    style Telegram fill:#d1d5db,stroke:#9ca3af,stroke-width:1px,color:#4b5563,stroke-dasharray: 5 5
-    style Discord fill:#d1d5db,stroke:#9ca3af,stroke-width:1px,color:#4b5563,stroke-dasharray: 5 5
-```
-
-> 🎯 **当前支持**: 飞书（Feishu / Lark）
-> 🔮 **架构预留**: Telegram 和 Discord 节点为未来扩展保留
-
----
-
-### 📋 前置条件
-
-- ✅ DeepCode 后端正在运行（见上方 [快速开始](#-快速开始)）
-- ✅ 飞书企业应用（或租用应用）— 免费创建
-- ✅ LLM API 密钥（OpenRouter / Claude / Minimax）
-
----
-
-### 🚀 三步完成设置
-
-#### **Step 1 · 创建飞书机器人**
-
-<details>
-<summary><strong>📱 点击展开飞书应用创建步骤</strong></summary>
-
-1. 登录 [飞书开放平台](https://open.feishu.cn/app)
-2. 点击 **创建企业自建应用**
-3. 填写应用名称和描述，上传图标
-4. 进入 **凭证与基础信息** 页面，复制：
-   - `App ID`
-   - `App Secret`
-5. 进入 **事件订阅** 页面：
-   - **请求地址 URL**: `http://your-server-ip:8081/feishu/event`（公网可访问）
-   - **消息加密**: 复制 `Encrypt Key` 和 `Verification Token`
-6. 进入 **权限管理**，开通以下权限：
-   - `im:message`（接收消息）
-   - `im:message:send_as_bot`（发送消息）
-   - `im:chat`（获取群信息）
-7. **发布版本** → 等待管理员审核通过
-
-> 💡 **开发环境**: 可使用 [ngrok](https://ngrok.com/) 或 [localhost.run](https://localhost.run/) 将本地 8081 端口映射到公网。
-
-</details>
-
----
-
-#### **Step 2 · 配置**
-
-编辑项目根目录的 `nanobot_config.json`:
-
-```json
-{
-  "channels": [
-    {
-      "type": "feishu",
-      "app_id": "cli_xxxxxxxxxxxxx",
-      "app_secret": "your_app_secret",
-      "encrypt_key": "your_encrypt_key",
-      "verification_token": "your_verification_token"
-    }
-  ],
-  "llm": {
-    "provider": "openai",  // 或 "anthropic" / "minimax"
-    "model": "openai/gpt-4o",  // 推荐英文模型
-    "api_key": "your_api_key",
-    "base_url": "https://openrouter.ai/api/v1"  // 可选
-  },
-  "deepcode": {
-    "api_url": "http://localhost:8000"  // DeepCode 后端地址
-  }
-}
-```
-
-> 💡 **提示**: 使用 `nanobot_config.json.example` 作为模板。
-
----
-
-#### **Step 3 · 启动**
-
-确保 DeepCode 后端已运行，然后启动 nanobot:
-
-```bash
-cd DeepCode/
-./nanobot/run_nanobot.sh
-```
-
-**Docker Compose 模式** (同时启动 DeepCode + nanobot):
-
-```bash
-docker compose -f deepcode_docker/docker-compose.yml up -d
-```
-
-访问飞书，找到你的机器人，发送消息测试：
-
-```
-hi
-```
-
-如果收到回复，说明配置成功！🎉
-
----
-
-### 💡 使用示例
-
-| 操作 | 命令示例 |
-|---|---|
-| **论文转代码** | `paper2code https://arxiv.org/abs/2104.09864` |
-| **对话转代码** | `chat2code 实现一个计算斐波那契数列的 Python 函数` |
-| **查询任务状态** | `deepcode_status task_abc123` |
-| **响应交互** | 当 AI 询问"需要测试用例吗？"时直接回复 `是` 或 `否` |
-
----
-
-<details>
-<summary><strong>🛠️ nanobot 管理命令</strong></summary>
-
-```bash
-# 查看日志（Docker 模式）
-docker compose -f deepcode_docker/docker-compose.yml logs -f nanobot
-
-# 重启 nanobot（Docker 模式）
-docker compose -f deepcode_docker/docker-compose.yml restart nanobot
-
-# 停止所有服务（Docker 模式）
-docker compose -f deepcode_docker/docker-compose.yml down
-```
-
-</details>
-
----
-
-<details>
-<summary><strong>🔧 常见问题（nanobot）</strong></summary>
-
-| 问题 | 解决方案 |
-|---|---|
-| nanobot 响应为中文 | 修改 `nanobot_config.json` 中 `llm.model` 为英文模型（如 `gpt-4o`） |
-| 飞书收不到消息 | 检查事件订阅 URL 是否可公网访问，端口 8081 是否开放 |
-| DeepCode 任务提交失败 | 确认 `deepcode.api_url` 正确，后端正在运行 |
-| nanobot 容器无法启动 | 检查 `nanobot_config.json` 格式是否正确（使用 JSON 验证器） |
-
-</details>
-
----
-
-  ---
 
 ## 💡 示例
 

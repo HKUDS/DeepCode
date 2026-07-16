@@ -1,0 +1,266 @@
+.row {
+  position: relative;
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  align-items: center;
+  border-radius: 8px;
+  color: var(--text-secondary);
+}
+
+.row:hover {
+  background: color-mix(in srgb, var(--surface-raised) 62%, transparent);
+  color: var(--text-primary);
+}
+
+.row[data-active="true"] {
+  background: var(--surface-selected);
+  color: var(--text-primary);
+}
+
+.row[data-active="true"]::before {
+  position: absolute;
+  z-index: 2;
+  top: 9px;
+  bottom: 9px;
+  left: -10px;
+  width: 2px;
+  border-radius: 4px;
+  background: var(--signal);
+  content: "";
+}
+
+.sessionButton {
+  display: grid;
+  min-width: 0;
+  min-height: 42px;
+  grid-template-columns: 10px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 6px 3px 6px 9px;
+  color: inherit;
+  text-align: left;
+}
+
+.copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.copy strong,
+.copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copy strong {
+  font-size: 11.5px;
+  font-weight: 570;
+}
+
+.copy small {
+  color: var(--text-tertiary);
+  font: 8.5px var(--font-mono);
+}
+
+.beacon {
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--border-emphasis);
+  border-radius: 999px;
+  background: var(--surface-sidebar);
+}
+
+.beacon[data-status="running"] {
+  border-color: var(--signal);
+  background: var(--signal);
+  box-shadow: 0 0 0 3px var(--signal-soft);
+  animation: beacon-pulse 1.8s ease-in-out infinite;
+}
+
+.beacon[data-status="waiting"] {
+  border-color: var(--attention);
+  background: var(--attention);
+}
+
+.beacon[data-status="failed"] {
+  border-color: var(--danger);
+  background: var(--danger);
+}
+
+.beacon[data-status="idle"] {
+  border-color: var(--success);
+}
+
+.moreButton {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--text-tertiary);
+  opacity: 0;
+}
+
+.row:hover .moreButton,
+.row[data-active="true"] .moreButton,
+.moreButton[aria-expanded="true"] {
+  opacity: 1;
+}
+
+.moreButton:hover:not(:disabled) {
+  background: var(--surface-raised);
+  color: var(--text-primary);
+}
+
+.renameForm {
+  display: grid;
+  min-width: 0;
+  min-height: 38px;
+  grid-column: 1 / -1;
+  grid-template-columns: 9px minmax(0, 1fr) 24px 24px;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 5px 4px 8px;
+}
+
+.renameForm label {
+  min-width: 0;
+}
+
+.renameForm input {
+  width: 100%;
+  height: 28px;
+  padding: 0 7px;
+  border: 1px solid var(--signal);
+  border-radius: 6px;
+  outline: 0;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-size: 12px;
+  box-shadow: 0 0 0 3px var(--signal-soft);
+}
+
+.renameForm button {
+  display: grid;
+  width: 23px;
+  height: 23px;
+  place-items: center;
+  border-radius: 5px;
+  color: var(--text-secondary);
+}
+
+.renameForm button:hover:not(:disabled) {
+  background: var(--surface-raised);
+  color: var(--text-primary);
+}
+
+.menu,
+.confirmation {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 4px);
+  right: 0;
+  width: 166px;
+  padding: 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-menu);
+}
+
+.menu button {
+  display: flex;
+  width: 100%;
+  min-height: 34px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-align: left;
+}
+
+.menu button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.menu .archiveAction {
+  color: var(--danger);
+}
+
+.confirmation {
+  width: 228px;
+  padding: 12px;
+}
+
+.confirmation p {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 620;
+}
+
+.confirmation p span {
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.confirmation > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.confirmation button {
+  min-height: 30px;
+  padding: 0 9px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.confirmation button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.confirmation .confirmArchive {
+  background: var(--danger);
+  color: var(--text-on-accent);
+}
+
+.confirmation .confirmArchive:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 86%, black);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@keyframes beacon-pulse {
+  50% {
+    box-shadow: 0 0 0 5px var(--signal-faint);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .beacon[data-status="running"] {
+    animation: none;
+  }
+}

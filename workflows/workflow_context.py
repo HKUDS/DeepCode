@@ -35,7 +35,6 @@ EXTENSION_TO_KIND: dict[str, InputKind] = {
     ".md": "md",
     ".markdown": "md",
     ".docx": "docx",
-    ".doc": "docx",
     ".txt": "txt",
     ".html": "html",
     ".htm": "html",

@@ -138,7 +138,9 @@ def _append_group(
             continue
         htype = handler.get("type", "command")
         if htype != "command":
-            warnings.append(f"skipping {htype!r} hook in {path}: only command hooks supported")
+            warnings.append(
+                f"skipping {htype!r} hook in {path}: only command hooks supported"
+            )
             continue
         if handler.get("async"):
             warnings.append(f"skipping async hook in {path}: async hooks not supported")
@@ -149,7 +151,9 @@ def _append_group(
             continue
         timeout = handler.get("timeout")
         try:
-            timeout_sec = max(1, int(timeout)) if timeout is not None else _DEFAULT_TIMEOUT_SEC
+            timeout_sec = (
+                max(1, int(timeout)) if timeout is not None else _DEFAULT_TIMEOUT_SEC
+            )
         except (TypeError, ValueError):
             timeout_sec = _DEFAULT_TIMEOUT_SEC
         status_message = handler.get("statusMessage") or handler.get("status_message")
@@ -162,7 +166,9 @@ def _append_group(
                 source=source,
                 source_path=str(path),
                 display_order=order,
-                status_message=status_message if isinstance(status_message, str) else None,
+                status_message=status_message
+                if isinstance(status_message, str)
+                else None,
             )
         )
         order += 1

@@ -1,0 +1,198 @@
+.markdown {
+  min-width: 0;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  overflow-wrap: anywhere;
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown blockquote,
+.markdown table,
+.markdown hr {
+  margin: 0 0 14px;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  margin: 24px 0 10px;
+  color: var(--text-primary);
+  font-weight: 680;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+}
+
+.markdown h1 {
+  font-size: 1.3em;
+}
+
+.markdown h2 {
+  font-size: 1.16em;
+}
+
+.markdown h3,
+.markdown h4 {
+  font-size: 1em;
+}
+
+.markdown ul,
+.markdown ol {
+  padding-left: 21px;
+}
+
+.markdown li {
+  margin: 4px 0;
+  padding-left: 2px;
+}
+
+.markdown li > p {
+  margin-bottom: 5px;
+}
+
+.markdown blockquote {
+  padding: 3px 0 3px 14px;
+  border-left: 2px solid var(--signal);
+  color: var(--text-secondary);
+}
+
+.markdown a {
+  color: var(--signal);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--signal) 35%, transparent);
+  text-underline-offset: 3px;
+}
+
+.markdown a:hover {
+  text-decoration-color: currentColor;
+}
+
+.markdown :not(pre) > code {
+  padding: 2px 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  background: var(--surface-code);
+  color: var(--text-primary);
+  font: 0.87em/1.4 var(--font-mono);
+}
+
+.markdown table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-spacing: 0;
+  border-collapse: separate;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  font-size: 0.9em;
+}
+
+.markdown th,
+.markdown td {
+  min-width: 110px;
+  padding: 8px 10px;
+  border-right: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: left;
+}
+
+.markdown th {
+  background: var(--surface-code);
+  font-weight: 620;
+}
+
+.markdown tr:last-child td {
+  border-bottom: 0;
+}
+
+.markdown th:last-child,
+.markdown td:last-child {
+  border-right: 0;
+}
+
+.markdown hr {
+  height: 1px;
+  border: 0;
+  background: var(--border-subtle);
+}
+
+.markdown input[type="checkbox"] {
+  margin: 0 6px 0 0;
+  accent-color: var(--signal);
+}
+
+.codeBlock {
+  margin: 16px 0;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--surface-code);
+}
+
+.codeBlock figcaption {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px 0 11px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
+  font: 9.5px var(--font-mono);
+  text-transform: lowercase;
+}
+
+.codeBlock figcaption button {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 6px;
+  border-radius: 5px;
+  color: var(--text-tertiary);
+  font: 9px var(--font-mono);
+}
+
+.codeBlock figcaption button:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.codeBlock pre {
+  max-height: 520px;
+  margin: 0;
+  padding: 14px 16px;
+  overflow: auto;
+  background: transparent !important;
+  color: var(--text-primary);
+  font: 11.5px/1.68 var(--font-mono);
+  tab-size: 2;
+}
+
+.codeBlock pre > span {
+  display: block;
+  min-width: max-content;
+}
+
+.markdown[data-compact="true"] {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.markdown[data-compact="true"] p,
+.markdown[data-compact="true"] ul,
+.markdown[data-compact="true"] ol,
+.markdown[data-compact="true"] blockquote {
+  margin-bottom: 8px;
+}

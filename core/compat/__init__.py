@@ -37,6 +37,7 @@ from core.compat.runtime import (
     DeepCodeRuntime,
     get_runtime,
     set_runtime,
+    use_runtime,
 )
 
 __all__ = [
@@ -51,4 +52,5 @@ __all__ = [
     "RequestParams",
     "get_runtime",
     "set_runtime",
+    "use_runtime",
 ]

@@ -23,7 +23,9 @@ from core.harness.code_mode import (  # noqa: E402
 )
 
 _API = [
-    ToolAPISpec("write", ["file_path", "content"], "write(file_path, content)", "write a file"),
+    ToolAPISpec(
+        "write", ["file_path", "content"], "write(file_path, content)", "write a file"
+    ),
     ToolAPISpec("read", ["file_path"], "read(file_path)", "read a file"),
     ToolAPISpec("boom", [], "boom()", "always fails"),
 ]
@@ -53,16 +55,27 @@ def _run(code):
 
 def test_api_from_definitions_filters_and_orders():
     defs = [
-        {"function": {"name": "write", "description": "Write a file. More.",
-                      "parameters": {"properties": {"file_path": {}, "content": {}, "mode": {}},
-                                     "required": ["file_path", "content"]}}},
+        {
+            "function": {
+                "name": "write",
+                "description": "Write a file. More.",
+                "parameters": {
+                    "properties": {"file_path": {}, "content": {}, "mode": {}},
+                    "required": ["file_path", "content"],
+                },
+            }
+        },
         {"function": {"name": "spawn_agent", "parameters": {}}},  # not exposed
     ]
     specs = api_from_definitions(defs, frozenset({"write"}))
     assert len(specs) == 1
     spec = specs[0]
     assert spec.name == "write"
-    assert spec.params == ["file_path", "content", "mode"]  # required first, then optional
+    assert spec.params == [
+        "file_path",
+        "content",
+        "mode",
+    ]  # required first, then optional
     assert spec.signature == "write(file_path, content, mode=None)"
     assert spec.doc == "Write a file"
 
@@ -80,15 +93,19 @@ def test_code_mode_batches_tool_calls_in_one_run():
     )
     out, calls, ws = _run(code)
     assert [c[0] for c in calls] == ["write", "write", "write", "read"]
-    assert all((Path(ws) / f"mod{i}.py").is_file() for i in range(3))  # tools really ran
+    assert all(
+        (Path(ws) / f"mod{i}.py").is_file() for i in range(3)
+    )  # tools really ran
     assert "built 3" in out
     assert "'ok': True" in out
 
 
 def test_positional_and_keyword_args():
     out, calls, _ = _run("write('a.py', 'x')\nwrite(file_path='b.py', content='y')\n")
-    assert calls == [("write", {"file_path": "a.py", "content": "x"}),
-                     ("write", {"file_path": "b.py", "content": "y"})]
+    assert calls == [
+        ("write", {"file_path": "a.py", "content": "x"}),
+        ("write", {"file_path": "b.py", "content": "y"}),
+    ]
 
 
 def test_tool_error_becomes_catchable_exception():
@@ -105,7 +122,9 @@ def test_code_exception_returns_traceback():
 
 def test_unexposed_tool_is_a_plain_nameerror():
     # A tool that is not exposed to code mode simply isn't a defined name.
-    out, _calls, _ = _run("try:\n    edit('x')\nexcept NameError as e:\n    print('err', e)\n")
+    out, _calls, _ = _run(
+        "try:\n    edit('x')\nexcept NameError as e:\n    print('err', e)\n"
+    )
     assert "err" in out and "'edit' is not defined" in out
 
 
@@ -134,7 +153,9 @@ def test_missing_code_arg():
 def test_large_tool_arg_round_trips_past_default_stream_limit():
     # A write whose content exceeds asyncio's default 64KB readline limit must
     # still cross the RPC bridge intact (regression for the raised _STREAM_LIMIT).
-    out, _calls, ws = _run("write('big.py', 'H' * 100000)\nprint('len', len(read('big.py')))\n")
+    out, _calls, ws = _run(
+        "write('big.py', 'H' * 100000)\nprint('len', len(read('big.py')))\n"
+    )
     assert (Path(ws) / "big.py").read_text() == "H" * 100000
     assert "len 100000" in out
 

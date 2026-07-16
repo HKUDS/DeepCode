@@ -18,6 +18,15 @@ if str(ROOT) not in sys.path:
 from core.sessions.store import SessionStore  # noqa: E402
 
 
+def test_default_root_follows_deepcode_home(tmp_path, monkeypatch):
+    home = tmp_path / "deepcode-home"
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+
+    store = SessionStore(use_index=False)
+
+    assert store.root == (home / "sessions").resolve()
+
+
 def _seed(store: SessionStore) -> dict[str, str]:
     """Create three sessions with messages/tasks; return {title: id}."""
     ids: dict[str, str] = {}
@@ -111,6 +120,30 @@ def test_self_heal_after_index_deleted(tmp_path):
     assert {s.session_id for s in listing} == set(ids.values())
     # The task link was rebuilt from JSONL too.
     assert store2.find_session_by_task("task-42").session_id == ids["beta"]
+
+
+def test_long_lived_reader_observes_another_process_writer(tmp_path):
+    """CLI and Desktop stores must converge without restarting either side."""
+
+    cli_store = SessionStore(tmp_path)
+    session = cli_store.create_session(
+        title="shared",
+        metadata={"workspace": str(tmp_path)},
+    )
+    desktop_store = SessionStore(tmp_path)
+
+    assert desktop_store.get_session(session.session_id).messages == []
+    assert desktop_store.list_sessions()[0].message_count == 0
+
+    cli_store.append_message(session.session_id, "user", "from CLI")
+    cli_store.append_message(session.session_id, "assistant", "shared reply")
+
+    reloaded = desktop_store.get_session(session.session_id)
+    assert [message.content for message in reloaded.messages] == [
+        "from CLI",
+        "shared reply",
+    ]
+    assert desktop_store.list_sessions()[0].message_count == 2
 
 
 def test_reindex_rebuilds(tmp_path):

@@ -1,0 +1,196 @@
+"""Long-lived AgentSession runtimes keyed by canonical SessionStore identity."""
+
+from __future__ import annotations
+
+import inspect
+from collections import OrderedDict
+from dataclasses import dataclass
+from typing import Any
+
+from core.application.agent_adapter import (
+    AgentSessionFactory,
+    AgentSessionPort,
+    ApprovalCallback,
+)
+from core.application.errors import ConflictError, ThreadNotFoundError
+from core.sessions import Session, SessionStore
+
+
+class ApprovalRouter:
+    """Keep a stable AgentSession callback while Turns provide fresh context."""
+
+    def __init__(self) -> None:
+        self.current: ApprovalCallback | None = None
+
+    async def __call__(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        reason: str | None,
+    ) -> bool:
+        callback = self.current
+        if callback is None:
+            return False
+        result = callback(tool_name, arguments, reason)
+        if inspect.isawaitable(result):
+            result = await result
+        return bool(result)
+
+
+@dataclass(slots=True)
+class LiveSessionRuntime:
+    session_id: str
+    workspace: str
+    model: str | None
+    agent: AgentSessionPort
+    approvals: ApprovalRouter
+    canonical_message_count: int
+    runtime_key: object
+    active: bool = False
+
+
+class SessionRuntimeRegistry:
+    """Retain one AgentSession per loaded Thread, with bounded idle residency."""
+
+    def __init__(
+        self,
+        store: SessionStore,
+        factory: AgentSessionFactory,
+        *,
+        max_live_sessions: int = 16,
+    ) -> None:
+        if max_live_sessions < 1:
+            raise ValueError("max_live_sessions must be positive")
+        self.store = store
+        self.factory = factory
+        self.max_live_sessions = max_live_sessions
+        self._runtimes: OrderedDict[str, LiveSessionRuntime] = OrderedDict()
+
+    async def acquire(
+        self,
+        session_id: str,
+        *,
+        workspace: str,
+        model: str | None,
+        approval_callback: ApprovalCallback,
+    ) -> AgentSessionPort:
+        canonical = self.store.get_session(session_id)
+        if canonical is None:
+            raise ThreadNotFoundError(f"session not found: {session_id}")
+
+        runtime_key = self._runtime_key(workspace=workspace, model=model)
+        runtime = self._runtimes.pop(session_id, None)
+        if runtime is not None and runtime.active:
+            self._runtimes[session_id] = runtime
+            raise ConflictError(f"session runtime is already active: {session_id}")
+        if runtime is not None and runtime.runtime_key != runtime_key:
+            await runtime.agent.aclose()
+            runtime = None
+        if runtime is None:
+            runtime = self._create(
+                canonical,
+                workspace=workspace,
+                model=model,
+                runtime_key=runtime_key,
+            )
+        elif runtime.canonical_message_count != len(canonical.messages):
+            # Another DeepCode process appended to the shared Session. Visible
+            # JSONL history wins; reloading is safer than silently forking.
+            runtime.agent.load_history(self._visible_history(canonical))
+            runtime.canonical_message_count = len(canonical.messages)
+
+        runtime.approvals.current = approval_callback
+        runtime.active = True
+        self._runtimes[session_id] = runtime
+        await self._evict_idle()
+        return runtime.agent
+
+    def release(self, session_id: str) -> None:
+        runtime = self._runtimes.get(session_id)
+        if runtime is None:
+            return
+        runtime.approvals.current = None
+        runtime.active = False
+
+    def mark_persisted(self, session_id: str) -> None:
+        runtime = self._runtimes.get(session_id)
+        canonical = self.store.get_session(session_id)
+        if runtime is not None and canonical is not None:
+            runtime.canonical_message_count = len(canonical.messages)
+
+    async def close_all(self) -> None:
+        runtimes = tuple(self._runtimes.values())
+        self._runtimes.clear()
+        for runtime in runtimes:
+            runtime.approvals.current = None
+            try:
+                await runtime.agent.aclose()
+            except Exception:
+                # Shutdown must continue so every other session gets a chance
+                # to release AgentControl and tool subprocesses.
+                continue
+
+    @property
+    def live_session_ids(self) -> tuple[str, ...]:
+        return tuple(self._runtimes)
+
+    def _create(
+        self,
+        canonical: Session,
+        *,
+        workspace: str,
+        model: str | None,
+        runtime_key: object,
+    ) -> LiveSessionRuntime:
+        approvals = ApprovalRouter()
+        agent = self.factory.create(
+            workspace=workspace,
+            model=model,
+            approval_callback=approvals,
+        )
+        agent.load_history(self._visible_history(canonical))
+        return LiveSessionRuntime(
+            session_id=canonical.session_id,
+            workspace=workspace,
+            model=model,
+            agent=agent,
+            approvals=approvals,
+            canonical_message_count=len(canonical.messages),
+            runtime_key=runtime_key,
+        )
+
+    def _runtime_key(self, *, workspace: str, model: str | None) -> object:
+        resolver = getattr(self.factory, "runtime_key", None)
+        if callable(resolver):
+            return resolver(workspace=workspace, model=model)
+        return (workspace, model)
+
+    async def _evict_idle(self) -> None:
+        while len(self._runtimes) > self.max_live_sessions:
+            victim_id = next(
+                (
+                    session_id
+                    for session_id, runtime in self._runtimes.items()
+                    if not runtime.active
+                ),
+                None,
+            )
+            if victim_id is None:
+                return
+            victim = self._runtimes.pop(victim_id)
+            await victim.agent.aclose()
+
+    @staticmethod
+    def _visible_history(session: Session) -> list[dict[str, str]]:
+        return [
+            {"role": message.role, "content": message.content}
+            for message in session.messages
+            if message.role in {"user", "assistant"} and message.content
+        ]
+
+
+__all__ = [
+    "ApprovalRouter",
+    "LiveSessionRuntime",
+    "SessionRuntimeRegistry",
+]

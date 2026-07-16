@@ -173,9 +173,9 @@ registry.register(MyCustomPlugin())
 | `BEFORE_IMPLEMENTATION` | 代码生成前 | (无) |
 | `AFTER_IMPLEMENTATION` | 代码生成后 | (无) |
 
-## WebSocket 消息格式
+## 应用层交互事件
 
-### 后端 → 前端: `interaction_required`
+Workflow service 应将 `interaction_required` 作为结构化事件交给应用层事件槽：
 
 ```json
 {
@@ -195,7 +195,7 @@ registry.register(MyCustomPlugin())
 }
 ```
 
-### 前端 → 后端: POST `/api/v1/workflows/respond/{task_id}`
+用户响应通过注入的 callback 返回，不绑定 HTTP 或 WebSocket transport：
 
 ```json
 {
@@ -209,6 +209,9 @@ registry.register(MyCustomPlugin())
   "skipped": false
 }
 ```
+
+App Server 会在后续阶段把这两个结构映射到版本化 JSON-RPC notification
+和 `approval/respond` / `workflow/respond` 方法；workflow 插件自身不得依赖传输层。
 
 ## 优势
 

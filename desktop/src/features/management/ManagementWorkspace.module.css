@@ -1,0 +1,623 @@
+.page {
+  width: min(1120px, 100%);
+  height: 100%;
+  margin: 0 auto;
+  padding: 42px clamp(28px, 5vw, 64px) 82px;
+  overflow-y: auto;
+}
+
+.pageHeader,
+.sectionHeader,
+.formCard > header,
+.card > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.pageHeader {
+  margin-bottom: 30px;
+}
+
+.pageHeader h1 {
+  margin: 5px 0 9px;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 36px;
+  font-weight: 640;
+  letter-spacing: -0.05em;
+}
+
+.pageHeader p,
+.sectionHeader p {
+  max-width: 660px;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--text-tertiary);
+  font: 600 9px var(--font-mono);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.headerActions,
+.cardActions,
+.formActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.primaryButton,
+.secondaryButton,
+.cardActions button,
+.formActions button,
+.formCard > header > button,
+.inlineForm button {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.primaryButton {
+  border-color: var(--text-primary);
+  background: var(--text-primary);
+  color: var(--text-inverse);
+}
+
+.secondaryButton:hover:not(:disabled),
+.cardActions button:hover:not(:disabled),
+.formActions button:hover:not(:disabled),
+.inlineForm button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.contextBar,
+.scopeBar {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+  padding: 9px 13px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface-sidebar);
+}
+
+.contextBar strong {
+  font-size: 12px;
+}
+
+.contextBar span,
+.scopeBar > span {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font: 9.5px var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scopeBar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.scopeBar select {
+  min-height: 32px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-size: 11px;
+}
+
+.tabs {
+  display: flex;
+  gap: 3px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.tabs button {
+  padding: 9px 12px;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.tabs button[aria-selected="true"] {
+  border-bottom-color: var(--signal);
+  color: var(--text-primary);
+}
+
+.splitView {
+  display: grid;
+  min-height: 560px;
+  grid-template-columns: minmax(220px, 0.38fr) minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  background: var(--surface-raised);
+}
+
+.listPane {
+  padding: 9px;
+  overflow-y: auto;
+  border-right: 1px solid var(--border-subtle);
+  background: var(--surface-sidebar);
+}
+
+.listPane button {
+  display: grid;
+  width: 100%;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 7px;
+  text-align: left;
+}
+
+.listPane button:hover,
+.listPane button[data-active="true"] {
+  background: var(--surface-hover);
+}
+
+.listPane button[data-active="true"] {
+  box-shadow: inset 2px 0 var(--signal);
+}
+
+.listPane span {
+  color: var(--text-tertiary);
+  font: 9px var(--font-mono);
+}
+
+.listPane strong {
+  font-size: 12px;
+}
+
+.listPane small {
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.detailPane {
+  min-width: 0;
+  padding: 28px;
+  overflow-y: auto;
+}
+
+.detailPane h2,
+.sectionHeader h2,
+.formCard h2,
+.card h2 {
+  margin: 3px 0 8px;
+  color: var(--text-primary);
+  font-size: 20px;
+  font-weight: 640;
+  letter-spacing: -0.025em;
+}
+
+.detailPane > p,
+.card > p,
+.formCard > p {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.62;
+}
+
+.cardList {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  gap: 14px;
+}
+
+.card,
+.formCard {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  background: var(--surface-raised);
+}
+
+.card > code {
+  display: block;
+  max-height: 110px;
+  padding: 10px;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--surface-code);
+  color: var(--text-secondary);
+  font: 9.5px/1.55 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.badge {
+  padding: 4px 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-tertiary);
+  font: 8.5px var(--font-mono);
+  text-transform: uppercase;
+}
+
+.badge[data-status="configured"] {
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border-subtle));
+  color: var(--success);
+}
+
+.badge[data-status="invalid"] {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border-subtle));
+  color: var(--danger);
+}
+
+.badge[data-status="completed"],
+.badge[data-status="enabled"] {
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border-subtle));
+  color: var(--success);
+}
+
+.badge[data-status="running"],
+.badge[data-status="queued"],
+.badge[data-status="waiting"] {
+  border-color: color-mix(in srgb, var(--signal) 45%, var(--border-subtle));
+  color: var(--signal);
+}
+
+.badge[data-status="paused"],
+.badge[data-status="skipped"],
+.badge[data-status="interrupted"] {
+  border-color: color-mix(in srgb, var(--attention) 45%, var(--border-subtle));
+  color: var(--attention);
+}
+
+.badge[data-status="failed"] {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border-subtle));
+  color: var(--danger);
+}
+
+.metadata,
+.diagnosticGrid {
+  display: grid;
+  margin: 16px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.metadata > div,
+.diagnosticGrid > div {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  font: 9.5px/1.5 var(--font-mono);
+}
+
+.metadata dt,
+.diagnosticGrid dt {
+  color: var(--text-tertiary);
+}
+
+.metadata dd,
+.diagnosticGrid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.cardActions {
+  justify-content: flex-end;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.runList {
+  display: grid;
+  gap: 5px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.runList > div {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  background: var(--surface-sidebar);
+  color: var(--text-tertiary);
+}
+
+.runList > div[data-status="running"],
+.runList > div[data-status="waiting"] {
+  color: var(--signal);
+}
+
+.runList > div[data-status="failed"] {
+  color: var(--danger);
+}
+
+.runList span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.runList strong {
+  color: var(--text-primary);
+  font-size: 10.5px;
+  text-transform: capitalize;
+}
+
+.runList small {
+  overflow-wrap: anywhere;
+  font: 9px/1.5 var(--font-mono);
+}
+
+.formCard {
+  margin-top: 18px;
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.formGrid label {
+  display: grid;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.formGrid input,
+.formGrid select,
+.formGrid textarea,
+.inlineForm input {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  outline: 0;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-size: 11.5px;
+}
+
+.formGrid textarea {
+  resize: vertical;
+  font-family: var(--font-mono);
+  line-height: 1.45;
+}
+
+.formGrid input:focus,
+.formGrid select:focus,
+.formGrid textarea:focus,
+.inlineForm input:focus {
+  border-color: var(--signal);
+  box-shadow: 0 0 0 2px var(--signal-soft);
+}
+
+.wideField {
+  grid-column: 1 / -1;
+}
+
+.checkboxField {
+  display: flex !important;
+  min-height: 34px;
+  align-items: center;
+  grid-template-columns: auto 1fr;
+}
+
+.checkboxField input {
+  width: auto;
+  min-height: 0;
+  accent-color: var(--signal);
+}
+
+.formActions {
+  justify-content: flex-end;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.formActions > span {
+  margin-right: auto;
+  color: var(--text-tertiary);
+  font-size: 9.5px;
+  line-height: 1.45;
+}
+
+.settingsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.settingsGrid .formCard {
+  margin-top: 0;
+}
+
+.section {
+  margin-top: 34px;
+}
+
+.sectionHeader {
+  margin-bottom: 12px;
+}
+
+.inlineForm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.checkList {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 8px;
+}
+
+.checkList article {
+  display: grid;
+  min-height: 68px;
+  grid-template-columns: 9px minmax(0, 1fr);
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface-raised);
+}
+
+.checkList article > span {
+  width: 8px;
+  height: 8px;
+  margin-top: 2px;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+.checkList article[data-status="warning"] > span {
+  background: var(--attention);
+}
+
+.checkList article[data-status="error"] > span {
+  background: var(--danger);
+}
+
+.checkList strong {
+  font-size: 10.5px;
+}
+
+.checkList p {
+  margin: 4px 0 0;
+  color: var(--text-tertiary);
+  font-size: 9.5px;
+  line-height: 1.5;
+}
+
+.diagnosticGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.diagnosticGrid > div {
+  grid-template-columns: 88px minmax(0, 1fr);
+  padding-right: 14px;
+}
+
+.errorBanner,
+.warningBlock {
+  margin: 0 0 14px;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--border-subtle));
+  border-radius: 7px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 10.5px;
+  line-height: 1.55;
+}
+
+.warningBlock {
+  border-color: color-mix(in srgb, var(--attention) 28%, var(--border-subtle));
+  background: var(--attention-soft);
+  color: var(--attention);
+}
+
+.warningBlock summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.warningBlock p {
+  margin: 7px 0 0;
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.emptyState,
+.emptyCopy {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.emptyState {
+  display: grid;
+  min-height: 420px;
+  align-content: center;
+  justify-items: center;
+  text-align: center;
+}
+
+.emptyState h2 {
+  margin: 0 0 8px;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 24px;
+}
+
+.emptyState p {
+  max-width: 430px;
+  margin: 0;
+}
+
+.note {
+  color: var(--text-tertiary) !important;
+  font: 9.5px/1.55 var(--font-mono) !important;
+}
+
+@media (max-width: 900px) {
+  .settingsGrid,
+  .formGrid,
+  .diagnosticGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .wideField {
+    grid-column: auto;
+  }
+
+  .splitView {
+    grid-template-columns: 1fr;
+  }
+
+  .listPane {
+    max-height: 220px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .inlineForm {
+    grid-template-columns: 1fr;
+  }
+}

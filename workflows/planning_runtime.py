@@ -172,13 +172,13 @@ def validate_plan_text(text: str) -> dict[str, Any]:
 
 
 def coerce_text_to_minimal_plan(text: str, *, paper_dir: str | Path) -> str:
-    """Wrap free-form planner output in the required YAML plan shape.
+    """Wrap free-form planner output in the legacy minimal YAML plan shape.
 
-    Some providers answer the planning prompt with useful analysis but do not
-    emit the exact YAML sections. This fallback preserves that analysis and
-    creates a conservative plan that downstream code can consume instead of
-    failing the entire workflow before implementation starts.
+    This compatibility path is intentionally opt-in at the orchestration
+    boundary. Desktop workflows use strict validation and never call it; legacy
+    CLI/API callers retain the P0 behavior unless they request strict outcomes.
     """
+
     summary = (text or "").strip()
     if len(summary) > 6000:
         summary = summary[:6000].rstrip() + "\n...[truncated]"
@@ -220,16 +220,26 @@ def coerce_text_to_minimal_plan(text: str, *, paper_dir: str | Path) -> str:
             },
         ],
         "validation_approach": {
-            "strategy": "Use lightweight unit and smoke tests because the model did not produce a full experimental protocol.",
+            "strategy": (
+                "Use lightweight unit and smoke tests because the model did not "
+                "produce a full experimental protocol."
+            ),
             "commands": ["python -m pytest tests"],
         },
         "environment_setup": {
             "language": "python",
             "dependencies": ["pytest"],
-            "notes": "Keep dependencies minimal unless the implementation step identifies explicit paper requirements.",
+            "notes": (
+                "Keep dependencies minimal unless the implementation step "
+                "identifies explicit paper requirements."
+            ),
         },
         "implementation_strategy": {
-            "approach": "Start from the preserved planner analysis, implement a small runnable scaffold, then expand only where the paper details are explicit.",
+            "approach": (
+                "Start from the preserved planner analysis, implement a small "
+                "runnable scaffold, then expand only where the paper details "
+                "are explicit."
+            ),
             "paper_dir": str(paper_dir),
             "planner_analysis": summary or "Planner did not return usable analysis.",
         },

@@ -23,6 +23,10 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from core.agent_runtime.processes import (
+    subprocess_group_kwargs,
+    terminate_process_tree,
+)
 from core.harness.hooks.discovery import Handler
 
 
@@ -58,9 +62,7 @@ def _default_shell() -> list[str]:
     return [shell, "-lc"]
 
 
-async def run_command(
-    handler: Handler, payload_json: str, cwd: str
-) -> CommandResult:
+async def run_command(handler: Handler, payload_json: str, cwd: str) -> CommandResult:
     """Run one hook command, feeding ``payload_json`` on stdin, with a timeout."""
     started = time.monotonic()
     argv = [*_default_shell(), handler.command]
@@ -73,6 +75,7 @@ async def run_command(
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
             env=env,
+            **subprocess_group_kwargs(),
         )
     except OSError as exc:
         return CommandResult(None, "", "", f"failed to spawn hook: {exc}", 0)
@@ -82,7 +85,7 @@ async def run_command(
             proc.communicate(payload_json.encode()), timeout=handler.timeout_sec
         )
     except asyncio.TimeoutError:
-        proc.kill()
+        await terminate_process_tree(proc)
         try:
             await proc.communicate()
         except Exception:  # noqa: BLE001 - best-effort reap after kill
@@ -91,6 +94,9 @@ async def run_command(
         return CommandResult(
             None, "", "", f"hook timed out after {handler.timeout_sec}s", elapsed
         )
+    except asyncio.CancelledError:
+        await terminate_process_tree(proc)
+        raise
 
     elapsed = int((time.monotonic() - started) * 1000)
     return CommandResult(
@@ -149,13 +155,16 @@ def _parse_universal(obj: dict) -> _Universal:
 # HandlerDecision with only the event-relevant fields set (universal + status
 # are applied by the shared envelope in ``parse_handler_output``).
 
+
 def _block_from_decision(obj: dict, event_label: str) -> HandlerDecision:
     """Shared ``{decision: block, reason}`` semantics (PostToolUse/UserPromptSubmit/Stop)."""
     dec = HandlerDecision()
     if obj.get("decision") == "block":
         reason = _trimmed_reason(obj.get("reason"))
         if reason is None:
-            dec.invalid_reason = f"{event_label} hook returned decision:block without a reason"
+            dec.invalid_reason = (
+                f"{event_label} hook returned decision:block without a reason"
+            )
         else:
             dec.block = True
             dec.block_reason = reason
@@ -186,13 +195,17 @@ def _decode_pre_tool_use(obj: dict) -> HandlerDecision:
             if isinstance(updated, dict):
                 dec.updated_input = updated
         elif permission == "ask":
-            dec.invalid_reason = "PreToolUse hook returned unsupported permissionDecision:ask"
+            dec.invalid_reason = (
+                "PreToolUse hook returned unsupported permissionDecision:ask"
+            )
     else:
         # Legacy contract: top-level decision:block + reason.
         if obj.get("decision") == "block":
             reason = _trimmed_reason(obj.get("reason"))
             if reason is None:
-                dec.invalid_reason = "PreToolUse hook returned decision:block without a reason"
+                dec.invalid_reason = (
+                    "PreToolUse hook returned decision:block without a reason"
+                )
             else:
                 dec.block = True
                 dec.block_reason = reason
@@ -213,7 +226,9 @@ def _decode_permission_request(obj: dict) -> HandlerDecision:
     """PermissionRequest: ``hookSpecificOutput.decision.behavior`` allow/deny."""
     dec = HandlerDecision()
     hook_specific = obj.get("hookSpecificOutput")
-    decision = hook_specific.get("decision") if isinstance(hook_specific, dict) else None
+    decision = (
+        hook_specific.get("decision") if isinstance(hook_specific, dict) else None
+    )
     if not isinstance(decision, dict):
         return dec
     behavior = decision.get("behavior")
@@ -222,7 +237,8 @@ def _decode_permission_request(obj: dict) -> HandlerDecision:
     elif behavior == "deny":
         dec.permission = "deny"
         dec.block_reason = (
-            _trimmed_reason(decision.get("message")) or "PermissionRequest hook denied approval"
+            _trimmed_reason(decision.get("message"))
+            or "PermissionRequest hook denied approval"
         )
     return dec
 
@@ -239,7 +255,9 @@ _DECODERS = {
 }
 
 # Events where a bare exit-2 (with a stderr reason) means "block".
-_EXIT2_BLOCK_EVENTS = frozenset({"PreToolUse", "PostToolUse", "UserPromptSubmit", "Stop", "SubagentStop"})
+_EXIT2_BLOCK_EVENTS = frozenset(
+    {"PreToolUse", "PostToolUse", "UserPromptSubmit", "Stop", "SubagentStop"}
+)
 
 # Events whose plain-text (non-JSON) stdout is injected verbatim as context —
 # the canonical ``echo "some context"`` hook. Other events ignore plain stdout.
@@ -266,15 +284,23 @@ def parse_handler_output(event_name: str, result: CommandResult) -> HandlerDecis
                 error=f"{event_name} hook exited with code 2 without a stderr reason",
             )
         if event_name == "PermissionRequest":
-            return HandlerDecision(status="blocked", permission="deny", block_reason=reason)
+            return HandlerDecision(
+                status="blocked", permission="deny", block_reason=reason
+            )
         if event_name in _EXIT2_BLOCK_EVENTS:
             return HandlerDecision(status="blocked", block=True, block_reason=reason)
         # SessionStart / SubagentStart have no block channel — exit 2 is a failure.
-        return HandlerDecision(status="failed", error=f"{event_name} hook exited with code 2")
+        return HandlerDecision(
+            status="failed", error=f"{event_name} hook exited with code 2"
+        )
 
     if result.exit_code != 0:
         code = result.exit_code
-        msg = "hook exited without a status code" if code is None else f"hook exited with code {code}"
+        msg = (
+            "hook exited without a status code"
+            if code is None
+            else f"hook exited with code {code}"
+        )
         return HandlerDecision(status="failed", error=msg)
 
     # exit 0: decode stdout, if any.
@@ -302,10 +328,13 @@ def parse_handler_output(event_name: str, result: CommandResult) -> HandlerDecis
         if event_name in _STOP_ON_DISCONTINUE_EVENTS:
             dec.block = True
             dec.block_reason = (
-                _trimmed_reason(universal.stop_reason) or f"{event_name} hook requested stop"
+                _trimmed_reason(universal.stop_reason)
+                or f"{event_name} hook requested stop"
             )
         elif event_name in _REJECT_DISCONTINUE_EVENTS:
-            dec.invalid_reason = f"{event_name} hook returned unsupported continue:false"
+            dec.invalid_reason = (
+                f"{event_name} hook returned unsupported continue:false"
+            )
     if dec.invalid_reason is not None:
         dec.status = "failed"
         dec.block = False

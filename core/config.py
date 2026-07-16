@@ -189,7 +189,9 @@ class ToolsConfig(_Base):
 class SecurityConfig(_Base):
     """Permission + sandbox policy (P1 security base).
 
-    - ``permission_mode``: ``full_auto`` (default) / ``default`` / ``plan``.
+    - ``permission_mode``: ``full_auto`` (legacy CLI default) / ``default`` /
+      ``plan``. Product clients may choose a safer default only when the user
+      did not explicitly configure this field.
     - ``permissions``: nested ``{tool: {pattern: action}}`` ruleset consumed
       by :func:`core.harness.permissions.rules_from_config`. Rules can only
       tighten or relax *within* the non-overridable sensitive-path denylist,
@@ -491,7 +493,21 @@ def _resolve_workspace_path(start: Path | None = None) -> Path:
 
 def default_config_path() -> Path:
     """The project-level ``deepcode_config.json`` (walked up from the cwd)."""
-    return _resolve_workspace_path() / _DEFAULT_CONFIG_FILENAME
+    return project_config_path()
+
+
+def project_config_path(workspace: str | Path | None = None) -> Path:
+    """Return the project config found by walking up from ``workspace``.
+
+    ``load_config()`` intentionally follows the process cwd for CLI
+    compatibility. Long-lived desktop processes host Sessions from many
+    directories, so they use this explicit variant instead of changing the
+    process cwd or accidentally applying the App Server launch directory's
+    configuration to every Session.
+    """
+
+    start = Path(workspace) if workspace is not None else None
+    return _resolve_workspace_path(start) / _DEFAULT_CONFIG_FILENAME
 
 
 def deepcode_home() -> Path:
@@ -584,6 +600,20 @@ def load_config(config_path: str | Path | None = None) -> DeepCodeConfig:
         raw = _deep_merge(base, project)
 
     raw = _resolve_env_refs(raw)
+    return DeepCodeConfig.model_validate(raw)
+
+
+def load_config_for_workspace(workspace: str | Path) -> DeepCodeConfig:
+    """Load the user base plus the project layer for an explicit workspace.
+
+    This is the desktop-safe counterpart to :func:`load_config`: it preserves
+    the CLI's cwd-based behavior while allowing one App Server process to host
+    Sessions from unrelated directories without global ``os.chdir()`` calls.
+    """
+
+    base = _load_raw(home_config_path())
+    project = _load_raw(project_config_path(workspace))
+    raw = _resolve_env_refs(_deep_merge(base, project))
     return DeepCodeConfig.model_validate(raw)
 
 
