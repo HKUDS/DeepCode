@@ -436,6 +436,8 @@ export interface MethodResults {
   };
   "event/replay": {
     events: Event[];
+    nextAfter: number | null;
+    hasMore: boolean;
   };
   "file/list": {
     entries: FileEntry[];
@@ -822,6 +824,7 @@ export interface Notifications {
   "turn.completed": Event;
   "turn.recovered": Event;
   "item.created": Event;
+  "item.delta": Event;
   "item.updated": Event;
   "approval.requested": Event;
   "approval.resolved": Event;

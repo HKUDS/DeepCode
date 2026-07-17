@@ -104,8 +104,16 @@ Stable application error codes and retryability are preserved for the UI.
 React receives only typed protocol results and canonical notifications. The
 workspace controller restores the last selected Project and Thread IDs from
 local preferences, calls `thread/resume`, then rebuilds the trace from
-`event/replay` in 1,000-event pages. JSONL owns Session identity and visible
-conversation; SQLite and its event log are the rebuildable Desktop projection.
+`event/replay` using explicit server cursors. The client may request up to 1,000
+events, but the App Server can return a shorter byte-bounded page with
+`hasMore: true`; the client follows `nextAfter` until completion. When paired
+with an older App Server, a `RESPONSE_TOO_LARGE` result causes the page limit to
+be halved and retried. JSONL owns Session identity and visible conversation;
+SQLite and its event log are the rebuildable Desktop projection.
+
+Live assistant output uses compact `item.delta` notifications between the
+initial and final Item snapshots. Reducer sequence guards make deltas
+idempotent, so replay and live delivery cannot append the same text twice.
 
 Project discovery reconciles Sessions from the central store, including records
 created by CLI processes in other directories. Listing can be scoped to an

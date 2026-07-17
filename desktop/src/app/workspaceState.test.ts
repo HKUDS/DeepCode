@@ -85,6 +85,48 @@ describe("workspace event projection", () => {
     expect(replayed.lastSequence).toBe(20);
   });
 
+  it("rebuilds streamed assistant text from compact delta events", () => {
+    const created = workspaceReducer(initialWorkspaceState, {
+      type: "event",
+      event: event(1, item("in_progress", "Hello")),
+    });
+    const projected = workspaceReducer(created, {
+      type: "event",
+      event: {
+        eventId: "event-2",
+        sequence: 2,
+        type: "item.delta",
+        threadId: turn.threadId,
+        turnId: turn.id,
+        itemId: "item-1",
+        timestamp: "2026-07-16T00:00:01Z",
+        payload: {
+          delta: " world",
+          summary: "Hello world",
+          streaming: true,
+          updatedAt: "2026-07-16T00:00:01Z",
+        },
+      },
+    });
+    const duplicate = workspaceReducer(projected, {
+      type: "event",
+      event: {
+        eventId: "event-2",
+        sequence: 2,
+        type: "item.delta",
+        threadId: turn.threadId,
+        turnId: turn.id,
+        itemId: "item-1",
+        timestamp: "2026-07-16T00:00:01Z",
+        payload: { delta: " world" },
+      },
+    });
+
+    expect(projected.items[0].payload.text).toBe("Hello world");
+    expect(projected.items[0].summary).toBe("Hello world");
+    expect(duplicate.items[0].payload.text).toBe("Hello world");
+  });
+
   it("does not let an older request snapshot overwrite a live update", () => {
     const live = workspaceReducer(initialWorkspaceState, {
       type: "event",

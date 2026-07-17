@@ -3525,10 +3525,22 @@
               "items": {
                 "$ref": "#/$defs/Event"
               }
+            },
+            "nextAfter": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "hasMore": {
+              "type": "boolean"
             }
           },
           "required": [
-            "events"
+            "events",
+            "nextAfter",
+            "hasMore"
           ]
         },
         "file/list": {
@@ -3827,6 +3839,9 @@
         "item.created": {
           "$ref": "#/$defs/Event"
         },
+        "item.delta": {
+          "$ref": "#/$defs/Event"
+        },
         "item.updated": {
           "$ref": "#/$defs/Event"
         },
@@ -3932,6 +3947,7 @@
         "turn.completed",
         "turn.recovered",
         "item.created",
+        "item.delta",
         "item.updated",
         "approval.requested",
         "approval.resolved",

@@ -60,8 +60,16 @@ are rebuilt from JSONL on the next App Server start.
 
 Event sequence numbers are monotonic inside one Thread. Live queues are bounded;
 on overflow the App Server sends `server.warning` and the consumer must recover
-with `event/replay`. The event log is the durable replay source for the current
-Desktop projection, while JSONL remains canonical for Session history.
+with `event/replay`. Replay is cursor-paginated with `nextAfter`/`hasMore`, and
+the transport trims a requested page to the largest encoded event prefix that
+fits the advertised message limit. The event log is the durable replay source
+for the current Desktop projection, while JSONL remains canonical for Session
+history.
+
+Streaming assistant text is stored as one initial Item, compact `item.delta`
+events, and one final Item checkpoint. The current Item row always contains the
+complete text, while the append-only log grows linearly instead of saving the
+entire accumulated response for every streamed update.
 
 ## P1 protocol surface
 

@@ -431,7 +431,11 @@ class TestRuntime implements DesktopRuntime {
         } as unknown as MethodResults[M];
       }
       case "event/replay":
-        return { events: this.events } as MethodResults[M];
+        return {
+          events: this.events,
+          nextAfter: null,
+          hasMore: false,
+        } as MethodResults[M];
       case "file/list":
         return { entries: [], truncated: false } as unknown as MethodResults[M];
       case "git/status":

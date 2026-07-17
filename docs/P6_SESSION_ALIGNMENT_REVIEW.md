@@ -137,6 +137,11 @@ DeepCode 不需要复制 Codex 的存储格式，但应复制这条所有权原�
 - [x] Python protocol codec/dispatcher 与 schema 一致。
 - [x] TypeScript protocol 类型由 schema 重新生成，没有手工双写。
 - [x] Desktop startup/select Thread 时先调用 `thread/resume` 再 replay。
+- [x] `event/replay` 使用 `nextAfter`/`hasMore` 游标，并按实际 JSON-RPC
+  编码字节裁页，不会因旧 Session 的事件总量超过 1 MiB 而整体失败。
+- [x] Desktop 对旧 App Server 的 `RESPONSE_TOO_LARGE` 会折半分页重试。
+- [x] assistant streaming 使用 `item.delta`，event log 不再反复保存增长中的
+  完整文本；最终 Item checkpoint 和重启恢复仍保留完整内容。
 - [x] `project/list` 会先 reconcile，以显示 CLI 在其他目录创建的 Sessions。
 - [x] React controller 的 RPC 顺序有 Vitest 回归测试。
 
@@ -163,7 +168,7 @@ DeepCode 不需要复制 Codex 的存储格式，但应复制这条所有权原�
 - [x] Desktop protocol generation check。
 - [x] Desktop TypeScript typecheck。
 - [x] Desktop Vitest。
-- [x] 当前最终全仓 Python pytest（包含后续 P7 测试）：534 passed。
+- [x] 当前最终全仓 Python pytest（包含后续 P7 测试）：541 passed。
 - [x] 全仓 Ruff：`ruff check .` passed。
 - [x] Python sdist/wheel build：两种 artifact 均成功生成。
 - [x] Desktop ESLint：0 errors、0 warnings；production build passed。

@@ -18,6 +18,13 @@ class DeliveryBatch:
     dropped: int
 
 
+@dataclass(frozen=True, slots=True)
+class ReplayPage:
+    events: tuple[DomainEvent, ...]
+    next_after: int | None
+    has_more: bool
+
+
 @dataclass(slots=True)
 class _Subscriber:
     queue: deque[DomainEvent]
@@ -95,11 +102,23 @@ class EventService:
     def replay(
         self, thread_id: str, *, after: int = 0, limit: int = 500
     ) -> list[DomainEvent]:
+        return list(self.replay_page(thread_id, after=after, limit=limit).events)
+
+    def replay_page(
+        self, thread_id: str, *, after: int = 0, limit: int = 500
+    ) -> ReplayPage:
         if after < 0:
             raise ValueError("after must not be negative")
         if not 1 <= limit <= 1000:
             raise ValueError("limit must be between 1 and 1000")
         with self.database.read() as connection:
-            return EventRepository(connection).replay(
-                thread_id, after=after, limit=limit
+            events = EventRepository(connection).replay(
+                thread_id, after=after, limit=limit + 1
             )
+        has_more = len(events) > limit
+        page = tuple(events[:limit])
+        return ReplayPage(
+            events=page,
+            next_after=page[-1].sequence if has_more and page else None,
+            has_more=has_more,
+        )

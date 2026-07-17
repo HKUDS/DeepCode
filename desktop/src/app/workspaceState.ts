@@ -99,7 +99,68 @@ function payloadEntity<T>(event: Event, key: string): T | null {
   return isRecord(value) ? (value as T) : null;
 }
 
+function applyItemDelta(state: WorkspaceState, event: Event): WorkspaceState {
+  const itemId = event.itemId;
+  const delta = event.payload.delta;
+  if (!itemId || typeof delta !== "string") {
+    return {
+      ...state,
+      lastSequence: Math.max(state.lastSequence, event.sequence),
+    };
+  }
+  const key = `item:${itemId}`;
+  if ((state.entitySequences[key] ?? 0) >= event.sequence) {
+    return {
+      ...state,
+      lastSequence: Math.max(state.lastSequence, event.sequence),
+    };
+  }
+  const index = state.items.findIndex((candidate) => candidate.id === itemId);
+  if (index === -1) {
+    return {
+      ...state,
+      lastSequence: Math.max(state.lastSequence, event.sequence),
+    };
+  }
+
+  const current = state.items[index];
+  const currentText =
+    typeof current.payload.text === "string" ? current.payload.text : "";
+  const summary =
+    typeof event.payload.summary === "string"
+      ? event.payload.summary
+      : current.summary;
+  const updatedAt =
+    typeof event.payload.updatedAt === "string"
+      ? event.payload.updatedAt
+      : event.timestamp;
+  const items = state.items.slice();
+  items[index] = {
+    ...current,
+    status: "in_progress",
+    summary,
+    payload: {
+      ...current.payload,
+      text: currentText + delta,
+      streaming: true,
+    },
+    updatedAt,
+  };
+  return {
+    ...state,
+    items,
+    lastSequence: Math.max(state.lastSequence, event.sequence),
+    entitySequences: {
+      ...state.entitySequences,
+      [key]: event.sequence,
+    },
+  };
+}
+
 function applyDomainEvent(state: WorkspaceState, event: Event): WorkspaceState {
+  if (event.type === "item.delta") {
+    return applyItemDelta(state, event);
+  }
   const thread = payloadEntity<Thread>(event, "thread");
   const turn = payloadEntity<Turn>(event, "turn");
   const item = payloadEntity<Item>(event, "item");

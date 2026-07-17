@@ -85,6 +85,31 @@ class ScriptedFactory:
         return session
 
 
+class LongStreamingSession(ScriptedSession):
+    async def run_stream(self, _op):
+        first = "a" * 300
+        second = "b" * 300
+        final = first + second
+        self.history.append({"role": "user", "content": _op.text})
+        yield Event("1", TurnStarted())
+        yield Event("2", AgentMessageDelta(first))
+        yield Event("3", AgentMessageDelta(second))
+        yield Event("4", AgentMessage(final))
+        yield Event("5", TaskComplete(final, "completed"))
+        self.history.append({"role": "assistant", "content": final})
+
+
+class LongStreamingFactory(ScriptedFactory):
+    def create(self, *, workspace, model, approval_callback):
+        session = LongStreamingSession(
+            approval_callback,
+            approval=False,
+            hang=False,
+        )
+        self.sessions.append(session)
+        return session
+
+
 def _application(
     tmp_path: Path, factory: ScriptedFactory
 ) -> tuple[DeepCodeApplication, str]:
@@ -128,6 +153,53 @@ def test_turn_projects_stream_into_durable_items(tmp_path: Path) -> None:
     finally:
         application.close()
     assert factory.sessions[0].closed is True
+
+
+def test_streaming_projection_logs_only_new_assistant_text(tmp_path: Path) -> None:
+    factory = LongStreamingFactory()
+    application, thread_id = _application(tmp_path, factory)
+    database_path = application.database.path
+    turn_id = ""
+    assistant_id = ""
+    try:
+        started = application.turns.start(thread_id, prompt="Stream it")
+        turn_id = started.turn.id
+        snapshot = _wait_for(application, started.turn.id, TurnStatus.COMPLETED)
+        assistant = next(
+            item for item in snapshot.items if item.kind is ItemKind.ASSISTANT_MESSAGE
+        )
+        assistant_id = assistant.id
+        events = [
+            event
+            for event in application.events.replay(thread_id, limit=1000)
+            if event.item_id == assistant.id
+        ]
+
+        assert [event.type for event in events] == [
+            "item.created",
+            "item.delta",
+            "item.updated",
+        ]
+        assert events[1].payload["delta"] == "b" * 300
+        assert "item" not in events[1].payload
+        assert assistant.payload["text"] == ("a" * 300) + ("b" * 300)
+        assert assistant.status is ItemStatus.COMPLETED
+    finally:
+        application.close()
+
+    reopened = DeepCodeApplication.open(database_path, session_factory=factory)
+    try:
+        restored = reopened.turns.read(turn_id)
+        assistant = next(item for item in restored.items if item.id == assistant_id)
+        assert assistant.payload["text"] == ("a" * 300) + ("b" * 300)
+        replayed = [
+            event.type
+            for event in reopened.events.replay(thread_id, limit=1000)
+            if event.item_id == assistant_id
+        ]
+        assert replayed == ["item.created", "item.delta", "item.updated"]
+    finally:
+        reopened.close()
 
 
 def test_turns_reuse_one_agent_session_until_application_close(tmp_path: Path) -> None:

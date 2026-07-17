@@ -141,9 +141,12 @@ class Dispatcher:
         self,
         application: DeepCodeApplication,
         connection: ConnectionState,
+        *,
+        max_message_bytes: int = DEFAULT_MAX_MESSAGE_BYTES,
     ) -> None:
         self.application = application
         self.connection = connection
+        self.max_message_bytes = max_message_bytes
         self._handlers: dict[str, Handler] = {
             rpc_methods.INITIALIZE: self._initialize,
             rpc_methods.SHUTDOWN: self._shutdown,
@@ -235,7 +238,7 @@ class Dispatcher:
                 "methods": list(self.methods),
                 "eventReplay": True,
                 "liveEvents": True,
-                "maxMessageBytes": DEFAULT_MAX_MESSAGE_BYTES,
+                "maxMessageBytes": self.max_message_bytes,
             },
         }
 
@@ -670,12 +673,16 @@ class Dispatcher:
         params.only("threadId", "after", "limit")
         thread_id = str(params.string("threadId"))
         self.application.threads.read(thread_id)
-        events = self.application.events.replay(
+        page = self.application.events.replay_page(
             thread_id,
             after=params.integer("after", default=0, maximum=2**63 - 1),
             limit=params.integer("limit", default=500, minimum=1, maximum=1000),
         )
-        return {"events": [event_view(event) for event in events]}
+        return {
+            "events": [event_view(event) for event in page.events],
+            "nextAfter": page.next_after,
+            "hasMore": page.has_more,
+        }
 
     def _file_list(self, params: Params) -> dict[str, Any]:
         params.only("threadId", "path", "depth", "limit")

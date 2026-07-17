@@ -13,6 +13,7 @@ from typing import Any
 from app_server.server import AppServer
 from core.application import DeepCodeApplication
 from core.domain import TrustState
+from core.persistence.event_repository import EventRepository
 
 
 def _request(request_id: int, method: str, params: dict[str, Any]) -> bytes:
@@ -197,5 +198,138 @@ def test_oversized_result_returns_a_protocol_error_without_stopping_server(
     messages = [json.loads(line) for line in sink.getvalue().splitlines()]
     by_id = {message.get("id"): message for message in messages if "id" in message}
     assert by_id[1]["result"]["protocolVersion"] == "1.0"
+    assert by_id[2]["error"]["data"]["code"] == "RESPONSE_TOO_LARGE"
+    assert by_id[3]["result"]["accepted"] is True
+
+
+def test_event_replay_is_split_into_byte_bounded_cursor_pages(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    project = application.projects.add(str(workspace), trust_state=TrustState.TRUSTED)
+    thread = application.threads.start(project.id, title="Paged replay")
+    with application.database.transaction() as connection:
+        repository = EventRepository(connection)
+        for index in range(12):
+            repository.append(
+                thread_id=thread.id,
+                type="test.large",
+                payload={"index": index, "text": "x" * 700},
+            )
+    expected = [
+        event.sequence for event in application.events.replay(thread.id, limit=1000)
+    ]
+
+    input_read, input_write = os.pipe()
+    output_read, output_write = os.pipe()
+    source = os.fdopen(input_read, "rb", buffering=0)
+    writer = os.fdopen(input_write, "wb", buffering=0)
+    reader = os.fdopen(output_read, "rb", buffering=0)
+    sink = os.fdopen(output_write, "wb", buffering=0)
+    server = threading.Thread(
+        target=AppServer(application, max_message_bytes=2_048).serve,
+        args=(source, sink),
+        daemon=True,
+    )
+    server.start()
+    try:
+        writer.write(
+            _request(
+                1,
+                "initialize",
+                {
+                    "protocolVersion": "1.0",
+                    "clientInfo": {"name": "replay-test", "version": "1.0"},
+                },
+            )
+        )
+        initialized = _until(reader, lambda message: message.get("id") == 1)
+        assert initialized["result"]["capabilities"]["maxMessageBytes"] == 2_048
+
+        collected: list[int] = []
+        after = 0
+        page_count = 0
+        request_id = 2
+        while True:
+            writer.write(
+                _request(
+                    request_id,
+                    "event/replay",
+                    {"threadId": thread.id, "after": after, "limit": 1000},
+                )
+            )
+            response = _until(
+                reader, lambda message, target=request_id: message.get("id") == target
+            )
+            assert "error" not in response
+            page = response["result"]
+            page_count += 1
+            collected.extend(event["sequence"] for event in page["events"])
+            if not page["hasMore"]:
+                assert page["nextAfter"] is None
+                break
+            assert page["events"]
+            assert page["nextAfter"] == page["events"][-1]["sequence"]
+            assert page["nextAfter"] > after
+            after = page["nextAfter"]
+            request_id += 1
+
+        assert page_count > 1
+        assert collected == expected
+        writer.write(_request(request_id + 1, "shutdown", {}))
+        assert (
+            _until(reader, lambda message: message.get("id") == request_id + 1)[
+                "result"
+            ]["accepted"]
+            is True
+        )
+        server.join(timeout=3)
+        assert not server.is_alive()
+    finally:
+        writer.close()
+        source.close()
+        sink.close()
+        reader.close()
+
+
+def test_single_replay_event_larger_than_transport_limit_is_reported(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    project = application.projects.add(str(workspace), trust_state=TrustState.TRUSTED)
+    thread = application.threads.start(project.id, title="Single large event")
+    with application.database.transaction() as connection:
+        oversized = EventRepository(connection).append(
+            thread_id=thread.id,
+            type="test.oversized",
+            payload={"text": "x" * 10_000},
+        )
+    source = io.BytesIO(
+        _request(
+            1,
+            "initialize",
+            {
+                "protocolVersion": "1.0",
+                "clientInfo": {"name": "limit-test", "version": "1.0"},
+            },
+        )
+        + _request(
+            2,
+            "event/replay",
+            {
+                "threadId": thread.id,
+                "after": oversized.sequence - 1,
+                "limit": 1000,
+            },
+        )
+        + _request(3, "shutdown", {})
+    )
+    sink = io.BytesIO()
+
+    assert AppServer(application, max_message_bytes=2_048).serve(source, sink) == 0
+    messages = [json.loads(line) for line in sink.getvalue().splitlines()]
+    by_id = {message.get("id"): message for message in messages if "id" in message}
     assert by_id[2]["error"]["data"]["code"] == "RESPONSE_TOO_LARGE"
     assert by_id[3]["result"]["accepted"] is True

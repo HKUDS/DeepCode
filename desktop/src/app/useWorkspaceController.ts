@@ -16,6 +16,7 @@ import type {
   DesktopRuntime,
   SidecarStatus,
 } from "../rpc/contracts";
+import { replayThreadHistory } from "./replayThreadHistory";
 import {
   initialWorkspaceState,
   workspaceReducer,
@@ -111,21 +112,9 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
   const replayThread = useCallback(
     async (threadId: string) => {
       dispatch({ type: "trace-reset" });
-      let after = 0;
-      for (;;) {
-        const result = await runtime.request("event/replay", {
-          threadId,
-          after,
-          limit: 1000,
-        });
-        for (const event of result.events) {
+      await replayThreadHistory(runtime, threadId, (event) => {
           dispatch({ type: "event", event });
-        }
-        if (result.events.length < 1000) {
-          break;
-        }
-        after = result.events[result.events.length - 1].sequence;
-      }
+      });
     },
     [runtime],
   );

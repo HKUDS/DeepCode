@@ -6,7 +6,7 @@ from dataclasses import replace
 from time import monotonic
 
 from core.application.event_service import EventBroker
-from core.application.views import item_view
+from core.application.views import item_view, timestamp
 from core.domain.common import utc_now
 from core.domain.event import DomainEvent
 from core.domain.item import Item, ItemKind, ItemStatus
@@ -161,12 +161,14 @@ class TurnEventProjector:
             and len(self._assistant_text) - self._last_flushed_length < 256
         ):
             return
-        self._update_item(
+        pending_delta = self._assistant_text[self._last_flushed_length :]
+        updated = self._append_item_delta(
             self._assistant_item_id,
-            status=ItemStatus.IN_PROGRESS,
+            delta=pending_delta,
             summary=self._assistant_text[:160],
-            payload_update={"text": self._assistant_text, "streaming": True},
         )
+        if updated is None:
+            return
         self._last_delta_flush = now
         self._last_flushed_length = len(self._assistant_text)
 
@@ -248,6 +250,51 @@ class TurnEventProjector:
                 item_id=updated.id,
                 type="item.updated",
                 payload={"item": item_view(updated)},
+            )
+        self.broker.publish(event)
+        return updated
+
+    def _append_item_delta(
+        self,
+        item_id: str,
+        *,
+        delta: str,
+        summary: str,
+    ) -> Item | None:
+        """Persist current item state while logging only newly appended text."""
+
+        if not delta:
+            return None
+        with self.database.transaction() as connection:
+            repository = ItemRepository(connection)
+            item = repository.get(item_id)
+            if item is None:
+                return None
+            text = item.payload.get("text")
+            current_text = text if isinstance(text, str) else ""
+            updated = replace(
+                item,
+                status=ItemStatus.IN_PROGRESS,
+                summary=summary,
+                payload={
+                    **item.payload,
+                    "text": current_text + delta,
+                    "streaming": True,
+                },
+                updated_at=utc_now(),
+            )
+            repository.update(updated)
+            event = EventRepository(connection).append(
+                thread_id=self.thread_id,
+                turn_id=self.turn_id,
+                item_id=updated.id,
+                type="item.delta",
+                payload={
+                    "delta": delta,
+                    "summary": updated.summary,
+                    "streaming": True,
+                    "updatedAt": timestamp(updated.updated_at),
+                },
             )
         self.broker.publish(event)
         return updated

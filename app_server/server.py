@@ -9,6 +9,7 @@ from typing import Any, BinaryIO
 from app_server.connection import ConnectionState
 from app_server.dispatcher import Dispatcher
 from app_server.errors import RpcError, from_application_error
+from app_server.protocol import methods as rpc_methods
 from app_server.protocol import notifications as rpc_notifications
 from app_server.protocol.codec import (
     DEFAULT_MAX_MESSAGE_BYTES,
@@ -37,7 +38,11 @@ class AppServer:
 
     def serve(self, source: BinaryIO, sink: BinaryIO) -> int:
         connection = ConnectionState(self.application.broker)
-        dispatcher = Dispatcher(self.application, connection)
+        dispatcher = Dispatcher(
+            self.application,
+            connection,
+            max_message_bytes=self.max_message_bytes,
+        )
         delivery_lock = threading.RLock()
         stop_pump = threading.Event()
 
@@ -110,7 +115,9 @@ class AppServer:
 
                     if request.has_id:
                         self._write_response(
-                            sink, Response(id=request.id, result=result).to_dict()
+                            sink,
+                            Response(id=request.id, result=result).to_dict(),
+                            method=request.method,
                         )
                     self._drain_events(sink, connection)
         finally:
@@ -183,11 +190,22 @@ class AppServer:
             Response(id=request_id, error=error.payload()).to_dict(),
         )
 
-    def _write_response(self, sink: BinaryIO, message: dict[str, Any]) -> None:
+    def _write_response(
+        self,
+        sink: BinaryIO,
+        message: dict[str, Any],
+        *,
+        method: str | None = None,
+    ) -> None:
         encoded = encode_message(message)
         if len(encoded) <= self.max_message_bytes:
             self._write_encoded(sink, encoded)
             return
+        if method == rpc_methods.EVENT_REPLAY:
+            replay_page = self._fit_replay_response(message)
+            if replay_page is not None:
+                self._write_encoded(sink, replay_page)
+                return
         request_id = message.get("id")
         error = RpcError(
             -32004,
@@ -199,6 +217,44 @@ class AppServer:
             sink,
             Response(id=request_id, error=error.payload()).to_dict(),
         )
+
+    def _fit_replay_response(self, message: dict[str, Any]) -> bytes | None:
+        """Return the largest replay prefix that fits one transport message."""
+
+        result = message.get("result")
+        if not isinstance(result, dict):
+            return None
+        events = result.get("events")
+        if not isinstance(events, list) or not events:
+            return None
+
+        best: bytes | None = None
+        low = 1
+        high = len(events)
+        while low <= high:
+            count = (low + high) // 2
+            last_event = events[count - 1]
+            if not isinstance(last_event, dict):
+                return None
+            sequence = last_event.get("sequence")
+            if isinstance(sequence, bool) or not isinstance(sequence, int):
+                return None
+            candidate = {
+                **message,
+                "result": {
+                    **result,
+                    "events": events[:count],
+                    "nextAfter": sequence,
+                    "hasMore": True,
+                },
+            }
+            encoded = encode_message(candidate)
+            if len(encoded) <= self.max_message_bytes:
+                best = encoded
+                low = count + 1
+            else:
+                high = count - 1
+        return best
 
     def _write_notification(self, sink: BinaryIO, message: dict[str, Any]) -> None:
         encoded = encode_message(message)
