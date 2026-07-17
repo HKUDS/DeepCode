@@ -140,7 +140,9 @@ class _CompactProvider:
     async def chat_with_retry(self, **kwargs: Any) -> LLMResponse:
         self.calls += 1
         if self.calls == 1:
-            return LLMResponse(content="HANDOFF: did X, next do Y", finish_reason="stop")
+            return LLMResponse(
+                content="HANDOFF: did X, next do Y", finish_reason="stop"
+            )
         self.main_request = kwargs.get("messages")
         return LLMResponse(content="done", finish_reason="stop")
 

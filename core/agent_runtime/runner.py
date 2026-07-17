@@ -59,7 +59,9 @@ _MICROCOMPACT_MIN_CHARS = 500
 # fallback. The compacted history is returned and persisted by the session, so
 # it survives across turns and is not re-summarized every step.
 _COMPACT_TRIGGER_FRACTION = 0.9  # summarize once the prompt exceeds 90% of budget
-_COMPACT_KEEP_USER_CHARS = 60_000  # recent user messages kept verbatim before the summary
+_COMPACT_KEEP_USER_CHARS = (
+    60_000  # recent user messages kept verbatim before the summary
+)
 _SUMMARIZATION_PROMPT = (
     "You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff "
     "summary for another agent that will resume this task.\n\n"
@@ -854,7 +856,11 @@ class AgentRunner:
                         "status": "denied",
                         "detail": reason.replace("\n", " ").strip()[:120],
                     }
-                    return f"Error: blocked by PreToolUse hook: {reason}" + _HINT, event, None
+                    return (
+                        f"Error: blocked by PreToolUse hook: {reason}" + _HINT,
+                        event,
+                        None,
+                    )
                 updated = getattr(pre, "updated_input", None)
                 if isinstance(updated, dict):
                     tool_call.arguments = updated
@@ -911,7 +917,12 @@ class AgentRunner:
             }
             message = f"Error: {type(exc).__name__}: {exc}"
             return await self._finish_tool(
-                spec, tool_call, message, event, exc if spec.fail_on_tool_error else None, pre_contexts
+                spec,
+                tool_call,
+                message,
+                event,
+                exc if spec.fail_on_tool_error else None,
+                pre_contexts,
             )
 
         if isinstance(result, str) and result.startswith("Error"):
@@ -936,7 +947,9 @@ class AgentRunner:
         elif len(detail) > 120:
             detail = detail[:120] + "..."
         event = {"name": tool_call.name, "status": "ok", "detail": detail}
-        return await self._finish_tool(spec, tool_call, result, event, None, pre_contexts)
+        return await self._finish_tool(
+            spec, tool_call, result, event, None, pre_contexts
+        )
 
     async def _finish_tool(
         self,
@@ -1041,7 +1054,9 @@ class AgentRunner:
             )
             if verdict is not None:
                 if getattr(verdict, "decision", None) == "deny":
-                    return getattr(verdict, "message", None) or reason or "denied by hook"
+                    return (
+                        getattr(verdict, "message", None) or reason or "denied by hook"
+                    )
                 if getattr(verdict, "decision", None) == "allow":
                     return None
 

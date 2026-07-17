@@ -69,7 +69,10 @@ def test_idempotent_second_run_does_not_clobber(isolated, capsys):
     rc = run([])
     assert rc == 0
     assert "Already configured" in capsys.readouterr().out
-    assert json.loads(home_config_path().read_text())["providers"]["openai"]["apiKey"] == "sk-real"
+    assert (
+        json.loads(home_config_path().read_text())["providers"]["openai"]["apiKey"]
+        == "sk-real"
+    )
 
 
 def test_force_backs_up_then_reseeds(isolated):
@@ -91,7 +94,10 @@ def test_from_explicit_path(isolated, tmp_path):
     src = _write(custom, {"providers": {"openai": {"apiKey": "sk-from"}}})
     rc = run(["--from", str(src)])
     assert rc == 0
-    assert json.loads(home_config_path().read_text())["providers"]["openai"]["apiKey"] == "sk-from"
+    assert (
+        json.loads(home_config_path().read_text())["providers"]["openai"]["apiKey"]
+        == "sk-from"
+    )
 
 
 def test_from_missing_path_errors(isolated, capsys):

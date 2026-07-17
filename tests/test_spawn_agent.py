@@ -43,7 +43,13 @@ class _HeldControl(AgentControl):
         self.last_seed = None
 
     async def _run_subagent(
-        self, task, workspace, *, seed_history=None, inbox_drainer=None, agent_id="subagent"
+        self,
+        task,
+        workspace,
+        *,
+        seed_history=None,
+        inbox_drainer=None,
+        agent_id="subagent",
     ):
         self.last_seed = seed_history
         await self.release.wait()
@@ -54,7 +60,13 @@ class _WritingControl(AgentControl):
     """Sub-agent writes a file (to exercise isolate + merge)."""
 
     async def _run_subagent(
-        self, task, workspace, *, seed_history=None, inbox_drainer=None, agent_id="subagent"
+        self,
+        task,
+        workspace,
+        *,
+        seed_history=None,
+        inbox_drainer=None,
+        agent_id="subagent",
     ):
         (Path(workspace) / "feature.py").write_text("VALUE = 1\n")
         return "wrote feature.py"

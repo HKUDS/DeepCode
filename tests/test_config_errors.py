@@ -52,6 +52,8 @@ def test_message_points_at_init_when_unconfigured(isolated):
 def test_message_is_terse_when_config_exists(isolated):
     _home, project = isolated
     (project / _DEFAULT_CONFIG_FILENAME).write_text(json.dumps({}), encoding="utf-8")
-    msg = format_config_error(ConfigError("Provider 'openai' requires providers.openai.apiKey"))
+    msg = format_config_error(
+        ConfigError("Provider 'openai' requires providers.openai.apiKey")
+    )
     assert "requires providers.openai.apiKey" in msg
     assert "deepcode init" not in msg  # they have config; init is not the fix

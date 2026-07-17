@@ -32,9 +32,9 @@ sys.path.insert(0, PROJECT_ROOT)
 # ``cli.mcp_server`` would resolve into it and fail. Evict any ``cli`` that does
 # not live under this checkout so our submodules import from the repo.
 _cached_cli = sys.modules.get("cli")
-if _cached_cli is not None and not (getattr(_cached_cli, "__file__", "") or "").startswith(
-    PROJECT_ROOT
-):
+if _cached_cli is not None and not (
+    getattr(_cached_cli, "__file__", "") or ""
+).startswith(PROJECT_ROOT):
     for _name in [n for n in list(sys.modules) if n == "cli" or n.startswith("cli.")]:
         del sys.modules[_name]
 
@@ -290,7 +290,7 @@ def start_backend(backend_dir: Path):
                 "--reload",
             ],
             cwd=backend_dir,
-            start_new_session=True, # Create new process group
+            start_new_session=True,  # Create new process group
             env=subprocess_env(),
         )
 
@@ -325,7 +325,7 @@ def start_frontend(frontend_dir: Path):
         _frontend_process = subprocess.Popen(
             [npm_cmd, "run", "dev"],
             cwd=frontend_dir,
-            start_new_session=True, # Create new process group
+            start_new_session=True,  # Create new process group
             env=subprocess_env(),
         )
 
@@ -479,6 +479,7 @@ def main():
             pass
         elif sys.argv[1] in ["--help", "-h", "help"]:
             print_banner()
+
             def row(cmd, desc):
                 return f"   {cmd:<37}{desc}"
 
@@ -488,16 +489,31 @@ def main():
                         "",
                         "Usage:",
                         row("deepcode", "Interactive coding agent (TUI, default)"),
-                        row("deepcode init", "Set up ~/.deepcode so deepcode runs anywhere"),
-                        row("deepcode --local", "Launch the web UI locally (Python + Node.js)"),
+                        row(
+                            "deepcode init",
+                            "Set up ~/.deepcode so deepcode runs anywhere",
+                        ),
+                        row(
+                            "deepcode --local",
+                            "Launch the web UI locally (Python + Node.js)",
+                        ),
                         row("deepcode test <paper>", "Test paper reproduction"),
                         row("deepcode test <paper> --fast", "Test paper (fast mode)"),
                         row("deepcode mcp", "Expose DeepCode as an MCP server (stdio)"),
                         "",
                         "   More agent entry points:",
-                        row('python -m cli.exec_cli "<task>" -w .', "Headless one-shot run"),
-                        row('python -m cli.loop_cli "<goal>"', "Autonomous loop to passing tests"),
-                        row("python -m cli.schedule_cli ...", "Scheduled / keepalive runs"),
+                        row(
+                            'python -m cli.exec_cli "<task>" -w .',
+                            "Headless one-shot run",
+                        ),
+                        row(
+                            'python -m cli.loop_cli "<goal>"',
+                            "Autonomous loop to passing tests",
+                        ),
+                        row(
+                            "python -m cli.schedule_cli ...",
+                            "Scheduled / keepalive runs",
+                        ),
                         "",
                         "Examples:",
                         row("deepcode", "Drop into the interactive agent"),
@@ -521,7 +537,9 @@ def main():
                         status = "ok" if os.path.exists(paper_md) else "--"
                         addendum = " (+addendum)" if os.path.exists(addendum_md) else ""
                         print(f"   [{status}] {item}{addendum}")
-            print("\n   Legend: [ok] = paper.md exists, (+addendum) = addendum.md exists")
+            print(
+                "\n   Legend: [ok] = paper.md exists, (+addendum) = addendum.md exists"
+            )
             return
         else:
             # Unknown argument — show help hint

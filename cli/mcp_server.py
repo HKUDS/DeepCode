@@ -101,7 +101,9 @@ async def _run_turn(session: Any, prompt: str) -> tuple[str, str]:
     return (final.strip() or "(the agent produced no summary)"), stop_reason
 
 
-def _reply(text: str, structured: dict[str, Any]) -> tuple[list[types.TextContent], dict[str, Any]]:
+def _reply(
+    text: str, structured: dict[str, Any]
+) -> tuple[list[types.TextContent], dict[str, Any]]:
     return [types.TextContent(type="text", text=text)], structured
 
 
@@ -157,7 +159,9 @@ def build_server() -> Server:
 async def _serve() -> None:
     server = build_server()
     async with stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream, server.create_initialization_options())
+        await server.run(
+            read_stream, write_stream, server.create_initialization_options()
+        )
 
 
 def main(argv: list[str] | None = None) -> int:

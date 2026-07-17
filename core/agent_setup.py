@@ -51,10 +51,14 @@ SYSTEM_PROMPT = (
 # Tools callable from inside code mode (C5b): file / shell / search — the ones
 # worth batching in a loop. Meta tools (plan, delegation, hooks, memory) are
 # intentionally not exposed to the code.
-_CODE_MODE_TOOLS = frozenset({"read", "write", "edit", "apply_patch", "bash", "grep", "glob"})
+_CODE_MODE_TOOLS = frozenset(
+    {"read", "write", "edit", "apply_patch", "bash", "grep", "glob"}
+)
 
 
-def _wire_code_mode(tool_registry: Any, workspace: str, engine: Any, hooks_engine: Any) -> None:
+def _wire_code_mode(
+    tool_registry: Any, workspace: str, engine: Any, hooks_engine: Any
+) -> None:
     """Register the ``code`` tool (C5b): a Python program that orchestrates the
     file/shell/search tools in one turn. Each tool call the code makes is run in
     the parent and governed exactly like a normal tool call — PreToolUse hook →

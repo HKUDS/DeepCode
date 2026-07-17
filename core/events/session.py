@@ -235,7 +235,9 @@ class AgentSession:
             logger.exception("start hook failed")
             return None
 
-    async def _run_prompt_hooks(self, text: str, hook_contexts: list[str]) -> str | None:
+    async def _run_prompt_hooks(
+        self, text: str, hook_contexts: list[str]
+    ) -> str | None:
         """Run SessionStart (once) + UserPromptSubmit hooks.
 
         Appends any injected context to ``hook_contexts`` and returns a block
@@ -277,7 +279,9 @@ class AgentSession:
             blocked = await self._run_prompt_hooks(text, hook_contexts)
             if blocked is not None:
                 self._history.append({"role": "user", "content": text})
-                self._emit(TaskComplete(final_text=blocked, stop_reason="blocked_by_hook"))
+                self._emit(
+                    TaskComplete(final_text=blocked, stop_reason="blocked_by_hook")
+                )
                 self._busy = False
                 return
 

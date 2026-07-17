@@ -89,7 +89,9 @@ def test_load_raw_rejects_non_object(tmp_path):
 def test_deepcode_home_env_override(tmp_path, monkeypatch):
     monkeypatch.setenv("DEEPCODE_HOME", str(tmp_path / "custom"))
     assert deepcode_home() == (tmp_path / "custom").resolve()
-    assert home_config_path() == (tmp_path / "custom" / _DEFAULT_CONFIG_FILENAME).resolve()
+    assert (
+        home_config_path() == (tmp_path / "custom" / _DEFAULT_CONFIG_FILENAME).resolve()
+    )
 
 
 def test_deepcode_home_defaults_to_dot_deepcode(monkeypatch):
@@ -134,7 +136,9 @@ def test_explicit_path_bypasses_layering(layered, tmp_path):
     home, project = layered
     _write_config(home, {"providers": {"openai": {"apiKey": "sk-home"}}})
     _write_config(project, {"providers": {"openai": {"apiKey": "sk-proj"}}})
-    explicit = _write_config(tmp_path / "elsewhere", {"providers": {"openai": {"apiKey": "sk-explicit"}}})
+    explicit = _write_config(
+        tmp_path / "elsewhere", {"providers": {"openai": {"apiKey": "sk-explicit"}}}
+    )
     cfg = load_config(config_path=explicit)
     assert cfg.providers.openai.api_key == "sk-explicit"  # neither layer consulted
 

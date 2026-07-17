@@ -158,6 +158,15 @@
 
 ## 📰 News
 
+**[2026-07-17] Extensible agents: reusable Skills, lifecycle Hooks & model-driven delegation**
+
+- **The agent chooses how to work.** DeepCode can maintain a plan, ask a focused question when genuinely blocked, and load reusable `SKILL.md` playbooks only when needed. Project and user skills under `.deepcode/skills/` — plus existing `.claude/skills/` packages — work across the CLI, web chat, and headless runs.
+- **Complex tasks delegate themselves.** The model can spawn bounded subagents with focused context, track their progress, and bring the results back into the parent task — without a special team command or a fixed workflow.
+- **Plug in your own guardrails and automation.** External command hooks cover session start, prompt submission, tool use, permission decisions, stopping, and subagent lifecycle events. DeepCode reads native hook files as well as compatible `.claude/settings.json` configurations, with timeouts and validated outputs so a broken hook cannot hang the agent.
+- **Run DeepCode from any folder.** `deepcode init` creates a user-level base under `~/.deepcode`; user configuration, instructions, and memory are layered with project overrides, so credentials stay global while repository-specific behavior follows the workspace. Configuration failures now show a clear setup hint instead of a traceback.
+
+---
+
 **[2026-07-10] Team mode: split a big feature across parallel workers**
 
 - **A team, not just one agent.** Hand DeepCode a larger feature and it breaks the work into pieces, builds them at the same time, and combines the results — each piece checked against your tests as it goes.

@@ -112,7 +112,10 @@ class CodeModeTool(Tool):
 
     @property
     def description(self) -> str:
-        lines = [spec.signature + (f"  # {spec.doc}" if spec.doc else "") for spec in self._api]
+        lines = [
+            spec.signature + (f"  # {spec.doc}" if spec.doc else "")
+            for spec in self._api
+        ]
         api_block = "\n".join(lines) if lines else "(no tools exposed)"
         return (
             "Code mode: write a Python program that calls the tools below as "
@@ -193,7 +196,9 @@ class CodeModeTool(Tool):
             elif msg.get("done"):
                 return msg
 
-    async def _dispatch(self, tool_name: str, arguments: dict) -> tuple[str | None, str | None]:
+    async def _dispatch(
+        self, tool_name: str, arguments: dict
+    ) -> tuple[str | None, str | None]:
         if tool_name not in self._api_by_name:
             return None, f"unknown tool {tool_name!r} (not exposed to code mode)"
         try:

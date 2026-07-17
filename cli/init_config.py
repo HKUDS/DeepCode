@@ -93,11 +93,15 @@ def run(argv: list[str] | None = None) -> int:
         description="Create the user-level config so deepcode runs in any directory.",
     )
     parser.add_argument(
-        "--from", dest="from_path", metavar="PATH", default=None,
+        "--from",
+        dest="from_path",
+        metavar="PATH",
+        default=None,
         help="Seed the home config from this file instead of auto-detecting.",
     )
     parser.add_argument(
-        "--force", action="store_true",
+        "--force",
+        action="store_true",
         help="Overwrite an existing home config (a .bak backup is kept).",
     )
     args = parser.parse_args(argv)
@@ -112,8 +116,10 @@ def run(argv: list[str] | None = None) -> int:
         if keyed:
             print("A provider key is present — deepcode is ready in any directory.")
         else:
-            print("No provider key resolved yet — edit the file and add one under "
-                  '"providers", then you are set.')
+            print(
+                "No provider key resolved yet — edit the file and add one under "
+                '"providers", then you are set.'
+            )
         print(_launch_hint())
         print("(Re-run with --force to reseed from another source.)")
         return 0
@@ -136,9 +142,13 @@ def run(argv: list[str] | None = None) -> int:
     print(f"Wrote {dest}")
     print(f"  seeded from: {label}")
     if _has_provider_key():
-        print("A provider key is present — you can now run `deepcode` from ANY directory.")
+        print(
+            "A provider key is present — you can now run `deepcode` from ANY directory."
+        )
     else:
-        print('No provider key yet: open the file and fill in one under "providers" '
-              "(inline value or a ${ENV_VAR} reference).")
+        print(
+            'No provider key yet: open the file and fill in one under "providers" '
+            "(inline value or a ${ENV_VAR} reference)."
+        )
     print(_launch_hint())
     return 0

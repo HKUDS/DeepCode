@@ -25,7 +25,9 @@ from core.harness.hooks.events import (  # noqa: E402
     validate_matcher,
 )
 
-pytestmark = pytest.mark.skipif(shutil.which("sh") is None, reason="POSIX shell required")
+pytestmark = pytest.mark.skipif(
+    shutil.which("sh") is None, reason="POSIX shell required"
+)
 
 
 def _handler(event, command, *, matcher=None, order=0, timeout=30):
@@ -89,11 +91,21 @@ def test_discovery_parses_and_orders(tmp_path):
             {
                 "hooks": {
                     "PreToolUse": [
-                        {"matcher": "Bash", "hooks": [{"type": "command", "command": "echo a"}]},
-                        {"matcher": "Edit", "hooks": [{"type": "command", "command": "echo b"}]},
+                        {
+                            "matcher": "Bash",
+                            "hooks": [{"type": "command", "command": "echo a"}],
+                        },
+                        {
+                            "matcher": "Edit",
+                            "hooks": [{"type": "command", "command": "echo b"}],
+                        },
                     ],
                     "SessionStart": [
-                        {"hooks": [{"type": "command", "command": "echo c", "timeout": 5}]}
+                        {
+                            "hooks": [
+                                {"type": "command", "command": "echo c", "timeout": 5}
+                            ]
+                        }
                     ],
                 }
             }
@@ -101,7 +113,9 @@ def test_discovery_parses_and_orders(tmp_path):
     )
     result = discover_hooks(str(tmp_path), home=str(tmp_path / "nonexistent_home"))
     assert result.warnings == []
-    assert [(h.event_name, h.matcher, h.command, h.display_order) for h in result.handlers] == [
+    assert [
+        (h.event_name, h.matcher, h.command, h.display_order) for h in result.handlers
+    ] == [
         ("PreToolUse", "Bash", "echo a", 0),
         ("PreToolUse", "Edit", "echo b", 1),
         ("SessionStart", None, "echo c", 2),
@@ -117,9 +131,16 @@ def test_discovery_skips_unsupported_and_warns(tmp_path):
             {
                 "hooks": {
                     "PreToolUse": [
-                        {"matcher": "[", "hooks": [{"type": "command", "command": "echo bad"}]},
+                        {
+                            "matcher": "[",
+                            "hooks": [{"type": "command", "command": "echo bad"}],
+                        },
                         {"hooks": [{"type": "prompt"}]},
-                        {"hooks": [{"type": "command", "command": "echo x", "async": True}]},
+                        {
+                            "hooks": [
+                                {"type": "command", "command": "echo x", "async": True}
+                            ]
+                        },
                         {"hooks": [{"type": "command", "command": "   "}]},
                     ]
                 }
@@ -135,7 +156,9 @@ def test_discovery_skips_unsupported_and_warns(tmp_path):
 
 
 def test_discovery_none_when_no_files(tmp_path):
-    engine, warnings = HooksEngine.discover(str(tmp_path), "sess", home=str(tmp_path / "no_home"))
+    engine, warnings = HooksEngine.discover(
+        str(tmp_path), "sess", home=str(tmp_path / "no_home")
+    )
     assert engine is None
     assert warnings == []
 
@@ -144,7 +167,16 @@ def test_userprompt_matcher_forced_none(tmp_path):
     (tmp_path / ".deepcode").mkdir()
     (tmp_path / ".deepcode" / "hooks.json").write_text(
         json.dumps(
-            {"hooks": {"UserPromptSubmit": [{"matcher": "[", "hooks": [{"type": "command", "command": "echo u"}]}]}}
+            {
+                "hooks": {
+                    "UserPromptSubmit": [
+                        {
+                            "matcher": "[",
+                            "hooks": [{"type": "command", "command": "echo u"}],
+                        }
+                    ]
+                }
+            }
         )
     )
     result = discover_hooks(str(tmp_path), home=str(tmp_path / "no_home"))
@@ -157,7 +189,14 @@ def test_userprompt_matcher_forced_none(tmp_path):
 
 
 def test_pre_tool_use_permission_deny_blocks():
-    out = json.dumps({"hookSpecificOutput": {"permissionDecision": "deny", "permissionDecisionReason": "nope"}})
+    out = json.dumps(
+        {
+            "hookSpecificOutput": {
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "nope",
+            }
+        }
+    )
     eng = _engine([_handler("PreToolUse", f"echo '{out}'", matcher="Bash")])
     res = asyncio.run(eng.run_pre_tool_use("Bash", {"command": "rm -rf /"}))
     assert res.block is True
@@ -179,7 +218,12 @@ def test_pre_tool_use_exit_2_empty_stderr_is_failure_not_block():
 
 def test_pre_tool_use_allow_with_updated_input():
     out = json.dumps(
-        {"hookSpecificOutput": {"permissionDecision": "allow", "updatedInput": {"command": "ls"}}}
+        {
+            "hookSpecificOutput": {
+                "permissionDecision": "allow",
+                "updatedInput": {"command": "ls"},
+            }
+        }
     )
     eng = _engine([_handler("PreToolUse", f"echo '{out}'", matcher="Bash")])
     res = asyncio.run(eng.run_pre_tool_use("Bash", {"command": "rm"}))
@@ -194,7 +238,14 @@ def test_non_json_stdout_is_noop():
 
 
 def test_matcher_selects_only_relevant_handlers():
-    out = json.dumps({"hookSpecificOutput": {"permissionDecision": "deny", "permissionDecisionReason": "no"}})
+    out = json.dumps(
+        {
+            "hookSpecificOutput": {
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "no",
+            }
+        }
+    )
     eng = _engine(
         [
             _handler("PreToolUse", f"echo '{out}'", matcher="Edit", order=0),
@@ -271,8 +322,22 @@ def test_block_reason_requires_non_empty():
 
 def test_first_block_reason_wins_context_accumulates():
     o1 = json.dumps({"hookSpecificOutput": {"additionalContext": "ctx"}})
-    deny = json.dumps({"hookSpecificOutput": {"permissionDecision": "deny", "permissionDecisionReason": "first"}})
-    deny2 = json.dumps({"hookSpecificOutput": {"permissionDecision": "deny", "permissionDecisionReason": "second"}})
+    deny = json.dumps(
+        {
+            "hookSpecificOutput": {
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "first",
+            }
+        }
+    )
+    deny2 = json.dumps(
+        {
+            "hookSpecificOutput": {
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "second",
+            }
+        }
+    )
     eng = _engine(
         [
             _handler("PreToolUse", f"echo '{o1}'", matcher="*", order=0),
@@ -333,7 +398,9 @@ def test_continue_false_stops_sessionstart_with_default_reason():
 
 
 def test_continue_false_is_unsupported_on_pretooluse():
-    out = json.dumps({"continue": False, "hookSpecificOutput": {"additionalContext": "x"}})
+    out = json.dumps(
+        {"continue": False, "hookSpecificOutput": {"additionalContext": "x"}}
+    )
     eng = _engine([_handler("PreToolUse", f"echo '{out}'", matcher="*")])
     res = asyncio.run(eng.run_pre_tool_use("Bash", {}))
     # Unsupported → the handler fails; it injects neither a block nor context.
@@ -386,18 +453,29 @@ def _call(runner, spec, name, arguments):
     from core.providers.base import ToolCallRequest
 
     return asyncio.run(
-        runner._run_tool(spec, ToolCallRequest(id="1", name=name, arguments=arguments), {})
+        runner._run_tool(
+            spec, ToolCallRequest(id="1", name=name, arguments=arguments), {}
+        )
     )
 
 
 def test_runner_pre_tool_use_blocks_tool_from_running():
     from core.agent_runtime.runner import AgentRunner
 
-    out = json.dumps({"hookSpecificOutput": {"permissionDecision": "deny", "permissionDecisionReason": "forbidden"}})
+    out = json.dumps(
+        {
+            "hookSpecificOutput": {
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "forbidden",
+            }
+        }
+    )
     eng = _engine([_handler("PreToolUse", f"echo '{out}'", matcher="*")])
     tools = _FakeTools()
     spec = _spec(tools, pre_tool_hook=eng.run_pre_tool_use)
-    result, event, error = _call(AgentRunner(None), spec, "Bash", {"command": "rm -rf /"})
+    result, event, error = _call(
+        AgentRunner(None), spec, "Bash", {"command": "rm -rf /"}
+    )
     assert "blocked by PreToolUse hook: forbidden" in result
     assert event["status"] == "denied"
     assert tools.calls == []  # the tool never executed
@@ -406,18 +484,29 @@ def test_runner_pre_tool_use_blocks_tool_from_running():
 def test_runner_pre_tool_use_rewrites_arguments():
     from core.agent_runtime.runner import AgentRunner
 
-    out = json.dumps({"hookSpecificOutput": {"permissionDecision": "allow", "updatedInput": {"command": "ls -la"}}})
+    out = json.dumps(
+        {
+            "hookSpecificOutput": {
+                "permissionDecision": "allow",
+                "updatedInput": {"command": "ls -la"},
+            }
+        }
+    )
     eng = _engine([_handler("PreToolUse", f"echo '{out}'", matcher="*")])
     tools = _FakeTools()
     spec = _spec(tools, pre_tool_hook=eng.run_pre_tool_use)
     result, _event, _error = _call(AgentRunner(None), spec, "Bash", {"command": "rm"})
-    assert tools.calls == [("Bash", {"command": "ls -la"})]  # rewritten input reached the tool
+    assert tools.calls == [
+        ("Bash", {"command": "ls -la"})
+    ]  # rewritten input reached the tool
 
 
 def test_runner_post_tool_use_injects_context_into_result():
     from core.agent_runtime.runner import AgentRunner
 
-    out = json.dumps({"hookSpecificOutput": {"additionalContext": "remember to run tests"}})
+    out = json.dumps(
+        {"hookSpecificOutput": {"additionalContext": "remember to run tests"}}
+    )
     eng = _engine([_handler("PostToolUse", f"echo '{out}'", matcher="*")])
     tools = _FakeTools()
     spec = _spec(tools, post_tool_hook=eng.run_post_tool_use)
@@ -536,7 +625,13 @@ def test_user_prompt_submit_blocks_turn():
 
 
 def test_permission_request_deny_wins_over_allow():
-    deny = json.dumps({"hookSpecificOutput": {"decision": {"behavior": "deny", "message": "policy X"}}})
+    deny = json.dumps(
+        {
+            "hookSpecificOutput": {
+                "decision": {"behavior": "deny", "message": "policy X"}
+            }
+        }
+    )
     allow = json.dumps({"hookSpecificOutput": {"decision": {"behavior": "allow"}}})
     eng = _engine(
         [
@@ -557,7 +652,13 @@ def test_permission_request_allow_and_no_verdict():
 
 
 def test_permission_request_exit2_denies_with_stderr():
-    eng = _engine([_handler("PermissionRequest", "echo blocked-by-policy >&2; exit 2", matcher="*")])
+    eng = _engine(
+        [
+            _handler(
+                "PermissionRequest", "echo blocked-by-policy >&2; exit 2", matcher="*"
+            )
+        ]
+    )
     res = asyncio.run(eng.run_permission_request("bash", {}))
     assert res.decision == "deny" and res.message == "blocked-by-policy"
 
@@ -584,7 +685,11 @@ def _recording_registry(tool_name, sink):
     from core.agent_runtime.tools.registry import ToolRegistry
 
     @tool_parameters(
-        {"type": "object", "properties": {"command": {"type": "string"}}, "required": []}
+        {
+            "type": "object",
+            "properties": {"command": {"type": "string"}},
+            "required": [],
+        }
     )
     class _Rec(Tool):
         @property
@@ -623,13 +728,21 @@ def test_runner_permission_request_hook_denies_an_ask():
     from core.agent_runtime.runner import AgentRunner
     from core.providers.base import LLMResponse, ToolCallRequest
 
-    deny = json.dumps({"hookSpecificOutput": {"decision": {"behavior": "deny", "message": "hook says no"}}})
+    deny = json.dumps(
+        {
+            "hookSpecificOutput": {
+                "decision": {"behavior": "deny", "message": "hook says no"}
+            }
+        }
+    )
     eng = _engine([_handler("PermissionRequest", f"echo '{deny}'", matcher="*")])
     provider = _Scripted(
         [
             LLMResponse(
                 content="",
-                tool_calls=[ToolCallRequest(id="c1", name="bash", arguments={"command": "x"})],
+                tool_calls=[
+                    ToolCallRequest(id="c1", name="bash", arguments={"command": "x"})
+                ],
                 finish_reason="tool_calls",
             ),
             LLMResponse(content="ok, backing off", finish_reason="stop"),
@@ -661,7 +774,9 @@ def test_runner_permission_request_hook_allows_an_ask():
         [
             LLMResponse(
                 content="",
-                tool_calls=[ToolCallRequest(id="c1", name="bash", arguments={"command": "ls"})],
+                tool_calls=[
+                    ToolCallRequest(id="c1", name="bash", arguments={"command": "ls"})
+                ],
                 finish_reason="tool_calls",
             ),
             LLMResponse(content="done", finish_reason="stop"),

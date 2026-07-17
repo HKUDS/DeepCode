@@ -40,7 +40,9 @@ class _FakeSession:
     async def run_stream(self, op):
         self.prompts.append(op.text)
         yield _Event(_Msg("agent_message"))
-        yield _Event(_Msg("task_complete", final_text=f"did: {op.text}", stop_reason="completed"))
+        yield _Event(
+            _Msg("task_complete", final_text=f"did: {op.text}", stop_reason="completed")
+        )
 
 
 @pytest.fixture(autouse=True)
