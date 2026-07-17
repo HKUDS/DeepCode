@@ -23,7 +23,8 @@ import styles from "./Composer.module.css";
 import { usePromptDraft } from "./usePromptDraft";
 
 interface ComposerProps {
-  enabled: boolean;
+  editable: boolean;
+  canExecute: boolean;
   busy: boolean;
   active: boolean;
   project: Project | null;
@@ -40,7 +41,8 @@ interface ComposerProps {
 }
 
 export function Composer({
-  enabled,
+  editable,
+  canExecute,
   busy,
   active,
   project,
@@ -82,7 +84,7 @@ export function Composer({
 
   const submit = async () => {
     const value = prompt.trim();
-    if (!value || !enabled || busy) return;
+    if (!value || !canExecute || busy) return;
     const parsed = parseComposerCommand(value);
     if (parsed) {
       if (!parsed.ok) {
@@ -173,7 +175,7 @@ export function Composer({
               : "Ask DeepCode to build, inspect, or verify…"
           }
           rows={1}
-          disabled={!enabled}
+          disabled={!editable}
         />
         {commandSuggestions.length ? (
           <div className={styles.commandMenu} role="listbox" aria-label="Commands">
@@ -218,7 +220,7 @@ export function Composer({
               className={styles.attachButton}
               type="button"
               onClick={() => void pickContextFiles()}
-              disabled={!enabled || busy}
+              disabled={!editable || busy}
               aria-label="Attach workspace files"
               title="Attach workspace files"
             >
@@ -273,7 +275,7 @@ export function Composer({
                 className={styles.queueButton}
                 type="button"
                 onClick={() => void submit()}
-                disabled={!enabled || busy || !prompt.trim()}
+                disabled={!canExecute || busy || !prompt.trim()}
               >
                 Queue
               </button>
@@ -292,7 +294,7 @@ export function Composer({
               className={styles.sendButton}
               type="button"
               onClick={() => void submit()}
-              disabled={!enabled || busy || !prompt.trim()}
+              disabled={!canExecute || busy || !prompt.trim()}
               aria-label="Run turn"
             >
               <ArrowUp size={17} strokeWidth={2.2} />

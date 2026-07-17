@@ -149,6 +149,21 @@ class TestRuntime implements DesktopRuntime {
     switch (method) {
       case "project/list":
         return { projects: this.projects } as MethodResults[M];
+      case "project/update": {
+        const request = params as MethodParams["project/update"];
+        const index = this.projects.findIndex(
+          (candidate) => candidate.id === request.projectId,
+        );
+        if (index === -1) {
+          throw new Error(`Missing test project: ${request.projectId}`);
+        }
+        this.projects[index] = {
+          ...this.projects[index],
+          ...(request.displayName ? { displayName: request.displayName } : {}),
+          ...(request.trustState ? { trustState: request.trustState } : {}),
+        };
+        return { project: this.projects[index] } as MethodResults[M];
+      }
       case "settings/read":
         return { settings: this.settingsState } as MethodResults[M];
       case "settings/update": {
@@ -1001,6 +1016,52 @@ describe("desktop command center", () => {
       }) as HTMLButtonElement).disabled,
     ).toBe(true);
     expect(screen.queryByText("Trusted")).toBeNull();
+  });
+
+  it("keeps a restored untrusted Session editable and runs only after trust", async () => {
+    const discoveredProject: Project = {
+      ...project,
+      id: "project-discovered",
+      canonicalPath: "/workspace/existing-cli-project",
+      displayName: "Existing CLI project",
+      trustState: "untrusted",
+      settings: { sessionDiscovered: true },
+    };
+    const restoredThread: Thread = {
+      ...thread,
+      id: "session-restored",
+      projectId: discoveredProject.id,
+      workspacePath: discoveredProject.canonicalPath,
+      title: "Existing CLI Session",
+    };
+    const runtime = new TestRuntime(
+      [discoveredProject],
+      [restoredThread],
+      [],
+    );
+    render(<App runtime={runtime} />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Task instruction",
+    });
+    expect((composer as HTMLTextAreaElement).disabled).toBe(false);
+    expect(
+      screen.getByText("Trust this folder before agent execution."),
+    ).toBeTruthy();
+
+    fireEvent.change(composer, {
+      target: { value: "Continue this existing Session" },
+    });
+    fireEvent.keyDown(composer, { key: "Enter" });
+    expect(runtime.calls).not.toContain("turn/start");
+    expect((composer as HTMLTextAreaElement).value).toBe(
+      "Continue this existing Session",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Trust folder" }));
+    await waitFor(() => expect(runtime.calls).toContain("project/update"));
+    fireEvent.keyDown(composer, { key: "Enter" });
+    await waitFor(() => expect(runtime.calls).toContain("turn/start"));
   });
 
   it("searches Sessions across projects and changes project context atomically", async () => {

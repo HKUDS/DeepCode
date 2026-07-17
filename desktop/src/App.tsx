@@ -68,11 +68,12 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
     ? ["queued", "running", "waiting"].includes(latestWorkflow.status)
     : false;
   const workspaceAvailable = projectCanExecute(selectedProject);
-  const composerEnabled =
+  const composerEditable =
     state.runtime.phase === "ready" &&
     workspaceAvailable &&
-    selectedProject?.trustState === "trusted" &&
     selectedThread !== null;
+  const agentExecutionEnabled =
+    composerEditable && selectedProject?.trustState === "trusted";
   const disabledReason =
     state.runtime.phase !== "ready"
       ? "Waiting for the local App Server."
@@ -268,7 +269,7 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
                 }
               >
                 <WorkflowComposer
-                  enabled={composerEnabled}
+                  enabled={agentExecutionEnabled}
                   busy={state.busy}
                   workflow={latestWorkflow}
                   disabledReason={disabledReason}
@@ -282,7 +283,8 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
             ) : selectedThread ? (
               <Composer
                 key={selectedThread.id}
-                enabled={composerEnabled}
+                editable={composerEditable}
+                canExecute={agentExecutionEnabled}
                 busy={state.busy}
                 active={Boolean(activeTurn)}
                 project={selectedProject}
