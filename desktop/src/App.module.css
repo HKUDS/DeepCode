@@ -23,9 +23,7 @@
 
 .threadViewport {
   min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scroll-behavior: smooth;
+  overflow: hidden;
 }
 
 .loadingSurface {

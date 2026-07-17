@@ -33,36 +33,30 @@
 .sessionButton {
   display: grid;
   min-width: 0;
-  min-height: 36px;
+  min-height: 30px;
   grid-template-columns: 9px minmax(0, 1fr);
   align-items: center;
   gap: 7px;
-  padding: 4px 2px 4px 7px;
+  padding: 3px 2px 3px 7px;
   color: inherit;
   text-align: left;
 }
 
 .copy {
-  display: grid;
+  display: block;
   min-width: 0;
-  gap: 2px;
 }
 
-.copy strong,
-.copy small {
+.copy strong {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .copy strong {
-  font-size: 10.5px;
-  font-weight: 560;
-}
-
-.copy small {
-  color: var(--text-tertiary);
-  font: 7.5px var(--font-mono);
+  font-size: 10.75px;
+  font-weight: 520;
 }
 
 .beacon {

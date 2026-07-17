@@ -241,6 +241,7 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
                   fallback={<LoadingSurface>Loading Session…</LoadingSurface>}
                 >
                   <ThreadConversation
+                    key={selectedThread.id}
                     turns={state.turns}
                     items={state.items}
                     approvals={state.approvals}

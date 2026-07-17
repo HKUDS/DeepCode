@@ -1,18 +1,5 @@
-import { useEffect, useMemo, useRef } from "react";
-import {
-  AlertTriangle,
-  CheckCircle2,
-  ChevronRight,
-  Clock3,
-  FilePenLine,
-  FlaskConical,
-  ListChecks,
-  PackageOpen,
-  RotateCcw,
-  ScrollText,
-  TerminalSquare,
-  Wrench,
-} from "lucide-react";
+import { ArrowDown } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   Approval,
@@ -21,10 +8,9 @@ import type {
   Turn,
 } from "../../generated/app-server";
 import type { DesktopInspectorTab } from "../../app/useDesktopUi";
-import { ApprovalCard } from "../execution/ApprovalCard";
-import { formatTimestamp, presentItem } from "../execution/itemPresentation";
-import { MarkdownContent } from "./MarkdownContent";
+import { buildConversationTurns } from "./conversationModel";
 import styles from "./ThreadConversation.module.css";
+import { TurnBlock } from "./TurnBlock";
 
 interface ThreadConversationProps {
   turns: Turn[];
@@ -39,49 +25,7 @@ interface ThreadConversationProps {
   onCancelQueuedTurn(turnId: string): void;
 }
 
-const activityKinds = new Set<Item["kind"]>([
-  "command_execution",
-  "tool_call",
-  "file_change",
-  "diff",
-  "test_result",
-  "artifact",
-  "workflow_stage",
-]);
-
-function approvalOutcome(status: Approval["status"]): string {
-  switch (status) {
-    case "approved_once":
-      return "Allowed once";
-    case "approved_session":
-      return "Allowed for this Session";
-    case "denied":
-      return "Denied";
-    case "cancelled":
-      return "Cancelled";
-    default:
-      return "Approval resolved";
-  }
-}
-
-function ActivityIcon({ kind }: { kind: Item["kind"] }) {
-  const props = { size: 15, strokeWidth: 1.8 };
-  switch (kind) {
-    case "command_execution":
-      return <TerminalSquare {...props} />;
-    case "file_change":
-    case "diff":
-      return <FilePenLine {...props} />;
-    case "test_result":
-      return <FlaskConical {...props} />;
-    case "artifact":
-      return <PackageOpen {...props} />;
-    case "workflow_stage":
-      return <ScrollText {...props} />;
-    default:
-      return <Wrench {...props} />;
-  }
-}
+const FOLLOW_THRESHOLD = 120;
 
 export function ThreadConversation({
   turns,
@@ -95,285 +39,121 @@ export function ThreadConversation({
   onRetryTurn,
   onCancelQueuedTurn,
 }: ThreadConversationProps) {
+  const scrollViewportRef = useRef<HTMLDivElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
-  const turnsById = useMemo(
-    () => new Map(turns.map((turn) => [turn.id, turn])),
-    [turns],
-  );
-  const ordered = useMemo(
-    () =>
-      [...items].sort((left, right) => {
-        const turnDifference =
-          (turnsById.get(left.turnId)?.ordinal ?? 0) -
-          (turnsById.get(right.turnId)?.ordinal ?? 0);
-        return turnDifference || left.ordinal - right.ordinal;
-      }),
-    [items, turnsById],
+  const followingRef = useRef(true);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const groupedTurns = useMemo(
+    () => buildConversationTurns(turns, items),
+    [items, turns],
   );
   const approvalsByItem = useMemo(
     () => new Map(approvals.map((approval) => [approval.itemId, approval])),
     [approvals],
   );
-  const lastItem = ordered.at(-1);
-
-  useEffect(() => {
-    if (!lastItem) return;
+  const latestItem = items.at(-1);
+  const latestUpdate = latestItem
+    ? `${latestItem.id}:${latestItem.status}:${latestItem.updatedAt}:${JSON.stringify(latestItem.payload).length}`
+    : `${turns.at(-1)?.id ?? "empty"}:${turns.at(-1)?.status ?? "idle"}`;
+  const scrollToLatest = useCallback((behavior: ScrollBehavior) => {
+    const viewport = scrollViewportRef.current;
+    if (typeof viewport?.scrollTo === "function") {
+      viewport.scrollTo({ top: viewport.scrollHeight, behavior });
+      return;
+    }
     const end = endRef.current;
     if (typeof end?.scrollIntoView === "function") {
-      end.scrollIntoView({
-        block: "end",
-        behavior: lastItem.status === "in_progress" ? "smooth" : "auto",
-      });
+      end.scrollIntoView({ block: "end", behavior });
     }
-  }, [lastItem]);
+  }, []);
 
-  if (ordered.length === 0) {
+  useEffect(() => {
+    const viewport = scrollViewportRef.current;
+    if (!viewport) return;
+
+    const handleScroll = () => {
+      const distanceFromBottom =
+        viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+      const nearBottom = distanceFromBottom <= FOLLOW_THRESHOLD;
+      followingRef.current = nearBottom;
+      setShowJumpToLatest(!nearBottom);
+    };
+
+    viewport.addEventListener("scroll", handleScroll, { passive: true });
+    return () => viewport.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  useEffect(() => {
+    if (!followingRef.current) return;
+    scrollToLatest(latestItem?.status === "in_progress" ? "smooth" : "auto");
+  }, [latestItem?.status, latestUpdate, scrollToLatest]);
+
+  const jumpToLatest = () => {
+    followingRef.current = true;
+    setShowJumpToLatest(false);
+    scrollToLatest("smooth");
+  };
+
+  if (groupedTurns.length === 0) {
     return (
-      <div className={styles.empty}>
-        <span className={styles.emptyRail} aria-hidden="true">
-          <i />
-          <i />
-          <i />
-        </span>
-        <h2>Start with a task.</h2>
-        <p>
-          Describe the outcome, the constraints, and how DeepCode should verify
-          the result.
-        </p>
-        <small>Conversation, tools, approvals, and review stay in this Session.</small>
+      <div className={styles.conversationFrame}>
+        <div className={styles.conversationScroller}>
+          <div className={styles.empty}>
+            <span className={styles.emptyRail} aria-hidden="true">
+              <i />
+              <i />
+              <i />
+            </span>
+            <h2>Start with a task.</h2>
+            <p>
+              Describe the outcome, the constraints, and how DeepCode should
+              verify the result.
+            </p>
+            <small>
+              Conversation, tools, approvals, and review stay in this Session.
+            </small>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className={styles.conversation} aria-label="Thread conversation">
-      {ordered.map((item) => {
-        const presentation = presentItem(item);
-        const approval = approvalsByItem.get(item.id);
-        const active = item.id === selectedItemId;
-        const turn = turnsById.get(item.turnId);
+    <div className={styles.conversationFrame}>
+      <div
+        className={styles.conversationScroller}
+        aria-label="Thread conversation"
+        ref={scrollViewportRef}
+      >
+        <div className={styles.conversation}>
+          {groupedTurns.map((group) => (
+            <TurnBlock
+              key={group.id}
+              group={group}
+              approvalsByItem={approvalsByItem}
+              selectedItemId={selectedItemId}
+              busy={busy}
+              onSelectItem={onSelectItem}
+              onOpenInspector={onOpenInspector}
+              onRespondToApproval={onRespondToApproval}
+              onRetryTurn={onRetryTurn}
+              onCancelQueuedTurn={onCancelQueuedTurn}
+            />
+          ))}
+          <div className={styles.conversationEnd} ref={endRef} />
+        </div>
+      </div>
 
-        if (item.kind === "user_message") {
-          const queued = turn?.status === "queued";
-          return (
-            <article
-              className={styles.userMessage}
-              data-queued={queued}
-              key={item.id}
-            >
-              <div className={styles.userBubble}>
-                <MarkdownContent>
-                  {presentation.body ?? item.summary}
-                </MarkdownContent>
-              </div>
-              {queued ? (
-                <div className={styles.queueState}>
-                  <Clock3 size={12} />
-                  <span>Queued</span>
-                  <button
-                    type="button"
-                    onClick={() => onCancelQueuedTurn(item.turnId)}
-                    disabled={busy}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              ) : null}
-            </article>
-          );
-        }
-
-        if (item.kind === "assistant_message") {
-          return (
-            <article className={styles.assistantMessage} key={item.id}>
-              <div className={styles.messageMeta}>
-                <strong>DeepCode</strong>
-                <time dateTime={item.updatedAt}>{formatTimestamp(item.updatedAt)}</time>
-              </div>
-              <div
-                className={styles.messageBody}
-                aria-live={item.status === "in_progress" ? "polite" : undefined}
-              >
-                <MarkdownContent>
-                  {presentation.body ?? item.summary}
-                </MarkdownContent>
-                {item.status === "in_progress" ? (
-                  <span className={styles.streamingCursor} aria-label="Agent is responding" />
-                ) : null}
-              </div>
-            </article>
-          );
-        }
-
-        if (item.kind === "approval_request" && approval) {
-          const pending = approval.status === "pending";
-          const toolName =
-            typeof approval.request.toolName === "string"
-              ? approval.request.toolName
-              : "operation";
-          return (
-            <section
-              className={styles.approval}
-              data-pending={pending}
-              data-status={approval.status}
-              key={item.id}
-            >
-              <div className={styles.approvalHeading}>
-                {pending ? (
-                  <AlertTriangle size={17} />
-                ) : (
-                  <CheckCircle2 size={17} />
-                )}
-                <span>
-                  <strong>
-                    {pending
-                      ? "Approval required"
-                      : approvalOutcome(approval.status)}
-                  </strong>
-                  <small>{pending ? item.summary : toolName}</small>
-                </span>
-              </div>
-              {pending ? (
-                <ApprovalCard
-                  approval={approval}
-                  busy={busy}
-                  onRespond={onRespondToApproval}
-                />
-              ) : (
-                <span className={styles.approvalDecision}>
-                  Decision: {approval.status.replaceAll("_", " ")}
-                </span>
-              )}
-            </section>
-          );
-        }
-
-        if (item.kind === "reasoning_summary" || item.kind === "plan") {
-          return (
-            <details
-              className={styles.plan}
-              key={item.id}
-              open={item.kind === "plan" || item.status === "in_progress"}
-            >
-              <summary>
-                {item.kind === "plan" ? (
-                  <ListChecks size={16} />
-                ) : (
-                  <ScrollText size={16} />
-                )}
-                <strong>{presentation.label}</strong>
-                <span>{item.status.replaceAll("_", " ")}</span>
-              </summary>
-              <div>
-                <MarkdownContent compact>
-                  {presentation.body ?? item.summary}
-                </MarkdownContent>
-              </div>
-            </details>
-          );
-        }
-
-        if (activityKinds.has(item.kind)) {
-          return (
-            <details
-              className={styles.activity}
-              data-active={active}
-              data-status={item.status}
-              key={item.id}
-              open={item.status === "in_progress" || active}
-            >
-              <summary>
-                <ActivityIcon kind={item.kind} />
-                <span>
-                  <strong>{item.summary || presentation.label}</strong>
-                  <small>{presentation.label}</small>
-                </span>
-                <span className={styles.activityStatus}>
-                  {item.status.replaceAll("_", " ")}
-                </span>
-                <ChevronRight className={styles.chevron} size={14} />
-              </summary>
-              {presentation.body ? <pre>{presentation.body}</pre> : null}
-              <button
-                type="button"
-                className={styles.inspectAction}
-                onClick={() => {
-                  onSelectItem(item.id);
-                  onOpenInspector("details");
-                }}
-              >
-                Inspect details
-              </button>
-            </details>
-          );
-        }
-
-        if (item.kind === "completion") {
-          const retryable =
-            item.status === "failed" ||
-            turn?.status === "failed" ||
-            turn?.status === "interrupted";
-          const recoveredAfterRestart =
-            item.payload.stopReason === "application_restarted";
-          return (
-            <section
-              className={styles.completion}
-              data-status={retryable ? "failed" : "completed"}
-              key={item.id}
-            >
-              <CheckCircle2 size={18} />
-              <span>
-                <strong>{item.summary || "Turn complete"}</strong>
-                <small>
-                  {recoveredAfterRestart
-                    ? "The previous process stopped. Retry from the same prompt."
-                    : retryable
-                      ? "Inspect the failure or retry this turn."
-                      : "Review changes, tests, and execution details."}
-                </small>
-              </span>
-              <div className={styles.completionActions}>
-                {retryable ? (
-                  <button
-                    type="button"
-                    onClick={() => onRetryTurn(item.turnId)}
-                    disabled={busy}
-                  >
-                    <RotateCcw size={13} />
-                    Retry
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  aria-label="Review turn details"
-                  onClick={() => {
-                    onSelectItem(item.id);
-                    onOpenInspector("changes");
-                  }}
-                >
-                  Review
-                  <ChevronRight size={14} />
-                </button>
-              </div>
-            </section>
-          );
-        }
-
-        if (item.kind === "error") {
-          return (
-            <article className={styles.error} key={item.id}>
-              <AlertTriangle size={17} />
-              <span>
-                <strong>{item.summary}</strong>
-                <p>{presentation.body}</p>
-              </span>
-            </article>
-          );
-        }
-
-        return null;
-      })}
-      <div ref={endRef} />
+      {showJumpToLatest ? (
+        <button
+          type="button"
+          className={styles.jumpToLatest}
+          onClick={jumpToLatest}
+        >
+          <ArrowDown size={14} />
+          Latest
+        </button>
+      ) : null}
     </div>
   );
 }

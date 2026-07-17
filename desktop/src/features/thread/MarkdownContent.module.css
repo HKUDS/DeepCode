@@ -20,30 +20,37 @@
 .markdown blockquote,
 .markdown table,
 .markdown hr {
-  margin: 0 0 14px;
+  margin: 0 0 12px;
 }
 
 .markdown h1,
 .markdown h2,
 .markdown h3,
-.markdown h4 {
-  margin: 24px 0 10px;
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  margin: 25px 0 9px;
   color: var(--text-primary);
-  font-weight: 680;
-  line-height: 1.3;
-  letter-spacing: -0.02em;
+  font-weight: 660;
+  line-height: 1.32;
+  letter-spacing: -0.018em;
 }
 
 .markdown h1 {
-  font-size: 1.3em;
+  font-size: 1.32em;
 }
 
 .markdown h2 {
-  font-size: 1.16em;
+  font-size: 1.18em;
 }
 
-.markdown h3,
-.markdown h4 {
+.markdown h3 {
+  font-size: 1.06em;
+}
+
+.markdown h4,
+.markdown h5,
+.markdown h6 {
   font-size: 1em;
 }
 
@@ -53,11 +60,17 @@
 }
 
 .markdown li {
-  margin: 4px 0;
+  margin: 3px 0;
   padding-left: 2px;
 }
 
 .markdown li > p {
+  margin-bottom: 4px;
+}
+
+.markdown li > ul,
+.markdown li > ol {
+  margin-top: 4px;
   margin-bottom: 5px;
 }
 
@@ -133,7 +146,7 @@
 }
 
 .codeBlock {
-  margin: 16px 0;
+  margin: 14px 0;
   overflow: hidden;
   border: 1px solid var(--border-subtle);
   border-radius: 10px;
@@ -186,8 +199,8 @@
 
 .markdown[data-compact="true"] {
   color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 1.65;
+  font-size: 11.5px;
+  line-height: 1.6;
 }
 
 .markdown[data-compact="true"] p,
@@ -195,4 +208,13 @@
 .markdown[data-compact="true"] ol,
 .markdown[data-compact="true"] blockquote {
   margin-bottom: 8px;
+}
+
+.markdown[data-compact="true"] h1,
+.markdown[data-compact="true"] h2,
+.markdown[data-compact="true"] h3,
+.markdown[data-compact="true"] h4,
+.markdown[data-compact="true"] h5,
+.markdown[data-compact="true"] h6 {
+  margin-top: 14px;
 }

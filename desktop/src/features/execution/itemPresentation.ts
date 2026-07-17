@@ -19,9 +19,17 @@ export function presentItem(item: Item): ItemPresentation {
     case "assistant_message":
       return { stage: "Response", label: "Agent", body: text ?? item.summary };
     case "reasoning_summary":
-      return { stage: "Reasoning", label: "Reasoning summary", body: text ?? item.summary };
+      return {
+        stage: "Reasoning",
+        label: "Reasoning summary",
+        body: text ?? result ?? item.summary,
+      };
     case "plan":
-      return { stage: "Plan", label: "Execution plan", body: text ?? item.summary };
+      return {
+        stage: "Plan",
+        label: "Execution plan",
+        body: text ?? result ?? item.summary,
+      };
     case "approval_request":
       return { stage: "Approval", label: "Permission review", body: item.summary };
     case "command_execution":

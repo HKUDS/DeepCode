@@ -1,7 +1,18 @@
 .region {
+  position: absolute;
+  z-index: 12;
+  right: 0;
+  bottom: 0;
+  left: 0;
   width: 100%;
-  padding: 10px 20px 14px;
-  background: var(--surface-canvas);
+  padding: 30px 20px 13px;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in srgb, var(--surface-canvas) 94%, transparent) 30px,
+    var(--surface-canvas) 58px
+  );
+  pointer-events: none;
 }
 
 .composer {
@@ -15,6 +26,7 @@
   transition:
     border-color 150ms ease,
     box-shadow 150ms ease;
+  pointer-events: auto;
 }
 
 .composer:focus-within {
@@ -270,6 +282,7 @@
   margin: 6px auto 0;
   color: var(--text-tertiary);
   font-size: 8.5px;
+  pointer-events: auto;
 }
 
 .hint span {

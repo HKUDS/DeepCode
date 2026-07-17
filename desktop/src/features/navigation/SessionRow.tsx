@@ -26,11 +26,6 @@ interface SessionRowProps {
 
 type RowMode = "closed" | "menu" | "rename" | "archive";
 
-function sessionKind(thread: Thread): string {
-  if (thread.mode === "paper") return "Paper2Code";
-  return thread.model ?? "Code";
-}
-
 export function SessionRow({
   thread,
   active,
@@ -138,7 +133,6 @@ export function SessionRow({
             />
             <span className={styles.copy}>
               <strong>{thread.title}</strong>
-              <small>{sessionKind(thread)}</small>
             </span>
           </button>
           <button

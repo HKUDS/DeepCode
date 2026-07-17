@@ -1,4 +1,5 @@
 import {
+  ChevronRight,
   Folder,
   FolderClock,
   FolderOpen,
@@ -11,7 +12,7 @@ import {
   Sparkles,
   WandSparkles,
 } from "lucide-react";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   isRecoveredHistoryProject,
@@ -21,6 +22,7 @@ import type { Project, Thread } from "../../generated/app-server";
 import type { DesktopDestination } from "../../app/useDesktopUi";
 import type { SidecarStatus } from "../../rpc/contracts";
 import { SessionRow } from "./SessionRow";
+import { useProjectDisclosure } from "./useProjectDisclosure";
 import styles from "./DesktopSidebar.module.css";
 
 interface DesktopSidebarProps {
@@ -42,34 +44,13 @@ interface DesktopSidebarProps {
   onArchiveThread(threadId: string): Promise<void>;
 }
 
-interface ThreadBucket {
-  label: string;
-  threads: Thread[];
-}
-
 interface SidebarProjectGroup {
   key: string;
   project: Project | null;
   displayName: string;
-  subtitle: string;
+  description: string;
   threads: Thread[];
   active: boolean;
-}
-
-function threadBuckets(threads: Thread[]): ThreadBucket[] {
-  const now = Date.now();
-  const day = 24 * 60 * 60 * 1000;
-  const buckets: ThreadBucket[] = [
-    { label: "Today", threads: [] },
-    { label: "Previous 7 days", threads: [] },
-    { label: "Older", threads: [] },
-  ];
-  for (const thread of threads) {
-    const age = Math.max(0, now - new Date(thread.updatedAt).getTime());
-    const bucket = age < day ? buckets[0] : age < day * 7 ? buckets[1] : buckets[2];
-    bucket.threads.push(thread);
-  }
-  return buckets.filter((bucket) => bucket.threads.length > 0);
 }
 
 function matches(
@@ -84,7 +65,7 @@ function matches(
     .includes(normalizedQuery);
 }
 
-function projectSubtitle(project: Project): string {
+function projectDescription(project: Project): string {
   const segments = project.canonicalPath.split("/").filter(Boolean);
   if (segments.length < 2) return project.canonicalPath;
   return `…/${segments.slice(-2).join("/")}`;
@@ -133,7 +114,7 @@ export function DesktopSidebar({
           key: project.id,
           project,
           displayName: project.displayName,
-          subtitle: projectSubtitle(project),
+          description: projectDescription(project),
           threads: projectThreads,
           active: project.id === selectedProjectId,
         };
@@ -152,7 +133,7 @@ export function DesktopSidebar({
         key: "recovered-history",
         project: null,
         displayName: "Previous sessions",
-        subtitle: "Original folders unavailable",
+        description: "Original folders unavailable",
         threads: recoveredThreads,
         active: recoveredThreads.some(
           (thread) => thread.projectId === selectedProjectId,
@@ -161,6 +142,9 @@ export function DesktopSidebar({
     }
     return regularGroups;
   }, [normalizedQuery, projects, selectedProjectId, threads]);
+  const activeGroupKey =
+    projectGroups.find((group) => group.active)?.key ?? null;
+  const disclosure = useProjectDisclosure(activeGroupKey);
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
@@ -304,63 +288,65 @@ export function DesktopSidebar({
         ) : (
           projectGroups.map((group) => {
             const project = group.project;
+            const expanded =
+              Boolean(normalizedQuery) || disclosure.isExpanded(group.key);
             return (
               <section className={styles.projectGroup} key={group.key}>
-                {project ? (
-                  <button
-                    type="button"
-                    className={styles.projectButton}
-                    data-active={group.active}
-                    onClick={() => onSelectProject(project.id)}
-                    title={project.canonicalPath}
-                  >
-                    {group.active ? (
+                <button
+                  type="button"
+                  className={styles.projectButton}
+                  data-active={group.active}
+                  data-static={!project || undefined}
+                  aria-expanded={expanded}
+                  aria-controls={`project-sessions-${group.key}`}
+                  onClick={() => {
+                    if (project && project.id !== selectedProjectId) {
+                      disclosure.expand(group.key);
+                      onSelectProject(project.id);
+                    } else {
+                      disclosure.toggle(group.key);
+                    }
+                  }}
+                  title={project?.canonicalPath ?? group.description}
+                >
+                  <ChevronRight
+                    size={13}
+                    className={styles.disclosure}
+                    aria-hidden="true"
+                  />
+                  {project ? (
+                    group.active ? (
                       <FolderOpen size={15} />
                     ) : (
                       <Folder size={15} />
-                    )}
-                    <span>
-                      <strong>{group.displayName}</strong>
-                      <small>{group.subtitle}</small>
-                    </span>
-                    {project.trustState === "untrusted" ? (
-                      <ShieldAlert
-                        size={14}
-                        className={styles.untrusted}
-                        aria-label="Project not trusted"
-                      />
-                    ) : null}
-                  </button>
-                ) : (
-                  <div
-                    className={styles.projectButton}
-                    data-active={group.active}
-                    data-static="true"
-                  >
+                    )
+                  ) : (
                     <FolderClock size={15} />
-                    <span>
-                      <strong>{group.displayName}</strong>
-                      <small>{group.subtitle}</small>
-                    </span>
-                  </div>
-                )}
+                  )}
+                  <strong>{group.displayName}</strong>
+                  {project?.trustState === "untrusted" ? (
+                    <ShieldAlert
+                      size={14}
+                      className={styles.untrusted}
+                      aria-label="Project not trusted"
+                    />
+                  ) : null}
+                </button>
 
-                {threadBuckets(group.threads).map((bucket) => (
-                  <div className={styles.threadBucket} key={bucket.label}>
-                    <p>{bucket.label}</p>
-                    {bucket.threads.map((thread) => (
-                      <SessionRow
-                        key={thread.id}
-                        thread={thread}
-                        active={thread.id === selectedThreadId}
-                        busy={busy}
-                        onSelect={onSelectThread}
-                        onRename={onRenameThread}
-                        onArchive={onArchiveThread}
-                      />
-                    ))}
-                  </div>
-                ))}
+                <ProjectSessions
+                  id={`project-sessions-${group.key}`}
+                  expanded={expanded}
+                  threads={group.threads}
+                  selectedThreadId={selectedThreadId}
+                  searching={Boolean(normalizedQuery)}
+                  busy={busy}
+                  onSelectThread={(threadId) => {
+                    disclosure.expand(group.key);
+                    onSelectThread(threadId);
+                  }}
+                  onRenameThread={onRenameThread}
+                  onArchiveThread={onArchiveThread}
+                />
               </section>
             );
           })
@@ -376,5 +362,81 @@ export function DesktopSidebar({
         <span className={styles.runtimeDot} data-phase={runtime.phase} aria-hidden="true" />
       </footer>
     </aside>
+  );
+}
+
+const SESSION_PREVIEW_LIMIT = 6;
+
+interface ProjectSessionsProps {
+  id: string;
+  expanded: boolean;
+  threads: Thread[];
+  selectedThreadId: string | null;
+  searching: boolean;
+  busy: boolean;
+  onSelectThread(threadId: string): void;
+  onRenameThread(threadId: string, title: string): Promise<void>;
+  onArchiveThread(threadId: string): Promise<void>;
+}
+
+function ProjectSessions({
+  id,
+  expanded,
+  threads,
+  selectedThreadId,
+  searching,
+  busy,
+  onSelectThread,
+  onRenameThread,
+  onArchiveThread,
+}: ProjectSessionsProps) {
+  const [showAll, setShowAll] = useState(false);
+
+  if (!expanded) return null;
+
+  const visibleThreads =
+    searching || showAll
+      ? threads
+      : threads.slice(0, SESSION_PREVIEW_LIMIT);
+  if (
+    !searching &&
+    !showAll &&
+    selectedThreadId &&
+    !visibleThreads.some((thread) => thread.id === selectedThreadId)
+  ) {
+    const selected = threads.find((thread) => thread.id === selectedThreadId);
+    if (selected) {
+      visibleThreads.splice(Math.max(0, SESSION_PREVIEW_LIMIT - 1), 1, selected);
+    }
+  }
+  const hiddenCount = threads.length - visibleThreads.length;
+
+  return (
+    <div className={styles.threadList} id={id}>
+      {threads.length === 0 ? (
+        <p className={styles.noSessions}>No Sessions</p>
+      ) : (
+        visibleThreads.map((thread) => (
+          <SessionRow
+            key={thread.id}
+            thread={thread}
+            active={thread.id === selectedThreadId}
+            busy={busy}
+            onSelect={onSelectThread}
+            onRename={onRenameThread}
+            onArchive={onArchiveThread}
+          />
+        ))
+      )}
+      {!searching && threads.length > SESSION_PREVIEW_LIMIT ? (
+        <button
+          type="button"
+          className={styles.showMore}
+          onClick={() => setShowAll((current) => !current)}
+        >
+          {showAll ? "Show less" : `Show ${hiddenCount} more`}
+        </button>
+      ) : null}
+    </div>
   );
 }

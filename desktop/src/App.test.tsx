@@ -667,6 +667,96 @@ const recoveryEvents: Event[] = [
   },
 ];
 
+const presentationItems: Item[] = [
+  {
+    id: "item-presentation-user",
+    threadId: thread.id,
+    turnId: turn.id,
+    ordinal: 1,
+    kind: "user_message",
+    status: "completed",
+    summary: "Inspect the repository",
+    payload: { text: "Inspect the repository" },
+    createdAt: "2026-07-16T00:00:01Z",
+    updatedAt: "2026-07-16T00:00:01Z",
+  },
+  {
+    id: "item-presentation-plan",
+    threadId: thread.id,
+    turnId: turn.id,
+    ordinal: 2,
+    kind: "plan",
+    status: "completed",
+    summary: "Execution plan",
+    payload: { resultPreview: "- Inspect files\n- Run tests" },
+    createdAt: "2026-07-16T00:00:01Z",
+    updatedAt: "2026-07-16T00:00:01Z",
+  },
+  {
+    id: "item-presentation-tool",
+    threadId: thread.id,
+    turnId: turn.id,
+    ordinal: 3,
+    kind: "command_execution",
+    status: "completed",
+    summary: "Ran the focused tests",
+    payload: { resultPreview: "3 tests passed" },
+    createdAt: "2026-07-16T00:00:02Z",
+    updatedAt: "2026-07-16T00:00:02Z",
+  },
+  {
+    id: "item-presentation-answer",
+    threadId: thread.id,
+    turnId: turn.id,
+    ordinal: 4,
+    kind: "assistant_message",
+    status: "completed",
+    summary: "Repository findings",
+    payload: {
+      text: "## Repository findings\n\nThe implementation is ready for review.",
+    },
+    createdAt: "2026-07-16T00:00:03Z",
+    updatedAt: "2026-07-16T00:00:03Z",
+  },
+  {
+    id: "item-presentation-completion",
+    threadId: thread.id,
+    turnId: turn.id,
+    ordinal: 5,
+    kind: "completion",
+    status: "completed",
+    summary: "Turn complete",
+    payload: { stopReason: "completed" },
+    createdAt: "2026-07-16T00:00:03Z",
+    updatedAt: "2026-07-16T00:00:03Z",
+  },
+];
+
+const presentationEvents: Event[] = [
+  {
+    eventId: "event-presentation-turn",
+    sequence: 1,
+    type: "turn.completed",
+    threadId: thread.id,
+    turnId: turn.id,
+    itemId: null,
+    timestamp: "2026-07-16T00:00:03Z",
+    payload: { turn: turn as unknown as JsonValue },
+  },
+  ...presentationItems.map(
+    (candidate, index): Event => ({
+      eventId: `event-presentation-${candidate.id}`,
+      sequence: index + 2,
+      type: "item.created",
+      threadId: thread.id,
+      turnId: turn.id,
+      itemId: candidate.id,
+      timestamp: candidate.updatedAt,
+      payload: { item: candidate as unknown as JsonValue },
+    }),
+  ),
+];
+
 const failedRecoveryEvents: Event[] = [
   {
     eventId: "event-recovered-turn",
@@ -1064,6 +1154,60 @@ describe("desktop command center", () => {
     await waitFor(() => expect(runtime.calls).toContain("turn/start"));
   });
 
+  it("reveals Session rows through project disclosure instead of expanding every project", async () => {
+    const secondProject: Project = {
+      ...project,
+      id: "project-collapsed",
+      canonicalPath: "/workspace/collapsed",
+      displayName: "Collapsed project",
+    };
+    const secondThread: Thread = {
+      ...thread,
+      id: "thread-collapsed",
+      projectId: secondProject.id,
+      title: "Hidden until expanded",
+      workspacePath: secondProject.canonicalPath,
+    };
+    const runtime = new TestRuntime(
+      [project, secondProject],
+      [thread, secondThread],
+      [],
+    );
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    expect(
+      screen.getByRole("button", { name: "Open Session Recovered task" }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", {
+        name: "Open Session Hidden until expanded",
+      }),
+    ).toBeNull();
+
+    const projectDisclosure = screen.getByRole("button", {
+      name: "Collapsed project",
+    });
+    expect(projectDisclosure.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(projectDisclosure);
+
+    await screen.findByRole("heading", { name: "Hidden until expanded" });
+    expect(projectDisclosure.getAttribute("aria-expanded")).toBe("true");
+    expect(
+      screen.getByRole("button", {
+        name: "Open Session Hidden until expanded",
+      }),
+    ).toBeTruthy();
+
+    fireEvent.click(projectDisclosure);
+    expect(projectDisclosure.getAttribute("aria-expanded")).toBe("false");
+    expect(
+      screen.queryByRole("button", {
+        name: "Open Session Hidden until expanded",
+      }),
+    ).toBeNull();
+  });
+
   it("searches Sessions across projects and changes project context atomically", async () => {
     const secondProject: Project = {
       ...project,
@@ -1161,6 +1305,28 @@ describe("desktop command center", () => {
     fireEvent.click(retry);
 
     await waitFor(() => expect(runtime.calls).toContain("turn/start"));
+  });
+
+  it("presents each completed Turn as one collapsed execution ledger and final answer", async () => {
+    const runtime = new TestRuntime([project], [thread], presentationEvents);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Repository findings" });
+    expect(
+      screen.getByText("The implementation is ready for review."),
+    ).toBeTruthy();
+    expect(screen.queryByText("Inspect files")).toBeNull();
+    expect(screen.queryByText("Turn complete")).toBeNull();
+
+    const ledger = screen.getByRole("button", {
+      name: /Worked for 2s.*2 steps/,
+    });
+    expect(ledger.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(ledger);
+
+    expect(ledger.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("Inspect files")).toBeTruthy();
+    expect(screen.getByText("Ran the focused tests")).toBeTruthy();
   });
 
   it("shows approval arguments and applies the durable decision", async () => {
