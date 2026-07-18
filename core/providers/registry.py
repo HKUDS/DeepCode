@@ -82,6 +82,17 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         supports_prompt_caching=True,
     ),
     ProviderSpec(
+        name="requesty",
+        keywords=("requesty",),
+        env_key="REQUESTY_API_KEY",
+        display_name="Requesty",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_base_keyword="requesty",
+        default_api_base="https://router.requesty.ai/v1",
+        supports_prompt_caching=True,
+    ),
+    ProviderSpec(
         name="anthropic",
         keywords=("anthropic", "claude"),
         env_key="ANTHROPIC_API_KEY",

@@ -791,7 +791,8 @@ Any OpenAI-compatible endpoint is supported by overriding `apiBase` on the match
   },
   "providers": {
     "openai":     { "apiKey": "your_openai_api_key" },
-    "openrouter": { "apiKey": "your_openrouter_key", "apiBase": "https://openrouter.ai/api/v1" }
+    "openrouter": { "apiKey": "your_openrouter_key", "apiBase": "https://openrouter.ai/api/v1" },
+    "requesty":   { "apiKey": "your_requesty_key", "apiBase": "https://router.requesty.ai/v1" }
   }
 }
 ```
@@ -802,6 +803,14 @@ OpenRouter model ids must use the exact `id` returned by OpenRouter, for example
 to search the live OpenRouter catalog and update the Default, Planning, and
 Implementation models without editing this file manually. Saving from the UI
 reloads the runtime for newly started workflows.
+
+[Requesty](https://requesty.ai) is another OpenAI-compatible gateway wired the
+same way: set `providers.requesty.apiKey` (from
+[app.requesty.ai/api-keys](https://app.requesty.ai/api-keys)) and use
+`provider/model` slugs such as `openai/gpt-4o-mini` or
+`anthropic/claude-sonnet-4-5`. See the
+[Requesty docs](https://docs.requesty.ai) and
+[model list](https://app.requesty.ai/router/list) for available ids.
 
 > **🔐 Never commit `deepcode_config.json`.** It is already in `.gitignore`.
 

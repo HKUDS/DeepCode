@@ -34,6 +34,10 @@
       "apiKey": "",
       "apiBase": "https://openrouter.ai/api/v1"
     },
+    "requesty": {
+      "apiKey": "",
+      "apiBase": "https://router.requesty.ai/v1"
+    },
     "gemini": {
       "apiKey": ""
     },
