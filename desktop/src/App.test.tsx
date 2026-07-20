@@ -83,6 +83,38 @@ const desktopSettings: SettingsSnapshot = {
   ],
 };
 
+const SKILL_ID = "sk_0123456789abcdef01234567";
+const VERIFY_SKILL_ID = "sk_89abcdef0123456701234567";
+const SKILL_REVISION = `sha256:${"a".repeat(64)}`;
+const CATALOG_REVISION = `sha256:${"b".repeat(64)}`;
+const reviewSkill = {
+  id: SKILL_ID,
+  name: "review",
+  description: "Review a change carefully",
+  allowedTools: ["read", "grep"],
+  scope: "project",
+  sourceRoot: "deepcode",
+  source: "project:deepcode",
+  location: "project/.deepcode/skills/review",
+  status: "active",
+  enabled: true,
+  selectable: true,
+  revision: SKILL_REVISION,
+  byteSize: 137,
+  shadowedBy: null,
+  error: null,
+} as const;
+const verifySkill = {
+  ...reviewSkill,
+  id: VERIFY_SKILL_ID,
+  name: "verify",
+  description: "Run the focused verification",
+  allowedTools: ["bash"],
+  revision: `sha256:${"c".repeat(64)}`,
+  byteSize: 121,
+  location: "project/.deepcode/skills/verify",
+} as const;
+
 const diagnostics: DiagnosticsSnapshot = {
   appVersion: "1.2.0",
   pythonVersion: "3.12.9",
@@ -128,6 +160,8 @@ class TestRuntime implements DesktopRuntime {
     models: desktopSettings.models.map((model) => ({ ...model })),
   };
   private automationStatus: Automation["status"] = "enabled";
+  private readonly disabledSkillIds = new Set<string>();
+  private readonly deletedSkillIds = new Set<string>();
 
   constructor(
     private readonly projects: Project[] = [],
@@ -182,30 +216,45 @@ class TestRuntime implements DesktopRuntime {
         return { settings: this.settingsState } as MethodResults[M];
       }
       case "skills/list":
-        return {
-          skills: [
-            {
-              name: "review",
-              description: "Review a change carefully",
-              allowedTools: ["read", "grep"],
-              directory: "/workspace/deepcode/.deepcode/skills/review",
-              source: "project:.deepcode",
-            },
-          ],
-          warnings: [],
-        } as unknown as MethodResults[M];
-      case "skill/read":
+        return this.skillCatalog() as unknown as MethodResults[M];
+      case "skill/read": {
+        const request = params as MethodParams["skill/read"];
+        const skill =
+          [reviewSkill, verifySkill].find(
+            (candidate) =>
+              candidate.id === request.skillId || candidate.name === request.name,
+          ) ?? reviewSkill;
         return {
           skill: {
-            name: "review",
-            description: "Review a change carefully",
-            allowedTools: ["read", "grep"],
-            directory: "/workspace/deepcode/.deepcode/skills/review",
-            source: "project:.deepcode",
+            ...skill,
+            ...(this.disabledSkillIds.has(skill.id)
+              ? {
+                  status: "disabled" as const,
+                  enabled: false,
+                  selectable: false,
+                }
+              : {}),
             instructions: "Inspect the change and report **concrete evidence**.",
             truncated: false,
           },
         } as unknown as MethodResults[M];
+      }
+      case "skills/set-enabled": {
+        const request = params as MethodParams["skills/set-enabled"];
+        if (request.enabled) {
+          this.disabledSkillIds.delete(request.skillId);
+        } else {
+          this.disabledSkillIds.add(request.skillId);
+        }
+        return this.skillCatalog() as unknown as MethodResults[M];
+      }
+      case "skills/delete": {
+        const request = params as MethodParams["skills/delete"];
+        this.deletedSkillIds.add(request.skillId);
+        return { removed: true } as MethodResults[M];
+      }
+      case "skills/reload":
+        return this.skillCatalog() as unknown as MethodResults[M];
       case "hooks/list":
         return {
           hooks: [
@@ -343,6 +392,7 @@ class TestRuntime implements DesktopRuntime {
           threadId: request.threadId,
           ordinal: 2,
           prompt: request.prompt,
+          skillIds: request.skills,
           status: "queued",
           stopReason: null,
           errorCode: null,
@@ -358,7 +408,21 @@ class TestRuntime implements DesktopRuntime {
           kind: "user_message",
           status: "completed",
           summary: request.prompt,
-          payload: { text: request.prompt },
+          payload: {
+            text: request.prompt,
+            skillIds: request.skills ?? [],
+            skills: (request.skills ?? []).map((skillId) => ({
+              skillId,
+              name:
+                skillId === SKILL_ID
+                  ? reviewSkill.name
+                  : skillId === VERIFY_SKILL_ID
+                    ? verifySkill.name
+                    : skillId,
+              revision: SKILL_REVISION,
+              invocation: "explicit",
+            })),
+          },
           createdAt: "2026-07-16T02:00:00Z",
           updatedAt: "2026-07-16T02:00:00Z",
         };
@@ -375,6 +439,7 @@ class TestRuntime implements DesktopRuntime {
           threadId: request.threadId,
           ordinal: 2,
           prompt: request.prompt,
+          skillIds: request.skills,
           status: "queued",
           stopReason: null,
           errorCode: null,
@@ -390,7 +455,21 @@ class TestRuntime implements DesktopRuntime {
           kind: "user_message",
           status: "completed",
           summary: request.prompt,
-          payload: { text: request.prompt },
+          payload: {
+            text: request.prompt,
+            skillIds: request.skills ?? [],
+            skills: (request.skills ?? []).map((skillId) => ({
+              skillId,
+              name:
+                skillId === SKILL_ID
+                  ? reviewSkill.name
+                  : skillId === VERIFY_SKILL_ID
+                    ? verifySkill.name
+                    : skillId,
+              revision: SKILL_REVISION,
+              invocation: "explicit",
+            })),
+          },
           createdAt: "2026-07-16T02:00:00Z",
           updatedAt: "2026-07-16T02:00:00Z",
         };
@@ -512,6 +591,25 @@ class TestRuntime implements DesktopRuntime {
   async onLog(listener: (message: string) => void) {
     void listener;
     return () => undefined;
+  }
+
+  private skillCatalog() {
+    return {
+      skills: [reviewSkill, verifySkill]
+        .filter((skill) => !this.deletedSkillIds.has(skill.id))
+        .map((skill) =>
+          this.disabledSkillIds.has(skill.id)
+            ? {
+                ...skill,
+                status: "disabled" as const,
+                enabled: false,
+                selectable: false,
+              }
+            : skill,
+        ),
+      warnings: [],
+      catalogRevision: CATALOG_REVISION,
+    };
   }
 }
 
@@ -930,6 +1028,27 @@ describe("desktop command center", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /review/i }));
     expect(await screen.findByText("concrete evidence")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Disable" }));
+    await waitFor(() =>
+      expect(
+        runtime.requests.some(
+          (candidate) =>
+            candidate.method === "skills/set-enabled" &&
+            (
+              candidate.params as MethodParams["skills/set-enabled"]
+            ).skillId === SKILL_ID,
+        ),
+      ).toBe(true),
+    );
+    const policyRequest = runtime.requests.find(
+      (candidate) => candidate.method === "skills/set-enabled",
+    );
+    expect(policyRequest?.params).toEqual({
+      projectId: project.id,
+      skillId: SKILL_ID,
+      enabled: false,
+      scope: "project",
+    });
     fireEvent.click(screen.getByRole("tab", { name: /Hooks 1/ }));
     expect(screen.getByText("python3 check.py")).toBeTruthy();
 
@@ -937,6 +1056,13 @@ describe("desktop command center", () => {
       (candidate) => candidate.method === "skills/list",
     );
     expect(skillsRequest?.params).toEqual({ projectId: project.id });
+    const detailRequest = runtime.requests.find(
+      (candidate) => candidate.method === "skill/read",
+    );
+    expect(detailRequest?.params).toEqual({
+      projectId: project.id,
+      skillId: SKILL_ID,
+    });
   });
 
   it("runs and manages a durable automation backed by a Goal Thread", async () => {
@@ -1450,6 +1576,39 @@ describe("desktop command center", () => {
     expect(request.prompt).toContain("Review this component");
     expect(request.prompt).toContain("- src/App.tsx");
     expect(request.prompt).not.toContain("/tmp/outside.txt");
+  });
+
+  it("attaches an opaque Skill selection to exactly one Desktop turn", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    const skillButton = await screen.findByRole("button", {
+      name: "Select Skills for this turn",
+    });
+    await waitFor(() =>
+      expect((skillButton as HTMLButtonElement).disabled).toBe(false),
+    );
+    fireEvent.click(skillButton);
+    fireEvent.click(await screen.findByRole("option", { name: /verify/i }));
+    fireEvent.click(screen.getByRole("option", { name: /review/i }));
+
+    expect(screen.getByRole("button", { name: "Remove review" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Remove verify" })).toBeTruthy();
+    const composer = screen.getByRole("textbox", { name: "Task instruction" });
+    fireEvent.change(composer, { target: { value: "Audit this patch" } });
+    fireEvent.keyDown(composer, { key: "Enter" });
+
+    await waitFor(() => expect(runtime.calls).toContain("turn/start"));
+    const request = runtime.requests.find(
+      (candidate) => candidate.method === "turn/start",
+    )?.params as MethodParams["turn/start"];
+    expect(request.skills).toEqual([VERIFY_SKILL_ID, SKILL_ID]);
+    expect(
+      screen.queryByRole("button", { name: "Remove review" }),
+    ).toBeNull();
+    expect(
+      (await screen.findByLabelText("Skills used in this turn")).textContent,
+    ).toContain("review");
   });
 
   it("executes slash commands locally instead of sending fake Agent prompts", async () => {

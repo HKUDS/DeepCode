@@ -288,6 +288,7 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
                 canExecute={agentExecutionEnabled}
                 busy={state.busy}
                 active={Boolean(activeTurn)}
+                runtime={runtime}
                 project={selectedProject}
                 thread={selectedThread}
                 settings={state.settings}

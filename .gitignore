@@ -81,6 +81,7 @@ uploads/
 # secrets (use .env or environment variables instead)
 # NEVER commit real API keys; use the *.example files as templates.
 deepcode_config.json
+deepcode_config.json.lock
 nanobot_config.json
 *.secrets.yaml
 *.secrets.yml

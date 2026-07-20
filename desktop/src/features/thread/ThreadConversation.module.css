@@ -14,13 +14,13 @@
 }
 
 .conversation {
-  width: min(780px, 100%);
+  width: min(820px, 100%);
   margin: 0 auto;
-  padding: 34px 24px 142px;
+  padding: 42px 30px 158px;
 }
 
 .turnBlock {
-  margin-bottom: 46px;
+  margin-bottom: 54px;
 }
 
 .turnBlock:last-of-type {
@@ -31,18 +31,18 @@
   display: flex;
   align-items: flex-end;
   flex-direction: column;
-  margin: 0 0 22px;
+  margin: 0 0 26px;
 }
 
 .userBubble {
-  max-width: min(640px, 86%);
-  padding: 10px 14px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 15px 15px 5px 15px;
+  max-width: min(660px, 82%);
+  padding: 11px 16px;
+  border: 1px solid color-mix(in srgb, var(--border-strong) 72%, transparent);
+  border-radius: 18px 18px 7px 18px;
   background: var(--surface-user);
   color: var(--text-primary);
-  font-size: 13.5px;
-  line-height: 1.58;
+  font-size: 14px;
+  line-height: 1.62;
 }
 
 .userMessage[data-queued="true"] .userBubble {
@@ -50,19 +50,45 @@
   color: var(--text-secondary);
 }
 
+.userSkills {
+  display: flex;
+  max-width: min(660px, 82%);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+  margin-top: 7px;
+}
+
+.userSkills span {
+  display: inline-flex;
+  min-height: 23px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--signal) 18%, var(--border-subtle));
+  border-radius: 999px;
+  background: var(--signal-faint);
+  color: var(--text-secondary);
+  font: 9px var(--font-mono);
+}
+
+.userSkills svg {
+  color: var(--signal);
+}
+
 .queueState {
   display: flex;
   align-items: center;
   gap: 5px;
-  margin-top: 7px;
+  margin-top: 8px;
   color: var(--text-tertiary);
-  font: 9px var(--font-mono);
+  font: 9.5px var(--font-mono);
 }
 
 .queueState button {
   margin-left: 3px;
   padding: 3px 6px;
-  border-radius: 5px;
+  border-radius: 8px;
   color: var(--danger);
   font-size: 9px;
 }
@@ -72,17 +98,21 @@
 }
 
 .runLedger {
-  margin: 2px 0 22px;
-  border-bottom: 1px solid var(--border-subtle);
+  margin: 3px 0 26px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--signal) 14%, var(--border-subtle));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--signal-faint) 56%, var(--surface-raised));
 }
 
 .runSummary {
   display: grid;
   width: 100%;
-  min-height: 38px;
-  grid-template-columns: 17px minmax(0, max-content) 1fr 15px;
+  min-height: 45px;
+  grid-template-columns: 18px minmax(0, max-content) 1fr 16px;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
+  padding: 0 12px;
   color: var(--text-tertiary);
   text-align: left;
 }
@@ -93,12 +123,12 @@
 
 .runSummary strong {
   color: var(--text-secondary);
-  font-size: 11.5px;
-  font-weight: 560;
+  font-size: 12px;
+  font-weight: 620;
 }
 
 .runSummary > span {
-  font: 8.5px var(--font-mono);
+  font: 9px var(--font-mono);
   text-align: right;
 }
 
@@ -124,15 +154,16 @@
 
 .runDetails {
   position: relative;
-  padding: 4px 0 13px 13px;
+  padding: 6px 10px 14px 21px;
   border-top: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--surface-raised) 72%, transparent);
 }
 
 .runDetails::before {
   position: absolute;
-  top: 10px;
-  bottom: 18px;
-  left: 5px;
+  top: 15px;
+  bottom: 21px;
+  left: 13px;
   width: 1px;
   background: var(--border-strong);
   content: "";
@@ -141,15 +172,15 @@
 .runStep,
 .runStep summary {
   display: grid;
-  min-height: 34px;
+  min-height: 38px;
   grid-template-columns: 17px minmax(0, 1fr) auto 14px;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
 }
 
 .runStep {
   position: relative;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   color: var(--text-tertiary);
 }
 
@@ -158,7 +189,7 @@ details.runStep {
 }
 
 .runStep summary {
-  padding: 0 7px;
+  padding: 0 9px;
   cursor: pointer;
   list-style: none;
 }
@@ -168,17 +199,17 @@ details.runStep {
 }
 
 div.runStep {
-  padding: 0 7px;
+  padding: 0 9px;
 }
 
 .runStep::before {
   position: absolute;
   z-index: 1;
-  top: 14px;
-  left: -10px;
-  width: 5px;
-  height: 5px;
-  border: 2px solid var(--surface-canvas);
+  top: 16px;
+  left: -11px;
+  width: 6px;
+  height: 6px;
+  border: 2px solid var(--surface-raised);
   border-radius: 50%;
   background: var(--border-emphasis);
   content: "";
@@ -209,14 +240,14 @@ div.runStep {
 .runStepCopy {
   display: grid;
   min-width: 0;
-  gap: 1px;
+  gap: 2px;
 }
 
 .runStepCopy strong {
   overflow: hidden;
   color: var(--text-primary);
-  font-size: 10.8px;
-  font-weight: 590;
+  font-size: 11.5px;
+  font-weight: 610;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -224,7 +255,7 @@ div.runStep {
 .runStepCopy small,
 .runStepStatus {
   color: var(--text-tertiary);
-  font: 8px var(--font-mono);
+  font: 8.5px var(--font-mono);
 }
 
 .runStepStatus {
@@ -232,15 +263,15 @@ div.runStep {
 }
 
 .runStepDetail {
-  margin: 0 7px 7px 24px;
+  margin: 1px 9px 9px 27px;
   overflow: hidden;
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--surface-code);
 }
 
 .runStepDetail > :first-child {
-  padding: 10px 12px;
+  padding: 11px 13px;
 }
 
 .runStepDetail pre {
@@ -248,7 +279,7 @@ div.runStep {
   margin: 0;
   overflow: auto;
   color: var(--text-secondary);
-  font: 10px/1.62 var(--font-mono);
+  font: 10.5px/1.64 var(--font-mono);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -256,12 +287,12 @@ div.runStep {
 .runStepDetail button {
   display: block;
   width: 100%;
-  min-height: 30px;
+  min-height: 33px;
   margin: 0;
-  padding: 0 12px;
+  padding: 0 13px;
   border-top: 1px solid var(--border-subtle);
   color: var(--text-tertiary);
-  font-size: 9.5px;
+  font-size: 10px;
   text-align: left;
 }
 
@@ -272,10 +303,10 @@ div.runStep {
 
 .runApproval {
   position: relative;
-  margin: 5px 7px 8px 0;
-  padding: 11px 12px;
+  margin: 6px 9px 9px 0;
+  padding: 13px 14px;
   border: 1px solid color-mix(in srgb, var(--attention) 34%, var(--border-subtle));
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   background: var(--attention-soft);
 }
 
@@ -324,29 +355,29 @@ div.runStep {
 
 .runApprovalHeading strong {
   color: var(--text-primary);
-  font-size: 10.8px;
+  font-size: 11.5px;
 }
 
 .runApprovalHeading small {
   color: var(--text-secondary);
-  font-size: 9.5px;
+  font-size: 10px;
 }
 
 .runApprovalDecision {
   display: block;
   margin: 5px 0 0 23px;
   color: var(--text-tertiary);
-  font: 8.5px var(--font-mono);
+  font: 9px var(--font-mono);
   text-transform: capitalize;
 }
 
 .runError {
   margin: 7px 7px 7px 0;
   padding: 9px 11px;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: var(--danger-soft);
   color: var(--danger);
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1.55;
 }
 
@@ -360,13 +391,13 @@ div.runStep {
 
 .runActions button {
   display: inline-flex;
-  min-height: 27px;
+  min-height: 30px;
   align-items: center;
   gap: 5px;
-  padding: 0 8px;
-  border-radius: 6px;
+  padding: 0 9px;
+  border-radius: 8px;
   color: var(--text-tertiary);
-  font-size: 9.5px;
+  font-size: 10px;
 }
 
 .runActions button:hover:not(:disabled) {
@@ -380,8 +411,8 @@ div.runStep {
 
 .messageBody {
   color: var(--text-primary);
-  font-size: 14.5px;
-  line-height: 1.68;
+  font-size: 15px;
+  line-height: 1.72;
   overflow-wrap: anywhere;
 }
 
@@ -399,19 +430,19 @@ div.runStep {
 .jumpToLatest {
   position: absolute;
   z-index: 8;
-  bottom: 148px;
+  bottom: 160px;
   left: 50%;
   display: inline-flex;
-  min-height: 32px;
+  min-height: 36px;
   align-items: center;
   gap: 6px;
-  padding: 0 11px;
+  padding: 0 13px;
   border: 1px solid var(--border-strong);
-  border-radius: 18px;
+  border-radius: var(--radius-pill);
   background: var(--surface-overlay);
   box-shadow: var(--shadow-float);
   color: var(--text-secondary);
-  font-size: 10.5px;
+  font-size: 11px;
   transform: translateX(-50%);
   backdrop-filter: blur(14px);
 }
@@ -438,22 +469,22 @@ div.runStep {
 
 .empty {
   display: grid;
-  width: min(660px, 100%);
+  width: min(700px, 100%);
   min-height: 100%;
   align-content: center;
   justify-items: start;
   margin: 0 auto;
-  padding: 64px 32px 142px;
+  padding: 72px 38px 158px;
   text-align: left;
 }
 
 .emptyRail {
   position: relative;
   display: flex;
-  width: 72px;
+  width: 78px;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 20px;
+  margin-bottom: 24px;
 }
 
 .emptyRail::before {
@@ -467,8 +498,8 @@ div.runStep {
 
 .emptyRail i {
   position: relative;
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border: 1px solid var(--border-emphasis);
   border-radius: 50%;
   background: var(--surface-canvas);
@@ -486,23 +517,23 @@ div.runStep {
 .empty h2 {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 25px;
-  font-weight: 650;
-  letter-spacing: -0.04em;
-  line-height: 1.12;
+  font-size: 31px;
+  font-weight: 680;
+  letter-spacing: -0.045em;
+  line-height: 1.1;
 }
 
 .empty > p {
   max-width: 520px;
-  margin: 13px 0 9px;
+  margin: 16px 0 11px;
   color: var(--text-secondary);
-  font-size: 13px;
-  line-height: 1.65;
+  font-size: 14px;
+  line-height: 1.68;
 }
 
 .empty small {
   color: var(--text-tertiary);
-  font: 9px var(--font-mono);
+  font: 9.5px var(--font-mono);
 }
 
 @media (max-width: 680px) {

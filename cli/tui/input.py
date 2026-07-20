@@ -22,6 +22,7 @@ from prompt_toolkit.patch_stdout import patch_stdout
 
 from cli.tui import theme
 from cli.tui.commands import REGISTRY
+from core.skills.management import LocalSkillManager
 
 _HISTORY_PATH = Path.home() / ".deepcode" / "tui_history"
 _SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv"}
@@ -33,6 +34,7 @@ class TuiCompleter(Completer):
 
     def __init__(self, workspace: str) -> None:
         self.workspace = Path(workspace)
+        self._skill_manager: LocalSkillManager | None = None
 
     def get_completions(self, document, complete_event):
         text = document.text_before_cursor
@@ -41,6 +43,25 @@ class TuiCompleter(Completer):
             for name in REGISTRY:
                 if name.startswith(prefix):
                     yield Completion(name, start_position=-len(prefix))
+            return
+        dollar = text.rfind("$")
+        if dollar >= 0 and (dollar == 0 or text[dollar - 1].isspace()):
+            fragment = text[dollar + 1 :]
+            if fragment and any(character.isspace() for character in fragment):
+                return
+            try:
+                if self._skill_manager is None:
+                    self._skill_manager = LocalSkillManager(self.workspace)
+                records = self._skill_manager.catalog().active()
+            except (OSError, ValueError):
+                records = ()
+            for record in records:
+                if record.name.casefold().startswith(fragment.casefold()):
+                    yield Completion(
+                        record.name,
+                        start_position=-len(fragment),
+                        display=f"${record.name} — {record.description}",
+                    )
             return
         at = text.rfind("@")
         if at == -1:

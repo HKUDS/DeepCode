@@ -17,6 +17,7 @@ from core.application.git_service import GitService
 from core.application.mcp_service import McpService
 from core.application.project_service import ProjectService
 from core.application.settings_service import SettingsService
+from core.application.skill_service import SkillService
 from core.application.terminal_service import TerminalService
 from core.application.test_service import TestService
 from core.application.thread_service import ThreadService
@@ -49,7 +50,8 @@ class DeepCodeApplication:
         self.broker = EventBroker(default_capacity=event_queue_capacity)
         self.projects = ProjectService(database)
         self.settings = SettingsService(self.projects)
-        self.extensions = ExtensionService(self.projects)
+        self.skills = SkillService(self.projects)
+        self.extensions = ExtensionService(self.projects, self.skills)
         self.mcp = McpService(self.projects)
         self.diagnostics = DiagnosticsService(
             database,

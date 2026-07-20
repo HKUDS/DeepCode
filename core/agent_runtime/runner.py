@@ -121,6 +121,10 @@ class AgentRunSpec:
     llm_timeout_s: float | None = None
     should_stop_callback: Any | None = None
     max_injection_cycles: int | None = None
+    # Optional dynamic restriction applied after the registry and before model
+    # exposure/execution. It may narrow the existing registry but can never add
+    # a tool or bypass the normal permission checker.
+    tool_filter: Any | None = None
     # Permission seam (P1 security base). A callable
     # ``(tool_name, arguments) -> (decision, reason)`` where ``decision`` is
     # one of "allow"/"ask"/"deny" (str or enum with a ``.value``). Called
@@ -156,6 +160,25 @@ class AgentRunSpec:
     # follow-up prompt and the loop keeps going. ``stop_hook_active`` is passed
     # so a well-behaved hook stops blocking after its first continuation.
     stop_hook: Any | None = None
+
+    def allowed_tool_names(self) -> frozenset[str] | None:
+        if self.tool_filter is None:
+            return None
+        value = self.tool_filter()
+        if value is None:
+            return None
+        return frozenset(str(name) for name in value)
+
+    def tool_definitions(self) -> list[dict[str, Any]]:
+        definitions = self.tools.get_definitions()
+        allowed = self.allowed_tool_names()
+        if allowed is None:
+            return definitions
+        return [
+            schema
+            for schema in definitions
+            if ToolRegistry._schema_name(schema) in allowed
+        ]
 
 
 @dataclass(slots=True)
@@ -725,7 +748,7 @@ class AgentRunner:
         kwargs = self._build_request_kwargs(
             spec,
             messages,
-            tools=spec.tools.get_definitions(),
+            tools=spec.tool_definitions(),
         )
         if hook.wants_streaming():
 
@@ -825,6 +848,21 @@ class AgentRunner:
         external_lookup_counts: dict[str, int],
     ) -> tuple[Any, dict[str, str], BaseException | None]:
         _HINT = "\n\n[Analyze the error above and try a different approach.]"
+        allowed = spec.allowed_tool_names()
+        if allowed is not None and tool_call.name not in allowed:
+            message = (
+                f"Error: tool {tool_call.name!r} is not allowed by the active "
+                "Skill policy"
+            )
+            return (
+                message + _HINT,
+                {
+                    "name": tool_call.name,
+                    "status": "denied",
+                    "detail": "blocked by active Skill policy",
+                },
+                None,
+            )
         lookup_error = repeated_external_lookup_error(
             tool_call.name,
             tool_call.arguments,
@@ -1302,7 +1340,7 @@ class AgentRunner:
             return messages
         try:
             estimate, _ = estimate_prompt_tokens_chain(
-                self.provider, spec.model, messages, spec.tools.get_definitions()
+                self.provider, spec.model, messages, spec.tool_definitions()
             )
         except Exception:
             return messages
@@ -1395,7 +1433,7 @@ class AgentRunner:
             self.provider,
             spec.model,
             messages,
-            spec.tools.get_definitions(),
+            spec.tool_definitions(),
         )
         if estimate <= budget:
             return messages

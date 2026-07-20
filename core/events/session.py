@@ -40,6 +40,8 @@ from core.events.protocol import (
     Shutdown,
     ShutdownComplete,
     Submission,
+    SkillLoaded,
+    SkillLoadFailed,
     TaskComplete,
     ToolCompleted,
     ToolStarted,
@@ -49,6 +51,8 @@ from core.events.protocol import (
     summarize_result,
 )
 from core.providers.base import LLMProvider
+from core.skills.models import SkillError
+from core.skills.runtime import SkillRuntime, SkillTurnContext
 
 _DEFAULT_MAX_ITERATIONS = 50
 _DEFAULT_MAX_TOOL_RESULT_CHARS = 60_000
@@ -117,6 +121,7 @@ class AgentSession:
         agent_context: tuple[str, str] | None = None,
         context_window_tokens: int | None = None,
         streaming: bool = False,
+        skill_runtime: SkillRuntime | None = None,
     ) -> None:
         self._runner = AgentRunner(provider)
         self._provider = provider
@@ -146,6 +151,10 @@ class AgentSession:
         # (terminated by the authoritative AgentMessage). Interactive
         # frontends enable this; headless NDJSON consumers leave it off.
         self._streaming = streaming
+        # Skills are resolved here, at the frontend-neutral turn boundary.
+        # A turn holds one immutable catalog snapshot, so a concurrent file
+        # change can only affect the next turn.
+        self._skill_runtime = skill_runtime
 
         self._events: asyncio.Queue[Event] = asyncio.Queue()
         self._history: list[dict[str, Any]] = []
@@ -225,7 +234,7 @@ class AgentSession:
     async def submit(self, op: Op) -> None:
         """Process one submission, emitting events onto the queue."""
         if isinstance(op, UserInput):
-            await self._run_user_input(op.text)
+            await self._run_user_input(op)
         elif isinstance(op, Interrupt):
             task = self._active_turn_task or self._current_task
             if task is not None and not task.done():
@@ -302,15 +311,77 @@ class AgentSession:
                 return out.block_reason or "Prompt blocked by a UserPromptSubmit hook."
         return None
 
-    async def _run_user_input(self, text: str) -> None:
+    async def _run_user_input(self, op: UserInput | str) -> None:
+        """Resolve one immutable turn and run it through the shared kernel.
+
+        ``str`` remains accepted for compatibility with older direct tests and
+        integrations; protocol callers should send :class:`UserInput`.
+        """
+        user_input = op if isinstance(op, UserInput) else UserInput(text=op)
+        text = user_input.text
         if self._busy:
             self._emit(ErrorEvent(message="a turn is already in progress"))
             self._emit(TaskComplete(final_text=None, stop_reason="busy"))
             return
         self._busy = True
         self._active_turn_task = asyncio.current_task()
-        self._emit(TurnStarted())
+        skill_context: SkillTurnContext | None = None
+        skill_token = None
+        try:
+            if self._skill_runtime is not None:
+                try:
+                    skill_context, skill_token = self._skill_runtime.begin_turn(
+                        text,
+                        user_input.skills,
+                    )
+                except SkillError as exc:
+                    self._emit(
+                        SkillLoadFailed(
+                            message=str(exc),
+                            skill_id=(
+                                user_input.skills[0].skill_id
+                                if user_input.skills
+                                else None
+                            ),
+                        )
+                    )
+                    self._emit(ErrorEvent(message=str(exc)))
+                    self._emit(
+                        TaskComplete(
+                            final_text=None,
+                            stop_reason="invalid_skill",
+                        )
+                    )
+                    return
 
+            invocations = (
+                skill_context.snapshot.invocations if skill_context is not None else ()
+            )
+            self._emit(TurnStarted(skill_invocations=invocations))
+            for invocation in invocations:
+                self._emit(SkillLoaded(invocation=invocation))
+            if skill_context is not None:
+                # Progressive-disclosure loads happen during tool execution and
+                # join the same per-turn invocation ledger.
+                skill_context.on_invocation = lambda invocation: self._emit(
+                    SkillLoaded(invocation=invocation)
+                )
+                skill_context.on_failure = lambda message, skill_id: self._emit(
+                    SkillLoadFailed(message=message, skill_id=skill_id)
+                )
+            await self._execute_turn(text, skill_context)
+        finally:
+            if skill_token is not None and self._skill_runtime is not None:
+                self._skill_runtime.end_turn(skill_token)
+            self._busy = False
+            self._current_task = None
+            self._active_turn_task = None
+
+    async def _execute_turn(
+        self,
+        text: str,
+        skill_context: SkillTurnContext | None,
+    ) -> None:
         # External-command hooks (C3): SessionStart (once) + UserPromptSubmit
         # (every prompt). UserPromptSubmit may block the turn outright or inject
         # context; SessionStart injects session context. Injected context rides
@@ -321,16 +392,12 @@ class AgentSession:
                 blocked = await self._run_prompt_hooks(text, hook_contexts)
             except asyncio.CancelledError:
                 self._emit(TaskComplete(final_text=None, stop_reason="interrupted"))
-                self._busy = False
-                self._active_turn_task = None
                 return
             if blocked is not None:
                 self._history.append({"role": "user", "content": text})
                 self._emit(
                     TaskComplete(final_text=blocked, stop_reason="blocked_by_hook")
                 )
-                self._busy = False
-                self._active_turn_task = None
                 return
 
         self._history.append({"role": "user", "content": text})
@@ -338,6 +405,13 @@ class AgentSession:
         initial: list[dict[str, Any]] = []
         if self._system_prompt:
             initial.append({"role": "system", "content": self._system_prompt})
+        if self._skill_runtime is not None and skill_context is not None:
+            preamble = self._skill_runtime.preamble(skill_context.catalog)
+            if preamble:
+                initial.append({"role": "system", "content": preamble})
+            instructions = skill_context.snapshot.injected_instructions
+            if instructions:
+                initial.append({"role": "system", "content": instructions})
         for ctx in hook_contexts:
             initial.append({"role": "system", "content": ctx})
         initial.extend(self._history)
@@ -381,6 +455,15 @@ class AgentSession:
             stop_hook=stop_hook,
             pre_compact_hook=pre_compact_hook,
             post_compact_hook=post_compact_hook,
+            tool_filter=(
+                (
+                    lambda: self._skill_runtime.visible_tool_names(
+                        tuple(self._tools.tool_names)
+                    )
+                )
+                if self._skill_runtime is not None
+                else None
+            ),
         )
 
         try:
@@ -388,9 +471,6 @@ class AgentSession:
             result = await self._current_task
         except asyncio.CancelledError:
             self._emit(TaskComplete(final_text=None, stop_reason="interrupted"))
-            self._busy = False
-            self._current_task = None
-            self._active_turn_task = None
             return
         except Exception as exc:  # noqa: BLE001
             # The runner should return errors as data, but a truly unexpected
@@ -399,9 +479,6 @@ class AgentSession:
             # close the turn with an error + task_complete.
             self._emit(ErrorEvent(message=f"{type(exc).__name__}: {exc}"))
             self._emit(TaskComplete(final_text=None, stop_reason="error"))
-            self._busy = False
-            self._current_task = None
-            self._active_turn_task = None
             return
         finally:
             self._current_task = None
@@ -418,5 +495,3 @@ class AgentSession:
                 final_text=result.final_content, stop_reason=result.stop_reason
             )
         )
-        self._busy = False
-        self._active_turn_task = None

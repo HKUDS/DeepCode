@@ -251,6 +251,11 @@ def test_management_methods_round_trip_real_project_state(
         str(workspace),
         trust_state=TrustState.TRUSTED,
     )
+    review_id = next(
+        skill.id
+        for skill in application.skills.list(project.id).skills
+        if skill.name == "review"
+    )
     source = io.BytesIO(
         _request(
             1,
@@ -297,7 +302,37 @@ def test_management_methods_round_trip_real_project_state(
                 "name": "project-tools",
             },
         )
-        + _request(10, "shutdown", {})
+        + _request(
+            10,
+            "skills/set-enabled",
+            {
+                "projectId": project.id,
+                "skillId": review_id,
+                "scope": "project",
+            },
+        )
+        + _request(
+            11,
+            "skills/set-enabled",
+            {
+                "projectId": project.id,
+                "skillId": review_id,
+                "enabled": False,
+                "scope": "project",
+            },
+        )
+        + _request(
+            12,
+            "skills/set-enabled",
+            {
+                "projectId": project.id,
+                "skillId": review_id,
+                "enabled": True,
+                "scope": "project",
+            },
+        )
+        + _request(13, "skills/reload", {"projectId": project.id})
+        + _request(14, "shutdown", {})
     )
     sink = io.BytesIO()
     try:
@@ -327,6 +362,19 @@ def test_management_methods_round_trip_real_project_state(
             server["name"] for server in responses[9]["servers"]
         }
         assert "demo" in {server["name"] for server in responses[9]["servers"]}
+        messages = {
+            message["id"]: message for message in _messages(sink) if "id" in message
+        }
+        assert messages[10]["error"]["data"]["code"] == "INVALID_REQUEST"
+        disabled = next(
+            skill for skill in responses[11]["skills"] if skill["id"] == review_id
+        )
+        assert disabled["status"] == "disabled"
+        enabled = next(
+            skill for skill in responses[12]["skills"] if skill["id"] == review_id
+        )
+        assert enabled["status"] == "active"
+        assert responses[13]["catalogRevision"].startswith("sha256:")
         serialized = sink.getvalue().decode()
         assert "never-return-this" not in serialized
         assert "mcp-secret" not in serialized

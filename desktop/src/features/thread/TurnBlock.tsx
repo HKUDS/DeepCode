@@ -9,6 +9,7 @@ import {
   PackageOpen,
   RotateCcw,
   ScrollText,
+  Sparkles,
   TerminalSquare,
   Wrench,
 } from "lucide-react";
@@ -43,6 +44,42 @@ interface TurnBlockProps {
 }
 
 const activeTurnStatuses = new Set(["queued", "running", "waiting_approval"]);
+
+interface SkillInvocationView {
+  skillId: string;
+  name: string;
+  revision?: string;
+  invocation?: string;
+}
+
+function itemSkills(item: Item): SkillInvocationView[] {
+  const value = item.payload.skills;
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((candidate) => {
+    if (
+      typeof candidate !== "object" ||
+      candidate === null ||
+      Array.isArray(candidate)
+    ) {
+      return [];
+    }
+    const skillId = candidate.skillId;
+    const name = candidate.name;
+    if (typeof skillId !== "string" || typeof name !== "string") return [];
+    return [
+      {
+        skillId,
+        name,
+        revision:
+          typeof candidate.revision === "string" ? candidate.revision : undefined,
+        invocation:
+          typeof candidate.invocation === "string"
+            ? candidate.invocation
+            : undefined,
+      },
+    ];
+  });
+}
 
 function ActivityIcon({ kind }: { kind: Item["kind"] }) {
   const props = { size: 14, strokeWidth: 1.8 };
@@ -347,9 +384,10 @@ export function TurnBlock({
     ? group.userMessages.map((item) => ({
         id: item.id,
         text: presentItem(item).body ?? item.summary,
+        skills: itemSkills(item),
       }))
     : group.turn?.prompt
-      ? [{ id: `${group.id}-prompt`, text: group.turn.prompt }]
+      ? [{ id: `${group.id}-prompt`, text: group.turn.prompt, skills: [] }]
       : [];
 
   return (
@@ -359,6 +397,19 @@ export function TurnBlock({
           <div className={styles.userBubble}>
             <MarkdownContent>{message.text}</MarkdownContent>
           </div>
+          {message.skills.length ? (
+            <div className={styles.userSkills} aria-label="Skills used in this turn">
+              {message.skills.map((skill) => (
+                <span
+                  key={skill.skillId}
+                  title={[skill.invocation, skill.revision].filter(Boolean).join(" · ")}
+                >
+                  <Sparkles size={10} />
+                  {skill.name}
+                </span>
+              ))}
+            </div>
+          ) : null}
           {queued && turnId ? (
             <div className={styles.queueState}>
               <Clock3 size={12} />

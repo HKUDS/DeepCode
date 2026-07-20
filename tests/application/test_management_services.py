@@ -8,6 +8,9 @@ import pytest
 from core.application import DeepCodeApplication
 from core.application.errors import InvalidArgumentError, ProjectNotTrustedError
 from core.domain import TrustState
+from core.persistence.migrations import LATEST_SCHEMA_VERSION
+from core.skills.management import LocalSkillManager
+from core.skills.runtime import SkillRuntime
 
 
 def _write_json(path: Path, value: dict) -> None:
@@ -54,12 +57,26 @@ def test_extension_inventory_matches_agent_skill_and_hook_discovery(
         },
     )
     application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
-    project = application.projects.add(str(workspace))
+    project = application.projects.add(
+        str(workspace),
+        trust_state=TrustState.TRUSTED,
+    )
     try:
         skills = application.extensions.skills(project.id)
         review = next(skill for skill in skills.skills if skill.name == "review")
         assert review.allowed_tools == ("read", "grep")
         assert any("frontmatter" in warning for warning in skills.warnings)
+        cli_record = LocalSkillManager(workspace).find(review.id)
+        agent_record = SkillRuntime(workspace).catalog().get(review.id)
+        assert agent_record is not None
+        assert (
+            (review.id, review.revision)
+            == (
+                cli_record.id,
+                cli_record.revision,
+            )
+            == (agent_record.id, agent_record.revision)
+        )
 
         detail = application.extensions.skill(project.id, "review")
         assert "concrete evidence" in detail.instructions
@@ -70,6 +87,36 @@ def test_extension_inventory_matches_agent_skill_and_hook_discovery(
         assert hooks.hooks[0].event_name == "PreToolUse"
         assert hooks.hooks[0].matcher == "Bash"
         assert hooks.hooks[0].timeout_seconds == 15
+    finally:
+        application.close()
+
+
+def test_untrusted_project_exposes_skill_metadata_but_not_instructions(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    skill_dir = workspace / ".deepcode" / "skills" / "review"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: review\n"
+        "description: Review a change carefully\n"
+        "---\n"
+        "PRIVATE-PROJECT-INSTRUCTIONS\n",
+        encoding="utf-8",
+    )
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    project = application.projects.add(str(workspace))
+    try:
+        inventory = application.skills.list(project.id)
+        review = next(skill for skill in inventory.skills if skill.name == "review")
+        with pytest.raises(ProjectNotTrustedError):
+            application.skills.read(project.id, review.id)
+
+        application.projects.update(project.id, trust_state=TrustState.TRUSTED)
+        detail = application.skills.read(project.id, review.id)
+        assert "PRIVATE-PROJECT-INSTRUCTIONS" in detail.instructions
     finally:
         application.close()
 
@@ -315,7 +362,7 @@ def test_diagnostics_reports_local_health_without_provider_secrets(
         assert snapshot["sessionCount"] == 1
         assert snapshot["threadCount"] == 1
         assert snapshot["automationCount"] == 0
-        assert snapshot["databaseSchemaVersion"] == 3
+        assert snapshot["databaseSchemaVersion"] == LATEST_SCHEMA_VERSION
         assert any(check["id"] == "database" for check in snapshot["checks"])
         assert "never-expose-this" not in serialized
     finally:

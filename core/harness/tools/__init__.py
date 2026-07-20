@@ -42,7 +42,14 @@ __all__ = [
 ]
 
 
-def default_coding_tools(workspace, *, skills=None, ask_user=None, agent_control=None):
+def default_coding_tools(
+    workspace,
+    *,
+    skills=None,
+    skill_runtime=None,
+    ask_user=None,
+    agent_control=None,
+):
     """Build a :class:`ToolRegistry` with the native coding tool set.
 
     read / write / edit / apply_patch / bash / grep / glob / memory / update_plan
@@ -51,10 +58,8 @@ def default_coding_tools(workspace, *, skills=None, ask_user=None, agent_control
     are fenced to. ``memory`` persists notes under ``.deepcode/memory/``;
     ``update_plan`` is the agent's self-driven TODO plan.
 
-    ``skills``: an optional pre-discovered :class:`~core.harness.skills.
-    SkillRegistry`. When omitted it is discovered from the workspace. The
-    ``skill`` tool is added only when at least one skill exists, so a workspace
-    with no skills keeps the exact base tool set.
+    ``skill_runtime`` is the preferred shared, live catalog. ``skills`` remains
+    as a compatibility input for callers with a static ``SkillRegistry``.
 
     ``ask_user``: an optional callback that prompts a human. When provided (an
     interactive frontend), the ``request_user_input`` tool is registered so the
@@ -92,11 +97,16 @@ def default_coding_tools(workspace, *, skills=None, ask_user=None, agent_control
     ]
     # Standalone fallback is workspace-hermetic (no ambient ~/.claude scan);
     # build_agent_session passes the full project+user set via `skills`.
-    skill_registry = (
-        discover_skills(workspace, include_user=False) if skills is None else skills
-    )
-    if skill_registry:
-        tools.append(SkillTool(skill_registry))
+    if skill_runtime is not None:
+        # Always register the dynamic tool: a Skill added after Session startup
+        # must become available on the next Turn without rebuilding the Agent.
+        tools.append(SkillTool(skill_runtime))
+    else:
+        skill_registry = (
+            discover_skills(workspace, include_user=False) if skills is None else skills
+        )
+        if skill_registry:
+            tools.append(SkillTool(skill_registry))
     if ask_user is not None:
         tools.append(RequestUserInputTool(ask_user))
     if agent_control is not None:

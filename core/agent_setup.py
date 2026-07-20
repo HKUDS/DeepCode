@@ -146,20 +146,18 @@ def build_agent_session(
         mode_override=permission_mode_override,
     )
 
-    # The system prompt is assembled once, here, so every frontend gets the
-    # same behavior: working-style (collaboration mode, keyed off the resolved
-    # permission mode) + memory (AGENTS.md + persistent index) + skills (SKILL.md
-    # playbooks). Skills are discovered once and shared by the preamble and the
-    # `skill` tool so the two never drift.
+    # Stable system context is assembled once here. Skills are intentionally
+    # not flattened into this prompt: AgentSession resolves a fresh immutable
+    # Skill snapshot at each turn, giving every frontend hot reload without
+    # allowing files to change halfway through one model execution.
     from core.harness.collaboration import collaboration_preamble
     from core.harness.memory import system_preamble
-    from core.harness.skills import discover_skills, skills_preamble
+    from core.skills.runtime import SkillRuntime
 
-    skills = discover_skills(workspace)
+    skill_runtime = SkillRuntime(workspace)
     addenda = [
         collaboration_preamble(engine.mode),
         system_preamble(workspace),
-        skills_preamble(skills),
     ]
     addendum = "\n\n".join(a for a in addenda if a)
     full_system_prompt = f"{system_prompt}\n\n{addendum}" if addendum else system_prompt
@@ -198,7 +196,7 @@ def build_agent_session(
 
     tool_registry = default_coding_tools(
         workspace,
-        skills=skills,
+        skill_runtime=skill_runtime,
         ask_user=ask_user_callback,
         agent_control=control,
     )
@@ -219,6 +217,7 @@ def build_agent_session(
         hooks_engine=hooks_engine,
         agent_context=agent_context,
         streaming=streaming,
+        skill_runtime=skill_runtime,
     )
     if control is not None:
         # `session.history` is a @property (a list), so it must be wrapped in a

@@ -11,6 +11,23 @@ export type JsonValue =
       [k: string]: JsonValue;
     };
 export type ConfigScope = "user" | "project";
+export type SkillReadParams = SkillReadParams1 & {
+  projectId: string;
+  skillId?: string;
+  /**
+   * Deprecated compatibility selector; use skillId.
+   */
+  name?: string;
+};
+export type SkillReadParams1 =
+  | {
+      skillId: string;
+      [k: string]: unknown;
+    }
+  | {
+      name: string;
+      [k: string]: unknown;
+    };
 export type AutomationScheduleKind = "manual" | "interval";
 export type AutomationStatus = "enabled" | "paused";
 export type ThreadMode = "code" | "paper" | "brief" | "review" | "goal";
@@ -56,8 +73,12 @@ export interface MethodParams {
   "project/remove": ProjectReadParams;
   "settings/read": OptionalProjectParams;
   "settings/update": SettingsUpdateParams;
-  "skills/list": ProjectReadParams;
+  "skills/list": SkillListParams;
   "skill/read": SkillReadParams;
+  "skills/import": SkillImportParams;
+  "skills/set-enabled": SkillSetEnabledParams;
+  "skills/delete": SkillIdentityParams;
+  "skills/reload": ProjectReadParams;
   "hooks/list": ProjectReadParams;
   "mcp/list": OptionalProjectParams;
   "mcp/upsert": McpUpsertParams;
@@ -144,9 +165,24 @@ export interface SettingsUpdateParams {
   scope?: ConfigScope;
   projectId?: string;
 }
-export interface SkillReadParams {
+export interface SkillListParams {
   projectId: string;
-  name: string;
+  refresh?: boolean;
+}
+export interface SkillImportParams {
+  projectId: string;
+  path: string;
+  scope: ConfigScope;
+}
+export interface SkillSetEnabledParams {
+  projectId: string;
+  skillId: string;
+  enabled: boolean;
+  scope: ConfigScope;
+}
+export interface SkillIdentityParams {
+  projectId: string;
+  skillId: string;
 }
 export interface McpUpsertParams {
   projectId?: string;
@@ -215,6 +251,19 @@ export interface ThreadForkParams {
 export interface TurnStartParams {
   threadId: string;
   prompt: string;
+  /**
+   * @maxItems 8
+   */
+  skills?:
+    | []
+    | [string]
+    | [string, string]
+    | [string, string, string]
+    | [string, string, string, string]
+    | [string, string, string, string, string]
+    | [string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string];
 }
 export interface TurnReadParams {
   turnId: string;
@@ -340,13 +389,18 @@ export interface MethodResults {
   "settings/update": {
     settings: SettingsSnapshot;
   };
-  "skills/list": {
-    skills: SkillInfo[];
-    warnings: string[];
-  };
+  "skills/list": SkillCatalogResult;
   "skill/read": {
     skill: SkillDetail;
   };
+  "skills/import": {
+    skill: SkillDetail;
+  };
+  "skills/set-enabled": SkillCatalogResult;
+  "skills/delete": {
+    removed: boolean;
+  };
+  "skills/reload": SkillCatalogResult;
   "hooks/list": {
     hooks: HookInfo[];
     warnings: string[];
@@ -533,19 +587,44 @@ export interface SettingsModel {
   maxOutputTokens: number;
   source: string;
 }
+export interface SkillCatalogResult {
+  skills: SkillInfo[];
+  warnings: string[];
+  catalogRevision: string;
+}
 export interface SkillInfo {
+  id: string;
   name: string;
   description: string;
   allowedTools: string[];
-  directory: string;
+  scope: "user" | "project";
+  sourceRoot: "deepcode" | "claude";
   source: string;
+  location: string;
+  status: "active" | "shadowed" | "disabled" | "invalid";
+  enabled: boolean;
+  selectable: boolean;
+  revision: string;
+  byteSize: number;
+  shadowedBy: string | null;
+  error: string | null;
 }
 export interface SkillDetail {
+  id: string;
   name: string;
   description: string;
   allowedTools: string[];
-  directory: string;
+  scope: "user" | "project";
+  sourceRoot: "deepcode" | "claude";
   source: string;
+  location: string;
+  status: "active" | "shadowed" | "disabled" | "invalid";
+  enabled: boolean;
+  selectable: boolean;
+  revision: string;
+  byteSize: number;
+  shadowedBy: string | null;
+  error: string | null;
   instructions: string;
   truncated: boolean;
 }
@@ -655,6 +734,19 @@ export interface Turn {
   threadId: string;
   ordinal: number;
   prompt: string;
+  /**
+   * @maxItems 8
+   */
+  skillIds?:
+    | []
+    | [string]
+    | [string, string]
+    | [string, string, string]
+    | [string, string, string, string]
+    | [string, string, string, string, string]
+    | [string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string];
   status: TurnStatus;
   stopReason: string | null;
   errorCode: string | null;

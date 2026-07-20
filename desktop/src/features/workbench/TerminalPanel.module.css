@@ -1,9 +1,9 @@
 .panel {
   display: none;
   height: 100%;
-  grid-template-rows: 36px auto minmax(0, 1fr);
+  grid-template-rows: 42px auto minmax(0, 1fr);
   overflow: hidden;
-  background: #171a20;
+  background: #171b19;
 }
 
 .panel[data-active="true"] {
@@ -14,29 +14,30 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 5px 8px 5px 12px;
-  border-bottom: 1px solid #30343d;
-  color: #aeb5c1;
-  font: 8px var(--font-mono);
+  padding: 6px 10px 6px 13px;
+  border-bottom: 1px solid #303832;
+  color: #b3bcb6;
+  font: 8.5px var(--font-mono);
 }
 
 .toolbar button {
-  min-height: 25px;
-  padding: 0 7px;
-  border: 1px solid #444a56;
-  border-radius: 5px;
+  min-height: 29px;
+  padding: 0 9px;
+  border: 1px solid #465048;
+  border-radius: 8px;
   color: #e8ebf0;
-  font-size: 8px;
+  font-size: 8.5px;
 }
 
 .toolbar button:hover:not(:disabled) {
-  background: #242832;
+  background: #252c27;
 }
 
 .error {
   margin: 8px;
   padding: 7px 9px;
-  border-left: 2px solid #e17a72;
+  border: 1px solid #6d3b3c;
+  border-radius: 9px;
   background: #342021;
   color: #f2aaa4;
   font-size: 9px;
@@ -46,7 +47,7 @@
 .host {
   min-width: 0;
   min-height: 0;
-  padding: 8px 4px 4px 8px;
+  padding: 10px 5px 5px 10px;
   overflow: hidden;
 }
 

@@ -12,6 +12,7 @@ from core.persistence.serde import (
     dump_json,
     load_datetime,
     load_json,
+    load_json_list,
     load_required_datetime,
 )
 
@@ -29,14 +30,15 @@ class TurnRepository:
 
     def add(self, turn: Turn) -> None:
         self.connection.execute(
-            "INSERT INTO turns (id, thread_id, ordinal, prompt, status, stop_reason, "
-            "error_code, error_message, started_at, completed_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO turns (id, thread_id, ordinal, prompt, skill_ids_json, "
+            "status, stop_reason, error_code, error_message, started_at, completed_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 turn.id,
                 turn.thread_id,
                 turn.ordinal,
                 turn.prompt,
+                dump_json(list(turn.skill_ids)),
                 turn.status.value,
                 turn.stop_reason,
                 turn.error_code,
@@ -114,6 +116,7 @@ class TurnRepository:
             thread_id=row["thread_id"],
             ordinal=row["ordinal"],
             prompt=row["prompt"],
+            skill_ids=tuple(load_json_list(row["skill_ids_json"])),
             status=TurnStatus(row["status"]),
             stop_reason=row["stop_reason"],
             error_code=row["error_code"],

@@ -56,6 +56,20 @@ class EventRenderer:
         self._streamed = ""
         self._line_open = False
 
+    def _on_skill_loaded(self, msg) -> None:
+        self._close_line()
+        invocation = msg.invocation
+        self.console.print(
+            f"[{theme.META_STYLE}]◇ Skill {escape(invocation.name)} "
+            f"({invocation.kind.value})[/]"
+        )
+
+    def _on_skill_load_failed(self, msg) -> None:
+        self._close_line()
+        self.console.print(
+            f"[{theme.ERROR_STYLE}]Skill error:[/] {escape(msg.message)}"
+        )
+
     def _on_agent_message_delta(self, msg) -> None:
         # Live typing: print the raw delta without a newline.
         self.console.print(msg.delta, end="", soft_wrap=True, highlight=False)

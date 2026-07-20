@@ -182,6 +182,22 @@ class ToolsConfig(_Base):
 
 
 # ---------------------------------------------------------------------------
+# skills
+# ---------------------------------------------------------------------------
+
+
+class SkillsConfig(_Base):
+    """User/project Skill policy.
+
+    Skill IDs are opaque identifiers issued by the shared Skill catalog.  The
+    effective disabled set is the union of the user and project layers; callers
+    must not rely on the generic config deep-merge for this list.
+    """
+
+    disabled: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
 # DeepCode-specific
 # ---------------------------------------------------------------------------
 
@@ -291,6 +307,7 @@ class DeepCodeConfig(BaseSettings):
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    skills: SkillsConfig = Field(default_factory=SkillsConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     workspace: WorkspaceConfig = Field(default_factory=WorkspaceConfig)
     document_segmentation: DocumentSegmentationConfig = Field(

@@ -29,6 +29,8 @@ from core.agent_setup import DEFAULT_MAX_ITERATIONS, build_agent_session
 from cli.config_errors import format_config_error
 from core.config import ConfigError
 from core.events import UserInput, serialize_event
+from core.skills.management import LocalSkillManager
+from core.skills.models import SkillSelection
 
 
 def _emit_human(event) -> None:
@@ -41,6 +43,13 @@ def _emit_human(event) -> None:
     elif t == "tool_completed":
         mark = "✗" if msg.is_error else "✓"
         print(f"  {mark} {msg.name}", flush=True)
+    elif t == "skill_loaded":
+        print(
+            f"  ◇ skill {msg.invocation.name} ({msg.invocation.kind.value})",
+            flush=True,
+        )
+    elif t == "skill_load_failed":
+        print(f"! skill error: {msg.message}", file=sys.stderr, flush=True)
     elif t == "agent_message":
         print(f"\n{msg.text}\n", flush=True)
     elif t == "error":
@@ -60,25 +69,43 @@ async def _run(args: argparse.Namespace) -> int:
         print(format_config_error(exc), file=sys.stderr, flush=True)
         return 1
     workspace = os.path.abspath(args.workspace)
+    try:
+        try:
+            manager = LocalSkillManager(workspace)
+            selected: list[SkillSelection] = []
+            for identifier in args.skill:
+                record = manager.select(identifier)
+                selected.append(SkillSelection(skill_id=record.id, name=record.name))
+            selections = tuple(selected)
+        except (OSError, ValueError) as exc:
+            print(f"error: {exc}", file=sys.stderr, flush=True)
+            return 1
 
-    if not args.json:
-        print(
-            f"deepcode exec · model={model} · workspace={workspace} · "
-            f"permission={engine.mode.value}",
-            file=sys.stderr,
-            flush=True,
-        )
+        if not args.json:
+            print(
+                f"deepcode exec · model={model} · workspace={workspace} · "
+                f"permission={engine.mode.value}",
+                file=sys.stderr,
+                flush=True,
+            )
 
-    stop_reason = "completed"
-    async for event in session.run_stream(UserInput(text=args.prompt)):
-        if args.json:
-            print(json.dumps(serialize_event(event), ensure_ascii=False), flush=True)
-        else:
-            _emit_human(event)
-        if event.msg.type == "task_complete":
-            stop_reason = event.msg.stop_reason
+        stop_reason = "completed"
+        async for event in session.run_stream(
+            UserInput(text=args.prompt, skills=selections)
+        ):
+            if args.json:
+                print(
+                    json.dumps(serialize_event(event), ensure_ascii=False),
+                    flush=True,
+                )
+            else:
+                _emit_human(event)
+            if event.msg.type == "task_complete":
+                stop_reason = event.msg.stop_reason
 
-    return 0 if stop_reason == "completed" else 1
+        return 0 if stop_reason == "completed" else 1
+    finally:
+        await session.aclose()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -100,12 +127,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--model", "-m", default=None, help="Override the model id.")
     parser.add_argument(
+        "--skill",
+        action="append",
+        default=[],
+        metavar="ID_OR_NAME",
+        help="Select a Skill for this turn (repeatable, maximum 8).",
+    )
+    parser.add_argument(
         "--max-iterations",
         type=int,
         default=DEFAULT_MAX_ITERATIONS,
         help=f"Max agent turns, a runaway backstop (default {DEFAULT_MAX_ITERATIONS}).",
     )
     args = parser.parse_args(argv)
+    if len(args.skill) > 8:
+        parser.error("--skill may be specified at most 8 times")
     return asyncio.run(_run(args))
 
 

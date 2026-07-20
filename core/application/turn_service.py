@@ -40,7 +40,7 @@ from core.domain.item import Item, ItemKind, ItemStatus
 from core.domain.project import TrustState
 from core.domain.thread import Thread, ThreadStatus
 from core.domain.turn import Turn, TurnStatus
-from core.events import Event, UserInput
+from core.events import Event, SkillLoaded, TurnStarted, UserInput
 from core.persistence.database import Database
 from core.persistence.event_repository import EventRepository
 from core.persistence.execution_repository import (
@@ -51,6 +51,7 @@ from core.persistence.execution_repository import (
 from core.persistence.project_repository import ProjectRepository
 from core.persistence.thread_repository import ThreadRepository
 from core.sessions import SessionStore
+from core.skills.models import SkillInvocation, SkillSelection
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,11 +92,13 @@ class TurnService:
         thread_id: str,
         *,
         prompt: str,
+        skill_ids: tuple[str, ...] = (),
         event_observer: Callable[[Event], None] | None = None,
     ) -> TurnSnapshot:
         return self._submit(
             thread_id,
             prompt=prompt,
+            skill_ids=skill_ids,
             queue_if_busy=False,
             event_observer=event_observer,
         )
@@ -105,6 +108,7 @@ class TurnService:
         thread_id: str,
         *,
         prompt: str,
+        skill_ids: tuple[str, ...] = (),
         event_observer: Callable[[Event], None] | None = None,
     ) -> TurnSnapshot:
         """Persist a next Turn and run it after earlier Turns settle."""
@@ -112,6 +116,7 @@ class TurnService:
         return self._submit(
             thread_id,
             prompt=prompt,
+            skill_ids=skill_ids,
             queue_if_busy=True,
             event_observer=event_observer,
         )
@@ -121,12 +126,23 @@ class TurnService:
         thread_id: str,
         *,
         prompt: str,
+        skill_ids: tuple[str, ...],
         queue_if_busy: bool,
         event_observer: Callable[[Event], None] | None,
     ) -> TurnSnapshot:
         clean_prompt = prompt.strip()
         if not clean_prompt:
             raise InvalidArgumentError("turn prompt must not be empty")
+        try:
+            clean_skill_ids = tuple(
+                SkillSelection(skill_id=skill_id).skill_id for skill_id in skill_ids
+            )
+            if len(set(clean_skill_ids)) != len(clean_skill_ids):
+                raise ValueError("skill IDs must be unique")
+            if len(clean_skill_ids) > 8:
+                raise ValueError("a turn may select at most 8 Skills")
+        except (TypeError, ValueError) as exc:
+            raise InvalidArgumentError(str(exc)) from exc
         events: list[DomainEvent] = []
         schedule_now = False
         with self.database.transaction() as connection:
@@ -155,6 +171,7 @@ class TurnService:
                 thread_id=thread_id,
                 ordinal=turns.next_ordinal(thread_id),
                 prompt=clean_prompt,
+                skill_ids=clean_skill_ids,
             )
             turns.add(turn)
             items = ItemRepository(connection)
@@ -166,7 +183,11 @@ class TurnService:
                 kind=ItemKind.USER_MESSAGE,
                 status=ItemStatus.COMPLETED,
                 summary=clean_prompt[:160],
-                payload={"text": clean_prompt},
+                payload={
+                    "text": clean_prompt,
+                    "skillIds": list(clean_skill_ids),
+                    "skills": [],
+                },
                 created_at=now,
                 updated_at=now,
             )
@@ -296,16 +317,43 @@ class TurnService:
                 approval_callback=approve,
             )
             session_acquired = True
-            stored_user = self.session_store.append_message(
-                turn.thread_id,
-                "user",
-                turn.prompt,
-                metadata={"client": "desktop", "turnId": turn.id},
-            )
-            if stored_user is None:
-                raise RuntimeError(f"canonical session disappeared: {turn.thread_id}")
-            self.session_runtimes.mark_persisted(turn.thread_id)
-            async for event in session.run_stream(UserInput(text=turn.prompt)):
+            skill_invocations: dict[str, SkillInvocation] = {}
+            stored_user = False
+            async for event in session.run_stream(
+                UserInput(
+                    text=turn.prompt,
+                    skills=tuple(
+                        SkillSelection(skill_id=skill_id) for skill_id in turn.skill_ids
+                    ),
+                )
+            ):
+                if isinstance(event.msg, TurnStarted):
+                    for invocation in event.msg.skill_invocations:
+                        skill_invocations[invocation.skill_id] = invocation
+                    if not stored_user:
+                        stored = self.session_store.append_message(
+                            turn.thread_id,
+                            "user",
+                            turn.prompt,
+                            metadata={
+                                "schemaVersion": 2,
+                                "client": "desktop",
+                                "turnId": turn.id,
+                                "skillInvocations": [
+                                    invocation.to_metadata()
+                                    for invocation in skill_invocations.values()
+                                ],
+                            },
+                        )
+                        if stored is None:
+                            raise RuntimeError(
+                                f"canonical session disappeared: {turn.thread_id}"
+                            )
+                        stored_user = True
+                        self.session_runtimes.mark_persisted(turn.thread_id)
+                elif isinstance(event.msg, SkillLoaded):
+                    invocation = event.msg.invocation
+                    skill_invocations[invocation.skill_id] = invocation
                 self._notify_observer(turn_id, event)
                 projection.project(event)
             if projection.saw_terminal:
@@ -314,18 +362,32 @@ class TurnService:
                         turn.thread_id,
                         "assistant",
                         projection.final_text,
-                        metadata={"client": "desktop", "turnId": turn.id},
+                        metadata={
+                            "schemaVersion": 2,
+                            "client": "desktop",
+                            "turnId": turn.id,
+                            "skillInvocations": [
+                                invocation.to_metadata()
+                                for invocation in skill_invocations.values()
+                            ],
+                        },
                     )
                     if stored_assistant is None:
                         raise RuntimeError(
                             f"canonical session disappeared: {turn.thread_id}"
                         )
-                self.session_runtimes.mark_persisted(turn.thread_id)
+                if stored_user or projection.final_text:
+                    self.session_runtimes.mark_persisted(turn.thread_id)
                 stop_reason = projection.stop_reason or "completed"
                 if stop_reason == "interrupted":
                     status = TurnStatus.INTERRUPTED
                     error_code = error_message = None
-                elif stop_reason in {"error", "empty_final_response", "busy"}:
+                elif stop_reason in {
+                    "error",
+                    "empty_final_response",
+                    "busy",
+                    "invalid_skill",
+                }:
                     status = TurnStatus.FAILED
                     error_code = "AGENT_TURN_FAILED"
                     error_message = f"agent stopped with reason: {stop_reason}"

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 
-def dump_json(value: dict[str, Any]) -> str:
+def dump_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
 
 
@@ -17,6 +17,15 @@ def load_json(value: str | None) -> dict[str, Any]:
     loaded = json.loads(value)
     if not isinstance(loaded, dict):
         raise ValueError("persisted JSON value is not an object")
+    return loaded
+
+
+def load_json_list(value: str | None) -> list[Any]:
+    if not value:
+        return []
+    loaded = json.loads(value)
+    if not isinstance(loaded, list):
+        raise ValueError("persisted JSON value is not an array")
     return loaded
 
 

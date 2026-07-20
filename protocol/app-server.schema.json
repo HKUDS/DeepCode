@@ -342,6 +342,15 @@
         "prompt": {
           "type": "string"
         },
+        "skillIds": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^sk_[0-9a-f]{24}$"
+          }
+        },
         "status": {
           "$ref": "#/$defs/TurnStatus"
         },
@@ -953,7 +962,7 @@
         }
       }
     },
-    "SkillReadParams": {
+    "SkillListParams": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -961,14 +970,122 @@
           "type": "string",
           "pattern": "^proj_"
         },
+        "refresh": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "projectId"
+      ]
+    },
+    "SkillReadParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "anyOf": [
+        {
+          "properties": {
+            "skillId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "skillId"
+          ]
+        },
+        {
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ]
+        }
+      ],
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^proj_"
+        },
+        "skillId": {
+          "type": "string",
+          "pattern": "^sk_[0-9a-f]{24}$"
+        },
         "name": {
           "type": "string",
+          "minLength": 1,
+          "description": "Deprecated compatibility selector; use skillId."
+        }
+      },
+      "required": [
+        "projectId"
+      ]
+    },
+    "SkillImportParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^proj_"
+        },
+        "path": {
+          "type": "string",
           "minLength": 1
+        },
+        "scope": {
+          "$ref": "#/$defs/ConfigScope"
         }
       },
       "required": [
         "projectId",
-        "name"
+        "path",
+        "scope"
+      ]
+    },
+    "SkillSetEnabledParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^proj_"
+        },
+        "skillId": {
+          "type": "string",
+          "pattern": "^sk_[0-9a-f]{24}$"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "scope": {
+          "$ref": "#/$defs/ConfigScope"
+        }
+      },
+      "required": [
+        "projectId",
+        "skillId",
+        "enabled",
+        "scope"
+      ]
+    },
+    "SkillIdentityParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^proj_"
+        },
+        "skillId": {
+          "type": "string",
+          "pattern": "^sk_[0-9a-f]{24}$"
+        }
+      },
+      "required": [
+        "projectId",
+        "skillId"
       ]
     },
     "ConfigScope": {
@@ -1028,6 +1145,10 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^sk_[0-9a-f]{24}$"
+        },
         "name": {
           "type": "string"
         },
@@ -1040,25 +1161,88 @@
             "type": "string"
           }
         },
-        "directory": {
-          "type": "string"
+        "scope": {
+          "type": "string",
+          "enum": [
+            "user",
+            "project"
+          ]
+        },
+        "sourceRoot": {
+          "type": "string",
+          "enum": [
+            "deepcode",
+            "claude"
+          ]
         },
         "source": {
           "type": "string"
+        },
+        "location": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "shadowed",
+            "disabled",
+            "invalid"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "selectable": {
+          "type": "boolean"
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^sha256:"
+        },
+        "byteSize": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "shadowedBy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
+        "id",
         "name",
         "description",
         "allowedTools",
-        "directory",
-        "source"
+        "scope",
+        "sourceRoot",
+        "source",
+        "location",
+        "status",
+        "enabled",
+        "selectable",
+        "revision",
+        "byteSize",
+        "shadowedBy",
+        "error"
       ]
     },
     "SkillDetail": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^sk_[0-9a-f]{24}$"
+        },
         "name": {
           "type": "string"
         },
@@ -1071,11 +1255,60 @@
             "type": "string"
           }
         },
-        "directory": {
-          "type": "string"
+        "scope": {
+          "type": "string",
+          "enum": [
+            "user",
+            "project"
+          ]
+        },
+        "sourceRoot": {
+          "type": "string",
+          "enum": [
+            "deepcode",
+            "claude"
+          ]
         },
         "source": {
           "type": "string"
+        },
+        "location": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "shadowed",
+            "disabled",
+            "invalid"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "selectable": {
+          "type": "boolean"
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^sha256:"
+        },
+        "byteSize": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "shadowedBy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "instructions": {
           "type": "string"
@@ -1085,13 +1318,50 @@
         }
       },
       "required": [
+        "id",
         "name",
         "description",
         "allowedTools",
-        "directory",
+        "scope",
+        "sourceRoot",
         "source",
+        "location",
+        "status",
+        "enabled",
+        "selectable",
+        "revision",
+        "byteSize",
+        "shadowedBy",
+        "error",
         "instructions",
         "truncated"
+      ]
+    },
+    "SkillCatalogResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "skills": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SkillInfo"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "catalogRevision": {
+          "type": "string",
+          "pattern": "^sha256:"
+        }
+      },
+      "required": [
+        "skills",
+        "warnings",
+        "catalogRevision"
       ]
     },
     "HookInfo": {
@@ -1882,6 +2152,15 @@
         "prompt": {
           "type": "string",
           "minLength": 1
+        },
+        "skills": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^sk_[0-9a-f]{24}$"
+          }
         }
       },
       "required": [
@@ -2795,10 +3074,22 @@
           "$ref": "#/$defs/SettingsUpdateParams"
         },
         "skills/list": {
-          "$ref": "#/$defs/ProjectReadParams"
+          "$ref": "#/$defs/SkillListParams"
         },
         "skill/read": {
           "$ref": "#/$defs/SkillReadParams"
+        },
+        "skills/import": {
+          "$ref": "#/$defs/SkillImportParams"
+        },
+        "skills/set-enabled": {
+          "$ref": "#/$defs/SkillSetEnabledParams"
+        },
+        "skills/delete": {
+          "$ref": "#/$defs/SkillIdentityParams"
+        },
+        "skills/reload": {
+          "$ref": "#/$defs/ProjectReadParams"
         },
         "hooks/list": {
           "$ref": "#/$defs/ProjectReadParams"
@@ -2954,6 +3245,10 @@
         "settings/update",
         "skills/list",
         "skill/read",
+        "skills/import",
+        "skills/set-enabled",
+        "skills/delete",
+        "skills/reload",
         "hooks/list",
         "mcp/list",
         "mcp/upsert",
@@ -3110,26 +3405,7 @@
           ]
         },
         "skills/list": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "skills": {
-              "type": "array",
-              "items": {
-                "$ref": "#/$defs/SkillInfo"
-              }
-            },
-            "warnings": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
-          },
-          "required": [
-            "skills",
-            "warnings"
-          ]
+          "$ref": "#/$defs/SkillCatalogResult"
         },
         "skill/read": {
           "type": "object",
@@ -3142,6 +3418,36 @@
           "required": [
             "skill"
           ]
+        },
+        "skills/import": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "skill": {
+              "$ref": "#/$defs/SkillDetail"
+            }
+          },
+          "required": [
+            "skill"
+          ]
+        },
+        "skills/set-enabled": {
+          "$ref": "#/$defs/SkillCatalogResult"
+        },
+        "skills/delete": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "removed": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "removed"
+          ]
+        },
+        "skills/reload": {
+          "$ref": "#/$defs/SkillCatalogResult"
         },
         "hooks/list": {
           "type": "object",
@@ -3768,6 +4074,10 @@
         "settings/update",
         "skills/list",
         "skill/read",
+        "skills/import",
+        "skills/set-enabled",
+        "skills/delete",
+        "skills/reload",
         "hooks/list",
         "mcp/list",
         "mcp/upsert",

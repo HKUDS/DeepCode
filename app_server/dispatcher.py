@@ -47,6 +47,7 @@ from core.domain.automation import (
 )
 from core.domain.project import TrustState
 from core.domain.thread import ThreadMode
+from core.skills.models import SkillScope
 
 
 PROTOCOL_VERSION = "1.0"
@@ -114,6 +115,11 @@ class Params:
             raise InvalidParams(f"{name} must be a boolean")
         return value
 
+    def required_boolean(self, name: str) -> bool:
+        if name not in self.values:
+            raise InvalidParams(f"{name} is required")
+        return self.boolean(name)
+
     def object(self, name: str, *, required: bool = True) -> dict[str, Any] | None:
         value = self.values.get(name)
         if value is None and not required:
@@ -121,6 +127,22 @@ class Params:
         if not isinstance(value, dict):
             raise InvalidParams(f"{name} must be an object")
         return value
+
+    def string_array(
+        self,
+        name: str,
+        *,
+        default: tuple[str, ...] = (),
+        maximum: int = 100,
+    ) -> tuple[str, ...]:
+        value = self.values.get(name, list(default))
+        if not isinstance(value, list) or any(
+            not isinstance(item, str) or not item.strip() for item in value
+        ):
+            raise InvalidParams(f"{name} must be an array of non-empty strings")
+        if len(value) > maximum:
+            raise InvalidParams(f"{name} may contain at most {maximum} entries")
+        return tuple(value)
 
     def nullable_string(self, name: str) -> str | None:
         if name not in self.values:
@@ -159,6 +181,10 @@ class Dispatcher:
             rpc_methods.SETTINGS_UPDATE: self._settings_update,
             rpc_methods.SKILLS_LIST: self._skills_list,
             rpc_methods.SKILL_READ: self._skill_read,
+            rpc_methods.SKILLS_IMPORT: self._skills_import,
+            rpc_methods.SKILLS_SET_ENABLED: self._skills_set_enabled,
+            rpc_methods.SKILLS_DELETE: self._skills_delete,
+            rpc_methods.SKILLS_RELOAD: self._skills_reload,
             rpc_methods.HOOKS_LIST: self._hooks_list,
             rpc_methods.MCP_LIST: self._mcp_list,
             rpc_methods.MCP_UPSERT: self._mcp_upsert,
@@ -314,20 +340,81 @@ class Dispatcher:
         return {"settings": settings}
 
     def _skills_list(self, params: Params) -> dict[str, Any]:
-        params.only("projectId")
-        discovery = self.application.extensions.skills(str(params.string("projectId")))
+        params.only("projectId", "refresh")
+        discovery = self.application.skills.list(
+            str(params.string("projectId")),
+            force=params.boolean("refresh", default=False),
+        )
         return {
             "skills": [skill_info_view(skill) for skill in discovery.skills],
             "warnings": list(discovery.warnings),
+            "catalogRevision": discovery.catalog_revision,
         }
 
     def _skill_read(self, params: Params) -> dict[str, Any]:
-        params.only("projectId", "name")
-        detail = self.application.extensions.skill(
+        params.only("projectId", "skillId", "name")
+        identifier = params.string("skillId", required=False) or params.string(
+            "name",
+            required=False,
+        )
+        if identifier is None:
+            raise InvalidParams("skillId is required")
+        detail = self.application.skills.read(
             str(params.string("projectId")),
-            str(params.string("name")),
+            identifier,
         )
         return {"skill": skill_detail_view(detail)}
+
+    def _skills_import(self, params: Params) -> dict[str, Any]:
+        params.only("projectId", "path", "scope")
+        detail = self.application.skills.import_directory(
+            str(params.string("projectId")),
+            str(params.string("path")),
+            scope=self._skill_scope(params),
+        )
+        return {"skill": skill_detail_view(detail)}
+
+    def _skills_set_enabled(self, params: Params) -> dict[str, Any]:
+        params.only("projectId", "skillId", "enabled", "scope")
+        discovery = self.application.skills.set_enabled(
+            str(params.string("projectId")),
+            str(params.string("skillId")),
+            enabled=params.required_boolean("enabled"),
+            scope=self._skill_scope(params),
+        )
+        return {
+            "skills": [skill_info_view(skill) for skill in discovery.skills],
+            "warnings": list(discovery.warnings),
+            "catalogRevision": discovery.catalog_revision,
+        }
+
+    def _skills_delete(self, params: Params) -> dict[str, Any]:
+        params.only("projectId", "skillId")
+        return {
+            "removed": self.application.skills.delete(
+                str(params.string("projectId")),
+                str(params.string("skillId")),
+            )
+        }
+
+    def _skills_reload(self, params: Params) -> dict[str, Any]:
+        params.only("projectId")
+        discovery = self.application.skills.list(
+            str(params.string("projectId")),
+            force=True,
+        )
+        return {
+            "skills": [skill_info_view(skill) for skill in discovery.skills],
+            "warnings": list(discovery.warnings),
+            "catalogRevision": discovery.catalog_revision,
+        }
+
+    @staticmethod
+    def _skill_scope(params: Params) -> SkillScope:
+        try:
+            return SkillScope(str(params.string("scope")))
+        except ValueError as exc:
+            raise InvalidParams("scope must be user or project") from exc
 
     def _hooks_list(self, params: Params) -> dict[str, Any]:
         params.only("projectId")
@@ -551,18 +638,20 @@ class Dispatcher:
         return {"thread": thread_view(thread)}
 
     def _turn_start(self, params: Params) -> dict[str, Any]:
-        params.only("threadId", "prompt")
+        params.only("threadId", "prompt", "skills")
         snapshot = self.application.turns.start(
             str(params.string("threadId")),
             prompt=str(params.string("prompt")),
+            skill_ids=params.string_array("skills", maximum=8),
         )
         return self._turn_snapshot(snapshot)
 
     def _turn_enqueue(self, params: Params) -> dict[str, Any]:
-        params.only("threadId", "prompt")
+        params.only("threadId", "prompt", "skills")
         snapshot = self.application.turns.enqueue(
             str(params.string("threadId")),
             prompt=str(params.string("prompt")),
+            skill_ids=params.string_array("skills", maximum=8),
         )
         return self._turn_snapshot(snapshot)
 

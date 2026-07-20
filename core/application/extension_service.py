@@ -1,4 +1,4 @@
-"""Read-only discovery views for workspace Skills and lifecycle Hooks."""
+"""Read-only lifecycle Hook views plus legacy Skill-service compatibility."""
 
 from __future__ import annotations
 
@@ -8,28 +8,15 @@ from pathlib import Path
 from core.application.errors import InvalidArgumentError
 from core.application.project_service import ProjectService
 from core.harness.hooks import discover_hooks
-from core.harness.skills import Skill, discover_skills
+from core.application.skill_service import (
+    SkillDetail,
+    SkillDiscovery,
+    SkillService,
+)
 
 
-MAX_SKILL_INSTRUCTIONS = 64 * 1024
 MAX_HOOK_HANDLERS = 500
 MAX_DISCOVERY_WARNINGS = 100
-
-
-@dataclass(frozen=True, slots=True)
-class SkillInfo:
-    name: str
-    description: str
-    allowed_tools: tuple[str, ...]
-    directory: str
-    source: str
-
-
-@dataclass(frozen=True, slots=True)
-class SkillDetail:
-    info: SkillInfo
-    instructions: str
-    truncated: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,12 +32,6 @@ class HookInfo:
 
 
 @dataclass(frozen=True, slots=True)
-class SkillDiscovery:
-    skills: tuple[SkillInfo, ...]
-    warnings: tuple[str, ...]
-
-
-@dataclass(frozen=True, slots=True)
 class HookDiscovery:
     hooks: tuple[HookInfo, ...]
     warnings: tuple[str, ...]
@@ -60,32 +41,15 @@ class HookDiscovery:
 class ExtensionService:
     """Expose the exact discovery inputs used by Agent Sessions."""
 
-    def __init__(self, projects: ProjectService) -> None:
+    def __init__(self, projects: ProjectService, skills: SkillService) -> None:
         self.projects = projects
+        self._skills = skills
 
     def skills(self, project_id: str) -> SkillDiscovery:
-        root = self._project_root(project_id)
-        registry = discover_skills(root)
-        return SkillDiscovery(
-            skills=tuple(_skill_info(skill) for skill in registry.all()),
-            warnings=_bounded_warnings(registry.errors),
-        )
+        return self._skills.list(project_id)
 
-    def skill(self, project_id: str, name: str) -> SkillDetail:
-        clean_name = name.strip()
-        if not clean_name:
-            raise InvalidArgumentError("skill name must not be empty")
-        root = self._project_root(project_id)
-        registry = discover_skills(root)
-        skill = registry.get(clean_name)
-        if skill is None:
-            raise InvalidArgumentError(f"skill is not available: {clean_name}")
-        instructions = skill.instructions[:MAX_SKILL_INSTRUCTIONS]
-        return SkillDetail(
-            info=_skill_info(skill),
-            instructions=instructions,
-            truncated=len(skill.instructions) > MAX_SKILL_INSTRUCTIONS,
-        )
+    def skill(self, project_id: str, identifier: str) -> SkillDetail:
+        return self._skills.read(project_id, identifier)
 
     def hooks(self, project_id: str) -> HookDiscovery:
         root = self._project_root(project_id)
@@ -120,16 +84,6 @@ class ExtensionService:
         if not root.is_dir():
             raise InvalidArgumentError("project path must be a directory")
         return root
-
-
-def _skill_info(skill: Skill) -> SkillInfo:
-    return SkillInfo(
-        name=skill.name,
-        description=skill.description,
-        allowed_tools=skill.allowed_tools,
-        directory=skill.directory,
-        source=skill.source,
-    )
 
 
 def _bounded_warnings(values: list[str]) -> tuple[str, ...]:

@@ -8,6 +8,7 @@ import type {
   Project,
   Thread,
   ThreadMode,
+  TurnStartParams,
   WorkflowStartParams,
 } from "../generated/app-server";
 import type {
@@ -75,8 +76,8 @@ export interface WorkspaceController {
   setPermissionMode(mode: DesktopPermissionMode): Promise<void>;
   refreshSettings(): Promise<void>;
   updateSettings(patch: JsonObject, scope?: ConfigScope): Promise<void>;
-  startTurn(prompt: string): Promise<void>;
-  queueTurn(prompt: string): Promise<void>;
+  startTurn(prompt: string, skillIds?: string[]): Promise<void>;
+  queueTurn(prompt: string, skillIds?: string[]): Promise<void>;
   retryTurn(turnId: string): Promise<void>;
   interruptTurn(turnId: string): Promise<void>;
   pickContextFiles(): Promise<string[]>;
@@ -468,13 +469,16 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
   );
 
   const executeTurn = useCallback(
-    async (prompt: string) => {
+    async (prompt: string, skillIds: string[] = []) => {
       if (!selectedThread) return;
       const shouldTitleSession =
         selectedThread.title === "New task" && state.turns.length === 0;
       const snapshot = await runtime.request("turn/start", {
         threadId: selectedThread.id,
         prompt,
+        ...(skillIds.length
+          ? { skills: skillIds as TurnStartParams["skills"] }
+          : {}),
       });
       dispatch({ type: "snapshot", snapshot });
       if (shouldTitleSession) {
@@ -496,7 +500,8 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
   );
 
   const startTurn = useCallback(
-    (prompt: string) => withBusy(() => executeTurn(prompt)),
+    (prompt: string, skillIds: string[] = []) =>
+      withBusy(() => executeTurn(prompt, skillIds)),
     [executeTurn, withBusy],
   );
 
@@ -505,18 +510,21 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
       withBusy(async () => {
         const turn = state.turns.find((candidate) => candidate.id === turnId);
         if (!turn || turn.threadId !== selectedThread?.id) return;
-        await executeTurn(turn.prompt);
+        await executeTurn(turn.prompt, [...(turn.skillIds ?? [])]);
       }),
     [executeTurn, selectedThread?.id, state.turns, withBusy],
   );
 
   const queueTurn = useCallback(
-    (prompt: string) =>
+    (prompt: string, skillIds: string[] = []) =>
       withBusy(async () => {
         if (!selectedThread) return;
         const snapshot = await runtime.request("turn/enqueue", {
           threadId: selectedThread.id,
           prompt,
+          ...(skillIds.length
+            ? { skills: skillIds as TurnStartParams["skills"] }
+            : {}),
         });
         dispatch({ type: "snapshot", snapshot });
       }),

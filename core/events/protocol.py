@@ -20,6 +20,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Union
 
+from core.skills.models import SkillInvocation, SkillSelection
+
 # --------------------------------------------------------------------------
 # Submission Queue — commands the UI sends the engine.
 # --------------------------------------------------------------------------
@@ -28,6 +30,7 @@ from typing import Any, Union
 @dataclass(frozen=True)
 class UserInput:
     text: str
+    skills: tuple[SkillSelection, ...] = ()
     type: str = field(default="user_input", init=False)
 
 
@@ -59,7 +62,21 @@ class Submission:
 
 @dataclass(frozen=True)
 class TurnStarted:
+    skill_invocations: tuple[SkillInvocation, ...] = ()
     type: str = field(default="turn_started", init=False)
+
+
+@dataclass(frozen=True)
+class SkillLoaded:
+    invocation: SkillInvocation
+    type: str = field(default="skill_loaded", init=False)
+
+
+@dataclass(frozen=True)
+class SkillLoadFailed:
+    message: str
+    skill_id: str | None = None
+    type: str = field(default="skill_load_failed", init=False)
 
 
 @dataclass(frozen=True)
@@ -160,6 +177,8 @@ class ShutdownComplete:
 
 EventMsg = Union[
     TurnStarted,
+    SkillLoaded,
+    SkillLoadFailed,
     AgentMessage,
     AgentMessageDelta,
     ToolStarted,

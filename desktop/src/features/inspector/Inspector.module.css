@@ -1,20 +1,21 @@
 .inspector {
   display: grid;
-  height: 100vh;
+  height: 100%;
   min-width: 0;
-  grid-template-rows: 48px minmax(0, 1fr);
+  grid-template-rows: 54px minmax(0, 1fr);
   overflow: hidden;
-  background: var(--surface-canvas);
+  background: var(--surface-raised);
 }
 
 .tabs {
   display: flex;
   min-width: 0;
-  align-items: flex-end;
-  gap: 3px;
-  padding: 0 43px 0 11px;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 46px 7px 10px;
   overflow-x: auto;
   border-bottom: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--surface-sidebar) 68%, var(--surface-raised));
   scrollbar-width: none;
 }
 
@@ -24,29 +25,32 @@
 
 .tabs button {
   flex: 0 0 auto;
-  padding: 11px 7px 10px;
-  border-bottom: 2px solid transparent;
-  border-radius: 0;
+  min-height: 34px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 9px;
   color: var(--text-tertiary);
-  font: 9px var(--font-mono);
+  font: 9.5px var(--font-mono);
   text-transform: capitalize;
 }
 
 .tabs button[aria-selected="true"] {
-  border-bottom-color: var(--signal);
+  border-color: var(--border-subtle);
+  background: var(--surface-raised);
   color: var(--text-primary);
+  box-shadow: var(--shadow-soft);
 }
 
 .close {
   position: absolute;
   z-index: 4;
-  top: 9px;
-  right: 8px;
+  top: 10px;
+  right: 9px;
   display: grid;
   width: 28px;
   height: 28px;
   place-items: center;
-  border-radius: 7px;
+  border-radius: 9px;
   color: var(--text-tertiary);
 }
 
@@ -63,25 +67,25 @@
 
 .content {
   height: 100%;
-  padding: 22px 18px;
+  padding: 26px 20px;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
 
 .content h2 {
-  margin: 0 0 16px;
+  margin: 0 0 18px;
   color: var(--text-primary);
   font-family: var(--font-display);
-  font-size: 18px;
-  font-weight: 640;
-  letter-spacing: -0.025em;
+  font-size: 20px;
+  font-weight: 680;
+  letter-spacing: -0.03em;
   line-height: 1.35;
 }
 
 .content h3 {
   margin: 0 0 8px;
   color: var(--text-tertiary);
-  font: 9.5px var(--font-mono);
+  font: 10px var(--font-mono);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -89,13 +93,13 @@
 .content > pre,
 .artifactPreview pre {
   margin: 0;
-  padding: 13px;
+  padding: 14px;
   overflow: auto;
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--surface-raised);
   color: var(--text-secondary);
-  font: 10px/1.6 var(--font-mono);
+  font: 10.5px/1.64 var(--font-mono);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -109,10 +113,10 @@
   margin: 0;
   padding: 8px 10px;
   border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--border-subtle));
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: var(--danger-soft);
   color: var(--danger);
-  font-size: 10px;
+  font-size: 10.5px;
   line-height: 1.5;
 }
 
@@ -121,7 +125,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
 
 .heading h2 {
@@ -132,13 +136,13 @@
 .outlinedAction,
 .worktreeControl button,
 .fileEditor header button {
-  min-height: 32px;
-  padding: 0 9px;
+  min-height: 35px;
+  padding: 0 10px;
   border: 1px solid var(--border-strong);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--surface-raised);
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 10.5px;
 }
 
 .heading button:hover:not(:disabled),
@@ -150,31 +154,31 @@
 }
 
 .eyebrow {
-  margin: 0 0 5px;
+  margin: 0 0 6px;
   color: var(--text-tertiary);
-  font: 8.5px var(--font-mono);
+  font: 9px var(--font-mono);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
 .worktreeControl {
   display: grid;
-  gap: 6px;
-  margin-bottom: 16px;
-  padding: 10px;
+  gap: 7px;
+  margin-bottom: 18px;
+  padding: 12px;
   border: 1px solid color-mix(in srgb, var(--signal) 24%, var(--border-subtle));
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--signal-soft);
 }
 
 .worktreeControl strong {
-  font-size: 11px;
+  font-size: 11.5px;
 }
 
 .worktreeControl > span {
   overflow: hidden;
   color: var(--text-tertiary);
-  font: 9px var(--font-mono);
+  font: 9.5px var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -186,20 +190,20 @@
 
 .outlinedAction {
   width: 100%;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
   border-style: dashed;
   text-align: left;
 }
 
 .diffList {
   display: grid;
-  gap: 11px;
+  gap: 13px;
 }
 
 .fileDiff {
   overflow: hidden;
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--surface-raised);
 }
 
@@ -208,9 +212,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 10px 11px;
+  padding: 11px 13px;
   border-bottom: 1px solid var(--border-subtle);
-  font: 9.5px var(--font-mono);
+  font: 10px var(--font-mono);
 }
 
 .fileDiff > header strong {
@@ -231,18 +235,18 @@
 
 .diffActions {
   display: flex;
-  gap: 6px;
-  padding: 6px 8px;
+  gap: 7px;
+  padding: 7px 9px;
   border-bottom: 1px solid var(--border-subtle);
   background: var(--surface-code);
 }
 
 .diffActions button {
-  min-height: 28px;
-  padding: 0 8px;
-  border-radius: 5px;
+  min-height: 31px;
+  padding: 0 9px;
+  border-radius: 8px;
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 10.5px;
 }
 
 .diffActions button:hover:not(:disabled) {
@@ -263,10 +267,10 @@
 
 .hunkHeader {
   min-width: max-content;
-  padding: 5px 8px;
+  padding: 6px 9px;
   background: var(--signal-soft);
   color: var(--signal);
-  font: 9px var(--font-mono);
+  font: 9.5px var(--font-mono);
 }
 
 .diffLine {
@@ -317,13 +321,13 @@
 .fileTree button {
   display: flex;
   width: 100%;
-  min-height: 29px;
+  min-height: 32px;
   align-items: center;
   gap: 6px;
   padding-right: 8px;
   border-radius: 0;
   color: var(--text-secondary);
-  font: 9.5px var(--font-mono);
+  font: 10px var(--font-mono);
   text-align: left;
 }
 
@@ -348,7 +352,7 @@
   position: relative;
   display: grid;
   min-height: 0;
-  grid-template-rows: 40px minmax(0, 1fr);
+  grid-template-rows: 44px minmax(0, 1fr);
   background: var(--surface-raised);
 }
 
@@ -357,9 +361,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 4px 7px 4px 11px;
+  padding: 5px 8px 5px 12px;
   border-bottom: 1px solid var(--border-subtle);
-  font: 9px var(--font-mono);
+  font: 9.5px var(--font-mono);
 }
 
 .fileEditor > header > span {
@@ -395,7 +399,7 @@
   margin: 0;
   padding: 6px 8px;
   border: 1px solid var(--border-subtle);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--surface-raised) 92%, transparent);
   color: var(--text-tertiary);
   font: 9px var(--font-mono);
@@ -431,25 +435,26 @@
 
 .artifactList {
   display: grid;
-  gap: 5px;
+  gap: 7px;
 }
 
 .artifactList button {
   display: grid;
-  min-height: 44px;
+  min-height: 50px;
   grid-template-columns: 62px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
-  padding: 9px;
+  padding: 10px;
   border: 1px solid var(--border-subtle);
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: var(--surface-raised);
   text-align: left;
 }
 
 .artifactList button[data-active="true"] {
   border-color: var(--signal);
-  box-shadow: inset 2px 0 var(--signal);
+  background: var(--signal-faint);
+  box-shadow: 0 0 0 2px var(--signal-soft);
 }
 
 .artifactList span,
@@ -479,15 +484,15 @@
 
 .testList {
   display: grid;
-  gap: 7px;
+  gap: 9px;
 }
 
 .testList button {
   display: grid;
   gap: 5px;
-  padding: 12px;
+  padding: 14px;
   border: 1px solid var(--border-subtle);
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: var(--surface-raised);
   text-align: left;
 }
@@ -497,7 +502,7 @@
 }
 
 .testList strong {
-  font-size: 11px;
+  font-size: 11.5px;
 }
 
 .testList code,
@@ -547,7 +552,7 @@
   padding: 9px;
   overflow: auto;
   border: 1px solid var(--border-subtle);
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: var(--surface-raised);
   color: var(--text-secondary);
   font: 9px/1.55 var(--font-mono);
@@ -616,8 +621,9 @@
 }
 
 .emptyRule {
-  width: 32px;
-  height: 2px;
+  width: 36px;
+  height: 3px;
+  border-radius: var(--radius-pill);
   background: var(--signal);
-  box-shadow: 12px 0 var(--success), 24px 0 var(--attention);
+  box-shadow: 14px 0 var(--success), 28px 0 var(--attention);
 }

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
+import re
 
 from core.domain.common import (
     new_id,
@@ -12,6 +13,9 @@ from core.domain.common import (
     require_non_empty,
     require_prefixed_id,
 )
+
+_MAX_SKILLS_PER_TURN = 8
+_SKILL_ID_RE = re.compile(r"^sk_[0-9a-f]{24}$")
 
 
 class TurnStatus(StrEnum):
@@ -36,6 +40,7 @@ class Turn:
     thread_id: str
     ordinal: int
     prompt: str
+    skill_ids: tuple[str, ...] = ()
     status: TurnStatus = TurnStatus.QUEUED
     stop_reason: str | None = None
     error_code: str | None = None
@@ -50,6 +55,15 @@ class Turn:
         require_non_empty(self.prompt, "prompt")
         if self.ordinal < 1:
             raise ValueError("ordinal must be positive")
+        if len(self.skill_ids) > _MAX_SKILLS_PER_TURN:
+            raise ValueError(f"a turn may select at most {_MAX_SKILLS_PER_TURN} skills")
+        if len(set(self.skill_ids)) != len(self.skill_ids):
+            raise ValueError("skill_ids must be unique")
+        if any(
+            not isinstance(skill_id, str) or not _SKILL_ID_RE.fullmatch(skill_id)
+            for skill_id in self.skill_ids
+        ):
+            raise ValueError("skill_ids must contain opaque sk_ identifiers")
         if self.started_at is not None:
             require_aware(self.started_at, "started_at")
         if self.completed_at is not None:

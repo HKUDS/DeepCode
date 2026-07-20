@@ -121,11 +121,21 @@ def test_command_view(command) -> dict[str, Any]:
 
 def skill_info_view(skill) -> dict[str, Any]:
     return {
+        "id": skill.id,
         "name": skill.name,
         "description": skill.description,
         "allowedTools": list(skill.allowed_tools),
-        "directory": skill.directory,
+        "scope": skill.scope,
+        "sourceRoot": skill.source_root,
         "source": skill.source,
+        "location": skill.location,
+        "status": skill.status,
+        "enabled": skill.enabled,
+        "selectable": skill.selectable,
+        "revision": skill.revision,
+        "byteSize": skill.byte_size,
+        "shadowedBy": skill.shadowed_by,
+        "error": skill.error,
     }
 
 
@@ -252,6 +262,7 @@ def turn_view(turn: Turn) -> dict[str, Any]:
         "threadId": turn.thread_id,
         "ordinal": turn.ordinal,
         "prompt": turn.prompt,
+        "skillIds": list(turn.skill_ids),
         "status": turn.status.value,
         "stopReason": turn.stop_reason,
         "errorCode": turn.error_code,

@@ -20,7 +20,7 @@
 .markdown blockquote,
 .markdown table,
 .markdown hr {
-  margin: 0 0 12px;
+  margin: 0 0 15px;
 }
 
 .markdown h1,
@@ -29,23 +29,24 @@
 .markdown h4,
 .markdown h5,
 .markdown h6 {
-  margin: 25px 0 9px;
+  margin: 30px 0 11px;
   color: var(--text-primary);
-  font-weight: 660;
-  line-height: 1.32;
-  letter-spacing: -0.018em;
+  font-family: var(--font-display);
+  font-weight: 680;
+  line-height: 1.28;
+  letter-spacing: -0.024em;
 }
 
 .markdown h1 {
-  font-size: 1.32em;
+  font-size: 1.42em;
 }
 
 .markdown h2 {
-  font-size: 1.18em;
+  font-size: 1.25em;
 }
 
 .markdown h3 {
-  font-size: 1.06em;
+  font-size: 1.1em;
 }
 
 .markdown h4,
@@ -56,12 +57,12 @@
 
 .markdown ul,
 .markdown ol {
-  padding-left: 21px;
+  padding-left: 23px;
 }
 
 .markdown li {
-  margin: 3px 0;
-  padding-left: 2px;
+  margin: 4px 0;
+  padding-left: 3px;
 }
 
 .markdown li > p {
@@ -75,8 +76,10 @@
 }
 
 .markdown blockquote {
-  padding: 3px 0 3px 14px;
-  border-left: 2px solid var(--signal);
+  padding: 9px 14px;
+  border-left: 3px solid var(--signal);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--signal-faint);
   color: var(--text-secondary);
 }
 
@@ -92,9 +95,9 @@
 }
 
 .markdown :not(pre) > code {
-  padding: 2px 5px;
+  padding: 2px 6px;
   border: 1px solid var(--border-subtle);
-  border-radius: 5px;
+  border-radius: 7px;
   background: var(--surface-code);
   color: var(--text-primary);
   font: 0.87em/1.4 var(--font-mono);
@@ -107,14 +110,14 @@
   border-spacing: 0;
   border-collapse: separate;
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   font-size: 0.9em;
 }
 
 .markdown th,
 .markdown td {
   min-width: 110px;
-  padding: 8px 10px;
+  padding: 9px 12px;
   border-right: 1px solid var(--border-subtle);
   border-bottom: 1px solid var(--border-subtle);
   text-align: left;
@@ -146,34 +149,35 @@
 }
 
 .codeBlock {
-  margin: 14px 0;
+  margin: 18px 0;
   overflow: hidden;
   border: 1px solid var(--border-subtle);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--surface-code);
+  box-shadow: var(--shadow-soft);
 }
 
 .codeBlock figcaption {
   display: flex;
-  min-height: 34px;
+  min-height: 38px;
   align-items: center;
   justify-content: space-between;
-  padding: 0 8px 0 11px;
+  padding: 0 10px 0 13px;
   border-bottom: 1px solid var(--border-subtle);
   color: var(--text-tertiary);
-  font: 9.5px var(--font-mono);
+  font: 10px var(--font-mono);
   text-transform: lowercase;
 }
 
 .codeBlock figcaption button {
   display: inline-flex;
-  min-height: 24px;
+  min-height: 27px;
   align-items: center;
   gap: 5px;
-  padding: 0 6px;
-  border-radius: 5px;
+  padding: 0 8px;
+  border-radius: 8px;
   color: var(--text-tertiary);
-  font: 9px var(--font-mono);
+  font: 9.5px var(--font-mono);
 }
 
 .codeBlock figcaption button:hover {
@@ -184,11 +188,11 @@
 .codeBlock pre {
   max-height: 520px;
   margin: 0;
-  padding: 14px 16px;
+  padding: 16px 18px;
   overflow: auto;
   background: transparent !important;
   color: var(--text-primary);
-  font: 11.5px/1.68 var(--font-mono);
+  font: 12px/1.7 var(--font-mono);
   tab-size: 2;
 }
 
@@ -199,8 +203,8 @@
 
 .markdown[data-compact="true"] {
   color: var(--text-secondary);
-  font-size: 11.5px;
-  line-height: 1.6;
+  font-size: 12px;
+  line-height: 1.64;
 }
 
 .markdown[data-compact="true"] p,

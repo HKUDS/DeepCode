@@ -592,6 +592,16 @@ export function SettingsPage({
           </>
         ) : null}
       </section>
+
+      <aside className={styles.credits} aria-label="Visual credits">
+        <span className={styles.creditMark} aria-hidden="true" />
+        <p>
+          <strong>Visual credits</strong>
+          <small>
+            Selected outline accents designed by The Icon Tree from Flaticon.
+          </small>
+        </p>
+      </aside>
     </section>
   );
 }

@@ -5,35 +5,39 @@
   bottom: 0;
   left: 0;
   width: 100%;
-  padding: 30px 20px 13px;
+  padding: 36px 24px 15px;
   background: linear-gradient(
     to bottom,
     transparent,
-    color-mix(in srgb, var(--surface-canvas) 94%, transparent) 30px,
-    var(--surface-canvas) 58px
+    color-mix(in srgb, var(--surface-raised) 92%, transparent) 34px,
+    var(--surface-raised) 66px
   );
   pointer-events: none;
 }
 
 .composer {
-  width: min(780px, 100%);
+  width: min(820px, 100%);
   margin: 0 auto;
   overflow: hidden;
   border: 1px solid var(--border-strong);
-  border-radius: 16px;
+  border-radius: 22px;
   background: var(--surface-raised);
-  box-shadow: 0 8px 26px rgb(20 22 26 / 9%);
+  box-shadow:
+    0 18px 46px rgb(27 34 30 / 10%),
+    0 3px 12px rgb(27 34 30 / 5%);
   transition:
     border-color 150ms ease,
-    box-shadow 150ms ease;
+    box-shadow 150ms ease,
+    transform 150ms ease;
   pointer-events: auto;
 }
 
 .composer:focus-within {
   border-color: var(--signal);
   box-shadow:
-    0 0 0 2px var(--signal-soft),
-    0 10px 30px rgb(20 22 26 / 11%);
+    0 0 0 3px var(--signal-soft),
+    0 22px 52px rgb(27 34 30 / 13%);
+  transform: translateY(-1px);
 }
 
 .composer label {
@@ -47,17 +51,17 @@
 .composer textarea {
   display: block;
   width: 100%;
-  min-height: 56px;
-  max-height: 176px;
+  min-height: 64px;
+  max-height: 190px;
   resize: none;
-  padding: 14px 16px 7px;
+  padding: 17px 18px 8px;
   overflow-y: auto;
   border: 0;
   outline: 0;
   background: transparent;
   color: var(--text-primary);
-  font-size: 13.5px;
-  line-height: 1.58;
+  font-size: 14px;
+  line-height: 1.62;
 }
 
 .composer textarea::placeholder {
@@ -66,39 +70,209 @@
 
 .toolbar {
   display: flex;
-  min-height: 41px;
+  min-height: 45px;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 4px 8px 7px 12px;
+  padding: 5px 9px 8px 14px;
 }
 
 .attachments {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
-  padding: 0 12px 5px;
+  gap: 6px;
+  padding: 0 14px 7px;
+}
+
+.skills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 14px 7px;
+}
+
+.skills > span {
+  display: inline-flex;
+  min-height: 29px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 5px 0 9px;
+  border: 1px solid color-mix(in srgb, var(--signal) 22%, var(--border-subtle));
+  border-radius: 999px;
+  background: var(--signal-faint);
+  color: var(--text-secondary);
+  font-size: 10.5px;
+}
+
+.skills > span > svg {
+  color: var(--signal);
+}
+
+.skills button {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--text-tertiary);
+}
+
+.skills button:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.skillMenu {
+  display: grid;
+  gap: 8px;
+  margin: 0 11px 9px;
+  padding: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-code);
+}
+
+.skillMenu > header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.skillMenu > header > div {
+  display: grid;
+  gap: 2px;
+}
+
+.skillMenu > header strong {
+  color: var(--text-primary);
+  font-size: 11.5px;
+}
+
+.skillMenu > header span,
+.skillMenu > header button {
+  color: var(--text-tertiary);
+  font-size: 9.5px;
+}
+
+.skillMenu > header button {
+  display: grid;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  border-radius: 8px;
+}
+
+.skillMenu > input {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  outline: 0;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-size: 11px;
+}
+
+.skillMenu > input:focus {
+  border-color: var(--signal);
+  box-shadow: 0 0 0 2px var(--signal-soft);
+}
+
+.skillOptions {
+  display: grid;
+  max-height: 210px;
+  gap: 3px;
+  overflow-y: auto;
+}
+
+.skillOptions > button {
+  display: grid;
+  min-height: 48px;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 9px;
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.skillOptions > button:hover,
+.skillOptions > button[aria-selected="true"] {
+  background: var(--surface-raised);
+}
+
+.skillOptions > button > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.skillOptions strong,
+.skillOptions small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skillOptions strong {
+  color: var(--text-primary);
+  font-size: 11px;
+}
+
+.skillOptions small {
+  color: var(--text-tertiary);
+  font-size: 9.5px;
+}
+
+.skillOptions em {
+  color: var(--text-tertiary);
+  font: 8.5px var(--font-mono);
+  font-style: normal;
+}
+
+.skillOptions > p {
+  margin: 10px;
+  color: var(--text-tertiary);
+  font-size: 10.5px;
+  text-align: center;
+}
+
+.skillCheck {
+  display: grid;
+  width: 17px;
+  height: 17px;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--signal);
+}
+
+.skillOptions button[aria-selected="true"] .skillCheck {
+  border-color: color-mix(in srgb, var(--signal) 42%, var(--border-strong));
+  background: var(--signal-soft);
 }
 
 .commandMenu {
   display: grid;
   max-height: 190px;
-  margin: 0 9px 7px;
-  padding: 4px;
+  margin: 0 11px 9px;
+  padding: 6px;
   overflow-y: auto;
   border: 1px solid var(--border-subtle);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--surface-code);
 }
 
 .commandMenu button {
   display: grid;
-  min-height: 38px;
+  min-height: 42px;
   grid-template-columns: 100px minmax(0, 1fr);
   align-items: center;
   gap: 9px;
-  padding: 0 8px;
-  border-radius: 6px;
+  padding: 0 10px;
+  border-radius: 9px;
   color: var(--text-secondary);
   text-align: left;
 }
@@ -110,12 +284,12 @@
 
 .commandMenu code {
   color: var(--signal);
-  font: 10px var(--font-mono);
+  font: 10.5px var(--font-mono);
 }
 
 .commandMenu span {
   overflow: hidden;
-  font-size: 10px;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -123,15 +297,15 @@
 .attachments > span {
   display: inline-flex;
   max-width: 210px;
-  min-height: 27px;
+  min-height: 30px;
   align-items: center;
   gap: 5px;
-  padding: 0 4px 0 7px;
+  padding: 0 5px 0 9px;
   border: 1px solid var(--border-subtle);
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: var(--surface-code);
   color: var(--text-secondary);
-  font: 9.5px var(--font-mono);
+  font: 10px var(--font-mono);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -160,19 +334,40 @@
   overflow: hidden;
 }
 
-.attachButton {
+.attachButton,
+.skillButton {
   display: grid;
-  width: 28px;
-  height: 28px;
+  width: 31px;
+  height: 31px;
   flex: 0 0 auto;
   place-items: center;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: var(--text-tertiary);
 }
 
-.attachButton:hover:not(:disabled) {
+.attachButton:hover:not(:disabled),
+.skillButton:hover:not(:disabled) {
   background: var(--surface-hover);
   color: var(--text-primary);
+}
+
+.skillButton {
+  position: relative;
+}
+
+.skillButton b {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  display: grid;
+  min-width: 13px;
+  height: 13px;
+  place-items: center;
+  border: 2px solid var(--surface-raised);
+  border-radius: 999px;
+  background: var(--signal);
+  color: var(--text-inverse);
+  font: 7px var(--font-mono);
 }
 
 .context span {
@@ -180,10 +375,10 @@
   min-width: 0;
   align-items: center;
   gap: 4px;
-  padding: 4px 6px;
-  border-radius: 6px;
+  padding: 5px 7px;
+  border-radius: 8px;
   color: var(--text-tertiary);
-  font-size: 9.5px;
+  font-size: 10px;
   white-space: nowrap;
 }
 
@@ -199,8 +394,8 @@
   min-width: 0;
   align-items: center;
   gap: 4px;
-  padding: 4px 6px;
-  border-radius: 6px;
+  padding: 5px 7px;
+  border-radius: 8px;
   color: var(--text-tertiary);
 }
 
@@ -216,7 +411,7 @@
   appearance: none;
   background: transparent;
   color: inherit;
-  font-size: 9.5px;
+  font-size: 10px;
   text-overflow: ellipsis;
 }
 
@@ -227,7 +422,7 @@
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
 }
 
 .activeActions {
@@ -238,13 +433,13 @@
 }
 
 .queueButton {
-  min-height: 32px;
-  padding: 0 11px;
+  min-height: 35px;
+  padding: 0 13px;
   border: 1px solid var(--border-strong);
   background: var(--surface-raised);
   color: var(--text-primary);
-  font-size: 11px;
-  font-weight: 620;
+  font-size: 11.5px;
+  font-weight: 640;
 }
 
 .queueButton:hover:not(:disabled) {
@@ -252,10 +447,11 @@
 }
 
 .sendButton {
-  width: 34px;
-  height: 34px;
+  width: 38px;
+  height: 38px;
   background: var(--text-primary);
   color: var(--text-inverse);
+  box-shadow: 0 5px 13px rgb(27 34 30 / 16%);
 }
 
 .sendButton:hover:not(:disabled) {
@@ -264,24 +460,24 @@
 }
 
 .stopButton {
-  min-height: 32px;
+  min-height: 35px;
   gap: 6px;
-  padding: 0 10px;
+  padding: 0 12px;
   border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--border-subtle));
   background: var(--danger-soft);
   color: var(--danger);
-  font-size: 11px;
-  font-weight: 620;
+  font-size: 11.5px;
+  font-weight: 640;
 }
 
 .hint {
   display: flex;
-  width: min(756px, calc(100% - 20px));
+  width: min(790px, calc(100% - 24px));
   justify-content: space-between;
   gap: 12px;
-  margin: 6px auto 0;
+  margin: 7px auto 0;
   color: var(--text-tertiary);
-  font-size: 8.5px;
+  font-size: 9px;
   pointer-events: auto;
 }
 
@@ -295,7 +491,7 @@
     padding-inline: 10px;
   }
 
-  .context > :nth-child(n + 2) {
+  .context > :nth-child(n + 3) {
     display: none;
   }
 }

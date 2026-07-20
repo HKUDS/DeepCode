@@ -87,6 +87,23 @@ async def _cmd_clear(app, args: str) -> str | None:
     return "context cleared"
 
 
+async def _cmd_skills(app, args: str) -> str | None:
+    return app.list_skills()
+
+
+async def _cmd_skill(app, args: str) -> str | None:
+    action, _, target = args.strip().partition(" ")
+    if not action:
+        return "usage: /skill <id|name> | remove <id|name> | clear"
+    if action.lower() == "clear":
+        return app.clear_skills()
+    if action.lower() == "remove":
+        if not target.strip():
+            return "usage: /skill remove <id|name>"
+        return app.remove_skill(target.strip())
+    return app.select_skill(args.strip())
+
+
 async def _cmd_exit(app, args: str) -> str | None:
     app.request_exit()
     return None
@@ -104,6 +121,13 @@ REGISTRY: dict[str, Command] = {
             _cmd_resume,
         ),
         Command("model", "/model [id]", "show or switch the model", _cmd_model),
+        Command("skills", "/skills", "list discovered Skills", _cmd_skills),
+        Command(
+            "skill",
+            "/skill <id|name>",
+            "select a Skill for the next turn",
+            _cmd_skill,
+        ),
         Command("clear", "/clear", "clear the conversation context", _cmd_clear),
         Command("exit", "/exit", "quit (ctrl-d also works)", _cmd_exit),
     )

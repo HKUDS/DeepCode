@@ -2,42 +2,37 @@
   position: relative;
   display: grid;
   width: 100%;
-  grid-template-columns: minmax(0, 1fr) 25px;
+  grid-template-columns: minmax(0, 1fr) 28px;
   align-items: center;
-  border-radius: 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   color: var(--text-secondary);
 }
 
 .row:hover {
-  background: color-mix(in srgb, var(--surface-raised) 52%, transparent);
+  background: color-mix(in srgb, var(--surface-raised) 58%, transparent);
   color: var(--text-primary);
 }
 
 .row[data-active="true"] {
-  background: var(--surface-selected);
+  border-color: var(--border-subtle);
+  background: var(--surface-raised);
   color: var(--text-primary);
+  box-shadow: var(--shadow-soft);
 }
 
 .row[data-active="true"]::before {
-  position: absolute;
-  z-index: 2;
-  top: 8px;
-  bottom: 8px;
-  left: -8px;
-  width: 2px;
-  border-radius: 4px;
-  background: var(--signal);
-  content: "";
+  display: none;
 }
 
 .sessionButton {
   display: grid;
   min-width: 0;
-  min-height: 30px;
+  min-height: 34px;
   grid-template-columns: 9px minmax(0, 1fr);
   align-items: center;
-  gap: 7px;
-  padding: 3px 2px 3px 7px;
+  gap: 8px;
+  padding: 4px 2px 4px 9px;
   color: inherit;
   text-align: left;
 }
@@ -55,14 +50,14 @@
 }
 
 .copy strong {
-  font-size: 10.75px;
-  font-weight: 520;
+  font-size: 11.5px;
+  font-weight: 540;
 }
 
 .beacon {
   width: 7px;
   height: 7px;
-  border: 1.5px solid var(--border-emphasis);
+  border: 1.5px solid var(--border-strong);
   border-radius: 999px;
   background: var(--surface-sidebar);
 }
@@ -90,10 +85,10 @@
 
 .moreButton {
   display: grid;
-  width: 22px;
-  height: 22px;
+  width: 25px;
+  height: 25px;
   place-items: center;
-  border-radius: 5px;
+  border-radius: 8px;
   color: var(--text-tertiary);
   opacity: 0;
 }
@@ -112,12 +107,12 @@
 .renameForm {
   display: grid;
   min-width: 0;
-  min-height: 38px;
+  min-height: 42px;
   grid-column: 1 / -1;
   grid-template-columns: 9px minmax(0, 1fr) 24px 24px;
   align-items: center;
   gap: 5px;
-  padding: 4px 5px 4px 8px;
+  padding: 5px 6px 5px 9px;
 }
 
 .renameForm label {
@@ -126,14 +121,14 @@
 
 .renameForm input {
   width: 100%;
-  height: 28px;
-  padding: 0 7px;
+  height: 31px;
+  padding: 0 9px;
   border: 1px solid var(--signal);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   outline: 0;
   background: var(--surface-raised);
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: 12.5px;
   box-shadow: 0 0 0 3px var(--signal-soft);
 }
 
@@ -142,7 +137,7 @@
   width: 23px;
   height: 23px;
   place-items: center;
-  border-radius: 5px;
+  border-radius: 8px;
   color: var(--text-secondary);
 }
 
@@ -155,12 +150,12 @@
 .confirmation {
   position: absolute;
   z-index: 30;
-  top: calc(100% + 4px);
+  top: calc(100% + 6px);
   right: 0;
-  width: 166px;
-  padding: 5px;
+  width: 178px;
+  padding: 6px;
   border: 1px solid var(--border-subtle);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--surface-raised);
   box-shadow: var(--shadow-menu);
 }
@@ -168,13 +163,13 @@
 .menu button {
   display: flex;
   width: 100%;
-  min-height: 34px;
+  min-height: 37px;
   align-items: center;
   gap: 8px;
-  padding: 0 8px;
-  border-radius: 6px;
+  padding: 0 10px;
+  border-radius: 9px;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   text-align: left;
 }
 
@@ -188,8 +183,8 @@
 }
 
 .confirmation {
-  width: 228px;
-  padding: 12px;
+  width: 248px;
+  padding: 14px;
 }
 
 .confirmation p {
@@ -197,13 +192,13 @@
   gap: 3px;
   margin: 0;
   color: var(--text-primary);
-  font-size: 11px;
-  font-weight: 620;
+  font-size: 12px;
+  font-weight: 650;
 }
 
 .confirmation p span {
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: 10.5px;
   font-weight: 400;
   line-height: 1.4;
 }
@@ -211,16 +206,16 @@
 .confirmation > div {
   display: flex;
   justify-content: flex-end;
-  gap: 5px;
-  margin-top: 10px;
+  gap: 7px;
+  margin-top: 13px;
 }
 
 .confirmation button {
-  min-height: 30px;
-  padding: 0 9px;
-  border-radius: 6px;
+  min-height: 34px;
+  padding: 0 11px;
+  border-radius: 9px;
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 10.5px;
 }
 
 .confirmation button:hover:not(:disabled) {

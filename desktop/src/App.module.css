@@ -2,23 +2,27 @@
   display: grid;
   width: 100vw;
   height: 100vh;
-  grid-template-columns: 248px minmax(0, 1fr);
+  grid-template-columns: 264px minmax(0, 1fr);
   overflow: hidden;
-  background: var(--surface-canvas);
+  background: var(--surface-shell);
 }
 
 .shell[data-inspector="true"] {
-  grid-template-columns: 248px minmax(460px, 1fr) minmax(360px, 410px);
+  grid-template-columns: 264px minmax(460px, 1fr) minmax(370px, 420px);
 }
 
 .workspace {
   position: relative;
   display: grid;
   min-width: 0;
-  height: 100vh;
+  height: calc(100vh - 16px);
   grid-template-rows: auto minmax(0, 1fr) auto;
+  margin: 8px 8px 8px 4px;
   overflow: hidden;
-  background: var(--surface-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-soft);
 }
 
 .threadViewport {
@@ -32,7 +36,7 @@
   place-items: center;
   padding: 24px;
   color: var(--text-tertiary);
-  font: 11px var(--font-mono);
+  font: 11.5px var(--font-mono);
   letter-spacing: 0.03em;
 }
 
@@ -43,56 +47,62 @@
 
 .startState {
   display: grid;
-  width: min(680px, 100%);
+  width: min(720px, 100%);
   min-height: 100%;
   align-content: center;
   margin: 0 auto;
-  padding: 68px clamp(30px, 6vw, 72px) 112px;
+  padding: 72px clamp(34px, 6vw, 78px) 128px;
   text-align: left;
 }
 
 .startEyebrow {
-  margin: 0 0 11px !important;
-  color: var(--text-tertiary) !important;
-  font: 500 10px var(--font-mono) !important;
-  letter-spacing: 0.02em;
+  width: max-content;
+  margin: 0 0 14px !important;
+  padding: 5px 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  background: var(--surface-code);
+  color: var(--text-secondary) !important;
+  font: 560 10px var(--font-mono) !important;
+  letter-spacing: 0.01em;
 }
 
 .startState h2 {
   margin: 0;
   color: var(--text-primary);
   font-family: var(--font-display);
-  font-size: clamp(25px, 3vw, 32px);
-  font-weight: 650;
-  letter-spacing: -0.04em;
-  line-height: 1.12;
+  font-size: clamp(30px, 3.2vw, 38px);
+  font-weight: 680;
+  letter-spacing: -0.045em;
+  line-height: 1.08;
 }
 
 .startState > p:not(.startEyebrow) {
   max-width: 540px;
-  margin: 15px 0 24px;
+  margin: 17px 0 28px;
   color: var(--text-secondary);
-  font-size: 13.5px;
-  line-height: 1.62;
+  font-size: 14px;
+  line-height: 1.68;
 }
 
 .startActions {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 18px;
 }
 
 .startActions button {
   display: inline-flex;
-  min-height: 43px;
+  min-height: 44px;
   align-items: center;
   gap: 9px;
-  padding: 0 15px;
-  border-radius: 9px;
+  padding: 0 17px;
+  border-radius: var(--radius-md);
   background: var(--text-primary);
   color: var(--text-inverse);
-  font-size: 12px;
-  font-weight: 640;
+  font-size: 12.5px;
+  font-weight: 650;
+  box-shadow: 0 6px 16px rgb(27 34 30 / 12%);
   transition:
     transform 150ms ease,
     opacity 150ms ease;
@@ -105,29 +115,34 @@
 
 .startActions > span {
   color: var(--text-tertiary);
-  font: 10px var(--font-mono);
+  font: 10.5px var(--font-mono);
 }
 
 .reviewPane {
   position: relative;
   min-width: 0;
-  height: 100vh;
+  height: calc(100vh - 16px);
+  margin: 8px 8px 8px 0;
   overflow: hidden;
-  border-left: 1px solid var(--border-subtle);
-  background: var(--surface-sidebar);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-soft);
 }
 
 @media (max-width: 1180px) {
   .shell[data-inspector="true"] {
-    grid-template-columns: 232px minmax(0, 1fr);
+    grid-template-columns: 248px minmax(0, 1fr);
   }
 
   .reviewPane {
     position: fixed;
     z-index: 20;
-    top: 0;
-    right: 0;
+    top: 8px;
+    right: 8px;
     width: min(430px, calc(100vw - 72px));
+    height: calc(100vh - 16px);
+    margin: 0;
     box-shadow: var(--shadow-float);
   }
 }
@@ -135,7 +150,7 @@
 @media (max-width: 920px) {
   .shell,
   .shell[data-inspector="true"] {
-    grid-template-columns: 220px minmax(0, 1fr);
+    grid-template-columns: 228px minmax(0, 1fr);
   }
 
   .startState {
@@ -147,7 +162,7 @@
 @media (max-width: 720px) {
   .shell,
   .shell[data-inspector="true"] {
-    grid-template-columns: 196px minmax(0, 1fr);
+    grid-template-columns: 204px minmax(0, 1fr);
   }
 
   .startState {

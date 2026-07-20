@@ -115,6 +115,10 @@ def main():
             from cli.mcp_server import main as mcp_main
 
             raise SystemExit(mcp_main(sys.argv[2:]))
+        elif sys.argv[1] in {"skill", "skills"}:
+            from cli.skill_cli import run as skill_run
+
+            raise SystemExit(skill_run(sys.argv[2:]))
         elif sys.argv[1] in ["--help", "-h", "help"]:
             print_banner()
 
@@ -134,6 +138,10 @@ def main():
                         row("deepcode test <paper>", "Test paper reproduction"),
                         row("deepcode test <paper> --fast", "Test paper (fast mode)"),
                         row("deepcode mcp", "Expose DeepCode as an MCP server (stdio)"),
+                        row(
+                            "deepcode skill <command>",
+                            "List, inspect, import, and manage Agent Skills",
+                        ),
                         "",
                         "   More agent entry points:",
                         row(

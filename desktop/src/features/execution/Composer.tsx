@@ -1,12 +1,14 @@
 import {
   ArrowUp,
+  Check,
   Cpu,
   Paperclip,
   ShieldCheck,
+  Sparkles,
   Square,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 import type {
   Project,
@@ -14,6 +16,8 @@ import type {
   Thread,
 } from "../../generated/app-server";
 import type { DesktopPermissionMode } from "../../app/useWorkspaceController";
+import type { DesktopRuntime } from "../../rpc/contracts";
+import { useSkillCatalog } from "../skills/useSkillCatalog";
 import {
   matchingCommands,
   parseComposerCommand,
@@ -27,6 +31,7 @@ interface ComposerProps {
   canExecute: boolean;
   busy: boolean;
   active: boolean;
+  runtime: DesktopRuntime;
   project: Project | null;
   thread: Thread | null;
   settings: SettingsSnapshot | null;
@@ -35,8 +40,8 @@ interface ComposerProps {
   onPermissionModeChange(mode: DesktopPermissionMode): void;
   onPickContextFiles(): Promise<string[]>;
   onCommand(command: ComposerCommand): Promise<boolean>;
-  onSubmit(prompt: string): Promise<void>;
-  onQueue(prompt: string): Promise<void>;
+  onSubmit(prompt: string, skillIds?: string[]): Promise<void>;
+  onQueue(prompt: string, skillIds?: string[]): Promise<void>;
   onInterrupt(): void;
 }
 
@@ -45,6 +50,7 @@ export function Composer({
   canExecute,
   busy,
   active,
+  runtime,
   project,
   thread,
   settings,
@@ -71,6 +77,26 @@ export function Composer({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [contextError, setContextError] = useState<string | null>(null);
   const [commandError, setCommandError] = useState<string | null>(null);
+  const [skillPickerOpen, setSkillPickerOpen] = useState(false);
+  const [skillQuery, setSkillQuery] = useState("");
+  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
+  const skillCatalog = useSkillCatalog(runtime, project?.id ?? null);
+  const availableSkills = useMemo(() => {
+    const query = skillQuery.trim().toLocaleLowerCase();
+    return skillCatalog.activeSkills.filter(
+      (skill) =>
+        !query ||
+        skill.name.toLocaleLowerCase().includes(query) ||
+        skill.description.toLocaleLowerCase().includes(query),
+    );
+  }, [skillCatalog.activeSkills, skillQuery]);
+  const selectedSkills = useMemo(() => {
+    const byId = new Map(skillCatalog.skills.map((skill) => [skill.id, skill]));
+    return selectedSkillIds.flatMap((skillId) => {
+      const skill = byId.get(skillId);
+      return skill ? [skill] : [];
+    });
+  }, [selectedSkillIds, skillCatalog.skills]);
   const defaultModel = settingsDefaultModel(settings);
   const permissionMode = settingsPermissionMode(settings);
   const modelOptions = settings?.models ?? [];
@@ -103,13 +129,16 @@ export function Composer({
       attachments,
       thread?.workspacePath,
     );
+    const selectedIds = selectedSkills.map((skill) => skill.id);
     if (active) {
-      await onQueue(executionPrompt);
+      await onQueue(executionPrompt, selectedIds);
     } else {
-      await onSubmit(executionPrompt);
+      await onSubmit(executionPrompt, selectedIds);
     }
     setPrompt("");
     clearAttachments();
+    setSelectedSkillIds([]);
+    setSkillPickerOpen(false);
   };
   const commandSuggestions = matchingCommands(prompt);
 
@@ -197,6 +226,96 @@ export function Composer({
             ))}
           </div>
         ) : null}
+        {skillPickerOpen ? (
+          <section className={styles.skillMenu} aria-label="Select Skills">
+            <header>
+              <div>
+                <strong>Skills for this turn</strong>
+                <span>Choose up to 8. You can also type $name.</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSkillPickerOpen(false)}
+                aria-label="Close Skill picker"
+              >
+                <X size={13} />
+              </button>
+            </header>
+            <input
+              value={skillQuery}
+              onChange={(event) => setSkillQuery(event.target.value)}
+              placeholder="Filter Skills"
+              aria-label="Filter Skills"
+              autoFocus
+            />
+            <div className={styles.skillOptions} role="listbox" aria-multiselectable>
+              {availableSkills.length ? (
+                availableSkills.map((skill) => {
+                  const selected = selectedSkillIds.includes(skill.id);
+                  return (
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={selected}
+                      key={skill.id}
+                      onClick={() =>
+                        setSelectedSkillIds((current) => {
+                          const selectable = new Set(
+                            skillCatalog.activeSkills.map((entry) => entry.id),
+                          );
+                          const valid = current.filter((skillId) =>
+                            selectable.has(skillId),
+                          );
+                          return selected
+                            ? valid.filter((skillId) => skillId !== skill.id)
+                            : valid.length < 8
+                              ? [...valid, skill.id]
+                              : valid;
+                        })
+                      }
+                    >
+                      <span className={styles.skillCheck}>
+                        {selected ? <Check size={11} /> : null}
+                      </span>
+                      <span>
+                        <strong>{skill.name}</strong>
+                        <small>{skill.description}</small>
+                      </span>
+                      <em>{skill.source.replace(":", " · ")}</em>
+                    </button>
+                  );
+                })
+              ) : (
+                <p>
+                  {skillCatalog.loading
+                    ? "Loading Skills…"
+                    : skillCatalog.error ?? "No matching Skills."}
+                </p>
+              )}
+            </div>
+          </section>
+        ) : null}
+        {selectedSkills.length ? (
+          <div className={styles.skills} aria-label="Selected Skills">
+            {selectedSkills.map((skill) => (
+              <span key={skill.id} title={skill.description}>
+                <Sparkles size={11} />
+                {skill.name}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSelectedSkillIds((current) =>
+                      current.filter((skillId) => skillId !== skill.id),
+                    )
+                  }
+                  aria-label={`Remove ${skill.name}`}
+                >
+                  <X size={11} />
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : null}
         {attachments.length ? (
           <div className={styles.attachments} aria-label="Attached context files">
             {attachments.map((path) => (
@@ -225,6 +344,22 @@ export function Composer({
               title="Attach workspace files"
             >
               <Paperclip size={13} />
+            </button>
+            <button
+              className={styles.skillButton}
+              type="button"
+              onClick={() => setSkillPickerOpen((open) => !open)}
+              disabled={!editable || busy || !skillCatalog.activeSkills.length}
+              aria-expanded={skillPickerOpen}
+              aria-label="Select Skills for this turn"
+              title={
+                skillCatalog.activeSkills.length
+                  ? "Select Skills for this turn"
+                  : "No selectable Skills"
+              }
+            >
+              <Sparkles size={13} />
+              {selectedSkills.length ? <b>{selectedSkills.length}</b> : null}
             </button>
             <span title={thread?.workspacePath ?? project?.canonicalPath}>
               {thread?.mode === "paper" ? "Paper2Code" : "Local"}

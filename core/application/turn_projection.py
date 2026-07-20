@@ -15,9 +15,11 @@ from core.events import (
     AgentMessageDelta,
     ErrorEvent,
     Event,
+    SkillLoaded,
     TaskComplete,
     ToolCompleted,
     ToolStarted,
+    TurnStarted,
 )
 from core.persistence.database import Database
 from core.persistence.event_repository import EventRepository
@@ -47,10 +49,20 @@ class TurnEventProjector:
         self._last_delta_flush = 0.0
         self._last_flushed_length = 0
         self._tool_item_ids: dict[str, str] = {}
+        self._skill_invocations: dict[str, dict[str, str]] = {}
 
     def project(self, event: Event) -> None:
         message = event.msg
-        if isinstance(message, AgentMessageDelta):
+        if isinstance(message, TurnStarted):
+            for invocation in message.skill_invocations:
+                self._skill_invocations[invocation.skill_id] = invocation.to_metadata()
+            self._persist_skill_invocations()
+        elif isinstance(message, SkillLoaded):
+            invocation = message.invocation
+            if invocation.skill_id not in self._skill_invocations:
+                self._skill_invocations[invocation.skill_id] = invocation.to_metadata()
+                self._persist_skill_invocations()
+        elif isinstance(message, AgentMessageDelta):
             self._append_assistant_delta(message.delta)
         elif isinstance(message, AgentMessage):
             self.final_text = message.text
@@ -94,6 +106,39 @@ class TurnEventProjector:
                 self.final_text = message.final_text
                 if self._assistant_item_id is None:
                     self._complete_assistant(message.final_text)
+
+    def _persist_skill_invocations(self) -> None:
+        """Attach the auditable Skill ledger to the existing user message."""
+
+        with self.database.transaction() as connection:
+            repository = ItemRepository(connection)
+            user_item = next(
+                (
+                    item
+                    for item in repository.list_for_turn(self.turn_id)
+                    if item.kind is ItemKind.USER_MESSAGE
+                ),
+                None,
+            )
+            if user_item is None:
+                return
+            skills = list(self._skill_invocations.values())
+            if user_item.payload.get("skills") == skills:
+                return
+            updated = replace(
+                user_item,
+                payload={**user_item.payload, "skills": skills},
+                updated_at=utc_now(),
+            )
+            repository.update(updated)
+            event = EventRepository(connection).append(
+                thread_id=self.thread_id,
+                turn_id=self.turn_id,
+                item_id=updated.id,
+                type="item.updated",
+                payload={"item": item_view(updated)},
+            )
+        self.broker.publish(event)
 
     def close_open_items(self, *, interrupted: bool) -> None:
         """Ensure an interrupted/failed turn leaves no misleading live cards."""

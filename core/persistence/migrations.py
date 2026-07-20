@@ -355,6 +355,15 @@ DROP TABLE IF EXISTS automation_runs;
 DROP TABLE IF EXISTS automations;
 """
 
+_TURN_SKILLS_V4 = r"""
+ALTER TABLE turns
+    ADD COLUMN skill_ids_json TEXT NOT NULL DEFAULT '[]';
+"""
+
+_DROP_TURN_SKILLS_V4 = r"""
+ALTER TABLE turns DROP COLUMN skill_ids_json;
+"""
+
 MIGRATIONS = (
     Migration(1, "initial_domain", _INITIAL_SCHEMA, _DROP_INITIAL_SCHEMA),
     Migration(
@@ -368,6 +377,12 @@ MIGRATIONS = (
         "desktop_automations",
         _AUTOMATIONS_V3,
         _DROP_AUTOMATIONS_V3,
+    ),
+    Migration(
+        4,
+        "turn_skill_selections",
+        _TURN_SKILLS_V4,
+        _DROP_TURN_SKILLS_V4,
     ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

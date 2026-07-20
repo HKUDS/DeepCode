@@ -53,6 +53,10 @@ class AutomationNotFoundError(ApplicationError):
     code = "AUTOMATION_NOT_FOUND"
 
 
+class SkillNotFoundError(ApplicationError):
+    code = "SKILL_NOT_FOUND"
+
+
 class WorkflowInteractionError(ApplicationError):
     code = "WORKFLOW_INTERACTION_INVALID"
 

@@ -1,30 +1,30 @@
 .header {
   position: relative;
   display: flex;
-  min-height: 60px;
+  min-height: 66px;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 8px 16px 8px 22px;
-  border-bottom: 1px solid var(--border-subtle);
+  padding: 9px 18px 9px 24px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 78%, transparent);
   background: var(--surface-overlay);
-  backdrop-filter: blur(18px);
+  backdrop-filter: blur(22px);
 }
 
 .identity {
   display: grid;
   min-width: 0;
-  gap: 3px;
+  gap: 4px;
 }
 
 .breadcrumb {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   overflow: hidden;
   color: var(--text-tertiary);
-  font: 8.5px var(--font-mono);
+  font: 9px var(--font-mono);
   white-space: nowrap;
 }
 
@@ -37,7 +37,7 @@
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
 }
 
 .titleRow h1 {
@@ -46,16 +46,16 @@
   overflow: hidden;
   color: var(--text-primary);
   font-family: var(--font-display);
-  font-size: 15.5px;
-  font-weight: 650;
-  letter-spacing: -0.025em;
+  font-size: 16.5px;
+  font-weight: 680;
+  letter-spacing: -0.03em;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .beacon {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
   flex: 0 0 auto;
   border: 1.5px solid var(--success);
   border-radius: 50%;
@@ -84,31 +84,33 @@
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
 }
 
 .actions button,
 .trustState,
 .unavailableState {
   display: inline-flex;
-  min-height: 30px;
+  min-height: 34px;
   align-items: center;
   gap: 6px;
-  padding: 0 8px;
-  border: 1px solid transparent;
-  border-radius: 7px;
+  padding: 0 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
   color: var(--text-secondary);
-  font-size: 10.5px;
-  font-weight: 590;
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .actions button:hover:not(:disabled) {
-  border-color: var(--border-subtle);
-  background: var(--surface-raised);
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
   color: var(--text-primary);
 }
 
 .trustState {
+  border-color: color-mix(in srgb, var(--success) 22%, var(--border-subtle));
+  background: var(--success-soft);
   color: var(--success);
 }
 
@@ -127,9 +129,9 @@
 }
 
 .reviewAction[data-active="true"] {
-  border-color: color-mix(in srgb, var(--signal) 30%, var(--border-strong));
-  background: var(--signal-faint);
-  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--signal) 28%, var(--border-strong));
+  background: var(--signal-soft);
+  color: var(--signal-strong);
 }
 
 @media (max-width: 820px) {

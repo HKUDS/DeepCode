@@ -1,7 +1,12 @@
-import { RefreshCw } from "lucide-react";
+import {
+  FolderInput,
+  Power,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
 import { useState } from "react";
 
-import type { Project } from "../../generated/app-server";
+import type { ConfigScope, Project } from "../../generated/app-server";
 import type { DesktopRuntime } from "../../rpc/contracts";
 import { MarkdownContent } from "../thread/MarkdownContent";
 import { useExtensionCatalog } from "./useExtensionCatalog";
@@ -15,27 +20,56 @@ interface ExtensionsPageProps {
 export function ExtensionsPage({ runtime, project }: ExtensionsPageProps) {
   const catalog = useExtensionCatalog(runtime, project?.id ?? null);
   const [tab, setTab] = useState<"skills" | "hooks">("skills");
+  const [scope, setScope] = useState<ConfigScope>("project");
+
+  const importSkill = async () => {
+    const path = await runtime.pickDirectory();
+    if (path) await catalog.importSkill(path, scope);
+  };
 
   return (
     <section className={styles.page} aria-labelledby="extensions-title">
       <header className={styles.pageHeader}>
         <div>
-          <p className={styles.eyebrow}>Agent extensions</p>
+          <p className={styles.eyebrow}>Agent capabilities</p>
           <h1 id="extensions-title">Skills &amp; Hooks</h1>
           <p>
-            The same project and user extensions discovered when an Agent Session
-            starts.
+            Skills are reusable instructions you can attach to a turn. Project and
+            user entries use the same backend in Desktop and CLI.
           </p>
         </div>
-        <button
-          className={styles.secondaryButton}
-          type="button"
-          disabled={!project || catalog.loading}
-          onClick={() => void catalog.refresh()}
-        >
-          <RefreshCw size={14} />
-          Refresh
-        </button>
+        <div className={styles.formActions}>
+          <label className={styles.compactSelect}>
+            <span>Store changes in</span>
+            <select
+              aria-label="Skill configuration scope"
+              title="Controls the import destination and enablement policy layer"
+              value={scope}
+              onChange={(event) => setScope(event.target.value as ConfigScope)}
+            >
+              <option value="project">This project</option>
+              <option value="user">User settings</option>
+            </select>
+          </label>
+          <button
+            className={styles.secondaryButton}
+            type="button"
+            disabled={!project || catalog.loading}
+            onClick={() => void catalog.refresh()}
+          >
+            <RefreshCw size={14} />
+            Reload
+          </button>
+          <button
+            className={styles.primaryButton}
+            type="button"
+            disabled={!project || catalog.loading}
+            onClick={() => void importSkill()}
+          >
+            <FolderInput size={14} />
+            Import folder
+          </button>
+        </div>
       </header>
 
       {!project ? (
@@ -82,18 +116,23 @@ export function ExtensionsPage({ runtime, project }: ExtensionsPageProps) {
                   catalog.skills.map((skill) => (
                     <button
                       type="button"
-                      key={`${skill.source}:${skill.name}`}
-                      data-active={catalog.selectedSkill?.name === skill.name}
-                      onClick={() => void catalog.selectSkill(skill.name)}
+                      key={skill.id}
+                      data-active={catalog.selectedSkill?.id === skill.id}
+                      data-status={skill.status}
+                      onClick={() => void catalog.selectSkill(skill.id)}
                     >
-                      <span>{skill.source.replace(":", " · ")}</span>
-                      <strong>{skill.name}</strong>
-                      <small>{skill.description}</small>
+                      <span className={styles.skillRowMeta}>
+                        {skill.source.replace(":", " · ")}
+                        <em data-status={skill.status}>{skill.status}</em>
+                      </span>
+                      <strong>{skill.name || "Invalid Skill"}</strong>
+                      <small>{skill.description || skill.error}</small>
                     </button>
                   ))
                 ) : (
                   <p className={styles.emptyCopy}>
-                    No SKILL.md capabilities were discovered for this project.
+                    No Skills yet. Import a folder containing a valid SKILL.md, or
+                    add one under .deepcode/skills.
                   </p>
                 )}
               </div>
@@ -101,14 +140,54 @@ export function ExtensionsPage({ runtime, project }: ExtensionsPageProps) {
                 {catalog.selectedSkill ? (
                   <>
                     <p className={styles.eyebrow}>
-                      {catalog.selectedSkill.source}
+                      {catalog.selectedSkill.source.replace(":", " · ")}
                     </p>
                     <h2>{catalog.selectedSkill.name}</h2>
                     <p>{catalog.selectedSkill.description}</p>
+                    <div className={styles.skillActions}>
+                      <span className={styles.badge} data-status={catalog.selectedSkill.status}>
+                        {catalog.selectedSkill.status}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void catalog.setEnabled(
+                            catalog.selectedSkill!.id,
+                            !catalog.selectedSkill!.enabled,
+                            scope,
+                          )
+                        }
+                        disabled={catalog.loading}
+                      >
+                        <Power size={13} />
+                        {catalog.selectedSkill.enabled ? "Disable" : "Enable"}
+                      </button>
+                      {catalog.selectedSkill.sourceRoot === "deepcode" ? (
+                        <button
+                          type="button"
+                          className={styles.dangerButton}
+                          disabled={catalog.loading}
+                          onClick={() => {
+                            const selected = catalog.selectedSkill;
+                            if (
+                              selected &&
+                              window.confirm(
+                                `Delete the managed Skill “${selected.name}”?`,
+                              )
+                            ) {
+                              void catalog.deleteSkill(selected.id);
+                            }
+                          }}
+                        >
+                          <Trash2 size={13} />
+                          Delete
+                        </button>
+                      ) : null}
+                    </div>
                     <dl className={styles.metadata}>
                       <div>
-                        <dt>Directory</dt>
-                        <dd>{catalog.selectedSkill.directory}</dd>
+                        <dt>Location</dt>
+                        <dd>{catalog.selectedSkill.location}</dd>
                       </div>
                       <div>
                         <dt>Intended tools</dt>
@@ -116,7 +195,16 @@ export function ExtensionsPage({ runtime, project }: ExtensionsPageProps) {
                           {catalog.selectedSkill.allowedTools.join(", ") || "Not declared"}
                         </dd>
                       </div>
+                      <div>
+                        <dt>Revision</dt>
+                        <dd>{catalog.selectedSkill.revision}</dd>
+                      </div>
                     </dl>
+                    {catalog.selectedSkill.error ? (
+                      <p className={styles.errorBanner}>
+                        {catalog.selectedSkill.error}
+                      </p>
+                    ) : null}
                     <MarkdownContent>
                       {catalog.selectedSkill.instructions}
                     </MarkdownContent>
@@ -128,7 +216,8 @@ export function ExtensionsPage({ runtime, project }: ExtensionsPageProps) {
                   </>
                 ) : (
                   <p className={styles.emptyCopy}>
-                    Select a Skill to inspect the instructions the Agent can load.
+                    Select a Skill to inspect its exact instructions, source, status,
+                    and revision.
                   </p>
                 )}
               </article>

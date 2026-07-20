@@ -1,33 +1,37 @@
 .sidebar {
   display: flex;
   min-width: 0;
-  height: 100vh;
+  height: calc(100vh - 16px);
   flex-direction: column;
-  padding: 12px 9px 9px;
+  margin: 8px 4px 8px 8px;
+  padding: 11px 10px 10px;
   overflow: hidden;
-  border-right: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
   background: var(--surface-sidebar);
   color: var(--text-primary);
+  box-shadow: var(--shadow-soft);
 }
 
 .brandRow {
   display: flex;
-  min-height: 38px;
+  min-height: 44px;
   align-items: center;
-  gap: 9px;
-  padding: 0 6px;
+  gap: 10px;
+  padding: 0 7px;
 }
 
 .brandMark {
   position: relative;
   display: flex;
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   align-items: center;
   justify-content: center;
   gap: 4px;
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--text-primary);
+  box-shadow: 0 5px 14px rgb(27 34 30 / 13%);
 }
 
 .brandMark i {
@@ -51,104 +55,101 @@
 
 .brandCopy strong {
   font-family: var(--font-display);
-  font-size: 13px;
-  font-weight: 650;
-  letter-spacing: -0.025em;
+  font-size: 13.5px;
+  font-weight: 680;
+  letter-spacing: -0.03em;
 }
 
 .brandCopy small {
   color: var(--text-tertiary);
-  font: 7.5px var(--font-mono);
-  letter-spacing: 0.05em;
+  font: 8px var(--font-mono);
+  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
 .destinations {
   display: grid;
-  gap: 3px;
-  margin: 8px 2px 12px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--border-subtle);
+  gap: 4px;
+  margin: 10px 0 14px;
+  padding-bottom: 13px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 76%, transparent);
 }
 
 .destinations button {
   position: relative;
   display: grid;
-  min-height: 32px;
-  grid-template-columns: 18px minmax(0, 1fr);
+  min-height: 38px;
+  grid-template-columns: 19px minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
-  padding: 0 8px;
-  border-radius: 7px;
+  gap: 9px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   color: var(--text-secondary);
-  font-size: 11.5px;
-  font-weight: 520;
+  font-size: 12.5px;
+  font-weight: 540;
   text-align: left;
 }
 
-.destinations button:hover,
-.destinations button[data-active="true"] {
+.destinations button:hover {
   background: var(--surface-hover);
   color: var(--text-primary);
 }
 
 .destinations button[data-active="true"] {
-  background: var(--surface-selected);
+  border-color: var(--border-subtle);
+  background: var(--surface-raised);
   color: var(--text-primary);
-  font-weight: 620;
+  font-weight: 650;
+  box-shadow: var(--shadow-soft);
 }
 
 .destinations button[data-active="true"]::before {
-  position: absolute;
-  top: 8px;
-  bottom: 8px;
-  left: 0;
-  width: 2px;
-  border-radius: 4px;
-  background: var(--signal);
-  content: "";
+  display: none;
 }
 
 .newThread {
   display: grid;
-  min-height: 36px;
+  min-height: 42px;
   grid-template-columns: 18px 1fr auto;
   align-items: center;
-  gap: 8px;
-  margin: 9px 2px 6px;
-  padding: 0 10px;
+  gap: 9px;
+  margin: 10px 0 7px;
+  padding: 0 12px;
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--surface-raised);
   color: var(--text-primary);
-  font-size: 11.5px;
-  font-weight: 640;
+  font-size: 12.5px;
+  font-weight: 650;
   text-align: left;
+  box-shadow: var(--shadow-soft);
 }
 
 .newThread:hover:not(:disabled) {
-  border-color: var(--border-emphasis);
-  background: var(--surface-hover);
+  border-color: var(--border-strong);
+  background: color-mix(in srgb, var(--surface-raised) 74%, var(--surface-hover));
+  transform: translateY(-1px);
 }
 
 .newThread kbd,
 .search kbd {
   margin: 0;
   color: var(--text-tertiary);
-  font: 9px var(--font-mono);
+  font: 9.5px var(--font-mono);
 }
 
 .search {
   display: grid;
-  min-height: 33px;
+  min-height: 39px;
   grid-template-columns: 18px 1fr auto;
   align-items: center;
-  gap: 7px;
-  margin: 0 2px 3px;
-  padding: 0 9px;
+  gap: 8px;
+  margin: 0 0 5px;
+  padding: 0 11px;
   border: 1px solid transparent;
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--surface-raised) 48%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface-inset) 78%, transparent);
   color: var(--text-tertiary);
 }
 
@@ -165,7 +166,7 @@
   outline: 0;
   background: transparent;
   color: var(--text-primary);
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .search input::placeholder {
@@ -176,19 +177,19 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 6px 7px 8px;
+  padding: 1px 5px 8px 9px;
   color: var(--text-tertiary);
-  font: 560 8px var(--font-mono);
-  letter-spacing: 0.07em;
+  font: 620 8.5px var(--font-mono);
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .sectionHeading button {
   display: grid;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   place-items: center;
-  border-radius: 6px;
+  border-radius: 8px;
   color: var(--text-secondary);
 }
 
@@ -200,25 +201,25 @@
 .projectList {
   min-height: 0;
   flex: 1;
-  padding: 0 1px 12px;
+  padding: 0 0 14px;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
 }
 
 .projectGroup {
-  margin-bottom: 3px;
+  margin-bottom: 4px;
 }
 
 .projectButton {
   display: grid;
   width: 100%;
-  min-height: 32px;
-  grid-template-columns: 13px 17px minmax(0, 1fr) auto;
+  min-height: 38px;
+  grid-template-columns: 14px 18px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 6px;
-  padding: 3px 7px 3px 5px;
-  border-radius: 7px;
+  gap: 7px;
+  padding: 3px 9px 3px 6px;
+  border-radius: var(--radius-sm);
   color: var(--text-secondary);
   text-align: left;
 }
@@ -232,7 +233,7 @@
 .projectButton strong {
   min-width: 0;
   overflow: hidden;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 570;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -265,25 +266,25 @@
 
 .threadList {
   position: relative;
-  margin: 1px 0 5px 18px;
-  padding: 1px 0 2px 6px;
-  border-left: 1px solid color-mix(in srgb, var(--border-subtle) 78%, transparent);
+  margin: 2px 0 7px 21px;
+  padding: 2px 0 3px 7px;
+  border-left: 1px solid color-mix(in srgb, var(--border-strong) 62%, transparent);
 }
 
 .noSessions {
   margin: 0;
-  padding: 7px 8px;
+  padding: 8px 9px;
   color: var(--text-tertiary);
-  font-size: 9.5px;
+  font-size: 10.5px;
 }
 
 .showMore {
   width: 100%;
-  min-height: 28px;
-  padding: 0 8px;
-  border-radius: 6px;
+  min-height: 30px;
+  padding: 0 9px;
+  border-radius: 8px;
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: 10.5px;
   text-align: left;
 }
 
@@ -297,9 +298,9 @@
   width: 100%;
   align-items: flex-start;
   gap: 11px;
-  padding: 14px 11px;
+  padding: 15px 13px;
   border: 1px dashed var(--border-strong);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   color: var(--text-secondary);
   text-align: left;
 }
@@ -316,22 +317,22 @@
 
 .emptyProject strong {
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: 12.5px;
 }
 
 .emptyProject small {
-  font-size: 10px;
+  font-size: 10.5px;
   line-height: 1.45;
 }
 
 .footer {
   display: grid;
-  min-height: 44px;
+  min-height: 50px;
   grid-template-columns: 18px minmax(0, 1fr) 8px;
   align-items: center;
   gap: 8px;
-  padding: 8px 7px 2px;
-  border-top: 1px solid var(--border-subtle);
+  padding: 9px 8px 1px;
+  border-top: 1px solid color-mix(in srgb, var(--border-subtle) 76%, transparent);
   color: var(--text-secondary);
 }
 
@@ -341,14 +342,14 @@
 }
 
 .footer strong {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 620;
   text-transform: capitalize;
 }
 
 .footer small {
   color: var(--text-tertiary);
-  font-size: 8px;
+  font-size: 9px;
 }
 
 .runtimeDot {
@@ -382,19 +383,19 @@
   display: grid;
   justify-items: center;
   gap: 5px;
-  padding: 30px 12px;
+  padding: 34px 14px;
   color: var(--text-tertiary);
   text-align: center;
 }
 
 .noResults strong {
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .noResults small {
   max-width: 180px;
-  font-size: 10px;
+  font-size: 10.5px;
   line-height: 1.45;
 }
 

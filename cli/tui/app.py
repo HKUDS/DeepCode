@@ -39,7 +39,9 @@ from cli.tui import commands, theme
 from cli.tui.input import InputReader, expand_file_refs
 from cli.tui.renderer import EventRenderer
 from cli.tui.session_bridge import SessionBridge
-from core.events import Interrupt, UserInput
+from core.events import Interrupt, SkillLoaded, TurnStarted, UserInput
+from core.skills.management import LocalSkillManager
+from core.skills.models import SkillSelection
 
 
 class TuiApp:
@@ -60,7 +62,9 @@ class TuiApp:
         self.reader = InputReader(self.workspace)
         self._exit_requested = False
         self._requested_model = model
+        self.selected_skill_ids: list[str] = []
         self._rebuild_agent(resume_id=resume_id)
+        self.skill_manager = LocalSkillManager(self.workspace)
 
     # -- agent lifecycle ----------------------------------------------------
 
@@ -97,9 +101,11 @@ class TuiApp:
     # -- public surface used by slash commands -------------------------------
 
     def new_conversation(self, title: str = "") -> None:
+        self.selected_skill_ids.clear()
         self._rebuild_agent(title=title)
 
     def resume_conversation(self, session_id: str) -> int:
+        self.selected_skill_ids.clear()
         self._rebuild_agent(resume_id=session_id)
         return len(self.agent.history)
 
@@ -117,6 +123,51 @@ class TuiApp:
         self.agent.load_history([])
         if self.reader.interactive:
             self.console.clear()
+
+    def list_skills(self) -> str:
+        try:
+            catalog = self.skill_manager.catalog()
+        except (OSError, ValueError) as exc:
+            return f"Skill error: {exc}"
+        if not catalog.records:
+            return "no Skills discovered"
+        selected = set(self.selected_skill_ids)
+        lines = ["", "Skills (select with /skill <id|name>):"]
+        for record in catalog.records:
+            marker = "*" if record.id in selected else " "
+            lines.append(
+                f" {marker} {record.status.value:<9} {record.name:<24} {record.id}"
+            )
+        return "\n".join(lines)
+
+    def select_skill(self, identifier: str) -> str:
+        try:
+            record = self.skill_manager.select(identifier)
+        except (OSError, ValueError) as exc:
+            return f"Skill error: {exc}"
+        if not record.selectable:
+            return (
+                f"Skill {record.name} is {record.status.value} and cannot be selected"
+            )
+        if record.id not in self.selected_skill_ids:
+            if len(self.selected_skill_ids) >= 8:
+                return "a turn may select at most 8 Skills"
+            self.selected_skill_ids.append(record.id)
+        return f"selected {record.name} for the next turn"
+
+    def remove_skill(self, identifier: str) -> str:
+        try:
+            record = self.skill_manager.find(identifier)
+        except (OSError, ValueError) as exc:
+            return f"Skill error: {exc}"
+        if record.id not in self.selected_skill_ids:
+            return f"{record.name} is not selected"
+        self.selected_skill_ids.remove(record.id)
+        return f"removed {record.name} from the next turn"
+
+    def clear_skills(self) -> str:
+        self.selected_skill_ids.clear()
+        return "cleared next-turn Skills"
 
     def request_exit(self) -> None:
         self._exit_requested = True
@@ -136,6 +187,11 @@ class TuiApp:
         if not self.agent.history:
             self.bridge.set_title_from(text)
         final_text: str | None = None
+        turn_started = False
+        invocations = {}
+        selected = tuple(
+            SkillSelection(skill_id=skill_id) for skill_id in self.selected_skill_ids
+        )
         loop = asyncio.get_running_loop()
 
         def _interrupt() -> None:
@@ -146,16 +202,31 @@ class TuiApp:
         except (NotImplementedError, RuntimeError):  # non-main loop / windows
             pass
         try:
-            async for event in self.agent.run_stream(UserInput(text=text)):
+            async for event in self.agent.run_stream(
+                UserInput(text=text, skills=selected)
+            ):
                 self.renderer.on_event(event)
-                if event.msg.type == "task_complete":
+                if isinstance(event.msg, TurnStarted):
+                    turn_started = True
+                    for invocation in event.msg.skill_invocations:
+                        invocations[invocation.skill_id] = invocation
+                elif isinstance(event.msg, SkillLoaded):
+                    invocation = event.msg.invocation
+                    invocations[invocation.skill_id] = invocation
+                elif event.msg.type == "task_complete":
                     final_text = event.msg.final_text
         finally:
             try:
                 loop.remove_signal_handler(signal.SIGINT)
             except (NotImplementedError, RuntimeError, ValueError):
                 pass
-        self.bridge.record_turn(text, final_text)
+            self.selected_skill_ids.clear()
+        if turn_started:
+            self.bridge.record_turn(
+                text,
+                final_text,
+                skill_invocations=tuple(invocations.values()),
+            )
 
     # -- REPL -----------------------------------------------------------------
 

@@ -28,6 +28,7 @@ import os
 
 from core.events.session import AgentSession
 from core.sessions import SessionStore, SessionSummary, get_default_store
+from core.skills.models import SkillInvocation
 
 _KIND = "tui"
 
@@ -60,12 +61,35 @@ class SessionBridge:
 
     # -- write path ----------------------------------------------------------
 
-    def record_turn(self, user_text: str, assistant_text: str | None) -> None:
+    def record_turn(
+        self,
+        user_text: str,
+        assistant_text: str | None,
+        *,
+        skill_invocations: tuple[SkillInvocation, ...] = (),
+    ) -> None:
         """Persist one completed turn. Errors here must never kill the REPL."""
         try:
-            self.store.append_message(self.session_id, "user", user_text)
+            metadata = {
+                "schemaVersion": 2,
+                "client": "cli",
+                "skillInvocations": [
+                    invocation.to_metadata() for invocation in skill_invocations
+                ],
+            }
+            self.store.append_message(
+                self.session_id,
+                "user",
+                user_text,
+                metadata=metadata,
+            )
             if assistant_text:
-                self.store.append_message(self.session_id, "assistant", assistant_text)
+                self.store.append_message(
+                    self.session_id,
+                    "assistant",
+                    assistant_text,
+                    metadata=metadata,
+                )
         except Exception:  # noqa: BLE001 - persistence is best-effort
             pass
 

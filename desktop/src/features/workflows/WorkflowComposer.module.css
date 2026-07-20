@@ -1,49 +1,55 @@
 .region {
-  padding: 12px clamp(20px, 4vw, 48px) 17px;
+  padding: 15px clamp(22px, 4vw, 52px) 19px;
   border-top: 1px solid var(--border-subtle);
-  background: color-mix(in srgb, var(--surface-canvas) 96%, transparent);
+  background: color-mix(in srgb, var(--surface-raised) 94%, transparent);
 }
 
 .composer,
 .console {
-  width: min(860px, 100%);
+  width: min(880px, 100%);
   margin: 0 auto;
   overflow: hidden;
   border: 1px solid var(--border-strong);
-  border-radius: 13px;
+  border-radius: var(--radius-lg);
   background: var(--surface-raised);
   box-shadow: var(--shadow-float);
 }
 
 .sourceTabs {
   display: flex;
-  gap: 3px;
-  padding: 7px 9px 0;
+  gap: 4px;
+  margin: 8px 10px 0;
+  padding: 4px;
   overflow-x: auto;
-  border-bottom: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-sidebar);
 }
 
 .sourceTabs button {
   flex: 0 0 auto;
-  padding: 6px 8px 8px;
-  border-bottom: 2px solid transparent;
-  border-radius: 0;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 9px;
   color: var(--text-tertiary);
-  font: 9px var(--font-mono);
+  font: 9.5px var(--font-mono);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
 .sourceTabs button[aria-selected="true"] {
-  border-bottom-color: var(--signal);
+  border-color: var(--border-subtle);
+  background: var(--surface-raised);
   color: var(--text-primary);
+  box-shadow: var(--shadow-soft);
 }
 
 .inputRow {
   display: flex;
   align-items: stretch;
-  gap: 8px;
-  padding: 10px 10px 6px;
+  gap: 9px;
+  padding: 12px 11px 7px;
 }
 
 .inputRow input,
@@ -52,14 +58,14 @@
   min-width: 0;
   flex: 1;
   resize: vertical;
-  padding: 10px 11px;
+  padding: 11px 13px;
   border: 1px solid var(--border-subtle);
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   outline: 0;
   background: var(--surface-code);
   color: var(--text-primary);
-  font-size: 11.5px;
-  line-height: 1.5;
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .inputRow input:focus,
@@ -73,13 +79,13 @@
 .submit > button,
 .reviewActions > button,
 .danger {
-  min-height: 34px;
-  padding: 0 11px;
+  min-height: 37px;
+  padding: 0 13px;
   border: 1px solid var(--border-strong);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--surface-raised);
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 10.5px;
   white-space: nowrap;
 }
 
@@ -102,8 +108,8 @@
 }
 
 .toolbar {
-  min-height: 38px;
-  padding: 3px 9px 8px 12px;
+  min-height: 42px;
+  padding: 4px 10px 9px 13px;
 }
 
 .options {
@@ -111,7 +117,7 @@
   flex-wrap: wrap;
   gap: 12px;
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 10.5px;
 }
 
 .options label {
@@ -129,7 +135,7 @@
   max-width: 310px;
   overflow: hidden;
   color: var(--text-tertiary);
-  font-size: 9px;
+  font-size: 9.5px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -142,21 +148,21 @@
 }
 
 .console {
-  padding: 12px;
+  padding: 15px;
 }
 
 .consoleHead strong {
   display: block;
   margin-top: 3px;
-  font-size: 13px;
-  font-weight: 620;
+  font-size: 14px;
+  font-weight: 650;
   text-transform: capitalize;
 }
 
 .kicker,
 .percent {
   color: var(--signal);
-  font: 9px var(--font-mono);
+  font: 9.5px var(--font-mono);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -167,9 +173,10 @@
 }
 
 .progress {
-  height: 2px;
-  margin: 10px 0 8px;
+  height: 4px;
+  margin: 13px 0 10px;
   overflow: hidden;
+  border-radius: var(--radius-pill);
   background: var(--border-subtle);
 }
 
@@ -177,6 +184,7 @@
   display: block;
   height: 100%;
   background: linear-gradient(90deg, var(--signal), var(--success));
+  border-radius: inherit;
   transition: width 220ms ease;
 }
 
@@ -197,25 +205,26 @@
 
 .review h3 {
   margin: 3px 0;
-  font-size: 15px;
+  font-family: var(--font-display);
+  font-size: 16px;
 }
 
 .review p {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 10.5px;
+  font-size: 11px;
 }
 
 .review pre {
   max-height: 150px;
   margin: 0;
-  padding: 9px;
+  padding: 11px;
   overflow: auto;
   border: 1px solid var(--border-subtle);
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: var(--surface-code);
   color: var(--text-secondary);
-  font: 9px/1.5 var(--font-mono);
+  font: 9.5px/1.55 var(--font-mono);
   white-space: pre-wrap;
 }
 
