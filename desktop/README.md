@@ -14,15 +14,88 @@ See the [P3 architecture](../docs/P3_DESKTOP_RUNTIME_ARCHITECTURE.md),
 [P5 architecture](../docs/P5_PAPER2CODE_ARCHITECTURE.md), and the
 [desktop rebuild plan](../docs/TAURI_DESKTOP_REBUILD_PLAN.md).
 
-## Development
+## Run from source
 
-Prerequisites: Python 3.12, Node.js 22, Rust stable, and the platform
-dependencies listed by Tauri. Desktop packaging uses an isolated Python 3.12
-environment installed from `sidecar-requirements.lock`; it does not depend on
-whatever optional packages happen to be installed in the repository virtualenv.
+Prerequisites:
+
+| Requirement | Version | Used for |
+|-------------|---------|----------|
+| Python | 3.12+ | App Server and Agent runtime |
+| Node.js | 22+ | React frontend and build scripts |
+| Rust | stable | Tauri application shell |
+
+Install dependencies once:
 
 ```bash
+cd desktop
 npm ci
+```
+
+Then start the development application from any directory with the repository
+launcher:
+
+```bash
+deepcode-desktop
+```
+
+Install the launcher command once by linking `scripts/deepcode-desktop` into a
+directory on `PATH`, for example `~/.local/bin`.
+
+Debug builds prefer the repository `.venv`, so normal Python and React edits do
+not require rebuilding the packaged PyInstaller sidecar.
+
+### Configure the first LLM connection
+
+1. Open **Settings → Connections**.
+2. Select **Add connection**.
+3. Choose a provider template, enter the endpoint when needed, and provide
+   either an API key or an environment variable name.
+4. Save the connection, then select **Test**.
+5. Open a Session and choose the connection/model from the picker below the
+   composer.
+
+API keys are written to `~/.deepcode/credentials.json` with user-only
+permissions. Desktop receives only configured/missing status and never reads a
+stored key back.
+
+### Use models inside a Session
+
+The composer model picker changes the connection/model for future Turns in the
+current Session. Existing history stays attached to the same canonical Session
+under `~/.deepcode/sessions/`. A switch is temporarily unavailable while a Turn
+is running or queued.
+
+Every accepted Turn stores an immutable, secret-free execution profile. Later
+changes to defaults or credentials cannot silently change queued or historical
+work.
+
+The equivalent CLI workflow uses the same connection and Session backend:
+
+```bash
+deepcode provider list
+deepcode provider set personal-openrouter --template openrouter --api-key
+deepcode provider test personal-openrouter
+deepcode provider models personal-openrouter --refresh
+deepcode -c personal-openrouter -m moonshotai/kimi-k3
+```
+
+### Run a durable Goal
+
+Use **Set a Goal** above the Session composer to define an outcome, optional
+acceptance criteria, and Skills. The compact Goal rail shows attempts, token
+usage, completion evidence, and pause/resume controls. Goals are not a Desktop
+workflow: the same ledger and ordinary Turn execution are available from the
+interactive CLI with `/goal`.
+
+## Development and verification
+
+Desktop packaging uses an isolated Python 3.12 environment installed from
+`sidecar-requirements.lock`; it does not depend on optional packages installed
+in the repository virtualenv.
+
+Run the complete validation sequence before opening a pull request:
+
+```bash
 npm run setup:sidecar
 npm run build:sidecar
 npm run audit:licenses
@@ -37,29 +110,24 @@ cargo test --all-targets
 ```
 
 `setup:sidecar` is idempotent. It creates `build/sidecar/.venv` and installs the
-locked runtime plus PyInstaller. Regenerate the lock from
+locked runtime plus PyInstaller. Regenerate `sidecar-requirements.lock` from
 `sidecar-requirements.in` only when packaged runtime dependencies intentionally
 change.
 
-The baseline sidecar supports PDF, Markdown, text, HTML, and DOCX without
-Docling or a system Office installation. CLI users who want Docling's advanced
+The packaged sidecar supports PDF, Markdown, text, HTML, and DOCX without
+Docling or a system Office installation. CLI users who need Docling's advanced
 layout/image conversion can install `deepcode-hku[advanced-documents]`; it is
 deliberately excluded from the Desktop bundle.
 
-Start from source. Debug builds prefer the repository `.venv`, preserving the
-normal edit/run loop without rebuilding PyInstaller output:
-
-```bash
-npm run tauri -- dev
-```
-
-Regenerate desktop protocol types only after changing the canonical schema:
+Regenerate Desktop protocol types only after changing the canonical schema:
 
 ```bash
 npm run generate:protocol
 ```
 
-Build the release application bundle:
+## Release build
+
+Build the application bundle:
 
 ```bash
 npm run tauri:build

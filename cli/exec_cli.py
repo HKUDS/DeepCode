@@ -30,7 +30,7 @@ from cli.config_errors import format_config_error
 from core.config import ConfigError
 from core.events import UserInput, serialize_event
 from core.skills.management import LocalSkillManager
-from core.skills.models import SkillSelection
+from core.skills.models import MAX_SELECTED_SKILLS, SkillSelection
 
 
 def _emit_human(event) -> None:
@@ -63,6 +63,7 @@ async def _run(args: argparse.Namespace) -> int:
         session, model, engine = build_agent_session(
             workspace=args.workspace,
             model=args.model,
+            connection_id=args.connection,
             max_iterations=args.max_iterations,
         )
     except ConfigError as exc:
@@ -127,6 +128,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--model", "-m", default=None, help="Override the model id.")
     parser.add_argument(
+        "--connection",
+        "-c",
+        default=None,
+        help="Use a named LLM connection from `deepcode provider list`.",
+    )
+    parser.add_argument(
         "--skill",
         action="append",
         default=[],
@@ -140,8 +147,8 @@ def main(argv: list[str] | None = None) -> int:
         help=f"Max agent turns, a runaway backstop (default {DEFAULT_MAX_ITERATIONS}).",
     )
     args = parser.parse_args(argv)
-    if len(args.skill) > 8:
-        parser.error("--skill may be specified at most 8 times")
+    if len(args.skill) > MAX_SELECTED_SKILLS:
+        parser.error(f"--skill may be specified at most {MAX_SELECTED_SKILLS} times")
     return asyncio.run(_run(args))
 
 

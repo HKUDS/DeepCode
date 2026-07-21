@@ -13,6 +13,7 @@ from core.domain.event import DomainEvent
 from core.domain.approval import Approval
 from core.domain.artifact import Artifact
 from core.domain.automation import Automation, AutomationRun
+from core.domain.goal import GoalRecord
 from core.domain.item import Item
 from core.domain.project import Project
 from core.domain.thread import Thread
@@ -220,6 +221,74 @@ def automation_run_view(run: AutomationRun) -> dict[str, Any]:
     }
 
 
+def goal_view(record: GoalRecord) -> dict[str, Any]:
+    goal = record.goal
+    latest_attempt = record.latest_attempt
+    phase = None
+    if goal.status.value == "active":
+        if latest_attempt is None or latest_attempt.status.is_terminal:
+            phase = "idle"
+        else:
+            phase = latest_attempt.status.value
+    return {
+        "id": goal.id,
+        "threadId": goal.thread_id,
+        "objective": goal.objective,
+        "acceptanceCriteria": list(goal.acceptance_criteria),
+        "status": goal.status.value,
+        "phase": phase,
+        "revision": goal.revision,
+        "definitionRevision": goal.definition_revision,
+        "attemptCount": record.attempt_count,
+        "tokensUsed": goal.tokens_used,
+        "elapsedSeconds": goal.elapsed_seconds,
+        "budget": {
+            "maxAttempts": goal.budget.max_attempts,
+            "maxTokens": goal.budget.max_tokens,
+            "maxElapsedSeconds": goal.budget.max_elapsed_seconds,
+        },
+        "skillIds": list(goal.skill_ids),
+        "verificationCommandId": goal.verification_command_id,
+        "verificationTimeoutSeconds": goal.verification_timeout_seconds,
+        "evaluatorConnectionId": goal.evaluator_connection_id,
+        "evaluatorModelId": goal.evaluator_model_id,
+        "lastVerdict": goal.last_verdict.value if goal.last_verdict else None,
+        "lastReason": goal.last_reason,
+        "createdAt": timestamp(goal.created_at),
+        "updatedAt": timestamp(goal.updated_at),
+        "completedAt": timestamp(goal.completed_at),
+        "attempts": [
+            {
+                "id": attempt.id,
+                "goalRevision": attempt.goal_revision,
+                "ordinal": attempt.ordinal,
+                "turnId": attempt.turn_id,
+                "status": attempt.status.value,
+                "createdAt": timestamp(attempt.created_at),
+                "updatedAt": timestamp(attempt.updated_at),
+                "completedAt": timestamp(attempt.completed_at),
+            }
+            for attempt in record.attempts
+        ],
+        "evaluations": [
+            {
+                "id": evaluation.id,
+                "goalRevision": evaluation.goal_revision,
+                "attemptId": evaluation.attempt_id,
+                "turnId": evaluation.turn_id,
+                "verdict": evaluation.verdict.value,
+                "reason": evaluation.reason,
+                "evidenceRefs": list(evaluation.evidence_refs),
+                "evaluatorProvider": evaluation.evaluator_provider,
+                "evaluatorModel": evaluation.evaluator_model,
+                "tokensUsed": evaluation.tokens_used,
+                "createdAt": timestamp(evaluation.created_at),
+            }
+            for evaluation in record.evaluations
+        ],
+    }
+
+
 def timestamp(value: datetime | None) -> str | None:
     if value is None:
         return None
@@ -248,6 +317,7 @@ def thread_view(thread: Thread) -> dict[str, Any]:
         "mode": thread.mode.value,
         "status": thread.status.value,
         "model": thread.model,
+        "connectionId": thread.connection_id,
         "workspacePath": thread.workspace_path,
         "worktreePath": thread.worktree_path,
         "createdAt": timestamp(thread.created_at),
@@ -263,6 +333,14 @@ def turn_view(turn: Turn) -> dict[str, Any]:
         "ordinal": turn.ordinal,
         "prompt": turn.prompt,
         "skillIds": list(turn.skill_ids),
+        "executionProfile": (
+            turn.execution_profile.to_dict()
+            if turn.execution_profile is not None
+            else None
+        ),
+        "goalId": turn.goal_id,
+        "goalDefinitionRevision": turn.goal_definition_revision,
+        "goalAttemptId": turn.goal_attempt_id,
         "status": turn.status.value,
         "stopReason": turn.stop_reason,
         "errorCode": turn.error_code,

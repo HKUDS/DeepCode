@@ -119,6 +119,26 @@ def main():
             from cli.skill_cli import run as skill_run
 
             raise SystemExit(skill_run(sys.argv[2:]))
+        elif sys.argv[1] in {"provider", "providers"}:
+            from cli.provider_cli import run as provider_run
+
+            raise SystemExit(provider_run(sys.argv[2:]))
+        elif sys.argv[1] in {"chat", "tui"}:
+            from cli.tui.app import main as tui_main
+
+            raise SystemExit(tui_main(sys.argv[2:]))
+        elif sys.argv[1] == "exec":
+            from cli.exec_cli import main as exec_main
+
+            raise SystemExit(exec_main(sys.argv[2:]))
+        elif sys.argv[1] == "loop":
+            from cli.loop_cli import main as loop_main
+
+            raise SystemExit(loop_main(sys.argv[2:]))
+        elif sys.argv[1] == "schedule":
+            from cli.schedule_cli import main as schedule_main
+
+            raise SystemExit(schedule_main(sys.argv[2:]))
         elif sys.argv[1] in ["--help", "-h", "help"]:
             print_banner()
 
@@ -141,6 +161,22 @@ def main():
                         row(
                             "deepcode skill <command>",
                             "List, inspect, import, and manage Agent Skills",
+                        ),
+                        row(
+                            "deepcode provider <command>",
+                            "Configure LLM connections and models",
+                        ),
+                        row(
+                            "deepcode exec <task>",
+                            "Run one headless coding task",
+                        ),
+                        row(
+                            "deepcode loop <goal>",
+                            "Drive a goal to passing tests",
+                        ),
+                        row(
+                            "deepcode schedule ...",
+                            "Run loop or memory maintenance on a schedule",
                         ),
                         "",
                         "   More agent entry points:",
@@ -182,6 +218,13 @@ def main():
                 "\n   Legend: [ok] = paper.md exists, (+addendum) = addendum.md exists"
             )
             return
+        elif sys.argv[1].startswith("-"):
+            # Agent flags belong to the default interactive surface, so
+            # `deepcode -c team -m model` behaves exactly like
+            # `python -m cli.tui -c team -m model`.
+            from cli.tui.app import main as tui_main
+
+            raise SystemExit(tui_main(sys.argv[1:]))
         else:
             # Unknown argument — show help hint
             print(f"Unknown option: {sys.argv[1]}")

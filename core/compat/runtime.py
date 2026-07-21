@@ -17,6 +17,7 @@ even though the underlying loader is now nanobot-style JSON.
 
 from __future__ import annotations
 
+import hashlib
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -32,7 +33,11 @@ from core.config import (
     load_config,
     make_llm_provider,
 )
+from core.domain.execution_profile import ExecutionProfile, ExecutionSelection
 from core.providers.base import LLMProvider
+from core.providers.catalog_service import ModelCatalogService
+from core.providers.credentials import CredentialStore
+from core.providers.profiles import ConnectionResolver
 
 
 _runtime_lock = threading.Lock()
@@ -63,10 +68,18 @@ class _ContextNamespace:
 class DeepCodeRuntime:
     """Owns the loaded DeepCode config + provider cache for one process."""
 
-    def __init__(self, config: DeepCodeConfig) -> None:
+    def __init__(
+        self,
+        config: DeepCodeConfig,
+        *,
+        credential_store: CredentialStore | None = None,
+    ) -> None:
         self.config = config
+        self.credential_store = credential_store or CredentialStore()
+        self.connection_resolver = ConnectionResolver(config, self.credential_store)
+        self.model_catalog = ModelCatalogService()
         self.logger = logger
-        self._provider_cache: dict[tuple[str, str, str | None], LLMProvider] = {}
+        self._provider_cache: dict[tuple[str, ...], LLMProvider] = {}
         # MCP servers materialised on construction so legacy callers can
         # mutate ``args`` in place (workflows.environment, plugin code, ...).
         self._mcp_servers = config.mcp_servers
@@ -83,14 +96,42 @@ class DeepCodeRuntime:
         self,
         *,
         provider_name: str | None = None,
+        connection_id: str | None = None,
         phase: str = "default",
         model: str | None = None,
+        execution_profile: ExecutionProfile | None = None,
     ) -> LLMProvider:
         """Return a cached :class:`LLMProvider` for the requested combination."""
+        if execution_profile is not None or connection_id is not None:
+            profile = execution_profile or self.resolve_execution_profile(
+                connection_id=connection_id,
+                model=model,
+                phase=phase,
+            )
+            connection = self.connection_resolver.connection_for_profile(profile)
+            credential_revision = hashlib.sha256(
+                (connection.api_key or "").encode()
+            ).hexdigest()[:16]
+            cache_key = (
+                profile.connection_id,
+                profile.model_id,
+                profile.config_revision,
+                credential_revision,
+                str(profile.max_tokens),
+                repr(profile.temperature),
+                profile.reasoning_effort or "",
+            )
+            cached = self._provider_cache.get(cache_key)
+            if cached is not None:
+                return cached
+            provider = self.connection_resolver.build_provider(profile)
+            self._provider_cache[cache_key] = provider
+            return provider
+
         chosen_provider = (provider_name or self.config.llm_provider or "auto").lower()
         if chosen_provider == "google":
             chosen_provider = "gemini"
-        cache_key = (chosen_provider, phase, model)
+        cache_key = (chosen_provider, phase, model or "")
         cached = self._provider_cache.get(cache_key)
         if cached is not None:
             return cached
@@ -102,6 +143,32 @@ class DeepCodeRuntime:
         )
         self._provider_cache[cache_key] = provider
         return provider
+
+    def resolve_execution_profile(
+        self,
+        *,
+        connection_id: str | None = None,
+        model: str | None = None,
+        phase: str = "implementation",
+    ) -> ExecutionProfile:
+        selection = ExecutionSelection(
+            connection_id=connection_id,
+            model_id=model,
+        )
+        connection, resolved_model = self.connection_resolver.resolve_selection(
+            selection,
+            phase=phase,
+        )
+        cached = self.model_catalog.cached_model(connection, resolved_model)
+        return self.connection_resolver.execution_profile(
+            selection,
+            phase=phase,
+            model_limits=(
+                (cached.context_window, cached.max_output_tokens)
+                if cached is not None
+                else None
+            ),
+        )
 
     def get_provider_config(self, name: str | None = None) -> ProviderConfig | None:
         """Return the :class:`ProviderConfig` block for ``name`` (or the

@@ -25,17 +25,27 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rich.console import Console
 
+from cli.goal_runner import GoalRunOptions, run_goal
+from core.domain.goal import GoalStatus
 from core.loop.autodream import consolidate_memory
-from core.loop.task import LoopTask
+from core.loop.compat import project_goal_to_loop_state
 from core.schedule.keepalive import Continuation
 from core.schedule.scheduler import RunOutcome, run_scheduled
 
 _console = Console()
 
 
-def _autodream_task(workspace: str, model: str | None):
+def _autodream_task(
+    workspace: str,
+    model: str | None,
+    connection_id: str | None,
+):
     async def task(run_index: int) -> RunOutcome:
-        result = await consolidate_memory(workspace, model=model)
+        result = await consolidate_memory(
+            workspace,
+            model=model,
+            connection_id=connection_id,
+        )
         detail = (
             f"{result.notes_before}->{result.notes_after} notes"
             if result.ran
@@ -51,15 +61,28 @@ def _autodream_task(workspace: str, model: str | None):
 
 def _loop_task(args) -> "callable":
     async def task(run_index: int) -> RunOutcome:
-        loop = LoopTask(
-            goal=args.goal,
-            workspace=os.path.abspath(args.workspace),
+        workspace = os.path.abspath(args.workspace)
+        result = await run_goal(
+            GoalRunOptions(
+                objective=args.goal,
+                workspace=workspace,
+                verification=args.test_cmd,
+                model=args.model,
+                connection_id=args.connection,
+                max_attempts=args.max_rounds,
+            )
+        )
+        legacy = project_goal_to_loop_state(
+            result.record,
+            workspace=workspace,
             test_command=args.test_cmd,
-            model=args.model,
             max_rounds=args.max_rounds,
         )
-        result = await loop.run()
-        return RunOutcome(goal_reached=result.succeeded, detail=result.state.status)
+        legacy.save()
+        return RunOutcome(
+            goal_reached=result.record.goal.status is GoalStatus.COMPLETED,
+            detail=result.record.goal.status.value,
+        )
 
     return task
 
@@ -71,7 +94,7 @@ def _run(args: argparse.Namespace) -> int:
     max_runs = 1 if args.once else args.max_runs
 
     if args.job == "autodream":
-        task = _autodream_task(workspace, args.model)
+        task = _autodream_task(workspace, args.model, args.connection)
     else:
         task = _loop_task(args)
 
@@ -114,6 +137,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workspace", "-w", default=os.getcwd())
     parser.add_argument("--test-cmd", "-t", default="")
     parser.add_argument("--model", "-m", default=None)
+    parser.add_argument("--connection", "-c", default=None)
     parser.add_argument(
         "--every", type=float, default=0, help="Interval seconds (0 = once)."
     )

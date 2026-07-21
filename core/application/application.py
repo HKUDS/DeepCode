@@ -14,7 +14,15 @@ from core.application.execution_registry import ExecutionRegistry
 from core.application.extension_service import ExtensionService
 from core.application.file_service import FileService
 from core.application.git_service import GitService
+from core.application.goal_coordinator import GoalCoordinator
+from core.application.goal_evaluator import (
+    GoalEvaluator,
+    ProviderSemanticEvaluator,
+    SemanticEvaluator,
+)
+from core.application.goal_service import GoalService
 from core.application.mcp_service import McpService
+from core.application.llm_configuration_service import LLMConfigurationService
 from core.application.project_service import ProjectService
 from core.application.settings_service import SettingsService
 from core.application.skill_service import SkillService
@@ -27,8 +35,9 @@ from core.application.worktree_service import WorktreeService
 from core.application.workflow_adapter import WorkflowRunner
 from core.application.workflow_service import WorkflowService
 from core.persistence.database import Database
+from core.persistence.event_repository import EventRepository
 from core.application.legacy_session_importer import LegacySessionImporter
-from core.sessions import SessionStore, get_default_store
+from core.sessions import GoalStore, SessionStore, get_default_store
 
 
 class DeepCodeApplication:
@@ -43,6 +52,7 @@ class DeepCodeApplication:
         session_factory: AgentSessionFactory | None = None,
         session_store: SessionStore | None = None,
         workflow_runner: WorkflowRunner | None = None,
+        semantic_goal_evaluator: SemanticEvaluator | None = None,
     ) -> None:
         self.database = database
         self.session_store = session_store or get_default_store()
@@ -50,6 +60,7 @@ class DeepCodeApplication:
         self.broker = EventBroker(default_capacity=event_queue_capacity)
         self.projects = ProjectService(database)
         self.settings = SettingsService(self.projects)
+        self.llm = LLMConfigurationService(self.projects)
         self.skills = SkillService(self.projects)
         self.extensions = ExtensionService(self.projects, self.skills)
         self.mcp = McpService(self.projects)
@@ -76,7 +87,24 @@ class DeepCodeApplication:
             self.executions,
             session_factory=session_factory,
             session_store=self.session_store,
+            llm_configuration=self.llm,
         )
+        self.goal_store = GoalStore(self.session_store)
+        self.goals = GoalService(
+            self.goal_store,
+            update_sink=self._publish_goal_update,
+        )
+        self.goal_evaluator = GoalEvaluator(
+            self.tests,
+            semantic_goal_evaluator or ProviderSemanticEvaluator(self.llm),
+        )
+        self.goal_coordinator = GoalCoordinator(
+            self.goals,
+            self.turns,
+            self.goal_evaluator,
+            self.executions,
+        )
+        self.turns.add_settled_listener(self.goal_coordinator.on_turn_settled)
         self.automations = AutomationService(
             database,
             self.broker,
@@ -101,6 +129,17 @@ class DeepCodeApplication:
             self.broker,
         )
 
+    def _publish_goal_update(self, thread_id, record) -> None:
+        from core.application.views import goal_view
+
+        with self.database.transaction() as connection:
+            event = EventRepository(connection).append(
+                thread_id=thread_id,
+                type="goal.updated",
+                payload={"goal": goal_view(record) if record is not None else None},
+            )
+        self.broker.publish(event)
+
     @classmethod
     def open(
         cls,
@@ -111,6 +150,7 @@ class DeepCodeApplication:
         session_factory: AgentSessionFactory | None = None,
         session_store: SessionStore | None = None,
         workflow_runner: WorkflowRunner | None = None,
+        semantic_goal_evaluator: SemanticEvaluator | None = None,
     ) -> "DeepCodeApplication":
         database = Database(database_path)
         database.initialize()
@@ -124,12 +164,18 @@ class DeepCodeApplication:
                 session_factory=session_factory,
                 session_store=session_store,
                 workflow_runner=workflow_runner,
+                semantic_goal_evaluator=semantic_goal_evaluator,
             )
             application._application_lease = lease
             if lease.recovery_owner:
                 application.threads.reconcile()
                 application.workflows.recover_incomplete()
-                application.turns.recover_incomplete()
+                application.goal_coordinator.recover_incomplete()
+                application.turns.recover_incomplete(
+                    resume_queued=(
+                        application.goal_coordinator.may_resume_queued_after_restart
+                    )
+                )
             lease.downgrade()
             return application
         except BaseException:
@@ -143,8 +189,10 @@ class DeepCodeApplication:
         try:
             self.automations.close()
             self.terminals.close_all()
+            self.goal_coordinator.prepare_shutdown()
             self.executions.close(cleanup=self.turns.close_live_sessions)
         finally:
+            self.turns.remove_settled_listener(self.goal_coordinator.on_turn_settled)
             lease = self._application_lease
             self._application_lease = None
             if lease is not None:

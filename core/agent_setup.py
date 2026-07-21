@@ -22,11 +22,13 @@ from typing import Any
 from loguru import logger
 
 from core.compat import DeepCodeRuntime, get_runtime
+from core.domain.execution_profile import ExecutionProfile
 from core.events import AgentSession
 from core.harness.permissions import PermissionMode
 from core.harness.policy import build_permission_engine
 from core.harness.tools import default_coding_tools
 from core.llm_runtime import get_workflow_provider
+from core.providers.catalog import resolve_model_info
 
 # A general coding task can legitimately need many tool-call turns. This is a
 # runaway backstop, not a task budget — the reference agents run effectively
@@ -101,10 +103,82 @@ def _wire_tool_permissions(tool_registry: Any, engine: Any) -> None:
     )
 
 
+def _legacy_execution_profile(
+    *,
+    runtime: Any,
+    provider: Any,
+    profile: Any,
+    connection_id: str | None,
+    requested_model: str | None,
+) -> ExecutionProfile:
+    """Adapt an old runtime/profile pair to the immutable execution contract.
+
+    ``build_agent_session`` has long been a public integration seam. A number
+    of embedders and offline tests provide a deliberately tiny runtime object
+    and replace ``get_workflow_provider``. Requiring those callers to grow the
+    new resolver API would break the stable CLI assembly contract, so this
+    adapter derives a complete, secret-free snapshot from the already-resolved
+    provider without changing how that provider was selected.
+    """
+
+    resolved_model = str(
+        requested_model
+        or getattr(profile, "model", None)
+        or provider.get_default_model()
+    )
+    model_info = resolve_model_info(resolved_model)
+    runtime_config = getattr(runtime, "config", None)
+
+    provider_name = getattr(profile, "provider_name", None)
+    if not provider_name and runtime_config is not None:
+        get_provider_name = getattr(runtime_config, "get_provider_name", None)
+        if callable(get_provider_name):
+            provider_name = get_provider_name(resolved_model)
+        provider_name = provider_name or getattr(runtime_config, "llm_provider", None)
+    provider_name = str(provider_name or "legacy")
+
+    generation = getattr(provider, "generation", None)
+    max_tokens = int(
+        getattr(profile, "max_tokens", None)
+        or getattr(generation, "max_tokens", None)
+        or model_info.max_output_tokens
+    )
+    context_window = int(
+        getattr(profile, "context_window", None) or model_info.context_window
+    )
+    max_output_tokens = max(max_tokens, int(model_info.max_output_tokens))
+
+    temperature = getattr(profile, "temperature", None)
+    if temperature is None:
+        temperature = getattr(generation, "temperature", None)
+    if temperature is None:
+        temperature = 0.7
+
+    return ExecutionProfile(
+        connection_id=str(
+            getattr(profile, "connection_id", None) or connection_id or provider_name
+        ),
+        provider_name=provider_name,
+        adapter=provider_name,
+        model_id=resolved_model,
+        context_window=context_window,
+        max_output_tokens=max_output_tokens,
+        max_tokens=min(max_tokens, max_output_tokens),
+        temperature=float(temperature),
+        reasoning_effort=(
+            getattr(profile, "reasoning_effort", None)
+            or getattr(generation, "reasoning_effort", None)
+        ),
+        config_revision="legacy-runtime",
+    )
+
+
 def build_agent_session(
     *,
     workspace: str,
     model: str | None = None,
+    connection_id: str | None = None,
+    execution_profile: ExecutionProfile | None = None,
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
     system_prompt: str = SYSTEM_PROMPT,
     approval_callback: Any | None = None,
@@ -131,12 +205,44 @@ def build_agent_session(
     os.makedirs(workspace, exist_ok=True)
 
     active_runtime = runtime or get_runtime()
-    provider, profile = get_workflow_provider(
-        phase="implementation",
-        model=model,
-        runtime=active_runtime,
-    )
-    resolved_model = model or profile.model
+    resolver = getattr(active_runtime, "resolve_execution_profile", None)
+    if execution_profile is not None:
+        resolved_execution = execution_profile
+        provider, profile = get_workflow_provider(
+            phase="implementation",
+            connection_id=resolved_execution.connection_id,
+            model=resolved_execution.model_id,
+            execution_profile=resolved_execution,
+            runtime=active_runtime,
+        )
+    elif callable(resolver):
+        resolved_execution = resolver(
+            connection_id=connection_id,
+            model=model,
+            phase="implementation",
+        )
+        provider, profile = get_workflow_provider(
+            phase="implementation",
+            connection_id=resolved_execution.connection_id,
+            model=resolved_execution.model_id,
+            execution_profile=resolved_execution,
+            runtime=active_runtime,
+        )
+    else:
+        provider, profile = get_workflow_provider(
+            phase="implementation",
+            connection_id=connection_id,
+            model=model,
+            runtime=active_runtime,
+        )
+        resolved_execution = _legacy_execution_profile(
+            runtime=active_runtime,
+            provider=provider,
+            profile=profile,
+            connection_id=connection_id,
+            requested_model=model,
+        )
+    resolved_model = resolved_execution.model_id
 
     security_cfg = getattr(active_runtime.config, "security", None)
     engine = build_permission_engine(
@@ -173,6 +279,7 @@ def build_agent_session(
         control = AgentControl(
             workspace,
             resolved_model,
+            execution_profile=resolved_execution,
             permission_mode=engine.mode,
             approval_callback=approval_callback,
             runtime=active_runtime,
@@ -218,6 +325,8 @@ def build_agent_session(
         agent_context=agent_context,
         streaming=streaming,
         skill_runtime=skill_runtime,
+        context_window_tokens=resolved_execution.context_window,
+        execution_profile=resolved_execution,
     )
     if control is not None:
         # `session.history` is a @property (a list), so it must be wrapped in a

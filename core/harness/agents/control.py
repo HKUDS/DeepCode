@@ -32,6 +32,7 @@ from core.harness.permissions import PermissionMode
 
 if TYPE_CHECKING:
     from core.compat.runtime import DeepCodeRuntime
+    from core.domain.execution_profile import ExecutionProfile
 
 # Max sub-agents running at once. A small fan-out (3-5 independent subtasks) is
 # the common case, so the default fits it without forcing a wait-and-retry,
@@ -92,6 +93,7 @@ class AgentControl:
         workspace: str,
         model: str | None = None,
         *,
+        execution_profile: "ExecutionProfile | None" = None,
         max_threads: int = MAX_CONCURRENT_SUBAGENTS,
         permission_mode: PermissionMode = PermissionMode.FULL_AUTO,
         approval_callback: Any | None = None,
@@ -99,6 +101,7 @@ class AgentControl:
     ) -> None:
         self._workspace = workspace
         self._model = model
+        self._execution_profile = execution_profile
         self._max_threads = max(1, max_threads)
         self._permission_mode = permission_mode
         self._approval_callback = approval_callback
@@ -319,6 +322,7 @@ class AgentControl:
         session, _model, _engine = build_agent_session(
             workspace=workspace,
             model=self._model,
+            execution_profile=self._execution_profile,
             allow_spawn=False,  # depth cap: sub-agents cannot spawn again
             injection_callback=inbox_drainer,  # receives parent's send_message
             agent_context=(agent_id, "subagent"),  # fires SubagentStart/Stop hooks

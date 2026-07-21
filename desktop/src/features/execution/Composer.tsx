@@ -1,7 +1,6 @@
 import {
   ArrowUp,
   Check,
-  Cpu,
   Paperclip,
   ShieldCheck,
   Sparkles,
@@ -11,13 +10,16 @@ import {
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 import type {
+  Goal,
   Project,
   SettingsSnapshot,
   Thread,
 } from "../../generated/app-server";
 import type { DesktopPermissionMode } from "../../app/useWorkspaceController";
+import type { GoalDefinitionInput } from "../../app/useWorkspaceController";
 import type { DesktopRuntime } from "../../rpc/contracts";
 import { useSkillCatalog } from "../skills/useSkillCatalog";
+import { GoalRail } from "../goal/GoalRail";
 import {
   matchingCommands,
   parseComposerCommand,
@@ -25,6 +27,7 @@ import {
 } from "./commands";
 import styles from "./Composer.module.css";
 import { usePromptDraft } from "./usePromptDraft";
+import { ModelPicker } from "./ModelPicker";
 
 interface ComposerProps {
   editable: boolean;
@@ -35,9 +38,14 @@ interface ComposerProps {
   project: Project | null;
   thread: Thread | null;
   settings: SettingsSnapshot | null;
+  goal: Goal | null;
   disabledReason: string | null;
-  onModelChange(model: string | null): void;
+  onModelChange(connectionId: string | null, model: string | null): void;
   onPermissionModeChange(mode: DesktopPermissionMode): void;
+  onSetGoal(input: GoalDefinitionInput): Promise<void>;
+  onPauseGoal(): Promise<void>;
+  onResumeGoal(): Promise<void>;
+  onClearGoal(): Promise<void>;
   onPickContextFiles(): Promise<string[]>;
   onCommand(command: ComposerCommand): Promise<boolean>;
   onSubmit(prompt: string, skillIds?: string[]): Promise<void>;
@@ -54,9 +62,14 @@ export function Composer({
   project,
   thread,
   settings,
+  goal,
   disabledReason,
   onModelChange,
   onPermissionModeChange,
+  onSetGoal,
+  onPauseGoal,
+  onResumeGoal,
+  onClearGoal,
   onPickContextFiles,
   onCommand,
   onSubmit,
@@ -97,9 +110,7 @@ export function Composer({
       return skill ? [skill] : [];
     });
   }, [selectedSkillIds, skillCatalog.skills]);
-  const defaultModel = settingsDefaultModel(settings);
   const permissionMode = settingsPermissionMode(settings);
-  const modelOptions = settings?.models ?? [];
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -187,6 +198,16 @@ export function Composer({
 
   return (
     <footer className={styles.region}>
+      <GoalRail
+        goal={goal}
+        enabled={canExecute}
+        busy={busy}
+        skills={skillCatalog.activeSkills}
+        onSet={onSetGoal}
+        onPause={onPauseGoal}
+        onResume={onResumeGoal}
+        onClear={onClearGoal}
+      />
       <div className={styles.composer}>
         <label htmlFor="turn-prompt">Task instruction</label>
         <textarea
@@ -364,28 +385,14 @@ export function Composer({
             <span title={thread?.workspacePath ?? project?.canonicalPath}>
               {thread?.mode === "paper" ? "Paper2Code" : "Local"}
             </span>
-            <label className={styles.selector} title="Model for this Session">
-              <Cpu size={12} />
-              <select
-                aria-label="Session model"
-                value={thread?.model ?? ""}
-                onChange={(event) => onModelChange(event.target.value || null)}
-                disabled={busy || active}
-              >
-                <option value="">
-                  {defaultModel ? `Default · ${defaultModel}` : "Configured model"}
-                </option>
-                {thread?.model &&
-                !modelOptions.some((model) => model.id === thread.model) ? (
-                  <option value={thread.model}>{thread.model}</option>
-                ) : null}
-                {modelOptions.map((model) => (
-                  <option value={model.id} key={model.id}>
-                    {model.id}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <ModelPicker
+              runtime={runtime}
+              project={project}
+              thread={thread}
+              settings={settings}
+              disabled={busy || active}
+              onChange={onModelChange}
+            />
             <label className={styles.selector} title="Tool permission mode">
               <ShieldCheck size={12} />
               <select
@@ -481,15 +488,6 @@ function withContextFiles(
     "Attached workspace context:",
     ...references.map((path) => `- ${path}`),
   ].join("\n");
-}
-
-function settingsDefaultModel(settings: SettingsSnapshot | null): string | null {
-  const defaults = settings?.agents.defaults;
-  if (typeof defaults !== "object" || defaults === null || Array.isArray(defaults)) {
-    return null;
-  }
-  const model = defaults.model;
-  return typeof model === "string" && model ? model : null;
 }
 
 function settingsPermissionMode(

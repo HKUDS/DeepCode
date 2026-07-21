@@ -29,6 +29,8 @@ import json
 import os
 import threading
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterable
 
@@ -103,6 +105,19 @@ class SessionStore:
 
     def _store_lock(self) -> Path:
         return self.root / ".store.lock"
+
+    @contextmanager
+    def session_guard(self, session_id: str) -> Iterator[Path | None]:
+        """Lock one canonical Session for a bounded companion-data mutation.
+
+        Session-owned stores such as the Goal ledger use this guard so their
+        compare-and-swap checks share the same cross-process lock as transcript
+        and metadata mutations. ``None`` means the Session no longer exists.
+        """
+
+        with self._lock, exclusive_file_lock(self._session_lock(session_id)):
+            directory = self._session_dir(session_id)
+            yield directory if self._session_jsonl(session_id).exists() else None
 
     # ------------------------------------------------------------------
     # Create / read

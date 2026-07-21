@@ -61,6 +61,20 @@
     "sandbox": true
   },
 
+  "goal": {
+    "$comment": "Shared CLI/Desktop guardrails for durable Goals. Null maxTokens means no separate Goal token cap; every provider and Turn limit still applies.",
+    "maxAttempts": 20,
+    "maxTokens": null,
+    "maxElapsedSeconds": 28800,
+    "stallThreshold": 3,
+    "evaluatorRetryLimit": 1,
+    "evaluatorMaxTokens": 1024,
+    "evaluatorTemperature": 0.0,
+    "verificationTimeoutSeconds": 300,
+    "evaluatorConnection": null,
+    "evaluatorModel": null
+  },
+
   "tools": {
     "defaultSearchServer": "filesystem",
     "mcpServers": {

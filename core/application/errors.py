@@ -53,6 +53,10 @@ class AutomationNotFoundError(ApplicationError):
     code = "AUTOMATION_NOT_FOUND"
 
 
+class GoalNotFoundError(ApplicationError):
+    code = "GOAL_NOT_FOUND"
+
+
 class SkillNotFoundError(ApplicationError):
     code = "SKILL_NOT_FOUND"
 

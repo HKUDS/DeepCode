@@ -26,6 +26,7 @@ from core.providers.registry import PROVIDERS
 _ALLOWED_ROOTS = {"agents", "providers", "security"}
 _AGENT_SECTIONS = {"defaults", "planning", "implementation"}
 _AGENT_FIELDS = {
+    "connection",
     "provider",
     "model",
     "maxTokens",
@@ -68,6 +69,10 @@ class SettingsService:
         project_id: str | None = None,
     ) -> dict[str, Any]:
         self._validate_patch(patch)
+        if scope == "project" and "providers" in patch:
+            raise InvalidArgumentError(
+                "provider connections and credentials are user-scoped only"
+            )
         store = self._store(scope, project_id)
         store.mutate(lambda current: deep_merge(current, patch))
         return self.read(project_id)

@@ -1,0 +1,55 @@
+#!/bin/sh
+
+set -eu
+
+# Resolve the real file when invoked through ~/.local/bin/deepcode-desktop.
+source_path=$0
+while [ -L "$source_path" ]; do
+  source_dir=$(CDPATH= cd -- "$(dirname -- "$source_path")" && pwd)
+  link_target=$(readlink "$source_path")
+  case $link_target in
+    /*) source_path=$link_target ;;
+    *) source_path=$source_dir/$link_target ;;
+  esac
+done
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$source_path")" && pwd)
+repository_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
+desktop_dir=$repository_root/desktop
+python_path=$repository_root/.venv/bin/python
+
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  cat <<'EOF'
+Usage: deepcode-desktop [tauri-dev-options]
+
+Start the DeepCode Tauri desktop application from any working directory.
+The launcher locates its source checkout and forwards additional arguments to
+`tauri dev`.
+EOF
+  exit 0
+fi
+
+if ! command -v npm >/dev/null 2>&1; then
+  echo "deepcode-desktop: npm is required (Node.js 22+)." >&2
+  exit 1
+fi
+
+if [ ! -x "$python_path" ]; then
+  echo "deepcode-desktop: repository virtualenv is missing." >&2
+  echo "Create $repository_root/.venv and install requirements.txt first." >&2
+  exit 1
+fi
+
+if [ ! -f "$desktop_dir/package.json" ]; then
+  echo "deepcode-desktop: desktop/package.json was not found." >&2
+  exit 1
+fi
+
+if [ ! -x "$desktop_dir/node_modules/.bin/tauri" ]; then
+  echo "deepcode-desktop: installing Desktop dependencies with npm ci..." >&2
+  (cd "$desktop_dir" && npm ci)
+fi
+
+export DEEPCODE_PYTHON=${DEEPCODE_PYTHON:-$python_path}
+cd "$desktop_dir"
+exec npm run tauri -- dev "$@"

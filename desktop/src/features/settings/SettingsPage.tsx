@@ -1,5 +1,5 @@
 import { Download, RefreshCw, Rocket } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useId, useState } from "react";
 
 import type {
   ConfigScope,
@@ -13,6 +13,8 @@ import type {
   DesktopUpdateProgress,
 } from "../../rpc/contracts";
 import { useDiagnostics } from "./useDiagnostics";
+import { ConnectionSettings } from "./ConnectionSettings";
+import { useConnectionCatalog } from "./useConnectionCatalog";
 import styles from "../management/ManagementWorkspace.module.css";
 
 interface SettingsPageProps {
@@ -25,9 +27,11 @@ interface SettingsPageProps {
 }
 
 interface AgentDraft {
-  provider: string;
+  defaultConnection: string;
   defaultModel: string;
+  planningConnection: string;
   planningModel: string;
+  implementationConnection: string;
   implementationModel: string;
   maxTokens: string;
 }
@@ -54,9 +58,14 @@ function agentDraft(settings: SettingsSnapshot | null): AgentDraft {
   const planning = record(agents.planning);
   const implementation = record(agents.implementation);
   return {
-    provider: text(defaults.provider, "auto"),
+    defaultConnection: text(
+      defaults.connection,
+      text(defaults.provider) === "auto" ? "" : text(defaults.provider),
+    ),
     defaultModel: text(defaults.model),
+    planningConnection: text(planning.connection),
     planningModel: text(planning.model),
+    implementationConnection: text(implementation.connection),
     implementationModel: text(implementation.model),
     maxTokens: numberText(defaults.maxTokens, 8192),
   };
@@ -72,8 +81,6 @@ export function SettingsPage({
 }: SettingsPageProps) {
   const [scope, setScope] = useState<ConfigScope>("user");
   const [agentOverrides, setAgentOverrides] = useState<Partial<AgentDraft>>({});
-  const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
-  const [providerBases, setProviderBases] = useState<Record<string, string>>({});
   const security = record(settings?.security);
   const [permissionModeOverride, setPermissionModeOverride] = useState<
     string | null
@@ -94,6 +101,7 @@ export function SettingsPage({
     useState<DesktopUpdateProgress | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const diagnostics = useDiagnostics(runtime, project?.id ?? null);
+  const connections = useConnectionCatalog(runtime, project?.id ?? null);
   const canWriteProject = project?.trustState === "trusted";
   const effectiveScope =
     scope === "project" && canWriteProject ? "project" : "user";
@@ -110,18 +118,7 @@ export function SettingsPage({
     maxTokens > 0;
 
   const models = settings?.models ?? [];
-  const providerNames = useMemo(
-    () => settings?.providers.map((provider) => provider.name) ?? [],
-    [settings?.providers],
-  );
-  const providers = useMemo(() => {
-    const activeProvider = agents.provider;
-    return [...(settings?.providers ?? [])].sort((left, right) => {
-      const leftRank = providerRank(left, activeProvider);
-      const rightRank = providerRank(right, activeProvider);
-      return leftRank - rightRank || left.label.localeCompare(right.label);
-    });
-  }, [agents.provider, settings?.providers]);
+  const connectionOptions = connections.catalog?.connections ?? [];
 
   const saveAgents = async () => {
     if (!maxTokensValid) return;
@@ -129,12 +126,19 @@ export function SettingsPage({
       {
         agents: {
           defaults: {
-            provider: agents.provider,
+            connection: agents.defaultConnection || null,
+            provider: "auto",
             model: agents.defaultModel,
             maxTokens,
           },
-          planning: { model: agents.planningModel || null },
-          implementation: { model: agents.implementationModel || null },
+          planning: {
+            connection: agents.planningConnection || null,
+            model: agents.planningModel || null,
+          },
+          implementation: {
+            connection: agents.implementationConnection || null,
+            model: agents.implementationModel || null,
+          },
         },
       },
       effectiveScope,
@@ -154,18 +158,6 @@ export function SettingsPage({
     );
     setPermissionModeOverride(null);
     setSandboxOverride(null);
-  };
-
-  const saveProvider = async (name: string) => {
-    const apiKey = apiKeys[name]?.trim();
-    const apiBase = providerBases[name]?.trim();
-    const patch: JsonObject = {};
-    if (apiKey) patch.apiKey = apiKey;
-    if (apiBase) patch.apiBase = apiBase;
-    if (!Object.keys(patch).length) return;
-    await onUpdate({ providers: { [name]: patch } }, effectiveScope);
-    setApiKeys((current) => ({ ...current, [name]: "" }));
-    setProviderBases((current) => ({ ...current, [name]: "" }));
   };
 
   const refresh = async () => {
@@ -271,20 +263,20 @@ export function SettingsPage({
           </header>
           <div className={styles.formGrid}>
             <label>
-              Provider
+              Default connection
               <select
-                value={agents.provider}
+                value={agents.defaultConnection}
                 onChange={(event) =>
                   setAgentOverrides((current) => ({
                     ...current,
-                    provider: event.target.value,
+                    defaultConnection: event.target.value,
                   }))
                 }
               >
-                <option value="auto">Auto</option>
-                {providerNames.map((name) => (
-                  <option value={name} key={name}>
-                    {name}
+                <option value="">Auto-select</option>
+                {connectionOptions.map((connection) => (
+                  <option value={connection.id} key={connection.id}>
+                    {connection.label}
                   </option>
                 ))}
               </select>
@@ -314,6 +306,25 @@ export function SettingsPage({
                 }))
               }
             />
+            <label>
+              Planning connection
+              <select
+                value={agents.planningConnection}
+                onChange={(event) =>
+                  setAgentOverrides((current) => ({
+                    ...current,
+                    planningConnection: event.target.value,
+                  }))
+                }
+              >
+                <option value="">Use default</option>
+                {connectionOptions.map((connection) => (
+                  <option value={connection.id} key={connection.id}>
+                    {connection.label}
+                  </option>
+                ))}
+              </select>
+            </label>
             <ModelField
               label="Planning override"
               value={agents.planningModel}
@@ -326,6 +337,25 @@ export function SettingsPage({
                 }))
               }
             />
+            <label>
+              Implementation connection
+              <select
+                value={agents.implementationConnection}
+                onChange={(event) =>
+                  setAgentOverrides((current) => ({
+                    ...current,
+                    implementationConnection: event.target.value,
+                  }))
+                }
+              >
+                <option value="">Use default</option>
+                {connectionOptions.map((connection) => (
+                  <option value={connection.id} key={connection.id}>
+                    {connection.label}
+                  </option>
+                ))}
+              </select>
+            </label>
             <ModelField
               label="Implementation override"
               value={agents.implementationModel}
@@ -446,70 +476,7 @@ export function SettingsPage({
         {updateInfo?.body ? <p>{updateInfo.body}</p> : null}
       </section>
 
-      <section className={styles.section}>
-        <header className={styles.sectionHeader}>
-          <div>
-            <p className={styles.eyebrow}>Credentials</p>
-            <h2>Providers</h2>
-          </div>
-        </header>
-        <div className={styles.cardList}>
-          {providers.map((provider) => (
-            <article className={styles.card} key={provider.name}>
-              <header>
-                <div>
-                  <p className={styles.eyebrow}>{provider.name}</p>
-                  <h2>{provider.label}</h2>
-                </div>
-                <span
-                  className={styles.badge}
-                  data-status={providerBadgeStatus(provider.credentialSource)}
-                >
-                  {providerCredentialLabel(provider.credentialSource)}
-                </span>
-              </header>
-              <p>{provider.apiBase ?? "Provider default endpoint"}</p>
-              <div className={styles.inlineForm}>
-                {!provider.local ? (
-                  <input
-                    type="password"
-                    value={apiKeys[provider.name] ?? ""}
-                    onChange={(event) =>
-                      setApiKeys((current) => ({
-                        ...current,
-                        [provider.name]: event.target.value,
-                      }))
-                    }
-                    placeholder="New API key (never read back)"
-                    autoComplete="off"
-                  />
-                ) : null}
-                <input
-                  value={providerBases[provider.name] ?? ""}
-                  onChange={(event) =>
-                    setProviderBases((current) => ({
-                      ...current,
-                      [provider.name]: event.target.value,
-                    }))
-                  }
-                  placeholder="Optional API base"
-                />
-                <button
-                  type="button"
-                  disabled={
-                    busy ||
-                    (!apiKeys[provider.name]?.trim() &&
-                      !providerBases[provider.name]?.trim())
-                  }
-                  onClick={() => void saveProvider(provider.name)}
-                >
-                  Save
-                </button>
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
+      <ConnectionSettings controller={connections} busy={busy} />
 
       <section className={styles.section}>
         <header className={styles.sectionHeader}>
@@ -617,38 +584,6 @@ function updateProgressLabel(progress: DesktopUpdateProgress | null): string {
   return `Downloading ${percentage}%`;
 }
 
-function providerRank(
-  provider: SettingsSnapshot["providers"][number],
-  activeProvider: string,
-): number {
-  if (provider.name === activeProvider) return 0;
-  if (
-    provider.credentialSource === "config" ||
-    provider.credentialSource === "environment"
-  ) {
-    return 1;
-  }
-  if (provider.credentialSource === "not_required") return 2;
-  return 3;
-}
-
-function providerBadgeStatus(
-  source: SettingsSnapshot["providers"][number]["credentialSource"],
-): "configured" | "neutral" | "invalid" {
-  if (source === "config" || source === "environment") return "configured";
-  if (source === "not_required") return "neutral";
-  return "invalid";
-}
-
-function providerCredentialLabel(
-  source: SettingsSnapshot["providers"][number]["credentialSource"],
-): string {
-  if (source === "config") return "Configured";
-  if (source === "environment") return "Environment";
-  if (source === "not_required") return "No key needed";
-  return "Missing key";
-}
-
 function updateStatusMessage(
   state: "idle" | "checking" | "current" | "available" | "installing",
   update: DesktopUpdateInfo | null,
@@ -676,18 +611,21 @@ function ModelField({
   allowEmpty?: boolean;
   onChange(value: string): void;
 }) {
-  const options = value && !models.includes(value) ? [value, ...models] : models;
+  const listId = useId();
   return (
     <label>
       {label}
-      <select value={value} onChange={(event) => onChange(event.target.value)}>
-        {allowEmpty ? <option value="">Use default</option> : null}
-        {options.map((model) => (
-          <option value={model} key={model}>
-            {model}
-          </option>
+      <input
+        list={listId}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={allowEmpty ? "Use default" : "Provider model ID"}
+      />
+      <datalist id={listId}>
+        {models.map((model) => (
+          <option value={model} key={model} />
         ))}
-      </select>
+      </datalist>
     </label>
   );
 }

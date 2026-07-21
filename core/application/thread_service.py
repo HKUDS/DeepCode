@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core.application.errors import (
+    ConflictError,
     InvalidArgumentError,
     ProjectNotFoundError,
     ThreadNotFoundError,
@@ -17,6 +18,7 @@ from core.application.event_service import EventBroker
 from core.application.views import item_view, thread_view, turn_view, workflow_view
 from core.domain.common import new_id, utc_now
 from core.domain.event import DomainEvent
+from core.domain.execution_profile import ExecutionProfile
 from core.domain.item import Item, ItemKind, ItemStatus
 from core.domain.project import Project, TrustState
 from core.domain.thread import Thread, ThreadMode, ThreadStatus
@@ -79,6 +81,7 @@ class ThreadService:
         title: str,
         mode: ThreadMode = ThreadMode.CODE,
         model: str | None = None,
+        connection_id: str | None = None,
         workspace_path: str | None = None,
         parent_thread_id: str | None = None,
     ) -> Thread:
@@ -105,12 +108,18 @@ class ThreadService:
             project.canonical_path,
         )
         resolved_model = model.strip() if model and model.strip() else None
+        resolved_connection = (
+            connection_id.strip().lower()
+            if connection_id and connection_id.strip()
+            else None
+        )
         metadata = {
             "kind": _DESKTOP_KIND,
             "workspace": str(workspace),
             "project_path": project.canonical_path,
             "mode": mode.value,
             "model": resolved_model,
+            "connection_id": resolved_connection,
             "archived": False,
         }
         if parent_thread_id is not None:
@@ -211,10 +220,47 @@ class ThreadService:
         return self._project_updated_session(thread_id, "thread.renamed")
 
     def set_model(self, thread_id: str, model: str | None) -> Thread:
+        self._require_no_active_turn(thread_id)
         resolved = model.strip() if model and model.strip() else None
         if not self.session_store.update_metadata(thread_id, {"model": resolved}):
             raise ThreadNotFoundError(f"thread not found: {thread_id}")
         return self._project_updated_session(thread_id, "thread.model_changed")
+
+    def set_execution_selection(
+        self,
+        thread_id: str,
+        *,
+        connection_id: str | None,
+        model: str | None,
+    ) -> Thread:
+        """Atomically change the selection used by future Turns."""
+
+        self._require_no_active_turn(thread_id)
+        resolved_connection = (
+            connection_id.strip().lower()
+            if connection_id and connection_id.strip()
+            else None
+        )
+        resolved_model = model.strip() if model and model.strip() else None
+        if not self.session_store.update_metadata(
+            thread_id,
+            {
+                "connection_id": resolved_connection,
+                "model": resolved_model,
+            },
+        ):
+            raise ThreadNotFoundError(f"thread not found: {thread_id}")
+        return self._project_updated_session(thread_id, "thread.model_changed")
+
+    def _require_no_active_turn(self, thread_id: str) -> None:
+        with self.database.read() as connection:
+            if ThreadRepository(connection).get(thread_id) is None:
+                raise ThreadNotFoundError(f"thread not found: {thread_id}")
+            active = TurnRepository(connection).active_for_thread(thread_id)
+        if active is not None:
+            raise ConflictError(
+                "connection and model cannot change while a Turn is active"
+            )
 
     def archive(self, thread_id: str) -> Thread:
         now = utc_now()
@@ -285,6 +331,7 @@ class ThreadService:
         metadata = session.metadata or {}
         mode = self._mode_for(session)
         model = self._model_for(metadata)
+        connection_id = self._connection_for(metadata)
         archived = bool(metadata.get("archived"))
         archived_at = (
             self._parse_time(str(metadata.get("archived_at"))) if archived else None
@@ -313,6 +360,7 @@ class ThreadService:
                     mode=mode,
                     status=ThreadStatus.ARCHIVED if archived else ThreadStatus.IDLE,
                     model=model,
+                    connection_id=connection_id,
                     workspace_path=str(workspace),
                     created_at=canonical_created,
                     updated_at=canonical_updated,
@@ -348,6 +396,7 @@ class ThreadService:
                     mode=mode,
                     status=status,
                     model=model,
+                    connection_id=connection_id,
                     workspace_path=str(workspace),
                     updated_at=updated_at,
                     archived_at=archived_at,
@@ -454,6 +503,19 @@ class ThreadService:
                     first_user.content
                     if first_user is not None
                     else "Projected session response"
+                ),
+                execution_profile=next(
+                    (
+                        parsed
+                        for message in messages
+                        for parsed in [
+                            ExecutionProfile.from_dict(
+                                (message.metadata or {}).get("executionProfile")
+                            )
+                        ]
+                        if parsed is not None
+                    ),
+                    None,
                 ),
                 status=TurnStatus.COMPLETED,
                 stop_reason="session_projection",
@@ -713,6 +775,7 @@ class ThreadService:
             "project_path": project.canonical_path if project is not None else None,
             "mode": thread.mode.value,
             "model": thread.model,
+            "connection_id": thread.connection_id,
             "archived": thread.status is ThreadStatus.ARCHIVED,
             "archived_at": (
                 thread.archived_at.isoformat()
@@ -873,6 +936,13 @@ class ThreadService:
         if raw is None:
             return None
         return str(raw).strip() or None
+
+    @staticmethod
+    def _connection_for(metadata: dict) -> str | None:
+        raw = metadata.get("connection_id") or metadata.get("connectionId")
+        if raw is None:
+            return None
+        return str(raw).strip().lower() or None
 
     @staticmethod
     def _parse_time(raw: str) -> datetime:

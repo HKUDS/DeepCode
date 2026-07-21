@@ -41,6 +41,11 @@ from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
 from core.agent_runtime.tools.mcp import MCPServerConfig
+from core.domain.goal import (
+    DEFAULT_GOAL_POLICY,
+    GOAL_EVALUATOR_MIN_TOKENS,
+    GOAL_VERIFICATION_TIMEOUT_MAX_SECONDS,
+)
 from core.providers.base import GenerationSettings, LLMProvider
 from core.providers.registry import (
     PROVIDERS,
@@ -78,6 +83,7 @@ class _Base(BaseModel):
 class AgentDefaults(_Base):
     """Default LLM generation settings shared by all phases."""
 
+    connection: str | None = None
     provider: str = "auto"  # "auto" or registry name (e.g. "openai", "anthropic")
     model: str = "openai/gpt-4o-mini"
     max_tokens: int = 8192
@@ -96,6 +102,7 @@ class AgentDefaults(_Base):
 class AgentPhase(_Base):
     """Per-phase overrides. Unset fields fall back to :class:`AgentDefaults`."""
 
+    connection: str | None = None
     provider: str | None = None
     model: str | None = None
     max_tokens: int | None = None
@@ -113,6 +120,7 @@ class AgentsConfig(_Base):
 class ResolvedAgentSettings:
     """Phase + defaults merged into one immutable view."""
 
+    connection: str | None
     provider: str
     model: str
     max_tokens: int
@@ -140,6 +148,26 @@ class ProviderConfig(_Base):
     extra_headers: dict[str, str] | None = None
 
 
+class ConnectionProfileConfig(_Base):
+    """One named connection instance backed by a registry provider template.
+
+    API keys are intentionally absent. They live in the credential store or
+    an environment variable named by ``apiKeyEnv``.
+    """
+
+    label: str = ""
+    template: str = "custom"
+    adapter: Literal["openai_compat", "anthropic"] | None = None
+    api_base: str | None = None
+    api_key_env: str | None = None
+    extra_headers: dict[str, str] = Field(default_factory=dict)
+    model_catalog: Literal["auto", "openrouter", "openai", "anthropic", "manual"] = (
+        "auto"
+    )
+    manual_models: list[str] = Field(default_factory=list)
+    enabled: bool = True
+
+
 class ProvidersConfig(_Base):
     """Per-provider connection blocks. Add new providers by extending here
     and adding the matching :class:`~core.providers.registry.ProviderSpec`.
@@ -155,6 +183,7 @@ class ProvidersConfig(_Base):
     dashscope: ProviderConfig = Field(default_factory=ProviderConfig)
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     ollama: ProviderConfig = Field(default_factory=ProviderConfig)
+    profiles: dict[str, ConnectionProfileConfig] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -195,6 +224,46 @@ class SkillsConfig(_Base):
     """
 
     disabled: list[str] = Field(default_factory=list)
+
+
+class GoalPolicyConfig(_Base):
+    """User-overridable guardrails for multi-Turn Goal execution."""
+
+    max_attempts: int | None = Field(
+        default=DEFAULT_GOAL_POLICY.max_attempts,
+        ge=1,
+    )
+    max_tokens: int | None = Field(
+        default=DEFAULT_GOAL_POLICY.max_tokens,
+        ge=1,
+    )
+    max_elapsed_seconds: int | None = Field(
+        default=DEFAULT_GOAL_POLICY.max_elapsed_seconds,
+        ge=1,
+    )
+    stall_threshold: int = Field(
+        default=DEFAULT_GOAL_POLICY.stall_threshold,
+        ge=1,
+    )
+    evaluator_retry_limit: int = Field(
+        default=DEFAULT_GOAL_POLICY.evaluator_retry_limit,
+        ge=0,
+    )
+    evaluator_max_tokens: int = Field(
+        default=DEFAULT_GOAL_POLICY.evaluator_max_tokens,
+        ge=GOAL_EVALUATOR_MIN_TOKENS,
+    )
+    evaluator_temperature: float = Field(
+        default=DEFAULT_GOAL_POLICY.evaluator_temperature,
+        ge=0,
+    )
+    verification_timeout_seconds: int = Field(
+        default=DEFAULT_GOAL_POLICY.verification_timeout_seconds,
+        ge=1,
+        le=GOAL_VERIFICATION_TIMEOUT_MAX_SECONDS,
+    )
+    evaluator_connection: str | None = None
+    evaluator_model: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -308,6 +377,7 @@ class DeepCodeConfig(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
+    goal: GoalPolicyConfig = Field(default_factory=GoalPolicyConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     workspace: WorkspaceConfig = Field(default_factory=WorkspaceConfig)
     document_segmentation: DocumentSegmentationConfig = Field(
@@ -379,6 +449,7 @@ class DeepCodeConfig(BaseSettings):
             return getattr(defaults, name)
 
         return ResolvedAgentSettings(
+            connection=_pick("connection"),
             provider=_pick("provider"),
             model=_pick("model"),
             max_tokens=_pick("max_tokens"),
@@ -573,6 +644,37 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     return merged
 
 
+def _project_runtime_layer(raw: dict[str, Any]) -> dict[str, Any]:
+    """Return project settings without user-owned provider routing.
+
+    Projects may select a user connection through ``agents.*.connection``.
+    Named profiles, API bases, and headers are always user-owned: otherwise a
+    repository could redirect a credential inherited from the user config or
+    environment. For legacy compatibility a project-level literal ``apiKey``
+    remains readable against the registry provider's trusted default endpoint;
+    all routing fields are discarded.
+    """
+
+    providers = raw.get("providers")
+    if not isinstance(providers, dict):
+        return raw
+    sanitized = dict(raw)
+    sanitized_providers: dict[str, Any] = {}
+    for name, value in providers.items():
+        if name == "profiles" or not isinstance(value, dict):
+            continue
+        if "apiKey" in value:
+            sanitized_providers[name] = {"apiKey": value["apiKey"]}
+        elif "api_key" in value:
+            sanitized_providers[name] = {"api_key": value["api_key"]}
+    if sanitized_providers:
+        sanitized["providers"] = sanitized_providers
+    else:
+        sanitized.pop("providers", None)
+    logger.trace("Ignoring project provider routing; LLM connections are user-scoped")
+    return sanitized
+
+
 def _resolve_env_refs(value: Any, *, path: str = "") -> Any:
     if isinstance(value, str):
 
@@ -613,7 +715,9 @@ def load_config(config_path: str | Path | None = None) -> DeepCodeConfig:
         raw = _load_raw(Path(config_path).expanduser().resolve())
     else:
         base = _load_raw(home_config_path())  # user-level, cwd-independent
-        project = _load_raw(default_config_path())  # cwd-scoped override
+        project = _project_runtime_layer(
+            _load_raw(default_config_path())
+        )  # cwd-scoped override
         raw = _deep_merge(base, project)
 
     raw = _resolve_env_refs(raw)
@@ -629,7 +733,7 @@ def load_config_for_workspace(workspace: str | Path) -> DeepCodeConfig:
     """
 
     base = _load_raw(home_config_path())
-    project = _load_raw(project_config_path(workspace))
+    project = _project_runtime_layer(_load_raw(project_config_path(workspace)))
     raw = _resolve_env_refs(_deep_merge(base, project))
     return DeepCodeConfig.model_validate(raw)
 
@@ -754,6 +858,7 @@ __all__ = [
     "ResolvedAgentSettings",
     "ToolsConfig",
     "ConfigError",
+    "ConnectionProfileConfig",
     "DEEPCODE_HOME_ENV",
     "WorkspaceConfig",
     "deepcode_home",

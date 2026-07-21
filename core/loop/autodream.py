@@ -53,6 +53,7 @@ async def consolidate_memory(
     workspace: str,
     *,
     model: str | None = None,
+    connection_id: str | None = None,
     max_iterations: int = 20,
     prompt_runner: Callable[[str], Awaitable[tuple[str, str]]] | None = None,
 ) -> AutodreamResult:
@@ -69,7 +70,10 @@ async def consolidate_memory(
         summary = final_text
     else:
         session, _model, _engine = build_agent_session(
-            workspace=workspace, model=model, max_iterations=max_iterations
+            workspace=workspace,
+            model=model,
+            connection_id=connection_id,
+            max_iterations=max_iterations,
         )
         summary = ""
         try:

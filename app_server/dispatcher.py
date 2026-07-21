@@ -27,6 +27,7 @@ from core.application.views import (
     file_diff_view,
     file_entry_view,
     git_status_view,
+    goal_view,
     item_view,
     hook_info_view,
     mcp_inventory_view,
@@ -45,9 +46,16 @@ from core.domain.automation import (
     AutomationScheduleKind,
     AutomationStatus,
 )
+from core.domain.execution_profile import ExecutionSelection
+from core.domain.goal import (
+    DEFAULT_GOAL_POLICY,
+    GOAL_ACCEPTANCE_CRITERIA_MAX_ITEMS,
+    GOAL_VERIFICATION_TIMEOUT_MAX_SECONDS,
+    GoalBudget,
+)
 from core.domain.project import TrustState
 from core.domain.thread import ThreadMode
-from core.skills.models import SkillScope
+from core.skills.models import MAX_SELECTED_SKILLS, SkillScope
 
 
 PROTOCOL_VERSION = "1.0"
@@ -179,6 +187,11 @@ class Dispatcher:
             rpc_methods.PROJECT_REMOVE: self._project_remove,
             rpc_methods.SETTINGS_READ: self._settings_read,
             rpc_methods.SETTINGS_UPDATE: self._settings_update,
+            rpc_methods.PROVIDER_LIST: self._provider_list,
+            rpc_methods.PROVIDER_UPSERT: self._provider_upsert,
+            rpc_methods.PROVIDER_REMOVE: self._provider_remove,
+            rpc_methods.PROVIDER_TEST: self._provider_test,
+            rpc_methods.MODEL_LIST: self._model_list,
             rpc_methods.SKILLS_LIST: self._skills_list,
             rpc_methods.SKILL_READ: self._skill_read,
             rpc_methods.SKILLS_IMPORT: self._skills_import,
@@ -204,10 +217,16 @@ class Dispatcher:
             rpc_methods.THREAD_MODEL: self._thread_model,
             rpc_methods.THREAD_ARCHIVE: self._thread_archive,
             rpc_methods.THREAD_FORK: self._thread_fork,
+            rpc_methods.THREAD_GOAL_GET: self._thread_goal_get,
+            rpc_methods.THREAD_GOAL_SET: self._thread_goal_set,
+            rpc_methods.THREAD_GOAL_PAUSE: self._thread_goal_pause,
+            rpc_methods.THREAD_GOAL_RESUME: self._thread_goal_resume,
+            rpc_methods.THREAD_GOAL_CLEAR: self._thread_goal_clear,
             rpc_methods.TURN_START: self._turn_start,
             rpc_methods.TURN_ENQUEUE: self._turn_enqueue,
             rpc_methods.TURN_READ: self._turn_read,
             rpc_methods.TURN_INTERRUPT: self._turn_interrupt,
+            rpc_methods.TURN_RETRY: self._turn_retry,
             rpc_methods.WORKFLOW_START: self._workflow_start,
             rpc_methods.WORKFLOW_READ: self._workflow_read,
             rpc_methods.WORKFLOW_LIST: self._workflow_list,
@@ -338,6 +357,32 @@ class Dispatcher:
             project_id=params.string("projectId", required=False),
         )
         return {"settings": settings}
+
+    def _provider_list(self, params: Params) -> dict[str, Any]:
+        params.only("projectId")
+        return self.application.llm.list_connections(
+            params.string("projectId", required=False)
+        )
+
+    def _provider_upsert(self, params: Params) -> dict[str, Any]:
+        params.only("connection")
+        return self.application.llm.upsert(dict(params.object("connection") or {}))
+
+    def _provider_remove(self, params: Params) -> dict[str, Any]:
+        params.only("connectionId")
+        return self.application.llm.remove(str(params.string("connectionId")))
+
+    def _provider_test(self, params: Params) -> dict[str, Any]:
+        params.only("connectionId")
+        return self.application.llm.test(str(params.string("connectionId")))
+
+    def _model_list(self, params: Params) -> dict[str, Any]:
+        params.only("connectionId", "projectId", "refresh")
+        return self.application.llm.list_models(
+            str(params.string("connectionId")),
+            project_id=params.string("projectId", required=False),
+            refresh=params.boolean("refresh"),
+        )
 
     def _skills_list(self, params: Params) -> dict[str, Any]:
         params.only("projectId", "refresh")
@@ -566,6 +611,7 @@ class Dispatcher:
             "projectId",
             "title",
             "mode",
+            "connectionId",
             "model",
             "workspacePath",
             "parentThreadId",
@@ -579,6 +625,7 @@ class Dispatcher:
             str(params.string("projectId")),
             title=str(params.string("title")),
             mode=mode,
+            connection_id=params.string("connectionId", required=False),
             model=params.string("model", required=False),
             workspace_path=params.string("workspacePath", required=False),
             parent_thread_id=params.string("parentThreadId", required=False),
@@ -617,11 +664,37 @@ class Dispatcher:
         return {"thread": thread_view(thread)}
 
     def _thread_model(self, params: Params) -> dict[str, Any]:
-        params.only("threadId", "model")
-        thread = self.application.threads.set_model(
-            str(params.string("threadId")),
-            params.nullable_string("model"),
-        )
+        params.only("threadId", "connectionId", "model")
+        thread_id = str(params.string("threadId"))
+        current = self.application.threads.read(thread_id)
+        if "connectionId" in params.values:
+            connection_id = params.nullable_string("connectionId")
+            model = params.nullable_string("model")
+            self.application.llm.resolve(
+                current.workspace_path,
+                ExecutionSelection(
+                    connection_id=connection_id,
+                    model_id=model,
+                ),
+            )
+            thread = self.application.threads.set_execution_selection(
+                thread_id,
+                connection_id=connection_id,
+                model=model,
+            )
+        else:
+            model = params.nullable_string("model")
+            self.application.llm.resolve(
+                current.workspace_path,
+                ExecutionSelection(
+                    connection_id=current.connection_id,
+                    model_id=model,
+                ),
+            )
+            thread = self.application.threads.set_model(
+                thread_id,
+                model,
+            )
         return {"thread": thread_view(thread)}
 
     def _thread_archive(self, params: Params) -> dict[str, Any]:
@@ -637,21 +710,190 @@ class Dispatcher:
         )
         return {"thread": thread_view(thread)}
 
+    def _thread_goal_get(self, params: Params) -> dict[str, Any]:
+        params.only("threadId")
+        record = self.application.goals.read(str(params.string("threadId")))
+        return {"goal": goal_view(record) if record is not None else None}
+
+    def _thread_goal_set(self, params: Params) -> dict[str, Any]:
+        params.only(
+            "threadId",
+            "objective",
+            "acceptanceCriteria",
+            "budget",
+            "skills",
+            "verificationCommandId",
+            "verificationTimeoutSeconds",
+            "evaluatorConnectionId",
+            "evaluatorModelId",
+            "expectedRevision",
+            "start",
+        )
+        thread_id = str(params.string("threadId"))
+        existing = self.application.goals.read(thread_id)
+        raw_budget = params.object("budget", required=False)
+        budget = self._goal_budget(raw_budget, existing)
+        criteria = (
+            params.string_array(
+                "acceptanceCriteria",
+                maximum=GOAL_ACCEPTANCE_CRITERIA_MAX_ITEMS,
+            )
+            if "acceptanceCriteria" in params.values
+            else (existing.goal.acceptance_criteria if existing is not None else ())
+        )
+        skills = (
+            params.string_array("skills", maximum=MAX_SELECTED_SKILLS)
+            if "skills" in params.values
+            else (existing.goal.skill_ids if existing is not None else ())
+        )
+        objective = (
+            str(params.string("objective"))
+            if "objective" in params.values
+            else existing.goal.objective
+            if existing is not None
+            else None
+        )
+        if objective is None:
+            raise InvalidParams("objective is required when creating a Goal")
+        verification_command_id = self._optional_nullable_string(
+            params,
+            "verificationCommandId",
+            fallback=(
+                existing.goal.verification_command_id if existing is not None else None
+            ),
+        )
+        evaluator_connection_id = self._optional_nullable_string(
+            params,
+            "evaluatorConnectionId",
+            fallback=(
+                existing.goal.evaluator_connection_id if existing is not None else None
+            ),
+        )
+        evaluator_model_id = self._optional_nullable_string(
+            params,
+            "evaluatorModelId",
+            fallback=(
+                existing.goal.evaluator_model_id if existing is not None else None
+            ),
+        )
+        verification_timeout = (
+            params.integer(
+                "verificationTimeoutSeconds",
+                default=DEFAULT_GOAL_POLICY.verification_timeout_seconds,
+                minimum=1,
+                maximum=GOAL_VERIFICATION_TIMEOUT_MAX_SECONDS,
+            )
+            if "verificationTimeoutSeconds" in params.values
+            else (
+                existing.goal.verification_timeout_seconds
+                if existing is not None
+                else DEFAULT_GOAL_POLICY.verification_timeout_seconds
+            )
+        )
+        if existing is None or existing.goal.status.is_terminal:
+            record = self.application.goals.create(
+                thread_id,
+                objective=objective,
+                acceptance_criteria=criteria,
+                budget=budget,
+                skill_ids=skills,
+                verification_command_id=verification_command_id,
+                verification_timeout_seconds=verification_timeout,
+                evaluator_connection_id=evaluator_connection_id,
+                evaluator_model_id=evaluator_model_id,
+            )
+        else:
+            expected_revision = params.optional_integer(
+                "expectedRevision",
+                minimum=1,
+                maximum=2_147_483_647,
+            )
+            if expected_revision is None:
+                raise InvalidParams(
+                    "expectedRevision is required when editing an active Goal"
+                )
+            record = self.application.goals.edit(
+                thread_id,
+                expected_revision=expected_revision,
+                objective=objective,
+                acceptance_criteria=criteria,
+                budget=budget,
+                skill_ids=skills,
+                verification_command_id=verification_command_id,
+                verification_timeout_seconds=verification_timeout,
+                evaluator_connection_id=evaluator_connection_id,
+                evaluator_model_id=evaluator_model_id,
+            )
+        if params.boolean("start", default=True):
+            self.application.goal_coordinator.continue_if_idle(thread_id)
+            record = self.application.goals.read(thread_id) or record
+        return {"goal": goal_view(record)}
+
+    def _thread_goal_pause(self, params: Params) -> dict[str, Any]:
+        params.only("threadId", "expectedRevision")
+        record = self.application.goal_coordinator.pause(
+            str(params.string("threadId")),
+            expected_revision=params.integer(
+                "expectedRevision",
+                default=0,
+                minimum=1,
+                maximum=2_147_483_647,
+            ),
+        )
+        return {"goal": goal_view(record)}
+
+    def _thread_goal_resume(self, params: Params) -> dict[str, Any]:
+        params.only("threadId", "expectedRevision")
+        thread_id = str(params.string("threadId"))
+        record = self.application.goal_coordinator.resume(
+            thread_id,
+            expected_revision=params.integer(
+                "expectedRevision",
+                default=0,
+                minimum=1,
+                maximum=2_147_483_647,
+            ),
+        )
+        return {"goal": goal_view(record)}
+
+    def _thread_goal_clear(self, params: Params) -> dict[str, Any]:
+        params.only("threadId", "expectedRevision")
+        self.application.goal_coordinator.clear(
+            str(params.string("threadId")),
+            expected_revision=params.integer(
+                "expectedRevision",
+                default=0,
+                minimum=1,
+                maximum=2_147_483_647,
+            ),
+        )
+        return {"goal": None}
+
     def _turn_start(self, params: Params) -> dict[str, Any]:
-        params.only("threadId", "prompt", "skills")
+        params.only("threadId", "prompt", "skills", "connectionId", "model")
         snapshot = self.application.turns.start(
             str(params.string("threadId")),
             prompt=str(params.string("prompt")),
-            skill_ids=params.string_array("skills", maximum=8),
+            skill_ids=params.string_array(
+                "skills",
+                maximum=MAX_SELECTED_SKILLS,
+            ),
+            connection_id=params.string("connectionId", required=False),
+            model=params.string("model", required=False),
         )
         return self._turn_snapshot(snapshot)
 
     def _turn_enqueue(self, params: Params) -> dict[str, Any]:
-        params.only("threadId", "prompt", "skills")
+        params.only("threadId", "prompt", "skills", "connectionId", "model")
         snapshot = self.application.turns.enqueue(
             str(params.string("threadId")),
             prompt=str(params.string("prompt")),
-            skill_ids=params.string_array("skills", maximum=8),
+            skill_ids=params.string_array(
+                "skills",
+                maximum=MAX_SELECTED_SKILLS,
+            ),
+            connection_id=params.string("connectionId", required=False),
+            model=params.string("model", required=False),
         )
         return self._turn_snapshot(snapshot)
 
@@ -665,6 +907,15 @@ class Dispatcher:
         params.only("turnId")
         accepted, turn = self.application.turns.interrupt(str(params.string("turnId")))
         return {"accepted": accepted, "turn": turn_view(turn)}
+
+    def _turn_retry(self, params: Params) -> dict[str, Any]:
+        params.only("turnId", "useCurrentSelection")
+        return self._turn_snapshot(
+            self.application.turns.retry(
+                str(params.string("turnId")),
+                use_current_selection=params.boolean("useCurrentSelection"),
+            )
+        )
 
     def _workflow_start(self, params: Params) -> dict[str, Any]:
         params.only("threadId", "kind", "sourceType", "source", "options")
@@ -911,6 +1162,62 @@ class Dispatcher:
             "stderr": result.stderr,
             "outputTruncated": result.output_truncated,
         }
+
+    @staticmethod
+    def _optional_nullable_string(
+        params: Params,
+        name: str,
+        *,
+        fallback: str | None,
+    ) -> str | None:
+        if name not in params.values:
+            return fallback
+        value = params.values[name]
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value.strip():
+            raise InvalidParams(f"{name} must be a non-empty string or null")
+        return value.strip()
+
+    @staticmethod
+    def _goal_budget(raw: dict[str, Any] | None, existing) -> GoalBudget | None:
+        if raw is None:
+            return existing.goal.budget if existing is not None else None
+        values = Params(raw).only(
+            "maxAttempts",
+            "maxTokens",
+            "maxElapsedSeconds",
+        )
+        prior = existing.goal.budget if existing is not None else GoalBudget()
+        return GoalBudget(
+            max_attempts=(
+                values.optional_integer(
+                    "maxAttempts",
+                    minimum=1,
+                    maximum=1_000_000,
+                )
+                if "maxAttempts" in raw
+                else prior.max_attempts
+            ),
+            max_tokens=(
+                values.optional_integer(
+                    "maxTokens",
+                    minimum=1,
+                    maximum=2_147_483_647,
+                )
+                if "maxTokens" in raw
+                else prior.max_tokens
+            ),
+            max_elapsed_seconds=(
+                values.optional_integer(
+                    "maxElapsedSeconds",
+                    minimum=1,
+                    maximum=31_536_000,
+                )
+                if "maxElapsedSeconds" in raw
+                else prior.max_elapsed_seconds
+            ),
+        )
 
     @staticmethod
     def _turn_snapshot(snapshot) -> dict[str, Any]:

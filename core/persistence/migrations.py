@@ -364,6 +364,32 @@ _DROP_TURN_SKILLS_V4 = r"""
 ALTER TABLE turns DROP COLUMN skill_ids_json;
 """
 
+_LLM_EXECUTION_PROFILES_V5 = r"""
+ALTER TABLE threads ADD COLUMN connection_id TEXT;
+ALTER TABLE turns ADD COLUMN execution_profile_json TEXT;
+"""
+
+_DROP_LLM_EXECUTION_PROFILES_V5 = r"""
+ALTER TABLE turns DROP COLUMN execution_profile_json;
+ALTER TABLE threads DROP COLUMN connection_id;
+"""
+
+_GOAL_TURN_LINKS_V6 = r"""
+ALTER TABLE turns ADD COLUMN goal_id TEXT;
+ALTER TABLE turns ADD COLUMN goal_definition_revision INTEGER;
+ALTER TABLE turns ADD COLUMN goal_attempt_id TEXT;
+CREATE UNIQUE INDEX idx_turns_goal_attempt
+    ON turns(goal_attempt_id)
+    WHERE goal_attempt_id IS NOT NULL;
+"""
+
+_DROP_GOAL_TURN_LINKS_V6 = r"""
+DROP INDEX IF EXISTS idx_turns_goal_attempt;
+ALTER TABLE turns DROP COLUMN goal_attempt_id;
+ALTER TABLE turns DROP COLUMN goal_definition_revision;
+ALTER TABLE turns DROP COLUMN goal_id;
+"""
+
 MIGRATIONS = (
     Migration(1, "initial_domain", _INITIAL_SCHEMA, _DROP_INITIAL_SCHEMA),
     Migration(
@@ -383,6 +409,18 @@ MIGRATIONS = (
         "turn_skill_selections",
         _TURN_SKILLS_V4,
         _DROP_TURN_SKILLS_V4,
+    ),
+    Migration(
+        5,
+        "llm_execution_profiles",
+        _LLM_EXECUTION_PROFILES_V5,
+        _DROP_LLM_EXECUTION_PROFILES_V5,
+    ),
+    Migration(
+        6,
+        "goal_turn_links",
+        _GOAL_TURN_LINKS_V6,
+        _DROP_GOAL_TURN_LINKS_V6,
     ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

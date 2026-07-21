@@ -9,6 +9,7 @@ from enum import StrEnum
 from pathlib import Path
 
 _SKILL_ID_RE = re.compile(r"^sk_[0-9a-f]{24}$")
+MAX_SELECTED_SKILLS = 8
 
 
 class SkillScope(StrEnum):

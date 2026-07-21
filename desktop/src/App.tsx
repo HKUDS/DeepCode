@@ -292,11 +292,18 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
                 project={selectedProject}
                 thread={selectedThread}
                 settings={state.settings}
+                goal={state.goal}
                 disabledReason={disabledReason}
-                onModelChange={(model) => void controller.setThreadModel(model)}
+                onModelChange={(connectionId, model) =>
+                  void controller.setThreadExecution(connectionId, model)
+                }
                 onPermissionModeChange={(mode) =>
                   void controller.setPermissionMode(mode)
                 }
+                onSetGoal={controller.setGoal}
+                onPauseGoal={controller.pauseGoal}
+                onResumeGoal={controller.resumeGoal}
+                onClearGoal={controller.clearGoal}
                 onPickContextFiles={controller.pickContextFiles}
                 onCommand={runComposerCommand}
                 onSubmit={controller.startTurn}

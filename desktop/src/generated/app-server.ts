@@ -36,6 +36,9 @@ export type AutomationTrigger = "manual" | "scheduled";
 export type AutomationRunStatus = "queued" | "running" | "waiting" | "completed" | "failed" | "interrupted" | "skipped";
 export type ThreadStatus = "idle" | "running" | "waiting" | "failed" | "archived";
 export type TurnStatus = "queued" | "running" | "waiting_approval" | "completed" | "failed" | "interrupted";
+export type GoalStatus = "active" | "paused" | "blocked" | "usage_limited" | "budget_limited" | "completed";
+export type GoalVerdict = "complete" | "continue" | "blocked" | "error";
+export type GoalAttemptStatus = "queued" | "running" | "evaluating" | "completed" | "failed" | "interrupted";
 export type ItemKind =
   | "user_message"
   | "assistant_message"
@@ -73,6 +76,11 @@ export interface MethodParams {
   "project/remove": ProjectReadParams;
   "settings/read": OptionalProjectParams;
   "settings/update": SettingsUpdateParams;
+  "provider/list": OptionalProjectParams;
+  "provider/upsert": ProviderUpsertParams;
+  "provider/remove": ConnectionIdentityParams;
+  "provider/test": ConnectionIdentityParams;
+  "model/list": ModelListParams;
   "skills/list": SkillListParams;
   "skill/read": SkillReadParams;
   "skills/import": SkillImportParams;
@@ -97,10 +105,16 @@ export interface MethodParams {
   "thread/model": ThreadModelParams;
   "thread/archive": ThreadReadParams;
   "thread/fork": ThreadForkParams;
+  "thread/goal/get": ThreadReadParams;
+  "thread/goal/set": GoalSetParams;
+  "thread/goal/pause": GoalRevisionParams;
+  "thread/goal/resume": GoalRevisionParams;
+  "thread/goal/clear": GoalRevisionParams;
   "turn/start": TurnStartParams;
   "turn/enqueue": TurnStartParams;
   "turn/read": TurnReadParams;
   "turn/interrupt": TurnReadParams;
+  "turn/retry": TurnRetryParams;
   "workflow/start": WorkflowStartParams;
   "workflow/read": WorkflowRunParams;
   "workflow/list": ThreadReadParams;
@@ -165,6 +179,30 @@ export interface SettingsUpdateParams {
   scope?: ConfigScope;
   projectId?: string;
 }
+export interface ProviderUpsertParams {
+  connection: {
+    id: string;
+    label?: string;
+    template?: string;
+    adapter?: "openai_compat" | "anthropic" | null;
+    apiBase?: string | null;
+    apiKeyEnv?: string | null;
+    apiKey?: string;
+    clearApiKey?: boolean;
+    extraHeaders?: JsonObject;
+    modelCatalog?: "auto" | "openrouter" | "openai" | "anthropic" | "manual";
+    manualModels?: string[];
+    enabled?: boolean;
+  };
+}
+export interface ConnectionIdentityParams {
+  connectionId: string;
+}
+export interface ModelListParams {
+  connectionId: string;
+  projectId?: string;
+  refresh?: boolean;
+}
 export interface SkillListParams {
   projectId: string;
   refresh?: boolean;
@@ -222,6 +260,7 @@ export interface ThreadStartParams {
   projectId: string;
   title: string;
   mode?: ThreadMode;
+  connectionId?: string;
   model?: string;
   workspacePath?: string;
   parentThreadId?: string;
@@ -243,10 +282,179 @@ export interface ThreadRenameParams {
 export interface ThreadModelParams {
   threadId: string;
   model: string | null;
+  connectionId?: string | null;
 }
 export interface ThreadForkParams {
   threadId: string;
   title?: string;
+}
+export interface GoalSetParams {
+  threadId: string;
+  objective?: string;
+  /**
+   * @maxItems 20
+   */
+  acceptanceCriteria?:
+    | []
+    | [string]
+    | [string, string]
+    | [string, string, string]
+    | [string, string, string, string]
+    | [string, string, string, string, string]
+    | [string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string, string, string, string, string, string]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string
+      ];
+  budget?: {
+    maxAttempts?: number | null;
+    maxTokens?: number | null;
+    maxElapsedSeconds?: number | null;
+  };
+  /**
+   * @maxItems 8
+   */
+  skills?:
+    | []
+    | [string]
+    | [string, string]
+    | [string, string, string]
+    | [string, string, string, string]
+    | [string, string, string, string, string]
+    | [string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string];
+  verificationCommandId?: string | null;
+  verificationTimeoutSeconds?: number;
+  evaluatorConnectionId?: string | null;
+  evaluatorModelId?: string | null;
+  expectedRevision?: number;
+  start?: boolean;
+}
+export interface GoalRevisionParams {
+  threadId: string;
+  expectedRevision: number;
 }
 export interface TurnStartParams {
   threadId: string;
@@ -264,9 +472,15 @@ export interface TurnStartParams {
     | [string, string, string, string, string, string]
     | [string, string, string, string, string, string, string]
     | [string, string, string, string, string, string, string, string];
+  connectionId?: string;
+  model?: string;
 }
 export interface TurnReadParams {
   turnId: string;
+}
+export interface TurnRetryParams {
+  turnId: string;
+  useCurrentSelection?: boolean;
 }
 export interface WorkflowStartParams {
   threadId: string;
@@ -368,6 +582,11 @@ export interface MethodResults {
   shutdown: {
     accepted: boolean;
   };
+  "provider/list": ConnectionCatalogResult;
+  "provider/upsert": ConnectionCatalogResult;
+  "provider/remove": ConnectionRemoveResult;
+  "provider/test": ProviderTestResult;
+  "model/list": ModelCatalogResult;
   "project/list": {
     projects: Project[];
   };
@@ -456,6 +675,11 @@ export interface MethodResults {
   "thread/fork": {
     thread: Thread;
   };
+  "thread/goal/get": GoalResult;
+  "thread/goal/set": GoalResult;
+  "thread/goal/pause": GoalResult;
+  "thread/goal/resume": GoalResult;
+  "thread/goal/clear": GoalResult;
   "turn/start": TurnSnapshotResult;
   "turn/enqueue": TurnSnapshotResult;
   "turn/read": TurnSnapshotResult;
@@ -463,6 +687,7 @@ export interface MethodResults {
     accepted: boolean;
     turn: Turn;
   };
+  "turn/retry": TurnSnapshotResult;
   "workflow/start": WorkflowSnapshotResult;
   "workflow/read": WorkflowSnapshotResult;
   "workflow/list": {
@@ -554,6 +779,63 @@ export interface InitializeResult {
     liveEvents: boolean;
     maxMessageBytes: number;
   };
+}
+export interface ConnectionCatalogResult {
+  connections: ConnectionInfo[];
+  templates: ConnectionTemplate[];
+  configPath: string;
+  credentialPath: string;
+}
+export interface ConnectionInfo {
+  id: string;
+  label: string;
+  providerName: string;
+  adapter: "openai_compat" | "anthropic";
+  apiBase: string | null;
+  apiKeyEnv: string | null;
+  modelCatalog: "openrouter" | "openai" | "anthropic" | "manual";
+  manualModels: string[];
+  configured: boolean;
+  credentialSource: "environment" | "credential_store" | "legacy_config" | "not_required" | "missing";
+  local: boolean;
+  enabled: boolean;
+  explicit: boolean;
+}
+export interface ConnectionTemplate {
+  name: string;
+  label: string;
+  adapter: string;
+  defaultApiBase: string | null;
+  local: boolean;
+}
+export interface ConnectionRemoveResult {
+  removed: boolean;
+  connections: ConnectionInfo[];
+  templates: ConnectionTemplate[];
+  configPath: string;
+  credentialPath: string;
+}
+export interface ProviderTestResult {
+  connectionId: string;
+  ok: boolean;
+  latencyMs: number;
+  modelCount: number;
+  error: string | null;
+}
+export interface ModelCatalogResult {
+  connectionId: string;
+  models: CatalogModel[];
+  source: string;
+  stale: boolean;
+  error: string | null;
+  refreshedAt: number | null;
+}
+export interface CatalogModel {
+  id: string;
+  name: string;
+  contextWindow: number;
+  maxOutputTokens: number;
+  supportedParameters: string[];
 }
 export interface Project {
   id: string;
@@ -723,6 +1005,7 @@ export interface Thread {
   mode: ThreadMode;
   status: ThreadStatus;
   model: string | null;
+  connectionId?: string | null;
   workspacePath: string;
   worktreePath: string | null;
   createdAt: string;
@@ -747,12 +1030,232 @@ export interface Turn {
     | [string, string, string, string, string, string]
     | [string, string, string, string, string, string, string]
     | [string, string, string, string, string, string, string, string];
+  executionProfile?: ExecutionProfile | null;
+  goalId?: string | null;
+  goalDefinitionRevision?: number | null;
+  goalAttemptId?: string | null;
   status: TurnStatus;
   stopReason: string | null;
   errorCode: string | null;
   errorMessage: string | null;
   startedAt: string | null;
   completedAt: string | null;
+}
+export interface ExecutionProfile {
+  connectionId: string;
+  providerName: string;
+  adapter: "openai_compat" | "anthropic";
+  modelId: string;
+  contextWindow: number;
+  maxOutputTokens: number;
+  maxTokens: number;
+  temperature: number;
+  reasoningEffort: string | null;
+  configRevision: string;
+}
+export interface GoalResult {
+  goal: Goal | null;
+}
+export interface Goal {
+  id: string;
+  threadId: string;
+  objective: string;
+  /**
+   * @maxItems 20
+   */
+  acceptanceCriteria:
+    | []
+    | [string]
+    | [string, string]
+    | [string, string, string]
+    | [string, string, string, string]
+    | [string, string, string, string, string]
+    | [string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string, string, string, string, string, string]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string
+      ];
+  status: GoalStatus;
+  phase: string | null;
+  revision: number;
+  definitionRevision: number;
+  attemptCount: number;
+  tokensUsed: number;
+  elapsedSeconds: number;
+  budget: GoalBudget;
+  /**
+   * @maxItems 8
+   */
+  skillIds:
+    | []
+    | [string]
+    | [string, string]
+    | [string, string, string]
+    | [string, string, string, string]
+    | [string, string, string, string, string]
+    | [string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string];
+  verificationCommandId: string | null;
+  verificationTimeoutSeconds: number;
+  evaluatorConnectionId: string | null;
+  evaluatorModelId: string | null;
+  lastVerdict: GoalVerdict | null;
+  lastReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  attempts: GoalAttempt[];
+  evaluations: GoalEvaluation[];
+}
+export interface GoalBudget {
+  maxAttempts: number | null;
+  maxTokens: number | null;
+  maxElapsedSeconds: number | null;
+}
+export interface GoalAttempt {
+  id: string;
+  goalRevision: number;
+  ordinal: number;
+  turnId: string | null;
+  status: GoalAttemptStatus;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+}
+export interface GoalEvaluation {
+  id: string;
+  goalRevision: number;
+  attemptId: string;
+  turnId: string;
+  verdict: GoalVerdict;
+  reason: string;
+  evidenceRefs: string[];
+  evaluatorProvider: string | null;
+  evaluatorModel: string | null;
+  tokensUsed: number;
+  createdAt: string;
 }
 export interface TurnSnapshotResult {
   turn: Turn;
@@ -926,6 +1429,7 @@ export interface Notifications {
   "workflow.completed": Event;
   "artifact.created": Event;
   "automation.updated": Event;
+  "goal.updated": Event;
   "terminal.output": {
     terminalId: string;
     threadId: string;

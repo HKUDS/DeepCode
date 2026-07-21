@@ -7,6 +7,7 @@ import sqlite3
 from core.domain.approval import Approval, ApprovalCategory, ApprovalStatus
 from core.domain.item import Item, ItemKind, ItemStatus
 from core.domain.turn import Turn, TurnStatus
+from core.domain.execution_profile import ExecutionProfile
 from core.persistence.serde import (
     dump_datetime,
     dump_json,
@@ -31,14 +32,24 @@ class TurnRepository:
     def add(self, turn: Turn) -> None:
         self.connection.execute(
             "INSERT INTO turns (id, thread_id, ordinal, prompt, skill_ids_json, "
-            "status, stop_reason, error_code, error_message, started_at, completed_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "execution_profile_json, goal_id, goal_definition_revision, "
+            "goal_attempt_id, status, stop_reason, error_code, error_message, "
+            "started_at, completed_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 turn.id,
                 turn.thread_id,
                 turn.ordinal,
                 turn.prompt,
                 dump_json(list(turn.skill_ids)),
+                (
+                    dump_json(turn.execution_profile.to_dict())
+                    if turn.execution_profile is not None
+                    else None
+                ),
+                turn.goal_id,
+                turn.goal_definition_revision,
+                turn.goal_attempt_id,
                 turn.status.value,
                 turn.stop_reason,
                 turn.error_code,
@@ -56,9 +67,15 @@ class TurnRepository:
 
     def update(self, turn: Turn) -> None:
         cursor = self.connection.execute(
-            "UPDATE turns SET status = ?, stop_reason = ?, error_code = ?, "
+            "UPDATE turns SET execution_profile_json = ?, status = ?, "
+            "stop_reason = ?, error_code = ?, "
             "error_message = ?, started_at = ?, completed_at = ? WHERE id = ?",
             (
+                (
+                    dump_json(turn.execution_profile.to_dict())
+                    if turn.execution_profile is not None
+                    else None
+                ),
                 turn.status.value,
                 turn.stop_reason,
                 turn.error_code,
@@ -117,6 +134,14 @@ class TurnRepository:
             ordinal=row["ordinal"],
             prompt=row["prompt"],
             skill_ids=tuple(load_json_list(row["skill_ids_json"])),
+            execution_profile=ExecutionProfile.from_dict(
+                load_json(row["execution_profile_json"])
+                if row["execution_profile_json"] is not None
+                else None
+            ),
+            goal_id=row["goal_id"],
+            goal_definition_revision=row["goal_definition_revision"],
+            goal_attempt_id=row["goal_attempt_id"],
             status=TurnStatus(row["status"]),
             stop_reason=row["stop_reason"],
             error_code=row["error_code"],

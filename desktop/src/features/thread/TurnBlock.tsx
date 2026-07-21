@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock3,
+  Cpu,
   FilePenLine,
   FlaskConical,
   ListChecks,
@@ -425,6 +426,14 @@ export function TurnBlock({
           ) : null}
         </article>
       ))}
+      {group.turn?.executionProfile ? (
+        <div className={styles.executionBadge}>
+          <Cpu size={10} />
+          <span>{group.turn.executionProfile.connectionId}</span>
+          <i aria-hidden="true">/</i>
+          <strong>{group.turn.executionProfile.modelId}</strong>
+        </div>
+      ) : null}
 
       <RunLedger
         group={group}

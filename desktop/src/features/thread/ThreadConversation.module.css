@@ -16,7 +16,7 @@
 .conversation {
   width: min(820px, 100%);
   margin: 0 auto;
-  padding: 42px 30px 158px;
+  padding: 42px 30px 202px;
 }
 
 .turnBlock {
@@ -95,6 +95,35 @@
 
 .queueState button:hover:not(:disabled) {
   background: var(--danger-soft);
+}
+
+.executionBadge {
+  display: flex;
+  width: fit-content;
+  max-width: 78%;
+  min-height: 24px;
+  align-items: center;
+  gap: 5px;
+  margin: -19px 0 22px auto;
+  color: var(--text-tertiary);
+  font: 8.5px var(--font-mono);
+}
+
+.executionBadge span,
+.executionBadge strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.executionBadge strong {
+  color: var(--text-secondary);
+  font-weight: 520;
+}
+
+.executionBadge i {
+  color: var(--border-emphasis);
+  font-style: normal;
 }
 
 .runLedger {
@@ -474,7 +503,7 @@ div.runStep {
   align-content: center;
   justify-items: start;
   margin: 0 auto;
-  padding: 72px 38px 158px;
+  padding: 72px 38px 202px;
   text-align: left;
 }
 

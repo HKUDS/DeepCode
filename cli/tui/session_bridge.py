@@ -29,6 +29,7 @@ import os
 from core.events.session import AgentSession
 from core.sessions import SessionStore, SessionSummary, get_default_store
 from core.skills.models import SkillInvocation
+from core.domain.execution_profile import ExecutionProfile
 
 _KIND = "tui"
 
@@ -43,6 +44,8 @@ class SessionBridge:
         session_id: str | None = None,
         title: str = "",
         workspace: str | None = None,
+        connection_id: str | None = None,
+        model: str | None = None,
     ) -> None:
         self.store = store or get_default_store()
         self.workspace = os.path.abspath(workspace) if workspace else None
@@ -55,6 +58,10 @@ class SessionBridge:
             metadata: dict = {"kind": _KIND}
             if self.workspace:
                 metadata["workspace"] = self.workspace
+            if connection_id:
+                metadata["connection_id"] = connection_id
+            if model:
+                metadata["model"] = model
             self.session_id = self.store.create_session(
                 title=title, metadata=metadata
             ).session_id
@@ -67,12 +74,18 @@ class SessionBridge:
         assistant_text: str | None,
         *,
         skill_invocations: tuple[SkillInvocation, ...] = (),
+        execution_profile: ExecutionProfile | None = None,
     ) -> None:
         """Persist one completed turn. Errors here must never kill the REPL."""
         try:
             metadata = {
-                "schemaVersion": 2,
+                "schemaVersion": 3,
                 "client": "cli",
+                "executionProfile": (
+                    execution_profile.to_dict()
+                    if execution_profile is not None
+                    else None
+                ),
                 "skillInvocations": [
                     invocation.to_metadata() for invocation in skill_invocations
                 ],
@@ -92,6 +105,30 @@ class SessionBridge:
                 )
         except Exception:  # noqa: BLE001 - persistence is best-effort
             pass
+
+    def execution_selection(self) -> tuple[str | None, str | None]:
+        stored = self.store.get_session(self.session_id)
+        metadata = stored.metadata if stored is not None else {}
+        connection = metadata.get("connection_id") or metadata.get("connectionId")
+        model = metadata.get("model")
+        return (
+            str(connection).strip().lower() if connection else None,
+            str(model).strip() if model else None,
+        )
+
+    def update_execution_selection(
+        self,
+        *,
+        connection_id: str | None,
+        model: str | None,
+    ) -> None:
+        self.store.update_metadata(
+            self.session_id,
+            {
+                "connection_id": connection_id,
+                "model": model,
+            },
+        )
 
     def set_title_from(self, first_message: str) -> None:
         """Title the session after its first message (like Claude Code)."""

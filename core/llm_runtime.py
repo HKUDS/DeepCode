@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from core.compat.runtime import DeepCodeRuntime, get_runtime
+from core.domain.execution_profile import ExecutionProfile
 from core.providers.base import LLMProvider
 
 if TYPE_CHECKING:
@@ -29,13 +30,17 @@ class LLMProfile:
     model: str
     reasoning_effort: str | None
     max_tokens: int
+    connection_id: str | None = None
+    context_window: int | None = None
 
 
 def get_workflow_provider(
     *,
     phase: str,
     provider_name: str | None = None,
+    connection_id: str | None = None,
     model: str | None = None,
+    execution_profile: ExecutionProfile | None = None,
     runtime: DeepCodeRuntime | None = None,
 ) -> tuple[LLMProvider, LLMProfile]:
     """Resolve a provider for non-AgentRunner workflow code.
@@ -45,10 +50,24 @@ def get_workflow_provider(
     instantiate OpenAI/Anthropic/Google SDK clients themselves.
     """
     active_runtime = runtime or get_runtime()
+    resolved_execution = execution_profile
+    resolver = getattr(active_runtime, "resolve_execution_profile", None)
+    if resolved_execution is None and provider_name is None and callable(resolver):
+        resolved_execution = resolver(
+            connection_id=connection_id,
+            model=model,
+            phase=phase,
+        )
     provider = active_runtime.provider_for(
         provider_name=provider_name,
+        connection_id=(
+            resolved_execution.connection_id
+            if resolved_execution is not None
+            else connection_id
+        ),
         phase=phase,
         model=model,
+        execution_profile=resolved_execution,
     )
     resolved_provider = (
         provider_name
@@ -57,11 +76,25 @@ def get_workflow_provider(
         or "auto"
     ).lower()
     profile = LLMProfile(
-        provider_name=resolved_provider,
+        provider_name=(
+            resolved_execution.provider_name
+            if resolved_execution is not None
+            else resolved_provider
+        ),
         phase=phase,
         model=provider.get_default_model(),
         reasoning_effort=provider.generation.reasoning_effort,
         max_tokens=provider.generation.max_tokens,
+        connection_id=(
+            resolved_execution.connection_id
+            if resolved_execution is not None
+            else connection_id
+        ),
+        context_window=(
+            resolved_execution.context_window
+            if resolved_execution is not None
+            else None
+        ),
     )
     logger.info(
         "Resolved workflow LLM: phase={} provider={} model={} reasoning_effort={} max_tokens={}",
@@ -79,12 +112,14 @@ async def attach_workflow_llm(
     *,
     phase: str,
     provider_name: str | None = None,
+    connection_id: str | None = None,
     model: str | None = None,
 ) -> "AugmentedLLM":
     """Attach an LLM to an agent with explicit workflow phase semantics."""
     llm = await agent.attach_llm(
         phase=phase,
         provider_name=provider_name,
+        connection_id=connection_id,
         model=model,
     )
     logger.info(

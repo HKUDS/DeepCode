@@ -122,6 +122,7 @@ class AgentSession:
         context_window_tokens: int | None = None,
         streaming: bool = False,
         skill_runtime: SkillRuntime | None = None,
+        execution_profile: Any | None = None,
     ) -> None:
         self._runner = AgentRunner(provider)
         self._provider = provider
@@ -155,11 +156,14 @@ class AgentSession:
         # A turn holds one immutable catalog snapshot, so a concurrent file
         # change can only affect the next turn.
         self._skill_runtime = skill_runtime
+        # Secret-free immutable selection used by persistence/frontends.
+        self.execution_profile = execution_profile
 
         self._events: asyncio.Queue[Event] = asyncio.Queue()
         self._history: list[dict[str, Any]] = []
         self._seq = 0
         self._busy = False
+        self._last_usage: dict[str, int] = {}
         self._current_task: asyncio.Task | None = None
         self._active_turn_task: asyncio.Task | None = None
         self._submission_id: ContextVar[str | None] = ContextVar(
@@ -220,6 +224,12 @@ class AgentSession:
     @property
     def history(self) -> list[dict[str, Any]]:
         return list(self._history)
+
+    @property
+    def last_usage(self) -> dict[str, int]:
+        """Token usage for the most recently completed kernel run."""
+
+        return dict(self._last_usage)
 
     def load_history(self, messages: list[dict[str, Any]]) -> None:
         """Replace the conversation history (session resume).
@@ -324,6 +334,7 @@ class AgentSession:
             self._emit(TaskComplete(final_text=None, stop_reason="busy"))
             return
         self._busy = True
+        self._last_usage = {}
         self._active_turn_task = asyncio.current_task()
         skill_context: SkillTurnContext | None = None
         skill_token = None
@@ -485,6 +496,7 @@ class AgentSession:
 
         # Persist the turn's messages (minus the system prompt) as history.
         self._history = [m for m in result.messages if m.get("role") != "system"]
+        self._last_usage = dict(result.usage)
 
         if result.final_content:
             self._emit(AgentMessage(text=result.final_content))

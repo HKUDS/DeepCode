@@ -1,18 +1,16 @@
-"""Loop engineering (P3) — autonomous, test-driven multi-round execution.
+"""Legacy loop data and verification helpers.
 
-The leap from "prompt the agent once" to "design a loop the agent runs to
-completion on its own". The centrepiece is :class:`~core.loop.task.LoopTask`
-(a Ralph loop): one thing per round, durable file-based state, real test
-backpressure, shadow-git checkpoints, and a declarative stop policy — built by
-assembling the P0–P2 foundations (AgentSession, Snapshotter, the native tools)
-rather than re-implementing them.
+Production long-running work is now coordinated by Session Goals in
+``core.application``. ``deepcode loop`` is a compatibility entry point over
+that same GoalCoordinator. The types in this package remain importable for old
+integrations and for projecting canonical Goal state to ``state.json``; they
+are not a second product orchestration path.
 
 Public surface:
 
 - :class:`~core.loop.state.LoopState` / :class:`~core.loop.state.RoundRecord`
 - :func:`~core.loop.backpressure.run_tests` / :class:`~core.loop.backpressure.TestResult`
 - :func:`~core.loop.policy.decide` / :class:`~core.loop.policy.Decision`
-- :class:`~core.loop.task.LoopTask` / :class:`~core.loop.task.LoopResult`
 """
 
 from core.loop.backpressure import TestResult, run_tests

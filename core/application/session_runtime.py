@@ -13,6 +13,7 @@ from core.application.agent_adapter import (
     ApprovalCallback,
 )
 from core.application.errors import ConflictError, ThreadNotFoundError
+from core.domain.execution_profile import ExecutionProfile
 from core.sessions import Session, SessionStore
 
 
@@ -42,6 +43,7 @@ class LiveSessionRuntime:
     session_id: str
     workspace: str
     model: str | None
+    execution_profile: ExecutionProfile | None
     agent: AgentSessionPort
     approvals: ApprovalRouter
     canonical_message_count: int
@@ -72,13 +74,18 @@ class SessionRuntimeRegistry:
         *,
         workspace: str,
         model: str | None,
+        execution_profile: ExecutionProfile | None = None,
         approval_callback: ApprovalCallback,
     ) -> AgentSessionPort:
         canonical = self.store.get_session(session_id)
         if canonical is None:
             raise ThreadNotFoundError(f"session not found: {session_id}")
 
-        runtime_key = self._runtime_key(workspace=workspace, model=model)
+        runtime_key = self._runtime_key(
+            workspace=workspace,
+            model=model,
+            execution_profile=execution_profile,
+        )
         runtime = self._runtimes.pop(session_id, None)
         if runtime is not None and runtime.active:
             self._runtimes[session_id] = runtime
@@ -91,6 +98,7 @@ class SessionRuntimeRegistry:
                 canonical,
                 workspace=workspace,
                 model=model,
+                execution_profile=execution_profile,
                 runtime_key=runtime_key,
             )
         elif runtime.canonical_message_count != len(canonical.messages):
@@ -140,30 +148,59 @@ class SessionRuntimeRegistry:
         *,
         workspace: str,
         model: str | None,
+        execution_profile: ExecutionProfile | None,
         runtime_key: object,
     ) -> LiveSessionRuntime:
         approvals = ApprovalRouter()
-        agent = self.factory.create(
-            workspace=workspace,
-            model=model,
-            approval_callback=approvals,
-        )
+        create = self.factory.create
+        create_kwargs = {
+            "workspace": workspace,
+            "model": model,
+            "approval_callback": approvals,
+        }
+        if _accepts_keyword(create, "execution_profile"):
+            create_kwargs["execution_profile"] = execution_profile
+        agent = create(**create_kwargs)
         agent.load_history(self._visible_history(canonical))
         return LiveSessionRuntime(
             session_id=canonical.session_id,
             workspace=workspace,
             model=model,
+            execution_profile=execution_profile,
             agent=agent,
             approvals=approvals,
             canonical_message_count=len(canonical.messages),
             runtime_key=runtime_key,
         )
 
-    def _runtime_key(self, *, workspace: str, model: str | None) -> object:
+    def _runtime_key(
+        self,
+        *,
+        workspace: str,
+        model: str | None,
+        execution_profile: ExecutionProfile | None,
+    ) -> object:
         resolver = getattr(self.factory, "runtime_key", None)
         if callable(resolver):
-            return resolver(workspace=workspace, model=model)
-        return (workspace, model)
+            kwargs = {"workspace": workspace, "model": model}
+            if _accepts_keyword(resolver, "execution_profile"):
+                kwargs["execution_profile"] = execution_profile
+            return resolver(**kwargs)
+        return (
+            workspace,
+            model,
+            (
+                execution_profile.connection_id,
+                execution_profile.config_revision,
+                execution_profile.context_window,
+                execution_profile.max_output_tokens,
+                execution_profile.max_tokens,
+                execution_profile.temperature,
+                execution_profile.reasoning_effort,
+            )
+            if execution_profile
+            else None,
+        )
 
     async def _evict_idle(self) -> None:
         while len(self._runtimes) > self.max_live_sessions:
@@ -187,6 +224,14 @@ class SessionRuntimeRegistry:
             for message in session.messages
             if message.role in {"user", "assistant"} and message.content
         ]
+
+
+def _accepts_keyword(callable_object, name: str) -> bool:
+    parameters = inspect.signature(callable_object).parameters.values()
+    return any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD or parameter.name == name
+        for parameter in parameters
+    )
 
 
 __all__ = [

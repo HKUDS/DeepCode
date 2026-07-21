@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
-import re
 
 from core.domain.common import (
     new_id,
@@ -13,9 +12,8 @@ from core.domain.common import (
     require_non_empty,
     require_prefixed_id,
 )
-
-_MAX_SKILLS_PER_TURN = 8
-_SKILL_ID_RE = re.compile(r"^sk_[0-9a-f]{24}$")
+from core.domain.execution_profile import ExecutionProfile
+from core.skills.models import MAX_SELECTED_SKILLS, SkillSelection
 
 
 class TurnStatus(StrEnum):
@@ -41,6 +39,10 @@ class Turn:
     ordinal: int
     prompt: str
     skill_ids: tuple[str, ...] = ()
+    execution_profile: ExecutionProfile | None = None
+    goal_id: str | None = None
+    goal_definition_revision: int | None = None
+    goal_attempt_id: str | None = None
     status: TurnStatus = TurnStatus.QUEUED
     stop_reason: str | None = None
     error_code: str | None = None
@@ -55,15 +57,27 @@ class Turn:
         require_non_empty(self.prompt, "prompt")
         if self.ordinal < 1:
             raise ValueError("ordinal must be positive")
-        if len(self.skill_ids) > _MAX_SKILLS_PER_TURN:
-            raise ValueError(f"a turn may select at most {_MAX_SKILLS_PER_TURN} skills")
+        if len(self.skill_ids) > MAX_SELECTED_SKILLS:
+            raise ValueError(f"a turn may select at most {MAX_SELECTED_SKILLS} skills")
         if len(set(self.skill_ids)) != len(self.skill_ids):
             raise ValueError("skill_ids must be unique")
-        if any(
-            not isinstance(skill_id, str) or not _SKILL_ID_RE.fullmatch(skill_id)
-            for skill_id in self.skill_ids
-        ):
-            raise ValueError("skill_ids must contain opaque sk_ identifiers")
+        try:
+            for skill_id in self.skill_ids:
+                SkillSelection(skill_id=skill_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("skill_ids must contain opaque sk_ identifiers") from exc
+        goal_fields = (
+            self.goal_id,
+            self.goal_definition_revision,
+            self.goal_attempt_id,
+        )
+        if any(value is not None for value in goal_fields):
+            if any(value is None for value in goal_fields):
+                raise ValueError("Goal Turn fields must be provided together")
+            require_prefixed_id(str(self.goal_id), "goal")
+            require_prefixed_id(str(self.goal_attempt_id), "gatt")
+            if int(self.goal_definition_revision or 0) < 1:
+                raise ValueError("goal_definition_revision must be positive")
         if self.started_at is not None:
             require_aware(self.started_at, "started_at")
         if self.completed_at is not None:

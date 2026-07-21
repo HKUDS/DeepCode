@@ -25,6 +25,7 @@ Public surface:
 """
 
 from core.sessions.index import SessionIndex
+from core.sessions.goal_store import GoalStore
 from core.sessions.models import (
     Session,
     SessionMessage,
@@ -35,6 +36,7 @@ from core.sessions.store import SessionStore, get_default_store
 
 __all__ = [
     "Session",
+    "GoalStore",
     "SessionIndex",
     "SessionMessage",
     "SessionStore",

@@ -11,6 +11,17 @@ from core.domain.automation import (
     AutomationTrigger,
 )
 from core.domain.event import DomainEvent
+from core.domain.execution_profile import ExecutionProfile, ExecutionSelection
+from core.domain.goal import (
+    Goal,
+    GoalAttempt,
+    GoalAttemptStatus,
+    GoalBudget,
+    GoalEvaluation,
+    GoalRecord,
+    GoalStatus,
+    GoalVerdict,
+)
 from core.domain.item import Item, ItemKind, ItemStatus
 from core.domain.project import Project, TrustState
 from core.domain.thread import Thread, ThreadMode, ThreadStatus
@@ -29,6 +40,16 @@ __all__ = [
     "AutomationStatus",
     "AutomationTrigger",
     "DomainEvent",
+    "ExecutionProfile",
+    "ExecutionSelection",
+    "Goal",
+    "GoalAttempt",
+    "GoalAttemptStatus",
+    "GoalBudget",
+    "GoalEvaluation",
+    "GoalRecord",
+    "GoalStatus",
+    "GoalVerdict",
     "Item",
     "ItemKind",
     "ItemStatus",

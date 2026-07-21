@@ -15,6 +15,7 @@ from core.domain import (
     AutomationRunStatus,
     AutomationScheduleKind,
     AutomationTrigger,
+    ExecutionProfile,
     Item,
     ItemKind,
     ItemStatus,
@@ -126,9 +127,27 @@ def test_repositories_round_trip_every_p1_entity(tmp_path: Path) -> None:
         project_id=project.id,
         title="P1",
         mode=ThreadMode.CODE,
+        model="moonshotai/kimi-k2.6",
+        connection_id="router-test",
         workspace_path=str(tmp_path),
     )
-    turn = Turn(thread_id=thread.id, ordinal=1, prompt="Build P1")
+    turn = Turn(
+        thread_id=thread.id,
+        ordinal=1,
+        prompt="Build P1",
+        execution_profile=ExecutionProfile(
+            connection_id="router-test",
+            provider_name="openrouter",
+            adapter="openai_compat",
+            model_id="moonshotai/kimi-k2.6",
+            context_window=256_000,
+            max_output_tokens=128_000,
+            max_tokens=8192,
+            temperature=0.1,
+            reasoning_effort=None,
+            config_revision="0123456789abcdef",
+        ),
+    )
     item = Item(
         thread_id=thread.id,
         turn_id=turn.id,

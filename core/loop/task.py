@@ -1,4 +1,9 @@
-"""LoopTask — the autonomous, test-driven Ralph loop (P3 centrepiece).
+"""Deprecated standalone Ralph-loop runner retained for API compatibility.
+
+New product surfaces use ``GoalCoordinator`` so CLI and Desktop share Session,
+Turn, Skill, model, recovery, and verification behavior. This module remains
+for embedders of the pre-Goal Python API and is no longer called by DeepCode
+CLI commands.
 
 Given a goal and a test command, run rounds until the tests are green (or a
 circuit breaker fires). Each round:
@@ -53,12 +58,19 @@ class LoopResult:
         return self.state.status == STATUS_SUCCEEDED
 
 
-def _make_default_round_runner(model: str | None, max_iterations: int) -> RoundRunner:
+def _make_default_round_runner(
+    model: str | None,
+    connection_id: str | None,
+    max_iterations: int,
+) -> RoundRunner:
     """A round runner that runs one turn of a fresh AgentSession per round."""
 
     async def _run(workspace: str, prompt: str) -> tuple[str, str]:
         session, _model, _engine = build_agent_session(
-            workspace=workspace, model=model, max_iterations=max_iterations
+            workspace=workspace,
+            model=model,
+            connection_id=connection_id,
+            max_iterations=max_iterations,
         )
         final_text = ""
         stop_reason = "completed"
@@ -81,6 +93,7 @@ class LoopTask:
         workspace: str,
         test_command: str = "",
         model: str | None = None,
+        connection_id: str | None = None,
         max_rounds: int = 8,
         max_iterations: int = 40,
         round_runner: RoundRunner | None = None,
@@ -92,7 +105,7 @@ class LoopTask:
         self.test_command = test_command
         self.max_rounds = max(1, max_rounds)
         self._round_runner = round_runner or _make_default_round_runner(
-            model, max_iterations
+            model, connection_id, max_iterations
         )
         self._test_runner = test_runner
         self._on_event = on_event

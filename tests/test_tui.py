@@ -9,6 +9,7 @@ DEEPCODE_SESSIONS_DIR.
 from __future__ import annotations
 
 import io
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -88,7 +89,16 @@ def test_slash_help_lists_registry(monkeypatch, tmp_path, capsys):
     rc, _ = _run_tui(monkeypatch, tmp_path, "/help\n/exit\n", ["unused"])
     assert rc == 0
     out = capsys.readouterr().out
-    for name in ("/new", "/resume", "/model", "/skills", "/skill", "/clear", "/exit"):
+    for name in (
+        "/new",
+        "/resume",
+        "/model",
+        "/skills",
+        "/skill",
+        "/goal",
+        "/clear",
+        "/exit",
+    ):
         assert name in out
 
 
@@ -137,6 +147,90 @@ def test_skill_command_is_one_turn_only_and_persists_invocation_metadata(
     invocation = stored.messages[0].metadata["skillInvocations"][0]
     assert invocation["name"] == "review"
     assert invocation["invocation"] == "explicit"
+
+
+def test_goal_command_uses_shared_goal_ledger_and_selected_skill(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    from core.application.goal_evaluator import SemanticDecision
+    from core.domain import GoalStatus, GoalVerdict
+    from core.sessions import GoalStore, SessionStore
+
+    workspace = tmp_path / "ws"
+    skill = workspace / ".deepcode" / "skills" / "review"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\n"
+        "name: review\n"
+        "description: Review the result\n"
+        "---\n"
+        "Inspect concrete evidence before declaring completion.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DEEPCODE_HOME", str(tmp_path / "home"))
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "deepcode_config.json").write_text(
+        json.dumps(
+            {
+                "agents": {
+                    "defaults": {
+                        "connection": "legacy",
+                        "model": "fake-model",
+                    }
+                },
+                "providers": {
+                    "profiles": {
+                        "legacy": {
+                            "template": "openai",
+                            "manualModels": ["fake-model"],
+                        }
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    async def complete(_self, _context):
+        return SemanticDecision(
+            verdict=GoalVerdict.COMPLETE,
+            reason="The requested work is complete.",
+            evidence_refs=(),
+            provider_name="test",
+            model_id="fake-model",
+            tokens_used=3,
+        )
+
+    monkeypatch.setattr(
+        "core.application.goal_evaluator.ProviderSemanticEvaluator.evaluate",
+        complete,
+    )
+    rc, provider = _run_tui(
+        monkeypatch,
+        tmp_path,
+        "/skill review\n/goal inspect and finish the work\n/exit\n",
+        ["goal work complete"],
+    )
+
+    assert rc == 0
+    assert provider.calls == 1
+    output = capsys.readouterr().out
+    assert "Skill review (explicit)" in output
+    assert "Goal completed" in output
+
+    store = SessionStore(tmp_path / "sessions")
+    summary = store.list_sessions()[0]
+    record = GoalStore(store).read(summary.session_id)
+    assert record is not None
+    assert record.goal.status is GoalStatus.COMPLETED
+    assert record.goal.skill_ids
+    stored = store.get_session(summary.session_id)
+    assert stored is not None
+    invocations = stored.messages[0].metadata["skillInvocations"]
+    assert invocations[0]["name"] == "review"
 
 
 def test_new_resets_history_and_model_switch_keeps_it(monkeypatch, tmp_path, capsys):

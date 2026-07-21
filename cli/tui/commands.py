@@ -77,9 +77,23 @@ async def _cmd_resume(app, args: str) -> str | None:
 async def _cmd_model(app, args: str) -> str | None:
     wanted = args.strip()
     if not wanted:
-        return f"model: {app.model}"
-    app.switch_model(wanted)
-    return f"model switched to {app.model} (history preserved)"
+        profile = app.agent.execution_profile
+        return f"connection: {profile.connection_id} · model: {app.model}"
+    connection, separator, model = wanted.partition(" ")
+    if not separator:
+        model = connection
+        connection = ""
+    try:
+        await app.switch_model(
+            model.strip(),
+            connection_id=connection.strip() or None,
+        )
+    except (OSError, ValueError) as exc:
+        return f"model switch failed: {exc}"
+    return (
+        f"model switched to {app.model} on connection "
+        f"{app.agent.execution_profile.connection_id} (history preserved)"
+    )
 
 
 async def _cmd_clear(app, args: str) -> str | None:
@@ -104,6 +118,10 @@ async def _cmd_skill(app, args: str) -> str | None:
     return app.select_skill(args.strip())
 
 
+async def _cmd_goal(app, args: str) -> str | None:
+    return await app.run_goal_command(args)
+
+
 async def _cmd_exit(app, args: str) -> str | None:
     app.request_exit()
     return None
@@ -120,13 +138,24 @@ REGISTRY: dict[str, Command] = {
             "list this directory's sessions / resume one",
             _cmd_resume,
         ),
-        Command("model", "/model [id]", "show or switch the model", _cmd_model),
+        Command(
+            "model",
+            "/model [connection] [id]",
+            "show or switch connection/model",
+            _cmd_model,
+        ),
         Command("skills", "/skills", "list discovered Skills", _cmd_skills),
         Command(
             "skill",
             "/skill <id|name>",
             "select a Skill for the next turn",
             _cmd_skill,
+        ),
+        Command(
+            "goal",
+            "/goal <objective>",
+            "run or manage this Session's durable Goal",
+            _cmd_goal,
         ),
         Command("clear", "/clear", "clear the conversation context", _cmd_clear),
         Command("exit", "/exit", "quit (ctrl-d also works)", _cmd_exit),

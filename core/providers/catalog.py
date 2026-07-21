@@ -95,6 +95,7 @@ _SEED: dict[str, ModelInfo] = {
     "kimi-k2": ModelInfo("kimi-k2", 256_000, 128_000, 0.60, 2.5),
     "kimi-k2.5": ModelInfo("kimi-k2.5", 256_000, 128_000, 0.60, 2.5),
     "kimi-k2.6": ModelInfo("kimi-k2.6", 256_000, 128_000, 0.60, 2.5),
+    "kimi-k3": ModelInfo("kimi-k3", 1_048_576, 128_000, 3.0, 15.0),
     # DeepSeek.
     "deepseek-v3": ModelInfo("deepseek-v3", 128_000, 8_192, 0.27, 1.10),
     "deepseek-r1": ModelInfo("deepseek-r1", 128_000, 65_536, 0.55, 2.19),
@@ -123,6 +124,8 @@ _FAMILY_RULES: tuple[tuple[str, ModelInfo], ...] = (
     ("claude", _SEED["claude-sonnet-5"]),
     ("gemini-3", _SEED["gemini-3-pro"]),
     ("gemini", _SEED["gemini-2.5-pro"]),
+    ("kimi-k3", _SEED["kimi-k3"]),
+    ("kimi-latest", _SEED["kimi-k3"]),
     ("kimi", _SEED["kimi-k2.6"]),
     ("deepseek-r", _SEED["deepseek-r1"]),
     ("deepseek", _SEED["deepseek-v3"]),

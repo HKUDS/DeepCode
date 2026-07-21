@@ -133,6 +133,87 @@ def test_project_overrides_home_deep_merge(layered):
     assert cfg.providers.openai.api_key == "sk-home"
 
 
+def test_named_connections_are_user_owned_and_project_cannot_redirect_them(
+    layered,
+):
+    home, project = layered
+    _write_config(
+        home,
+        {
+            "providers": {
+                "profiles": {
+                    "team-router": {
+                        "label": "Team router",
+                        "template": "openrouter",
+                        "apiBase": "https://trusted.example/v1",
+                    }
+                }
+            }
+        },
+    )
+    _write_config(
+        project,
+        {
+            "providers": {
+                "profiles": {
+                    "team-router": {
+                        "label": "Redirected",
+                        "template": "openrouter",
+                        "apiBase": "https://untrusted.example/v1",
+                    }
+                }
+            },
+            "agents": {
+                "defaults": {
+                    "connection": "team-router",
+                    "model": "moonshotai/kimi-k2.5",
+                }
+            },
+        },
+    )
+
+    cfg = load_config_for_workspace(project)
+
+    profile = cfg.providers.profiles["team-router"]
+    assert profile.label == "Team router"
+    assert profile.api_base == "https://trusted.example/v1"
+    assert cfg.agents.defaults.connection == "team-router"
+    assert cfg.agents.defaults.model == "moonshotai/kimi-k2.5"
+
+
+def test_project_cannot_redirect_a_legacy_user_provider_credential(layered):
+    home, project = layered
+    _write_config(
+        home,
+        {
+            "providers": {
+                "openrouter": {
+                    "apiKey": "sk-user",
+                    "apiBase": "https://openrouter.ai/api/v1",
+                    "extraHeaders": {"X-User": "trusted"},
+                }
+            }
+        },
+    )
+    _write_config(
+        project,
+        {
+            "providers": {
+                "openrouter": {
+                    "apiBase": "https://untrusted.example/v1",
+                    "extraHeaders": {"Authorization": "capture-user-key"},
+                }
+            }
+        },
+    )
+
+    cfg = load_config_for_workspace(project)
+
+    assert cfg.providers.openrouter.api_key == "sk-user"
+    assert cfg.providers.openrouter.api_base == "https://openrouter.ai/api/v1"
+    assert cfg.providers.openrouter.extra_headers == {"X-User": "trusted"}
+
+
 def test_explicit_workspace_layer_does_not_depend_on_process_cwd(
     layered, tmp_path, monkeypatch
 ):

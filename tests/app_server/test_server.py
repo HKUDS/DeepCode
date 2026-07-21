@@ -135,6 +135,70 @@ def test_thread_list_and_resume_use_the_shared_session_store(tmp_path: Path) -> 
     assert source_path.read_bytes() == source_before
 
 
+def test_thread_goal_protocol_uses_the_canonical_session_ledger(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    sessions = SessionStore(tmp_path / "sessions")
+    application = DeepCodeApplication.open(
+        tmp_path / "state.sqlite3",
+        session_store=sessions,
+    )
+    project = application.projects.add(
+        str(workspace),
+        trust_state=TrustState.TRUSTED,
+    )
+    thread = application.threads.start(project.id, title="Goal protocol")
+    source = io.BytesIO(
+        _request(
+            1,
+            "initialize",
+            {
+                "protocolVersion": "1.0",
+                "clientInfo": {"name": "goal-test", "version": "1.0"},
+            },
+        )
+        + _request(
+            2,
+            "thread/goal/set",
+            {
+                "threadId": thread.id,
+                "objective": "Implement the feature",
+                "acceptanceCriteria": ["Tests pass"],
+                "budget": {"maxAttempts": 3},
+                "start": False,
+            },
+        )
+        + _request(3, "thread/goal/get", {"threadId": thread.id})
+        + _request(
+            4,
+            "thread/goal/pause",
+            {"threadId": thread.id, "expectedRevision": 1},
+        )
+        + _request(
+            5,
+            "thread/goal/clear",
+            {"threadId": thread.id, "expectedRevision": 2},
+        )
+        + _request(6, "shutdown", {})
+    )
+    sink = io.BytesIO()
+
+    assert AppServer(application).serve(source, sink) == 0
+    responses = {
+        message["id"]: message["result"]
+        for message in _messages(sink)
+        if "id" in message and "result" in message
+    }
+    assert responses[2]["goal"]["objective"] == "Implement the feature"
+    assert responses[2]["goal"]["budget"]["maxAttempts"] == 3
+    assert responses[3]["goal"]["revision"] == 1
+    assert responses[4]["goal"]["status"] == "paused"
+    assert responses[5] == {"goal": None}
+    assert (sessions.root / thread.id / "goal.jsonl").exists()
+
+
 def test_settings_and_thread_model_are_real_shared_configuration(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -185,6 +249,98 @@ def test_settings_and_thread_model_are_real_shared_configuration(
     canonical = application.session_store.get_session(thread.id)
     assert canonical is not None
     assert canonical.metadata["model"] == "gpt-5-mini"
+
+
+def test_connection_and_model_protocol_is_shared_secret_safe_state(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "deepcode-home"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    project = application.projects.add(str(workspace))
+    thread = application.threads.start(project.id, title="Connection selection")
+    secret = "rpc-secret-that-must-not-be-returned"
+    source = io.BytesIO(
+        _request(
+            1,
+            "initialize",
+            {
+                "protocolVersion": "1.0",
+                "clientInfo": {"name": "connection-test", "version": "1.0"},
+            },
+        )
+        + _request(
+            2,
+            "provider/upsert",
+            {
+                "connection": {
+                    "id": "router-rpc",
+                    "label": "Router RPC",
+                    "template": "openrouter",
+                    "apiKey": secret,
+                    "modelCatalog": "manual",
+                    "manualModels": ["moonshotai/kimi-k2.6"],
+                }
+            },
+        )
+        + _request(3, "provider/list", {})
+        + _request(
+            4,
+            "model/list",
+            {"connectionId": "router-rpc", "refresh": True},
+        )
+        + _request(
+            5,
+            "thread/model",
+            {
+                "threadId": thread.id,
+                "connectionId": "router-rpc",
+                "model": "moonshotai/kimi-k2.6",
+            },
+        )
+        + _request(6, "provider/remove", {"connectionId": "router-rpc"})
+        + _request(7, "shutdown", {})
+    )
+    sink = io.BytesIO()
+
+    assert AppServer(application).serve(source, sink) == 0
+    assert secret.encode() not in sink.getvalue()
+    responses = {
+        message["id"]: message["result"]
+        for message in _messages(sink)
+        if "id" in message and "result" in message
+    }
+    upserted = next(
+        connection
+        for connection in responses[2]["connections"]
+        if connection["id"] == "router-rpc"
+    )
+    assert upserted["configured"] is True
+    assert upserted["credentialSource"] == "credential_store"
+    assert (
+        next(
+            connection
+            for connection in responses[3]["connections"]
+            if connection["id"] == "router-rpc"
+        )
+        == upserted
+    )
+    assert [model["id"] for model in responses[4]["models"]] == ["moonshotai/kimi-k2.6"]
+    assert responses[4]["source"] == "manual"
+    assert responses[5]["thread"]["connectionId"] == "router-rpc"
+    assert responses[5]["thread"]["model"] == "moonshotai/kimi-k2.6"
+    assert responses[6]["removed"] is True
+
+    persisted = json.loads((home / "deepcode_config.json").read_text())
+    assert secret not in json.dumps(persisted)
+    assert "router-rpc" not in persisted.get("providers", {}).get("profiles", {})
+    canonical = application.session_store.get_session(thread.id)
+    assert canonical is not None
+    assert canonical.metadata["connection_id"] == "router-rpc"
+    assert canonical.metadata["model"] == "moonshotai/kimi-k2.6"
 
 
 def test_management_methods_round_trip_real_project_state(

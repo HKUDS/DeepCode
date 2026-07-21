@@ -39,6 +39,7 @@ class Thread:
     workspace_path: str
     status: ThreadStatus = ThreadStatus.IDLE
     model: str | None = None
+    connection_id: str | None = None
     parent_thread_id: str | None = None
     worktree_path: str | None = None
     id: str = field(default_factory=lambda: new_id("thr"))
@@ -55,6 +56,8 @@ class Thread:
             require_non_empty(self.parent_thread_id, "parent_thread_id")
         require_non_empty(self.title, "title")
         require_non_empty(self.workspace_path, "workspace_path")
+        if self.connection_id is not None:
+            require_non_empty(self.connection_id, "connection_id")
         require_aware(self.created_at, "created_at")
         require_aware(self.updated_at, "updated_at")
         if self.archived_at is not None:

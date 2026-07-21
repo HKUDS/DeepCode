@@ -94,6 +94,37 @@
         "interrupted"
       ]
     },
+    "GoalStatus": {
+      "type": "string",
+      "enum": [
+        "active",
+        "paused",
+        "blocked",
+        "usage_limited",
+        "budget_limited",
+        "completed"
+      ]
+    },
+    "GoalAttemptStatus": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "running",
+        "evaluating",
+        "completed",
+        "failed",
+        "interrupted"
+      ]
+    },
+    "GoalVerdict": {
+      "type": "string",
+      "enum": [
+        "complete",
+        "continue",
+        "blocked",
+        "error"
+      ]
+    },
     "WorkflowStatus": {
       "type": "string",
       "enum": [
@@ -248,6 +279,69 @@
         "lastOpenedAt"
       ]
     },
+    "ExecutionProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "connectionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "providerName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "adapter": {
+          "type": "string",
+          "enum": [
+            "openai_compat",
+            "anthropic"
+          ]
+        },
+        "modelId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "contextWindow": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxOutputTokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxTokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "temperature": {
+          "type": "number",
+          "minimum": 0
+        },
+        "reasoningEffort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "configRevision": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "connectionId",
+        "providerName",
+        "adapter",
+        "modelId",
+        "contextWindow",
+        "maxOutputTokens",
+        "maxTokens",
+        "temperature",
+        "reasoningEffort",
+        "configRevision"
+      ]
+    },
     "Thread": {
       "type": "object",
       "additionalProperties": false,
@@ -277,6 +371,12 @@
           "$ref": "#/$defs/ThreadStatus"
         },
         "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "connectionId": {
           "type": [
             "string",
             "null"
@@ -350,6 +450,35 @@
             "type": "string",
             "pattern": "^sk_[0-9a-f]{24}$"
           }
+        },
+        "executionProfile": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ExecutionProfile"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "goalId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "goalDefinitionRevision": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "goalAttemptId": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "status": {
           "$ref": "#/$defs/TurnStatus"
@@ -950,6 +1079,406 @@
       },
       "required": [
         "patch"
+      ]
+    },
+    "ConnectionInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "providerName": {
+          "type": "string"
+        },
+        "adapter": {
+          "type": "string",
+          "enum": [
+            "openai_compat",
+            "anthropic"
+          ]
+        },
+        "apiBase": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "apiKeyEnv": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "modelCatalog": {
+          "type": "string",
+          "enum": [
+            "openrouter",
+            "openai",
+            "anthropic",
+            "manual"
+          ]
+        },
+        "manualModels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "configured": {
+          "type": "boolean"
+        },
+        "credentialSource": {
+          "type": "string",
+          "enum": [
+            "environment",
+            "credential_store",
+            "legacy_config",
+            "not_required",
+            "missing"
+          ]
+        },
+        "local": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "explicit": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "providerName",
+        "adapter",
+        "apiBase",
+        "apiKeyEnv",
+        "modelCatalog",
+        "manualModels",
+        "configured",
+        "credentialSource",
+        "local",
+        "enabled",
+        "explicit"
+      ]
+    },
+    "ConnectionTemplate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "adapter": {
+          "type": "string"
+        },
+        "defaultApiBase": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "local": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "label",
+        "adapter",
+        "defaultApiBase",
+        "local"
+      ]
+    },
+    "ConnectionCatalogResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "connections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ConnectionInfo"
+          }
+        },
+        "templates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ConnectionTemplate"
+          }
+        },
+        "configPath": {
+          "type": "string"
+        },
+        "credentialPath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "connections",
+        "templates",
+        "configPath",
+        "credentialPath"
+      ]
+    },
+    "ConnectionRemoveResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "removed": {
+          "type": "boolean"
+        },
+        "connections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ConnectionInfo"
+          }
+        },
+        "templates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ConnectionTemplate"
+          }
+        },
+        "configPath": {
+          "type": "string"
+        },
+        "credentialPath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "removed",
+        "connections",
+        "templates",
+        "configPath",
+        "credentialPath"
+      ]
+    },
+    "ProviderUpsertParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "connection": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+            },
+            "label": {
+              "type": "string"
+            },
+            "template": {
+              "type": "string"
+            },
+            "adapter": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "openai_compat",
+                "anthropic",
+                null
+              ]
+            },
+            "apiBase": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "apiKeyEnv": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "apiKey": {
+              "type": "string"
+            },
+            "clearApiKey": {
+              "type": "boolean"
+            },
+            "extraHeaders": {
+              "$ref": "#/$defs/JsonObject"
+            },
+            "modelCatalog": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "openrouter",
+                "openai",
+                "anthropic",
+                "manual"
+              ]
+            },
+            "manualModels": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        }
+      },
+      "required": [
+        "connection"
+      ]
+    },
+    "ConnectionIdentityParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "connectionId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "connectionId"
+      ]
+    },
+    "ModelListParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "connectionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "projectId": {
+          "type": "string",
+          "pattern": "^proj_"
+        },
+        "refresh": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "connectionId"
+      ]
+    },
+    "CatalogModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "contextWindow": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxOutputTokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "supportedParameters": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "contextWindow",
+        "maxOutputTokens",
+        "supportedParameters"
+      ]
+    },
+    "ModelCatalogResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "connectionId": {
+          "type": "string"
+        },
+        "models": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CatalogModel"
+          }
+        },
+        "source": {
+          "type": "string"
+        },
+        "stale": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "refreshedAt": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "connectionId",
+        "models",
+        "source",
+        "stale",
+        "error",
+        "refreshedAt"
+      ]
+    },
+    "ProviderTestResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "connectionId": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "latencyMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "modelCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "connectionId",
+        "ok",
+        "latencyMs",
+        "modelCount",
+        "error"
       ]
     },
     "OptionalProjectParams": {
@@ -2024,6 +2553,10 @@
         "mode": {
           "$ref": "#/$defs/ThreadMode"
         },
+        "connectionId": {
+          "type": "string",
+          "minLength": 1
+        },
         "model": {
           "type": "string"
         },
@@ -2115,6 +2648,13 @@
             "null"
           ],
           "minLength": 1
+        },
+        "connectionId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
         }
       },
       "required": [
@@ -2140,6 +2680,453 @@
         "threadId"
       ]
     },
+    "GoalBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxAttempts": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "maxTokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "maxElapsedSeconds": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        }
+      },
+      "required": [
+        "maxAttempts",
+        "maxTokens",
+        "maxElapsedSeconds"
+      ]
+    },
+    "GoalAttempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^gatt_"
+        },
+        "goalRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "ordinal": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "turnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/GoalAttemptStatus"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "completedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "goalRevision",
+        "ordinal",
+        "turnId",
+        "status",
+        "createdAt",
+        "updatedAt",
+        "completedAt"
+      ]
+    },
+    "GoalEvaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^geval_"
+        },
+        "goalRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "attemptId": {
+          "type": "string",
+          "pattern": "^gatt_"
+        },
+        "turnId": {
+          "type": "string",
+          "pattern": "^turn_"
+        },
+        "verdict": {
+          "$ref": "#/$defs/GoalVerdict"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidenceRefs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "evaluatorProvider": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evaluatorModel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tokensUsed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "goalRevision",
+        "attemptId",
+        "turnId",
+        "verdict",
+        "reason",
+        "evidenceRefs",
+        "evaluatorProvider",
+        "evaluatorModel",
+        "tokensUsed",
+        "createdAt"
+      ]
+    },
+    "Goal": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^goal_"
+        },
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "objective": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "acceptanceCriteria": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        "status": {
+          "$ref": "#/$defs/GoalStatus"
+        },
+        "phase": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "definitionRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "attemptCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tokensUsed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "elapsedSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "budget": {
+          "$ref": "#/$defs/GoalBudget"
+        },
+        "skillIds": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^sk_[0-9a-f]{24}$"
+          }
+        },
+        "verificationCommandId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "verificationTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1800
+        },
+        "evaluatorConnectionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evaluatorModelId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lastVerdict": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/GoalVerdict"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "completedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "attempts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/GoalAttempt"
+          }
+        },
+        "evaluations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/GoalEvaluation"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "threadId",
+        "objective",
+        "acceptanceCriteria",
+        "status",
+        "phase",
+        "revision",
+        "definitionRevision",
+        "attemptCount",
+        "tokensUsed",
+        "elapsedSeconds",
+        "budget",
+        "skillIds",
+        "verificationCommandId",
+        "verificationTimeoutSeconds",
+        "evaluatorConnectionId",
+        "evaluatorModelId",
+        "lastVerdict",
+        "lastReason",
+        "createdAt",
+        "updatedAt",
+        "completedAt",
+        "attempts",
+        "evaluations"
+      ]
+    },
+    "GoalSetParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "objective": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "acceptanceCriteria": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        "budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "maxAttempts": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
+            },
+            "maxTokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
+            },
+            "maxElapsedSeconds": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
+            }
+          }
+        },
+        "skills": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^sk_[0-9a-f]{24}$"
+          }
+        },
+        "verificationCommandId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "verificationTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1800
+        },
+        "evaluatorConnectionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evaluatorModelId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "start": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "threadId"
+      ]
+    },
+    "GoalRevisionParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "threadId",
+        "expectedRevision"
+      ]
+    },
+    "GoalResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "goal": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Goal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "goal"
+      ]
+    },
     "TurnStartParams": {
       "type": "object",
       "additionalProperties": false,
@@ -2161,6 +3148,14 @@
             "type": "string",
             "pattern": "^sk_[0-9a-f]{24}$"
           }
+        },
+        "connectionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "required": [
@@ -2175,6 +3170,22 @@
         "turnId": {
           "type": "string",
           "pattern": "^turn_"
+        }
+      },
+      "required": [
+        "turnId"
+      ]
+    },
+    "TurnRetryParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "turnId": {
+          "type": "string",
+          "pattern": "^turn_"
+        },
+        "useCurrentSelection": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -3073,6 +4084,21 @@
         "settings/update": {
           "$ref": "#/$defs/SettingsUpdateParams"
         },
+        "provider/list": {
+          "$ref": "#/$defs/OptionalProjectParams"
+        },
+        "provider/upsert": {
+          "$ref": "#/$defs/ProviderUpsertParams"
+        },
+        "provider/remove": {
+          "$ref": "#/$defs/ConnectionIdentityParams"
+        },
+        "provider/test": {
+          "$ref": "#/$defs/ConnectionIdentityParams"
+        },
+        "model/list": {
+          "$ref": "#/$defs/ModelListParams"
+        },
         "skills/list": {
           "$ref": "#/$defs/SkillListParams"
         },
@@ -3145,6 +4171,21 @@
         "thread/fork": {
           "$ref": "#/$defs/ThreadForkParams"
         },
+        "thread/goal/get": {
+          "$ref": "#/$defs/ThreadReadParams"
+        },
+        "thread/goal/set": {
+          "$ref": "#/$defs/GoalSetParams"
+        },
+        "thread/goal/pause": {
+          "$ref": "#/$defs/GoalRevisionParams"
+        },
+        "thread/goal/resume": {
+          "$ref": "#/$defs/GoalRevisionParams"
+        },
+        "thread/goal/clear": {
+          "$ref": "#/$defs/GoalRevisionParams"
+        },
         "turn/start": {
           "$ref": "#/$defs/TurnStartParams"
         },
@@ -3156,6 +4197,9 @@
         },
         "turn/interrupt": {
           "$ref": "#/$defs/TurnReadParams"
+        },
+        "turn/retry": {
+          "$ref": "#/$defs/TurnRetryParams"
         },
         "workflow/start": {
           "$ref": "#/$defs/WorkflowStartParams"
@@ -3243,6 +4287,11 @@
         "project/remove",
         "settings/read",
         "settings/update",
+        "provider/list",
+        "provider/upsert",
+        "provider/remove",
+        "provider/test",
+        "model/list",
         "skills/list",
         "skill/read",
         "skills/import",
@@ -3268,10 +4317,16 @@
         "thread/model",
         "thread/archive",
         "thread/fork",
+        "thread/goal/get",
+        "thread/goal/set",
+        "thread/goal/pause",
+        "thread/goal/resume",
+        "thread/goal/clear",
         "turn/start",
         "turn/enqueue",
         "turn/read",
         "turn/interrupt",
+        "turn/retry",
         "workflow/start",
         "workflow/read",
         "workflow/list",
@@ -3316,6 +4371,21 @@
           "required": [
             "accepted"
           ]
+        },
+        "provider/list": {
+          "$ref": "#/$defs/ConnectionCatalogResult"
+        },
+        "provider/upsert": {
+          "$ref": "#/$defs/ConnectionCatalogResult"
+        },
+        "provider/remove": {
+          "$ref": "#/$defs/ConnectionRemoveResult"
+        },
+        "provider/test": {
+          "$ref": "#/$defs/ProviderTestResult"
+        },
+        "model/list": {
+          "$ref": "#/$defs/ModelCatalogResult"
         },
         "project/list": {
           "type": "object",
@@ -3691,6 +4761,21 @@
             "thread"
           ]
         },
+        "thread/goal/get": {
+          "$ref": "#/$defs/GoalResult"
+        },
+        "thread/goal/set": {
+          "$ref": "#/$defs/GoalResult"
+        },
+        "thread/goal/pause": {
+          "$ref": "#/$defs/GoalResult"
+        },
+        "thread/goal/resume": {
+          "$ref": "#/$defs/GoalResult"
+        },
+        "thread/goal/clear": {
+          "$ref": "#/$defs/GoalResult"
+        },
         "turn/start": {
           "$ref": "#/$defs/TurnSnapshotResult"
         },
@@ -3715,6 +4800,9 @@
             "accepted",
             "turn"
           ]
+        },
+        "turn/retry": {
+          "$ref": "#/$defs/TurnSnapshotResult"
         },
         "workflow/start": {
           "$ref": "#/$defs/WorkflowSnapshotResult"
@@ -4072,6 +5160,11 @@
         "project/remove",
         "settings/read",
         "settings/update",
+        "provider/list",
+        "provider/upsert",
+        "provider/remove",
+        "provider/test",
+        "model/list",
         "skills/list",
         "skill/read",
         "skills/import",
@@ -4097,10 +5190,16 @@
         "thread/model",
         "thread/archive",
         "thread/fork",
+        "thread/goal/get",
+        "thread/goal/set",
+        "thread/goal/pause",
+        "thread/goal/resume",
+        "thread/goal/clear",
         "turn/start",
         "turn/enqueue",
         "turn/read",
         "turn/interrupt",
+        "turn/retry",
         "workflow/start",
         "workflow/read",
         "workflow/list",
@@ -4177,6 +5276,9 @@
           "$ref": "#/$defs/Event"
         },
         "automation.updated": {
+          "$ref": "#/$defs/Event"
+        },
+        "goal.updated": {
           "$ref": "#/$defs/Event"
         },
         "terminal.output": {
@@ -4267,6 +5369,7 @@
         "workflow.completed",
         "artifact.created",
         "automation.updated",
+        "goal.updated",
         "terminal.output",
         "terminal.exit",
         "server.warning"

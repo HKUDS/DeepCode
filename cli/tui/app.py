@@ -37,6 +37,7 @@ from cli.config_errors import format_config_error
 from core.config import ConfigError
 from cli.tui import commands, theme
 from cli.tui.input import InputReader, expand_file_refs
+from cli.tui.goal_controller import TuiGoalController
 from cli.tui.renderer import EventRenderer
 from cli.tui.session_bridge import SessionBridge
 from core.events import Interrupt, SkillLoaded, TurnStarted, UserInput
@@ -52,6 +53,7 @@ class TuiApp:
         *,
         workspace: str,
         model: str | None,
+        connection_id: str | None = None,
         max_iterations: int,
         resume_id: str | None = None,
     ) -> None:
@@ -62,9 +64,11 @@ class TuiApp:
         self.reader = InputReader(self.workspace)
         self._exit_requested = False
         self._requested_model = model
+        self._requested_connection = connection_id
         self.selected_skill_ids: list[str] = []
         self._rebuild_agent(resume_id=resume_id)
         self.skill_manager = LocalSkillManager(self.workspace)
+        self.goal_controller = TuiGoalController(self)
 
     # -- agent lifecycle ----------------------------------------------------
 
@@ -76,9 +80,20 @@ class TuiApp:
         title: str = "",
     ) -> None:
         """(Re)assemble the AgentSession + persistence bridge."""
+        if resume_id is not None:
+            stored_bridge = SessionBridge(
+                session_id=resume_id,
+                workspace=self.workspace,
+            )
+            stored_connection, stored_model = stored_bridge.execution_selection()
+            if self._requested_connection is None:
+                self._requested_connection = stored_connection
+            if self._requested_model is None:
+                self._requested_model = stored_model
         agent, resolved_model, engine = build_agent_session(
             workspace=self.workspace,
             model=self._requested_model,
+            connection_id=self._requested_connection,
             max_iterations=self.max_iterations,
             approval_callback=self._approve,
             # Streaming deltas only make sense on a live terminal; piped
@@ -94,7 +109,13 @@ class TuiApp:
             self.bridge = SessionBridge(session_id=resume_id, workspace=self.workspace)
             self.bridge.load_into(agent)
         else:
-            self.bridge = SessionBridge(title=title, workspace=self.workspace)
+            profile = self.agent.execution_profile
+            self.bridge = SessionBridge(
+                title=title,
+                workspace=self.workspace,
+                connection_id=profile.connection_id,
+                model=profile.model_id,
+            )
             if carry_history:
                 agent.load_history(carry_history)
 
@@ -109,14 +130,35 @@ class TuiApp:
         self._rebuild_agent(resume_id=session_id)
         return len(self.agent.history)
 
-    def switch_model(self, model: str) -> None:
+    async def switch_model(
+        self,
+        model: str,
+        *,
+        connection_id: str | None = None,
+    ) -> None:
+        previous_model = self._requested_model
+        previous_connection = self._requested_connection
         self._requested_model = model
+        if connection_id is not None:
+            self._requested_connection = connection_id
         history = self.agent.history
         current_session = self.bridge.session_id
-        self._rebuild_agent(carry_history=history)
+        old_agent = self.agent
+        try:
+            self._rebuild_agent(carry_history=history)
+        except Exception:
+            self._requested_model = previous_model
+            self._requested_connection = previous_connection
+            raise
+        await old_agent.aclose()
         # Keep recording into the same stored session (scoping unchanged).
         self.bridge = SessionBridge(
             session_id=current_session, workspace=self.workspace
+        )
+        profile = self.agent.execution_profile
+        self.bridge.update_execution_selection(
+            connection_id=profile.connection_id,
+            model=profile.model_id,
         )
 
     def clear_conversation(self) -> None:
@@ -168,6 +210,18 @@ class TuiApp:
     def clear_skills(self) -> str:
         self.selected_skill_ids.clear()
         return "cleared next-turn Skills"
+
+    async def run_goal_command(self, args: str) -> str:
+        result = await self.goal_controller.execute(args)
+        if result.refresh_session:
+            await self._reload_current_session()
+        return result.message
+
+    async def _reload_current_session(self) -> None:
+        session_id = self.bridge.session_id
+        old_agent = self.agent
+        await old_agent.aclose()
+        self._rebuild_agent(resume_id=session_id)
 
     def request_exit(self) -> None:
         self._exit_requested = True
@@ -226,6 +280,7 @@ class TuiApp:
                 text,
                 final_text,
                 skill_invocations=tuple(invocations.values()),
+                execution_profile=self.agent.execution_profile,
             )
 
     # -- REPL -----------------------------------------------------------------
@@ -278,6 +333,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--workspace", "-w", default=os.getcwd())
     parser.add_argument("--model", "-m", default=None)
+    parser.add_argument("--connection", "-c", default=None)
     parser.add_argument("--resume", "-r", default=None, help="Session id to resume.")
     parser.add_argument("--max-iterations", type=int, default=DEFAULT_MAX_ITERATIONS)
     args = parser.parse_args(argv)
@@ -286,6 +342,7 @@ def main(argv: list[str] | None = None) -> int:
         app = TuiApp(
             workspace=args.workspace,
             model=args.model,
+            connection_id=args.connection,
             max_iterations=args.max_iterations,
             resume_id=args.resume,
         )

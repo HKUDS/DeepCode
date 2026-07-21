@@ -9,7 +9,9 @@ from typing import Any, Protocol
 from core.agent_setup import build_agent_session
 from core.compat import DeepCodeRuntime, get_runtime
 from core.config import home_config_path, load_config_for_workspace, project_config_path
+from core.providers.credentials import default_credentials_path
 from core.events import Event, Op
+from core.domain.execution_profile import ExecutionProfile
 from core.harness.permissions import PermissionMode
 
 
@@ -28,13 +30,20 @@ class AgentSessionPort(Protocol):
 
 
 class AgentSessionFactory(Protocol):
-    def runtime_key(self, *, workspace: str, model: str | None) -> object: ...
+    def runtime_key(
+        self,
+        *,
+        workspace: str,
+        model: str | None,
+        execution_profile: ExecutionProfile | None = None,
+    ) -> object: ...
 
     def create(
         self,
         *,
         workspace: str,
         model: str | None,
+        execution_profile: ExecutionProfile | None = None,
         approval_callback: ApprovalCallback,
     ) -> AgentSessionPort: ...
 
@@ -58,6 +67,7 @@ class ConfiguredAgentSessionFactory:
         *,
         workspace: str,
         model: str | None,
+        execution_profile: ExecutionProfile | None = None,
         approval_callback: ApprovalCallback,
     ) -> AgentSessionPort:
         options: dict[str, Any] = {}
@@ -67,6 +77,7 @@ class ConfiguredAgentSessionFactory:
         session, _resolved_model, _engine = build_agent_session(
             workspace=workspace,
             model=model,
+            execution_profile=execution_profile,
             approval_callback=approval_callback,
             streaming=self.streaming,
             default_permission_mode=self.default_permission_mode,
@@ -75,14 +86,32 @@ class ConfiguredAgentSessionFactory:
         )
         return session
 
-    def runtime_key(self, *, workspace: str, model: str | None) -> object:
+    def runtime_key(
+        self,
+        *,
+        workspace: str,
+        model: str | None,
+        execution_profile: ExecutionProfile | None = None,
+    ) -> object:
         """Invalidate idle sessions after an in-process config reload."""
 
         return (
             str(Path(workspace).expanduser().resolve(strict=False)),
             model,
+            (
+                execution_profile.connection_id,
+                execution_profile.config_revision,
+                execution_profile.context_window,
+                execution_profile.max_output_tokens,
+                execution_profile.max_tokens,
+                execution_profile.temperature,
+                execution_profile.reasoning_effort,
+            )
+            if execution_profile is not None
+            else None,
             _config_signature(home_config_path()),
             _config_signature(project_config_path(workspace)),
+            _config_signature(default_credentials_path()),
             id(get_runtime()),
         )
 

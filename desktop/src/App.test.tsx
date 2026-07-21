@@ -1,4 +1,11 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type {
@@ -7,6 +14,7 @@ import type {
   AutomationRun,
   DiagnosticsSnapshot,
   Event,
+  Goal,
   Item,
   JsonValue,
   MethodParams,
@@ -160,6 +168,7 @@ class TestRuntime implements DesktopRuntime {
     models: desktopSettings.models.map((model) => ({ ...model })),
   };
   private automationStatus: Automation["status"] = "enabled";
+  private goalState: Goal | null;
   private readonly disabledSkillIds = new Set<string>();
   private readonly deletedSkillIds = new Set<string>();
 
@@ -169,8 +178,10 @@ class TestRuntime implements DesktopRuntime {
     private readonly events: Event[] = [],
     private readonly contextFiles: string[] = [],
     private readonly availableUpdate: DesktopUpdateInfo | null = null,
+    initialGoal: Goal | null = null,
   ) {
     this.threadState = threads.map((candidate) => ({ ...candidate }));
+    this.goalState = initialGoal;
   }
 
   async request<M extends RpcMethod>(
@@ -181,6 +192,119 @@ class TestRuntime implements DesktopRuntime {
     this.calls.push(method);
     this.requests.push({ method, params });
     switch (method) {
+      case "provider/list":
+        return {
+          connections: [
+            {
+              id: "openai",
+              label: "OpenAI",
+              providerName: "openai",
+              adapter: "openai_compat",
+              apiBase: "https://api.openai.com/v1",
+              apiKeyEnv: "OPENAI_API_KEY",
+              modelCatalog: "openai",
+              manualModels: [],
+              configured: true,
+              credentialSource: "environment",
+              local: false,
+              enabled: true,
+              explicit: false,
+            },
+          ],
+          templates: [
+            {
+              name: "openai",
+              label: "OpenAI",
+              adapter: "openai_compat",
+              defaultApiBase: "https://api.openai.com/v1",
+              local: false,
+            },
+          ],
+          configPath: "/tmp/deepcode_config.json",
+          credentialPath: "/tmp/credentials.json",
+        } as unknown as MethodResults[M];
+      case "model/list": {
+        const request = params as MethodParams["model/list"];
+        return {
+          connectionId: request.connectionId,
+          models: desktopSettings.models.map((model) => ({
+            id: model.id,
+            name: model.id,
+            contextWindow: model.contextWindow,
+            maxOutputTokens: model.maxOutputTokens,
+            supportedParameters: [],
+          })),
+          source: "test",
+          stale: false,
+          error: null,
+          refreshedAt: 1_768_000_000,
+        } as unknown as MethodResults[M];
+      }
+      case "provider/upsert": {
+        const request = params as MethodParams["provider/upsert"];
+        const connection = request.connection;
+        return {
+          connections: [
+            {
+              id: "openai",
+              label: "OpenAI",
+              providerName: "openai",
+              adapter: "openai_compat",
+              apiBase: "https://api.openai.com/v1",
+              apiKeyEnv: "OPENAI_API_KEY",
+              modelCatalog: "openai",
+              manualModels: [],
+              configured: true,
+              credentialSource: "environment",
+              local: false,
+              enabled: true,
+              explicit: false,
+            },
+            {
+              id: connection.id,
+              label: connection.label ?? connection.id,
+              providerName: connection.template ?? "custom",
+              adapter: connection.adapter ?? "openai_compat",
+              apiBase: connection.apiBase ?? null,
+              apiKeyEnv: connection.apiKeyEnv ?? null,
+              modelCatalog:
+                connection.modelCatalog === "auto" ||
+                connection.modelCatalog === undefined
+                  ? "openrouter"
+                  : connection.modelCatalog,
+              manualModels: connection.manualModels ?? [],
+              configured: Boolean(connection.apiKey || connection.apiKeyEnv),
+              credentialSource: connection.apiKey
+                ? "credential_store"
+                : "environment",
+              local: false,
+              enabled: connection.enabled ?? true,
+              explicit: true,
+            },
+          ],
+          templates: [],
+          configPath: "/tmp/deepcode_config.json",
+          credentialPath: "/tmp/credentials.json",
+        } as unknown as MethodResults[M];
+      }
+      case "provider/test": {
+        const request = params as MethodParams["provider/test"];
+        return {
+          connectionId: request.connectionId,
+          ok: true,
+          latencyMs: 42,
+          modelCount: 2,
+          error: null,
+        } as MethodResults[M];
+      }
+      case "provider/remove":
+        return {
+          removed: true,
+          connections: [],
+          templates: [],
+          configPath: "/tmp/deepcode_config.json",
+          credentialPath: "/tmp/credentials.json",
+        } as unknown as MethodResults[M];
       case "project/list":
         return { projects: this.projects } as MethodResults[M];
       case "project/update": {
@@ -368,10 +492,70 @@ class TestRuntime implements DesktopRuntime {
         if (index === -1) throw new Error(`Missing test thread: ${request.threadId}`);
         this.threadState[index] = {
           ...this.threadState[index],
+          connectionId: request.connectionId,
           model: request.model,
         };
         return { thread: this.threadState[index] } as MethodResults[M];
       }
+      case "thread/goal/get":
+        return { goal: this.goalState } as MethodResults[M];
+      case "thread/goal/set": {
+        const request = params as MethodParams["thread/goal/set"];
+        const now = "2026-07-16T02:00:00Z";
+        this.goalState = {
+          id: this.goalState?.id ?? "goal-desktop",
+          threadId: request.threadId,
+          objective: request.objective ?? this.goalState?.objective ?? "Goal",
+          acceptanceCriteria:
+            request.acceptanceCriteria ??
+            this.goalState?.acceptanceCriteria ??
+            [],
+          status: "active",
+          phase: "working",
+          revision: (this.goalState?.revision ?? 0) + 1,
+          definitionRevision:
+            (this.goalState?.definitionRevision ?? 0) + 1,
+          attemptCount: this.goalState?.attemptCount ?? 0,
+          tokensUsed: this.goalState?.tokensUsed ?? 0,
+          elapsedSeconds: this.goalState?.elapsedSeconds ?? 0,
+          budget: this.goalState?.budget ?? {
+            maxAttempts: 20,
+            maxTokens: null,
+            maxElapsedSeconds: 28_800,
+          },
+          skillIds: request.skills ?? this.goalState?.skillIds ?? [],
+          verificationCommandId: request.verificationCommandId ?? null,
+          verificationTimeoutSeconds:
+            request.verificationTimeoutSeconds ?? 300,
+          evaluatorConnectionId: request.evaluatorConnectionId ?? null,
+          evaluatorModelId: request.evaluatorModelId ?? null,
+          lastVerdict: null,
+          lastReason: null,
+          createdAt: this.goalState?.createdAt ?? now,
+          updatedAt: now,
+          completedAt: null,
+          attempts: this.goalState?.attempts ?? [],
+          evaluations: this.goalState?.evaluations ?? [],
+        } as Goal;
+        return { goal: this.goalState } as MethodResults[M];
+      }
+      case "thread/goal/pause":
+      case "thread/goal/resume": {
+        if (!this.goalState) {
+          throw new Error("Missing test Goal");
+        }
+        this.goalState = {
+          ...this.goalState,
+          status:
+            method === "thread/goal/pause" ? "paused" : "active",
+          revision: this.goalState.revision + 1,
+          updatedAt: "2026-07-16T02:01:00Z",
+        };
+        return { goal: this.goalState } as MethodResults[M];
+      }
+      case "thread/goal/clear":
+        this.goalState = null;
+        return { goal: null } as MethodResults[M];
       case "thread/archive": {
         const request = params as MethodParams["thread/archive"];
         const index = this.threadState.findIndex(
@@ -477,6 +661,25 @@ class TestRuntime implements DesktopRuntime {
           turn: queuedTurn,
           items: [userItem],
           approvals: [],
+        } as unknown as MethodResults[M];
+      }
+      case "turn/retry": {
+        const request = params as MethodParams["turn/retry"];
+        return {
+          turn: {
+            ...failedTurn,
+            id: "turn-retry",
+            ordinal: failedTurn.ordinal + 1,
+            status: "queued",
+            stopReason: null,
+            errorCode: null,
+            errorMessage: null,
+            startedAt: null,
+            completedAt: null,
+          },
+          items: [],
+          approvals: [],
+          originalTurnId: request.turnId,
         } as unknown as MethodResults[M];
       }
       case "turn/interrupt": {
@@ -1109,6 +1312,55 @@ describe("desktop command center", () => {
     ).toHaveLength(1);
   });
 
+  it("creates and pauses a durable Session Goal with selected Skills", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Set a Goal/ }),
+    );
+    fireEvent.change(screen.getByLabelText("Outcome"), {
+      target: { value: "Ship the verified implementation" },
+    });
+    fireEvent.change(screen.getByLabelText("Done when"), {
+      target: { value: "Focused tests pass\nThe change is reviewed" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "review" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start Goal" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Ship the verified implementation")).toBeTruthy();
+      expect(screen.getByText(/Working/)).toBeTruthy();
+    });
+    const setRequest = runtime.requests.find(
+      (candidate) => candidate.method === "thread/goal/set",
+    );
+    expect(setRequest?.params).toMatchObject({
+      threadId: thread.id,
+      objective: "Ship the verified implementation",
+      acceptanceCriteria: [
+        "Focused tests pass",
+        "The change is reviewed",
+      ],
+      skills: [SKILL_ID],
+      start: true,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    await waitFor(() => {
+      expect(screen.getByText(/Paused/)).toBeTruthy();
+    });
+    expect(
+      runtime.requests.find(
+        (candidate) => candidate.method === "thread/goal/pause",
+      )?.params,
+    ).toMatchObject({
+      threadId: thread.id,
+      expectedRevision: 1,
+    });
+  });
+
   it("shows honest MCP configuration state without claiming a live connection", async () => {
     const runtime = new TestRuntime([project], [thread], []);
     render(<App runtime={runtime} />);
@@ -1148,6 +1400,72 @@ describe("desktop command center", () => {
     expect(runtime.diagnosticsExports).toEqual([diagnostics]);
   });
 
+  it("configures one shared credential-safe LLM connection from Settings", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    await screen.findByRole("heading", { name: "Connections" });
+    fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
+
+    fireEvent.change(screen.getByLabelText("Connection ID"), {
+      target: { value: "router-desktop" },
+    });
+    fireEvent.change(screen.getByLabelText("Display name"), {
+      target: { value: "Router Desktop" },
+    });
+    fireEvent.change(screen.getByLabelText("API key"), {
+      target: { value: "desktop-test-secret" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save connection" }),
+    );
+
+    const connectionName = await screen.findByText("Router Desktop", {
+      selector: "strong",
+    });
+    const card = connectionName.closest("article");
+    expect(card).toBeTruthy();
+    const request = runtime.requests.find(
+      (candidate) => candidate.method === "provider/upsert",
+    )?.params as MethodParams["provider/upsert"];
+    expect(request.connection).toMatchObject({
+      id: "router-desktop",
+      label: "Router Desktop",
+      template: "openrouter",
+      apiKey: "desktop-test-secret",
+    });
+
+    fireEvent.click(
+      within(card as HTMLElement).getByRole("button", { name: "Test" }),
+    );
+    expect(
+      await within(card as HTMLElement).findByText("2 models · 42 ms"),
+    ).toBeTruthy();
+
+    fireEvent.click(
+      within(card as HTMLElement).getByRole("button", { name: "Edit" }),
+    );
+    expect((screen.getByLabelText("API key") as HTMLInputElement).value).toBe("");
+    fireEvent.click(screen.getByLabelText("Remove saved API key"));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save connection" }),
+    );
+    await waitFor(() => {
+      expect(
+        runtime.requests.filter(
+          (candidate) => candidate.method === "provider/upsert",
+        ),
+      ).toHaveLength(2);
+    });
+    const clearRequest = runtime.requests.filter(
+      (candidate) => candidate.method === "provider/upsert",
+    )[1].params as MethodParams["provider/upsert"];
+    expect(clearRequest.connection.clearApiKey).toBe(true);
+    expect(clearRequest.connection.apiKey).toBeUndefined();
+  });
+
   it("checks and installs only a verified desktop update selected by the user", async () => {
     const runtime = new TestRuntime([project], [thread], [], [], {
       currentVersion: "0.1.0",
@@ -1179,11 +1497,12 @@ describe("desktop command center", () => {
       expect(screen.getByRole("heading", { name: "Recovered task" })).toBeTruthy();
       expect(screen.getByText("Recovered final answer")).toBeTruthy();
     });
-    expect(runtime.calls.slice(0, 5)).toEqual([
+    expect(runtime.calls.slice(0, 6)).toEqual([
       "project/list",
       "thread/list",
       "thread/resume",
       "event/replay",
+      "thread/goal/get",
       "settings/read",
     ]);
     expect(runtime.calls).not.toContain("file/list");
@@ -1434,7 +1753,13 @@ describe("desktop command center", () => {
     ).toBeTruthy();
     fireEvent.click(retry);
 
-    await waitFor(() => expect(runtime.calls).toContain("turn/start"));
+    await waitFor(() => expect(runtime.calls).toContain("turn/retry"));
+    expect(
+      runtime.requests.find((request) => request.method === "turn/retry")?.params,
+    ).toEqual({
+      turnId: failedTurn.id,
+      useCurrentSelection: false,
+    });
   });
 
   it("presents each completed Turn as one collapsed execution ledger and final answer", async () => {
@@ -1528,16 +1853,25 @@ describe("desktop command center", () => {
     const runtime = new TestRuntime([project], [thread], []);
     render(<App runtime={runtime} />);
 
-    const model = await screen.findByRole("combobox", { name: "Session model" });
+    const model = await screen.findByRole("button", { name: "Session model" });
     const permissions = screen.getByRole("combobox", {
       name: "Permission mode",
     });
     expect((permissions as HTMLSelectElement).value).toBe("default");
 
-    fireEvent.change(model, { target: { value: "gpt-5-mini" } });
+    fireEvent.click(model);
+    const option = await screen.findByRole("option", { name: /gpt-5-mini/ });
+    fireEvent.click(option);
     await waitFor(() => {
-      expect((model as HTMLSelectElement).value).toBe("gpt-5-mini");
       expect(runtime.calls).toContain("thread/model");
+      expect(screen.getByText("gpt-5-mini")).toBeTruthy();
+    });
+    expect(
+      runtime.requests.find((request) => request.method === "thread/model")?.params,
+    ).toEqual({
+      threadId: thread.id,
+      connectionId: "openai",
+      model: "gpt-5-mini",
     });
 
     fireEvent.change(permissions, { target: { value: "plan" } });

@@ -169,12 +169,21 @@ class TurnEventProjector:
                 )
         self._publish(events)
 
-    def add_completion(self, *, status: ItemStatus, stop_reason: str) -> Item:
+    def add_completion(
+        self,
+        *,
+        status: ItemStatus,
+        stop_reason: str,
+        usage: dict[str, int] | None = None,
+    ) -> Item:
         return self._add_item(
             kind=ItemKind.COMPLETION,
             status=status,
             summary=f"Turn {stop_reason.replace('_', ' ')}",
-            payload={"stopReason": stop_reason},
+            payload={
+                "stopReason": stop_reason,
+                **({"usage": dict(usage)} if usage else {}),
+            },
         )
 
     def add_error(self, *, code: str, message: str) -> Item:

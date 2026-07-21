@@ -513,11 +513,29 @@ confirmation:
 
 ### Long-running work
 
-Drive a goal until its verification command passes:
+In the interactive CLI, attach a durable Goal to the current Session:
+
+```text
+/goal Implement and verify the requested feature
+/goal status
+/goal pause
+/goal resume
+/goal clear
+```
+
+The Goal is stored beside the canonical Session transcript and appears in
+Desktop. Every attempt is an ordinary Turn, so model selection, Skills,
+permissions, approvals, recovery, and history stay aligned across clients.
+Safety limits and the optional evaluator connection/model are user-configurable
+through the `goal` block shown in `deepcode_config.json.example`; no provider
+or model is fixed by the Goal engine.
+
+For scripts and CI, the compatibility command uses the same Goal engine and
+stops when its discovered, allowlisted verification command passes:
 
 ```bash
 deepcode loop "Implement the requested feature" \
-  --test-cmd "python -m pytest -q" \
+  --test-cmd pytest \
   --max-rounds 6
 ```
 

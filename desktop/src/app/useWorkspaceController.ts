@@ -4,6 +4,7 @@ import type {
   ApprovalDecision,
   ConfigScope,
   Event,
+  GoalSetParams,
   JsonObject,
   Project,
   Thread,
@@ -59,6 +60,12 @@ function titleFromPrompt(prompt: string): string {
 
 export type DesktopPermissionMode = "default" | "plan" | "full_auto";
 
+export interface GoalDefinitionInput {
+  objective: string;
+  acceptanceCriteria: string[];
+  skillIds: string[];
+}
+
 export interface WorkspaceController {
   state: WorkspaceState;
   selectedProject: Project | null;
@@ -73,9 +80,17 @@ export interface WorkspaceController {
   archiveThread(threadId: string): Promise<void>;
   registerThread(thread: Thread): void;
   setThreadModel(model: string | null): Promise<void>;
+  setThreadExecution(
+    connectionId: string | null,
+    model: string | null,
+  ): Promise<void>;
   setPermissionMode(mode: DesktopPermissionMode): Promise<void>;
   refreshSettings(): Promise<void>;
   updateSettings(patch: JsonObject, scope?: ConfigScope): Promise<void>;
+  setGoal(input: GoalDefinitionInput): Promise<void>;
+  pauseGoal(): Promise<void>;
+  resumeGoal(): Promise<void>;
+  clearGoal(): Promise<void>;
   startTurn(prompt: string, skillIds?: string[]): Promise<void>;
   queueTurn(prompt: string, skillIds?: string[]): Promise<void>;
   retryTurn(turnId: string): Promise<void>;
@@ -130,6 +145,14 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
     [runtime],
   );
 
+  const loadGoal = useCallback(
+    async (threadId: string) => {
+      const result = await runtime.request("thread/goal/get", { threadId });
+      dispatch({ type: "goal", goal: result.goal });
+    },
+    [runtime],
+  );
+
   const loadThreads = useCallback(
     async (
       projectId: string,
@@ -162,11 +185,12 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
         });
         dispatch({ type: "thread-upsert", thread: resumed.thread });
         await replayThread(selected);
+        await loadGoal(selected);
         return resumed.thread;
       }
       return null;
     },
-    [replayThread, runtime],
+    [loadGoal, replayThread, runtime],
   );
 
   const loadProjects = useCallback(async () => {
@@ -365,9 +389,10 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
       selectedThreadRef.current = target.id;
       localStorage.setItem(THREAD_KEY, target.id);
       await replayThread(target.id);
+      await loadGoal(target.id);
       await loadSettings(target.projectId);
     },
-    [loadSettings, replayThread, runtime, state.selectedProjectId],
+    [loadGoal, loadSettings, replayThread, runtime, state.selectedProjectId],
   );
 
   const selectThread = useCallback(
@@ -437,6 +462,20 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
     [runtime, selectedThread, withBusy],
   );
 
+  const setThreadExecution = useCallback(
+    (connectionId: string | null, model: string | null) =>
+      withBusy(async () => {
+        if (!selectedThread) return;
+        const result = await runtime.request("thread/model", {
+          threadId: selectedThread.id,
+          connectionId,
+          model,
+        });
+        dispatch({ type: "thread-upsert", thread: result.thread });
+      }),
+    [runtime, selectedThread, withBusy],
+  );
+
   const applySettings = useCallback(
     async (patch: JsonObject, scope: ConfigScope = "user") => {
       const result = await runtime.request("settings/update", {
@@ -466,6 +505,67 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
     (patch: JsonObject, scope: ConfigScope = "user") =>
       withBusy(() => applySettings(patch, scope)),
     [applySettings, withBusy],
+  );
+
+  const setGoal = useCallback(
+    (input: GoalDefinitionInput) =>
+      withBusy(async () => {
+        if (!selectedThread) return;
+        const current = state.goal;
+        const editable =
+          current !== null &&
+          !["completed", "budget_limited"].includes(current.status);
+        const result = await runtime.request("thread/goal/set", {
+          threadId: selectedThread.id,
+          objective: input.objective,
+          acceptanceCriteria:
+            input.acceptanceCriteria as GoalSetParams["acceptanceCriteria"],
+          skills: input.skillIds as GoalSetParams["skills"],
+          ...(editable ? { expectedRevision: current.revision } : {}),
+          start: true,
+        });
+        dispatch({ type: "goal", goal: result.goal });
+      }),
+    [runtime, selectedThread, state.goal, withBusy],
+  );
+
+  const pauseGoal = useCallback(
+    () =>
+      withBusy(async () => {
+        if (!selectedThread || !state.goal) return;
+        const result = await runtime.request("thread/goal/pause", {
+          threadId: selectedThread.id,
+          expectedRevision: state.goal.revision,
+        });
+        dispatch({ type: "goal", goal: result.goal });
+      }),
+    [runtime, selectedThread, state.goal, withBusy],
+  );
+
+  const resumeGoal = useCallback(
+    () =>
+      withBusy(async () => {
+        if (!selectedThread || !state.goal) return;
+        const result = await runtime.request("thread/goal/resume", {
+          threadId: selectedThread.id,
+          expectedRevision: state.goal.revision,
+        });
+        dispatch({ type: "goal", goal: result.goal });
+      }),
+    [runtime, selectedThread, state.goal, withBusy],
+  );
+
+  const clearGoal = useCallback(
+    () =>
+      withBusy(async () => {
+        if (!selectedThread || !state.goal) return;
+        await runtime.request("thread/goal/clear", {
+          threadId: selectedThread.id,
+          expectedRevision: state.goal.revision,
+        });
+        dispatch({ type: "goal", goal: null });
+      }),
+    [runtime, selectedThread, state.goal, withBusy],
   );
 
   const executeTurn = useCallback(
@@ -510,9 +610,13 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
       withBusy(async () => {
         const turn = state.turns.find((candidate) => candidate.id === turnId);
         if (!turn || turn.threadId !== selectedThread?.id) return;
-        await executeTurn(turn.prompt, [...(turn.skillIds ?? [])]);
+        const snapshot = await runtime.request("turn/retry", {
+          turnId,
+          useCurrentSelection: false,
+        });
+        dispatch({ type: "snapshot", snapshot });
       }),
-    [executeTurn, selectedThread?.id, state.turns, withBusy],
+    [runtime, selectedThread?.id, state.turns, withBusy],
   );
 
   const queueTurn = useCallback(
@@ -672,9 +776,14 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
       archiveThread,
       registerThread,
       setThreadModel,
+      setThreadExecution,
       setPermissionMode,
       refreshSettings,
       updateSettings,
+      setGoal,
+      pauseGoal,
+      resumeGoal,
+      clearGoal,
       startTurn,
       queueTurn,
       retryTurn,
@@ -706,7 +815,12 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
       renameThread,
       registerThread,
       refreshSettings,
+      clearGoal,
+      pauseGoal,
+      resumeGoal,
+      setGoal,
       setPermissionMode,
+      setThreadExecution,
       setThreadModel,
       updateSettings,
       selectProject,

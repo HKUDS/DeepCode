@@ -101,7 +101,7 @@ def test_desktop_turn_persists_selection_and_invocation_ledger(
 
         stored = store.get_session(thread.id)
         assert stored is not None
-        assert stored.messages[0].metadata["schemaVersion"] == 2
+        assert stored.messages[0].metadata["schemaVersion"] == 3
         assert stored.messages[0].metadata["skillInvocations"][0]["skillId"] == SKILL_ID
         assert (
             stored.messages[1]

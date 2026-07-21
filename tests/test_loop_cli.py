@@ -55,6 +55,9 @@ def test_loop_cli_succeeds_on_green(monkeypatch, tmp_path, capsys):
         "get_runtime",
         lambda: type("R", (), {"config": type("C", (), {"security": None})()})(),
     )
+    monkeypatch.setenv("DEEPCODE_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("DEEPCODE_SESSIONS_DIR", str(tmp_path / "sessions"))
+    monkeypatch.setattr("core.sessions.store._DEFAULT_STORE", None)
     rc = loop_cli.main(
         [
             "keep calc.add working",
@@ -72,8 +75,15 @@ def test_loop_cli_succeeds_on_green(monkeypatch, tmp_path, capsys):
     assert "succeeded" in out
     # State file was written.
     from core.loop.state import LoopState
+    from core.sessions import GoalStore, SessionStore
 
     assert LoopState.load(ws).status == "succeeded"
+    sessions = SessionStore(tmp_path / "sessions")
+    summary = sessions.list_sessions()[0]
+    record = GoalStore(sessions).read(summary.session_id)
+    assert record is not None
+    assert record.goal.status.value == "completed"
+    assert record.attempt_count == 1
 
 
 def test_loop_cli_fails_exit_when_tests_stay_red(monkeypatch, tmp_path, capsys):
@@ -91,6 +101,9 @@ def test_loop_cli_fails_exit_when_tests_stay_red(monkeypatch, tmp_path, capsys):
         "get_runtime",
         lambda: type("R", (), {"config": type("C", (), {"security": None})()})(),
     )
+    monkeypatch.setenv("DEEPCODE_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("DEEPCODE_SESSIONS_DIR", str(tmp_path / "sessions"))
+    monkeypatch.setattr("core.sessions.store._DEFAULT_STORE", None)
     # Agent does nothing, so tests never pass → non-zero exit.
     rc = loop_cli.main(
         ["fix it", "-w", str(ws), "-t", "python -m pytest -q", "--max-rounds", "2"]
