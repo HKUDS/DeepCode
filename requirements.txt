@@ -27,5 +27,5 @@ PyYAML>=6.0
 reportlab>=3.5.0
 rich>=13.0.0
 streamlit
-uvicorn>=0.24.0
+uvicorn>=0.39.0
 websockets>=12.0
