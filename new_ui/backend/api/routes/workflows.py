@@ -99,6 +99,7 @@ async def get_workflow_status(task_id: str):
         "message": task.message,
         "result": task.result,
         "error": task.error,
+        "error_details": task.error_details,
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,
     }
@@ -238,6 +239,7 @@ async def get_recent_tasks(limit: int = 10):
                 "message": task.message,
                 "result": task.result,
                 "error": task.error,
+                "error_details": task.error_details,
                 "started_at": task.started_at,
                 "completed_at": task.completed_at,
             }

@@ -10,6 +10,7 @@ no naming conflicts (config.py -> settings.py, utils/ -> app_utils/).
 import asyncio
 import uuid
 import os
+import re
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -30,6 +31,7 @@ class WorkflowTask:
     message: str = ""
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+    error_details: Optional[Dict[str, Any]] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
@@ -181,7 +183,13 @@ class WorkflowService:
                 task.progress = progress
                 task.message = message
                 if error:
-                    task.error = error
+                    task.error = self._sanitize_error_message(error)
+                    task.error_details = self._build_error_details(
+                        task,
+                        error,
+                        stage=message,
+                        progress=progress,
+                    )
 
             # Broadcast to all subscribers
             asyncio.create_task(
@@ -192,7 +200,8 @@ class WorkflowService:
                         "task_id": task_id,
                         "progress": progress,
                         "message": message,
-                        "error": error,
+                        "error": self._sanitize_error_message(error),
+                        "error_details": task.error_details if task else None,
                         "timestamp": datetime.utcnow().isoformat(),
                     },
                 )
@@ -297,6 +306,9 @@ class WorkflowService:
 
         task.status = "running"
         task.started_at = datetime.utcnow()
+        task.error = None
+        task.error_details = None
+        original_cwd = os.getcwd()
 
         # Bind task_id into the async context so every loguru call and
         # provider/MCP record made downstream is automatically attributed
@@ -326,7 +338,6 @@ class WorkflowService:
             progress_callback = await self._create_progress_callback(task_id)
 
             # Change to project root directory for MCP server paths to work correctly
-            original_cwd = os.getcwd()
             os.chdir(PROJECT_ROOT)
 
             # Create MCP app context with explicit config path
@@ -350,58 +361,32 @@ class WorkflowService:
                     ),
                 )
 
-                result_status = self._pipeline_status(result)
-                task.status = result_status
-                task.progress = 100 if result_status == "completed" else 95
-                task.result = self._build_workflow_result(result, result_status)
-                task.completed_at = datetime.utcnow()
-                self._record_session_outcome(
-                    task,
-                    role="assistant",
-                    body=self._pipeline_summary(result),
-                    metadata=self._pipeline_metadata(result),
+                return await self._finish_task_with_pipeline_result(
+                    task_id, task, result
                 )
-
-                # Broadcast completion signal to all subscribers
-                await self._broadcast(
-                    task_id,
-                    {
-                        "type": "complete",
-                        "task_id": task_id,
-                        "status": result_status,
-                        "result": task.result,
-                        "timestamp": datetime.utcnow().isoformat(),
-                    },
-                )
-                # Give WebSocket handlers time to receive the completion message
-                await asyncio.sleep(0.5)
-
-                return task.result
 
         except (PlanReviewCancelled, asyncio.CancelledError) as e:
             reason = getattr(e, "reason", None) or str(e) or "Workflow cancelled"
             return await self._mark_task_cancelled(task_id, reason)
 
         except Exception as e:
-            task.status = "error"
-            task.error = str(e)
+            self._mark_task_error(task, e)
             task.completed_at = datetime.utcnow()
             self._record_session_outcome(
-                task, role="system", body=f"Workflow failed: {e}"
+                task,
+                role="system",
+                body=f"Workflow failed: {task.error}",
+                metadata=self._pipeline_metadata(None, task),
             )
 
             # Broadcast error signal to all subscribers
-            await self._broadcast(
-                task_id,
-                {
-                    "type": "error",
-                    "task_id": task_id,
-                    "error": str(e),
-                    "timestamp": datetime.utcnow().isoformat(),
-                },
-            )
+            await self._broadcast(task_id, self._error_payload(task))
 
-            return {"status": "error", "error": str(e)}
+            return {
+                "status": "error",
+                "error": task.error,
+                "error_details": task.error_details,
+            }
 
         finally:
             # Restore original working directory
@@ -435,6 +420,9 @@ class WorkflowService:
 
         task.status = "running"
         task.started_at = datetime.utcnow()
+        task.error = None
+        task.error_details = None
+        original_cwd = os.getcwd()
 
         short_task_id = str(task_id)[:8] if task_id else None
         task.task_short_id = short_task_id
@@ -459,7 +447,6 @@ class WorkflowService:
             progress_callback = await self._create_progress_callback(task_id)
 
             # Change to project root directory for MCP server paths to work correctly
-            original_cwd = os.getcwd()
             os.chdir(PROJECT_ROOT)
 
             # Create MCP app context with explicit config path
@@ -531,58 +518,32 @@ class WorkflowService:
                     ),
                 )
 
-                result_status = self._pipeline_status(result)
-                task.status = result_status
-                task.progress = 100 if result_status == "completed" else 95
-                task.result = self._build_workflow_result(result, result_status)
-                task.completed_at = datetime.utcnow()
-                self._record_session_outcome(
-                    task,
-                    role="assistant",
-                    body=self._pipeline_summary(result),
-                    metadata=self._pipeline_metadata(result),
+                return await self._finish_task_with_pipeline_result(
+                    task_id, task, result
                 )
-
-                # Broadcast completion signal to all subscribers
-                await self._broadcast(
-                    task_id,
-                    {
-                        "type": "complete",
-                        "task_id": task_id,
-                        "status": result_status,
-                        "result": task.result,
-                        "timestamp": datetime.utcnow().isoformat(),
-                    },
-                )
-                # Give WebSocket handlers time to receive the completion message
-                await asyncio.sleep(0.5)
-
-                return task.result
 
         except (PlanReviewCancelled, asyncio.CancelledError) as e:
             reason = getattr(e, "reason", None) or str(e) or "Workflow cancelled"
             return await self._mark_task_cancelled(task_id, reason)
 
         except Exception as e:
-            task.status = "error"
-            task.error = str(e)
+            self._mark_task_error(task, e)
             task.completed_at = datetime.utcnow()
             self._record_session_outcome(
-                task, role="system", body=f"Workflow failed: {e}"
+                task,
+                role="system",
+                body=f"Workflow failed: {task.error}",
+                metadata=self._pipeline_metadata(None, task),
             )
 
             # Broadcast error signal to all subscribers
-            await self._broadcast(
-                task_id,
-                {
-                    "type": "error",
-                    "task_id": task_id,
-                    "error": str(e),
-                    "timestamp": datetime.utcnow().isoformat(),
-                },
-            )
+            await self._broadcast(task_id, self._error_payload(task))
 
-            return {"status": "error", "error": str(e)}
+            return {
+                "status": "error",
+                "error": task.error,
+                "error_details": task.error_details,
+            }
 
         finally:
             # Restore original working directory
@@ -780,14 +741,20 @@ class WorkflowService:
             return str(result.get("summary") or result)
         return str(result)
 
-    @staticmethod
-    def _pipeline_metadata(result: Any) -> Dict[str, Any]:
+    def _pipeline_metadata(
+        self, result: Any, task: Optional["WorkflowTask"] = None
+    ) -> Dict[str, Any]:
         if not isinstance(result, dict):
-            return {}
+            metadata: Dict[str, Any] = {}
+            if task and task.error_details:
+                metadata["error_details"] = task.error_details
+            return metadata
         metadata: Dict[str, Any] = {}
         implementation = result.get("implementation")
         if isinstance(implementation, dict):
             metadata["implementation"] = implementation
+        if task and task.error_details:
+            metadata["error_details"] = task.error_details
         return metadata
 
     @staticmethod
@@ -799,6 +766,235 @@ class WorkflowService:
         if isinstance(result, dict) and isinstance(result.get("implementation"), dict):
             payload["implementation"] = result["implementation"]
         return payload
+
+    async def _finish_task_with_pipeline_result(
+        self,
+        task_id: str,
+        task: "WorkflowTask",
+        result: Any,
+    ) -> Dict[str, Any]:
+        result_status = self._pipeline_status(result)
+        task.status = result_status
+        task.progress = 100 if result_status == "completed" else 95
+        task.result = self._build_workflow_result(result, result_status)
+        task.completed_at = datetime.utcnow()
+
+        if result_status == "error":
+            error_message = self._extract_result_error(result)
+            task.error = error_message
+            task.error_details = self._build_error_details(
+                task,
+                error_message,
+                stage=task.message or "Workflow failed",
+                progress=task.progress,
+                result=result,
+            )
+
+        self._record_session_outcome(
+            task,
+            role="system" if result_status == "error" else "assistant",
+            body=(
+                f"Workflow failed: {task.error}"
+                if result_status == "error"
+                else self._pipeline_summary(result)
+            ),
+            metadata=self._pipeline_metadata(result, task),
+        )
+
+        if result_status == "error":
+            await self._broadcast(task_id, self._error_payload(task))
+        else:
+            await self._broadcast(
+                task_id,
+                {
+                    "type": "complete",
+                    "task_id": task_id,
+                    "status": result_status,
+                    "result": task.result,
+                    "timestamp": datetime.utcnow().isoformat(),
+                },
+            )
+
+        # Give WebSocket handlers time to receive the terminal message.
+        await asyncio.sleep(0.5)
+        return task.result
+
+    @classmethod
+    def _sanitize_error_message(cls, error: Any) -> str:
+        message = str(error or "Unknown error").strip() or "Unknown error"
+        replacements = [
+            (r"sk-[A-Za-z0-9_-]{12,}", "sk-***"),
+            (r"sk-or-v1-[A-Za-z0-9_-]{12,}", "sk-or-v1-***"),
+            (r"(?i)(api[_-]?key\s*[=:]\s*)([^\s,'\"}]+)", r"\1***"),
+            (r"(?i)(authorization:\s*bearer\s+)([^\s,'\"}]+)", r"\1***"),
+            (r"(?i)(token\s*[=:]\s*)([^\s,'\"}]+)", r"\1***"),
+        ]
+        for pattern, replacement in replacements:
+            message = re.sub(pattern, replacement, message)
+        return message[:4000]
+
+    @staticmethod
+    def _extract_result_error(result: Any) -> str:
+        if not isinstance(result, dict):
+            return "Workflow failed"
+
+        candidates = [
+            result.get("error"),
+            result.get("message"),
+        ]
+        implementation = result.get("implementation")
+        if isinstance(implementation, dict):
+            candidates.extend(
+                [
+                    implementation.get("message"),
+                    implementation.get("abort_reason"),
+                    implementation.get("error"),
+                ]
+            )
+        candidates.append(result.get("summary"))
+
+        for candidate in candidates:
+            if candidate:
+                return WorkflowService._sanitize_error_message(candidate)
+        return "Workflow failed; see task logs for details"
+
+    def _mark_task_error(self, task: "WorkflowTask", error: Any) -> None:
+        task.status = "error"
+        task.error = self._sanitize_error_message(error)
+        task.error_details = self._build_error_details(
+            task,
+            error,
+            stage=task.message or "Workflow failed",
+            progress=task.progress,
+        )
+
+    def _error_payload(self, task: "WorkflowTask") -> Dict[str, Any]:
+        return {
+            "type": "error",
+            "task_id": task.task_id,
+            "error": task.error,
+            "error_details": task.error_details,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+    def _build_error_details(
+        self,
+        task: "WorkflowTask",
+        error: Any,
+        *,
+        stage: Optional[str] = None,
+        progress: Optional[int] = None,
+        result: Any = None,
+    ) -> Dict[str, Any]:
+        message = self._sanitize_error_message(error)
+        error_type = type(error).__name__ if isinstance(error, BaseException) else None
+        category = self._classify_error(message)
+        short_id = task.task_short_id or task.task_id[:8]
+        task_dir = self._resolve_task_dir(task)
+        log_paths = self._build_log_paths(task_dir)
+
+        details: Dict[str, Any] = {
+            "message": message,
+            "category": category,
+            "stage": stage or task.message or "Workflow failed",
+            "progress": progress if progress is not None else task.progress,
+            "task_id": task.task_id,
+            "task_short_id": short_id,
+            "task_kind": task.task_kind,
+            "session_id": task.session_id,
+            "hint": self._error_hint(category),
+        }
+        if error_type:
+            details["error_type"] = error_type
+        if task_dir:
+            details["task_dir"] = str(task_dir)
+            details["log_stream_url"] = f"/ws/tasks/{short_id}/logs"
+        if log_paths:
+            details["log_paths"] = log_paths
+        if isinstance(result, dict):
+            details["result_status"] = result.get("status")
+            implementation = result.get("implementation")
+            if isinstance(implementation, dict):
+                details["implementation_status"] = implementation.get("status")
+                details["implementation_message"] = implementation.get("message")
+        return details
+
+    @staticmethod
+    def _classify_error(message: str) -> str:
+        lowered = message.lower()
+        if (
+            "504" in lowered
+            or "gateway time-out" in lowered
+            or "gateway timeout" in lowered
+        ):
+            return "provider_timeout"
+        if "timeout" in lowered or "timed out" in lowered:
+            return "timeout"
+        if "rate limit" in lowered or "429" in lowered:
+            return "rate_limit"
+        if "quota" in lowered or "insufficient" in lowered or "billing" in lowered:
+            return "quota_or_billing"
+        if "api" in lowered or "llm" in lowered or "provider" in lowered:
+            return "llm_provider"
+        if "document" in lowered or "pdf" in lowered or "preprocessing" in lowered:
+            return "document_preprocessing"
+        return "workflow"
+
+    @staticmethod
+    def _error_hint(category: str) -> str:
+        hints = {
+            "provider_timeout": (
+                "The LLM provider or upstream gateway timed out. Check provider "
+                "status, proxy settings, and task logs; retrying with a smaller "
+                "input or another model may help."
+            ),
+            "timeout": (
+                "A workflow step exceeded its wait time. Check the task logs to "
+                "see which agent or tool stalled."
+            ),
+            "rate_limit": (
+                "The LLM provider rejected the request due to rate limits. Wait "
+                "before retrying or use another provider/model."
+            ),
+            "quota_or_billing": (
+                "The provider appears to be out of quota or billing credit. "
+                "Check the configured API account."
+            ),
+            "llm_provider": (
+                "The failure came from the model provider path. Check provider "
+                "configuration, model id, API base, and task LLM logs."
+            ),
+            "document_preprocessing": (
+                "The input document could not be processed cleanly. Check the "
+                "uploaded file and preprocessing logs."
+            ),
+        }
+        return hints.get(
+            category,
+            "Check the task logs for the failing stage and retry after fixing the underlying issue.",
+        )
+
+    @staticmethod
+    def _build_log_paths(task_dir: Optional[Path]) -> Dict[str, str]:
+        if not task_dir:
+            return {}
+        return {
+            channel: str(task_dir / "logs" / f"{channel}.jsonl")
+            for channel in ("system", "llm", "mcp")
+        }
+
+    @staticmethod
+    def _resolve_task_dir(task: "WorkflowTask") -> Optional[Path]:
+        if task.task_dir:
+            return Path(task.task_dir)
+        short_id = task.task_short_id or task.task_id[:8]
+        session = session_store.find_session_by_task(short_id)
+        if session is None:
+            return None
+        for stored_task in session.tasks:
+            if stored_task.task_id == short_id and stored_task.task_dir:
+                return Path(stored_task.task_dir)
+        return None
 
     def _record_session_outcome(
         self,

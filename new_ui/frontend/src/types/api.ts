@@ -18,8 +18,28 @@ export interface WorkflowStatusResponse {
   message: string;
   result?: Record<string, unknown>;
   error?: string;
+  error_details?: WorkflowErrorDetails;
   started_at?: string;
   completed_at?: string;
+}
+
+export interface WorkflowErrorDetails {
+  message: string;
+  category?: string;
+  error_type?: string;
+  stage?: string;
+  progress?: number;
+  task_id?: string;
+  task_short_id?: string;
+  task_kind?: string;
+  session_id?: string | null;
+  task_dir?: string;
+  log_stream_url?: string;
+  log_paths?: Record<string, string>;
+  hint?: string;
+  result_status?: string;
+  implementation_status?: string;
+  implementation_message?: string;
 }
 
 export interface QuestionsResponse {
@@ -160,6 +180,7 @@ export interface WSErrorMessage {
   type: 'error';
   task_id: string;
   error: string;
+  error_details?: WorkflowErrorDetails;
   timestamp: string;
 }
 

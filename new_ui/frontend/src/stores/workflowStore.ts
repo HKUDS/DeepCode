@@ -4,6 +4,7 @@ import type {
   WorkflowStatus,
   WorkflowStep,
 } from '../types/workflow';
+import type { WorkflowErrorDetails } from '../types/api';
 
 // Activity log entry type
 interface ActivityLogEntry {
@@ -63,6 +64,7 @@ interface WorkflowState {
   // Results
   result: Record<string, unknown> | null;
   error: string | null;
+  errorDetails: WorkflowErrorDetails | null;
 
   // Recovery
   needsRecovery: boolean;  // Flag to indicate if we need to recover a task
@@ -80,7 +82,7 @@ interface WorkflowState {
   setPendingInteraction: (interaction: PendingInteraction | null) => void;
   clearInteraction: () => void;
   setResult: (result: Record<string, unknown> | null) => void;
-  setError: (error: string | null) => void;
+  setError: (error: string | null, details?: WorkflowErrorDetails | null) => void;
   setNeedsRecovery: (needs: boolean) => void;
   reset: () => void;
 }
@@ -101,6 +103,7 @@ const initialState = {
   isWaitingForInput: false,
   result: null,
   error: null,
+  errorDetails: null,
   needsRecovery: false,
 };
 
@@ -212,7 +215,7 @@ export const useWorkflowStore = create<WorkflowState>()(
     set({ result });
   },
 
-  setError: (error) => set({ error, status: error ? 'error' : get().status }),
+  setError: (error, details = null) => set({ error, errorDetails: details, status: error ? 'error' : get().status }),
 
   setNeedsRecovery: (needs) => set({ needsRecovery: needs }),
 

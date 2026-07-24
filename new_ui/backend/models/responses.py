@@ -25,6 +25,7 @@ class WorkflowStatusResponse(BaseModel):
     message: str = ""
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+    error_details: Optional[Dict[str, Any]] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
 

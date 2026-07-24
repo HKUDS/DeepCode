@@ -165,7 +165,7 @@ export function useTaskRecovery() {
         console.log('[TaskRecovery] Task errored, syncing error state...');
 
         setStatus('error');
-        setError(taskStatus.error || 'Unknown error');
+        setError(taskStatus.error || 'Unknown error', taskStatus.error_details ?? null);
         setNeedsRecovery(false);
 
         setRecoveryState({
