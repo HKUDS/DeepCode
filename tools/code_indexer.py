@@ -1128,7 +1128,7 @@ class CodeIndexer:
                 # Get output configuration
                 output_config = self.indexer_config.get("output", {})
                 json_indent = output_config.get("json_indent", 2)
-                ensure_ascii = not output_config.get("ensure_ascii", False)
+                ensure_ascii = output_config.get("ensure_ascii", False)
 
                 # Save to JSON file
                 with open(output_file, "w", encoding="utf-8") as f:
@@ -1322,7 +1322,7 @@ class CodeIndexer:
         # Get output configuration
         output_config = self.indexer_config.get("output", {})
         json_indent = output_config.get("json_indent", 2)
-        ensure_ascii = not output_config.get("ensure_ascii", False)
+        ensure_ascii = output_config.get("ensure_ascii", False)
 
         with open(stats_path, "w", encoding="utf-8") as f:
             json.dump(
@@ -1338,7 +1338,7 @@ class CodeIndexer:
         # Get output configuration from config file
         output_config = self.indexer_config.get("output", {})
         json_indent = output_config.get("json_indent", 2)
-        ensure_ascii = not output_config.get("ensure_ascii", False)
+        ensure_ascii = output_config.get("ensure_ascii", False)
 
         summary_data = {
             "indexing_completion_time": datetime.now().isoformat(),
