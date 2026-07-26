@@ -98,6 +98,8 @@ _SEED: dict[str, ModelInfo] = {
     # DeepSeek.
     "deepseek-v3": ModelInfo("deepseek-v3", 128_000, 8_192, 0.27, 1.10),
     "deepseek-r1": ModelInfo("deepseek-r1", 128_000, 65_536, 0.55, 2.19),
+    "deepseek-v4-pro": ModelInfo("deepseek-v4-pro", 1_000_000, 65_536, 1.5, 3.0),
+    "deepseek-v4-flash": ModelInfo("deepseek-v4-flash", 1_000_000, 65_536, 0.125, 0.25),
     # Alibaba Qwen.
     "qwen3-max": ModelInfo("qwen3-max", 256_000, 32_768, 1.2, 6.0),
     "qwen3-coder": ModelInfo("qwen3-coder", 256_000, 65_536, 1.0, 5.0),
@@ -124,6 +126,7 @@ _FAMILY_RULES: tuple[tuple[str, ModelInfo], ...] = (
     ("gemini-3", _SEED["gemini-3-pro"]),
     ("gemini", _SEED["gemini-2.5-pro"]),
     ("kimi", _SEED["kimi-k2.6"]),
+    ("deepseek-v4-", _SEED["deepseek-v4-flash"]),
     ("deepseek-r", _SEED["deepseek-r1"]),
     ("deepseek", _SEED["deepseek-v3"]),
     ("qwen", _SEED["qwen3-max"]),

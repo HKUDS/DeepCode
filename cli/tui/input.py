@@ -73,9 +73,10 @@ class TuiCompleter(Completer):
 class InputReader:
     """One awaitable ``read()`` for both interactive and piped stdin."""
 
-    def __init__(self, workspace: str) -> None:
+    def __init__(self, workspace: str, model_status: str = "") -> None:
         self.interactive = sys.stdin.isatty()
         self._prompt_session: PromptSession | None = None
+        self._model_status = model_status
         if self.interactive:
             _HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
             self._prompt_session = PromptSession(
@@ -89,7 +90,10 @@ class InputReader:
         if self._prompt_session is not None:
             try:
                 with patch_stdout():
-                    return await self._prompt_session.prompt_async(theme.PROMPT)
+                    return await self._prompt_session.prompt_async(
+                        theme.PROMPT,
+                        bottom_toolbar=self._model_status if self._model_status else None,
+                    )
             except EOFError:
                 return None
         loop = asyncio.get_running_loop()

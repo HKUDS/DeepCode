@@ -77,9 +77,13 @@ async def _cmd_resume(app, args: str) -> str | None:
 async def _cmd_model(app, args: str) -> str | None:
     wanted = args.strip()
     if not wanted:
-        return f"model: {app.model}"
+        from cli.tui.app import _model_tier_label
+        tier = _model_tier_label(app.model)
+        return f"model: {app.model}  {tier}"
     app.switch_model(wanted)
-    return f"model switched to {app.model} (history preserved)"
+    from cli.tui.app import _model_tier_label
+    tier = _model_tier_label(app.model)
+    return f"model switched to {app.model}  {tier} (history preserved)"
 
 
 async def _cmd_clear(app, args: str) -> str | None:

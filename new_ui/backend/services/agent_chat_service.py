@@ -27,6 +27,58 @@ from core.agent_setup import build_agent_session
 from core.events import AgentSession, Interrupt, UserInput, serialize_event
 from core.sessions import get_default_store
 
+# ── Model tier detection ──────────────────────────────────────────────
+# NVIDIA NIM free models (from mcp_servers/nvidia_models_server.py)
+_NVIDIA_FREE_MODEL_IDS = {
+    "deepseek-ai/deepseek-v4-pro",
+    "z-ai/glm-5.2",
+    "qwen/qwen3.5-122b-a10b",
+    "qwen/qwen3.5-397b-a17b",
+    "minimaxai/minimax-m3",
+    "mistralai/mistral-large-3-675b-instruct-2512",
+    "stockmark/stockmark-2-100b-instruct",
+}
+
+_NVIDIA_FREE_KEYWORDS = {
+    "deepseek-v4-pro", "deepseek-v4", "glm-5.2", "glm-5",
+    "qwen3.5", "qwen3", "minimax-m3", "minimax",
+    "mistral-large", "mistral", "stockmark",
+}
+
+_DEEPSEEK_PAID_KEYWORDS = {
+    "deepseek-v4-pro", "deepseek-v4-flash", "deepseek-reasoner",
+    "deepseek-v4",  # paid direct API
+}
+
+
+def get_model_tier(model_name: str) -> dict[str, Any]:
+    """Determine whether a model is NVIDIA-free or DeepSeek-paid.
+
+    Returns a dict with ``model``, ``tier`` ("free"|"paid"|"unknown"),
+    and ``label`` for display.
+    """
+    model_lower = model_name.lower()
+
+    # Check exact NVIDIA NIM IDs first
+    if model_name in _NVIDIA_FREE_MODEL_IDS:
+        return {"model": model_name, "tier": "free", "label": "NVIDIA 免费"}
+
+    # Check NVIDIA keywords
+    for kw in _NVIDIA_FREE_KEYWORDS:
+        if kw in model_lower:
+            return {"model": model_name, "tier": "free", "label": "NVIDIA 免费"}
+
+    # Check DeepSeek paid
+    for kw in _DEEPSEEK_PAID_KEYWORDS:
+        if kw in model_lower and "nvidia" not in model_lower:
+            return {"model": model_name, "tier": "paid", "label": "DeepSeek 付费"}
+
+    # OpenAI / Anthropic / other paid providers
+    if any(p in model_lower for p in ("openai/", "gpt-", "claude", "anthropic")):
+        return {"model": model_name, "tier": "paid", "label": "付费 API"}
+
+    return {"model": model_name, "tier": "unknown", "label": "未知"}
+
 _CHAT_KIND = "agent_chat"
 
 
@@ -73,9 +125,12 @@ class AgentChatService:
         with self._lock:
             self._live[sid] = agent
             self._meta[sid] = {"model": resolved_model, "workspace": ws}
+        model_tier = get_model_tier(resolved_model)
         return {
             "session_id": sid,
             "model": resolved_model,
+            "model_tier": model_tier["tier"],
+            "model_label": model_tier["label"],
             "workspace": ws,
             "permission_mode": engine.mode.value,
             "title": stored.title,
@@ -200,6 +255,27 @@ class AgentChatService:
             self._live.pop(session_id, None)
             self._meta.pop(session_id, None)
         return self.store.delete_session(session_id)
+
+    # -- model status ---------------------------------------------------------
+
+    def get_chat_model_status(self, session_id: str) -> dict[str, Any] | None:
+        """Return model + tier info for a specific chat session."""
+        with self._lock:
+            meta = self._meta.get(session_id)
+        if meta is None:
+            # Try to revive from stored metadata
+            stored = self.store.get_session(session_id)
+            if stored is None:
+                return None
+            meta = stored.metadata or {}
+        model_name = meta.get("model", "unknown")
+        tier = get_model_tier(model_name)
+        return {
+            "session_id": session_id,
+            "model": model_name,
+            "tier": tier["tier"],
+            "label": tier["label"],
+        }
 
 
 agent_chat_service = AgentChatService()

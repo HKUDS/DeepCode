@@ -1,89 +1,79 @@
-# Python-related files
-__pycache__/
-*.py[cod]
-*.egg-info/
-.eggs/
-*.tgz
-*.tar.gz
-*.ini
+# Quant Trader — Git忽略规则
+# 敏感文件
+.env
+.env.example      # 模板不含真实密钥，但可忽略
+*.token
+*_token*
+quant_trading/.env
+deepcode_config.json   # 含 ${VAR} 占位符或真实密钥
 
-# Virtual Environment
-.venv/
-env/
-venv/
-*.env*
-.env_example
+# 数据库 (包含真实交易数据)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+!test_*.db
 
-
-# Build / Distribution
-dist/
-build/
-site/
-
-# Logs / Reports
-*.log
-*.log.*
-*.logfire
-*.coverage/
-log/
+# 日志
 logs/
+*.log
+*.jsonl
 
-# Node
-node_modules/
-
-# Caches
-.cache/
-.mypy_cache/
+# 缓存
+__pycache__/
+*.pyc
+*.pyo
 .pytest_cache/
-.ruff_cache/
-.gradio/
-.history/
-temp/
+*.pyc.bak
 
-# IDE / Editor Files
+# 日志 (运行时生成)
+logs/
+*.jsonl
+!quant_trading/logs/.gitkeep
+!quant_trading/logs/filebeat.yml
+!quant_trading/logs/logstash.conf
+
+# 报告 (含个人信息)
+reports/*.docx
+reports/*.html
+charts/
+
+# IDE
 .idea/
 .vscode/
-.vscode/settings.json
+*.swp
+*.swo
 
-# Framework-specific files
-local_neo4jWorkDir/
-neo4jWorkDir/
+# 环境
+.venv/
+venv/
+env/
 
-# Data & Storage
-inputs/
-rag_storage/
-examples/input/
-examples/output/
-deepcode-mcp/agent_folders
+# 第三方/大型二进制目录
+claude-code-win32-x64/
+devecostudio-windows-6.1.1.280/
+dzh365/
+node_modules/
+deveco_extract/
+OpenHarmony/
+Huawei/
+nvidia-skills/
+CAD/
+.cn-financial-mcp/
+nanobot/              # 原框架，已移植到 core/
+cn-financial-mcp/     # 独立 MCP 服务，通过 settings.json 引用
+eval/                 # 评估框架
 
-# Miscellaneous
+# 数据文件 (大型)
+data/*.h5
+data/*.parquet
+data/*.feather
+
+# OS
 .DS_Store
-TODO.md
-ignore_this.txt
-*.ignore.*
+Thumbs.db
 
-# scratch test files (but real suites under tests/ ARE tracked)
-test_*
-!tests/test_*
-run_indexer_with_filtering.py
-
-# Cline files
-memory-bank/
-
-# project files
-deepcode_lab/
-uploads/
-
-# secrets (use .env or environment variables instead)
-# NEVER commit real API keys; use the *.example files as templates.
-deepcode_config.json
-nanobot_config.json
-*.secrets.yaml
-*.secrets.yml
-secrets.json
-credentials.json
-*credentials*.json
-.env
-.env.*
-!.env.example
-!*.env.example
+# 报告缓存
+reports/*.json
+reports/*.docx
+reports/*.txt

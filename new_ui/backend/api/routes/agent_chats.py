@@ -62,3 +62,12 @@ async def delete_chat(session_id: str):
     if not agent_chat_service.delete_chat(session_id):
         raise HTTPException(status_code=404, detail="session not found")
     return {"deleted": session_id}
+
+
+@router.get("/{session_id}/model-status")
+async def chat_model_status(session_id: str):
+    """Return the model name and tier (free/paid) for a chat session."""
+    result = agent_chat_service.get_chat_model_status(session_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return result

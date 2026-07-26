@@ -45,6 +45,12 @@ export interface Draft {
   workspace: string
 }
 
+export interface ModelInfo {
+  model: string
+  tier: 'free' | 'paid' | 'unknown'
+  label: string
+}
+
 export function useAgentChat() {
   const [chats, setChats] = useState<ChatSummary[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -52,6 +58,7 @@ export function useAgentChat() {
   const [thread, setThread] = useState<ThreadItem[]>([])
   const [streamText, setStreamText] = useState('')
   const [running, setRunning] = useState(false)
+  const [modelInfo, setModelInfo] = useState<ModelInfo | null>(null)
 
   const streamRef = useRef('')
   const pendingSendRef = useRef<string | null>(null)
@@ -82,6 +89,14 @@ export function useAgentChat() {
         ),
       )
     })
+    // Fetch model status for this chat
+    api.get(`/agent/chats/${activeId}/model-status`).then((res) => {
+      setModelInfo({
+        model: res.data.model,
+        tier: res.data.tier,
+        label: res.data.label,
+      })
+    }).catch(() => setModelInfo(null))
   }, [activeId])
 
   const onEvent = useCallback(
@@ -169,6 +184,7 @@ export function useAgentChat() {
     setStreamText('')
     streamRef.current = ''
     setRunning(false)
+    setModelInfo(null)
     setDraft({ workspace })
   }, [])
 
@@ -187,6 +203,14 @@ export function useAgentChat() {
         )
         setDraft(null)
         setActiveId(res.data.session_id)
+        // Set model info from the creation response
+        if (res.data.model) {
+          setModelInfo({
+            model: res.data.model,
+            tier: res.data.model_tier || 'unknown',
+            label: res.data.model_label || '未知',
+          })
+        }
         await refreshChats()
         return
       }
@@ -233,6 +257,7 @@ export function useAgentChat() {
     running,
     isConnected,
     activeWorkspace,
+    modelInfo,
     selectChat,
     startDraft,
     send,

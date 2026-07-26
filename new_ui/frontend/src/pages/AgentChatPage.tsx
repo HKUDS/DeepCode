@@ -76,6 +76,7 @@ export default function AgentChatPage() {
               running={chat.running}
               onSend={chat.send}
               onInterrupt={chat.interrupt}
+              modelInfo={chat.modelInfo}
               placeholder={
                 isDraft
                   ? 'Describe your first task to start this conversation…'

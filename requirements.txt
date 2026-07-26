@@ -1,31 +1,67 @@
-# Core Dependencies
-aiofiles>=0.8.0
-aiohttp>=3.8.0
-anthropic>=0.40.0
-asyncio-mqtt
-docling
+# ============================================================
+# A-Share Quantitative Trading System — Python Dependencies
+# ============================================================
+# Install: pip install -r requirements.txt
+# Minimum Python: 3.10+
 
-# New UI Backend Dependencies
-fastapi>=0.104.0
-google-genai
-httpx>=0.27.0
-json-repair>=0.30.0
-loguru>=0.7.0
+# Core
+numpy>=1.24,<3.0
+pandas>=2.0,<3.0
+pyyaml>=6.0,<7.0
 
-# DeepCode-native LLM + MCP runtime (replaces legacy mcp-agent)
-mcp>=1.0.0
-mcp-server-git
-nest_asyncio
-openai>=1.55.0
-openapi
-pathlib2
-prompt_toolkit>=3.0.0
-pydantic-settings>=2.0.0
-PyPDF2>=2.0.0
-python-multipart>=0.0.6
-PyYAML>=6.0
-reportlab>=3.5.0
-rich>=13.0.0
-streamlit
-uvicorn>=0.24.0
-websockets>=12.0
+# Data Sources (权威数据源)
+tushare>=1.4            # A股K线/财务 — 注册: https://tushare.pro
+baostock>=0.8.8         # 免费A股数据回退
+akshare>=1.12           # 多源金融数据
+yfinance>=0.2.30        # 美股数据
+
+# Web & API
+fastapi>=0.104          # REST API 框架
+uvicorn>=0.24           # ASGI 服务器
+pydantic>=2.4           # 数据校验
+streamlit>=1.28         # 仪表盘
+plotly>=5.17            # 交互图表
+
+# Reports
+python-docx>=0.8        # Word 报告生成
+
+# Terminal UI
+textual>=0.47
+rich>=13.5
+
+# Backtest (note: backtrader 已归档 2021, 计划迁移 vectorbt)
+backtrader>=1.9.78
+
+# Portfolio Optimization
+pypfopt>=1.5
+
+# Machine Learning
+scikit-learn>=1.3,<1.6
+lightgbm>=4.1,<5.0
+
+# Database
+duckdb>=0.9             # 分析型数据库
+# sqlite3 (Python 内置)
+
+# Monitoring
+prometheus-client>=0.17 # Prometheus 指标导出
+
+# Notebooks (research profile)
+jupyterlab>=4.0
+
+# Testing
+pytest>=7.4
+pytest-cov>=4.1
+
+# Visualization
+matplotlib>=3.5,<4.0
+scipy>=1.7,<2.0
+
+# Utilities
+requests>=2.31,<3.0
+python-dateutil>=2.8,<3.0
+
+# Workflow Engine
+loguru>=0.7          # 结构化日志
+docling>=2.0         # PDF文档转换（workflow 引擎可选依赖）
+PyPDF2>=3.0          # PDF提取回退（workflow 引擎可选依赖）

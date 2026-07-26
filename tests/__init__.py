@@ -1,1 +1,0 @@
-"""DeepCode test package."""

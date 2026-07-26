@@ -41,6 +41,25 @@ from cli.tui.renderer import EventRenderer
 from cli.tui.session_bridge import SessionBridge
 from core.events import Interrupt, UserInput
 
+# ── Model tier detection (mirrors backend get_model_tier) ────────────
+_NVIDIA_FREE_KEYWORDS = {
+    "deepseek-v4-pro", "deepseek-v4", "glm-5.2", "glm-5",
+    "qwen3.5", "qwen3", "minimax-m3", "minimax",
+    "mistral-large", "mistral", "stockmark",
+}
+
+def _model_tier_label(model: str) -> str:
+    """Return a tier badge for the given model name."""
+    lower = model.lower()
+    for kw in _NVIDIA_FREE_KEYWORDS:
+        if kw in lower:
+            return "[bold green]◉ 免费[/]"
+    if any(p in lower for p in ("openai/", "gpt-", "claude", "anthropic")):
+        return "[bold yellow]◉ 付费[/]"
+    if "deepseek" in lower:
+        return "[bold yellow]◉ 付费[/]"
+    return "[dim]◉[/]"
+
 
 class TuiApp:
     """State + REPL loop; slash commands drive it via the public methods."""
@@ -57,10 +76,22 @@ class TuiApp:
         self.max_iterations = max_iterations
         self.console = Console()
         self.renderer = EventRenderer(self.console)
-        self.reader = InputReader(self.workspace)
         self._exit_requested = False
         self._requested_model = model
         self._rebuild_agent(resume_id=resume_id)
+        self.reader = InputReader(self.workspace, self._model_status_str())
+
+    def _model_status_str(self) -> str:
+        """Build the bottom toolbar model status string."""
+        tier = _model_tier_label(self.model)
+        # Strip rich markup for plain toolbar
+        if "green" in tier:
+            label = " NVIDIA 免费"
+        elif "yellow" in tier:
+            label = " 付费 API"
+        else:
+            label = ""
+        return f" {self.model}{label}  │  /model to switch  │  /help for commands"
 
     # -- agent lifecycle ----------------------------------------------------
 
@@ -112,6 +143,8 @@ class TuiApp:
         self.bridge = SessionBridge(
             session_id=current_session, workspace=self.workspace
         )
+        # Update the prompt toolbar with new model info
+        self.reader._model_status = self._model_status_str()
 
     def clear_conversation(self) -> None:
         self.agent.load_history([])
@@ -160,11 +193,12 @@ class TuiApp:
     # -- REPL -----------------------------------------------------------------
 
     def _banner(self) -> None:
+        tier = _model_tier_label(self.model)
         self.console.print(
             Panel.fit(
                 f"[bold {theme.ACCENT}]{theme.BRAND}[/]\n"
-                f"[{theme.META_STYLE}]model[/] {self.model}"
-                f"  [{theme.META_STYLE}]workspace[/] {self.workspace}\n"
+                f"[{theme.META_STYLE}]model[/] {self.model}  {tier}\n"
+                f"[{theme.META_STYLE}]workspace[/] {self.workspace}\n"
                 f"[{theme.META_STYLE}]permission[/] {self.engine.mode.value}"
                 f"  [{theme.META_STYLE}]session[/] {self.bridge.session_id}"
                 f"   [{theme.META_STYLE}]/help for commands[/]",

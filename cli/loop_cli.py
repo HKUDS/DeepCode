@@ -40,13 +40,39 @@ def _run(args: argparse.Namespace) -> int:
     workspace = os.path.abspath(args.workspace)
     os.makedirs(workspace, exist_ok=True)
 
+    # 🧬 MoE 专家路由
+    expert_info = ""
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "quant_trading"))
+        from quant_trading.ml.moe_router import CodeExpertRouter
+        router = CodeExpertRouter()
+        if args.expert == "auto":
+            expert, confidence = router.select_expert(args.goal)
+            expert_info = f"  [grey58]expert[/] {expert.name} ({expert.strength}) [{confidence:.0%}]"
+        elif args.expert == "fix":
+            from quant_trading.ml.moe_router import FixExpert
+            expert = FixExpert()
+            expert_info = f"  [grey58]expert[/] fix (强制)"
+        elif args.expert == "refactor":
+            from quant_trading.ml.moe_router import RefactorExpert
+            expert = RefactorExpert()
+            expert_info = f"  [grey58]expert[/] refactor (强制)"
+        elif args.expert == "write":
+            from quant_trading.ml.moe_router import WriteExpert
+            expert = WriteExpert()
+            expert_info = f"  [grey58]expert[/] write (强制)"
+    except Exception as e:
+        expert_info = f"  [grey58]expert[/] not available ({e})"
+
     console.print(
         Panel.fit(
             "[bold cyan]✳ DeepCode loop[/]\n"
             f"[grey58]goal[/] {args.goal}\n"
             f"[grey58]test[/] {args.test_cmd or '(none)'}"
             f"  [grey58]workspace[/] {workspace}"
-            f"  [grey58]max rounds[/] {args.max_rounds}",
+            f"  [grey58]max rounds[/] {args.max_rounds}\n"
+            f"{expert_info}",
             border_style="grey58",
         )
     )
@@ -88,6 +114,13 @@ def _run(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows encoding fix: force UTF-8 for Rich console output
+    import sys
+    if sys.platform == "win32" and isinstance(sys.stdout, type(None)) is False:
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
     parser = argparse.ArgumentParser(
         prog="deepcode loop",
         description="Autonomously drive a goal to passing tests, round by round.",
@@ -104,6 +137,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", "-m", default=None)
     parser.add_argument("--max-rounds", type=int, default=6)
     parser.add_argument("--max-iterations", type=int, default=40)
+    parser.add_argument("--expert", choices=["auto", "fix", "refactor", "write"],
+                        default="auto", help="Code expert router (🧬 MoE)")
     args = parser.parse_args(argv)
     return _run(args)
 

@@ -3,7 +3,8 @@
  * button becomes an interrupt while a turn is running.
  */
 import { useState } from 'react'
-import { Send, StopCircle } from 'lucide-react'
+import { Send, StopCircle, Cpu } from 'lucide-react'
+import type { ModelInfo } from '../../hooks/useAgentChat'
 
 interface Props {
   disabled: boolean
@@ -11,6 +12,7 @@ interface Props {
   onSend: (text: string) => void
   onInterrupt: () => void
   placeholder?: string
+  modelInfo?: ModelInfo | null
 }
 
 export default function Composer({
@@ -19,6 +21,7 @@ export default function Composer({
   onSend,
   onInterrupt,
   placeholder,
+  modelInfo,
 }: Props) {
   const [value, setValue] = useState('')
 
@@ -28,6 +31,14 @@ export default function Composer({
     onSend(text)
     setValue('')
   }
+
+  const tierBadge = modelInfo
+    ? modelInfo.tier === 'free'
+      ? 'bg-green-100 text-green-700 border-green-300'
+      : modelInfo.tier === 'paid'
+        ? 'bg-amber-100 text-amber-700 border-amber-300'
+        : 'bg-gray-100 text-gray-500 border-gray-300'
+    : 'bg-gray-100 text-gray-400 border-gray-200'
 
   return (
     <div className="border-t border-gray-200 dark:border-gray-800 p-4">
@@ -64,6 +75,22 @@ export default function Composer({
           </button>
         )}
       </div>
+
+      {/* Model status bar */}
+      {modelInfo && (
+        <div className="mx-auto mt-2 flex max-w-3xl items-center gap-2">
+          <span
+            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${tierBadge}`}
+            title={`Current model: ${modelInfo.model}`}
+          >
+            <Cpu size={11} />
+            <span className="max-w-[160px] truncate">{modelInfo.model}</span>
+            <span className="ml-0.5 rounded-full bg-white/60 px-1 text-[10px] font-bold">
+              {modelInfo.tier === 'free' ? '免费' : modelInfo.tier === 'paid' ? '付费' : '?'}
+            </span>
+          </span>
+        </div>
+      )}
     </div>
   )
 }

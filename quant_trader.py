@@ -3230,15 +3230,23 @@ def main():
         console.print(f"  Cache: {stats['total_rows']:,} rows | {stats['codes']} stocks | {stats['size_mb']} MB")
 
     elif cmd == "daily-update":
-        """统一数据库每日更新: Sina EOD → 引擎评分 → 重训 → GRPO → 验证"""
+        """统一数据库每日更新 (早盘仅Tushare数据 → 18点后全套)"""
         import subprocess, os
-        print_header("DAILY UPDATE — 统一数据库每日更新",
-                     "Sina收盘同步 → Batch评分 → 模型重训 → GRPO → 前向验证")
+        hour = datetime.now().hour
         script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                               "quant_trading", "reports", "daily_auto_update.py")
-        args = [sys.executable, script, "--skip-prewarm"]
-        console.print(f"  [{C_CYAN}]启动: {' '.join(args)}[/]")
-        result = subprocess.run(args, cwd=os.path.dirname(os.path.abspath(__file__)))
+        if hour < 18:
+            # 早盘 (<18:00): 仅从Tushare拉取数据，不做评分/模型/GRPO
+            print_header("DAILY UPDATE — 早盘模式 (仅Tushare数据同步)",
+                         "从Tushare拉取日线行情 → 完成")
+            args_list = [sys.executable, script, "--tushare-only"]
+        else:
+            # 晚盘 (>=18:00): 全套 — Sina EOD + 评分 + 重训 + GRPO + 验证
+            print_header("DAILY UPDATE — 全量更新",
+                         "Sina收盘同步 → Batch评分 → 模型重训 → GRPO → 前向验证")
+            args_list = [sys.executable, script, "--skip-prewarm"]
+        console.print(f"  [{C_CYAN}]启动: {' '.join(args_list)}[/]")
+        result = subprocess.run(args_list, cwd=os.path.dirname(os.path.abspath(__file__)))
         if result.returncode == 0:
             console.print(f"\n  [{C_GREEN}]✓ 每日更新完成[/]")
         else:
