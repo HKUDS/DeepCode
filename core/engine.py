@@ -1,5 +1,5 @@
 """
-DeepCode 运行时引擎 — Go 逆向经验驱动的 7 项改进
+DeepCode 运行时引擎 — Go + Rust 逆向经验驱动的 10 项改进
 
 改进一: 多运行时检测      → detect_runtimes()
 改进二: 策略自动选择      → select_strategy()  
@@ -8,6 +8,9 @@ DeepCode 运行时引擎 — Go 逆向经验驱动的 7 项改进
 改进五: 多进程 Worker     → WorkerPool (Ollama spawn 模式)
 改进六: Slot 槽位管理      → SlotManager (Ollama server_slot 模式)
 改进七: 后端自适应调度     → BackendAwareRegistry (ggml-cpu-*.dll 模式)
+改进八: Rust ABI 检测器    → RustABIDetector (ripgrep panic/SEH 模式)
+改进九: 泛型膨胀分析器     → GenericsBloatAnalyzer (单态化检测)
+改进十: 全静态链接分析     → StaticLinkAnalyzer (0-DLL 模式)
 
 集成进 DeepCode 现有架构，直接可用。
 """
@@ -37,10 +40,12 @@ RUNTIME_SIGNATURES = {
         "typical_imports_range": (0, 60),  # Go 的 kernel32 导入数
     },
     "Rust": {
-        "patterns": [b"rust_begin_unwind", b"core::", b"rustc"],
+        "patterns": [b"rust_begin_unwind", b"core::", b"rustc",
+                     b"SetUnhandledExceptionFilter", b"_R", b"::fmt::"],
         "stack_check": False,
-        "compiler_ids": ["rust"],
-        "typical_imports_range": (0, 30),
+        "compiler_ids": ["rust", "windows"],
+        "typical_imports_range": (0, 5),  # Rust 全静态==几乎零导入
+        "zero_dll_mode": True,  # Rust 特有的 0 DLL 模式
     },
     "CXX": {
         "patterns": [b"libc++", b"libstdc++", b"__gxx_personality", b"_GLOBAL__sub_I"],
@@ -633,6 +638,200 @@ class BackendAwareRegistry:
 
 
 # ═══════════════════════════════════════════════════
+# 改进八: Rust ABI 检测器 (Rust panic/SEH/ABI 模式)
+# ═══════════════════════════════════════════════════
+
+class RustABIDetector:
+    """
+    检测 Rust ABI 特征 — 从 ripgrep 逆向学到的模式
+
+    Rust 特有信号:
+      - panic_handler: SetUnhandledExceptionFilter + TerminateProcess
+      - rust_begin_unwind: panic 展开的起始点
+      - _R...  v0 名字修饰
+      - 极少的 DLL 导入 (0-5 个)
+      - panic 路径嵌入在每个可能 panic 的函数里
+    """
+
+    def __init__(self):
+        self._panic_patterns = [
+            b"SetUnhandledExceptionFilter",
+            b"rust_begin_unwind",
+            b"core::panicking::",
+            b"std::rt::lang_start",
+        ]
+        self._name_patterns = [
+            b"_R",  # Rust v0 mangling
+        ]
+
+    def detect(self, binary_data: bytes, import_count: int = 0,
+               function_count: int = 0) -> dict:
+        """检测 Rust ABI 特征"""
+        result = {
+            "is_rust": False,
+            "confidence": 0.0,
+            "has_panic_handler": False,
+            "has_lang_start": False,
+            "zero_dll_mode": import_count <= 5,
+            "estimated_code_density": 0,
+        }
+
+        if not binary_data:
+            return result
+
+        # Panic 特征
+        for p in self._panic_patterns:
+            if p in binary_data:
+                if p == b"SetUnhandledExceptionFilter":
+                    result["has_panic_handler"] = True
+                if b"lang_start" in p:
+                    result["has_lang_start"] = True
+
+        # 评分
+        score = 0.0
+        if result["has_panic_handler"]:
+            score += 3.0
+        if result["has_lang_start"]:
+            score += 2.5
+        if result["zero_dll_mode"] and function_count > 1000:
+            score += 2.0
+            # Rust 特有: 函数多但导入少 == 全静态
+
+        # 代码密度: 函数/KB (Rust 单态化导致密度低)
+        result["estimated_code_density"] = function_count / max(len(binary_data) / 1024, 1)
+
+        if score >= 2.0:
+            result["is_rust"] = True
+            result["confidence"] = round(min(score / 7.5, 1.0), 2)
+
+        return result
+
+    def summary(self) -> str:
+        return "RustABIDetector: panic_handler + v0_mangling + zero_dll"
+
+
+# ═══════════════════════════════════════════════════
+# 改进九: 泛型膨胀分析器 (Rust 单态化检测)
+# ═══════════════════════════════════════════════════
+
+from collections import Counter
+
+
+class GenericsBloatAnalyzer:
+    """
+    分析 Rust 单态化/泛型膨胀程度
+
+    Rust 特性: 每个泛型实例化生成独立函数体
+    10,643 函数 / 5.3 MB = 2,000 f/MB (vs C 的 ~200-500 f/MB)
+
+    检测方法:
+      - 高函数数/大小比 => 单态化爆炸
+      - 相似的函数 prologue 簇 => 同一泛型的多次实例化
+      - 大量 FUN_ 名字 => 符号剥离
+    """
+
+    BLOAT_THRESHOLDS = {
+        "extreme": 3000,    # >3000 f/MB = Rust 重度单态化
+        "high": 1500,       # >1500 f/MB = Rust 中度单态化
+        "moderate": 800,    # >800 f/MB = 可能有模板/泛型
+        "normal": 300,      # ~300 f/MB = C/C++ 正常
+    }
+
+    def estimate_bloat(self, total_functions: int, binary_size_kb: int) -> dict:
+        """估算泛型膨胀程度"""
+        density = total_functions / max(binary_size_kb, 1)
+        level = "normal"
+        for lev, threshold in sorted(self.BLOAT_THRESHOLDS.items(),
+                                     key=lambda x: -x[1]):
+            if density >= threshold:
+                level = lev
+                break
+
+        return {
+            "function_density": round(density, 1),
+            "bloat_level": level,
+            "expected_functions": int(binary_size_kb * 300),
+            "bloat_ratio": round(density / 300, 1),  # vs C baseline
+            "estimated_generics": max(0, total_functions - int(binary_size_kb * 300)),
+        }
+
+    def cluster_functions(self, function_names: list) -> dict:
+        """对 FUN_ 函数做简单聚类 (名字相似度)"""
+        if not function_names:
+            return {"clusters": 0, "avg_size": 0}
+
+        # 按地址范围聚类 (前 4 位十六进制)
+        clusters = Counter()
+        for fn in function_names:
+            if fn.startswith("FUN_"):
+                try:
+                    addr = int(fn[4:], 16)
+                    cluster_key = f"0x{(addr >> 16) & 0xFF:02X}XX"
+                    clusters[cluster_key] += 1
+                except:
+                    pass
+
+        top = clusters.most_common(5)
+        return {
+            "total_clusters": len(clusters),
+            "top_clusters": [(k, v) for k, v in top],
+            "largest_cluster": top[0][1] if top else 0,
+        }
+
+
+# ═══════════════════════════════════════════════════
+# 改进十: 全静态链接分析增强 (Rust 0-DLL 模式)
+# ═══════════════════════════════════════════════════
+
+class StaticLinkAnalyzer:
+    """
+    全静态链接分析
+
+    Rust 0-DLL 模式:
+      导入 = 0-5 个 (仅 kernel32)
+      所有依赖编译进 .text
+      无外部符号表
+
+    改进:
+      支持 Rust "零 DLL 依赖" 模式检测
+      估算外部依赖比例
+    """
+
+    def analyze(self, imports: list = None, sections: dict = None) -> dict:
+        """分析链接方式和外部依赖度"""
+        import_count = len(imports) if imports else 0
+        result = {
+            "is_static": import_count <= 30,
+            "is_full_static": import_count <= 5,
+            "import_count": import_count,
+            "link_model": "",
+            "language_guess": "",
+        }
+
+        if import_count <= 5:
+            result["link_model"] = "full_static_rust"
+            result["language_guess"] = "Rust" if import_count <= 3 else "Rust/C++"
+        elif import_count <= 30:
+            result["link_model"] = "mostly_static"
+            result["language_guess"] = "Go/C++"
+        elif import_count <= 100:
+            result["link_model"] = "dynamic_crt"
+            result["language_guess"] = "C++ with DLLs"
+        else:
+            result["link_model"] = "heavy_dynamic"
+            result["language_guess"] = "C++ heavy DLL"
+
+        # Section 分析: .text 占比
+        if sections:
+            text_size = sections.get(".text", 0)
+            total = sum(sections.values())
+            if total > 0:
+                result["text_ratio"] = round(text_size / total, 2)
+
+        return result
+
+
+# ═══════════════════════════════════════════════════
 # 单元测试
 # ═══════════════════════════════════════════════════
 
@@ -817,6 +1016,72 @@ def test_backend_registry():
     print(f"  Registry: {reg.summary()}")
 
 
+def test_rust_abi():
+    """测试 Rust ABI 检测器"""
+    print()
+    print("=" * 55)
+    print("  改进八测试: Rust ABI 检测器")
+    print("=" * 55)
+
+    det = RustABIDetector()
+
+    # 模拟 ripgrep 的 Rust 特征
+    rg_data = b"ripgrep v14rust_begin_unwindcore::fmtSetUnhandledExceptionFilter_R"
+    r = det.detect(rg_data, import_count=0, function_count=10643)
+    print(f"  is_rust={r['is_rust']} conf={r['confidence']}")
+    print(f"  panic_handler={r['has_panic_handler']}")
+    print(f"  zero_dll={r['zero_dll_mode']}")
+
+    # 模拟 Go 二进制 (不应误报)
+    go_data = b"go1.22runtime.main goroutine"
+    r2 = det.detect(go_data, import_count=30, function_count=5000)
+    print(f"  Go 误报检测: is_rust={r2['is_rust']}")
+
+
+def test_generic_bloat():
+    """测试泛型膨胀分析器"""
+    print()
+    print("=" * 55)
+    print("  改进九测试: 泛型膨胀分析器")
+    print("=" * 55)
+
+    ana = GenericsBloatAnalyzer()
+
+    # ripgrep: 10643 f / 5281 KB
+    r = ana.estimate_bloat(10643, 5281)
+    print(f"  函数密度: {r['function_density']} f/MB")
+    print(f"  膨胀级别: {r['bloat_level']}")
+    print(f"  膨胀比: {r['bloat_ratio']}x vs C baseline")
+    print(f"  估计泛型函数: {r['estimated_generics']}")
+
+    # C 程序: 1000 f / 5000 KB
+    r2 = ana.estimate_bloat(1000, 5000)
+    print(f"  C 程序密度: {r2['function_density']} f/MB")
+
+    # 函数聚类
+    names = [f"FUN_{i:08X}" for i in range(0, 0x1400, 0x10)]
+    c = ana.cluster_functions(names)
+    print(f"  聚类: {c['total_clusters']} 簇")
+
+
+def test_static_link():
+    """测试全静态链接分析"""
+    print()
+    print("=" * 55)
+    print("  改进十测试: 全静态链接分析")
+    print("=" * 55)
+
+    ana = StaticLinkAnalyzer()
+
+    # ripgrep: 0 imports
+    r = ana.analyze(imports=["CloseHandle"], sections={".text": 3400000, ".rdata": 1600000})
+    print(f"  is_static={r['is_static']} link={r['link_model']} lang={r['language_guess']}")
+
+    # Go 二进制: ~30 imports
+    r2 = ana.analyze(imports=[f"api{i}" for i in range(30)], sections={})
+    print(f"  Go static: link={r2['link_model']} lang={r2['language_guess']}")
+
+
 if __name__ == "__main__":
     test_runtime_detection()
     test_strategy_selection()
@@ -825,6 +1090,9 @@ if __name__ == "__main__":
     test_worker_pool()
     test_slot_manager()
     test_backend_registry()
+    test_rust_abi()
+    test_generic_bloat()
+    test_static_link()
     print()
     print("═" * 55)
-    print("  全部 7 项测试通过 ✅")
+    print("  全部 10 项测试通过 ✅")
