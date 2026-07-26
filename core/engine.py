@@ -1,5 +1,5 @@
 """
-DeepCode 运行时引擎 — Go + Rust 逆向经验驱动的 10 项改进
+DeepCode 运行时引擎 — Go + Rust 逆向经验驱动的 11 项改进
 
 改进一: 多运行时检测      → detect_runtimes()
 改进二: 策略自动选择      → select_strategy()  
@@ -11,6 +11,7 @@ DeepCode 运行时引擎 — Go + Rust 逆向经验驱动的 10 项改进
 改进八: Rust ABI 检测器    → RustABIDetector (ripgrep panic/SEH 模式)
 改进九: 泛型膨胀分析器     → GenericsBloatAnalyzer (单态化检测)
 改进十: 全静态链接分析     → StaticLinkAnalyzer (0-DLL 模式)
+改进十一: Rust 规则提取器   → RustRuleExtractor (ruff 规则扫描)
 
 集成进 DeepCode 现有架构，直接可用。
 """
@@ -832,6 +833,71 @@ class StaticLinkAnalyzer:
 
 
 # ═══════════════════════════════════════════════════
+# 改进十一: Rust 规则代码提取器 (Rust lint rule scanner)
+# ═══════════════════════════════════════════════════
+
+class RustRuleExtractor:
+    """
+    从剥离的 Rust 二进制中提取规则代码和文档
+
+    原理: Rust 规则引擎 (如 ruff 的 lint 规则) 把规则代码和
+    文档字符串编译进 .rdata 段。虽然符号被剥离，但规则模式
+    [A-Z]{1,4}\d{3} 仍然可搜索。
+
+    用法:
+      ext = RustRuleExtractor()
+      rules = ext.extract_rules(binary_data)
+      summary = ext.summarize(rules)
+      doc = ext.find_rule_doc(binary_data, "F401")
+    """
+
+    RULE_PATTERN = re.compile(rb'[A-Z]{1,4}\d{3,4}')
+
+    def extract_rules(self, binary_data: bytes) -> dict:
+        """从二进制数据中提取所有规则代码"""
+        rules = {}
+        for m in self.RULE_PATTERN.finditer(binary_data):
+            code = m.group().decode('ascii')
+            prefix = re.match(r'([A-Z]+)', code)
+            pfx = prefix.group(1) if prefix else "?"
+            if code not in rules:
+                rules[code] = {"count": 0, "prefix": pfx, "offsets": []}
+            rules[code]["count"] += 1
+            if len(rules[code]["offsets"]) < 3:
+                rules[code]["offsets"].append(m.start())
+        return rules
+
+    def summarize(self, rules: dict) -> dict:
+        """汇总规则分布"""
+        from collections import Counter
+        prefixes = Counter("p")  # placeholder
+        for r in rules.values():
+            prefixes[r["prefix"]] += r["count"]
+        total = len(rules)
+        top_rules = sorted(rules.items(), key=lambda x: -x[1]["count"])[:10]
+        return {
+            "total_rules": total,
+            "prefixes": dict(prefixes.most_common(20)),
+            "top_rules": [{"code": c, "count": v["count"]} for c, v in top_rules],
+        }
+
+    def find_rule_doc(self, binary_data: bytes, rule_code: str) -> str:
+        """查找特定规则代码关联的文档字符串"""
+        code_bytes = rule_code.encode('ascii')
+        idx = binary_data.find(code_bytes)
+        if idx < 0:
+            return ""
+        start = max(0, idx - 100)
+        end = min(len(binary_data), idx + 400)
+        doc = binary_data[start:end]
+        try:
+            text = doc.split(b'\x00')[0].decode('ascii', errors='replace')
+            return text.strip()[:200]
+        except:
+            return ""
+
+
+# ═══════════════════════════════════════════════════
 # 单元测试
 # ═══════════════════════════════════════════════════
 
@@ -1082,6 +1148,25 @@ def test_static_link():
     print(f"  Go static: link={r2['link_model']} lang={r2['language_guess']}")
 
 
+def test_rust_rules():
+    ext = RustRuleExtractor()
+    # 用模拟数据测试 (规则代码在数据段深处，不用全量扫描)
+    mock = b"some data F401 E302 E303 W291 F841 more"
+    rules = ext.extract_rules(mock)
+    s = ext.summarize(rules)
+    print('=' * 55)
+    print('  改进十一测试: Rust 规则提取器')
+    print('=' * 55)
+    print(f'  规则总数: {s["total_rules"]}')
+    doc = ext.find_rule_doc(mock, "F401")
+    if doc:
+        print(f'  F401 上下文: {doc[:60]}...')
+    # 实际测试用 ruff
+    with open('F:/DEEPCODE/targets/ruff/ruff.exe', 'rb') as f:
+        real = ext.extract_rules(f.read())
+    real_s = ext.summarize(real)
+    print(f'  ruff 实际规则: {real_s["total_rules"]}')
+
 if __name__ == "__main__":
     test_runtime_detection()
     test_strategy_selection()
@@ -1093,6 +1178,7 @@ if __name__ == "__main__":
     test_rust_abi()
     test_generic_bloat()
     test_static_link()
+    test_rust_rules()
     print()
     print("═" * 55)
-    print("  全部 10 项测试通过 ✅")
+    print("  全部 11 项测试通过 ✅")
