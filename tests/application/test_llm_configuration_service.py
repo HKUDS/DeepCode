@@ -50,9 +50,10 @@ def test_connection_write_separates_and_never_projects_secret(
 
     raw_config = config.path.read_text(encoding="utf-8")
     assert secret not in raw_config
-    assert json.loads(raw_config)["providers"]["profiles"]["router-personal"][
-        "template"
-    ] == "openrouter"
+    assert (
+        json.loads(raw_config)["providers"]["profiles"]["router-personal"]["template"]
+        == "openrouter"
+    )
     assert credentials.get("router-personal") == secret
     assert stat.S_IMODE(credentials.path.stat().st_mode) == 0o600
     assert secret not in repr(result)
@@ -67,9 +68,7 @@ def test_connection_write_separates_and_never_projects_secret(
     assert removed["removed"] is True
     assert credentials.get("router-personal") is None
     persisted = json.loads(config.path.read_text())
-    assert "router-personal" not in persisted.get("providers", {}).get(
-        "profiles", {}
-    )
+    assert "router-personal" not in persisted.get("providers", {}).get("profiles", {})
 
 
 def test_environment_precedence_and_named_local_connection(

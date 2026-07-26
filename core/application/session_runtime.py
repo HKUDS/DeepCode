@@ -15,6 +15,7 @@ from core.application.agent_adapter import (
 from core.application.errors import ConflictError, ThreadNotFoundError
 from core.domain.execution_profile import ExecutionProfile
 from core.sessions import Session, SessionStore
+from core.sessions.continuation import session_message_history_entry
 
 
 class ApprovalRouter:
@@ -126,6 +127,18 @@ class SessionRuntimeRegistry:
         if runtime is not None and canonical is not None:
             runtime.canonical_message_count = len(canonical.messages)
 
+    async def discard(self, session_id: str) -> None:
+        """Close and forget one idle runtime after permanent Session deletion."""
+
+        runtime = self._runtimes.pop(session_id, None)
+        if runtime is None:
+            return
+        if runtime.active:
+            self._runtimes[session_id] = runtime
+            raise ConflictError(f"session runtime is active: {session_id}")
+        runtime.approvals.current = None
+        await runtime.agent.aclose()
+
     async def close_all(self) -> None:
         runtimes = tuple(self._runtimes.values())
         self._runtimes.clear()
@@ -218,9 +231,9 @@ class SessionRuntimeRegistry:
             await victim.agent.aclose()
 
     @staticmethod
-    def _visible_history(session: Session) -> list[dict[str, str]]:
+    def _visible_history(session: Session) -> list[dict[str, Any]]:
         return [
-            {"role": message.role, "content": message.content}
+            session_message_history_entry(message)
             for message in session.messages
             if message.role in {"user", "assistant"} and message.content
         ]

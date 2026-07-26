@@ -7,12 +7,19 @@ import type {
   Project,
   SettingsSnapshot,
   Thread,
+  TurnPlan,
+  TurnPlanStep,
   Turn,
   TurnSnapshotResult,
   WorkflowRun,
   WorkflowSnapshotResult,
 } from "../generated/app-server";
 import type { BridgeError, SidecarStatus } from "../rpc/contracts";
+
+export interface TurnPlanState extends TurnPlan {
+  turnId: string;
+  updatedAt: string;
+}
 
 export interface WorkspaceState {
   runtime: SidecarStatus;
@@ -26,6 +33,7 @@ export interface WorkspaceState {
   approvals: Approval[];
   workflows: WorkflowRun[];
   artifacts: Artifact[];
+  plansByTurnId: Record<string, TurnPlanState>;
   goal: Goal | null;
   lastSequence: number;
   entitySequences: Record<string, number>;
@@ -75,6 +83,7 @@ export const initialWorkspaceState: WorkspaceState = {
   approvals: [],
   workflows: [],
   artifacts: [],
+  plansByTurnId: {},
   goal: null,
   lastSequence: 0,
   entitySequences: {},
@@ -101,6 +110,40 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function payloadEntity<T>(event: Event, key: string): T | null {
   const value = event.payload[key];
   return isRecord(value) ? (value as T) : null;
+}
+
+function isPlanStep(value: unknown): value is TurnPlanStep {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.step === "string" &&
+    value.step.trim().length > 0 &&
+    (value.status === "pending" ||
+      value.status === "in_progress" ||
+      value.status === "completed")
+  );
+}
+
+function eventPlan(event: Event): TurnPlanState | null {
+  if (!event.turnId) return null;
+  const value = event.payload.plan;
+  if (!isRecord(value) || !Array.isArray(value.steps)) return null;
+  if (
+    value.explanation !== null &&
+    typeof value.explanation !== "string"
+  ) {
+    return null;
+  }
+  const steps: TurnPlanStep[] = [];
+  for (const candidate of value.steps) {
+    if (!isPlanStep(candidate)) return null;
+    steps.push(candidate);
+  }
+  return {
+    turnId: event.turnId,
+    explanation: value.explanation as string | null,
+    steps,
+    updatedAt: event.timestamp,
+  };
 }
 
 function applyItemDelta(state: WorkspaceState, event: Event): WorkspaceState {
@@ -164,6 +207,28 @@ function applyItemDelta(state: WorkspaceState, event: Event): WorkspaceState {
 function applyDomainEvent(state: WorkspaceState, event: Event): WorkspaceState {
   if (event.type === "item.delta") {
     return applyItemDelta(state, event);
+  }
+  if (event.type === "turn.plan.updated") {
+    const plan = eventPlan(event);
+    const key = event.turnId ? `plan:${event.turnId}` : null;
+    if (!plan || !key || (state.entitySequences[key] ?? 0) >= event.sequence) {
+      return {
+        ...state,
+        lastSequence: Math.max(state.lastSequence, event.sequence),
+      };
+    }
+    return {
+      ...state,
+      plansByTurnId: {
+        ...state.plansByTurnId,
+        [plan.turnId]: plan,
+      },
+      lastSequence: Math.max(state.lastSequence, event.sequence),
+      entitySequences: {
+        ...state.entitySequences,
+        [key]: event.sequence,
+      },
+    };
   }
   if (event.type === "goal.updated") {
     const key = `goal:${event.threadId}`;
@@ -269,6 +334,7 @@ export function workspaceReducer(
         approvals: [],
         workflows: [],
         artifacts: [],
+        plansByTurnId: {},
         goal: null,
         lastSequence: 0,
         entitySequences: {},
@@ -299,6 +365,7 @@ export function workspaceReducer(
         approvals: selected ? [] : state.approvals,
         workflows: selected ? [] : state.workflows,
         artifacts: selected ? [] : state.artifacts,
+        plansByTurnId: selected ? {} : state.plansByTurnId,
         goal: selected ? null : state.goal,
         lastSequence: selected ? 0 : state.lastSequence,
         entitySequences: selected ? {} : state.entitySequences,
@@ -314,6 +381,7 @@ export function workspaceReducer(
         approvals: [],
         workflows: [],
         artifacts: [],
+        plansByTurnId: {},
         goal: null,
         lastSequence: 0,
         entitySequences: {},
@@ -327,6 +395,7 @@ export function workspaceReducer(
         approvals: [],
         workflows: [],
         artifacts: [],
+        plansByTurnId: {},
         goal: null,
         lastSequence: 0,
         entitySequences: {},

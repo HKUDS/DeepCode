@@ -77,3 +77,40 @@ def test_idle_agent_runtime_is_rebuilt_when_configuration_token_changes(
         await registry.close_all()
 
     asyncio.run(exercise())
+
+
+def test_runtime_resume_rehydrates_provider_continuation_state(tmp_path) -> None:
+    store = SessionStore(tmp_path / "sessions")
+    session = store.create_session(
+        title="runtime",
+        metadata={"workspace": str(tmp_path)},
+    )
+    store.append_message(session.session_id, "user", "hello")
+    store.append_message(
+        session.session_id,
+        "assistant",
+        "answer",
+        metadata={
+            "providerState": {"encrypted": "opaque"},
+            "reasoningSummary": "Safe summary",
+        },
+    )
+    factory = _Factory()
+    registry = SessionRuntimeRegistry(store, factory)
+
+    async def exercise() -> None:
+        agent = await registry.acquire(
+            session.session_id,
+            workspace=str(tmp_path),
+            model=None,
+            approval_callback=lambda *_args: False,
+        )
+        assert agent.history[-1] == {
+            "role": "assistant",
+            "content": "answer",
+            "provider_state": {"encrypted": "opaque"},
+            "reasoning_summary": "Safe summary",
+        }
+        await registry.close_all()
+
+    asyncio.run(exercise())

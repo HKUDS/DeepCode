@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.agent_setup import DEFAULT_MAX_ITERATIONS, build_agent_session
 from cli.config_errors import format_config_error
+from cli.execution_options import add_reasoning_effort_argument
 from core.config import ConfigError
 from core.events import UserInput, serialize_event
 from core.skills.management import LocalSkillManager
@@ -64,6 +65,7 @@ async def _run(args: argparse.Namespace) -> int:
             workspace=args.workspace,
             model=args.model,
             connection_id=args.connection,
+            reasoning_effort=args.reasoning_effort,
             max_iterations=args.max_iterations,
         )
     except ConfigError as exc:
@@ -83,9 +85,14 @@ async def _run(args: argparse.Namespace) -> int:
             return 1
 
         if not args.json:
+            effort = (
+                args.reasoning_effort
+                or session.execution_profile.reasoning_effort
+                or "auto"
+            )
             print(
                 f"deepcode exec · model={model} · workspace={workspace} · "
-                f"permission={engine.mode.value}",
+                f"effort={effort} · permission={engine.mode.value}",
                 file=sys.stderr,
                 flush=True,
             )
@@ -133,6 +140,7 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Use a named LLM connection from `deepcode provider list`.",
     )
+    add_reasoning_effort_argument(parser)
     parser.add_argument(
         "--skill",
         action="append",

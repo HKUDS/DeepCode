@@ -65,7 +65,12 @@ class LLMResponse:
     finish_reason: str = "stop"
     usage: dict[str, int] = field(default_factory=dict)
     retry_after: float | None = None
+    # ``reasoning_content`` is provider-internal raw reasoning retained only
+    # when an adapter needs it for same-provider continuation.  Product
+    # surfaces must use ``reasoning_summary`` exclusively.
     reasoning_content: str | None = None
+    reasoning_summary: str | None = None
+    provider_state: dict[str, Any] | None = None
     thinking_blocks: list[dict] | None = None
     error_status_code: int | None = None
     error_kind: str | None = None

@@ -16,9 +16,16 @@ from core.domain.thread import ThreadStatus
 from core.domain.turn import Turn, TurnStatus
 from core.events import (
     AgentMessage,
+    AgentMessageCompleted,
     AgentMessageDelta,
+    AgentMessagePhase,
     Event,
+    PlanStep,
+    PlanStepStatus,
+    PlanUpdated,
     TaskComplete,
+    ToolActivity,
+    ToolActivityKind,
     ToolCompleted,
     ToolStarted,
     TurnStarted,
@@ -102,6 +109,113 @@ class LongStreamingSession(ScriptedSession):
 class LongStreamingFactory(ScriptedFactory):
     def create(self, *, workspace, model, approval_callback):
         session = LongStreamingSession(
+            approval_callback,
+            approval=False,
+            hang=False,
+        )
+        self.sessions.append(session)
+        return session
+
+
+class InterleavedSession(ScriptedSession):
+    async def run_stream(self, _op):
+        self.history.append({"role": "user", "content": _op.text})
+        yield Event("1", TurnStarted())
+        yield Event(
+            "2",
+            AgentMessageDelta(
+                "I will inspect the repository.",
+                message_id="commentary-1",
+            ),
+        )
+        yield Event(
+            "3",
+            AgentMessageCompleted(
+                message_id="commentary-1",
+                text="I will inspect the repository.",
+            ),
+        )
+        yield Event(
+            "4",
+            ToolStarted(
+                "read-1",
+                "read",
+                "src/app.py",
+                ToolActivity(ToolActivityKind.READ, "Read", "src/app.py"),
+            ),
+        )
+        yield Event("5", ToolCompleted("read-1", "read", False, "contents"))
+        yield Event(
+            "6",
+            AgentMessageDelta(
+                "The repository is ready.",
+                message_id="final-1",
+            ),
+        )
+        yield Event(
+            "7",
+            AgentMessageCompleted(
+                message_id="final-1",
+                text="The repository is ready.",
+            ),
+        )
+        yield Event(
+            "8",
+            AgentMessage(
+                "The repository is ready.",
+                message_id="final-1",
+                phase=AgentMessagePhase.FINAL_ANSWER,
+            ),
+        )
+        yield Event("9", TaskComplete("The repository is ready.", "completed"))
+        self.history.append(
+            {"role": "assistant", "content": "The repository is ready."}
+        )
+
+
+class InterleavedFactory(ScriptedFactory):
+    def create(self, *, workspace, model, approval_callback):
+        session = InterleavedSession(
+            approval_callback,
+            approval=False,
+            hang=False,
+        )
+        self.sessions.append(session)
+        return session
+
+
+class PlannedSession(ScriptedSession):
+    async def run_stream(self, _op):
+        self.history.append({"role": "user", "content": _op.text})
+        yield Event("1", TurnStarted())
+        yield Event(
+            "2",
+            ToolStarted(
+                "plan-1",
+                "update_plan",
+                "",
+                ToolActivity(ToolActivityKind.PLAN, "Update plan"),
+            ),
+        )
+        yield Event(
+            "3",
+            PlanUpdated(
+                explanation="Starting",
+                plan=(
+                    PlanStep("Inspect", PlanStepStatus.IN_PROGRESS),
+                    PlanStep("Verify", PlanStepStatus.PENDING),
+                ),
+            ),
+        )
+        yield Event("4", ToolCompleted("plan-1", "update_plan", False, "updated"))
+        yield Event("5", AgentMessage("done"))
+        yield Event("6", TaskComplete("done", "completed"))
+        self.history.append({"role": "assistant", "content": "done"})
+
+
+class PlannedFactory(ScriptedFactory):
+    def create(self, *, workspace, model, approval_callback):
+        session = PlannedSession(
             approval_callback,
             approval=False,
             hang=False,
@@ -200,6 +314,63 @@ def test_streaming_projection_logs_only_new_assistant_text(tmp_path: Path) -> No
         assert replayed == ["item.created", "item.delta", "item.updated"]
     finally:
         reopened.close()
+
+
+def test_projection_preserves_interleaved_message_and_tool_order(
+    tmp_path: Path,
+) -> None:
+    application, thread_id = _application(tmp_path, InterleavedFactory())
+    try:
+        started = application.turns.start(thread_id, prompt="Inspect it")
+        snapshot = _wait_for(application, started.turn.id, TurnStatus.COMPLETED)
+
+        assert [item.kind for item in snapshot.items] == [
+            ItemKind.USER_MESSAGE,
+            ItemKind.ASSISTANT_MESSAGE,
+            ItemKind.TOOL_CALL,
+            ItemKind.ASSISTANT_MESSAGE,
+            ItemKind.COMPLETION,
+        ]
+        commentary, tool, final = snapshot.items[1:4]
+        assert commentary.payload["phase"] == "commentary"
+        assert commentary.payload["messageId"] == "commentary-1"
+        assert tool.payload["activity"] == {
+            "kind": "read",
+            "label": "Read",
+            "subject": "src/app.py",
+        }
+        assert final.payload["phase"] == "final_answer"
+        assert final.payload["messageId"] == "final-1"
+        assert [item.ordinal for item in snapshot.items] == [1, 2, 3, 4, 5]
+    finally:
+        application.close()
+
+
+def test_plan_updates_replay_without_creating_transcript_items(
+    tmp_path: Path,
+) -> None:
+    application, thread_id = _application(tmp_path, PlannedFactory())
+    try:
+        started = application.turns.start(thread_id, prompt="Plan it")
+        snapshot = _wait_for(application, started.turn.id, TurnStatus.COMPLETED)
+
+        assert ItemKind.PLAN not in {item.kind for item in snapshot.items}
+        events = application.events.replay(thread_id, limit=1000)
+        plan_event = next(
+            event for event in events if event.type == "turn.plan.updated"
+        )
+        assert plan_event.turn_id == started.turn.id
+        assert plan_event.payload == {
+            "plan": {
+                "explanation": "Starting",
+                "steps": [
+                    {"step": "Inspect", "status": "in_progress"},
+                    {"step": "Verify", "status": "pending"},
+                ],
+            }
+        }
+    finally:
+        application.close()
 
 
 def test_turns_reuse_one_agent_session_until_application_close(tmp_path: Path) -> None:

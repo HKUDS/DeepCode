@@ -121,9 +121,7 @@ def test_failed_deterministic_verification_cannot_be_overruled() -> None:
     )
     evaluator = GoalEvaluator(FakeTests(_test_result(passed=False)), semantic)
 
-    result = asyncio.run(
-        evaluator.evaluate(_context(verification_command_id="pytest"))
-    )
+    result = asyncio.run(evaluator.evaluate(_context(verification_command_id="pytest")))
 
     assert result.verdict is GoalVerdict.CONTINUE
     assert semantic.calls == 0
@@ -144,9 +142,7 @@ def test_passing_verification_is_preserved_as_semantic_evidence() -> None:
     tests = FakeTests(_test_result(passed=True))
     evaluator = GoalEvaluator(tests, semantic)
 
-    result = asyncio.run(
-        evaluator.evaluate(_context(verification_command_id="pytest"))
-    )
+    result = asyncio.run(evaluator.evaluate(_context(verification_command_id="pytest")))
 
     assert result.verdict is GoalVerdict.COMPLETE
     assert result.evaluator_model == "fake-model"
@@ -168,9 +164,7 @@ def test_semantic_only_goal_does_not_run_a_test_command() -> None:
     tests = FakeTests(_test_result(passed=True))
     evaluator = GoalEvaluator(tests, semantic)
 
-    result = asyncio.run(
-        evaluator.evaluate(_context(verification_command_id=None))
-    )
+    result = asyncio.run(evaluator.evaluate(_context(verification_command_id=None)))
 
     assert result.verdict is GoalVerdict.CONTINUE
     assert tests.calls == 0

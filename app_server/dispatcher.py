@@ -215,7 +215,9 @@ class Dispatcher:
             rpc_methods.THREAD_READ: self._thread_read,
             rpc_methods.THREAD_RENAME: self._thread_rename,
             rpc_methods.THREAD_MODEL: self._thread_model,
+            rpc_methods.THREAD_EXECUTION_UPDATE: self._thread_execution_update,
             rpc_methods.THREAD_ARCHIVE: self._thread_archive,
+            rpc_methods.THREAD_DELETE: self._thread_delete,
             rpc_methods.THREAD_FORK: self._thread_fork,
             rpc_methods.THREAD_GOAL_GET: self._thread_goal_get,
             rpc_methods.THREAD_GOAL_SET: self._thread_goal_set,
@@ -613,6 +615,7 @@ class Dispatcher:
             "mode",
             "connectionId",
             "model",
+            "reasoningEffort",
             "workspacePath",
             "parentThreadId",
         )
@@ -627,6 +630,7 @@ class Dispatcher:
             mode=mode,
             connection_id=params.string("connectionId", required=False),
             model=params.string("model", required=False),
+            reasoning_effort=params.string("reasoningEffort", required=False),
             workspace_path=params.string("workspacePath", required=False),
             parent_thread_id=params.string("parentThreadId", required=False),
         )
@@ -675,12 +679,14 @@ class Dispatcher:
                 ExecutionSelection(
                     connection_id=connection_id,
                     model_id=model,
+                    reasoning_effort=current.reasoning_effort,
                 ),
             )
             thread = self.application.threads.set_execution_selection(
                 thread_id,
                 connection_id=connection_id,
                 model=model,
+                reasoning_effort=current.reasoning_effort,
             )
         else:
             model = params.nullable_string("model")
@@ -689,6 +695,7 @@ class Dispatcher:
                 ExecutionSelection(
                     connection_id=current.connection_id,
                     model_id=model,
+                    reasoning_effort=current.reasoning_effort,
                 ),
             )
             thread = self.application.threads.set_model(
@@ -697,10 +704,43 @@ class Dispatcher:
             )
         return {"thread": thread_view(thread)}
 
+    def _thread_execution_update(self, params: Params) -> dict[str, Any]:
+        """Atomically validate and update the future-Turn execution choice."""
+
+        params.only("threadId", "connectionId", "model", "reasoningEffort")
+        thread_id = str(params.string("threadId"))
+        current = self.application.threads.read(thread_id)
+        connection_id = params.nullable_string("connectionId")
+        model = params.nullable_string("model")
+        reasoning_effort = params.nullable_string("reasoningEffort")
+        self.application.llm.resolve(
+            current.workspace_path,
+            ExecutionSelection(
+                connection_id=connection_id,
+                model_id=model,
+                reasoning_effort=reasoning_effort,
+            ),
+        )
+        thread = self.application.threads.set_execution_selection(
+            thread_id,
+            connection_id=connection_id,
+            model=model,
+            reasoning_effort=reasoning_effort,
+        )
+        return {"thread": thread_view(thread)}
+
     def _thread_archive(self, params: Params) -> dict[str, Any]:
         params.only("threadId")
         thread = self.application.threads.archive(str(params.string("threadId")))
         return {"thread": thread_view(thread)}
+
+    def _thread_delete(self, params: Params) -> dict[str, Any]:
+        params.only("threadId")
+        result = self.application.deletions.delete(str(params.string("threadId")))
+        return {
+            "threadId": result.thread_id,
+            "cleanupPending": result.cleanup_pending,
+        }
 
     def _thread_fork(self, params: Params) -> dict[str, Any]:
         params.only("threadId", "title")
@@ -870,7 +910,14 @@ class Dispatcher:
         return {"goal": None}
 
     def _turn_start(self, params: Params) -> dict[str, Any]:
-        params.only("threadId", "prompt", "skills", "connectionId", "model")
+        params.only(
+            "threadId",
+            "prompt",
+            "skills",
+            "connectionId",
+            "model",
+            "reasoningEffort",
+        )
         snapshot = self.application.turns.start(
             str(params.string("threadId")),
             prompt=str(params.string("prompt")),
@@ -880,11 +927,19 @@ class Dispatcher:
             ),
             connection_id=params.string("connectionId", required=False),
             model=params.string("model", required=False),
+            reasoning_effort=params.string("reasoningEffort", required=False),
         )
         return self._turn_snapshot(snapshot)
 
     def _turn_enqueue(self, params: Params) -> dict[str, Any]:
-        params.only("threadId", "prompt", "skills", "connectionId", "model")
+        params.only(
+            "threadId",
+            "prompt",
+            "skills",
+            "connectionId",
+            "model",
+            "reasoningEffort",
+        )
         snapshot = self.application.turns.enqueue(
             str(params.string("threadId")),
             prompt=str(params.string("prompt")),
@@ -894,6 +949,7 @@ class Dispatcher:
             ),
             connection_id=params.string("connectionId", required=False),
             model=params.string("model", required=False),
+            reasoning_effort=params.string("reasoningEffort", required=False),
         )
         return self._turn_snapshot(snapshot)
 

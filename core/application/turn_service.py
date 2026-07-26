@@ -53,6 +53,7 @@ from core.persistence.execution_repository import (
 from core.persistence.project_repository import ProjectRepository
 from core.persistence.thread_repository import ThreadRepository
 from core.sessions import SessionStore
+from core.sessions.continuation import assistant_continuation_metadata
 from core.skills.models import MAX_SELECTED_SKILLS, SkillInvocation, SkillSelection
 
 
@@ -121,6 +122,7 @@ class TurnService:
         skill_ids: tuple[str, ...] = (),
         connection_id: str | None = None,
         model: str | None = None,
+        reasoning_effort: str | None = None,
         event_observer: Callable[[Event], None] | None = None,
     ) -> TurnSnapshot:
         return self._submit(
@@ -129,6 +131,7 @@ class TurnService:
             skill_ids=skill_ids,
             connection_id=connection_id,
             model=model,
+            reasoning_effort=reasoning_effort,
             queue_if_busy=False,
             event_observer=event_observer,
         )
@@ -152,6 +155,7 @@ class TurnService:
             skill_ids=skill_ids,
             connection_id=None,
             model=None,
+            reasoning_effort=None,
             queue_if_busy=False,
             event_observer=event_observer,
             goal_id=goal_id,
@@ -167,6 +171,7 @@ class TurnService:
         skill_ids: tuple[str, ...] = (),
         connection_id: str | None = None,
         model: str | None = None,
+        reasoning_effort: str | None = None,
         event_observer: Callable[[Event], None] | None = None,
     ) -> TurnSnapshot:
         """Persist a next Turn and run it after earlier Turns settle."""
@@ -177,6 +182,7 @@ class TurnService:
             skill_ids=skill_ids,
             connection_id=connection_id,
             model=model,
+            reasoning_effort=reasoning_effort,
             queue_if_busy=True,
             event_observer=event_observer,
         )
@@ -189,6 +195,7 @@ class TurnService:
         skill_ids: tuple[str, ...],
         connection_id: str | None,
         model: str | None,
+        reasoning_effort: str | None,
         queue_if_busy: bool,
         event_observer: Callable[[Event], None] | None,
         execution_profile_override: ExecutionProfile | None = None,
@@ -242,6 +249,11 @@ class TurnService:
                     ExecutionSelection(
                         connection_id=connection_id or thread.connection_id,
                         model_id=model or thread.model,
+                        reasoning_effort=(
+                            reasoning_effort
+                            if reasoning_effort is not None
+                            else thread.reasoning_effort
+                        ),
                     ),
                 )
             turn = Turn(
@@ -335,6 +347,7 @@ class TurnService:
             skill_ids=original.skill_ids,
             connection_id=None,
             model=None,
+            reasoning_effort=None,
             queue_if_busy=False,
             event_observer=None,
             execution_profile_override=(
@@ -502,6 +515,9 @@ class TurnService:
                 }
             if projection.saw_terminal:
                 if projection.final_text:
+                    continuation_metadata = assistant_continuation_metadata(
+                        getattr(session, "history", ())
+                    )
                     stored_assistant = self.session_store.append_message(
                         turn.thread_id,
                         "assistant",
@@ -511,6 +527,7 @@ class TurnService:
                             "client": "desktop",
                             "turnId": turn.id,
                             "executionProfile": execution_profile.to_dict(),
+                            **continuation_metadata,
                             **goal_metadata,
                             "skillInvocations": [
                                 invocation.to_metadata()
@@ -640,6 +657,13 @@ class TurnService:
 
         await self.session_runtimes.close_all()
 
+    def discard_session_runtime(self, session_id: str) -> None:
+        """Release an idle Agent runtime whose canonical Session was deleted."""
+
+        if session_id not in self.session_runtimes.live_session_ids:
+            return
+        self.registry.run_maintenance(lambda: self.session_runtimes.discard(session_id))
+
     def _mark_running(self, turn_id: str) -> tuple[Turn, str, ExecutionProfile]:
         with self.database.transaction() as connection:
             turns = TurnRepository(connection)
@@ -665,6 +689,7 @@ class TurnService:
                     ExecutionSelection(
                         connection_id=thread.connection_id,
                         model_id=thread.model,
+                        reasoning_effort=thread.reasoning_effort,
                     ),
                 )
                 running = replace(running, execution_profile=profile)

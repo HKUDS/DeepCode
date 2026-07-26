@@ -188,9 +188,7 @@ class GoalCoordinator:
                 owns_evaluation = (
                     latest is not None
                     and latest.turn_id is not None
-                    and self.registry.is_active(
-                        self._evaluation_job_id(latest.turn_id)
-                    )
+                    and self.registry.is_active(self._evaluation_job_id(latest.turn_id))
                 )
                 if not owns_turn and not owns_evaluation:
                     continue
@@ -434,11 +432,7 @@ class GoalCoordinator:
                 None,
             )
         return next(
-            (
-                attempt
-                for attempt in record.attempts
-                if attempt.turn_id == turn.id
-            ),
+            (attempt for attempt in record.attempts if attempt.turn_id == turn.id),
             None,
         )
 

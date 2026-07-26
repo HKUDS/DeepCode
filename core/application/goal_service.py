@@ -137,9 +137,7 @@ class GoalService:
             acceptance_criteria=clean_criteria,
             budget=resolved_budget,
             skill_ids=clean_skills,
-            verification_command_id=self._clean_optional(
-                verification_command_id
-            ),
+            verification_command_id=self._clean_optional(verification_command_id),
             verification_timeout_seconds=self._verification_timeout(
                 verification_timeout_seconds
                 if verification_timeout_seconds is not None
@@ -190,15 +188,11 @@ class GoalService:
             acceptance_criteria=self._criteria(acceptance_criteria),
             budget=budget,
             skill_ids=self._skills(skill_ids),
-            verification_command_id=self._clean_optional(
-                verification_command_id
-            ),
+            verification_command_id=self._clean_optional(verification_command_id),
             verification_timeout_seconds=self._verification_timeout(
                 verification_timeout_seconds
             ),
-            evaluator_connection_id=self._clean_optional(
-                evaluator_connection_id
-            ),
+            evaluator_connection_id=self._clean_optional(evaluator_connection_id),
             evaluator_model_id=self._clean_optional(evaluator_model_id),
             revision=current.goal.revision + 1,
             definition_revision=current.goal.definition_revision + 1,
@@ -323,9 +317,7 @@ class GoalService:
         if attempt is None:
             raise ConflictError(f"Goal Attempt not found: {attempt_id}")
         binding_turn = (
-            status is attempt.status
-            and attempt.turn_id is None
-            and turn_id is not None
+            status is attempt.status and attempt.turn_id is None and turn_id is not None
         )
         if status is attempt.status and not binding_turn:
             if turn_id is None or turn_id == attempt.turn_id:
@@ -483,9 +475,7 @@ class GoalService:
                 "a Goal may contain at most "
                 f"{GOAL_ACCEPTANCE_CRITERIA_MAX_ITEMS} acceptance criteria"
             )
-        if any(
-            len(value) > GOAL_ACCEPTANCE_CRITERION_MAX_CHARS for value in clean
-        ):
+        if any(len(value) > GOAL_ACCEPTANCE_CRITERION_MAX_CHARS for value in clean):
             raise InvalidArgumentError(
                 "each acceptance criterion may contain at most "
                 f"{GOAL_ACCEPTANCE_CRITERION_MAX_CHARS} characters"

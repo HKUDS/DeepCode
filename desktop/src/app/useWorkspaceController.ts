@@ -78,11 +78,13 @@ export interface WorkspaceController {
   selectThread(threadId: string): Promise<void>;
   renameThread(threadId: string, title: string): Promise<void>;
   archiveThread(threadId: string): Promise<void>;
+  deleteThread(threadId: string): Promise<void>;
   registerThread(thread: Thread): void;
   setThreadModel(model: string | null): Promise<void>;
   setThreadExecution(
     connectionId: string | null,
     model: string | null,
+    reasoningEffort: string | null,
   ): Promise<void>;
   setPermissionMode(mode: DesktopPermissionMode): Promise<void>;
   refreshSettings(): Promise<void>;
@@ -419,30 +421,45 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
     [runtime, withBusy],
   );
 
+  const removeThreadLocally = useCallback(
+    async (target: Thread) => {
+      const wasSelected = selectedThreadRef.current === target.id;
+      const remaining = state.threads.filter((thread) => thread.id !== target.id);
+      dispatch({ type: "thread-remove", threadId: target.id });
+      if (!wasSelected) return;
+
+      selectedThreadRef.current = null;
+      localStorage.removeItem(THREAD_KEY);
+      const replacement =
+        remaining
+          .filter((thread) => thread.projectId === target.projectId)
+          .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] ??
+        null;
+      if (replacement) await activateThread(replacement);
+    },
+    [activateThread, state.threads],
+  );
+
   const archiveThread = useCallback(
     (threadId: string) =>
       withBusy(async () => {
         const target = state.threads.find((thread) => thread.id === threadId);
         if (!target) return;
         await runtime.request("thread/archive", { threadId });
-
-        const wasSelected = selectedThreadRef.current === threadId;
-        const remaining = state.threads.filter((thread) => thread.id !== threadId);
-        dispatch({ type: "thread-remove", threadId });
-        if (!wasSelected) return;
-
-        selectedThreadRef.current = null;
-        localStorage.removeItem(THREAD_KEY);
-        const replacement =
-          remaining
-            .filter((thread) => thread.projectId === target.projectId)
-            .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] ??
-          null;
-        if (replacement) {
-          await activateThread(replacement);
-        }
+        await removeThreadLocally(target);
       }),
-    [activateThread, runtime, state.threads, withBusy],
+    [removeThreadLocally, runtime, state.threads, withBusy],
+  );
+
+  const deleteThread = useCallback(
+    (threadId: string) =>
+      withBusy(async () => {
+        const target = state.threads.find((thread) => thread.id === threadId);
+        if (!target) return;
+        await runtime.request("thread/delete", { threadId });
+        await removeThreadLocally(target);
+      }),
+    [removeThreadLocally, runtime, state.threads, withBusy],
   );
 
   const registerThread = useCallback((thread: Thread) => {
@@ -463,13 +480,18 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
   );
 
   const setThreadExecution = useCallback(
-    (connectionId: string | null, model: string | null) =>
+    (
+      connectionId: string | null,
+      model: string | null,
+      reasoningEffort: string | null,
+    ) =>
       withBusy(async () => {
         if (!selectedThread) return;
-        const result = await runtime.request("thread/model", {
+        const result = await runtime.request("thread/execution/update", {
           threadId: selectedThread.id,
           connectionId,
           model,
+          reasoningEffort,
         });
         dispatch({ type: "thread-upsert", thread: result.thread });
       }),
@@ -774,6 +796,7 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
       selectThread,
       renameThread,
       archiveThread,
+      deleteThread,
       registerThread,
       setThreadModel,
       setThreadExecution,
@@ -802,6 +825,7 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
     [
       createThread,
       archiveThread,
+      deleteThread,
       forkThread,
       interrupt,
       interruptTurn,

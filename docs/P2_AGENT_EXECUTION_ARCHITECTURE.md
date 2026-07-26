@@ -133,6 +133,28 @@ loop. This includes queued cancellation callbacks and running Turn finalizers.
 After jobs settle, every live AgentSession is closed on that same loop so its
 AgentControl, tools, hooks, and child resources receive one lifecycle end.
 
+## Model request timeout policy
+
+CLI and Desktop inherit one timeout policy from `AgentRunner` and the provider
+adapters:
+
+- Non-streaming model calls have a 300-second wall-clock deadline, configurable
+  with `DEEPCODE_LLM_TIMEOUT_S`.
+- Streaming calls use an activity deadline instead of that short wall-clock
+  deadline. Every provider event renews the default 90-second idle window,
+  including hidden reasoning events; only user-visible text is projected to
+  clients. Configure the idle window with `DEEPCODE_STREAM_IDLE_TIMEOUT_S`.
+- Active streams have no total runtime limit by default because token limits,
+  interruption, and the idle deadline already bound normal execution. Operators
+  can add a hard ceiling with `DEEPCODE_LLM_STREAM_MAX_RUNTIME_S`; a non-positive
+  value disables it.
+- An explicitly supplied `llm_timeout_s` remains a per-call hard ceiling for
+  compatibility with bounded automation callers.
+
+This separation prevents long reasoning and tool-continuation Turns from being
+cancelled merely because they remain active for more than five minutes, while a
+genuinely stalled connection still fails and enters the normal retry policy.
+
 `SessionStart` therefore fires once per loaded AgentSession, not once per Turn;
 `UserPromptSubmit` and approval context remain Turn-scoped. This matches the
 established CLI session lifecycle without coupling CLI command routing to the

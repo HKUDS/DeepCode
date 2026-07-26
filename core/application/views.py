@@ -318,6 +318,7 @@ def thread_view(thread: Thread) -> dict[str, Any]:
         "status": thread.status.value,
         "model": thread.model,
         "connectionId": thread.connection_id,
+        "reasoningEffort": thread.reasoning_effort,
         "workspacePath": thread.workspace_path,
         "worktreePath": thread.worktree_path,
         "createdAt": timestamp(thread.created_at),

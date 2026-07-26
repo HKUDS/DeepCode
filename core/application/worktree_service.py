@@ -27,6 +27,7 @@ from core.persistence.event_repository import EventRepository
 from core.persistence.execution_repository import TurnRepository
 from core.persistence.project_repository import ProjectRepository
 from core.persistence.thread_repository import ThreadRepository
+from core.sessions import SessionStore
 
 
 MANIFEST_VERSION = 1
@@ -47,16 +48,25 @@ class WorktreeService:
         database: Database,
         broker: EventBroker,
         git: GitService,
+        sessions: SessionStore,
     ) -> None:
         self.database = database
         self.broker = broker
         self.git = git
+        self.sessions = sessions
         self._terminal_activity = lambda _thread_id: False
 
     def set_terminal_activity_check(self, callback) -> None:
         self._terminal_activity = callback
 
     def create(self, thread_id: str) -> WorktreeResult:
+        activity = self.sessions.acquire_activity_lease(thread_id)
+        if activity is None:
+            raise ThreadNotFoundError(f"thread not found: {thread_id}")
+        with activity:
+            return self._create(thread_id)
+
+    def _create(self, thread_id: str) -> WorktreeResult:
         thread, project = self._load(thread_id)
         project_root = Path(project.canonical_path).resolve(strict=True)
         base = self.git.repository_root(project_root)

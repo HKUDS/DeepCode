@@ -7,8 +7,10 @@ import type {
   Item,
   Turn,
 } from "../../generated/app-server";
+import type { TurnPlanState } from "../../app/workspaceState";
 import type { DesktopInspectorTab } from "../../app/useDesktopUi";
 import { buildConversationTurns } from "./conversationModel";
+import { PlanProgress } from "./PlanProgress";
 import styles from "./ThreadConversation.module.css";
 import { TurnBlock } from "./TurnBlock";
 
@@ -16,6 +18,7 @@ interface ThreadConversationProps {
   turns: Turn[];
   items: Item[];
   approvals: Approval[];
+  plansByTurnId: Record<string, TurnPlanState>;
   selectedItemId: string | null;
   busy: boolean;
   onSelectItem(itemId: string): void;
@@ -31,6 +34,7 @@ export function ThreadConversation({
   turns,
   items,
   approvals,
+  plansByTurnId,
   selectedItemId,
   busy,
   onSelectItem,
@@ -51,10 +55,24 @@ export function ThreadConversation({
     () => new Map(approvals.map((approval) => [approval.itemId, approval])),
     [approvals],
   );
+  const activeTurn = useMemo(
+    () =>
+      [...turns]
+        .reverse()
+        .find(
+          (turn) =>
+            turn.status === "queued" ||
+            turn.status === "running" ||
+            turn.status === "waiting_approval",
+        ) ?? null,
+    [turns],
+  );
+  const activePlan = activeTurn ? plansByTurnId[activeTurn.id] ?? null : null;
   const latestItem = items.at(-1);
-  const latestUpdate = latestItem
+  const itemUpdate = latestItem
     ? `${latestItem.id}:${latestItem.status}:${latestItem.updatedAt}:${JSON.stringify(latestItem.payload).length}`
     : `${turns.at(-1)?.id ?? "empty"}:${turns.at(-1)?.status ?? "idle"}`;
+  const latestUpdate = `${itemUpdate}:${activePlan?.updatedAt ?? "no-plan"}`;
   const scrollToLatest = useCallback((behavior: ScrollBehavior) => {
     const viewport = scrollViewportRef.current;
     if (typeof viewport?.scrollTo === "function") {
@@ -119,7 +137,10 @@ export function ThreadConversation({
   }
 
   return (
-    <div className={styles.conversationFrame}>
+    <div
+      className={styles.conversationFrame}
+      data-plan-active={Boolean(activePlan)}
+    >
       <div
         className={styles.conversationScroller}
         aria-label="Thread conversation"
@@ -143,6 +164,12 @@ export function ThreadConversation({
           <div className={styles.conversationEnd} ref={endRef} />
         </div>
       </div>
+
+      {activePlan ? (
+        <div className={styles.planProgressDock}>
+          <PlanProgress plan={activePlan} />
+        </div>
+      ) : null}
 
       {showJumpToLatest ? (
         <button

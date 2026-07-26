@@ -32,12 +32,21 @@ def test_reasoning_precedes_text():
     events = llm_response_to_events(
         LLMResponse(
             content="answer",
-            reasoning_content="thinking...",
+            reasoning_content="private raw chain of thought",
+            reasoning_summary="safe summary",
             finish_reason="stop",
         )
     )
     assert isinstance(events[0], ReasoningDelta)
     assert isinstance(events[1], TextDelta)
+
+
+def test_raw_reasoning_is_never_projected() -> None:
+    events = llm_response_to_events(
+        LLMResponse(content="answer", reasoning_content="private raw chain")
+    )
+
+    assert events == [TextDelta(text="answer")]
 
 
 def test_tool_calls_become_tool_call_end():

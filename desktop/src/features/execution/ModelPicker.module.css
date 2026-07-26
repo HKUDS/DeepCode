@@ -27,7 +27,8 @@
 }
 
 .trigger small,
-.trigger strong {
+.trigger strong,
+.trigger em {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -42,6 +43,12 @@
   color: var(--text-secondary);
   font-size: 9.5px;
   font-weight: 590;
+}
+
+.trigger em {
+  color: var(--text-tertiary);
+  font: 8px/1.1 var(--font-mono);
+  font-style: normal;
 }
 
 .menu {
@@ -233,9 +240,54 @@
   text-align: center;
 }
 
+.effort {
+  display: grid;
+  gap: 9px;
+  padding: 11px 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.effort > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.effort strong {
+  color: var(--text-primary);
+  font-size: 10.5px;
+}
+
+.effort span {
+  color: var(--text-tertiary);
+  font-size: 9px;
+}
+
+.effort > div:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.effort button {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-size: 9.5px;
+}
+
+.effort button:hover,
+.effort button[aria-checked="true"] {
+  border-color: color-mix(in srgb, var(--signal) 50%, var(--border-subtle));
+  background: var(--signal-soft);
+  color: var(--text-primary);
+}
+
 .menu > footer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   gap: 6px;
   padding: 9px;
   border-top: 1px solid var(--border-subtle);
@@ -262,6 +314,16 @@
   color: var(--text-on-accent);
   font-size: 9.5px;
   font-weight: 620;
+}
+
+.menu > footer button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.menu > footer .apply {
+  background: var(--signal);
+  color: var(--text-on-accent);
 }
 
 .menu > footer .reset {

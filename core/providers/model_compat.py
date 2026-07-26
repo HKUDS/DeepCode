@@ -69,10 +69,9 @@ def is_kimi_thinking_model(model_name: str) -> bool:
 
 def normalize_effort(reasoning_effort: str | None) -> str | None:
     """Semantic effort: lowercased, with ``minimum`` folded to ``minimal``."""
-    if not isinstance(reasoning_effort, str):
-        return None
-    effort = reasoning_effort.lower()
-    return "minimal" if effort == "minimum" else effort
+    from core.providers.reasoning import normalize_reasoning_effort
+
+    return normalize_reasoning_effort(reasoning_effort)
 
 
 @dataclass(frozen=True)
@@ -118,9 +117,7 @@ def resolve_model_compat(
         resolved_name = resolved_name.split("/")[-1]
 
     semantic_effort = normalize_effort(reasoning_effort)
-    reasoning_active = (
-        reasoning_effort is not None and reasoning_effort.lower() != "none"
-    )
+    reasoning_active = semantic_effort not in {None, "auto", "none"}
 
     # Temperature: reasoning models reject it while reasoning is active.
     include_temperature = not (reasoning_active and is_reasoning_model(resolved_name))
@@ -141,16 +138,16 @@ def resolve_model_compat(
     ):
         reasoning_effort_wire = "minimum"
 
-    thinking_enabled = semantic_effort != "minimal"
+    thinking_enabled = reasoning_active
 
     # Thinking extra_body: provider-level style OR model-level Kimi injection.
     thinking_extra_body: dict[str, Any] | None = None
     style = getattr(spec, "thinking_style", "") if spec is not None else ""
-    if style and reasoning_effort is not None:
+    if style and semantic_effort not in {None, "auto"}:
         builder = _THINKING_STYLE_BUILDERS.get(style)
         if builder is not None:
             thinking_extra_body = builder(thinking_enabled)
-    if reasoning_effort is not None and is_kimi_thinking_model(resolved_name):
+    if semantic_effort not in {None, "auto"} and is_kimi_thinking_model(resolved_name):
         fragment = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
         if thinking_extra_body:
             thinking_extra_body = {**thinking_extra_body, **fragment}
@@ -158,14 +155,8 @@ def resolve_model_compat(
             thinking_extra_body = fragment
 
     # Empty reasoning_content echo is needed when thinking is actually on.
-    style_thinking_on = (
-        bool(style) and reasoning_effort is not None and thinking_enabled
-    )
-    kimi_thinking_on = (
-        reasoning_effort is not None
-        and is_kimi_thinking_model(resolved_name)
-        and thinking_enabled
-    )
+    style_thinking_on = bool(style) and thinking_enabled
+    kimi_thinking_on = is_kimi_thinking_model(resolved_name) and thinking_enabled
     inject_empty_reasoning_content = style_thinking_on or kimi_thinking_on
 
     overrides: dict[str, Any] = {}

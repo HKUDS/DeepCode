@@ -126,8 +126,8 @@ def llm_response_to_events(response: LLMResponse) -> list[LLMEvent]:
         ]
 
     events: list[LLMEvent] = []
-    if response.reasoning_content:
-        events.append(ReasoningDelta(text=response.reasoning_content))
+    if response.reasoning_summary:
+        events.append(ReasoningDelta(text=response.reasoning_summary))
     if response.content:
         events.append(TextDelta(text=response.content))
     for call in response.tool_calls:

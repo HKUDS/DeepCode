@@ -323,7 +323,7 @@ deepcode provider models personal-openrouter --refresh
 ### 3. 开始编码
 
 ```bash
-deepcode -c personal-openrouter -m moonshotai/kimi-k3
+deepcode -c personal-openrouter -m moonshotai/kimi-k3 --effort low
 ```
 
 也可以无头执行单个任务：
@@ -332,6 +332,7 @@ deepcode -c personal-openrouter -m moonshotai/kimi-k3
 deepcode exec "修复失败的测试，并解释根本原因" \
   --connection personal-openrouter \
   --model moonshotai/kimi-k3 \
+  --effort low \
   --json
 ```
 
@@ -361,6 +362,7 @@ npm run tauri -- dev
 /resume all             列出所有已记录目录的 Sessions
 /resume <id>            恢复一个 Session
 /model [连接] [模型ID]    查看或修改后续 Turn 的模型
+/effort [auto|off|档位]  查看或修改后续 Turn 的 Thinking 强度
 /clear                  清空当前内存上下文
 @src/main.py            将文件附加到下一条提示
 ```
@@ -417,7 +419,8 @@ deepcode provider set company-proxy \
   "agents": {
     "defaults": {
       "connection": "personal-openrouter",
-      "model": "moonshotai/kimi-k3"
+      "model": "moonshotai/kimi-k3",
+      "reasoningEffort": "low"
     }
   }
 }
@@ -425,6 +428,12 @@ deepcode provider set company-proxy \
 
 项目配置可以选择用户已有的连接，但不能替换它的 endpoint、adapter、
 headers 或凭证。
+
+Thinking 档位来自所选模型的 catalog，而不是 DeepCode 内的一份全局硬编码
+列表。`auto` 使用 provider/model 默认值；只有模型允许关闭时才提供 `off`。
+Session 内的切换只影响后续 Turn，不会改写已有历史。DeepCode 不会把原始
+chain-of-thought 渲染成助手正文；界面最多显示 provider 明确提供的安全摘要，
+签名或加密的续接状态只会私下保存在 canonical Session 中。
 
 ### Skills
 

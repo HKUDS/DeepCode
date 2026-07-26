@@ -21,15 +21,24 @@ from core.agent_runtime.tools.base import Tool, tool_parameters  # noqa: E402
 from core.agent_runtime.tools.registry import ToolRegistry  # noqa: E402
 from core.events import (  # noqa: E402
     AgentMessage,
+    AgentMessageCompleted,
+    AgentMessageDelta,
+    AgentMessagePhase,
+    AgentReasoningSummary,
     AgentSession,
+    Event,
     Interrupt,
+    PlanStepStatus,
+    PlanUpdated,
     Shutdown,
     Submission,
     TaskComplete,
     ToolCompleted,
     ToolStarted,
     UserInput,
+    serialize_event,
 )
+from core.harness.tools.plan import UpdatePlanTool  # noqa: E402
 from core.providers.base import LLMResponse, ToolCallRequest  # noqa: E402
 
 
@@ -63,9 +72,31 @@ class ScriptedProvider:
         return self.responses[i]
 
 
+class StreamingTransportProvider(ScriptedProvider):
+    def __init__(self, responses: list[LLMResponse]):
+        super().__init__(responses)
+        self.stream_calls = 0
+
+    async def chat_stream_with_retry(self, **kwargs: Any) -> LLMResponse:
+        self.stream_calls += 1
+        i = min(self.calls, len(self.responses) - 1)
+        self.calls += 1
+        response = self.responses[i]
+        callback = kwargs.get("on_content_delta")
+        if callback is not None and response.content:
+            await callback(response.content)
+        return response
+
+
 def _tools() -> ToolRegistry:
     reg = ToolRegistry()
     reg.register(EchoTool())
+    return reg
+
+
+def _tools_with_plan() -> ToolRegistry:
+    reg = _tools()
+    reg.register(UpdatePlanTool())
     return reg
 
 
@@ -91,6 +122,70 @@ async def test_plain_text_turn_emits_started_message_complete():
     complete = events[-1].msg
     assert isinstance(complete, TaskComplete)
     assert complete.stop_reason == "completed"
+
+
+@pytest.mark.asyncio
+async def test_headless_session_can_use_streaming_transport_without_delta_events():
+    provider = StreamingTransportProvider(
+        [LLMResponse(content="hello", finish_reason="stop")]
+    )
+    session = _session(
+        provider,
+        streaming=False,
+        streaming_transport=True,
+    )
+
+    await session.submit(UserInput(text="hi"))
+    events = session.drain_events()
+
+    assert provider.stream_calls == 1
+    assert _types(events) == ["turn_started", "agent_message", "task_complete"]
+
+
+@pytest.mark.asyncio
+async def test_session_falls_back_for_provider_without_streaming_transport():
+    provider = ScriptedProvider([LLMResponse(content="hello", finish_reason="stop")])
+    session = _session(
+        provider,
+        streaming=False,
+        streaming_transport=True,
+    )
+
+    await session.submit(UserInput(text="hi"))
+    events = session.drain_events()
+
+    assert provider.calls == 1
+    assert _types(events) == ["turn_started", "agent_message", "task_complete"]
+
+
+@pytest.mark.asyncio
+async def test_safe_reasoning_summary_emits_but_raw_reasoning_does_not():
+    provider = ScriptedProvider(
+        [
+            LLMResponse(
+                content="answer",
+                reasoning_content="private raw chain",
+                reasoning_summary="Checked the constraints.",
+                provider_state={"opaque": ["state"]},
+            )
+        ]
+    )
+    session = _session(provider)
+
+    await session.submit(UserInput(text="solve"))
+    events = session.drain_events()
+
+    summaries = [
+        event.msg for event in events if isinstance(event.msg, AgentReasoningSummary)
+    ]
+    assert [message.text for message in summaries] == ["Checked the constraints."]
+    assert "private raw chain" not in repr(events)
+    assistant = next(
+        message
+        for message in reversed(session.history)
+        if message["role"] == "assistant"
+    )
+    assert assistant["provider_state"] == {"opaque": ["state"]}
 
 
 @pytest.mark.asyncio
@@ -120,6 +215,105 @@ async def test_tool_turn_emits_tool_started_and_completed():
     assert started.name == "echo"
     assert completed.is_error is False
     assert kinds[-1] == "task_complete"
+
+
+@pytest.mark.asyncio
+async def test_streaming_turn_preserves_commentary_and_final_message_items():
+    provider = StreamingTransportProvider(
+        [
+            LLMResponse(
+                content="I will inspect the input.",
+                tool_calls=[
+                    ToolCallRequest(id="c1", name="echo", arguments={"text": "x"})
+                ],
+                finish_reason="tool_calls",
+            ),
+            LLMResponse(content="Inspection complete.", finish_reason="stop"),
+        ]
+    )
+    session = _session(provider, streaming=True)
+
+    await session.submit(UserInput(text="inspect"))
+    events = session.drain_events()
+
+    first_delta = next(
+        event.msg
+        for event in events
+        if isinstance(event.msg, AgentMessageDelta)
+        and event.msg.delta == "I will inspect the input."
+    )
+    completions = [
+        event.msg for event in events if isinstance(event.msg, AgentMessageCompleted)
+    ]
+    final = next(event.msg for event in events if isinstance(event.msg, AgentMessage))
+
+    assert len(completions) == 2
+    assert completions[0].message_id == first_delta.message_id
+    assert completions[0].phase is AgentMessagePhase.COMMENTARY
+    assert completions[0].text == "I will inspect the input."
+    assert completions[1].text == "Inspection complete."
+    assert final.message_id == completions[1].message_id
+    assert final.phase is AgentMessagePhase.FINAL_ANSWER
+
+    ordered_types = _types(events)
+    assert ordered_types.index("agent_message_completed") < ordered_types.index(
+        "tool_started"
+    )
+    assert ordered_types.index("tool_completed") < max(
+        index
+        for index, event_type in enumerate(ordered_types)
+        if event_type == "agent_message_completed"
+    )
+
+
+@pytest.mark.asyncio
+async def test_successful_update_plan_emits_structured_plan_state():
+    provider = ScriptedProvider(
+        [
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(
+                        id="plan-1",
+                        name="update_plan",
+                        arguments={
+                            "explanation": "Starting",
+                            "plan": [
+                                {
+                                    "step": "Inspect the repository",
+                                    "status": "in_progress",
+                                },
+                                {"step": "Run tests", "status": "pending"},
+                            ],
+                        },
+                    )
+                ],
+                finish_reason="tool_calls",
+            ),
+            LLMResponse(content="done", finish_reason="stop"),
+        ]
+    )
+    session = AgentSession(
+        provider,
+        _tools_with_plan(),
+        model="fake-model",
+    )
+
+    await session.submit(UserInput(text="make a plan"))
+    events = session.drain_events()
+
+    plan = next(event.msg for event in events if isinstance(event.msg, PlanUpdated))
+    assert plan.explanation == "Starting"
+    assert [item.step for item in plan.plan] == [
+        "Inspect the repository",
+        "Run tests",
+    ]
+    assert [item.status for item in plan.plan] == [
+        PlanStepStatus.IN_PROGRESS,
+        PlanStepStatus.PENDING,
+    ]
+    assert _types(events).index("tool_started") < _types(events).index("plan_updated")
+    assert _types(events).index("plan_updated") < _types(events).index("tool_completed")
 
 
 @pytest.mark.asyncio
@@ -173,6 +367,32 @@ async def test_ids_correlate_and_increase():
     events = session.drain_events()
     ids = [int(e.id) for e in events]
     assert ids == sorted(ids) and len(set(ids)) == len(ids)
+
+
+def test_legacy_cli_serialization_omits_rich_message_metadata():
+    message = Event(
+        id="1",
+        msg=AgentMessage(
+            text="done",
+            message_id="message-1",
+            phase=AgentMessagePhase.FINAL_ANSWER,
+        ),
+        submission_id="submission-1",
+    )
+    delta = Event(
+        id="2",
+        msg=AgentMessageDelta(delta="do", message_id="message-1"),
+        submission_id="submission-1",
+    )
+
+    assert serialize_event(message) == {
+        "id": "1",
+        "msg": {"text": "done", "type": "agent_message"},
+    }
+    assert serialize_event(delta) == {
+        "id": "2",
+        "msg": {"delta": "do", "type": "agent_message_delta"},
+    }
 
 
 @pytest.mark.asyncio

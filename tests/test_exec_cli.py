@@ -101,7 +101,9 @@ def test_exec_human_output(tmp_path, monkeypatch, capsys):
         [LLMResponse(content="all done", finish_reason="stop")]
     )
     _patch(monkeypatch, provider)
-    rc = exec_cli.main(["--workspace", str(tmp_path), "say hello"])
+    rc = exec_cli.main(["--workspace", str(tmp_path), "--effort", "high", "say hello"])
     assert rc == 0
-    out = capsys.readouterr().out
+    captured = capsys.readouterr()
+    out = captured.out
     assert "all done" in out  # agent message rendered
+    assert "effort=high" in captured.err

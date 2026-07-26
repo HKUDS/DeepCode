@@ -32,10 +32,12 @@ from core.persistence.project_repository import ProjectRepository
 from core.persistence.thread_repository import ThreadRepository
 from core.persistence.workflow_repository import WorkflowRepository
 from core.sessions import Session, SessionMessage, SessionStore
+from core.providers.reasoning import normalize_reasoning_effort
 
 
 _DESKTOP_KIND = "desktop"
 _MISSING_WORKSPACE_DIR = ".missing-workspaces"
+_UNSET = object()
 
 
 class ThreadService:
@@ -82,6 +84,7 @@ class ThreadService:
         mode: ThreadMode = ThreadMode.CODE,
         model: str | None = None,
         connection_id: str | None = None,
+        reasoning_effort: str | None = None,
         workspace_path: str | None = None,
         parent_thread_id: str | None = None,
     ) -> Thread:
@@ -113,6 +116,7 @@ class ThreadService:
             if connection_id and connection_id.strip()
             else None
         )
+        resolved_reasoning = normalize_reasoning_effort(reasoning_effort)
         metadata = {
             "kind": _DESKTOP_KIND,
             "workspace": str(workspace),
@@ -120,6 +124,7 @@ class ThreadService:
             "mode": mode.value,
             "model": resolved_model,
             "connection_id": resolved_connection,
+            "reasoning_effort": resolved_reasoning,
             "archived": False,
         }
         if parent_thread_id is not None:
@@ -167,6 +172,9 @@ class ThreadService:
         if session is not None:
             thread, _changed = self._ensure_projection(session)
             return thread
+
+        if self.session_store.is_deletion_pending(thread_id):
+            raise ThreadNotFoundError(f"thread not found: {thread_id}")
 
         # A pre-P6 SQLite-only thread may be encountered before startup
         # reconciliation. Adopt it in place, preserving its existing id.
@@ -232,6 +240,7 @@ class ThreadService:
         *,
         connection_id: str | None,
         model: str | None,
+        reasoning_effort: str | None | object = _UNSET,
     ) -> Thread:
         """Atomically change the selection used by future Turns."""
 
@@ -242,13 +251,15 @@ class ThreadService:
             else None
         )
         resolved_model = model.strip() if model and model.strip() else None
-        if not self.session_store.update_metadata(
-            thread_id,
-            {
-                "connection_id": resolved_connection,
-                "model": resolved_model,
-            },
-        ):
+        metadata: dict[str, str | None] = {
+            "connection_id": resolved_connection,
+            "model": resolved_model,
+        }
+        if reasoning_effort is not _UNSET:
+            metadata["reasoning_effort"] = normalize_reasoning_effort(
+                reasoning_effort if isinstance(reasoning_effort, str) else None
+            )
+        if not self.session_store.update_metadata(thread_id, metadata):
             raise ThreadNotFoundError(f"thread not found: {thread_id}")
         return self._project_updated_session(thread_id, "thread.model_changed")
 
@@ -273,6 +284,11 @@ class ThreadService:
         ):
             raise ThreadNotFoundError(f"thread not found: {thread_id}")
         return self._project_updated_session(thread_id, "thread.archived")
+
+    def forget(self, thread_id: str) -> None:
+        """Drop process-local resume context after permanent deletion."""
+
+        self._workspace_overrides.pop(thread_id, None)
 
     def fork(self, thread_id: str, *, title: str | None = None) -> Thread:
         source = self.session_store.get_session(thread_id)
@@ -332,6 +348,7 @@ class ThreadService:
         mode = self._mode_for(session)
         model = self._model_for(metadata)
         connection_id = self._connection_for(metadata)
+        reasoning_effort = self._reasoning_for(metadata)
         archived = bool(metadata.get("archived"))
         archived_at = (
             self._parse_time(str(metadata.get("archived_at"))) if archived else None
@@ -361,6 +378,7 @@ class ThreadService:
                     status=ThreadStatus.ARCHIVED if archived else ThreadStatus.IDLE,
                     model=model,
                     connection_id=connection_id,
+                    reasoning_effort=reasoning_effort,
                     workspace_path=str(workspace),
                     created_at=canonical_created,
                     updated_at=canonical_updated,
@@ -397,6 +415,7 @@ class ThreadService:
                     status=status,
                     model=model,
                     connection_id=connection_id,
+                    reasoning_effort=reasoning_effort,
                     workspace_path=str(workspace),
                     updated_at=updated_at,
                     archived_at=archived_at,
@@ -532,6 +551,36 @@ class ThreadService:
                 )
             )
             for message, created_at in zip(messages, timestamps, strict=True):
+                reasoning_summary = (message.metadata or {}).get("reasoningSummary")
+                if (
+                    message.role == "assistant"
+                    and isinstance(reasoning_summary, str)
+                    and reasoning_summary.strip()
+                ):
+                    reasoning_item = Item(
+                        thread_id=thread.id,
+                        turn_id=turn.id,
+                        ordinal=items.next_ordinal(turn.id),
+                        kind=ItemKind.REASONING_SUMMARY,
+                        status=ItemStatus.COMPLETED,
+                        summary=reasoning_summary.strip()[:160],
+                        payload={
+                            "text": reasoning_summary.strip(),
+                            "projectedFromSession": True,
+                        },
+                        created_at=created_at,
+                        updated_at=created_at,
+                    )
+                    items.add(reasoning_item)
+                    events.append(
+                        event_repo.append(
+                            thread_id=thread.id,
+                            turn_id=turn.id,
+                            item_id=reasoning_item.id,
+                            type="item.projected",
+                            payload={"item": item_view(reasoning_item)},
+                        )
+                    )
                 item = Item(
                     thread_id=thread.id,
                     turn_id=turn.id,
@@ -742,7 +791,9 @@ class ThreadService:
                 limit=100_000,
             )
         for thread in threads:
-            if self.session_store.get_session(thread.id) is None:
+            if self.session_store.get_session(
+                thread.id
+            ) is None and not self.session_store.is_deletion_pending(thread.id):
                 self._adopt_thread(thread)
 
     def _adopt_thread(self, thread: Thread) -> None:
@@ -776,6 +827,7 @@ class ThreadService:
             "mode": thread.mode.value,
             "model": thread.model,
             "connection_id": thread.connection_id,
+            "reasoning_effort": thread.reasoning_effort,
             "archived": thread.status is ThreadStatus.ARCHIVED,
             "archived_at": (
                 thread.archived_at.isoformat()
@@ -943,6 +995,11 @@ class ThreadService:
         if raw is None:
             return None
         return str(raw).strip().lower() or None
+
+    @staticmethod
+    def _reasoning_for(metadata: dict) -> str | None:
+        raw = metadata.get("reasoning_effort") or metadata.get("reasoningEffort")
+        return normalize_reasoning_effort(str(raw)) if raw is not None else None
 
     @staticmethod
     def _parse_time(raw: str) -> datetime:

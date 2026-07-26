@@ -1,15 +1,31 @@
 import type { Item, Turn } from "../../generated/app-server";
 
+export interface TimelineItemEntry {
+  type: "item";
+  id: string;
+  item: Item;
+}
+
+export interface TimelineActivityGroup {
+  type: "activity_group";
+  id: string;
+  activityKind: "exploration";
+  items: Item[];
+}
+
+export type TimelineEntry = TimelineItemEntry | TimelineActivityGroup;
+
 export interface ConversationTurn {
   id: string;
   turn: Turn | null;
   userMessages: Item[];
-  assistantMessages: Item[];
-  executionItems: Item[];
+  timeline: TimelineEntry[];
   completion: Item | null;
 }
 
-interface MutableConversationTurn extends ConversationTurn {
+interface MutableConversationTurn
+  extends Omit<ConversationTurn, "timeline"> {
+  timelineItems: Item[];
   sortOrdinal: number;
 }
 
@@ -18,11 +34,64 @@ function createGroup(turn: Turn): MutableConversationTurn {
     id: turn.id,
     turn,
     userMessages: [],
-    assistantMessages: [],
-    executionItems: [],
+    timelineItems: [],
     completion: null,
     sortOrdinal: turn.ordinal,
   };
+}
+
+const groupedActivityKinds = new Set(["read", "search", "list"]);
+
+function itemActivityKind(item: Item): string | null {
+  const activity = item.payload.activity;
+  if (
+    typeof activity !== "object" ||
+    activity === null ||
+    Array.isArray(activity)
+  ) {
+    return null;
+  }
+  return typeof activity.kind === "string" ? activity.kind : null;
+}
+
+function canJoinExplorationGroup(item: Item): boolean {
+  const activityKind = itemActivityKind(item);
+  return activityKind !== null && groupedActivityKinds.has(activityKind);
+}
+
+function compactTimeline(items: Item[]): TimelineEntry[] {
+  const entries: TimelineEntry[] = [];
+  let index = 0;
+
+  while (index < items.length) {
+    const item = items[index];
+    if (!canJoinExplorationGroup(item)) {
+      entries.push({ type: "item", id: item.id, item });
+      index += 1;
+      continue;
+    }
+
+    const adjacent: Item[] = [item];
+    let cursor = index + 1;
+    while (cursor < items.length && canJoinExplorationGroup(items[cursor])) {
+      adjacent.push(items[cursor]);
+      cursor += 1;
+    }
+
+    if (adjacent.length === 1) {
+      entries.push({ type: "item", id: item.id, item });
+    } else {
+      entries.push({
+        type: "activity_group",
+        id: `exploration:${item.id}`,
+        activityKind: "exploration",
+        items: adjacent,
+      });
+    }
+    index = cursor;
+  }
+
+  return entries;
 }
 
 export function buildConversationTurns(
@@ -50,8 +119,7 @@ export function buildConversationTurns(
         id: item.turnId,
         turn: null,
         userMessages: [],
-        assistantMessages: [],
-        executionItems: [],
+        timelineItems: [],
         completion: null,
         sortOrdinal: orphanOrdinal,
       };
@@ -61,14 +129,11 @@ export function buildConversationTurns(
       case "user_message":
         group.userMessages.push(item);
         break;
-      case "assistant_message":
-        group.assistantMessages.push(item);
-        break;
       case "completion":
         group.completion = item;
         break;
       default:
-        group.executionItems.push(item);
+        group.timelineItems.push(item);
     }
   }
 
@@ -78,8 +143,7 @@ export function buildConversationTurns(
       id: group.id,
       turn: group.turn,
       userMessages: group.userMessages,
-      assistantMessages: group.assistantMessages,
-      executionItems: group.executionItems,
+      timeline: compactTimeline(group.timelineItems),
       completion: group.completion,
     }));
 }

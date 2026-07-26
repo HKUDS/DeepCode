@@ -11,6 +11,7 @@ import json_repair
 from loguru import logger
 
 from core.providers.base import LLMResponse, ToolCallRequest
+from core.providers.reasoning import OPENAI_RESPONSE_REASONING_ITEMS
 
 FINISH_REASON_MAP = {
     "completed": "stop",
@@ -141,6 +142,7 @@ def parse_response_output(response: Any) -> LLMResponse:
     content_parts: list[str] = []
     tool_calls: list[ToolCallRequest] = []
     reasoning_content: str | None = None
+    reasoning_items: list[dict[str, Any]] = []
 
     for item in output:
         if not isinstance(item, dict):
@@ -156,6 +158,7 @@ def parse_response_output(response: Any) -> LLMResponse:
                 if block.get("type") == "output_text":
                     content_parts.append(block.get("text") or "")
         elif item_type == "reasoning":
+            reasoning_items.append(dict(item))
             for s in item.get("summary") or []:
                 if not isinstance(s, dict):
                     dump = getattr(s, "model_dump", None)
@@ -209,16 +212,28 @@ def parse_response_output(response: Any) -> LLMResponse:
         tool_calls=tool_calls,
         finish_reason=finish_reason,
         usage=usage,
-        reasoning_content=reasoning_content
-        if isinstance(reasoning_content, str)
-        else None,
+        reasoning_summary=(
+            reasoning_content if isinstance(reasoning_content, str) else None
+        ),
+        provider_state=(
+            {OPENAI_RESPONSE_REASONING_ITEMS: reasoning_items}
+            if reasoning_items
+            else None
+        ),
     )
 
 
 async def consume_sdk_stream(
     stream: Any,
     on_content_delta: Callable[[str], Awaitable[None]] | None = None,
-) -> tuple[str, list[ToolCallRequest], str, dict[str, int], str | None]:
+) -> tuple[
+    str,
+    list[ToolCallRequest],
+    str,
+    dict[str, int],
+    str | None,
+    dict[str, Any] | None,
+]:
     """Consume an SDK async stream from ``client.responses.create(stream=True)``."""
     content = ""
     tool_calls: list[ToolCallRequest] = []
@@ -226,6 +241,7 @@ async def consume_sdk_stream(
     finish_reason = "stop"
     usage: dict[str, int] = {}
     reasoning_content: str | None = None
+    reasoning_items: list[dict[str, Any]] = []
 
     async for event in stream:
         event_type = getattr(event, "type", None)
@@ -303,6 +319,10 @@ async def consume_sdk_stream(
                     }
                 for out_item in getattr(resp, "output", None) or []:
                     if getattr(out_item, "type", None) == "reasoning":
+                        dump = getattr(out_item, "model_dump", None)
+                        item_map = dump() if callable(dump) else None
+                        if isinstance(item_map, dict):
+                            reasoning_items.append(item_map)
                         for s in getattr(out_item, "summary", None) or []:
                             if getattr(s, "type", None) == "summary_text":
                                 text = getattr(s, "text", None)
@@ -316,4 +336,14 @@ async def consume_sdk_stream(
             )
             raise RuntimeError(f"Response failed: {str(detail)[:500]}")
 
-    return content, tool_calls, finish_reason, usage, reasoning_content
+    provider_state = (
+        {OPENAI_RESPONSE_REASONING_ITEMS: reasoning_items} if reasoning_items else None
+    )
+    return (
+        content,
+        tool_calls,
+        finish_reason,
+        usage,
+        reasoning_content,
+        provider_state,
+    )

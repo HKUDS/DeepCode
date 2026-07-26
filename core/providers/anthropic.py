@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import os
 import re
 import secrets
 import string
@@ -15,12 +13,40 @@ import json_repair
 
 from core.observability import log_llm_call
 from core.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from core.providers.reasoning import (
+    ANTHROPIC_THINKING_BLOCKS,
+    infer_reasoning_capabilities,
+    normalize_reasoning_effort,
+)
+from core.providers.timeouts import (
+    StreamIdleTimeoutError,
+    iter_with_stream_idle_timeout,
+    resolve_stream_idle_timeout_s,
+    wait_for_stream_activity,
+)
 
 _ALNUM = string.ascii_letters + string.digits
 
 
 def _gen_tool_id() -> str:
     return "toolu_" + "".join(secrets.choice(_ALNUM) for _ in range(22))
+
+
+def _stream_text_delta(event: Any) -> str | None:
+    """Project only visible text while every raw event renews stream activity."""
+
+    delta = (
+        event.get("delta") if isinstance(event, dict) else getattr(event, "delta", None)
+    )
+    delta_type = (
+        delta.get("type") if isinstance(delta, dict) else getattr(delta, "type", None)
+    )
+    if delta_type != "text_delta":
+        return None
+    text = (
+        delta.get("text") if isinstance(delta, dict) else getattr(delta, "text", None)
+    )
+    return text if isinstance(text, str) and text else None
 
 
 class AnthropicProvider(LLMProvider):
@@ -198,7 +224,16 @@ class AnthropicProvider(LLMProvider):
         blocks: list[dict[str, Any]] = []
         content = msg.get("content")
 
-        for tb in msg.get("thinking_blocks") or []:
+        state = msg.get("provider_state")
+        state_blocks = (
+            state.get(ANTHROPIC_THINKING_BLOCKS) if isinstance(state, dict) else None
+        )
+        thinking_blocks = (
+            state_blocks
+            if isinstance(state_blocks, list)
+            else msg.get("thinking_blocks")
+        )
+        for tb in thinking_blocks or []:
             if isinstance(tb, dict) and tb.get("type") == "thinking":
                 blocks.append(
                     {
@@ -414,7 +449,9 @@ class AnthropicProvider(LLMProvider):
             )
 
         max_tokens = max(1, max_tokens)
-        thinking_enabled = bool(reasoning_effort)
+        effort = normalize_reasoning_effort(reasoning_effort)
+        summarized_thinking = self._uses_summarized_thinking(model_name, effort)
+        thinking_enabled = summarized_thinking or effort not in {None, "auto", "none"}
 
         kwargs: dict[str, Any] = {
             "model": model_name,
@@ -425,15 +462,15 @@ class AnthropicProvider(LLMProvider):
         if system:
             kwargs["system"] = system
 
-        if reasoning_effort == "adaptive":
-            # Adaptive thinking: model decides when and how much to think
-            # Supported on claude-sonnet-4-6 and claude-opus-4-6.
-            # Also auto-enables interleaved thinking between tool calls.
-            kwargs["thinking"] = {"type": "adaptive"}
-            kwargs["temperature"] = 1.0
+        if summarized_thinking:
+            # Current Claude reasoning models expose only summarized thinking
+            # to clients while signed blocks are retained for continuation.
+            kwargs["thinking"] = {"type": "adaptive", "display": "summarized"}
+            if effort not in {None, "auto", "adaptive"}:
+                kwargs["output_config"] = {"effort": effort}
         elif thinking_enabled:
             budget_map = {"low": 1024, "medium": 4096, "high": max(8192, max_tokens)}
-            budget = budget_map.get(reasoning_effort.lower(), 4096)
+            budget = budget_map.get(effort or "medium", 4096)
             kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
             kwargs["max_tokens"] = max(max_tokens, budget + 4096)
             kwargs["temperature"] = 1.0
@@ -451,12 +488,28 @@ class AnthropicProvider(LLMProvider):
 
         return kwargs
 
+    @staticmethod
+    def _uses_summarized_thinking(model_name: str, effort: str | None) -> bool:
+        if effort == "none":
+            return False
+        capabilities = infer_reasoning_capabilities(
+            model_name,
+            provider_name="anthropic",
+        )
+        return bool(
+            capabilities
+            and capabilities.supports_summary
+            and (effort not in {None, "auto"} or capabilities.default_enabled)
+        )
+
     # ------------------------------------------------------------------
     # Response parsing
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _parse_response(response: Any) -> LLMResponse:
+    def _parse_response(
+        response: Any, *, expose_reasoning_summary: bool = False
+    ) -> LLMResponse:
         content_parts: list[str] = []
         tool_calls: list[ToolCallRequest] = []
         thinking_blocks: list[dict[str, Any]] = []
@@ -517,6 +570,22 @@ class AnthropicProvider(LLMProvider):
             finish_reason=finish_reason,
             usage=usage,
             thinking_blocks=thinking_blocks or None,
+            reasoning_summary=(
+                "\n\n".join(
+                    block["thinking"]
+                    for block in thinking_blocks
+                    if isinstance(block.get("thinking"), str)
+                    and block["thinking"].strip()
+                )
+                or None
+                if expose_reasoning_summary
+                else None
+            ),
+            provider_state=(
+                {ANTHROPIC_THINKING_BLOCKS: thinking_blocks}
+                if thinking_blocks
+                else None
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -546,7 +615,13 @@ class AnthropicProvider(LLMProvider):
         result: LLMResponse | None = None
         try:
             response = await self._client.messages.create(**kwargs)
-            result = self._parse_response(response)
+            result = self._parse_response(
+                response,
+                expose_reasoning_summary=self._uses_summarized_thinking(
+                    self._strip_prefix(model or self.default_model),
+                    normalize_reasoning_effort(reasoning_effort),
+                ),
+            )
             return result
         except Exception as e:
             result = self._handle_error(e)
@@ -580,33 +655,29 @@ class AnthropicProvider(LLMProvider):
             reasoning_effort,
             tool_choice,
         )
-        idle_timeout_s = int(
-            os.environ.get("DEEPCODE_STREAM_IDLE_TIMEOUT_S")
-            or os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S")
-            or "90"
-        )
+        idle_timeout_s = resolve_stream_idle_timeout_s()
         started = time.monotonic()
         result: LLMResponse | None = None
         try:
             async with self._client.messages.stream(**kwargs) as stream:
-                if on_content_delta:
-                    stream_iter = stream.text_stream.__aiter__()
-                    while True:
-                        try:
-                            text = await asyncio.wait_for(
-                                stream_iter.__anext__(),
-                                timeout=idle_timeout_s,
-                            )
-                        except StopAsyncIteration:
-                            break
+                async for event in iter_with_stream_idle_timeout(
+                    stream, timeout_s=idle_timeout_s
+                ):
+                    text = _stream_text_delta(event)
+                    if text and on_content_delta:
                         await on_content_delta(text)
-                response = await asyncio.wait_for(
-                    stream.get_final_message(),
-                    timeout=idle_timeout_s,
+                response = await wait_for_stream_activity(
+                    stream.get_final_message(), timeout_s=idle_timeout_s
                 )
-            result = self._parse_response(response)
+            result = self._parse_response(
+                response,
+                expose_reasoning_summary=self._uses_summarized_thinking(
+                    self._strip_prefix(model or self.default_model),
+                    normalize_reasoning_effort(reasoning_effort),
+                ),
+            )
             return result
-        except asyncio.TimeoutError:
+        except StreamIdleTimeoutError:
             result = LLMResponse(
                 content=(
                     f"Error calling LLM: stream stalled for more than "

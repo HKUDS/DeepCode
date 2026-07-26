@@ -48,6 +48,7 @@ export function ThreadHeader({
   onToggleInspector,
 }: ThreadHeaderProps) {
   const recoveredHistory = isRecoveredHistoryProject(project);
+  const title = thread?.title ?? "Start a local coding thread";
   return (
     <header className={styles.header}>
       <div className={styles.identity}>
@@ -66,7 +67,9 @@ export function ThreadHeader({
             data-status={thread?.status ?? runtime.phase}
             aria-hidden="true"
           />
-          <h1 id="thread-title">{thread?.title ?? "Start a local coding thread"}</h1>
+          <h1 id="thread-title" title={title}>
+            {title}
+          </h1>
         </div>
       </div>
 

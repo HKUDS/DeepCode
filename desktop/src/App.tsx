@@ -146,6 +146,15 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
           }
           await controller.archiveThread(threadId);
         }}
+        onDeleteThread={async (threadId) => {
+          if (
+            threadId === state.selectedThreadId &&
+            !(await ui.confirmDiscardInspectorDraft())
+          ) {
+            return;
+          }
+          await controller.deleteThread(threadId);
+        }}
       />
 
       <section className={styles.workspace} aria-labelledby="thread-title">
@@ -245,6 +254,7 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
                     turns={state.turns}
                     items={state.items}
                     approvals={state.approvals}
+                    plansByTurnId={state.plansByTurnId}
                     selectedItemId={state.selectedItemId}
                     busy={state.busy}
                     onSelectItem={controller.selectItem}
@@ -294,8 +304,12 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
                 settings={state.settings}
                 goal={state.goal}
                 disabledReason={disabledReason}
-                onModelChange={(connectionId, model) =>
-                  void controller.setThreadExecution(connectionId, model)
+                onModelChange={(connectionId, model, reasoningEffort) =>
+                  void controller.setThreadExecution(
+                    connectionId,
+                    model,
+                    reasoningEffort,
+                  )
                 }
                 onPermissionModeChange={(mode) =>
                   void controller.setPermissionMode(mode)

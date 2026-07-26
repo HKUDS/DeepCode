@@ -25,6 +25,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from cli.goal_runner import GoalRunOptions, run_goal
+from cli.execution_options import add_reasoning_effort_argument
 from core.application.errors import ApplicationError
 from core.config import ConfigError
 from core.domain.goal import GoalStatus
@@ -95,6 +96,7 @@ def _run(args: argparse.Namespace) -> int:
                     verification=args.test_cmd,
                     model=args.model,
                     connection_id=args.connection,
+                    reasoning_effort=args.reasoning_effort,
                     skill_ids=skill_ids,
                     max_attempts=args.max_rounds,
                     max_iterations=args.max_iterations,
@@ -140,6 +142,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--model", "-m", default=None)
     parser.add_argument("--connection", "-c", default=None)
+    add_reasoning_effort_argument(parser)
     parser.add_argument(
         "--skill",
         action="append",

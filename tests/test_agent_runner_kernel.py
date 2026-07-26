@@ -9,6 +9,7 @@ Covers the two mechanism knobs added for the unified implementation loop:
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from core.agent_runtime.runner import AgentRunner, AgentRunSpec  # noqa: E402
+from core.agent_runtime.hook import AgentHook, AgentHookContext  # noqa: E402
 from core.agent_runtime.tools.base import Tool, tool_parameters  # noqa: E402
 from core.agent_runtime.tools.registry import ToolRegistry  # noqa: E402
 from core.providers.base import LLMResponse, ToolCallRequest  # noqa: E402
@@ -59,6 +61,40 @@ class ScriptedProvider:
         index = min(self.calls, len(self.responses) - 1)
         self.calls += 1
         return self.responses[index]
+
+
+class StreamingHook(AgentHook):
+    def __init__(self) -> None:
+        super().__init__()
+        self.deltas: list[str] = []
+
+    def wants_streaming(self) -> bool:
+        return True
+
+    async def on_stream(self, context: AgentHookContext, delta: str) -> None:
+        self.deltas.append(delta)
+
+
+class DelayedStreamingProvider:
+    def __init__(self, delay_s: float) -> None:
+        self.delay_s = delay_s
+        self.calls = 0
+
+    def get_default_model(self) -> str:
+        return "streaming-model"
+
+    async def chat_stream_with_retry(self, **kwargs: Any) -> LLMResponse:
+        self.calls += 1
+        await asyncio.sleep(self.delay_s)
+        callback = kwargs.get("on_content_delta")
+        if callback is not None:
+            await callback("done")
+        return LLMResponse(content="done", finish_reason="stop")
+
+    async def chat_with_retry(self, **kwargs: Any) -> LLMResponse:
+        self.calls += 1
+        await asyncio.sleep(self.delay_s)
+        return LLMResponse(content="done", finish_reason="stop")
 
 
 def _tool_registry() -> ToolRegistry:
@@ -105,6 +141,37 @@ async def test_tool_call_roundtrip_feeds_result_back():
     assert len(tool_messages) == 1
     assert tool_messages[0]["content"] == "echo: hi"
     assert provider.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_streaming_request_is_not_cut_off_by_regular_request_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("DEEPCODE_LLM_TIMEOUT_S", "0.01")
+    monkeypatch.delenv("DEEPCODE_LLM_STREAM_MAX_RUNTIME_S", raising=False)
+    provider = DelayedStreamingProvider(0.03)
+    hook = StreamingHook()
+
+    result = await AgentRunner(provider).run(_spec(provider, hook=hook))
+
+    assert result.stop_reason == "completed"
+    assert result.final_content == "done"
+    assert hook.deltas == ["done"]
+
+
+@pytest.mark.asyncio
+async def test_streaming_request_respects_explicit_safety_cap(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("DEEPCODE_LLM_STREAM_MAX_RUNTIME_S", "0.01")
+    provider = DelayedStreamingProvider(0.03)
+
+    result = await AgentRunner(provider).run(_spec(provider, hook=StreamingHook()))
+
+    assert result.stop_reason == "error"
+    assert result.final_content == (
+        "Error calling LLM: stream exceeded the configured maximum runtime of 0.01s"
+    )
 
 
 @pytest.mark.asyncio

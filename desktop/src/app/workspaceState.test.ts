@@ -63,6 +63,8 @@ describe("workspace event projection", () => {
     mode: "code",
     status: "idle",
     model: null,
+    connectionId: null,
+    reasoningEffort: null,
     workspacePath: "/workspace/project-1",
     worktreePath: null,
     createdAt: "2026-07-16T00:00:00Z",
@@ -185,6 +187,62 @@ describe("workspace event projection", () => {
     expect(projected.lastSequence).toBe(21);
   });
 
+  it("replays structured Turn plans and ignores stale updates", () => {
+    const current = workspaceReducer(initialWorkspaceState, {
+      type: "event",
+      event: {
+        eventId: "event-plan-2",
+        sequence: 22,
+        type: "turn.plan.updated",
+        threadId: turn.threadId,
+        turnId: turn.id,
+        itemId: null,
+        timestamp: "2026-07-16T00:00:02Z",
+        payload: {
+          plan: {
+            explanation: "Implementing",
+            steps: [
+              { step: "Inspect", status: "completed" },
+              { step: "Implement", status: "in_progress" },
+            ],
+          },
+        },
+      },
+    });
+    const stale = workspaceReducer(current, {
+      type: "event",
+      event: {
+        eventId: "event-plan-1",
+        sequence: 21,
+        type: "turn.plan.updated",
+        threadId: turn.threadId,
+        turnId: turn.id,
+        itemId: null,
+        timestamp: "2026-07-16T00:00:01Z",
+        payload: {
+          plan: {
+            explanation: "Starting",
+            steps: [
+              { step: "Inspect", status: "in_progress" },
+              { step: "Implement", status: "pending" },
+            ],
+          },
+        },
+      },
+    });
+
+    expect(stale.plansByTurnId[turn.id]).toEqual({
+      turnId: turn.id,
+      explanation: "Implementing",
+      steps: [
+        { step: "Inspect", status: "completed" },
+        { step: "Implement", status: "in_progress" },
+      ],
+      updatedAt: "2026-07-16T00:00:02Z",
+    });
+    expect(stale.lastSequence).toBe(22);
+  });
+
   it("keeps the global Session index when project context changes", () => {
     const changed = workspaceReducer(
       {
@@ -209,6 +267,14 @@ describe("workspace event projection", () => {
         selectedThreadId: thread.id,
         turns: [turn],
         items: [item("completed", "done")],
+        plansByTurnId: {
+          [turn.id]: {
+            turnId: turn.id,
+            explanation: null,
+            steps: [{ step: "Done", status: "completed" }],
+            updatedAt: "2026-07-16T00:00:00Z",
+          },
+        },
         lastSequence: 4,
       },
       { type: "thread-remove", threadId: thread.id },
@@ -218,6 +284,7 @@ describe("workspace event projection", () => {
     expect(removed.selectedThreadId).toBeNull();
     expect(removed.turns).toEqual([]);
     expect(removed.items).toEqual([]);
+    expect(removed.plansByTurnId).toEqual({});
     expect(removed.lastSequence).toBe(0);
   });
 });

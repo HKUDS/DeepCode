@@ -3,6 +3,7 @@ import {
   Check,
   MoreHorizontal,
   Pencil,
+  Trash2,
   X,
 } from "lucide-react";
 import {
@@ -22,9 +23,10 @@ interface SessionRowProps {
   onSelect(threadId: string): void;
   onRename(threadId: string, title: string): Promise<void>;
   onArchive(threadId: string): Promise<void>;
+  onDelete(threadId: string): Promise<void>;
 }
 
-type RowMode = "closed" | "menu" | "rename" | "archive";
+type RowMode = "closed" | "menu" | "rename" | "archive" | "delete";
 
 export function SessionRow({
   thread,
@@ -33,6 +35,7 @@ export function SessionRow({
   onSelect,
   onRename,
   onArchive,
+  onDelete,
 }: SessionRowProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -177,6 +180,21 @@ export function SessionRow({
             <Archive size={13} />
             Archive
           </button>
+          <button
+            type="button"
+            role="menuitem"
+            className={styles.deleteAction}
+            onClick={() => setMode("delete")}
+            disabled={archiveDisabled}
+            title={
+              archiveDisabled
+                ? "Stop active work before deleting this Session."
+                : undefined
+            }
+          >
+            <Trash2 size={13} />
+            Delete permanently
+          </button>
         </div>
       ) : null}
 
@@ -204,6 +222,37 @@ export function SessionRow({
               }}
             >
               Archive
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {mode === "delete" ? (
+        <div
+          className={styles.confirmation}
+          role="alertdialog"
+          aria-label={`Delete ${thread.title}`}
+        >
+          <p>
+            Permanently delete this Session?
+            <span>
+              Conversation and Goal history will be removed. Workspace files stay untouched.
+            </span>
+          </p>
+          <div>
+            <button type="button" onClick={() => setMode("closed")}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className={styles.confirmDelete}
+              disabled={busy}
+              onClick={() => {
+                setMode("closed");
+                void onDelete(thread.id);
+              }}
+            >
+              Delete permanently
             </button>
           </div>
         </div>

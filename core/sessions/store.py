@@ -35,7 +35,11 @@ from pathlib import Path
 from typing import Iterable
 
 from core.config import deepcode_home
-from core.file_lock import exclusive_file_lock
+from core.file_lock import FileLease, exclusive_file_lock
+from core.sessions.deletion import (
+    SessionDeletionJournal,
+    SessionDeletionTicket,
+)
 from core.sessions.index import SessionIndex
 from core.sessions.models import (
     Session,
@@ -68,6 +72,7 @@ class SessionStore:
             SessionIndex(self.root / "index.db") if use_index else None
         )
         self._disk_signatures: dict[str, tuple[int, int, int, int]] | None = None
+        self._deletions = SessionDeletionJournal(self.root)
 
     # ------------------------------------------------------------------
     # Path helpers
@@ -106,6 +111,10 @@ class SessionStore:
     def _store_lock(self) -> Path:
         return self.root / ".store.lock"
 
+    def _activity_lock(self, session_id: str) -> Path:
+        safe_id = self._validated_session_id(session_id)
+        return self.root / ".activity" / f"{safe_id}.lock"
+
     @contextmanager
     def session_guard(self, session_id: str) -> Iterator[Path | None]:
         """Lock one canonical Session for a bounded companion-data mutation.
@@ -117,7 +126,49 @@ class SessionStore:
 
         with self._lock, exclusive_file_lock(self._session_lock(session_id)):
             directory = self._session_dir(session_id)
-            yield directory if self._session_jsonl(session_id).exists() else None
+            exists = self._session_jsonl(session_id).exists()
+            yield (
+                directory
+                if exists and not self._deletions.pending(session_id)
+                else None
+            )
+
+    @contextmanager
+    def deletion_guard(self, session_id: str) -> Iterator["SessionDeletionGuard"]:
+        """Serialize one permanent deletion with every canonical mutation."""
+
+        safe_id = self._validated_session_id(session_id)
+        with self._lock, exclusive_file_lock(self._session_lock(safe_id)):
+            yield SessionDeletionGuard(self, safe_id)
+
+    def acquire_activity_lease(self, session_id: str) -> FileLease | None:
+        """Keep a Session alive while a CLI or workspace resource owns it."""
+
+        safe_id = self._validated_session_id(session_id)
+        if self.get_session(safe_id) is None:
+            return None
+        lease = FileLease.acquire(self._activity_lock(safe_id), shared=True)
+        assert lease is not None  # blocking acquisition
+        if self.get_session(safe_id) is None:
+            lease.close()
+            return None
+        return lease
+
+    def acquire_deletion_lease(self, session_id: str) -> FileLease | None:
+        """Try to exclude live CLI, terminal, and worktree Session owners."""
+
+        safe_id = self._validated_session_id(session_id)
+        return FileLease.acquire(
+            self._activity_lock(safe_id),
+            shared=False,
+            blocking=False,
+        )
+
+    def is_deletion_pending(self, session_id: str) -> bool:
+        return self._deletions.pending(self._validated_session_id(session_id))
+
+    def pending_deletions(self) -> tuple[SessionDeletionTicket, ...]:
+        return self._deletions.list_pending()
 
     # ------------------------------------------------------------------
     # Create / read
@@ -139,7 +190,7 @@ class SessionStore:
         with self._lock, exclusive_file_lock(self._store_lock()):
             sid = session_id or _new_session_id()
             attempts = 0
-            while self._session_dir(sid).exists():
+            while self._session_dir(sid).exists() or self._deletions.pending(sid):
                 if session_id is not None:
                     raise FileExistsError(f"session already exists: {sid}")
                 sid = _new_session_id()
@@ -161,7 +212,12 @@ class SessionStore:
 
     def get_session(self, session_id: str) -> Session | None:
         """Load a session from disk (cached on subsequent calls)."""
+        session_id = self._validated_session_id(session_id)
         with self._lock:
+            if self._deletions.pending(session_id):
+                self._cache.pop(session_id, None)
+                self._cache_signatures.pop(session_id, None)
+                return None
             signature = self._disk_signature(session_id)
             cached = self._cache.get(session_id)
             if (
@@ -607,7 +663,9 @@ class SessionStore:
         return [
             entry.name
             for entry in self.root.iterdir()
-            if entry.is_dir() and (entry / "session.jsonl").exists()
+            if entry.is_dir()
+            and (entry / "session.jsonl").exists()
+            and not self._deletions.pending(entry.name)
         ]
 
     def _all_disk_signatures(self) -> dict[str, tuple[int, int, int, int]]:
@@ -771,6 +829,60 @@ class SessionStore:
             metadata=dict(metadata.get("metadata") or {}),
         )
         return session
+
+
+class SessionDeletionGuard:
+    """SessionStore-owned mutation handle valid only inside ``deletion_guard``."""
+
+    def __init__(self, store: SessionStore, session_id: str) -> None:
+        self._store = store
+        self.session_id = session_id
+
+    @property
+    def directory(self) -> Path:
+        return self._store._session_dir(self.session_id)
+
+    @property
+    def exists(self) -> bool:
+        return (
+            self._store._session_jsonl(self.session_id).is_file() and not self.pending
+        )
+
+    @property
+    def pending(self) -> bool:
+        return self._store._deletions.pending(self.session_id)
+
+    @property
+    def pending_ticket(self) -> SessionDeletionTicket | None:
+        return self._store._deletions.read(self.session_id)
+
+    def stage(self) -> SessionDeletionTicket:
+        ticket = self._store._deletions.stage(self.session_id, self.directory)
+        self._forget()
+        return ticket
+
+    def ensure_quarantined(self, ticket: SessionDeletionTicket) -> None:
+        self._store._deletions.ensure_quarantined(ticket, self.directory)
+        self._forget()
+
+    def rollback(self, ticket: SessionDeletionTicket) -> None:
+        self._store._deletions.rollback(ticket, self.directory)
+        self._forget()
+        session = self._store.get_session(self.session_id)
+        if session is not None:
+            self._store._index_session(session)
+
+    def finalize(self, ticket: SessionDeletionTicket) -> bool:
+        self._forget()
+        return self._store._deletions.finalize(ticket)
+
+    def _forget(self) -> None:
+        self._store._cache.pop(self.session_id, None)
+        self._store._cache_signatures.pop(self.session_id, None)
+        if self._store._disk_signatures is not None:
+            self._store._disk_signatures.pop(self.session_id, None)
+        if self._store._index is not None:
+            self._store._index.remove_session(self.session_id)
 
 
 # ---------------------------------------------------------------------------

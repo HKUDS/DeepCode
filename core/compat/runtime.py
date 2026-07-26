@@ -149,11 +149,13 @@ class DeepCodeRuntime:
         *,
         connection_id: str | None = None,
         model: str | None = None,
+        reasoning_effort: str | None = None,
         phase: str = "implementation",
     ) -> ExecutionProfile:
         selection = ExecutionSelection(
             connection_id=connection_id,
             model_id=model,
+            reasoning_effort=reasoning_effort,
         )
         connection, resolved_model = self.connection_resolver.resolve_selection(
             selection,
@@ -168,6 +170,7 @@ class DeepCodeRuntime:
                 if cached is not None
                 else None
             ),
+            reasoning_capabilities=(cached.reasoning if cached is not None else None),
         )
 
     def get_provider_config(self, name: str | None = None) -> ProviderConfig | None:

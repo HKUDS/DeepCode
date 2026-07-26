@@ -42,6 +42,7 @@ interface DesktopSidebarProps {
   onSelectThread(threadId: string): void;
   onRenameThread(threadId: string, title: string): Promise<void>;
   onArchiveThread(threadId: string): Promise<void>;
+  onDeleteThread(threadId: string): Promise<void>;
 }
 
 interface SidebarProjectGroup {
@@ -88,6 +89,7 @@ export function DesktopSidebar({
   onSelectThread,
   onRenameThread,
   onArchiveThread,
+  onDeleteThread,
 }: DesktopSidebarProps) {
   const searchRef = useRef<HTMLInputElement | null>(null);
   const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -346,6 +348,7 @@ export function DesktopSidebar({
                   }}
                   onRenameThread={onRenameThread}
                   onArchiveThread={onArchiveThread}
+                  onDeleteThread={onDeleteThread}
                 />
               </section>
             );
@@ -377,6 +380,7 @@ interface ProjectSessionsProps {
   onSelectThread(threadId: string): void;
   onRenameThread(threadId: string, title: string): Promise<void>;
   onArchiveThread(threadId: string): Promise<void>;
+  onDeleteThread(threadId: string): Promise<void>;
 }
 
 function ProjectSessions({
@@ -389,6 +393,7 @@ function ProjectSessions({
   onSelectThread,
   onRenameThread,
   onArchiveThread,
+  onDeleteThread,
 }: ProjectSessionsProps) {
   const [showAll, setShowAll] = useState(false);
 
@@ -425,6 +430,7 @@ function ProjectSessions({
             onSelect={onSelectThread}
             onRename={onRenameThread}
             onArchive={onArchiveThread}
+            onDelete={onDeleteThread}
           />
         ))
       )}

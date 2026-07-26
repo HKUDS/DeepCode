@@ -33,14 +33,17 @@ from rich.markup import escape
 from rich.panel import Panel
 
 from core.agent_setup import DEFAULT_MAX_ITERATIONS, build_agent_session
+from cli.execution_options import add_reasoning_effort_argument
 from cli.config_errors import format_config_error
 from core.config import ConfigError
+from core.file_lock import FileLease
 from cli.tui import commands, theme
 from cli.tui.input import InputReader, expand_file_refs
 from cli.tui.goal_controller import TuiGoalController
 from cli.tui.renderer import EventRenderer
 from cli.tui.session_bridge import SessionBridge
 from core.events import Interrupt, SkillLoaded, TurnStarted, UserInput
+from core.providers.reasoning import normalize_reasoning_effort
 from core.skills.management import LocalSkillManager
 from core.skills.models import SkillSelection
 
@@ -54,6 +57,7 @@ class TuiApp:
         workspace: str,
         model: str | None,
         connection_id: str | None = None,
+        reasoning_effort: str | None = None,
         max_iterations: int,
         resume_id: str | None = None,
     ) -> None:
@@ -65,7 +69,14 @@ class TuiApp:
         self._exit_requested = False
         self._requested_model = model
         self._requested_connection = connection_id
+        self._requested_reasoning_effort = (
+            normalize_reasoning_effort(reasoning_effort)
+            if reasoning_effort is not None
+            else None
+        )
         self.selected_skill_ids: list[str] = []
+        self._session_activity: FileLease | None = None
+        self._leased_session_id: str | None = None
         self._rebuild_agent(resume_id=resume_id)
         self.skill_manager = LocalSkillManager(self.workspace)
         self.goal_controller = TuiGoalController(self)
@@ -85,15 +96,20 @@ class TuiApp:
                 session_id=resume_id,
                 workspace=self.workspace,
             )
-            stored_connection, stored_model = stored_bridge.execution_selection()
+            stored_connection, stored_model, stored_effort = (
+                stored_bridge.execution_selection()
+            )
             if self._requested_connection is None:
                 self._requested_connection = stored_connection
             if self._requested_model is None:
                 self._requested_model = stored_model
+            if self._requested_reasoning_effort is None:
+                self._requested_reasoning_effort = stored_effort
         agent, resolved_model, engine = build_agent_session(
             workspace=self.workspace,
             model=self._requested_model,
             connection_id=self._requested_connection,
+            reasoning_effort=self._requested_reasoning_effort,
             max_iterations=self.max_iterations,
             approval_callback=self._approve,
             # Streaming deltas only make sense on a live terminal; piped
@@ -115,9 +131,23 @@ class TuiApp:
                 workspace=self.workspace,
                 connection_id=profile.connection_id,
                 model=profile.model_id,
+                reasoning_effort=self._requested_reasoning_effort,
             )
             if carry_history:
                 agent.load_history(carry_history)
+        self._lease_session(self.bridge.session_id)
+
+    def _lease_session(self, session_id: str) -> None:
+        if self._leased_session_id == session_id and self._session_activity is not None:
+            return
+        lease = self.bridge.store.acquire_activity_lease(session_id)
+        if lease is None:
+            raise ValueError(f"no such session: {session_id}")
+        previous = self._session_activity
+        self._session_activity = lease
+        self._leased_session_id = session_id
+        if previous is not None:
+            previous.close()
 
     # -- public surface used by slash commands -------------------------------
 
@@ -141,25 +171,48 @@ class TuiApp:
         self._requested_model = model
         if connection_id is not None:
             self._requested_connection = connection_id
-        history = self.agent.history
         current_session = self.bridge.session_id
         old_agent = self.agent
         try:
-            self._rebuild_agent(carry_history=history)
+            self._rebuild_agent(resume_id=current_session)
         except Exception:
             self._requested_model = previous_model
             self._requested_connection = previous_connection
             raise
         await old_agent.aclose()
-        # Keep recording into the same stored session (scoping unchanged).
-        self.bridge = SessionBridge(
-            session_id=current_session, workspace=self.workspace
-        )
         profile = self.agent.execution_profile
         self.bridge.update_execution_selection(
             connection_id=profile.connection_id,
             model=profile.model_id,
+            reasoning_effort=self._requested_reasoning_effort,
         )
+
+    async def switch_reasoning_effort(self, effort: str) -> None:
+        """Change future turns while preserving this Session's history."""
+
+        requested = normalize_reasoning_effort(effort)
+        previous = self._requested_reasoning_effort
+        self._requested_reasoning_effort = requested
+        current_session = self.bridge.session_id
+        old_agent = self.agent
+        try:
+            self._rebuild_agent(resume_id=current_session)
+        except Exception:
+            self._requested_reasoning_effort = previous
+            raise
+        await old_agent.aclose()
+        profile = self.agent.execution_profile
+        self.bridge.update_execution_selection(
+            connection_id=profile.connection_id,
+            model=profile.model_id,
+            reasoning_effort=requested,
+        )
+
+    @property
+    def requested_reasoning_effort(self) -> str:
+        """User-facing selection; ``auto`` means provider/model default."""
+
+        return self._requested_reasoning_effort or "auto"
 
     def clear_conversation(self) -> None:
         self.agent.load_history([])
@@ -276,11 +329,20 @@ class TuiApp:
                 pass
             self.selected_skill_ids.clear()
         if turn_started:
+            assistant_message = next(
+                (
+                    message
+                    for message in reversed(self.agent.history)
+                    if message.get("role") == "assistant"
+                ),
+                None,
+            )
             self.bridge.record_turn(
                 text,
                 final_text,
                 skill_invocations=tuple(invocations.values()),
                 execution_profile=self.agent.execution_profile,
+                assistant_message=assistant_message,
             )
 
     # -- REPL -----------------------------------------------------------------
@@ -292,6 +354,7 @@ class TuiApp:
                 f"[{theme.META_STYLE}]model[/] {self.model}"
                 f"  [{theme.META_STYLE}]workspace[/] {self.workspace}\n"
                 f"[{theme.META_STYLE}]permission[/] {self.engine.mode.value}"
+                f"  [{theme.META_STYLE}]effort[/] {self.requested_reasoning_effort}"
                 f"  [{theme.META_STYLE}]session[/] {self.bridge.session_id}"
                 f"   [{theme.META_STYLE}]/help for commands[/]",
                 border_style=theme.DIM,
@@ -301,29 +364,36 @@ class TuiApp:
     async def repl(self) -> int:
         if self.reader.interactive:
             self._banner()
-        while not self._exit_requested:
-            line = await self.reader.read()
-            if line is None:
-                break
-            text = line.strip()
-            if not text:
-                continue
-            if text.startswith("/"):
-                status = await commands.dispatch(self, text)
-                if status:
-                    # escape(): statuses carry user data (paths, titles) that
-                    # must never be parsed as rich markup. soft_wrap: long
-                    # paths must not be hard-wrapped mid-line.
-                    self.console.print(
-                        f"[{theme.META_STYLE}]{escape(status)}[/]",
-                        soft_wrap=True,
-                        highlight=False,
-                    )
-                continue
-            await self.run_turn(expand_file_refs(text, self.workspace))
-        if self.reader.interactive:
-            self.console.print(f"[{theme.META_STYLE}]bye[/]")
-        return 0
+        try:
+            while not self._exit_requested:
+                line = await self.reader.read()
+                if line is None:
+                    break
+                text = line.strip()
+                if not text:
+                    continue
+                if text.startswith("/"):
+                    status = await commands.dispatch(self, text)
+                    if status:
+                        # escape(): statuses carry user data (paths, titles) that
+                        # must never be parsed as rich markup. soft_wrap: long
+                        # paths must not be hard-wrapped mid-line.
+                        self.console.print(
+                            f"[{theme.META_STYLE}]{escape(status)}[/]",
+                            soft_wrap=True,
+                            highlight=False,
+                        )
+                    continue
+                await self.run_turn(expand_file_refs(text, self.workspace))
+            if self.reader.interactive:
+                self.console.print(f"[{theme.META_STYLE}]bye[/]")
+            return 0
+        finally:
+            await self.agent.aclose()
+            if self._session_activity is not None:
+                self._session_activity.close()
+                self._session_activity = None
+                self._leased_session_id = None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -334,6 +404,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workspace", "-w", default=os.getcwd())
     parser.add_argument("--model", "-m", default=None)
     parser.add_argument("--connection", "-c", default=None)
+    add_reasoning_effort_argument(parser)
     parser.add_argument("--resume", "-r", default=None, help="Session id to resume.")
     parser.add_argument("--max-iterations", type=int, default=DEFAULT_MAX_ITERATIONS)
     args = parser.parse_args(argv)
@@ -343,6 +414,7 @@ def main(argv: list[str] | None = None) -> int:
             workspace=args.workspace,
             model=args.model,
             connection_id=args.connection,
+            reasoning_effort=args.reasoning_effort,
             max_iterations=args.max_iterations,
             resume_id=args.resume,
         )

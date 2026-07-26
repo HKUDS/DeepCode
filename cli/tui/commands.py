@@ -78,7 +78,10 @@ async def _cmd_model(app, args: str) -> str | None:
     wanted = args.strip()
     if not wanted:
         profile = app.agent.execution_profile
-        return f"connection: {profile.connection_id} · model: {app.model}"
+        return (
+            f"connection: {profile.connection_id} · model: {app.model} · "
+            f"effort: {app.requested_reasoning_effort}"
+        )
     connection, separator, model = wanted.partition(" ")
     if not separator:
         model = connection
@@ -92,7 +95,26 @@ async def _cmd_model(app, args: str) -> str | None:
         return f"model switch failed: {exc}"
     return (
         f"model switched to {app.model} on connection "
-        f"{app.agent.execution_profile.connection_id} (history preserved)"
+        f"{app.agent.execution_profile.connection_id} · effort "
+        f"{app.requested_reasoning_effort} (history preserved)"
+    )
+
+
+async def _cmd_effort(app, args: str) -> str | None:
+    wanted = args.strip()
+    if not wanted:
+        profile = app.agent.execution_profile
+        effective = profile.reasoning_effort or "provider default"
+        return f"effort: {app.requested_reasoning_effort} · effective: {effective}"
+    try:
+        await app.switch_reasoning_effort(wanted)
+    except (OSError, ValueError) as exc:
+        return f"effort switch failed: {exc}"
+    profile = app.agent.execution_profile
+    effective = profile.reasoning_effort or "provider default"
+    return (
+        f"effort switched to {app.requested_reasoning_effort} "
+        f"(effective: {effective}; history preserved)"
     )
 
 
@@ -143,6 +165,12 @@ REGISTRY: dict[str, Command] = {
             "/model [connection] [id]",
             "show or switch connection/model",
             _cmd_model,
+        ),
+        Command(
+            "effort",
+            "/effort [auto|off|level]",
+            "show or switch reasoning effort",
+            _cmd_effort,
         ),
         Command("skills", "/skills", "list discovered Skills", _cmd_skills),
         Command(

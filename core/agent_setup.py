@@ -178,6 +178,7 @@ def build_agent_session(
     workspace: str,
     model: str | None = None,
     connection_id: str | None = None,
+    reasoning_effort: str | None = None,
     execution_profile: ExecutionProfile | None = None,
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
     system_prompt: str = SYSTEM_PROMPT,
@@ -187,6 +188,7 @@ def build_agent_session(
     injection_callback: Any | None = None,
     agent_context: tuple[str, str] | None = None,
     streaming: bool = False,
+    streaming_transport: bool = True,
     default_permission_mode: PermissionMode = PermissionMode.FULL_AUTO,
     permission_mode_override: PermissionMode | None = None,
     runtime: DeepCodeRuntime | None = None,
@@ -219,6 +221,7 @@ def build_agent_session(
         resolved_execution = resolver(
             connection_id=connection_id,
             model=model,
+            reasoning_effort=reasoning_effort,
             phase="implementation",
         )
         provider, profile = get_workflow_provider(
@@ -324,6 +327,7 @@ def build_agent_session(
         hooks_engine=hooks_engine,
         agent_context=agent_context,
         streaming=streaming,
+        streaming_transport=streaming_transport,
         skill_runtime=skill_runtime,
         context_window_tokens=resolved_execution.context_window,
         execution_profile=resolved_execution,

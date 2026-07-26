@@ -16,10 +16,10 @@ metadata, and the default listing shows only sessions born in the current
 workspace. ``include_all`` lifts the filter (legacy sessions without a
 recorded workspace, and other frontends' sessions, appear only there).
 
-Resume fidelity: the store keeps the *visible* conversation (user/assistant
-text), not the internal tool-call messages — resuming restores conversational
-context, and the agent re-reads files as needed. This matches the resume
-semantics of comparable CLIs and keeps the on-disk format tool-agnostic.
+Resume fidelity: the store keeps the visible conversation plus opaque,
+provider-authored continuation state. Raw chain-of-thought is never promoted
+to visible history; signed/encrypted provider state is replayed only to the
+provider that produced it.
 """
 
 from __future__ import annotations
@@ -28,6 +28,10 @@ import os
 
 from core.events.session import AgentSession
 from core.sessions import SessionStore, SessionSummary, get_default_store
+from core.sessions.continuation import (
+    assistant_continuation_metadata,
+    session_message_history_entry,
+)
 from core.skills.models import SkillInvocation
 from core.domain.execution_profile import ExecutionProfile
 
@@ -46,6 +50,7 @@ class SessionBridge:
         workspace: str | None = None,
         connection_id: str | None = None,
         model: str | None = None,
+        reasoning_effort: str | None = None,
     ) -> None:
         self.store = store or get_default_store()
         self.workspace = os.path.abspath(workspace) if workspace else None
@@ -62,6 +67,8 @@ class SessionBridge:
                 metadata["connection_id"] = connection_id
             if model:
                 metadata["model"] = model
+            if reasoning_effort:
+                metadata["reasoning_effort"] = reasoning_effort
             self.session_id = self.store.create_session(
                 title=title, metadata=metadata
             ).session_id
@@ -75,6 +82,7 @@ class SessionBridge:
         *,
         skill_invocations: tuple[SkillInvocation, ...] = (),
         execution_profile: ExecutionProfile | None = None,
+        assistant_message: dict | None = None,
     ) -> None:
         """Persist one completed turn. Errors here must never kill the REPL."""
         try:
@@ -101,19 +109,28 @@ class SessionBridge:
                     self.session_id,
                     "assistant",
                     assistant_text,
-                    metadata=metadata,
+                    metadata={
+                        **metadata,
+                        **assistant_continuation_metadata(
+                            [assistant_message] if assistant_message is not None else []
+                        ),
+                    },
                 )
         except Exception:  # noqa: BLE001 - persistence is best-effort
             pass
 
-    def execution_selection(self) -> tuple[str | None, str | None]:
+    def execution_selection(self) -> tuple[str | None, str | None, str | None]:
         stored = self.store.get_session(self.session_id)
         metadata = stored.metadata if stored is not None else {}
         connection = metadata.get("connection_id") or metadata.get("connectionId")
         model = metadata.get("model")
+        reasoning_effort = metadata.get("reasoning_effort") or metadata.get(
+            "reasoningEffort"
+        )
         return (
             str(connection).strip().lower() if connection else None,
             str(model).strip() if model else None,
+            str(reasoning_effort).strip().lower() if reasoning_effort else None,
         )
 
     def update_execution_selection(
@@ -121,12 +138,14 @@ class SessionBridge:
         *,
         connection_id: str | None,
         model: str | None,
+        reasoning_effort: str | None,
     ) -> None:
         self.store.update_metadata(
             self.session_id,
             {
                 "connection_id": connection_id,
                 "model": model,
+                "reasoning_effort": reasoning_effort,
             },
         )
 
@@ -148,7 +167,7 @@ class SessionBridge:
         if stored is None:
             return 0
         history = [
-            {"role": m.role, "content": m.content}
+            session_message_history_entry(m)
             for m in stored.messages
             if m.role in ("user", "assistant") and m.content
         ]

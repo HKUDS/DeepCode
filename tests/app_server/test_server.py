@@ -135,6 +135,50 @@ def test_thread_list_and_resume_use_the_shared_session_store(tmp_path: Path) -> 
     assert source_path.read_bytes() == source_before
 
 
+def test_thread_delete_removes_the_shared_session_through_json_rpc(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    sessions = SessionStore(tmp_path / "sessions")
+    application = DeepCodeApplication.open(
+        tmp_path / "state.sqlite3",
+        session_store=sessions,
+    )
+    project = application.projects.add(str(workspace))
+    thread = application.threads.start(project.id, title="Delete through Desktop")
+    sessions.append_message(thread.id, "user", "temporary history")
+    source = io.BytesIO(
+        _request(
+            1,
+            "initialize",
+            {
+                "protocolVersion": "1.0",
+                "clientInfo": {"name": "deletion-test", "version": "1.0"},
+            },
+        )
+        + _request(2, "thread/delete", {"threadId": thread.id})
+        + _request(3, "thread/read", {"threadId": thread.id})
+        + _request(4, "shutdown", {})
+    )
+    sink = io.BytesIO()
+
+    try:
+        assert AppServer(application).serve(source, sink) == 0
+        responses = {
+            message["id"]: message for message in _messages(sink) if "id" in message
+        }
+        assert "thread/delete" in responses[1]["result"]["capabilities"]["methods"]
+        assert responses[2]["result"] == {
+            "threadId": thread.id,
+            "cleanupPending": False,
+        }
+        assert responses[3]["error"]["data"]["code"] == "THREAD_NOT_FOUND"
+        assert sessions.get_session(thread.id) is None
+    finally:
+        application.close()
+
+
 def test_thread_goal_protocol_uses_the_canonical_session_ledger(
     tmp_path: Path,
 ) -> None:
@@ -282,7 +326,7 @@ def test_connection_and_model_protocol_is_shared_secret_safe_state(
                     "template": "openrouter",
                     "apiKey": secret,
                     "modelCatalog": "manual",
-                    "manualModels": ["moonshotai/kimi-k2.6"],
+                    "manualModels": ["moonshotai/kimi-k3"],
                 }
             },
         )
@@ -294,11 +338,12 @@ def test_connection_and_model_protocol_is_shared_secret_safe_state(
         )
         + _request(
             5,
-            "thread/model",
+            "thread/execution/update",
             {
                 "threadId": thread.id,
                 "connectionId": "router-rpc",
-                "model": "moonshotai/kimi-k2.6",
+                "model": "moonshotai/kimi-k3",
+                "reasoningEffort": "high",
             },
         )
         + _request(6, "provider/remove", {"connectionId": "router-rpc"})
@@ -328,10 +373,16 @@ def test_connection_and_model_protocol_is_shared_secret_safe_state(
         )
         == upserted
     )
-    assert [model["id"] for model in responses[4]["models"]] == ["moonshotai/kimi-k2.6"]
+    assert [model["id"] for model in responses[4]["models"]] == ["moonshotai/kimi-k3"]
+    assert responses[4]["models"][0]["reasoning"]["supportedEfforts"] == [
+        "low",
+        "high",
+        "max",
+    ]
     assert responses[4]["source"] == "manual"
     assert responses[5]["thread"]["connectionId"] == "router-rpc"
-    assert responses[5]["thread"]["model"] == "moonshotai/kimi-k2.6"
+    assert responses[5]["thread"]["model"] == "moonshotai/kimi-k3"
+    assert responses[5]["thread"]["reasoningEffort"] == "high"
     assert responses[6]["removed"] is True
 
     persisted = json.loads((home / "deepcode_config.json").read_text())
@@ -340,7 +391,8 @@ def test_connection_and_model_protocol_is_shared_secret_safe_state(
     canonical = application.session_store.get_session(thread.id)
     assert canonical is not None
     assert canonical.metadata["connection_id"] == "router-rpc"
-    assert canonical.metadata["model"] == "moonshotai/kimi-k2.6"
+    assert canonical.metadata["model"] == "moonshotai/kimi-k3"
+    assert canonical.metadata["reasoning_effort"] == "high"
 
 
 def test_management_methods_round_trip_real_project_state(

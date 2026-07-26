@@ -13,11 +13,13 @@ class ExecutionSelection:
 
     connection_id: str | None = None
     model_id: str | None = None
+    reasoning_effort: str | None = None
 
     def normalized(self) -> "ExecutionSelection":
         return ExecutionSelection(
             connection_id=_clean_optional(self.connection_id),
             model_id=_clean_optional(self.model_id),
+            reasoning_effort=_clean_optional(self.reasoning_effort),
         )
 
 

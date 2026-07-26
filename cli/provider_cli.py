@@ -59,7 +59,9 @@ def _parser() -> argparse.ArgumentParser:
     command_parsers.append(models)
     models.add_argument("id")
     models.add_argument("--refresh", action="store_true")
-    parser.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+    parser.add_argument(
+        "--json", action="store_true", help="Print machine-readable JSON."
+    )
     for command in command_parsers:
         command.add_argument(
             "--json",

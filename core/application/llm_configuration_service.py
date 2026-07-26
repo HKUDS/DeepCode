@@ -85,9 +85,7 @@ class LLMConfigurationService:
 
     def upsert(self, value: dict[str, Any]) -> dict[str, Any]:
         connection_id, api_key, clear_api_key = self._parse_mutation(value)
-        config_fields_supplied = bool(
-            set(value) - {"id", "apiKey", "clearApiKey"}
-        )
+        config_fields_supplied = bool(set(value) - {"id", "apiKey", "clearApiKey"})
 
         def transform(current: dict[str, Any]) -> dict[str, Any]:
             providers = current.get("providers")
@@ -207,6 +205,9 @@ class LLMConfigurationService:
                     if cached is not None
                     else None
                 ),
+                reasoning_capabilities=(
+                    cached.reasoning if cached is not None else None
+                ),
             )
         except ValueError as exc:
             raise InvalidArgumentError(str(exc)) from exc
@@ -276,9 +277,7 @@ class LLMConfigurationService:
         for field in field_names.intersection(value):
             profile_data[field] = value[field]
 
-        profile_data["label"] = str(
-            profile_data.get("label") or connection_id
-        ).strip()
+        profile_data["label"] = str(profile_data.get("label") or connection_id).strip()
         template = str(profile_data.get("template") or "custom").strip().lower()
         if find_by_name(template) is None:
             raise InvalidArgumentError(f"unknown provider template: {template}")
@@ -286,9 +285,7 @@ class LLMConfigurationService:
         if "apiBase" in profile_data:
             profile_data["apiBase"] = _clean_optional(profile_data["apiBase"])
         if "apiKeyEnv" in profile_data:
-            profile_data["apiKeyEnv"] = _clean_optional(
-                profile_data["apiKeyEnv"]
-            )
+            profile_data["apiKeyEnv"] = _clean_optional(profile_data["apiKeyEnv"])
         try:
             parsed = ConnectionProfileConfig.model_validate(profile_data)
         except Exception as exc:

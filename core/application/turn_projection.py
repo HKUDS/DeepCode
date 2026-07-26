@@ -12,11 +12,16 @@ from core.domain.event import DomainEvent
 from core.domain.item import Item, ItemKind, ItemStatus
 from core.events import (
     AgentMessage,
+    AgentMessageCompleted,
     AgentMessageDelta,
+    AgentMessagePhase,
+    AgentReasoningSummary,
     ErrorEvent,
     Event,
+    PlanUpdated,
     SkillLoaded,
     TaskComplete,
+    ToolActivityKind,
     ToolCompleted,
     ToolStarted,
     TurnStarted,
@@ -44,11 +49,13 @@ class TurnEventProjector:
         self.final_text: str | None = None
         self.stop_reason: str | None = None
         self.saw_terminal = False
-        self._assistant_item_id: str | None = None
-        self._assistant_text = ""
-        self._last_delta_flush = 0.0
-        self._last_flushed_length = 0
+        self._assistant_item_ids: dict[str, str] = {}
+        self._assistant_texts: dict[str, str] = {}
+        self._last_delta_flush: dict[str, float] = {}
+        self._last_flushed_length: dict[str, int] = {}
+        self._saw_final_assistant = False
         self._tool_item_ids: dict[str, str] = {}
+        self._plan_tool_calls: set[str] = set()
         self._skill_invocations: dict[str, dict[str, str]] = {}
 
     def project(self, event: Event) -> None:
@@ -63,23 +70,76 @@ class TurnEventProjector:
                 self._skill_invocations[invocation.skill_id] = invocation.to_metadata()
                 self._persist_skill_invocations()
         elif isinstance(message, AgentMessageDelta):
-            self._append_assistant_delta(message.delta)
+            self._append_assistant_delta(message.delta, message.message_id)
+        elif isinstance(message, AgentMessageCompleted):
+            self._complete_assistant(
+                message.text,
+                message_id=message.message_id,
+                phase=message.phase,
+            )
+        elif isinstance(message, AgentReasoningSummary):
+            self._add_item(
+                kind=ItemKind.REASONING_SUMMARY,
+                status=ItemStatus.COMPLETED,
+                summary=message.text[:160],
+                payload={"text": message.text},
+            )
         elif isinstance(message, AgentMessage):
             self.final_text = message.text
-            self._complete_assistant(message.text)
+            self._complete_assistant(
+                message.text,
+                message_id=message.message_id,
+                phase=message.phase,
+            )
+        elif isinstance(message, PlanUpdated):
+            self._persist_plan_update(message)
         elif isinstance(message, ToolStarted):
+            if (
+                message.name.lower() in {"update_plan", "plan"}
+                or message.activity is not None
+                and message.activity.kind is ToolActivityKind.PLAN
+            ):
+                self._plan_tool_calls.add(message.call_id)
+                return
+            activity = (
+                {
+                    "kind": message.activity.kind.value,
+                    "label": message.activity.label,
+                    "subject": message.activity.subject,
+                }
+                if message.activity is not None
+                else None
+            )
             item = self._add_item(
                 kind=self._kind_for_tool(message.name),
                 status=ItemStatus.IN_PROGRESS,
-                summary=message.detail or message.name,
+                summary=(
+                    message.activity.subject
+                    if message.activity is not None and message.activity.subject
+                    else message.detail or message.name
+                ),
                 payload={
                     "callId": message.call_id,
                     "name": message.name,
                     "detail": message.detail,
+                    "activity": activity,
                 },
             )
             self._tool_item_ids[message.call_id] = item.id
         elif isinstance(message, ToolCompleted):
+            if message.call_id in self._plan_tool_calls:
+                self._plan_tool_calls.discard(message.call_id)
+                if message.is_error:
+                    self._add_item(
+                        kind=ItemKind.ERROR,
+                        status=ItemStatus.FAILED,
+                        summary="Plan update failed",
+                        payload={
+                            "name": message.name,
+                            "resultPreview": message.result_preview,
+                        },
+                    )
+                return
             item_id = self._tool_item_ids.get(message.call_id)
             if item_id is not None:
                 self._update_item(
@@ -104,8 +164,11 @@ class TurnEventProjector:
             self.stop_reason = message.stop_reason
             if message.final_text:
                 self.final_text = message.final_text
-                if self._assistant_item_id is None:
-                    self._complete_assistant(message.final_text)
+                if not self._saw_final_assistant:
+                    self._complete_assistant(
+                        message.final_text,
+                        phase=AgentMessagePhase.FINAL_ANSWER,
+                    )
 
     def _persist_skill_invocations(self) -> None:
         """Attach the auditable Skill ledger to the existing user message."""
@@ -137,6 +200,27 @@ class TurnEventProjector:
                 item_id=updated.id,
                 type="item.updated",
                 payload={"item": item_view(updated)},
+            )
+        self.broker.publish(event)
+
+    def _persist_plan_update(self, update: PlanUpdated) -> None:
+        """Store plan state as a Turn event, never as a transcript Item."""
+
+        payload = {
+            "plan": {
+                "explanation": update.explanation,
+                "steps": [
+                    {"step": item.step, "status": item.status.value}
+                    for item in update.plan
+                ],
+            }
+        }
+        with self.database.transaction() as connection:
+            event = EventRepository(connection).append(
+                thread_id=self.thread_id,
+                turn_id=self.turn_id,
+                type="turn.plan.updated",
+                payload=payload,
             )
         self.broker.publish(event)
 
@@ -194,55 +278,88 @@ class TurnEventProjector:
             payload={"code": code, "message": message},
         )
 
-    def _append_assistant_delta(self, delta: str) -> None:
+    @staticmethod
+    def _assistant_key(message_id: str | None) -> str:
+        return message_id or "__legacy_assistant__"
+
+    def _append_assistant_delta(
+        self,
+        delta: str,
+        message_id: str | None,
+    ) -> None:
         if not delta:
             return
-        self._assistant_text += delta
-        if self._assistant_item_id is None:
+        key = self._assistant_key(message_id)
+        text = self._assistant_texts.get(key, "") + delta
+        self._assistant_texts[key] = text
+        item_id = self._assistant_item_ids.get(key)
+        if item_id is None:
             item = self._add_item(
                 kind=ItemKind.ASSISTANT_MESSAGE,
                 status=ItemStatus.IN_PROGRESS,
-                summary=self._assistant_text[:160],
-                payload={"text": self._assistant_text, "streaming": True},
+                summary=text[:160],
+                payload={
+                    "text": text,
+                    "streaming": True,
+                    "messageId": message_id,
+                    "phase": AgentMessagePhase.UNKNOWN.value,
+                },
             )
-            self._assistant_item_id = item.id
-            self._last_delta_flush = monotonic()
-            self._last_flushed_length = len(self._assistant_text)
+            self._assistant_item_ids[key] = item.id
+            self._last_delta_flush[key] = monotonic()
+            self._last_flushed_length[key] = len(text)
             return
         now = monotonic()
         if (
-            now - self._last_delta_flush < 0.05
-            and len(self._assistant_text) - self._last_flushed_length < 256
+            now - self._last_delta_flush.get(key, 0.0) < 0.05
+            and len(text) - self._last_flushed_length.get(key, 0) < 256
         ):
             return
-        pending_delta = self._assistant_text[self._last_flushed_length :]
+        pending_delta = text[self._last_flushed_length.get(key, 0) :]
         updated = self._append_item_delta(
-            self._assistant_item_id,
+            item_id,
             delta=pending_delta,
-            summary=self._assistant_text[:160],
+            summary=text[:160],
         )
         if updated is None:
             return
-        self._last_delta_flush = now
-        self._last_flushed_length = len(self._assistant_text)
+        self._last_delta_flush[key] = now
+        self._last_flushed_length[key] = len(text)
 
-    def _complete_assistant(self, text: str) -> None:
-        self._assistant_text = text
-        if self._assistant_item_id is None:
+    def _complete_assistant(
+        self,
+        text: str,
+        *,
+        message_id: str | None = None,
+        phase: AgentMessagePhase = AgentMessagePhase.FINAL_ANSWER,
+    ) -> None:
+        key = self._assistant_key(message_id)
+        self._assistant_texts[key] = text
+        item_id = self._assistant_item_ids.get(key)
+        payload = {
+            "text": text,
+            "streaming": False,
+            "messageId": message_id,
+            "phase": phase.value,
+        }
+        if item_id is None:
             item = self._add_item(
                 kind=ItemKind.ASSISTANT_MESSAGE,
                 status=ItemStatus.COMPLETED,
                 summary=text[:160],
-                payload={"text": text, "streaming": False},
+                payload=payload,
             )
-            self._assistant_item_id = item.id
-            return
-        self._update_item(
-            self._assistant_item_id,
-            status=ItemStatus.COMPLETED,
-            summary=text[:160],
-            payload_update={"text": text, "streaming": False},
-        )
+            self._assistant_item_ids[key] = item.id
+        else:
+            self._update_item(
+                item_id,
+                status=ItemStatus.COMPLETED,
+                summary=text[:160],
+                payload_update=payload,
+            )
+        self._last_flushed_length[key] = len(text)
+        if phase is AgentMessagePhase.FINAL_ANSWER:
+            self._saw_final_assistant = True
 
     def _add_item(
         self,

@@ -40,7 +40,11 @@ interface ComposerProps {
   settings: SettingsSnapshot | null;
   goal: Goal | null;
   disabledReason: string | null;
-  onModelChange(connectionId: string | null, model: string | null): void;
+  onModelChange(
+    connectionId: string | null,
+    model: string | null,
+    reasoningEffort: string | null,
+  ): void;
   onPermissionModeChange(mode: DesktopPermissionMode): void;
   onSetGoal(input: GoalDefinitionInput): Promise<void>;
   onPauseGoal(): Promise<void>;

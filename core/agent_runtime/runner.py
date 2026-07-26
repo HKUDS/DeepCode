@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import os
+from collections.abc import Awaitable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -38,6 +38,10 @@ from core.agent_runtime.runtime import (
 )
 from core.agent_runtime.tools.registry import ToolRegistry
 from core.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from core.providers.timeouts import (
+    resolve_request_timeout_s,
+    resolve_stream_max_runtime_s,
+)
 
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
 _PERSISTED_MODEL_ERROR_PLACEHOLDER = "[Assistant reply unavailable due to model error.]"
@@ -414,6 +418,8 @@ class AgentRunner:
                     response.content or "",
                     tool_calls=[tc.to_openai_tool_call() for tc in response.tool_calls],
                     reasoning_content=response.reasoning_content,
+                    reasoning_summary=response.reasoning_summary,
+                    provider_state=response.provider_state,
                     thinking_blocks=response.thinking_blocks,
                 )
                 messages.append(assistant_message)
@@ -562,6 +568,8 @@ class AgentRunner:
                         build_assistant_message(
                             clean,
                             reasoning_content=response.reasoning_content,
+                            reasoning_summary=response.reasoning_summary,
+                            provider_state=response.provider_state,
                             thinking_blocks=response.thinking_blocks,
                         )
                     )
@@ -574,6 +582,8 @@ class AgentRunner:
                 assistant_message = build_assistant_message(
                     clean,
                     reasoning_content=response.reasoning_content,
+                    reasoning_summary=response.reasoning_summary,
+                    provider_state=response.provider_state,
                     thinking_blocks=response.thinking_blocks,
                 )
 
@@ -641,6 +651,8 @@ class AgentRunner:
                 or build_assistant_message(
                     clean,
                     reasoning_content=response.reasoning_content,
+                    reasoning_summary=response.reasoning_summary,
+                    provider_state=response.provider_state,
                     thinking_blocks=response.thinking_blocks,
                 )
             )
@@ -731,44 +743,64 @@ class AgentRunner:
         hook: AgentHook,
         context: AgentHookContext,
     ):
-        timeout_s: float | None = spec.llm_timeout_s
-        if timeout_s is None:
-            raw = (
-                os.environ.get("DEEPCODE_LLM_TIMEOUT_S")
-                or os.environ.get("NANOBOT_LLM_TIMEOUT_S")
-                or "300"
-            ).strip()
-            try:
-                timeout_s = float(raw)
-            except (TypeError, ValueError):
-                timeout_s = 300.0
-        if timeout_s is not None and timeout_s <= 0:
-            timeout_s = None
-
         kwargs = self._build_request_kwargs(
             spec,
             messages,
             tools=spec.tool_definitions(),
         )
-        if hook.wants_streaming():
+        requested_streaming = hook.wants_streaming()
+        stream_request = getattr(self.provider, "chat_stream_with_retry", None)
+        streaming = requested_streaming and callable(stream_request)
+        if requested_streaming and not streaming:
+            logger.debug(
+                "Provider {} has no streaming transport; using non-streaming request",
+                type(self.provider).__name__,
+            )
+        if streaming:
 
             async def _stream(delta: str) -> None:
                 await hook.on_stream(context, delta)
 
-            coro = self.provider.chat_stream_with_retry(
+            coro = stream_request(
                 **kwargs,
                 on_content_delta=_stream,
             )
         else:
             coro = self.provider.chat_with_retry(**kwargs)
 
+        timeout_s = (
+            resolve_stream_max_runtime_s(spec.llm_timeout_s)
+            if streaming
+            else resolve_request_timeout_s(spec.llm_timeout_s)
+        )
+        return await self._await_provider_response(
+            coro,
+            timeout_s=timeout_s,
+            streaming=streaming,
+        )
+
+    @staticmethod
+    async def _await_provider_response(
+        request: Awaitable[LLMResponse],
+        *,
+        timeout_s: float | None,
+        streaming: bool,
+    ) -> LLMResponse:
+        """Apply the correct deadline without conflating activity and runtime."""
+
         if timeout_s is None:
-            return await coro
+            return await request
         try:
-            return await asyncio.wait_for(coro, timeout=timeout_s)
+            return await asyncio.wait_for(request, timeout=timeout_s)
         except asyncio.TimeoutError:
+            message = (
+                "Error calling LLM: stream exceeded the configured maximum "
+                f"runtime of {timeout_s:g}s"
+                if streaming
+                else f"Error calling LLM: timed out after {timeout_s:g}s"
+            )
             return LLMResponse(
-                content=f"Error calling LLM: timed out after {timeout_s:g}s",
+                content=message,
                 finish_reason="error",
                 error_kind="timeout",
             )
@@ -781,7 +813,11 @@ class AgentRunner:
         retry_messages = list(messages)
         retry_messages.append(build_finalization_retry_message())
         kwargs = self._build_request_kwargs(spec, retry_messages, tools=None)
-        return await self.provider.chat_with_retry(**kwargs)
+        return await self._await_provider_response(
+            self.provider.chat_with_retry(**kwargs),
+            timeout_s=resolve_request_timeout_s(spec.llm_timeout_s),
+            streaming=False,
+        )
 
     @staticmethod
     def _usage_dict(usage: dict[str, Any] | None) -> dict[str, int]:
@@ -1381,7 +1417,11 @@ class AgentRunner:
         request = self._backfill_missing_tool_results(request)
         kwargs = self._build_request_kwargs(spec, request, tools=None)
         try:
-            response = await self.provider.chat_with_retry(**kwargs)
+            response = await self._await_provider_response(
+                self.provider.chat_with_retry(**kwargs),
+                timeout_s=resolve_request_timeout_s(spec.llm_timeout_s),
+                streaming=False,
+            )
         except Exception:
             logger.exception("compaction summarization call failed")
             return None

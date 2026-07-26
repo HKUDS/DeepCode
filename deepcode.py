@@ -123,6 +123,10 @@ def main():
             from cli.provider_cli import run as provider_run
 
             raise SystemExit(provider_run(sys.argv[2:]))
+        elif sys.argv[1] in {"session", "sessions"}:
+            from cli.session_cli import run as session_run
+
+            raise SystemExit(session_run(sys.argv[2:]))
         elif sys.argv[1] in {"chat", "tui"}:
             from cli.tui.app import main as tui_main
 
@@ -165,6 +169,10 @@ def main():
                         row(
                             "deepcode provider <command>",
                             "Configure LLM connections and models",
+                        ),
+                        row(
+                            "deepcode session delete <id>",
+                            "Permanently delete a conversation Session",
                         ),
                         row(
                             "deepcode exec <task>",

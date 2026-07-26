@@ -15,6 +15,11 @@ from core.providers.base import GenerationSettings, LLMProvider
 from core.providers.catalog import resolve_model_info
 from core.providers.credentials import CredentialStore
 from core.providers.registry import PROVIDERS, ProviderSpec, find_by_model, find_by_name
+from core.providers.reasoning import (
+    ModelReasoningCapabilities,
+    infer_reasoning_capabilities,
+    resolve_reasoning_effort,
+)
 
 if TYPE_CHECKING:
     from core.config import ConnectionProfileConfig, DeepCodeConfig
@@ -57,7 +62,12 @@ class ResolvedConnection:
 
     @property
     def is_usable(self) -> bool:
-        return bool(self.api_key) or self.local or self.spec.is_direct or self.spec.is_oauth
+        return (
+            bool(self.api_key)
+            or self.local
+            or self.spec.is_direct
+            or self.spec.is_oauth
+        )
 
 
 class ConnectionResolver:
@@ -147,8 +157,10 @@ class ConnectionResolver:
         *,
         phase: str = "implementation",
         model_limits: tuple[int, int] | None = None,
+        reasoning_capabilities: ModelReasoningCapabilities | None = None,
     ) -> ExecutionProfile:
-        connection, model = self.resolve_selection(selection, phase=phase)
+        normalized = (selection or ExecutionSelection()).normalized()
+        connection, model = self.resolve_selection(normalized, phase=phase)
         settings = self.config.resolve_phase(phase)
         info = resolve_model_info(model)
         context_window, max_output_tokens = model_limits or (
@@ -157,6 +169,18 @@ class ConnectionResolver:
         )
         if context_window < 1 or max_output_tokens < 1:
             raise ConfigError(f"Invalid model limits for '{model}'")
+        capabilities = reasoning_capabilities or infer_reasoning_capabilities(
+            model,
+            provider_name=connection.provider_name,
+        )
+        try:
+            reasoning_effort = resolve_reasoning_effort(
+                requested=normalized.reasoning_effort,
+                configured=settings.reasoning_effort,
+                capabilities=capabilities,
+            )
+        except ValueError as exc:
+            raise ConfigError(str(exc)) from exc
         return ExecutionProfile(
             connection_id=connection.id,
             provider_name=connection.provider_name,
@@ -166,7 +190,7 @@ class ConnectionResolver:
             max_output_tokens=max_output_tokens,
             max_tokens=min(settings.max_tokens, max_output_tokens),
             temperature=settings.temperature,
-            reasoning_effort=settings.reasoning_effort,
+            reasoning_effort=reasoning_effort,
             config_revision=self.connection_revision(connection),
         )
 

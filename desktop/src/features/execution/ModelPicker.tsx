@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   ConnectionInfo,
+  CatalogModel,
   ModelCatalogResult,
   Project,
   SettingsSnapshot,
@@ -24,7 +25,11 @@ interface ModelPickerProps {
   thread: Thread | null;
   settings: SettingsSnapshot | null;
   disabled: boolean;
-  onChange(connectionId: string | null, model: string | null): void;
+  onChange(
+    connectionId: string | null,
+    model: string | null,
+    reasoningEffort: string | null,
+  ): void;
 }
 
 export function ModelPicker({
@@ -42,6 +47,8 @@ export function ModelPicker({
   } = useConnectionCatalog(runtime, project?.id ?? null);
   const [open, setOpen] = useState(false);
   const [connectionId, setConnectionId] = useState("");
+  const [modelId, setModelId] = useState("");
+  const [reasoningEffort, setReasoningEffort] = useState("auto");
   const [catalog, setCatalog] = useState<ModelCatalogResult | null>(null);
   const [refreshingModels, setRefreshingModels] = useState(false);
   const [modelFailure, setModelFailure] = useState<{
@@ -58,6 +65,24 @@ export function ModelPicker({
     effectiveModel,
   );
   const selectedConnectionId = connectionId || effectiveConnection?.id || "";
+  const selectedModel = useMemo(
+    () =>
+      catalog?.connectionId === selectedConnectionId
+        ? catalog.models.find((model) => model.id === modelId) ?? null
+        : null,
+    [catalog, modelId, selectedConnectionId],
+  );
+  const effortOptions = useMemo(
+    () => reasoningOptions(selectedModel),
+    [selectedModel],
+  );
+  const validReasoningEffort = effortOptions.some(
+    (option) => option.value === reasoningEffort,
+  )
+    ? reasoningEffort
+    : "auto";
+  const effectiveEffort =
+    thread?.reasoningEffort ?? defaults.reasoningEffort ?? "auto";
 
   useEffect(() => {
     if (!open || !selectedConnectionId) return;
@@ -124,8 +149,9 @@ export function ModelPicker({
         !modelError,
     );
 
-  const choose = (model: string) => {
-    onChange(selectedConnectionId || null, model);
+  const apply = () => {
+    if (!selectedConnectionId || !modelId) return;
+    onChange(selectedConnectionId, modelId, validReasoningEffort);
     setOpen(false);
     setQuery("");
     setManualModel("");
@@ -156,6 +182,10 @@ export function ModelPicker({
           if (!open && !connectionId && effectiveConnection) {
             setConnectionId(effectiveConnection.id);
           }
+          if (!open) {
+            setModelId(effectiveModel ?? "");
+            setReasoningEffort(effectiveEffort);
+          }
           setOpen((current) => !current);
         }}
         disabled={disabled}
@@ -168,6 +198,7 @@ export function ModelPicker({
         <span>
           <small>{effectiveConnection?.label ?? "Automatic"}</small>
           <strong>{effectiveModel || "Configured model"}</strong>
+          <em>{effortLabel(effectiveEffort)}</em>
         </span>
         <ChevronDown size={11} />
       </button>
@@ -199,6 +230,8 @@ export function ModelPicker({
               value={selectedConnectionId}
               onChange={(event) => {
                 setConnectionId(event.target.value);
+                setModelId("");
+                setReasoningEffort("auto");
                 setModelFailure(null);
                 setQuery("");
               }}
@@ -230,16 +263,17 @@ export function ModelPicker({
 
           <div className={styles.models} role="listbox">
             {models.map((model) => {
-              const selected =
-                selectedConnectionId === effectiveConnection?.id &&
-                model.id === effectiveModel;
+              const selected = model.id === modelId;
               return (
                 <button
                   type="button"
                   role="option"
                   aria-selected={selected}
                   key={model.id}
-                  onClick={() => choose(model.id)}
+                  onClick={() => {
+                    setModelId(model.id);
+                    setReasoningEffort("auto");
+                  }}
                 >
                   <span>
                     <strong>{model.name}</strong>
@@ -247,6 +281,7 @@ export function ModelPicker({
                   </span>
                   <small>
                     {formatTokens(model.contextWindow)} context
+                    {model.reasoning ? " · Thinking" : ""}
                     {selected ? <Check size={12} /> : null}
                   </small>
                 </button>
@@ -262,6 +297,30 @@ export function ModelPicker({
             ) : null}
           </div>
 
+          <section className={styles.effort} aria-label="Thinking effort">
+            <div>
+              <strong>Thinking</strong>
+              <span>
+                {selectedModel?.reasoning
+                  ? "Applied to future Turns in this Session."
+                  : "This model does not publish adjustable Thinking levels."}
+              </span>
+            </div>
+            <div role="radiogroup" aria-label="Thinking effort level">
+              {effortOptions.map((option) => (
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={validReasoningEffort === option.value}
+                  key={option.value}
+                  onClick={() => setReasoningEffort(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </section>
+
           <footer>
             <input
               value={manualModel}
@@ -271,16 +330,27 @@ export function ModelPicker({
             />
             <button
               type="button"
-              onClick={() => choose(manualModel.trim())}
+              onClick={() => {
+                setModelId(manualModel.trim());
+                setReasoningEffort("auto");
+              }}
               disabled={!selectedConnectionId || !manualModel.trim()}
             >
-              Use model
+              Select
+            </button>
+            <button
+              type="button"
+              className={styles.apply}
+              onClick={apply}
+              disabled={!selectedConnectionId || !modelId}
+            >
+              Apply
             </button>
             <button
               type="button"
               className={styles.reset}
               onClick={() => {
-                onChange(null, null);
+                onChange(null, null, null);
                 setOpen(false);
               }}
             >
@@ -295,10 +365,14 @@ export function ModelPicker({
 
 function agentDefaults(
   settings: SettingsSnapshot | null,
-): { connection: string | null; model: string | null } {
+): {
+  connection: string | null;
+  model: string | null;
+  reasoningEffort: string | null;
+} {
   const defaults = settings?.agents.defaults;
   if (typeof defaults !== "object" || defaults === null || Array.isArray(defaults)) {
-    return { connection: null, model: null };
+    return { connection: null, model: null, reasoningEffort: null };
   }
   const connection =
     typeof defaults.connection === "string" && defaults.connection
@@ -308,7 +382,32 @@ function agentDefaults(
         : null;
   const model =
     typeof defaults.model === "string" && defaults.model ? defaults.model : null;
-  return { connection, model };
+  const reasoningEffort =
+    typeof defaults.reasoningEffort === "string" && defaults.reasoningEffort
+      ? defaults.reasoningEffort
+      : typeof defaults.reasoning_effort === "string" && defaults.reasoning_effort
+        ? defaults.reasoning_effort
+        : null;
+  return { connection, model, reasoningEffort };
+}
+
+function reasoningOptions(
+  model: CatalogModel | null,
+): Array<{ value: string; label: string }> {
+  const capabilities = model?.reasoning;
+  const options = [{ value: "auto", label: "Auto" }];
+  if (!capabilities) return options;
+  if (!capabilities.mandatory) options.push({ value: "none", label: "Off" });
+  for (const effort of capabilities.supportedEfforts) {
+    options.push({ value: effort, label: effortLabel(effort) });
+  }
+  return options;
+}
+
+function effortLabel(value: string): string {
+  if (value === "auto") return "Auto";
+  if (value === "none") return "Off";
+  return value.charAt(0).toLocaleUpperCase() + value.slice(1);
 }
 
 function resolveConnection(

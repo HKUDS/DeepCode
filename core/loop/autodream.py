@@ -54,6 +54,7 @@ async def consolidate_memory(
     *,
     model: str | None = None,
     connection_id: str | None = None,
+    reasoning_effort: str | None = None,
     max_iterations: int = 20,
     prompt_runner: Callable[[str], Awaitable[tuple[str, str]]] | None = None,
 ) -> AutodreamResult:
@@ -73,6 +74,7 @@ async def consolidate_memory(
             workspace=workspace,
             model=model,
             connection_id=connection_id,
+            reasoning_effort=reasoning_effort,
             max_iterations=max_iterations,
         )
         summary = ""

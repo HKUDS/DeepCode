@@ -1,15 +1,19 @@
 import {
   AlertTriangle,
+  BookOpen,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   Clock3,
   Cpu,
   FilePenLine,
   FlaskConical,
+  ListTree,
   ListChecks,
   PackageOpen,
   RotateCcw,
   ScrollText,
+  Search,
   Sparkles,
   TerminalSquare,
   Wrench,
@@ -28,6 +32,7 @@ import {
   formatTurnDuration,
   turnDurationSeconds,
   type ConversationTurn,
+  type TimelineActivityGroup,
 } from "./conversationModel";
 import { MarkdownContent } from "./MarkdownContent";
 import styles from "./ThreadConversation.module.css";
@@ -51,6 +56,30 @@ interface SkillInvocationView {
   name: string;
   revision?: string;
   invocation?: string;
+}
+
+interface ItemActivityView {
+  kind: string;
+  label: string;
+  subject: string | null;
+}
+
+function itemActivity(item: Item): ItemActivityView | null {
+  const value = item.payload.activity;
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    typeof value.kind !== "string" ||
+    typeof value.label !== "string"
+  ) {
+    return null;
+  }
+  return {
+    kind: value.kind,
+    label: value.label,
+    subject: typeof value.subject === "string" ? value.subject : null,
+  };
 }
 
 function itemSkills(item: Item): SkillInvocationView[] {
@@ -82,8 +111,22 @@ function itemSkills(item: Item): SkillInvocationView[] {
   });
 }
 
-function ActivityIcon({ kind }: { kind: Item["kind"] }) {
+function ActivityIcon({
+  kind,
+  activityKind,
+}: {
+  kind: Item["kind"];
+  activityKind?: string;
+}) {
   const props = { size: 14, strokeWidth: 1.8 };
+  switch (activityKind) {
+    case "read":
+      return <BookOpen {...props} />;
+    case "search":
+      return <Search {...props} />;
+    case "list":
+      return <ListTree {...props} />;
+  }
   switch (kind) {
     case "plan":
       return <ListChecks {...props} />;
@@ -150,14 +193,14 @@ function runLabel(group: ConversationTurn, now: number): string {
   }
 }
 
-function shouldShowRunLedger(group: ConversationTurn, now: number): boolean {
-  if (group.executionItems.length > 0 || group.completion) return true;
+function shouldShowRunStatus(group: ConversationTurn, now: number): boolean {
+  if (group.timeline.length > 0 || group.completion) return true;
   if (group.turn?.status === "queued") return false;
   if (group.turn && group.turn.status !== "completed") return true;
   return (turnDurationSeconds(group.turn, now) ?? 0) > 0;
 }
 
-function RunStep({
+function ActivityItem({
   item,
   approval,
   active,
@@ -207,14 +250,17 @@ function RunStep({
   }
 
   const presentation = presentItem(item);
+  const activity = itemActivity(item);
   const body = presentation.body;
   const hasBody = Boolean(body && body.trim() && body.trim() !== item.summary.trim());
   const heading = (
     <>
-      <ActivityIcon kind={item.kind} />
+      <ActivityIcon kind={item.kind} activityKind={activity?.kind} />
       <span className={styles.runStepCopy}>
-        <strong>{item.summary || presentation.label}</strong>
-        <small>{presentation.label}</small>
+        <strong>
+          {activity?.subject ?? (item.summary || presentation.label)}
+        </strong>
+        <small>{activity?.label ?? presentation.label}</small>
       </span>
       <span className={styles.runStepStatus}>
         {item.status.replaceAll("_", " ")}
@@ -265,7 +311,22 @@ function RunStep({
   );
 }
 
-function RunLedger({
+function RunStatus({ group }: { group: ConversationTurn }) {
+  const active = Boolean(
+    group.turn && activeTurnStatuses.has(group.turn.status),
+  );
+  const now = useElapsedNow(active);
+  if (!shouldShowRunStatus(group, now)) return null;
+
+  return (
+    <div className={styles.runStatus} data-status={group.turn?.status}>
+      <Clock3 size={13} aria-hidden="true" />
+      <span>{runLabel(group, now)}</span>
+    </div>
+  );
+}
+
+function ExplorationGroup({
   group,
   approvalsByItem,
   selectedItemId,
@@ -273,98 +334,84 @@ function RunLedger({
   onSelectItem,
   onOpenInspector,
   onRespondToApproval,
-  onRetryTurn,
-}: Omit<TurnBlockProps, "onCancelQueuedTurn">) {
-  const active = Boolean(
-    group.turn && activeTurnStatuses.has(group.turn.status),
+}: {
+  group: TimelineActivityGroup;
+  approvalsByItem: ReadonlyMap<string, Approval>;
+  selectedItemId: string | null;
+  busy: boolean;
+  onSelectItem(itemId: string): void;
+  onOpenInspector(tab?: DesktopInspectorTab): void;
+  onRespondToApproval(approvalId: string, decision: ApprovalDecision): void;
+}) {
+  const active = group.items.some(
+    (item) => item.status === "in_progress" || item.id === selectedItemId,
   );
-  const hasPendingApproval = group.executionItems.some(
-    (item) => approvalsByItem.get(item.id)?.status === "pending",
-  );
-  const now = useElapsedNow(active);
-  const [expanded, setExpanded] = useState(false);
-  const failed =
-    group.turn?.status === "failed" ||
-    group.turn?.status === "interrupted" ||
-    group.completion?.status === "failed";
-  const turnId = group.turn?.id ?? null;
-  const open = expanded || active || hasPendingApproval || failed;
-  const detailsId = `run-details-${group.id}`;
-
-  if (!shouldShowRunLedger(group, now)) return null;
+  const completed = group.items.filter(
+    (item) => item.status === "completed",
+  ).length;
 
   return (
-    <section
-      className={styles.runLedger}
-      data-open={open}
-      data-status={failed ? "failed" : group.turn?.status}
-    >
-      <button
-        type="button"
-        className={styles.runSummary}
-        aria-expanded={open}
-        aria-controls={detailsId}
-        onClick={() => setExpanded((current) => !current)}
-      >
-        <Clock3 size={14} />
-        <strong>{runLabel(group, now)}</strong>
-        {group.executionItems.length > 0 ? (
-          <span>
-            {group.executionItems.length}{" "}
-            {group.executionItems.length === 1 ? "step" : "steps"}
-          </span>
-        ) : null}
-        <ChevronRight className={styles.runChevron} size={14} />
-      </button>
+    <details className={styles.activityGroup} open={active}>
+      <summary>
+        <Search size={14} aria-hidden="true" />
+        <span>
+          <strong>Explored project context</strong>
+          <small>
+            {completed}/{group.items.length} activities
+          </small>
+        </span>
+        <ChevronDown size={14} aria-hidden="true" />
+      </summary>
+      <div className={styles.activityGroupItems}>
+        {group.items.map((item) => (
+          <ActivityItem
+            key={item.id}
+            item={item}
+            approval={approvalsByItem.get(item.id)}
+            active={item.id === selectedItemId}
+            busy={busy}
+            onSelectItem={onSelectItem}
+            onOpenInspector={onOpenInspector}
+            onRespondToApproval={onRespondToApproval}
+          />
+        ))}
+      </div>
+    </details>
+  );
+}
 
-      {open ? (
-        <div className={styles.runDetails} id={detailsId}>
-          {group.executionItems.map((item) => (
-            <RunStep
-              key={item.id}
-              item={item}
-              approval={approvalsByItem.get(item.id)}
-              active={item.id === selectedItemId}
-              busy={busy}
-              onSelectItem={onSelectItem}
-              onOpenInspector={onOpenInspector}
-              onRespondToApproval={onRespondToApproval}
-            />
-          ))}
-          {group.completion?.payload.stopReason === "application_restarted" ? (
-            <p className={styles.runError}>
-              The previous process stopped. Retry from the same prompt.
-            </p>
-          ) : group.turn?.errorMessage ? (
-            <p className={styles.runError}>{group.turn.errorMessage}</p>
-          ) : null}
-          <div className={styles.runActions}>
-            {failed && turnId ? (
-              <button
-                type="button"
-                onClick={() => onRetryTurn(turnId)}
-                disabled={busy}
-              >
-                <RotateCcw size={13} />
-                Retry
-              </button>
-            ) : null}
-            <button
-              type="button"
-              onClick={() => {
-                const selected =
-                  group.completion ?? group.executionItems.at(-1) ?? null;
-                if (selected) onSelectItem(selected.id);
-                onOpenInspector("changes");
-              }}
-            >
-              Review changes
-              <ChevronRight size={13} />
-            </button>
-          </div>
-        </div>
-      ) : null}
-    </section>
+function AssistantMessage({ item }: { item: Item }) {
+  const presentation = presentItem(item);
+  const phase =
+    item.payload.phase === "commentary" ? "commentary" : "final_answer";
+  return (
+    <article
+      className={styles.assistantMessage}
+      data-phase={phase}
+      data-status={item.status}
+    >
+      <span className={styles.srOnly}>
+        {phase === "commentary" ? "DeepCode progress update" : "DeepCode response"}
+      </span>
+      <div
+        className={styles.messageBody}
+        aria-live={item.status === "in_progress" ? "polite" : undefined}
+      >
+        <MarkdownContent>{presentation.body ?? item.summary}</MarkdownContent>
+        {item.status === "in_progress" ? (
+          <span
+            className={styles.streamingCursor}
+            aria-label="Agent is responding"
+          />
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
+function timelineItems(group: ConversationTurn): Item[] {
+  return group.timeline.flatMap((entry) =>
+    entry.type === "item" ? [entry.item] : entry.items,
   );
 }
 
@@ -390,6 +437,19 @@ export function TurnBlock({
     : group.turn?.prompt
       ? [{ id: `${group.id}-prompt`, text: group.turn.prompt, skills: [] }]
       : [];
+  const orderedItems = timelineItems(group);
+  const lastExecutionItem =
+    [...orderedItems]
+      .reverse()
+      .find((item) => item.kind !== "assistant_message") ?? null;
+  const failed =
+    group.turn?.status === "failed" ||
+    group.turn?.status === "interrupted" ||
+    group.completion?.status === "failed";
+  const errorMessage =
+    group.completion?.payload.stopReason === "application_restarted"
+      ? "The previous process stopped. Retry from the same prompt."
+      : group.turn?.errorMessage;
 
   return (
     <section className={styles.turnBlock} data-status={group.turn?.status}>
@@ -432,40 +492,78 @@ export function TurnBlock({
           <span>{group.turn.executionProfile.connectionId}</span>
           <i aria-hidden="true">/</i>
           <strong>{group.turn.executionProfile.modelId}</strong>
+          {group.turn.executionProfile.reasoningEffort ? (
+            <small>
+              Thinking {group.turn.executionProfile.reasoningEffort}
+            </small>
+          ) : null}
         </div>
       ) : null}
 
-      <RunLedger
-        group={group}
-        approvalsByItem={approvalsByItem}
-        selectedItemId={selectedItemId}
-        busy={busy}
-        onSelectItem={onSelectItem}
-        onOpenInspector={onOpenInspector}
-        onRespondToApproval={onRespondToApproval}
-        onRetryTurn={onRetryTurn}
-      />
+      <RunStatus group={group} />
 
-      {group.assistantMessages.map((item) => {
-        const presentation = presentItem(item);
-        return (
-          <article className={styles.assistantMessage} key={item.id}>
-            <span className={styles.srOnly}>DeepCode response</span>
-            <div
-              className={styles.messageBody}
-              aria-live={item.status === "in_progress" ? "polite" : undefined}
-            >
-              <MarkdownContent>{presentation.body ?? item.summary}</MarkdownContent>
-              {item.status === "in_progress" ? (
-                <span
-                  className={styles.streamingCursor}
-                  aria-label="Agent is responding"
-                />
-              ) : null}
+      <div className={styles.timeline}>
+        {group.timeline.map((entry) => {
+          if (entry.type === "activity_group") {
+            return (
+              <ExplorationGroup
+                key={entry.id}
+                group={entry}
+                approvalsByItem={approvalsByItem}
+                selectedItemId={selectedItemId}
+                busy={busy}
+                onSelectItem={onSelectItem}
+                onOpenInspector={onOpenInspector}
+                onRespondToApproval={onRespondToApproval}
+              />
+            );
+          }
+          if (entry.item.kind === "assistant_message") {
+            return <AssistantMessage key={entry.id} item={entry.item} />;
+          }
+          return (
+            <div className={styles.activityEntry} key={entry.id}>
+              <ActivityItem
+                item={entry.item}
+                approval={approvalsByItem.get(entry.item.id)}
+                active={entry.item.id === selectedItemId}
+                busy={busy}
+                onSelectItem={onSelectItem}
+                onOpenInspector={onOpenInspector}
+                onRespondToApproval={onRespondToApproval}
+              />
             </div>
-          </article>
-        );
-      })}
+          );
+        })}
+      </div>
+
+      {errorMessage ? <p className={styles.runError}>{errorMessage}</p> : null}
+      {failed || lastExecutionItem ? (
+        <div className={styles.runActions}>
+          {failed && turnId ? (
+            <button
+              type="button"
+              onClick={() => onRetryTurn(turnId)}
+              disabled={busy}
+            >
+              <RotateCcw size={13} />
+              Retry
+            </button>
+          ) : null}
+          {lastExecutionItem ? (
+            <button
+              type="button"
+              onClick={() => {
+                onSelectItem(lastExecutionItem.id);
+                onOpenInspector("changes");
+              }}
+            >
+              Review changes
+              <ChevronRight size={13} />
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }

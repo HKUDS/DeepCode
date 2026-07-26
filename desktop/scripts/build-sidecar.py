@@ -22,6 +22,12 @@ BUILD_ROOT = DESKTOP_ROOT / "build" / "sidecar"
 DIST_ROOT = BUILD_ROOT / "dist"
 APP_SERVER_ROOT = DIST_ROOT / "deepcode-app-server"
 SIDECAR_ENV_ROOT = BUILD_ROOT / ".venv"
+BUNDLED_DATA = (
+    (
+        REPOSITORY_ROOT / "core" / "application" / "goal_prompts",
+        "core/application/goal_prompts",
+    ),
+)
 REQUIRED_IMPORTS = (
     "PyInstaller",
     "aiofiles",
@@ -157,6 +163,12 @@ def main() -> int:
     ]
     for module in EXCLUDED_MODULES:
         command.extend(("--exclude-module", module))
+    for source, destination in BUNDLED_DATA:
+        if not source.is_dir():
+            raise RuntimeError(
+                f"required sidecar resource directory is missing: {source}"
+            )
+        command.extend(("--add-data", f"{source}{os.pathsep}{destination}"))
     command.append(str(REPOSITORY_ROOT / "app_server" / "__main__.py"))
     DIST_ROOT.mkdir(parents=True, exist_ok=True)
     subprocess.run(command, cwd=REPOSITORY_ROOT, check=True)

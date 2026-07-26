@@ -60,14 +60,23 @@ stored key back.
 
 ### Use models inside a Session
 
-The composer model picker changes the connection/model for future Turns in the
-current Session. Existing history stays attached to the same canonical Session
-under `~/.deepcode/sessions/`. A switch is temporarily unavailable while a Turn
-is running or queued.
+The composer model picker changes the connection, model, and model-advertised
+Thinking effort for future Turns in the current Session. Existing history stays
+attached to the same canonical Session under `~/.deepcode/sessions/`. A switch
+is temporarily unavailable while a Turn is running or queued. Raw
+chain-of-thought is never shown as assistant text; only provider-designated
+summaries may be rendered, while opaque continuation state remains private.
 
 Every accepted Turn stores an immutable, secret-free execution profile. Later
 changes to defaults or credentials cannot silently change queued or historical
 work.
+
+The Session menu separates **Archive** from **Delete permanently**. Archive
+preserves the canonical transcript. Permanent deletion removes the transcript,
+Goal ledger, and rebuildable application records but never deletes repository
+files. The backend rejects deletion when another CLI/terminal still owns the
+Session, work is active, a managed worktree is attached, or an Automation must
+be removed first.
 
 The equivalent CLI workflow uses the same connection and Session backend:
 
@@ -76,7 +85,7 @@ deepcode provider list
 deepcode provider set personal-openrouter --template openrouter --api-key
 deepcode provider test personal-openrouter
 deepcode provider models personal-openrouter --refresh
-deepcode -c personal-openrouter -m moonshotai/kimi-k3
+deepcode -c personal-openrouter -m moonshotai/kimi-k3 --effort low
 ```
 
 ### Run a durable Goal

@@ -151,7 +151,9 @@ class ProviderSemanticEvaluator:
                 retry_mode="standard",
             )
             if response.finish_reason == "error":
-                parse_error = RuntimeError(response.content or "evaluator request failed")
+                parse_error = RuntimeError(
+                    response.content or "evaluator request failed"
+                )
                 continue
             try:
                 verdict, reason, refs = self._parse(
@@ -224,7 +226,7 @@ class ProviderSemanticEvaluator:
             }:
                 evidence.append(f"{item.id}: {item.summary}")
         final_response = final_response[-_MAX_FINAL_RESPONSE_CHARS:]
-        evidence_text = ("\n".join(evidence) or "(no structured evidence was recorded)")
+        evidence_text = "\n".join(evidence) or "(no structured evidence was recorded)"
         evidence_text = evidence_text[-_MAX_EVIDENCE_CHARS:]
         rendered = (
             self._template.replace("{{OBJECTIVE}}", goal.objective)

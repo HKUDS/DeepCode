@@ -25,6 +25,7 @@ from core.application.mcp_service import McpService
 from core.application.llm_configuration_service import LLMConfigurationService
 from core.application.project_service import ProjectService
 from core.application.settings_service import SettingsService
+from core.application.session_deletion_service import SessionDeletionService
 from core.application.skill_service import SkillService
 from core.application.terminal_service import TerminalService
 from core.application.test_service import TestService
@@ -74,8 +75,13 @@ class DeepCodeApplication:
         self.workspaces = WorkspaceService(database)
         self.files = FileService(database, self.workspaces)
         self.git = GitService(database, self.workspaces)
-        self.terminals = TerminalService(self.workspaces)
-        self.worktrees = WorktreeService(database, self.broker, self.git)
+        self.terminals = TerminalService(self.workspaces, self.session_store)
+        self.worktrees = WorktreeService(
+            database,
+            self.broker,
+            self.git,
+            self.session_store,
+        )
         self.worktrees.set_terminal_activity_check(self.terminals.active_for_thread)
         self.tests = TestService(database, self.broker, self.workspaces)
         self.executions = ExecutionRegistry(max_concurrent=max_concurrent_turns)
@@ -105,6 +111,13 @@ class DeepCodeApplication:
             self.executions,
         )
         self.turns.add_settled_listener(self.goal_coordinator.on_turn_settled)
+        self.deletions = SessionDeletionService(
+            database,
+            self.session_store,
+            self.goal_store,
+            ensure_projection=self.threads.read,
+            on_deleted=self._on_session_deleted,
+        )
         self.automations = AutomationService(
             database,
             self.broker,
@@ -140,6 +153,11 @@ class DeepCodeApplication:
             )
         self.broker.publish(event)
 
+    def _on_session_deleted(self, thread_id: str) -> None:
+        self.threads.forget(thread_id)
+        self.goal_coordinator.remove_event_observer(thread_id)
+        self.turns.discard_session_runtime(thread_id)
+
     @classmethod
     def open(
         cls,
@@ -168,6 +186,7 @@ class DeepCodeApplication:
             )
             application._application_lease = lease
             if lease.recovery_owner:
+                application.deletions.recover_pending()
                 application.threads.reconcile()
                 application.workflows.recover_incomplete()
                 application.goal_coordinator.recover_incomplete()

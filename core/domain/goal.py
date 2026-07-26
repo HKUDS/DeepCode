@@ -109,9 +109,7 @@ class Goal:
     budget: GoalBudget = field(default_factory=GoalBudget)
     skill_ids: tuple[str, ...] = ()
     verification_command_id: str | None = None
-    verification_timeout_seconds: int = (
-        DEFAULT_GOAL_POLICY.verification_timeout_seconds
-    )
+    verification_timeout_seconds: int = DEFAULT_GOAL_POLICY.verification_timeout_seconds
     evaluator_connection_id: str | None = None
     evaluator_model_id: str | None = None
     evaluator_max_tokens: int = DEFAULT_GOAL_POLICY.evaluator_max_tokens
@@ -184,8 +182,7 @@ class Goal:
             raise ValueError("evaluator_model_id must not be empty")
         if self.evaluator_max_tokens < GOAL_EVALUATOR_MIN_TOKENS:
             raise ValueError(
-                "evaluator_max_tokens must be at least "
-                f"{GOAL_EVALUATOR_MIN_TOKENS}"
+                f"evaluator_max_tokens must be at least {GOAL_EVALUATOR_MIN_TOKENS}"
             )
         if (
             not math.isfinite(self.evaluator_temperature)

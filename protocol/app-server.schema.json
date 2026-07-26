@@ -198,6 +198,53 @@
         "declined"
       ]
     },
+    "PlanStepStatus": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "in_progress",
+        "completed"
+      ]
+    },
+    "TurnPlanStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "step": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "$ref": "#/$defs/PlanStepStatus"
+        }
+      },
+      "required": [
+        "step",
+        "status"
+      ]
+    },
+    "TurnPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "explanation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TurnPlanStep"
+          }
+        }
+      },
+      "required": [
+        "explanation",
+        "steps"
+      ]
+    },
     "ApprovalStatus": {
       "type": "string",
       "enum": [
@@ -382,6 +429,12 @@
             "null"
           ]
         },
+        "reasoningEffort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "workspacePath": {
           "type": "string"
         },
@@ -415,6 +468,8 @@
         "mode",
         "status",
         "model",
+        "connectionId",
+        "reasoningEffort",
         "workspacePath",
         "worktreePath",
         "createdAt",
@@ -890,6 +945,33 @@
         "itemId",
         "timestamp",
         "payload"
+      ]
+    },
+    "TurnPlanUpdatedEvent": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Event"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "payload": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "plan": {
+                  "$ref": "#/$defs/TurnPlan"
+                }
+              },
+              "required": [
+                "plan"
+              ]
+            }
+          },
+          "required": [
+            "payload"
+          ]
+        }
       ]
     },
     "InitializeParams": {
@@ -1374,6 +1456,42 @@
         "connectionId"
       ]
     },
+    "ReasoningCapabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "supportedEfforts": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "defaultEffort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "defaultEnabled": {
+          "type": "boolean"
+        },
+        "mandatory": {
+          "type": "boolean"
+        },
+        "supportsSummary": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "supportedEfforts",
+        "defaultEffort",
+        "defaultEnabled",
+        "mandatory",
+        "supportsSummary"
+      ]
+    },
     "CatalogModel": {
       "type": "object",
       "additionalProperties": false,
@@ -1397,6 +1515,16 @@
           "items": {
             "type": "string"
           }
+        },
+        "reasoning": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ReasoningCapabilities"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -1404,7 +1532,8 @@
         "name",
         "contextWindow",
         "maxOutputTokens",
-        "supportedParameters"
+        "supportedParameters",
+        "reasoning"
       ]
     },
     "ModelCatalogResult": {
@@ -2560,6 +2689,10 @@
         "model": {
           "type": "string"
         },
+        "reasoningEffort": {
+          "type": "string",
+          "minLength": 1
+        },
         "workspacePath": {
           "type": "string"
         },
@@ -2660,6 +2793,44 @@
       "required": [
         "threadId",
         "model"
+      ]
+    },
+    "ThreadExecutionParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "connectionId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "reasoningEffort": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        }
+      },
+      "required": [
+        "threadId",
+        "connectionId",
+        "model",
+        "reasoningEffort"
       ]
     },
     "ThreadForkParams": {
@@ -3154,6 +3325,10 @@
           "minLength": 1
         },
         "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reasoningEffort": {
           "type": "string",
           "minLength": 1
         }
@@ -4165,7 +4340,13 @@
         "thread/model": {
           "$ref": "#/$defs/ThreadModelParams"
         },
+        "thread/execution/update": {
+          "$ref": "#/$defs/ThreadExecutionParams"
+        },
         "thread/archive": {
+          "$ref": "#/$defs/ThreadReadParams"
+        },
+        "thread/delete": {
           "$ref": "#/$defs/ThreadReadParams"
         },
         "thread/fork": {
@@ -4315,7 +4496,9 @@
         "thread/read",
         "thread/rename",
         "thread/model",
+        "thread/execution/update",
         "thread/archive",
+        "thread/delete",
         "thread/fork",
         "thread/goal/get",
         "thread/goal/set",
@@ -4737,6 +4920,18 @@
             "thread"
           ]
         },
+        "thread/execution/update": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "thread": {
+              "$ref": "#/$defs/Thread"
+            }
+          },
+          "required": [
+            "thread"
+          ]
+        },
         "thread/archive": {
           "type": "object",
           "additionalProperties": false,
@@ -4747,6 +4942,24 @@
           },
           "required": [
             "thread"
+          ]
+        },
+        "thread/delete": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "threadId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            },
+            "cleanupPending": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "threadId",
+            "cleanupPending"
           ]
         },
         "thread/fork": {
@@ -5188,7 +5401,9 @@
         "thread/read",
         "thread/rename",
         "thread/model",
+        "thread/execution/update",
         "thread/archive",
+        "thread/delete",
         "thread/fork",
         "thread/goal/get",
         "thread/goal/set",
@@ -5281,6 +5496,9 @@
         "goal.updated": {
           "$ref": "#/$defs/Event"
         },
+        "turn.plan.updated": {
+          "$ref": "#/$defs/TurnPlanUpdatedEvent"
+        },
         "terminal.output": {
           "type": "object",
           "additionalProperties": false,
@@ -5370,6 +5588,7 @@
         "artifact.created",
         "automation.updated",
         "goal.updated",
+        "turn.plan.updated",
         "terminal.output",
         "terminal.exit",
         "server.warning"

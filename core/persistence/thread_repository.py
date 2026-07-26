@@ -20,8 +20,8 @@ class ThreadRepository:
         self.connection.execute(
             "INSERT INTO threads (id, project_id, parent_thread_id, title, mode, "
             "status, model, connection_id, workspace_path, worktree_path, "
-            "created_at, updated_at, archived_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "reasoning_effort, created_at, updated_at, archived_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 thread.id,
                 thread.project_id,
@@ -33,6 +33,7 @@ class ThreadRepository:
                 thread.connection_id,
                 thread.workspace_path,
                 thread.worktree_path,
+                thread.reasoning_effort,
                 dump_datetime(thread.created_at),
                 dump_datetime(thread.updated_at),
                 dump_datetime(thread.archived_at),
@@ -43,7 +44,7 @@ class ThreadRepository:
         cursor = self.connection.execute(
             "UPDATE threads SET project_id = ?, parent_thread_id = ?, title = ?, "
             "mode = ?, status = ?, model = ?, connection_id = ?, "
-            "workspace_path = ?, worktree_path = ?, "
+            "workspace_path = ?, worktree_path = ?, reasoning_effort = ?, "
             "updated_at = ?, archived_at = ? WHERE id = ?",
             (
                 thread.project_id,
@@ -55,6 +56,7 @@ class ThreadRepository:
                 thread.connection_id,
                 thread.workspace_path,
                 thread.worktree_path,
+                thread.reasoning_effort,
                 dump_datetime(thread.updated_at),
                 dump_datetime(thread.archived_at),
                 thread.id,
@@ -117,6 +119,7 @@ class ThreadRepository:
             status=ThreadStatus(row["status"]),
             model=row["model"],
             connection_id=row["connection_id"],
+            reasoning_effort=row["reasoning_effort"],
             workspace_path=row["workspace_path"],
             worktree_path=row["worktree_path"],
             created_at=load_required_datetime(row["created_at"]),

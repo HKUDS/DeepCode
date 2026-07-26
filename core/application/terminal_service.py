@@ -19,8 +19,11 @@ from core.application.errors import (
     InvalidArgumentError,
     NotSupportedApplicationError,
     TerminalNotFoundError,
+    ThreadNotFoundError,
 )
 from core.application.workspace_service import WorkspaceService
+from core.file_lock import FileLease
+from core.sessions import SessionStore
 
 if os.name != "nt":
     import fcntl
@@ -46,12 +49,20 @@ class _TerminalSession:
     info: TerminalInfo
     process: subprocess.Popen[bytes]
     master_fd: int
+    activity_lease: FileLease
     closing: bool = False
 
 
 class TerminalService:
-    def __init__(self, workspaces: WorkspaceService, *, max_sessions: int = 8) -> None:
+    def __init__(
+        self,
+        workspaces: WorkspaceService,
+        sessions: SessionStore,
+        *,
+        max_sessions: int = 8,
+    ) -> None:
         self.workspaces = workspaces
+        self.sessions = sessions
         self.max_sessions = max_sessions
         self._lock = threading.RLock()
         self._sessions: dict[str, _TerminalSession] = {}
@@ -76,15 +87,20 @@ class TerminalService:
                 "PTY terminals require the Windows ConPTY adapter"
             )
         self._validate_size(columns, rows)
-        context = self.workspaces.resolve(thread_id, require_trusted=True)
-        with self._lock:
-            if len(self._sessions) + self._creating >= self.max_sessions:
-                raise ConflictError("maximum terminal session count reached")
-            self._creating += 1
+        activity_lease = self.sessions.acquire_activity_lease(thread_id)
+        if activity_lease is None:
+            raise ThreadNotFoundError(f"thread not found: {thread_id}")
         master_fd: int | None = None
         slave_fd: int | None = None
         registered = False
+        counted = False
         try:
+            context = self.workspaces.resolve(thread_id, require_trusted=True)
+            with self._lock:
+                if len(self._sessions) + self._creating >= self.max_sessions:
+                    raise ConflictError("maximum terminal session count reached")
+                self._creating += 1
+                counted = True
             master_fd, slave_fd = pty.openpty()
             self._set_size(master_fd, columns, rows)
             shell = _shell_path()
@@ -116,7 +132,12 @@ class TerminalService:
                 rows=rows,
                 workspace_path=str(context.root),
             )
-            session = _TerminalSession(info=info, process=process, master_fd=master_fd)
+            session = _TerminalSession(
+                info=info,
+                process=process,
+                master_fd=master_fd,
+                activity_lease=activity_lease,
+            )
             with self._lock:
                 self._sessions[terminal_id] = session
                 self._creating -= 1
@@ -132,8 +153,10 @@ class TerminalService:
             raise ConflictError(f"terminal could not start: {exc}") from exc
         finally:
             if not registered:
-                with self._lock:
-                    self._creating -= 1
+                activity_lease.close()
+                if counted:
+                    with self._lock:
+                        self._creating -= 1
                 for descriptor in (slave_fd, master_fd):
                     if descriptor is not None:
                         try:
@@ -246,6 +269,7 @@ class TerminalService:
             with self._lock:
                 if self._sessions.get(session.info.id) is session:
                     self._sessions.pop(session.info.id, None)
+            session.activity_lease.close()
             self._publish(
                 "terminal.exit",
                 {

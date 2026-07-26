@@ -62,6 +62,18 @@ class GoalStore:
                 raise GoalSessionNotFoundError(f"session not found: {thread_id}")
             return self._fold(self._read_entries(directory))
 
+    def read_guarded(self, thread_id: str, directory: Path) -> GoalRecord | None:
+        """Read while the caller already owns the Session mutation guard.
+
+        Permanent deletion uses this narrow seam to inspect Goal state without
+        recursively acquiring the same cross-process file lock.
+        """
+
+        expected = self.sessions.root / self.sessions._validated_session_id(thread_id)
+        if directory != expected:
+            raise ValueError("guarded Goal directory does not match the Session")
+        return self._fold(self._read_entries(directory))
+
     def create(self, goal: Goal) -> GoalRecord:
         if goal.revision != 1:
             raise ValueError("new goals must start at revision 1")
@@ -156,9 +168,7 @@ class GoalStore:
             current = self._matching_goal(record, evaluation.goal_id)
             self._require_revision(current, expected_revision)
             if evaluation.goal_revision != current.goal.definition_revision:
-                raise GoalConflictError(
-                    "evaluation belongs to a stale Goal definition"
-                )
+                raise GoalConflictError("evaluation belongs to a stale Goal definition")
             if not any(
                 attempt.id == evaluation.attempt_id
                 and attempt.turn_id == evaluation.turn_id
@@ -211,9 +221,7 @@ class GoalStore:
             if updated_goal.id != current.goal.id:
                 raise GoalConflictError("updated Goal identity does not match")
             if evaluation.goal_revision != current.goal.definition_revision:
-                raise GoalConflictError(
-                    "evaluation belongs to a stale Goal definition"
-                )
+                raise GoalConflictError("evaluation belongs to a stale Goal definition")
             if updated_goal.definition_revision != current.goal.definition_revision:
                 raise GoalConflictError(
                     "an evaluation cannot change the Goal definition"
@@ -336,11 +344,7 @@ class GoalStore:
                             "Goal Attempt does not belong to the active Goal"
                         )
                     existing = next(
-                        (
-                            item
-                            for item in record.attempts
-                            if item.id == attempt.id
-                        ),
+                        (item for item in record.attempts if item.id == attempt.id),
                         None,
                     )
                     attempts = (
@@ -492,9 +496,7 @@ class GoalStore:
             acceptance_criteria=tuple(raw.get("acceptanceCriteria") or ()),
             status=GoalStatus(raw["status"]),
             revision=int(raw["revision"]),
-            definition_revision=int(
-                raw.get("definitionRevision", raw["revision"])
-            ),
+            definition_revision=int(raw.get("definitionRevision", raw["revision"])),
             tokens_used=int(raw.get("tokensUsed", 0)),
             elapsed_seconds=int(raw.get("elapsedSeconds", 0)),
             budget=GoalBudget(

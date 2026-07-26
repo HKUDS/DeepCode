@@ -117,6 +117,7 @@ def _application(
         title="Model switching",
         connection_id="router-a",
         model="moonshotai/kimi-k2.5",
+        reasoning_effort="low",
     )
     return application, thread.id, sessions
 
@@ -154,6 +155,7 @@ def test_session_switch_rebuilds_runtime_but_preserves_history_and_turn_provenan
             thread_id,
             connection_id="router-b",
             model="openai/gpt-5-mini",
+            reasoning_effort="high",
         )
         second = application.turns.start(thread_id, prompt="second")
         second_done = _wait(
@@ -166,8 +168,10 @@ def test_session_switch_rebuilds_runtime_but_preserves_history_and_turn_provenan
         assert second_done.turn.execution_profile is not None
         assert first_done.turn.execution_profile.connection_id == "router-a"
         assert first_done.turn.execution_profile.model_id == "moonshotai/kimi-k2.5"
+        assert first_done.turn.execution_profile.reasoning_effort == "low"
         assert second_done.turn.execution_profile.connection_id == "router-b"
         assert second_done.turn.execution_profile.model_id == "openai/gpt-5-mini"
+        assert second_done.turn.execution_profile.reasoning_effort == "high"
         assert [profile.connection_id for profile in factory.profiles] == [
             "router-a",
             "router-b",
@@ -184,12 +188,15 @@ def test_session_switch_rebuilds_runtime_but_preserves_history_and_turn_provenan
         assert canonical is not None
         assert canonical.metadata["connection_id"] == "router-b"
         assert canonical.metadata["model"] == "openai/gpt-5-mini"
-        assert canonical.messages[0].metadata["executionProfile"][
-            "connectionId"
-        ] == "router-a"
-        assert canonical.messages[-1].metadata["executionProfile"][
-            "connectionId"
-        ] == "router-b"
+        assert canonical.metadata["reasoning_effort"] == "high"
+        assert (
+            canonical.messages[0].metadata["executionProfile"]["connectionId"]
+            == "router-a"
+        )
+        assert (
+            canonical.messages[-1].metadata["executionProfile"]["connectionId"]
+            == "router-b"
+        )
 
         original_retry = application.turns.retry(first.turn.id)
         original_done = _wait(
@@ -211,8 +218,10 @@ def test_session_switch_rebuilds_runtime_but_preserves_history_and_turn_provenan
         assert current_done.turn.execution_profile is not None
         assert current_done.turn.execution_profile.connection_id == "router-b"
         assert current_done.turn.execution_profile.model_id == "openai/gpt-5-mini"
+        assert current_done.turn.execution_profile.reasoning_effort == "high"
     finally:
         application.close()
+
 
 def test_queued_turn_keeps_override_and_active_turn_blocks_session_switch(
     tmp_path: Path,
@@ -228,17 +237,20 @@ def test_queued_turn_keeps_override_and_active_turn_blocks_session_switch(
             prompt="queued",
             connection_id="router-b",
             model="openai/gpt-5-mini",
+            reasoning_effort="high",
         )
 
         assert queued.turn.status is TurnStatus.QUEUED
         assert queued.turn.execution_profile is not None
         assert queued.turn.execution_profile.connection_id == "router-b"
         assert queued.turn.execution_profile.model_id == "openai/gpt-5-mini"
+        assert queued.turn.execution_profile.reasoning_effort == "high"
         with pytest.raises(ConflictError, match="cannot change while a Turn is active"):
             application.threads.set_execution_selection(
                 thread_id,
                 connection_id="router-b",
                 model="openai/gpt-5-mini",
+                reasoning_effort="high",
             )
 
         application.turns.interrupt(active.turn.id)

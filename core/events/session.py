@@ -32,7 +32,10 @@ from core.agent_runtime.tools.registry import ToolRegistry
 from core.providers.catalog import context_window_for
 from core.events.protocol import (
     AgentMessage,
+    AgentMessageCompleted,
     AgentMessageDelta,
+    AgentMessagePhase,
+    AgentReasoningSummary,
     ErrorEvent,
     Event,
     Interrupt,
@@ -47,6 +50,8 @@ from core.events.protocol import (
     ToolStarted,
     TurnStarted,
     UserInput,
+    describe_tool_activity,
+    parse_plan_update,
     summarize_call,
     summarize_result,
 )
@@ -67,10 +72,22 @@ def _is_error_result(result: Any) -> bool:
 class _EventEmittingHook(AgentHook):
     """Bridge kernel hook callbacks onto the event queue in real time."""
 
-    def __init__(self, emit, *, streaming: bool = False) -> None:
+    def __init__(
+        self,
+        emit,
+        *,
+        streaming: bool = False,
+        emit_deltas: bool | None = None,
+    ) -> None:
         super().__init__()
         self._emit = emit
         self._streaming = streaming
+        self._emit_deltas = streaming if emit_deltas is None else emit_deltas
+        self._reasoning_iterations: set[int] = set()
+        self._message_id: str | None = None
+        self._message_text = ""
+        self._last_message_id: str | None = None
+        self._last_message_text = ""
 
     def wants_streaming(self) -> bool:
         # Routes the kernel through chat_stream_with_retry so assistant text
@@ -78,8 +95,67 @@ class _EventEmittingHook(AgentHook):
         return self._streaming
 
     async def on_stream(self, context: AgentHookContext, delta: str) -> None:
-        if delta:
-            self._emit(AgentMessageDelta(delta=delta))
+        if not delta:
+            return
+        if self._message_id is None:
+            self._message_id = uuid4().hex
+            self._message_text = ""
+        self._message_text += delta
+        if self._emit_deltas:
+            self._emit(
+                AgentMessageDelta(
+                    delta=delta,
+                    message_id=self._message_id,
+                )
+            )
+
+    async def on_stream_end(
+        self,
+        context: AgentHookContext,
+        *,
+        resuming: bool,
+    ) -> None:
+        """Close one provider response item without deciding the final answer.
+
+        Every response segment first completes as commentary. AgentSession
+        upgrades the actual last segment to ``final_answer`` after all stop
+        hooks and injections have settled.
+        """
+
+        if not self._emit_deltas:
+            self._message_id = None
+            self._message_text = ""
+            return
+        response_text = (
+            context.response.content
+            if context.response is not None
+            and isinstance(context.response.content, str)
+            else ""
+        )
+        text = response_text or self._message_text
+        if not text:
+            self._message_id = None
+            self._message_text = ""
+            return
+        message_id = self._message_id or uuid4().hex
+        self._emit(
+            AgentMessageCompleted(
+                message_id=message_id,
+                text=text,
+                phase=AgentMessagePhase.COMMENTARY,
+            )
+        )
+        self._last_message_id = message_id
+        self._last_message_text = text
+        self._message_id = None
+        self._message_text = ""
+
+    def final_message_id(self, text: str) -> str:
+        """Reuse the streamed item's ID only when its authoritative text matches."""
+
+        if self._last_message_id is not None and self._last_message_text == text:
+            return self._last_message_id
+        return uuid4().hex
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         for call in context.tool_calls:
@@ -88,16 +164,31 @@ class _EventEmittingHook(AgentHook):
                     call_id=call.id,
                     name=call.name,
                     detail=summarize_call(call.name, call.arguments),
+                    activity=describe_tool_activity(call.name, call.arguments),
                 )
             )
 
     async def after_iteration(self, context: AgentHookContext) -> None:
+        summary = (
+            context.response.reasoning_summary if context.response is not None else None
+        )
+        if summary and context.iteration not in self._reasoning_iterations:
+            self._reasoning_iterations.add(context.iteration)
+            self._emit(AgentReasoningSummary(text=summary))
         for call, result in zip(context.tool_calls, context.tool_results):
+            is_error = _is_error_result(result)
+            if call.name.lower() == "update_plan" and not is_error:
+                try:
+                    self._emit(parse_plan_update(call.arguments))
+                except ValueError:
+                    logger.warning(
+                        "update_plan succeeded but its arguments could not be projected"
+                    )
             self._emit(
                 ToolCompleted(
                     call_id=call.id,
                     name=call.name,
-                    is_error=_is_error_result(result),
+                    is_error=is_error,
                     result_preview=summarize_result(result),
                 )
             )
@@ -121,6 +212,7 @@ class AgentSession:
         agent_context: tuple[str, str] | None = None,
         context_window_tokens: int | None = None,
         streaming: bool = False,
+        streaming_transport: bool | None = None,
         skill_runtime: SkillRuntime | None = None,
         execution_profile: Any | None = None,
     ) -> None:
@@ -152,6 +244,12 @@ class AgentSession:
         # (terminated by the authoritative AgentMessage). Interactive
         # frontends enable this; headless NDJSON consumers leave it off.
         self._streaming = streaming
+        # Provider streaming is also the liveness mechanism for long reasoning.
+        # It can remain enabled when a headless client does not want token
+        # deltas projected into its event stream.
+        self._streaming_transport = (
+            streaming if streaming_transport is None else streaming_transport
+        )
         # Skills are resolved here, at the frontend-neutral turn boundary.
         # A turn holds one immutable catalog snapshot, so a concurrent file
         # change can only affect the next turn.
@@ -449,6 +547,11 @@ class AgentSession:
             elif self._hooks_engine.has_event("Stop"):
                 stop_hook = self._hooks_engine.run_stop
 
+        event_hook = _EventEmittingHook(
+            self._emit,
+            streaming=self._streaming_transport,
+            emit_deltas=self._streaming,
+        )
         spec = AgentRunSpec(
             initial_messages=initial,
             tools=self._tools,
@@ -456,7 +559,7 @@ class AgentSession:
             max_iterations=self._max_iterations,
             max_tool_result_chars=_DEFAULT_MAX_TOOL_RESULT_CHARS,
             context_window_tokens=self._context_window_tokens,
-            hook=_EventEmittingHook(self._emit, streaming=self._streaming),
+            hook=event_hook,
             permission_checker=self._permission_checker,
             approval_callback=self._approval_callback,
             injection_callback=self._injection_callback,
@@ -499,7 +602,13 @@ class AgentSession:
         self._last_usage = dict(result.usage)
 
         if result.final_content:
-            self._emit(AgentMessage(text=result.final_content))
+            self._emit(
+                AgentMessage(
+                    text=result.final_content,
+                    message_id=event_hook.final_message_id(result.final_content),
+                    phase=AgentMessagePhase.FINAL_ANSWER,
+                )
+            )
         if result.error and result.stop_reason in ("error", "empty_final_response"):
             self._emit(ErrorEvent(message=result.error))
         self._emit(

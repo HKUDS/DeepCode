@@ -93,6 +93,7 @@ def test_slash_help_lists_registry(monkeypatch, tmp_path, capsys):
         "/new",
         "/resume",
         "/model",
+        "/effort",
         "/skills",
         "/skill",
         "/goal",
@@ -244,6 +245,34 @@ def test_new_resets_history_and_model_switch_keeps_it(monkeypatch, tmp_path, cap
     out = capsys.readouterr().out
     assert "started a new conversation" in out
     assert "model switched to other-model" in out
+
+
+def test_effort_switch_preserves_history_and_session_selection(
+    monkeypatch, tmp_path, capsys
+):
+    rc, provider = _run_tui(
+        monkeypatch,
+        tmp_path,
+        "hello\n/effort high\ncontinue\n/exit\n",
+        ["first reply", "second reply"],
+    )
+
+    assert rc == 0
+    assert provider.calls == 2
+    assert "effort switched to high" in capsys.readouterr().out
+
+    from core.sessions.store import SessionStore
+
+    store = SessionStore(tmp_path / "sessions")
+    stored = store.get_session(store.list_sessions()[0].session_id)
+    assert stored is not None
+    assert stored.metadata["reasoning_effort"] == "high"
+    assert [message.content for message in stored.messages] == [
+        "hello",
+        "first reply",
+        "continue",
+        "second reply",
+    ]
 
 
 def test_clear_keeps_the_same_persistent_session(monkeypatch, tmp_path, capsys):

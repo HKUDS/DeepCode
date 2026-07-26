@@ -87,6 +87,11 @@ class EventRenderer:
         self.console.print()
         self._streamed = ""
 
+    def _on_agent_reasoning_summary(self, msg) -> None:
+        self._close_line()
+        self.console.print(f"[{theme.META_STYLE}]◇ Thinking summary[/]")
+        self.console.print(Markdown(msg.text), style=theme.META_STYLE)
+
     def _on_tool_started(self, msg) -> None:
         self._close_line()
         label = (

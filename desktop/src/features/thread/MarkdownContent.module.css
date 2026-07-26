@@ -20,7 +20,7 @@
 .markdown blockquote,
 .markdown table,
 .markdown hr {
-  margin: 0 0 15px;
+  margin: 0 0 12px;
 }
 
 .markdown h1,
@@ -29,7 +29,7 @@
 .markdown h4,
 .markdown h5,
 .markdown h6 {
-  margin: 30px 0 11px;
+  margin: 24px 0 9px;
   color: var(--text-primary);
   font-family: var(--font-display);
   font-weight: 680;
@@ -38,11 +38,11 @@
 }
 
 .markdown h1 {
-  font-size: 1.42em;
+  font-size: 1.36em;
 }
 
 .markdown h2 {
-  font-size: 1.25em;
+  font-size: 1.2em;
 }
 
 .markdown h3 {
@@ -61,7 +61,7 @@
 }
 
 .markdown li {
-  margin: 4px 0;
+  margin: 3px 0;
   padding-left: 3px;
 }
 
@@ -149,7 +149,7 @@
 }
 
 .codeBlock {
-  margin: 18px 0;
+  margin: 14px 0;
   overflow: hidden;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);

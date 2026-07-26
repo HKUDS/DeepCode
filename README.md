@@ -146,6 +146,14 @@ See the
 
 ## News
 
+**2026-07-21 · Durable Goals and safe Session lifecycle**
+
+- Run long tasks as resumable, evidence-driven Goals shared by CLI and Desktop.
+- Archive history for later or permanently delete it through one guarded
+  Session lifecycle, without touching repository files.
+- Interrupted deletions recover from a durable tombstone instead of reviving
+  stale Session records.
+
 **2026-07-20 · Session-level model control and shared Skills**
 
 - Configure named LLM connections once and use them throughout DeepCode.
@@ -352,7 +360,7 @@ exposed to a client or written into Session history.
 ### 3. Start coding
 
 ```bash
-deepcode -c personal-openrouter -m moonshotai/kimi-k3
+deepcode -c personal-openrouter -m moonshotai/kimi-k3 --effort low
 ```
 
 Or run one headless task:
@@ -361,6 +369,7 @@ Or run one headless task:
 deepcode exec "Fix the failing tests and explain the root cause" \
   --connection personal-openrouter \
   --model moonshotai/kimi-k3 \
+  --effort low \
   --json
 ```
 
@@ -392,6 +401,7 @@ connection and model from the Session composer.
 /resume all              list Sessions from every recorded directory
 /resume <id>             restore one Session
 /model [connection] [id] show or change the model for future Turns
+/effort [auto|off|level] show or change Thinking for future Turns
 /clear                   clear the current in-memory context
 @src/main.py             attach a file to the next prompt
 ```
@@ -406,6 +416,20 @@ deepcode --resume <session-id>
 Session files remain under `~/.deepcode/sessions/` no matter which client opens
 them. An explicit cross-directory resume changes the current execution context
 without rewriting the Session's recorded origin.
+
+Archive keeps canonical history and only removes a Session from the normal
+Desktop list. Permanent deletion removes that history and its derived runtime
+records while leaving repository files untouched. Desktop exposes both actions
+in the Session menu; scripts can use the same application service through:
+
+```bash
+deepcode session delete <session-id> --yes
+```
+
+DeepCode refuses permanent deletion while the Session is open in another CLI,
+has active work, owns a managed worktree, or belongs to an Automation. Resolve
+the reported blocker first; deletion never force-kills work or silently removes
+workspace state.
 
 ### Connections and models
 
@@ -448,7 +472,8 @@ To make one connection/model the shared default, edit the user-level
   "agents": {
     "defaults": {
       "connection": "personal-openrouter",
-      "model": "moonshotai/kimi-k3"
+      "model": "moonshotai/kimi-k3",
+      "reasoningEffort": "low"
     }
   }
 }
@@ -456,6 +481,13 @@ To make one connection/model the shared default, edit the user-level
 
 Project configuration may select a user-owned connection, but cannot replace
 its endpoint, adapter, headers, or credential.
+
+Thinking levels come from the selected model's catalog rather than a global
+hard-coded list. `auto` follows the provider/model default; `off` is offered
+only when the model permits it. A Session switch affects future Turns without
+rewriting earlier history. DeepCode never renders raw chain-of-thought as
+assistant text; only a provider-designated summary may appear, while signed or
+encrypted continuation state remains private in the canonical Session.
 
 ### Skills
 

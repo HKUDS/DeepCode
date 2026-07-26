@@ -75,6 +75,8 @@ function thread(id: string): Thread {
     mode: "code",
     status: "idle",
     model: null,
+    connectionId: null,
+    reasoningEffort: null,
     workspacePath: `/workspace/${id}`,
     worktreePath: null,
     createdAt: "2026-07-16T00:00:00Z",

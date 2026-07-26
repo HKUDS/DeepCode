@@ -54,9 +54,7 @@ class SequencedSemanticEvaluator:
 
     async def evaluate(self, _context):
         self.calls += 1
-        verdict = (
-            GoalVerdict.CONTINUE if self.calls == 1 else GoalVerdict.COMPLETE
-        )
+        verdict = GoalVerdict.CONTINUE if self.calls == 1 else GoalVerdict.COMPLETE
         return SemanticDecision(
             verdict=verdict,
             reason=(

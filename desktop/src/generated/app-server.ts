@@ -57,6 +57,13 @@ export type ItemKind =
 export type ItemStatus = "pending" | "in_progress" | "completed" | "failed" | "declined";
 export type ApprovalStatus = "pending" | "approved_once" | "approved_session" | "denied" | "cancelled" | "expired";
 export type WorkflowStatus = "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled";
+export type TurnPlanUpdatedEvent = Event & {
+  payload: {
+    plan: TurnPlan;
+  };
+  [k: string]: unknown;
+};
+export type PlanStepStatus = "pending" | "in_progress" | "completed";
 
 /**
  * Canonical JSON-RPC data contracts for the DeepCode desktop client.
@@ -103,7 +110,9 @@ export interface MethodParams {
   "thread/read": ThreadReadParams;
   "thread/rename": ThreadRenameParams;
   "thread/model": ThreadModelParams;
+  "thread/execution/update": ThreadExecutionParams;
   "thread/archive": ThreadReadParams;
+  "thread/delete": ThreadReadParams;
   "thread/fork": ThreadForkParams;
   "thread/goal/get": ThreadReadParams;
   "thread/goal/set": GoalSetParams;
@@ -262,6 +271,7 @@ export interface ThreadStartParams {
   mode?: ThreadMode;
   connectionId?: string;
   model?: string;
+  reasoningEffort?: string;
   workspacePath?: string;
   parentThreadId?: string;
 }
@@ -283,6 +293,12 @@ export interface ThreadModelParams {
   threadId: string;
   model: string | null;
   connectionId?: string | null;
+}
+export interface ThreadExecutionParams {
+  threadId: string;
+  connectionId: string | null;
+  model: string | null;
+  reasoningEffort: string | null;
 }
 export interface ThreadForkParams {
   threadId: string;
@@ -474,6 +490,7 @@ export interface TurnStartParams {
     | [string, string, string, string, string, string, string, string];
   connectionId?: string;
   model?: string;
+  reasoningEffort?: string;
 }
 export interface TurnReadParams {
   turnId: string;
@@ -669,8 +686,15 @@ export interface MethodResults {
   "thread/model": {
     thread: Thread;
   };
+  "thread/execution/update": {
+    thread: Thread;
+  };
   "thread/archive": {
     thread: Thread;
+  };
+  "thread/delete": {
+    threadId: string;
+    cleanupPending: boolean;
   };
   "thread/fork": {
     thread: Thread;
@@ -836,6 +860,14 @@ export interface CatalogModel {
   contextWindow: number;
   maxOutputTokens: number;
   supportedParameters: string[];
+  reasoning: ReasoningCapabilities | null;
+}
+export interface ReasoningCapabilities {
+  supportedEfforts: string[];
+  defaultEffort: string | null;
+  defaultEnabled: boolean;
+  mandatory: boolean;
+  supportsSummary: boolean;
 }
 export interface Project {
   id: string;
@@ -1005,7 +1037,8 @@ export interface Thread {
   mode: ThreadMode;
   status: ThreadStatus;
   model: string | null;
-  connectionId?: string | null;
+  connectionId: string | null;
+  reasoningEffort: string | null;
   workspacePath: string;
   worktreePath: string | null;
   createdAt: string;
@@ -1430,6 +1463,7 @@ export interface Notifications {
   "artifact.created": Event;
   "automation.updated": Event;
   "goal.updated": Event;
+  "turn.plan.updated": TurnPlanUpdatedEvent;
   "terminal.output": {
     terminalId: string;
     threadId: string;
@@ -1445,4 +1479,12 @@ export interface Notifications {
     dropped: number;
     replayRequired: true;
   };
+}
+export interface TurnPlan {
+  explanation: string | null;
+  steps: TurnPlanStep[];
+}
+export interface TurnPlanStep {
+  step: string;
+  status: PlanStepStatus;
 }

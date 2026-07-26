@@ -59,6 +59,26 @@ class ExecutionRegistry:
             future = self._jobs.get(job_id)
             return future is not None and not future.done()
 
+    def run_maintenance(
+        self,
+        job_factory: JobFactory,
+        *,
+        timeout: float = 5.0,
+    ) -> None:
+        """Run bounded cleanup on the registry's owning event loop."""
+
+        with self._lock:
+            if self._closed:
+                return
+            loop = self._loop
+            owner = self._thread
+        if loop is None:
+            return
+        if owner is threading.current_thread():
+            raise RuntimeError("maintenance cannot block the execution event loop")
+        future = asyncio.run_coroutine_threadsafe(job_factory(), loop)
+        future.result(timeout=timeout)
+
     def close(
         self,
         *,

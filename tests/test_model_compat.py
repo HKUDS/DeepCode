@@ -105,9 +105,17 @@ def test_kimi_thinking_injects_extra_body_and_reasoning_echo():
     assert c.inject_empty_reasoning_content is True
 
 
-def test_kimi_thinking_disabled_at_minimal_effort():
+def test_kimi_minimal_effort_still_enables_thinking():
     c = resolve_model_compat(
         model_name="kimi-k2.5", spec=OPENAI, reasoning_effort="minimal"
+    )
+    assert c.thinking_extra_body == {"thinking": {"type": "enabled"}}
+    assert c.inject_empty_reasoning_content is True
+
+
+def test_kimi_thinking_is_explicitly_disabled_with_none():
+    c = resolve_model_compat(
+        model_name="kimi-k2.5", spec=OPENAI, reasoning_effort="none"
     )
     assert c.thinking_extra_body == {"thinking": {"type": "disabled"}}
     assert c.inject_empty_reasoning_content is False

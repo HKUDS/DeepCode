@@ -16,6 +16,10 @@ from core.config import deepcode_home
 from core.file_lock import exclusive_file_lock
 from core.providers.catalog import known_model_ids, resolve_model_info
 from core.providers.profiles import ConnectionResolver, ResolvedConnection
+from core.providers.reasoning import (
+    ModelReasoningCapabilities,
+    infer_reasoning_capabilities,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +29,7 @@ class CatalogModel:
     context_window: int
     max_output_tokens: int
     supported_parameters: tuple[str, ...] = ()
+    reasoning: ModelReasoningCapabilities | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -33,6 +38,7 @@ class CatalogModel:
             "contextWindow": self.context_window,
             "maxOutputTokens": self.max_output_tokens,
             "supportedParameters": list(self.supported_parameters),
+            "reasoning": self.reasoning.to_dict() if self.reasoning else None,
         }
 
     @classmethod
@@ -55,6 +61,13 @@ class CatalogModel:
                     str(item)
                     for item in value.get("supportedParameters", [])
                     if isinstance(item, str)
+                ),
+                reasoning=(
+                    ModelReasoningCapabilities.from_dict(value.get("reasoning"))
+                    or infer_reasoning_capabilities(
+                        model_id,
+                        supported_parameters=value.get("supportedParameters", ()),
+                    )
                 ),
             )
         except (TypeError, ValueError):
@@ -180,7 +193,9 @@ class ModelCatalogService:
 
     def _fetch(self, connection: ResolvedConnection) -> tuple[CatalogModel, ...]:
         url, headers = _catalog_request(connection)
-        with httpx.Client(timeout=self.timeout_seconds, follow_redirects=True) as client:
+        with httpx.Client(
+            timeout=self.timeout_seconds, follow_redirects=True
+        ) as client:
             response = client.get(url, headers=headers)
             response.raise_for_status()
             payload = response.json()
@@ -298,9 +313,7 @@ def _catalog_request(connection: ResolvedConnection) -> tuple[str, dict[str, str
         return url, headers
 
     if connection.model_catalog == "openrouter":
-        base = (
-            connection.api_base or "https://openrouter.ai/api/v1"
-        ).rstrip("/")
+        base = (connection.api_base or "https://openrouter.ai/api/v1").rstrip("/")
     elif connection.provider_name == "openai":
         base = (connection.api_base or "https://api.openai.com/v1").rstrip("/")
     else:
@@ -321,9 +334,7 @@ def _parse_model(value: dict[str, Any]) -> CatalogModel | None:
     model_id = raw_id.strip()
     fallback = resolve_model_info(model_id)
     top_provider = (
-        value.get("top_provider")
-        if isinstance(value.get("top_provider"), dict)
-        else {}
+        value.get("top_provider") if isinstance(value.get("top_provider"), dict) else {}
     )
     context = (
         value.get("context_length")
@@ -337,16 +348,24 @@ def _parse_model(value: dict[str, Any]) -> CatalogModel | None:
         or fallback.max_output_tokens
     )
     supported = value.get("supported_parameters", [])
+    supported_parameters = (
+        tuple(str(item) for item in supported if isinstance(item, str))
+        if isinstance(supported, list)
+        else ()
+    )
+    reasoning = ModelReasoningCapabilities.from_dict(value.get("reasoning"))
+    if reasoning is None:
+        reasoning = infer_reasoning_capabilities(
+            model_id,
+            supported_parameters=supported_parameters,
+        )
     return CatalogModel(
         id=model_id,
         name=str(value.get("name") or value.get("display_name") or model_id),
         context_window=max(1, int(context)),
         max_output_tokens=max(1, int(output)),
-        supported_parameters=tuple(
-            str(item) for item in supported if isinstance(item, str)
-        )
-        if isinstance(supported, list)
-        else (),
+        supported_parameters=supported_parameters,
+        reasoning=reasoning,
     )
 
 
@@ -357,6 +376,7 @@ def _offline_model(model_id: str) -> CatalogModel:
         name=model_id,
         context_window=info.context_window,
         max_output_tokens=info.max_output_tokens,
+        reasoning=infer_reasoning_capabilities(model_id),
     )
 
 

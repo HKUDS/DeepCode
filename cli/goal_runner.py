@@ -23,6 +23,7 @@ class GoalRunOptions:
     workspace: str
     connection_id: str | None = None
     model: str | None = None
+    reasoning_effort: str | None = None
     skill_ids: tuple[str, ...] = ()
     acceptance_criteria: tuple[str, ...] = ()
     verification: str = ""
@@ -73,12 +74,9 @@ async def run_goal(
     application = DeepCodeApplication.open(
         session_factory=factory,
         semantic_goal_evaluator=(
-            VerificationSufficientEvaluator()
-            if options.verification.strip()
-            else None
+            VerificationSufficientEvaluator() if options.verification.strip() else None
         ),
     )
-    thread_id = ""
     try:
         project = application.projects.add(
             str(workspace),
@@ -93,8 +91,8 @@ async def run_goal(
             title=objective.splitlines()[0][:60],
             connection_id=options.connection_id,
             model=options.model,
+            reasoning_effort=options.reasoning_effort,
         )
-        thread_id = thread.id
         verification_id = _verification_command_id(
             application,
             thread.id,
@@ -161,11 +159,7 @@ def _verification_command_id(
     except ValueError as exc:
         raise InvalidArgumentError(f"invalid verification command: {exc}") from exc
     matched = next(
-        (
-            command
-            for command in available
-            if _normalized_argv(command.argv) == wanted
-        ),
+        (command for command in available if _normalized_argv(command.argv) == wanted),
         None,
     )
     if matched is not None:

@@ -139,7 +139,7 @@ class TuiGoalController:
                     "/goal status, /goal resume, or /goal clear"
                 )
             selected_skills = tuple(self.owner.selected_skill_ids)
-            created = application.goals.create(
+            application.goals.create(
                 thread_id,
                 objective=objective,
                 skill_ids=selected_skills,
@@ -175,9 +175,8 @@ class TuiGoalController:
                 self.owner.workspace,
                 trust_state=TrustState.TRUSTED,
             )
-            if (
-                project.trust_state is TrustState.UNTRUSTED
-                and bool(project.settings.get("sessionDiscovered"))
+            if project.trust_state is TrustState.UNTRUSTED and bool(
+                project.settings.get("sessionDiscovered")
             ):
                 # The established CLI already executes in its launch folder.
                 # Reconciliation may have created a conservative projection

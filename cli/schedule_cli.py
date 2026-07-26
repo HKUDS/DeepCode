@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from rich.console import Console
 
 from cli.goal_runner import GoalRunOptions, run_goal
+from cli.execution_options import add_reasoning_effort_argument
 from core.domain.goal import GoalStatus
 from core.loop.autodream import consolidate_memory
 from core.loop.compat import project_goal_to_loop_state
@@ -39,12 +40,14 @@ def _autodream_task(
     workspace: str,
     model: str | None,
     connection_id: str | None,
+    reasoning_effort: str | None,
 ):
     async def task(run_index: int) -> RunOutcome:
         result = await consolidate_memory(
             workspace,
             model=model,
             connection_id=connection_id,
+            reasoning_effort=reasoning_effort,
         )
         detail = (
             f"{result.notes_before}->{result.notes_after} notes"
@@ -69,6 +72,7 @@ def _loop_task(args) -> "callable":
                 verification=args.test_cmd,
                 model=args.model,
                 connection_id=args.connection,
+                reasoning_effort=args.reasoning_effort,
                 max_attempts=args.max_rounds,
             )
         )
@@ -94,7 +98,12 @@ def _run(args: argparse.Namespace) -> int:
     max_runs = 1 if args.once else args.max_runs
 
     if args.job == "autodream":
-        task = _autodream_task(workspace, args.model, args.connection)
+        task = _autodream_task(
+            workspace,
+            args.model,
+            args.connection,
+            args.reasoning_effort,
+        )
     else:
         task = _loop_task(args)
 
@@ -138,6 +147,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--test-cmd", "-t", default="")
     parser.add_argument("--model", "-m", default=None)
     parser.add_argument("--connection", "-c", default=None)
+    add_reasoning_effort_argument(parser)
     parser.add_argument(
         "--every", type=float, default=0, help="Interval seconds (0 = once)."
     )

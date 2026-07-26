@@ -390,6 +390,14 @@ ALTER TABLE turns DROP COLUMN goal_definition_revision;
 ALTER TABLE turns DROP COLUMN goal_id;
 """
 
+_THREAD_REASONING_EFFORT_V7 = r"""
+ALTER TABLE threads ADD COLUMN reasoning_effort TEXT;
+"""
+
+_DROP_THREAD_REASONING_EFFORT_V7 = r"""
+ALTER TABLE threads DROP COLUMN reasoning_effort;
+"""
+
 MIGRATIONS = (
     Migration(1, "initial_domain", _INITIAL_SCHEMA, _DROP_INITIAL_SCHEMA),
     Migration(
@@ -421,6 +429,12 @@ MIGRATIONS = (
         "goal_turn_links",
         _GOAL_TURN_LINKS_V6,
         _DROP_GOAL_TURN_LINKS_V6,
+    ),
+    Migration(
+        7,
+        "thread_reasoning_effort",
+        _THREAD_REASONING_EFFORT_V7,
+        _DROP_THREAD_REASONING_EFFORT_V7,
     ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

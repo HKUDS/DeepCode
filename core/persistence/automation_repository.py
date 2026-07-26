@@ -102,6 +102,13 @@ class AutomationRepository:
         ).fetchone()
         return self._from_row(row) if row is not None else None
 
+    def get_for_thread(self, thread_id: str) -> Automation | None:
+        row = self.connection.execute(
+            "SELECT * FROM automations WHERE thread_id = ?",
+            (thread_id,),
+        ).fetchone()
+        return self._from_row(row) if row is not None else None
+
     def list(
         self,
         *,

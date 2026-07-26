@@ -178,7 +178,7 @@
   color: var(--text-primary);
 }
 
-.menu .archiveAction {
+.menu .deleteAction {
   color: var(--danger);
 }
 
@@ -222,12 +222,14 @@
   background: var(--surface-hover);
 }
 
-.confirmation .confirmArchive {
+.confirmation .confirmArchive,
+.confirmation .confirmDelete {
   background: var(--danger);
   color: var(--text-on-accent);
 }
 
-.confirmation .confirmArchive:hover:not(:disabled) {
+.confirmation .confirmArchive:hover:not(:disabled),
+.confirmation .confirmDelete:hover:not(:disabled) {
   background: color-mix(in srgb, var(--danger) 86%, black);
 }
 

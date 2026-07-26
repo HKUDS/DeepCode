@@ -13,9 +13,7 @@ def test_json_output_flag_is_accepted_before_or_after_subcommand() -> None:
     assert provider_cli._parser().parse_args(["--json", "list"]).json is True
     assert provider_cli._parser().parse_args(["list", "--json"]).json is True
     assert (
-        provider_cli._parser()
-        .parse_args(["models", "openrouter", "--json"])
-        .json
+        provider_cli._parser().parse_args(["models", "openrouter", "--json"]).json
         is True
     )
 
@@ -98,6 +96,6 @@ def test_provider_cli_key_rotation_does_not_reset_connection_fields(
     assert profile["template"] == "openrouter"
     assert profile["label"] == "Router CLI"
     assert profile["apiBase"] == "https://router.example/v1"
-    assert CredentialStore(home / "credentials.json").get(
-        "router-cli"
-    ) == "rotated-secret"
+    assert (
+        CredentialStore(home / "credentials.json").get("router-cli") == "rotated-secret"
+    )

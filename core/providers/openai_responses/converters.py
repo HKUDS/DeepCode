@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from typing import Any
+
+from core.providers.reasoning import OPENAI_RESPONSE_REASONING_ITEMS
 
 
 def convert_messages(
@@ -31,6 +34,18 @@ def convert_messages(
             continue
 
         if role == "assistant":
+            provider_state = msg.get("provider_state")
+            reasoning_items = (
+                provider_state.get(OPENAI_RESPONSE_REASONING_ITEMS)
+                if isinstance(provider_state, dict)
+                else None
+            )
+            if isinstance(reasoning_items, list):
+                input_items.extend(
+                    deepcopy(item)
+                    for item in reasoning_items
+                    if isinstance(item, dict) and item.get("type") == "reasoning"
+                )
             if isinstance(content, str) and content:
                 input_items.append(
                     {

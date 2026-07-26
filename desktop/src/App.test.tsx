@@ -233,6 +233,13 @@ class TestRuntime implements DesktopRuntime {
             contextWindow: model.contextWindow,
             maxOutputTokens: model.maxOutputTokens,
             supportedParameters: [],
+            reasoning: {
+              supportedEfforts: ["low", "medium", "high"],
+              defaultEffort: "medium",
+              defaultEnabled: true,
+              mandatory: false,
+              supportsSummary: true,
+            },
           })),
           source: "test",
           stale: false,
@@ -492,8 +499,25 @@ class TestRuntime implements DesktopRuntime {
         if (index === -1) throw new Error(`Missing test thread: ${request.threadId}`);
         this.threadState[index] = {
           ...this.threadState[index],
+          connectionId:
+            request.connectionId === undefined
+              ? this.threadState[index].connectionId
+              : request.connectionId,
+          model: request.model,
+        };
+        return { thread: this.threadState[index] } as MethodResults[M];
+      }
+      case "thread/execution/update": {
+        const request = params as MethodParams["thread/execution/update"];
+        const index = this.threadState.findIndex(
+          (candidate) => candidate.id === request.threadId,
+        );
+        if (index === -1) throw new Error(`Missing test thread: ${request.threadId}`);
+        this.threadState[index] = {
+          ...this.threadState[index],
           connectionId: request.connectionId,
           model: request.model,
+          reasoningEffort: request.reasoningEffort,
         };
         return { thread: this.threadState[index] } as MethodResults[M];
       }
@@ -568,6 +592,18 @@ class TestRuntime implements DesktopRuntime {
           archivedAt: "2026-07-16T02:00:00Z",
         };
         return { thread: this.threadState[index] } as MethodResults[M];
+      }
+      case "thread/delete": {
+        const request = params as MethodParams["thread/delete"];
+        const index = this.threadState.findIndex(
+          (candidate) => candidate.id === request.threadId,
+        );
+        if (index === -1) throw new Error(`Missing test thread: ${request.threadId}`);
+        this.threadState.splice(index, 1);
+        return {
+          threadId: request.threadId,
+          cleanupPending: false,
+        } as MethodResults[M];
       }
       case "turn/start": {
         const request = params as MethodParams["turn/start"];
@@ -835,6 +871,8 @@ const thread: Thread = {
   mode: "code",
   status: "idle",
   model: null,
+  connectionId: null,
+  reasoningEffort: null,
   workspacePath: project.canonicalPath,
   worktreePath: null,
   createdAt: "2026-07-16T00:00:00Z",
@@ -1743,6 +1781,39 @@ describe("desktop command center", () => {
     expect(runtime.calls).toContain("thread/archive");
   });
 
+  it("permanently deletes a Session only after explicit destructive confirmation", async () => {
+    const runtime = new TestRuntime([project], [thread], recoveryEvents);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Session actions for Recovered task",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Delete permanently" }),
+    );
+
+    const dialog = screen.getByRole("alertdialog", {
+      name: "Delete Recovered task",
+    });
+    expect(within(dialog).getByText("Workspace files stay untouched.", { exact: false })).toBeTruthy();
+    expect(runtime.calls).not.toContain("thread/delete");
+
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Delete permanently" }),
+    );
+
+    await waitFor(() => expect(runtime.calls).toContain("thread/delete"));
+    expect(
+      screen.queryByRole("button", { name: "Open Session Recovered task" }),
+    ).toBeNull();
+    expect(
+      runtime.requests.find((request) => request.method === "thread/delete")?.params,
+    ).toEqual({ threadId: thread.id });
+  });
+
   it("retries a turn that was interrupted by App Server recovery", async () => {
     const runtime = new TestRuntime([project], [thread], failedRecoveryEvents);
     render(<App runtime={runtime} />);
@@ -1762,26 +1833,25 @@ describe("desktop command center", () => {
     });
   });
 
-  it("presents each completed Turn as one collapsed execution ledger and final answer", async () => {
+  it("presents legacy Turn items in their durable ordinal order", async () => {
     const runtime = new TestRuntime([project], [thread], presentationEvents);
     render(<App runtime={runtime} />);
 
-    await screen.findByRole("heading", { name: "Repository findings" });
-    expect(
-      screen.getByText("The implementation is ready for review."),
-    ).toBeTruthy();
-    expect(screen.queryByText("Inspect files")).toBeNull();
-    expect(screen.queryByText("Turn complete")).toBeNull();
-
-    const ledger = screen.getByRole("button", {
-      name: /Worked for 2s.*2 steps/,
+    const answer = await screen.findByRole("heading", {
+      name: "Repository findings",
     });
-    expect(ledger.getAttribute("aria-expanded")).toBe("false");
-    fireEvent.click(ledger);
+    const plan = screen.getByText("Execution plan", { selector: "strong" });
+    const tool = screen.getByText("Ran the focused tests");
 
-    expect(ledger.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("Worked for 2s")).toBeTruthy();
+    expect(
+      plan.compareDocumentPosition(tool) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      tool.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(screen.getByText("Inspect files")).toBeTruthy();
-    expect(screen.getByText("Ran the focused tests")).toBeTruthy();
+    expect(screen.queryByText("Turn complete")).toBeNull();
   });
 
   it("shows approval arguments and applies the durable decision", async () => {
@@ -1862,16 +1932,23 @@ describe("desktop command center", () => {
     fireEvent.click(model);
     const option = await screen.findByRole("option", { name: /gpt-5-mini/ });
     fireEvent.click(option);
+    const highEffort = screen.getByRole("radio", { name: "High" });
+    fireEvent.click(highEffort);
+    expect(highEffort.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     await waitFor(() => {
-      expect(runtime.calls).toContain("thread/model");
+      expect(runtime.calls).toContain("thread/execution/update");
       expect(screen.getByText("gpt-5-mini")).toBeTruthy();
     });
     expect(
-      runtime.requests.find((request) => request.method === "thread/model")?.params,
+      runtime.requests.find(
+        (request) => request.method === "thread/execution/update",
+      )?.params,
     ).toEqual({
       threadId: thread.id,
       connectionId: "openai",
       model: "gpt-5-mini",
+      reasoningEffort: "high",
     });
 
     fireEvent.change(permissions, { target: { value: "plan" } });
