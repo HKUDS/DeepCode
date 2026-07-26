@@ -842,7 +842,7 @@ class RustRuleExtractor:
 
     原理: Rust 规则引擎 (如 ruff 的 lint 规则) 把规则代码和
     文档字符串编译进 .rdata 段。虽然符号被剥离，但规则模式
-    [A-Z]{1,4}\d{3} 仍然可搜索。
+    [A-Z]{1,4}[0-9]{3} 仍然可搜索。
 
     用法:
       ext = RustRuleExtractor()
@@ -895,6 +895,47 @@ class RustRuleExtractor:
             return text.strip()[:200]
         except:
             return ""
+
+
+
+
+# ═══════════════════════════════════════════════════
+# 改进十二: Rust ML 框架检测器 (mistral.rs / candle 模式)
+# ═══════════════════════════════════════════════════
+
+class RustMLDetector:
+    def detect(self, binary_data: bytes) -> dict:
+        r = {"is_rust_ml": False, "confidence": 0.0, "frameworks": [], "models_supported": [], "features": []}
+        if not binary_data: return r
+        s = 0.0
+        sigs = {"candle": [b"candle_nn", b"candle::"], "safetensors": [b"safetensors"],
+                "ggml": [b"ggml"], "tokenizers": [b"Tokenizer"], "flash_attn": [b"flash_attn"],
+                "paged_attn": [b"PagedAttention"]}
+        for n, ps in sigs.items():
+            for p in ps:
+                if p in binary_data: r["frameworks"].append(n); s += 2; r["features"].append(n); break
+        models = {"llama": [b"Llama"], "mistral": [b"Mistral"], "phi": [b"phi", b"Phi3"], "gemma": [b"Gemma"]}
+        for n, ps in models.items():
+            for p in ps:
+                if p in binary_data and n not in r["models_supported"]: r["models_supported"].append(n); s += 1; break
+        if any(p in binary_data for p in [b"Q4", b"quantized"]): r["features"].append("q"); s += 1
+        if s >= 3: r["is_rust_ml"] = True; r["confidence"] = round(min(s / 12, 1), 2)
+        return r
+
+
+# ═══════════════════════════════════════════════════
+# 改进十三: 多模型架构分析器
+# ═══════════════════════════════════════════════════
+
+class ModelArchAnalyzer:
+    MODELS = {"llama": ([b"llama"], ["rope", "rms_norm"]), "mistral": ([b"mistral"], ["rope", "rms_norm", "sw"]),
+              "phi3": ([b"phi3"], ["rope", "layer_norm"]), "gemma": ([b"gemma"], ["rope", "rms_norm"])}
+    def analyze(self, data: bytes) -> dict:
+        f = {}
+        for n, (ps, fs) in self.MODELS.items():
+            sc = sum(2 for p in ps if p in data) + sum(1 for fk in fs if fk.encode() in data)
+            if sc >= 2: f[n] = {"c": round(min(sc/6, 1), 2), "m": sc}
+        return {"models": f, "count": len(f), "primary": max(f, key=lambda k: f[k]["m"]) if f else None}
 
 
 # ═══════════════════════════════════════════════════
