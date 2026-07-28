@@ -932,7 +932,6 @@ Requirements:
             # The implementation phase owns its own budgets (wall clock +
             # iteration caps); no per-call timeout, like the legacy loop.
             llm_timeout_s=0,
-            max_injection_cycles=_MAX_ITERATIONS,
         )
 
         runner = AgentRunner(provider)

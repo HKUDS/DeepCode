@@ -186,6 +186,9 @@ def build_agent_session(
     ask_user_callback: Any | None = None,
     allow_spawn: bool = True,
     injection_callback: Any | None = None,
+    active_turn_id_provider: Any | None = None,
+    runtime_input_sink: Any | None = None,
+    goal_runtime: Any | None = None,
     agent_context: tuple[str, str] | None = None,
     streaming: bool = False,
     streaming_transport: bool = True,
@@ -259,6 +262,7 @@ def build_agent_session(
     # not flattened into this prompt: AgentSession resolves a fresh immutable
     # Skill snapshot at each turn, giving every frontend hot reload without
     # allowing files to change halfway through one model execution.
+    from core.agent_runtime.injections import compose_injection_callbacks
     from core.harness.collaboration import collaboration_preamble
     from core.harness.memory import system_preamble
     from core.skills.runtime import SkillRuntime
@@ -286,6 +290,8 @@ def build_agent_session(
             permission_mode=engine.mode,
             approval_callback=approval_callback,
             runtime=active_runtime,
+            active_turn_id_provider=active_turn_id_provider,
+            runtime_input_sink=runtime_input_sink,
         )
 
     # External-command hooks (C3): discover Claude-Code-compatible hooks.json in
@@ -309,6 +315,7 @@ def build_agent_session(
         skill_runtime=skill_runtime,
         ask_user=ask_user_callback,
         agent_control=control,
+        goal_runtime=goal_runtime,
     )
     _wire_code_mode(tool_registry, workspace, engine, hooks_engine)
     _wire_tool_permissions(tool_registry, engine)
@@ -321,9 +328,17 @@ def build_agent_session(
         max_iterations=max_iterations,
         permission_checker=engine.evaluate,
         approval_callback=approval_callback,
-        # Top-level session: results from its own sub-agents. Sub-agent session
-        # (no control of its own): an explicit inbox drainer for send_message.
-        injection_callback=control.drain_injections if control else injection_callback,
+        # Application-backed sessions send sub-agent results directly into the
+        # same atomic Turn mailbox as user steering. Direct CLI sessions retain
+        # the local drain adapter because they do not own application Turn IDs.
+        injection_callback=compose_injection_callbacks(
+            injection_callback,
+            (
+                control.drain_injections
+                if control is not None and runtime_input_sink is None
+                else None
+            ),
+        ),
         hooks_engine=hooks_engine,
         agent_context=agent_context,
         streaming=streaming,
@@ -331,6 +346,9 @@ def build_agent_session(
         skill_runtime=skill_runtime,
         context_window_tokens=resolved_execution.context_window,
         execution_profile=resolved_execution,
+        tool_filter=(
+            goal_runtime.visible_tool_names if goal_runtime is not None else None
+        ),
     )
     if control is not None:
         # `session.history` is a @property (a list), so it must be wrapped in a

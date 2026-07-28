@@ -8,11 +8,29 @@ import threading
 import asyncio
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
+from app_server.dispatcher import Dispatcher, Params
+from app_server.connection import ConnectionState
 from app_server.server import AppServer
 from core.application import DeepCodeApplication
-from core.domain import TrustState
+from core.application.errors import NoActiveTurnError, TurnNotSteerableError
+from core.application.goal_extension import (
+    GoalContinueDisposition,
+    GoalContinueResult,
+)
+from core.application.views import thread_goal_view
+from core.domain.thread_goal import ThreadGoal
+from core.domain import (
+    ClientSurface,
+    ThreadGoalStatus,
+    TrustState,
+    Turn,
+)
+from core.application.event_service import EventBroker
 from core.events import (
     AgentMessage,
     Event,
@@ -80,6 +98,194 @@ def test_notification_errors_do_not_produce_responses(tmp_path: Path) -> None:
     sink = io.BytesIO()
     AppServer(application).serve(source, sink)
     assert sink.getvalue() == b""
+
+
+def test_app_server_uses_explicit_client_surface_without_name_inference() -> None:
+    class Automations:
+        def start_scheduler(self) -> None:
+            return None
+
+    class Turns:
+        def __init__(self) -> None:
+            self.kwargs: dict[str, Any] = {}
+
+        def start(self, thread_id: str, **kwargs):
+            self.kwargs = {"thread_id": thread_id, **kwargs}
+            return SimpleNamespace(
+                turn=Turn(
+                    id="turn_000000000000000000000001",
+                    thread_id=thread_id,
+                    ordinal=1,
+                    prompt=str(kwargs["prompt"]),
+                ),
+                items=(),
+                approvals=(),
+            )
+
+    turns = Turns()
+    connection = ConnectionState(EventBroker())
+    dispatcher = Dispatcher(
+        SimpleNamespace(automations=Automations(), turns=turns),
+        connection,
+    )
+
+    initialized = dispatcher._initialize(
+        Params(
+            {
+                "protocolVersion": "1.0",
+                "clientInfo": {
+                    "name": "arbitrary-host-name",
+                    "version": "1.0",
+                    "surface": "desktop",
+                },
+            }
+        )
+    )
+    dispatcher._turn_start(
+        Params(
+            {
+                "threadId": "thread-1",
+                "prompt": "Run it",
+                "messageId": "message-1",
+            }
+        )
+    )
+
+    assert initialized["clientInfo"]["surface"] == "desktop"
+    assert connection.client_surface is ClientSurface.DESKTOP
+    assert turns.kwargs["client_surface"] is ClientSurface.DESKTOP
+
+
+def test_turn_steer_reports_typed_no_active_error_without_implicit_queue(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    project = application.projects.add(str(workspace))
+    thread = application.threads.start(project.id, title="Strict steer")
+    source = io.BytesIO(
+        _request(
+            1,
+            "initialize",
+            {
+                "protocolVersion": "1.0",
+                "clientInfo": {"name": "strict-turn-test", "version": "1.0"},
+            },
+        )
+        + _request(
+            2,
+            "turn/steer",
+            {
+                "threadId": thread.id,
+                "expectedTurnId": "turn_missing",
+                "prompt": "Continue with this correction.",
+                "messageId": "strict-steer-1",
+            },
+        )
+        + _request(3, "shutdown", {})
+    )
+    sink = io.BytesIO()
+
+    assert AppServer(application).serve(source, sink) == 0
+    responses = {
+        message["id"]: message for message in _messages(sink) if "id" in message
+    }
+    assert responses[2]["error"]["data"]["code"] == "NO_ACTIVE_TURN"
+    assert responses[2]["error"]["data"]["retryable"] is True
+    assert responses[2]["error"]["data"]["details"]["actualTurnId"] is None
+    assert application.turns.active_for_thread(thread.id) is None
+    assert application.turns.conversation_count(thread.id) == 0
+
+
+@pytest.mark.parametrize("boundary_state", ["closing", "closed"])
+def test_turn_steer_waits_for_durable_terminal_before_reporting_no_active(
+    boundary_state: str,
+) -> None:
+    class Turns:
+        def __init__(self) -> None:
+            self.waited_for: str | None = None
+
+        def steer(self, thread_id: str, **kwargs):
+            del thread_id, kwargs
+            raise TurnNotSteerableError(
+                "active Turn input is closed",
+                details={"state": boundary_state},
+            )
+
+        def wait_until_terminal(self, turn_id: str):
+            self.waited_for = turn_id
+            return object()
+
+    turns = Turns()
+    dispatcher = Dispatcher(
+        SimpleNamespace(turns=turns),
+        SimpleNamespace(),
+    )
+
+    with pytest.raises(NoActiveTurnError) as raised:
+        dispatcher._turn_steer(
+            Params(
+                {
+                    "threadId": "thread-1",
+                    "expectedTurnId": "turn-1",
+                    "prompt": "Continue after finalization.",
+                    "messageId": "message-1",
+                }
+            )
+        )
+
+    assert turns.waited_for == "turn-1"
+    assert raised.value.details["actualTurnId"] is None
+
+
+def test_thread_goal_continue_has_one_explicit_typed_rpc() -> None:
+    goal = ThreadGoal(
+        id="goal_000000000000000000000001",
+        thread_id="thread-1",
+        objective="Ship",
+    )
+
+    class Goals:
+        def read_outcome(self, thread_id: str):
+            assert thread_id == goal.thread_id
+            return None
+
+        def continue_goal(
+            self,
+            thread_id: str,
+            *,
+            expected_goal_id: str,
+            **_kwargs,
+        ):
+            assert thread_id == goal.thread_id
+            assert expected_goal_id == goal.id
+            return GoalContinueResult(
+                goal=goal,
+                disposition=GoalContinueDisposition.STARTED,
+                turn_id="turn_000000000000000000000001",
+            )
+
+    dispatcher = Dispatcher(
+        SimpleNamespace(goals=Goals()),
+        SimpleNamespace(),
+    )
+
+    result = dispatcher._thread_goal_continue(
+        Params(
+            {
+                "threadId": goal.thread_id,
+                "expectedGoalId": goal.id,
+            }
+        )
+    )
+
+    assert result == {
+        "goal": thread_goal_view(goal),
+        "outcome": None,
+        "disposition": "started",
+        "turnId": "turn_000000000000000000000001",
+    }
 
 
 def test_thread_list_and_resume_use_the_shared_session_store(tmp_path: Path) -> None:
@@ -209,23 +415,12 @@ def test_thread_goal_protocol_uses_the_canonical_session_ledger(
             {
                 "threadId": thread.id,
                 "objective": "Implement the feature",
-                "acceptanceCriteria": ["Tests pass"],
-                "budget": {"maxAttempts": 3},
+                "tokenBudget": 12_000,
                 "start": False,
             },
         )
         + _request(3, "thread/goal/get", {"threadId": thread.id})
-        + _request(
-            4,
-            "thread/goal/pause",
-            {"threadId": thread.id, "expectedRevision": 1},
-        )
-        + _request(
-            5,
-            "thread/goal/clear",
-            {"threadId": thread.id, "expectedRevision": 2},
-        )
-        + _request(6, "shutdown", {})
+        + _request(4, "shutdown", {})
     )
     sink = io.BytesIO()
 
@@ -236,11 +431,117 @@ def test_thread_goal_protocol_uses_the_canonical_session_ledger(
         if "id" in message and "result" in message
     }
     assert responses[2]["goal"]["objective"] == "Implement the feature"
-    assert responses[2]["goal"]["budget"]["maxAttempts"] == 3
-    assert responses[3]["goal"]["revision"] == 1
-    assert responses[4]["goal"]["status"] == "paused"
-    assert responses[5] == {"goal": None}
+    assert responses[2]["goal"]["tokenBudget"] == 12_000
+    assert responses[3]["goal"] == responses[2]["goal"]
+    goal_id = responses[2]["goal"]["id"]
+
+    follow_up = io.BytesIO(
+        _request(
+            5,
+            "initialize",
+            {
+                "protocolVersion": "1.0",
+                "clientInfo": {"name": "goal-test", "version": "1.0"},
+            },
+        )
+        + _request(
+            6,
+            "thread/goal/pause",
+            {"threadId": thread.id, "expectedGoalId": goal_id},
+        )
+        + _request(
+            7,
+            "thread/goal/clear",
+            {"threadId": thread.id, "expectedGoalId": goal_id},
+        )
+        + _request(8, "shutdown", {})
+    )
+    follow_up_sink = io.BytesIO()
+    assert AppServer(application).serve(follow_up, follow_up_sink) == 0
+    follow_up_responses = {
+        message["id"]: message["result"]
+        for message in _messages(follow_up_sink)
+        if "id" in message and "result" in message
+    }
+    assert follow_up_responses[6]["goal"]["status"] == "paused"
+    assert follow_up_responses[7] == {"goal": None, "outcome": None}
     assert (sessions.root / thread.id / "goal.jsonl").exists()
+
+
+def test_thread_goal_protocol_edits_and_resumes_the_same_identity(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    try:
+        project = application.projects.add(
+            str(workspace),
+            trust_state=TrustState.TRUSTED,
+        )
+        thread = application.threads.start(project.id, title="Reopen Goal")
+        created = application.goals.create(
+            thread.id,
+            objective="Ship version one",
+            start=False,
+        )
+        completed = application.thread_goal_store.update(
+            thread.id,
+            expected_goal_id=created.id,
+            transform=lambda current: current.agent_transition(
+                ThreadGoalStatus.COMPLETE
+            ),
+            reason="Version one is complete.",
+            source="agent",
+        )
+        source = io.BytesIO(
+            _request(
+                1,
+                "initialize",
+                {
+                    "protocolVersion": "1.0",
+                    "clientInfo": {"name": "reopen-test", "version": "1.0"},
+                },
+            )
+            + _request(
+                2,
+                "thread/goal/set",
+                {
+                    "threadId": thread.id,
+                    "objective": "Ship version two",
+                    "expectedGoalId": completed.id,
+                    "start": False,
+                },
+            )
+            + _request(
+                3,
+                "thread/goal/resume",
+                {"threadId": thread.id, "expectedGoalId": completed.id},
+            )
+            + _request(4, "thread/goal/get", {"threadId": thread.id})
+            + _request(5, "shutdown", {})
+        )
+        sink = io.BytesIO()
+
+        assert AppServer(application).serve(source, sink) == 0
+        responses = {
+            message["id"]: message["result"]
+            for message in _messages(sink)
+            if "id" in message and "result" in message
+        }
+        edited = responses[2]["goal"]
+        assert edited["id"] == created.id
+        assert edited["status"] == ThreadGoalStatus.COMPLETE.value
+        assert edited["objective"] == "Ship version two"
+        assert responses[2]["outcome"]["status"] == "complete"
+        assert responses[2]["outcome"]["reason"] == "Version one is complete."
+        assert responses[3]["goal"]["id"] == created.id
+        assert responses[3]["goal"]["status"] == ThreadGoalStatus.ACTIVE.value
+        assert responses[3]["outcome"] is None
+        assert responses[4]["goal"] == responses[3]["goal"]
+        assert responses[4]["outcome"] is None
+    finally:
+        application.close()
 
 
 def test_settings_and_thread_model_are_real_shared_configuration(
@@ -302,6 +603,7 @@ def test_connection_and_model_protocol_is_shared_secret_safe_state(
     home = tmp_path / "deepcode-home"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.setenv("DEEPCODE_HOME", str(home))
     application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
     project = application.projects.add(str(workspace))
@@ -887,7 +1189,17 @@ def test_json_rpc_turn_approval_and_terminal_replay(tmp_path: Path) -> None:
         )
         assert _read_pipe(reader)["id"] == 1
 
-        writer.write(_request(2, "turn/start", {"threadId": thread.id, "prompt": "go"}))
+        writer.write(
+            _request(
+                2,
+                "turn/start",
+                {
+                    "threadId": thread.id,
+                    "prompt": "go",
+                    "messageId": "server-start-1",
+                },
+            )
+        )
         started = _read_until(reader, lambda message: message.get("id") == 2)
         turn_id = started["result"]["turn"]["id"]
         requested = _read_until(

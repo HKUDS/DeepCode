@@ -415,8 +415,15 @@
   text-overflow: ellipsis;
 }
 
+.context > .nextTurnNotice {
+  color: var(--text-tertiary);
+  font-size: 8.5px;
+  font-style: italic;
+}
+
 .sendButton,
 .stopButton,
+.steerButton,
 .queueButton {
   display: inline-flex;
   flex: 0 0 auto;
@@ -432,6 +439,7 @@
   gap: 5px;
 }
 
+.steerButton,
 .queueButton {
   min-height: 35px;
   padding: 0 13px;
@@ -442,8 +450,13 @@
   font-weight: 640;
 }
 
+.steerButton:hover:not(:disabled),
 .queueButton:hover:not(:disabled) {
   background: var(--surface-hover);
+}
+
+.queueButton {
+  color: var(--text-secondary);
 }
 
 .sendButton {

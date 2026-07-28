@@ -1,10 +1,12 @@
-"""Kernel-level tests for the P0 AgentRunSpec seams.
+"""Kernel-level tests for the shared AgentRunSpec seams.
 
-Covers the two mechanism knobs added for the unified implementation loop:
+The runner has no semantic limit on user corrections. Safety comes from the
+bounded active-Turn mailbox and the normal model/context budgets:
+
 - ``should_stop_callback`` — external stop conditions checked at the top of
   every iteration (budgets, completion checks, loop detectors).
-- ``max_injection_cycles`` — parametrized continuation budget so domain
-  loops can steer far past the default 5 cycles.
+- accepted input always reaches another model sample, including at the regular
+  max-iteration boundary.
 """
 
 from __future__ import annotations
@@ -20,11 +22,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.agent_runtime.runner import AgentRunner, AgentRunSpec  # noqa: E402
-from core.agent_runtime.hook import AgentHook, AgentHookContext  # noqa: E402
-from core.agent_runtime.tools.base import Tool, tool_parameters  # noqa: E402
-from core.agent_runtime.tools.registry import ToolRegistry  # noqa: E402
-from core.providers.base import LLMResponse, ToolCallRequest  # noqa: E402
+from core.agent_runtime.hook import AgentHook, AgentHookContext
+from core.agent_runtime.runner import AgentRunner, AgentRunSpec
+from core.agent_runtime.tools.base import Tool, tool_parameters
+from core.agent_runtime.tools.registry import ToolRegistry
+from core.providers.base import LLMResponse, ToolCallRequest
 
 
 @tool_parameters(
@@ -53,11 +55,13 @@ class ScriptedProvider:
     def __init__(self, responses: list[LLMResponse]):
         self.responses = list(responses)
         self.calls = 0
+        self.requests: list[dict[str, Any]] = []
 
     def get_default_model(self) -> str:
         return "fake-model"
 
     async def chat_with_retry(self, **kwargs: Any) -> LLMResponse:
+        self.requests.append(kwargs)
         index = min(self.calls, len(self.responses) - 1)
         self.calls += 1
         return self.responses[index]
@@ -221,18 +225,23 @@ async def test_should_stop_callback_checked_each_iteration():
 
 
 @pytest.mark.asyncio
-async def test_injection_cycles_default_cap_is_five():
+async def test_bounded_callback_batch_is_not_truncated_by_runner():
     provider = ScriptedProvider([LLMResponse(content="final", finish_reason="stop")])
+    pending = [{"role": "user", "content": f"follow-up-{index}"} for index in range(64)]
 
-    async def always_inject() -> list[dict[str, Any]]:
-        return [{"role": "user", "content": "keep going"}]
+    async def drain_all() -> list[dict[str, Any]]:
+        values = list(pending)
+        pending.clear()
+        return values
 
     result = await AgentRunner(provider).run(
-        _spec(provider, injection_callback=always_inject)
+        _spec(provider, injection_callback=drain_all)
     )
 
-    # 1 initial call + 5 injection-continued calls, then the cap halts.
-    assert provider.calls == 6
+    assert provider.calls == 1
+    request_text = str(provider.requests[0]["messages"])
+    assert "follow-up-0" in request_text
+    assert "follow-up-63" in request_text
     assert result.had_injections is True
 
 
@@ -326,7 +335,7 @@ async def test_ask_with_approver_allows():
 
 
 @pytest.mark.asyncio
-async def test_max_injection_cycles_override_extends_continuation():
+async def test_injections_have_no_fixed_cycle_cap():
     provider = ScriptedProvider([LLMResponse(content="final", finish_reason="stop")])
     injections_left = {"count": 8}
 
@@ -337,10 +346,61 @@ async def test_max_injection_cycles_override_extends_continuation():
         return [{"role": "user", "content": "keep going"}]
 
     result = await AgentRunner(provider).run(
-        _spec(provider, injection_callback=inject_eight_times, max_injection_cycles=50)
+        _spec(provider, injection_callback=inject_eight_times)
     )
 
-    # 1 initial + 8 injected continuations, ended by the empty injection.
-    assert provider.calls == 9
+    # The first injection is present on the first request, avoiding an empty
+    # probe call; seven later continuations consume the remaining messages.
+    assert provider.calls == 8
     assert result.stop_reason == "completed"
     assert result.final_content == "final"
+
+
+@pytest.mark.asyncio
+async def test_input_at_max_iteration_boundary_gets_another_model_sample():
+    provider = ScriptedProvider(
+        [
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(id="c1", name="echo", arguments={"text": "x"})
+                ],
+                finish_reason="tool_calls",
+            ),
+            LLMResponse(content="handled correction", finish_reason="stop"),
+        ]
+    )
+    drains = 0
+
+    async def inject_after_tool() -> list[dict[str, Any]]:
+        nonlocal drains
+        drains += 1
+        if drains == 2:
+            return [{"role": "user", "content": "correct the result"}]
+        return []
+
+    result = await AgentRunner(provider).run(
+        _spec(
+            provider,
+            injection_callback=inject_after_tool,
+            max_iterations=1,
+        )
+    )
+
+    assert provider.calls == 2
+    assert result.final_content == "handled correction"
+    assert result.stop_reason == "completed"
+
+
+@pytest.mark.asyncio
+async def test_injection_callback_failure_is_observable():
+    provider = ScriptedProvider([LLMResponse(content="unused", finish_reason="stop")])
+
+    async def broken_callback() -> list[dict[str, Any]]:
+        raise RuntimeError("mailbox unavailable")
+
+    with pytest.raises(RuntimeError, match="mailbox unavailable"):
+        await AgentRunner(provider).run(
+            _spec(provider, injection_callback=broken_callback)
+        )
+    assert provider.calls == 0

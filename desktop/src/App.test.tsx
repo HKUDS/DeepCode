@@ -15,6 +15,7 @@ import type {
   DiagnosticsSnapshot,
   Event,
   Goal,
+  GoalOutcome,
   Item,
   JsonValue,
   MethodParams,
@@ -169,6 +170,7 @@ class TestRuntime implements DesktopRuntime {
   };
   private automationStatus: Automation["status"] = "enabled";
   private goalState: Goal | null;
+  private goalOutcomeState: GoalOutcome | null;
   private readonly disabledSkillIds = new Set<string>();
   private readonly deletedSkillIds = new Set<string>();
 
@@ -179,9 +181,11 @@ class TestRuntime implements DesktopRuntime {
     private readonly contextFiles: string[] = [],
     private readonly availableUpdate: DesktopUpdateInfo | null = null,
     initialGoal: Goal | null = null,
+    initialGoalOutcome: GoalOutcome | null = null,
   ) {
     this.threadState = threads.map((candidate) => ({ ...candidate }));
     this.goalState = initialGoal;
+    this.goalOutcomeState = initialGoalOutcome;
   }
 
   async request<M extends RpcMethod>(
@@ -522,7 +526,10 @@ class TestRuntime implements DesktopRuntime {
         return { thread: this.threadState[index] } as MethodResults[M];
       }
       case "thread/goal/get":
-        return { goal: this.goalState } as MethodResults[M];
+        return {
+          goal: this.goalState,
+          outcome: this.goalOutcomeState,
+        } as MethodResults[M];
       case "thread/goal/set": {
         const request = params as MethodParams["thread/goal/set"];
         const now = "2026-07-16T02:00:00Z";
@@ -530,38 +537,21 @@ class TestRuntime implements DesktopRuntime {
           id: this.goalState?.id ?? "goal-desktop",
           threadId: request.threadId,
           objective: request.objective ?? this.goalState?.objective ?? "Goal",
-          acceptanceCriteria:
-            request.acceptanceCriteria ??
-            this.goalState?.acceptanceCriteria ??
-            [],
-          status: "active",
-          phase: "working",
-          revision: (this.goalState?.revision ?? 0) + 1,
-          definitionRevision:
-            (this.goalState?.definitionRevision ?? 0) + 1,
-          attemptCount: this.goalState?.attemptCount ?? 0,
+          status: this.goalState?.status ?? "active",
+          tokenBudget:
+            request.tokenBudget !== undefined
+              ? request.tokenBudget
+              : (this.goalState?.tokenBudget ?? null),
           tokensUsed: this.goalState?.tokensUsed ?? 0,
-          elapsedSeconds: this.goalState?.elapsedSeconds ?? 0,
-          budget: this.goalState?.budget ?? {
-            maxAttempts: 20,
-            maxTokens: null,
-            maxElapsedSeconds: 28_800,
-          },
+          timeUsedSeconds: this.goalState?.timeUsedSeconds ?? 0,
           skillIds: request.skills ?? this.goalState?.skillIds ?? [],
-          verificationCommandId: request.verificationCommandId ?? null,
-          verificationTimeoutSeconds:
-            request.verificationTimeoutSeconds ?? 300,
-          evaluatorConnectionId: request.evaluatorConnectionId ?? null,
-          evaluatorModelId: request.evaluatorModelId ?? null,
-          lastVerdict: null,
-          lastReason: null,
           createdAt: this.goalState?.createdAt ?? now,
           updatedAt: now,
-          completedAt: null,
-          attempts: this.goalState?.attempts ?? [],
-          evaluations: this.goalState?.evaluations ?? [],
         } as Goal;
-        return { goal: this.goalState } as MethodResults[M];
+        return {
+          goal: this.goalState,
+          outcome: this.goalOutcomeState,
+        } as MethodResults[M];
       }
       case "thread/goal/pause":
       case "thread/goal/resume": {
@@ -572,14 +562,29 @@ class TestRuntime implements DesktopRuntime {
           ...this.goalState,
           status:
             method === "thread/goal/pause" ? "paused" : "active",
-          revision: this.goalState.revision + 1,
           updatedAt: "2026-07-16T02:01:00Z",
         };
-        return { goal: this.goalState } as MethodResults[M];
+        this.goalOutcomeState = null;
+        return {
+          goal: this.goalState,
+          outcome: this.goalOutcomeState,
+        } as MethodResults[M];
+      }
+      case "thread/goal/continue": {
+        if (!this.goalState) {
+          throw new Error("No Goal");
+        }
+        return {
+          goal: this.goalState,
+          disposition: "started",
+          turnId: "turn-goal-continuation",
+          outcome: this.goalOutcomeState,
+        } as MethodResults[M];
       }
       case "thread/goal/clear":
         this.goalState = null;
-        return { goal: null } as MethodResults[M];
+        this.goalOutcomeState = null;
+        return { goal: null, outcome: null } as MethodResults[M];
       case "thread/archive": {
         const request = params as MethodParams["thread/archive"];
         const index = this.threadState.findIndex(
@@ -698,6 +703,15 @@ class TestRuntime implements DesktopRuntime {
           items: [userItem],
           approvals: [],
         } as unknown as MethodResults[M];
+      }
+      case "turn/steer": {
+        const request = params as MethodParams["turn/steer"];
+        return {
+          messageId: request.messageId ?? "desktop-steer",
+          delivery: "current_turn",
+          duplicate: false,
+          turn: runningTurn,
+        } as MethodResults[M];
       }
       case "turn/retry": {
         const request = params as MethodParams["turn/retry"];
@@ -1359,30 +1373,64 @@ describe("desktop command center", () => {
       await screen.findByRole("button", { name: /Set a Goal/ }),
     );
     fireEvent.change(screen.getByLabelText("Outcome"), {
-      target: { value: "Ship the verified implementation" },
-    });
-    fireEvent.change(screen.getByLabelText("Done when"), {
-      target: { value: "Focused tests pass\nThe change is reviewed" },
+      target: {
+        value:
+          "Ship the implementation. Focused tests pass and the change is reviewed.",
+      },
     });
     fireEvent.click(screen.getByRole("button", { name: "review" }));
     fireEvent.click(screen.getByRole("button", { name: "Start Goal" }));
 
     await waitFor(() => {
-      expect(screen.getByText("Ship the verified implementation")).toBeTruthy();
-      expect(screen.getByText(/Working/)).toBeTruthy();
+      expect(
+        screen.getByText(
+          "Ship the implementation. Focused tests pass and the change is reviewed.",
+        ),
+      ).toBeTruthy();
+      expect(screen.getByText(/Ready to continue/)).toBeTruthy();
     });
     const setRequest = runtime.requests.find(
       (candidate) => candidate.method === "thread/goal/set",
     );
     expect(setRequest?.params).toMatchObject({
       threadId: thread.id,
-      objective: "Ship the verified implementation",
-      acceptanceCriteria: [
-        "Focused tests pass",
-        "The change is reviewed",
-      ],
+      objective:
+        "Ship the implementation. Focused tests pass and the change is reviewed.",
+      tokenBudget: null,
       skills: [SKILL_ID],
       start: true,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() =>
+      expect(
+        runtime.requests.find(
+          (candidate) => candidate.method === "thread/goal/continue",
+        )?.params,
+      ).toMatchObject({
+        threadId: thread.id,
+        expectedGoalId: "goal-desktop",
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit Goal" }));
+    const revisedOutcome = screen.getByLabelText("Outcome") as HTMLTextAreaElement;
+    expect(revisedOutcome.value).toContain("Ship the implementation");
+    fireEvent.change(revisedOutcome, {
+      target: { value: "Ship the revised implementation and verify it." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save Goal" }));
+    await waitFor(() =>
+      expect(
+        screen.getByText("Ship the revised implementation and verify it."),
+      ).toBeTruthy(),
+    );
+    const revisions = runtime.requests.filter(
+      (candidate) => candidate.method === "thread/goal/set",
+    );
+    expect(revisions.at(-1)?.params).toMatchObject({
+      expectedGoalId: "goal-desktop",
+      objective: "Ship the revised implementation and verify it.",
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Pause" }));
@@ -1395,8 +1443,129 @@ describe("desktop command center", () => {
       )?.params,
     ).toMatchObject({
       threadId: thread.id,
-      expectedRevision: 1,
+      expectedGoalId: "goal-desktop",
     });
+  });
+
+  it("edits and resumes a complete Goal without changing its identity", async () => {
+    const completedGoal: Goal = {
+      id: "goal-completed",
+      threadId: thread.id,
+      objective: "Ship version one",
+      status: "complete",
+      tokenBudget: null,
+      tokensUsed: 42,
+      timeUsedSeconds: 8,
+      skillIds: [],
+      createdAt: "2026-07-16T02:00:00Z",
+      updatedAt: "2026-07-16T02:01:00Z",
+    };
+    const decidingTurn: Turn = {
+      ...turn,
+      goalId: completedGoal.id,
+    };
+    const evidenceItem: Item = {
+      id: "item-goal-evidence",
+      threadId: thread.id,
+      turnId: decidingTurn.id,
+      ordinal: 2,
+      kind: "test_result",
+      status: "completed",
+      summary: "Focused tests passed",
+      payload: { command: "pytest -q", exitCode: 0 },
+      createdAt: "2026-07-16T02:00:30Z",
+      updatedAt: "2026-07-16T02:00:31Z",
+    };
+    const goalEvents: Event[] = [
+      {
+        eventId: "event-goal-turn",
+        sequence: 1,
+        type: "turn.completed",
+        threadId: thread.id,
+        turnId: decidingTurn.id,
+        itemId: null,
+        timestamp: decidingTurn.completedAt ?? "2026-07-16T02:00:31Z",
+        payload: { turn: decidingTurn as unknown as JsonValue },
+      },
+      {
+        eventId: "event-goal-evidence",
+        sequence: 2,
+        type: "item.created",
+        threadId: thread.id,
+        turnId: decidingTurn.id,
+        itemId: evidenceItem.id,
+        timestamp: evidenceItem.updatedAt,
+        payload: { item: evidenceItem as unknown as JsonValue },
+      },
+    ];
+    const goalOutcome: GoalOutcome = {
+      status: "complete",
+      reason: "The requested change is implemented and focused tests pass.",
+      source: "agent",
+      decidedByTurnId: decidingTurn.id,
+      decidedAt: "2026-07-16T02:00:31Z",
+      evidenceRefs: [
+        {
+          itemId: evidenceItem.id,
+          turnId: decidingTurn.id,
+          kind: evidenceItem.kind,
+          status: evidenceItem.status,
+          summary: evidenceItem.summary,
+        },
+      ],
+    };
+    const runtime = new TestRuntime(
+      [project],
+      [thread],
+      goalEvents,
+      [],
+      null,
+      completedGoal,
+      goalOutcome,
+    );
+    render(<App runtime={runtime} />);
+
+    await screen.findByText("Complete");
+    fireEvent.click(screen.getByText("Ship version one").closest("button")!);
+    expect(
+      screen.getByText(
+        "The requested change is implemented and focused tests pass.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText(/Deciding Turn/)).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Focused tests passed" }),
+    );
+    expect(await screen.findByRole("heading", { name: "Focused tests passed" }))
+      .toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit & reopen" }));
+    const outcome = screen.getByLabelText("Outcome") as HTMLTextAreaElement;
+    expect(outcome.value).toBe("Ship version one");
+    fireEvent.change(outcome, {
+      target: { value: "Ship version two" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save & resume" }));
+
+    await waitFor(() =>
+      expect(screen.getByText("Ship version two")).toBeTruthy(),
+    );
+    expect(
+      runtime.requests.find(
+        (candidate) =>
+          candidate.method === "thread/goal/set" &&
+          (candidate.params as MethodParams["thread/goal/set"])
+            .expectedGoalId === "goal-completed",
+      )?.params,
+    ).toMatchObject({
+      objective: "Ship version two",
+      expectedGoalId: "goal-completed",
+    });
+    expect(
+      runtime.requests.find(
+        (candidate) => candidate.method === "thread/goal/resume",
+      )?.params,
+    ).toMatchObject({ expectedGoalId: "goal-completed" });
   });
 
   it("shows honest MCP configuration state without claiming a live connection", async () => {
@@ -1891,6 +2060,7 @@ describe("desktop command center", () => {
     fireEvent.keyDown(restoredComposer, { key: "Enter" });
 
     await waitFor(() => expect(secondRuntime.calls).toContain("turn/start"));
+    expect(screen.getByText("Started a new Turn.")).toBeTruthy();
     expect((restoredComposer as HTMLTextAreaElement).value).toBe("");
   });
 
@@ -2048,7 +2218,7 @@ describe("desktop command center", () => {
     expect(runtime.calls).not.toContain("turn/start");
   });
 
-  it("queues and cancels the next durable Turn while the Agent is active", async () => {
+  it("steers the active Turn instead of creating a competing Turn", async () => {
     const runningThread = { ...thread, status: "running" as const };
     const runtime = new TestRuntime([project], [runningThread], runningEvents);
     render(<App runtime={runtime} />);
@@ -2061,10 +2231,39 @@ describe("desktop command center", () => {
     });
     fireEvent.keyDown(composer, { key: "Enter" });
 
+    await waitFor(() => expect(runtime.calls).toContain("turn/steer"));
+    expect(
+      screen.getByText("Update delivered to the active Turn."),
+    ).toBeTruthy();
+    expect(runtime.calls).not.toContain("turn/enqueue");
+    const request = runtime.requests.find(
+      (candidate) => candidate.method === "turn/steer",
+    )?.params as MethodParams["turn/steer"];
+    expect(request.expectedTurnId).toBe(runningTurn.id);
+    expect(request.messageId).toMatch(/^desktop-/);
+  });
+
+  it("queues a next Turn only through the explicit Queue action", async () => {
+    const runningThread = { ...thread, status: "running" as const };
+    const runtime = new TestRuntime([project], [runningThread], runningEvents);
+    render(<App runtime={runtime} />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Task instruction",
+    });
+    fireEvent.change(composer, {
+      target: { value: "Run this after the current work" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Queue next" }));
+
     await waitFor(() => expect(runtime.calls).toContain("turn/enqueue"));
-    expect(screen.getByText("Queued")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    await waitFor(() => expect(runtime.calls).toContain("turn/interrupt"));
+    expect(screen.getByText("Queued for the next Turn.")).toBeTruthy();
+    expect(runtime.calls).not.toContain("turn/steer");
+    const request = runtime.requests.find(
+      (candidate) => candidate.method === "turn/enqueue",
+    )?.params as MethodParams["turn/enqueue"];
+    expect(request.prompt).toBe("Run this after the current work");
+    expect(request.messageId).toMatch(/^desktop-/);
   });
 
   it("restores a waiting Paper2Code review without using the agent composer", async () => {

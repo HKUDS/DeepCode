@@ -82,8 +82,7 @@
 
 旧浏览器界面已经移除。目前可以从源码运行新的 Tauri 2 桌面工作台；
 正式打包发布仍在开发中。详见
-[`P1 架构`](../P1_APP_SERVER_ARCHITECTURE.md)与
-[`完整路线`](../TAURI_DESKTOP_REBUILD_PLAN.md)。
+[`P1 架构`](../P1_APP_SERVER_ARCHITECTURE.md)。
 
 ---
 

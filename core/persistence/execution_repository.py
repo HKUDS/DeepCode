@@ -32,10 +32,10 @@ class TurnRepository:
     def add(self, turn: Turn) -> None:
         self.connection.execute(
             "INSERT INTO turns (id, thread_id, ordinal, prompt, skill_ids_json, "
-            "execution_profile_json, goal_id, goal_definition_revision, "
-            "goal_attempt_id, status, stop_reason, error_code, error_message, "
+            "execution_profile_json, goal_id, status, stop_reason, "
+            "error_code, error_message, "
             "started_at, completed_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 turn.id,
                 turn.thread_id,
@@ -48,8 +48,6 @@ class TurnRepository:
                     else None
                 ),
                 turn.goal_id,
-                turn.goal_definition_revision,
-                turn.goal_attempt_id,
                 turn.status.value,
                 turn.stop_reason,
                 turn.error_code,
@@ -91,7 +89,10 @@ class TurnRepository:
     def active_for_thread(self, thread_id: str) -> Turn | None:
         row = self.connection.execute(
             "SELECT * FROM turns WHERE thread_id = ? AND status IN "
-            "('queued', 'running', 'waiting_approval') ORDER BY ordinal DESC LIMIT 1",
+            "('queued', 'running', 'waiting_approval') "
+            "ORDER BY CASE status "
+            "WHEN 'running' THEN 0 WHEN 'waiting_approval' THEN 0 ELSE 1 END, "
+            "ordinal LIMIT 1",
             (thread_id,),
         ).fetchone()
         return self._from_row(row) if row is not None else None
@@ -140,8 +141,6 @@ class TurnRepository:
                 else None
             ),
             goal_id=row["goal_id"],
-            goal_definition_revision=row["goal_definition_revision"],
-            goal_attempt_id=row["goal_attempt_id"],
             status=TurnStatus(row["status"]),
             stop_reason=row["stop_reason"],
             error_code=row["error_code"],
@@ -217,6 +216,20 @@ class ItemRepository:
             (thread_id,),
         ).fetchone()
         return int(row[0])
+
+    def find_user_message_by_message_id(
+        self,
+        thread_id: str,
+        message_id: str,
+    ) -> Item | None:
+        row = self.connection.execute(
+            "SELECT * FROM items WHERE thread_id = ? "
+            "AND kind = 'user_message' "
+            "AND json_extract(payload_json, '$.messageId') = ? "
+            "ORDER BY created_at, id LIMIT 1",
+            (thread_id, message_id),
+        ).fetchone()
+        return self._from_row(row) if row is not None else None
 
     def conversation_before(self, thread_id: str, turn_ordinal: int) -> list[Item]:
         rows = self.connection.execute(

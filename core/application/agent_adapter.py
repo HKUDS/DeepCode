@@ -6,14 +6,15 @@ from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any, Protocol
 
+from core.agent_runtime.injections import InjectionCallback, TurnInputSink
+from core.agent_runtime.goal_runtime import GoalRuntimeRouter
 from core.agent_setup import build_agent_session
 from core.compat import DeepCodeRuntime, get_runtime
 from core.config import home_config_path, load_config_for_workspace, project_config_path
-from core.providers.credentials import default_credentials_path
-from core.events import Event, Op
 from core.domain.execution_profile import ExecutionProfile
+from core.events import Event, Op
 from core.harness.permissions import PermissionMode
-
+from core.providers.credentials import default_credentials_path
 
 ApprovalCallback = Callable[[str, dict[str, Any], str | None], Any]
 
@@ -45,6 +46,10 @@ class AgentSessionFactory(Protocol):
         model: str | None,
         execution_profile: ExecutionProfile | None = None,
         approval_callback: ApprovalCallback,
+        injection_callback: InjectionCallback | None = None,
+        active_turn_id_provider: Callable[[], str | None] | None = None,
+        runtime_input_sink: TurnInputSink | None = None,
+        goal_runtime: GoalRuntimeRouter | None = None,
     ) -> AgentSessionPort: ...
 
 
@@ -69,6 +74,10 @@ class ConfiguredAgentSessionFactory:
         model: str | None,
         execution_profile: ExecutionProfile | None = None,
         approval_callback: ApprovalCallback,
+        injection_callback: InjectionCallback | None = None,
+        active_turn_id_provider: Callable[[], str | None] | None = None,
+        runtime_input_sink: TurnInputSink | None = None,
+        goal_runtime: GoalRuntimeRouter | None = None,
     ) -> AgentSessionPort:
         options: dict[str, Any] = {}
         if self.max_iterations is not None:
@@ -79,6 +88,10 @@ class ConfiguredAgentSessionFactory:
             model=model,
             execution_profile=execution_profile,
             approval_callback=approval_callback,
+            injection_callback=injection_callback,
+            active_turn_id_provider=active_turn_id_provider,
+            runtime_input_sink=runtime_input_sink,
+            goal_runtime=goal_runtime,
             streaming=self.streaming,
             default_permission_mode=self.default_permission_mode,
             runtime=runtime,

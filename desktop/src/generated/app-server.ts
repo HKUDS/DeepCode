@@ -1,5 +1,6 @@
 /* AUTO-GENERATED from protocol/app-server.schema.json. DO NOT EDIT. */
 
+export type ClientSurface = "cli" | "desktop" | "headless" | "automation" | "app_server" | "internal";
 export type TrustState = "untrusted" | "trusted";
 export type JsonValue =
   | null
@@ -36,9 +37,7 @@ export type AutomationTrigger = "manual" | "scheduled";
 export type AutomationRunStatus = "queued" | "running" | "waiting" | "completed" | "failed" | "interrupted" | "skipped";
 export type ThreadStatus = "idle" | "running" | "waiting" | "failed" | "archived";
 export type TurnStatus = "queued" | "running" | "waiting_approval" | "completed" | "failed" | "interrupted";
-export type GoalStatus = "active" | "paused" | "blocked" | "usage_limited" | "budget_limited" | "completed";
-export type GoalVerdict = "complete" | "continue" | "blocked" | "error";
-export type GoalAttemptStatus = "queued" | "running" | "evaluating" | "completed" | "failed" | "interrupted";
+export type GoalStatus = "active" | "paused" | "blocked" | "budget_limited" | "complete";
 export type ItemKind =
   | "user_message"
   | "assistant_message"
@@ -116,13 +115,15 @@ export interface MethodParams {
   "thread/fork": ThreadForkParams;
   "thread/goal/get": ThreadReadParams;
   "thread/goal/set": GoalSetParams;
-  "thread/goal/pause": GoalRevisionParams;
-  "thread/goal/resume": GoalRevisionParams;
-  "thread/goal/clear": GoalRevisionParams;
+  "thread/goal/pause": GoalIdentityParams;
+  "thread/goal/resume": GoalIdentityParams;
+  "thread/goal/continue": GoalIdentityParams;
+  "thread/goal/clear": GoalIdentityParams;
   "turn/start": TurnStartParams;
   "turn/enqueue": TurnStartParams;
+  "turn/steer": TurnSteerParams;
   "turn/read": TurnReadParams;
-  "turn/interrupt": TurnReadParams;
+  "turn/interrupt": TurnInterruptParams;
   "turn/retry": TurnRetryParams;
   "workflow/start": WorkflowStartParams;
   "workflow/read": WorkflowRunParams;
@@ -157,6 +158,7 @@ export interface InitializeParams {
 export interface ClientInfo {
   name: string;
   version: string;
+  surface?: ClientSurface;
 }
 export interface EmptyParams {}
 export interface ProjectListParams {
@@ -307,147 +309,7 @@ export interface ThreadForkParams {
 export interface GoalSetParams {
   threadId: string;
   objective?: string;
-  /**
-   * @maxItems 20
-   */
-  acceptanceCriteria?:
-    | []
-    | [string]
-    | [string, string]
-    | [string, string, string]
-    | [string, string, string, string]
-    | [string, string, string, string, string]
-    | [string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string, string, string, string, string, string, string]
-    | [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string
-      ]
-    | [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string
-      ]
-    | [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string
-      ]
-    | [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string
-      ]
-    | [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string
-      ]
-    | [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string
-      ];
-  budget?: {
-    maxAttempts?: number | null;
-    maxTokens?: number | null;
-    maxElapsedSeconds?: number | null;
-  };
+  tokenBudget?: number | null;
   /**
    * @maxItems 8
    */
@@ -461,20 +323,17 @@ export interface GoalSetParams {
     | [string, string, string, string, string, string]
     | [string, string, string, string, string, string, string]
     | [string, string, string, string, string, string, string, string];
-  verificationCommandId?: string | null;
-  verificationTimeoutSeconds?: number;
-  evaluatorConnectionId?: string | null;
-  evaluatorModelId?: string | null;
-  expectedRevision?: number;
+  expectedGoalId?: string | null;
   start?: boolean;
 }
-export interface GoalRevisionParams {
+export interface GoalIdentityParams {
   threadId: string;
-  expectedRevision: number;
+  expectedGoalId: string;
 }
 export interface TurnStartParams {
   threadId: string;
   prompt: string;
+  messageId: string;
   /**
    * @maxItems 8
    */
@@ -492,7 +351,17 @@ export interface TurnStartParams {
   model?: string;
   reasoningEffort?: string;
 }
+export interface TurnSteerParams {
+  threadId: string;
+  expectedTurnId: string;
+  prompt: string;
+  messageId: string;
+}
 export interface TurnReadParams {
+  turnId: string;
+}
+export interface TurnInterruptParams {
+  threadId: string;
   turnId: string;
 }
 export interface TurnRetryParams {
@@ -703,9 +572,11 @@ export interface MethodResults {
   "thread/goal/set": GoalResult;
   "thread/goal/pause": GoalResult;
   "thread/goal/resume": GoalResult;
+  "thread/goal/continue": GoalContinueResult;
   "thread/goal/clear": GoalResult;
   "turn/start": TurnSnapshotResult;
   "turn/enqueue": TurnSnapshotResult;
+  "turn/steer": TurnSteerResult;
   "turn/read": TurnSnapshotResult;
   "turn/interrupt": {
     accepted: boolean;
@@ -1065,8 +936,6 @@ export interface Turn {
     | [string, string, string, string, string, string, string, string];
   executionProfile?: ExecutionProfile | null;
   goalId?: string | null;
-  goalDefinitionRevision?: number | null;
-  goalAttemptId?: string | null;
   status: TurnStatus;
   stopReason: string | null;
   errorCode: string | null;
@@ -1088,155 +957,16 @@ export interface ExecutionProfile {
 }
 export interface GoalResult {
   goal: Goal | null;
+  outcome: GoalOutcome | null;
 }
 export interface Goal {
   id: string;
   threadId: string;
   objective: string;
-  /**
-   * @maxItems 20
-   */
-  acceptanceCriteria:
-    | []
-    | [string]
-    | [string, string]
-    | [string, string, string]
-    | [string, string, string, string]
-    | [string, string, string, string, string]
-    | [string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string, string, string, string, string, string, string]
-    | [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string
-      ]
-    | [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string
-      ]
-    | [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string
-      ]
-    | [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string
-      ]
-    | [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string
-      ]
-    | [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string
-      ];
   status: GoalStatus;
-  phase: string | null;
-  revision: number;
-  definitionRevision: number;
-  attemptCount: number;
+  tokenBudget: number | null;
   tokensUsed: number;
-  elapsedSeconds: number;
-  budget: GoalBudget;
+  timeUsedSeconds: number;
   /**
    * @maxItems 8
    */
@@ -1250,45 +980,108 @@ export interface Goal {
     | [string, string, string, string, string, string]
     | [string, string, string, string, string, string, string]
     | [string, string, string, string, string, string, string, string];
-  verificationCommandId: string | null;
-  verificationTimeoutSeconds: number;
-  evaluatorConnectionId: string | null;
-  evaluatorModelId: string | null;
-  lastVerdict: GoalVerdict | null;
-  lastReason: string | null;
   createdAt: string;
   updatedAt: string;
-  completedAt: string | null;
-  attempts: GoalAttempt[];
-  evaluations: GoalEvaluation[];
 }
-export interface GoalBudget {
-  maxAttempts: number | null;
-  maxTokens: number | null;
-  maxElapsedSeconds: number | null;
-}
-export interface GoalAttempt {
-  id: string;
-  goalRevision: number;
-  ordinal: number;
-  turnId: string | null;
-  status: GoalAttemptStatus;
-  createdAt: string;
-  updatedAt: string;
-  completedAt: string | null;
-}
-export interface GoalEvaluation {
-  id: string;
-  goalRevision: number;
-  attemptId: string;
-  turnId: string;
-  verdict: GoalVerdict;
+export interface GoalOutcome {
+  status: "complete" | "blocked";
   reason: string;
-  evidenceRefs: string[];
-  evaluatorProvider: string | null;
-  evaluatorModel: string | null;
-  tokensUsed: number;
-  createdAt: string;
+  source: "user" | "agent" | "runtime" | "migration";
+  decidedByTurnId: string | null;
+  decidedAt: string;
+  /**
+   * @maxItems 12
+   */
+  evidenceRefs:
+    | []
+    | [GoalEvidenceRef]
+    | [GoalEvidenceRef, GoalEvidenceRef]
+    | [GoalEvidenceRef, GoalEvidenceRef, GoalEvidenceRef]
+    | [GoalEvidenceRef, GoalEvidenceRef, GoalEvidenceRef, GoalEvidenceRef]
+    | [GoalEvidenceRef, GoalEvidenceRef, GoalEvidenceRef, GoalEvidenceRef, GoalEvidenceRef]
+    | [GoalEvidenceRef, GoalEvidenceRef, GoalEvidenceRef, GoalEvidenceRef, GoalEvidenceRef, GoalEvidenceRef]
+    | [
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef
+      ]
+    | [
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef
+      ]
+    | [
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef
+      ]
+    | [
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef
+      ]
+    | [
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef
+      ]
+    | [
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef,
+        GoalEvidenceRef
+      ];
+}
+export interface GoalEvidenceRef {
+  itemId: string;
+  turnId: string;
+  kind: ItemKind;
+  status: ItemStatus;
+  summary: string;
+}
+export interface GoalContinueResult {
+  goal: Goal;
+  disposition: "started" | "alreadyRunning";
+  turnId: string;
+  outcome: GoalOutcome | null;
 }
 export interface TurnSnapshotResult {
   turn: Turn;
@@ -1318,6 +1111,12 @@ export interface Approval {
   decision: JsonObject | null;
   requestedAt: string;
   resolvedAt: string | null;
+}
+export interface TurnSteerResult {
+  messageId: string;
+  delivery: "current_turn";
+  duplicate: boolean;
+  turn: Turn;
 }
 export interface WorkflowSnapshotResult {
   workflow: WorkflowRun;

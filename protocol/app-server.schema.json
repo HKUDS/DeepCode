@@ -100,29 +100,8 @@
         "active",
         "paused",
         "blocked",
-        "usage_limited",
         "budget_limited",
-        "completed"
-      ]
-    },
-    "GoalAttemptStatus": {
-      "type": "string",
-      "enum": [
-        "queued",
-        "running",
-        "evaluating",
-        "completed",
-        "failed",
-        "interrupted"
-      ]
-    },
-    "GoalVerdict": {
-      "type": "string",
-      "enum": [
-        "complete",
-        "continue",
-        "blocked",
-        "error"
+        "complete"
       ]
     },
     "WorkflowStatus": {
@@ -264,6 +243,17 @@
         "denied"
       ]
     },
+    "ClientSurface": {
+      "type": "string",
+      "enum": [
+        "cli",
+        "desktop",
+        "headless",
+        "automation",
+        "app_server",
+        "internal"
+      ]
+    },
     "ClientInfo": {
       "type": "object",
       "additionalProperties": false,
@@ -275,6 +265,9 @@
         "version": {
           "type": "string",
           "minLength": 1
+        },
+        "surface": {
+          "$ref": "#/$defs/ClientSurface"
         }
       },
       "required": [
@@ -517,19 +510,6 @@
           ]
         },
         "goalId": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "goalDefinitionRevision": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "minimum": 1
-        },
-        "goalAttemptId": {
           "type": [
             "string",
             "null"
@@ -2851,159 +2831,6 @@
         "threadId"
       ]
     },
-    "GoalBudget": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "maxAttempts": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "minimum": 1
-        },
-        "maxTokens": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "minimum": 1
-        },
-        "maxElapsedSeconds": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "minimum": 1
-        }
-      },
-      "required": [
-        "maxAttempts",
-        "maxTokens",
-        "maxElapsedSeconds"
-      ]
-    },
-    "GoalAttempt": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "type": "string",
-          "pattern": "^gatt_"
-        },
-        "goalRevision": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "ordinal": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "turnId": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "status": {
-          "$ref": "#/$defs/GoalAttemptStatus"
-        },
-        "createdAt": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "updatedAt": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "completedAt": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "format": "date-time"
-        }
-      },
-      "required": [
-        "id",
-        "goalRevision",
-        "ordinal",
-        "turnId",
-        "status",
-        "createdAt",
-        "updatedAt",
-        "completedAt"
-      ]
-    },
-    "GoalEvaluation": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "type": "string",
-          "pattern": "^geval_"
-        },
-        "goalRevision": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "attemptId": {
-          "type": "string",
-          "pattern": "^gatt_"
-        },
-        "turnId": {
-          "type": "string",
-          "pattern": "^turn_"
-        },
-        "verdict": {
-          "$ref": "#/$defs/GoalVerdict"
-        },
-        "reason": {
-          "type": "string",
-          "minLength": 1
-        },
-        "evidenceRefs": {
-          "type": "array",
-          "uniqueItems": true,
-          "items": {
-            "type": "string"
-          }
-        },
-        "evaluatorProvider": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "evaluatorModel": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "tokensUsed": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "createdAt": {
-          "type": "string",
-          "format": "date-time"
-        }
-      },
-      "required": [
-        "id",
-        "goalRevision",
-        "attemptId",
-        "turnId",
-        "verdict",
-        "reason",
-        "evidenceRefs",
-        "evaluatorProvider",
-        "evaluatorModel",
-        "tokensUsed",
-        "createdAt"
-      ]
-    },
     "Goal": {
       "type": "object",
       "additionalProperties": false,
@@ -3020,48 +2847,25 @@
         "objective": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 4000
-        },
-        "acceptanceCriteria": {
-          "type": "array",
-          "maxItems": 20,
-          "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 500
-          }
+          "maxLength": 16384
         },
         "status": {
           "$ref": "#/$defs/GoalStatus"
         },
-        "phase": {
+        "tokenBudget": {
           "type": [
-            "string",
+            "integer",
             "null"
-          ]
-        },
-        "revision": {
-          "type": "integer",
+          ],
           "minimum": 1
-        },
-        "definitionRevision": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "attemptCount": {
-          "type": "integer",
-          "minimum": 0
         },
         "tokensUsed": {
           "type": "integer",
           "minimum": 0
         },
-        "elapsedSeconds": {
+        "timeUsedSeconds": {
           "type": "integer",
           "minimum": 0
-        },
-        "budget": {
-          "$ref": "#/$defs/GoalBudget"
         },
         "skillIds": {
           "type": "array",
@@ -3072,45 +2876,6 @@
             "pattern": "^sk_[0-9a-f]{24}$"
           }
         },
-        "verificationCommandId": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "verificationTimeoutSeconds": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 1800
-        },
-        "evaluatorConnectionId": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "evaluatorModelId": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "lastVerdict": {
-          "oneOf": [
-            {
-              "$ref": "#/$defs/GoalVerdict"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "lastReason": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "createdAt": {
           "type": "string",
           "format": "date-time"
@@ -3118,52 +2883,102 @@
         "updatedAt": {
           "type": "string",
           "format": "date-time"
-        },
-        "completedAt": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "format": "date-time"
-        },
-        "attempts": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/GoalAttempt"
-          }
-        },
-        "evaluations": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/GoalEvaluation"
-          }
         }
       },
       "required": [
         "id",
         "threadId",
         "objective",
-        "acceptanceCriteria",
         "status",
-        "phase",
-        "revision",
-        "definitionRevision",
-        "attemptCount",
+        "tokenBudget",
         "tokensUsed",
-        "elapsedSeconds",
-        "budget",
+        "timeUsedSeconds",
         "skillIds",
-        "verificationCommandId",
-        "verificationTimeoutSeconds",
-        "evaluatorConnectionId",
-        "evaluatorModelId",
-        "lastVerdict",
-        "lastReason",
         "createdAt",
-        "updatedAt",
-        "completedAt",
-        "attempts",
-        "evaluations"
+        "updatedAt"
+      ]
+    },
+    "GoalEvidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "itemId": {
+          "type": "string",
+          "pattern": "^item_"
+        },
+        "turnId": {
+          "type": "string",
+          "pattern": "^turn_"
+        },
+        "kind": {
+          "$ref": "#/$defs/ItemKind"
+        },
+        "status": {
+          "$ref": "#/$defs/ItemStatus"
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 240
+        }
+      },
+      "required": [
+        "itemId",
+        "turnId",
+        "kind",
+        "status",
+        "summary"
+      ]
+    },
+    "GoalOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "blocked"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "user",
+            "agent",
+            "runtime",
+            "migration"
+          ]
+        },
+        "decidedByTurnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "decidedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "evidenceRefs": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "$ref": "#/$defs/GoalEvidenceRef"
+          }
+        }
+      },
+      "required": [
+        "status",
+        "reason",
+        "source",
+        "decidedByTurnId",
+        "decidedAt",
+        "evidenceRefs"
       ]
     },
     "GoalSetParams": {
@@ -3180,41 +2995,12 @@
           "minLength": 1,
           "maxLength": 4000
         },
-        "acceptanceCriteria": {
-          "type": "array",
-          "maxItems": 20,
-          "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 500
-          }
-        },
-        "budget": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "maxAttempts": {
-              "type": [
-                "integer",
-                "null"
-              ],
-              "minimum": 1
-            },
-            "maxTokens": {
-              "type": [
-                "integer",
-                "null"
-              ],
-              "minimum": 1
-            },
-            "maxElapsedSeconds": {
-              "type": [
-                "integer",
-                "null"
-              ],
-              "minimum": 1
-            }
-          }
+        "tokenBudget": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
         },
         "skills": {
           "type": "array",
@@ -3225,32 +3011,12 @@
             "pattern": "^sk_[0-9a-f]{24}$"
           }
         },
-        "verificationCommandId": {
+        "expectedGoalId": {
           "type": [
             "string",
             "null"
-          ]
-        },
-        "verificationTimeoutSeconds": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 1800
-        },
-        "evaluatorConnectionId": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "evaluatorModelId": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "expectedRevision": {
-          "type": "integer",
-          "minimum": 1
+          ],
+          "pattern": "^goal_"
         },
         "start": {
           "type": "boolean"
@@ -3260,7 +3026,7 @@
         "threadId"
       ]
     },
-    "GoalRevisionParams": {
+    "GoalIdentityParams": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -3269,14 +3035,50 @@
           "minLength": 1,
           "maxLength": 255
         },
-        "expectedRevision": {
-          "type": "integer",
-          "minimum": 1
+        "expectedGoalId": {
+          "type": "string",
+          "pattern": "^goal_"
         }
       },
       "required": [
         "threadId",
-        "expectedRevision"
+        "expectedGoalId"
+      ]
+    },
+    "GoalContinueResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "goal": {
+          "$ref": "#/$defs/Goal"
+        },
+        "disposition": {
+          "type": "string",
+          "enum": [
+            "started",
+            "alreadyRunning"
+          ]
+        },
+        "turnId": {
+          "type": "string",
+          "pattern": "^turn_"
+        },
+        "outcome": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/GoalOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "goal",
+        "disposition",
+        "turnId",
+        "outcome"
       ]
     },
     "GoalResult": {
@@ -3292,10 +3094,21 @@
               "type": "null"
             }
           ]
+        },
+        "outcome": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/GoalOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
-        "goal"
+        "goal",
+        "outcome"
       ]
     },
     "TurnStartParams": {
@@ -3310,6 +3123,11 @@
         "prompt": {
           "type": "string",
           "minLength": 1
+        },
+        "messageId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
         },
         "skills": {
           "type": "array",
@@ -3335,7 +3153,66 @@
       },
       "required": [
         "threadId",
-        "prompt"
+        "prompt",
+        "messageId"
+      ]
+    },
+    "TurnSteerParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "expectedTurnId": {
+          "type": "string",
+          "pattern": "^turn_"
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "messageId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        }
+      },
+      "required": [
+        "threadId",
+        "expectedTurnId",
+        "prompt",
+        "messageId"
+      ]
+    },
+    "TurnSteerResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "messageId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "delivery": {
+          "type": "string",
+          "enum": [
+            "current_turn"
+          ]
+        },
+        "duplicate": {
+          "type": "boolean"
+        },
+        "turn": {
+          "$ref": "#/$defs/Turn"
+        }
+      },
+      "required": [
+        "messageId",
+        "delivery",
+        "duplicate",
+        "turn"
       ]
     },
     "TurnReadParams": {
@@ -3348,6 +3225,25 @@
         }
       },
       "required": [
+        "turnId"
+      ]
+    },
+    "TurnInterruptParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "turnId": {
+          "type": "string",
+          "pattern": "^turn_"
+        }
+      },
+      "required": [
+        "threadId",
         "turnId"
       ]
     },
@@ -4359,13 +4255,16 @@
           "$ref": "#/$defs/GoalSetParams"
         },
         "thread/goal/pause": {
-          "$ref": "#/$defs/GoalRevisionParams"
+          "$ref": "#/$defs/GoalIdentityParams"
         },
         "thread/goal/resume": {
-          "$ref": "#/$defs/GoalRevisionParams"
+          "$ref": "#/$defs/GoalIdentityParams"
+        },
+        "thread/goal/continue": {
+          "$ref": "#/$defs/GoalIdentityParams"
         },
         "thread/goal/clear": {
-          "$ref": "#/$defs/GoalRevisionParams"
+          "$ref": "#/$defs/GoalIdentityParams"
         },
         "turn/start": {
           "$ref": "#/$defs/TurnStartParams"
@@ -4373,11 +4272,14 @@
         "turn/enqueue": {
           "$ref": "#/$defs/TurnStartParams"
         },
+        "turn/steer": {
+          "$ref": "#/$defs/TurnSteerParams"
+        },
         "turn/read": {
           "$ref": "#/$defs/TurnReadParams"
         },
         "turn/interrupt": {
-          "$ref": "#/$defs/TurnReadParams"
+          "$ref": "#/$defs/TurnInterruptParams"
         },
         "turn/retry": {
           "$ref": "#/$defs/TurnRetryParams"
@@ -4504,9 +4406,11 @@
         "thread/goal/set",
         "thread/goal/pause",
         "thread/goal/resume",
+        "thread/goal/continue",
         "thread/goal/clear",
         "turn/start",
         "turn/enqueue",
+        "turn/steer",
         "turn/read",
         "turn/interrupt",
         "turn/retry",
@@ -4986,6 +4890,9 @@
         "thread/goal/resume": {
           "$ref": "#/$defs/GoalResult"
         },
+        "thread/goal/continue": {
+          "$ref": "#/$defs/GoalContinueResult"
+        },
         "thread/goal/clear": {
           "$ref": "#/$defs/GoalResult"
         },
@@ -4994,6 +4901,9 @@
         },
         "turn/enqueue": {
           "$ref": "#/$defs/TurnSnapshotResult"
+        },
+        "turn/steer": {
+          "$ref": "#/$defs/TurnSteerResult"
         },
         "turn/read": {
           "$ref": "#/$defs/TurnSnapshotResult"
@@ -5409,9 +5319,11 @@
         "thread/goal/set",
         "thread/goal/pause",
         "thread/goal/resume",
+        "thread/goal/continue",
         "thread/goal/clear",
         "turn/start",
         "turn/enqueue",
+        "turn/steer",
         "turn/read",
         "turn/interrupt",
         "turn/retry",

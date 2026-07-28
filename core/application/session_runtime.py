@@ -3,10 +3,21 @@
 from __future__ import annotations
 
 import inspect
+import threading
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any
 
+from core.agent_runtime.goal_runtime import (
+    GoalRuntimeContext,
+    GoalRuntimeHandler,
+    GoalRuntimeRouter,
+)
+from core.agent_runtime.injections import (
+    TurnInputMailbox,
+    TurnInputReservation,
+    TurnRuntimeInput,
+)
 from core.application.agent_adapter import (
     AgentSessionFactory,
     AgentSessionPort,
@@ -49,6 +60,10 @@ class LiveSessionRuntime:
     approvals: ApprovalRouter
     canonical_message_count: int
     runtime_key: object
+    inputs: TurnInputMailbox
+    inputs_enabled: bool
+    goals: GoalRuntimeRouter
+    goals_enabled: bool
     active: bool = False
 
 
@@ -68,6 +83,18 @@ class SessionRuntimeRegistry:
         self.factory = factory
         self.max_live_sessions = max_live_sessions
         self._runtimes: OrderedDict[str, LiveSessionRuntime] = OrderedDict()
+        self._mailbox_lock = threading.Lock()
+        self._mailboxes: dict[str, TurnInputMailbox] = {}
+        self._goal_handler: GoalRuntimeHandler | None = None
+        self._goal_runtimes: dict[str, GoalRuntimeRouter] = {}
+
+    def configure_goal_handler(self, handler: GoalRuntimeHandler) -> None:
+        """Attach application persistence without rebuilding live sessions."""
+
+        with self._mailbox_lock:
+            self._goal_handler = handler
+            for runtime in self._goal_runtimes.values():
+                runtime.configure(handler)
 
     async def acquire(
         self,
@@ -114,12 +141,82 @@ class SessionRuntimeRegistry:
         await self._evict_idle()
         return runtime.agent
 
-    def release(self, session_id: str) -> None:
+    def prepare_inputs(self, session_id: str, *, turn_id: str) -> None:
+        """Claim the Turn mailbox before canonical message persistence."""
+
+        runtime = self._runtimes.get(session_id)
+        if runtime is None or not runtime.active:
+            raise ConflictError(f"session runtime is not active: {session_id}")
+        if not runtime.inputs_enabled:
+            return
+        runtime.inputs.prepare(turn_id)
+
+    def activate_inputs(self, session_id: str, *, turn_id: str) -> None:
+        """Open injection after the Turn's first user message is durable."""
+
+        runtime = self._runtimes.get(session_id)
+        if runtime is None or not runtime.active:
+            raise ConflictError(f"session runtime is not active: {session_id}")
+        if not runtime.inputs_enabled:
+            return
+        runtime.inputs.activate(turn_id)
+
+    def activate_goal(
+        self,
+        session_id: str,
+        *,
+        context: GoalRuntimeContext,
+    ) -> None:
+        """Expose Goal tools only for the owning Goal-associated Turn."""
+
+        runtime = self._runtimes.get(session_id)
+        if runtime is None or not runtime.active:
+            raise ConflictError(f"session runtime is not active: {session_id}")
+        if not runtime.goals_enabled:
+            return
+        runtime.goals.activate(context)
+
+    def release(self, session_id: str, *, turn_id: str | None = None) -> None:
         runtime = self._runtimes.get(session_id)
         if runtime is None:
             return
+        if turn_id is not None:
+            runtime.inputs.deactivate(turn_id)
+            runtime.goals.deactivate(turn_id)
         runtime.approvals.current = None
         runtime.active = False
+
+    def reserve_input(
+        self,
+        session_id: str,
+        value: TurnRuntimeInput,
+    ) -> TurnInputReservation | None:
+        """Reserve bounded input only while the expected Turn is active."""
+
+        return self._mailbox(session_id).reserve(value)
+
+    def commit_input(
+        self,
+        session_id: str,
+        reservation: TurnInputReservation,
+    ) -> None:
+        self._mailbox(session_id).commit(reservation)
+
+    def cancel_input(
+        self,
+        session_id: str,
+        reservation: TurnInputReservation,
+    ) -> None:
+        self._mailbox(session_id).cancel(reservation)
+
+    def inject_transient(
+        self,
+        session_id: str,
+        value: TurnRuntimeInput,
+    ) -> bool:
+        """Inject ledger-backed internal context without duplicating persistence."""
+
+        return self._mailbox(session_id).put_transient(value)
 
     def mark_persisted(self, session_id: str) -> None:
         runtime = self._runtimes.get(session_id)
@@ -127,17 +224,37 @@ class SessionRuntimeRegistry:
         if runtime is not None and canonical is not None:
             runtime.canonical_message_count = len(canonical.messages)
 
+    def clear_live_history(self, session_id: str) -> None:
+        """Clear only the resident model context, preserving canonical history."""
+
+        runtime = self._runtimes.get(session_id)
+        if runtime is None:
+            return
+        if runtime.active:
+            raise ConflictError(f"session runtime is active: {session_id}")
+        canonical = self.store.get_session(session_id)
+        if canonical is None:
+            raise ThreadNotFoundError(f"session not found: {session_id}")
+        runtime.agent.load_history([])
+        runtime.canonical_message_count = len(canonical.messages)
+
     async def discard(self, session_id: str) -> None:
         """Close and forget one idle runtime after permanent Session deletion."""
 
         runtime = self._runtimes.pop(session_id, None)
         if runtime is None:
+            with self._mailbox_lock:
+                self._mailboxes.pop(session_id, None)
+                self._goal_runtimes.pop(session_id, None)
             return
         if runtime.active:
             self._runtimes[session_id] = runtime
             raise ConflictError(f"session runtime is active: {session_id}")
         runtime.approvals.current = None
         await runtime.agent.aclose()
+        with self._mailbox_lock:
+            self._mailboxes.pop(session_id, None)
+            self._goal_runtimes.pop(session_id, None)
 
     async def close_all(self) -> None:
         runtimes = tuple(self._runtimes.values())
@@ -150,6 +267,9 @@ class SessionRuntimeRegistry:
                 # Shutdown must continue so every other session gets a chance
                 # to release AgentControl and tool subprocesses.
                 continue
+        with self._mailbox_lock:
+            self._mailboxes.clear()
+            self._goal_runtimes.clear()
 
     @property
     def live_session_ids(self) -> tuple[str, ...]:
@@ -165,6 +285,8 @@ class SessionRuntimeRegistry:
         runtime_key: object,
     ) -> LiveSessionRuntime:
         approvals = ApprovalRouter()
+        inputs = self._mailbox(canonical.session_id)
+        goals = self._goal_runtime(canonical.session_id)
         create = self.factory.create
         create_kwargs = {
             "workspace": workspace,
@@ -173,6 +295,16 @@ class SessionRuntimeRegistry:
         }
         if _accepts_keyword(create, "execution_profile"):
             create_kwargs["execution_profile"] = execution_profile
+        inputs_enabled = _accepts_keyword(create, "injection_callback")
+        if inputs_enabled:
+            create_kwargs["injection_callback"] = inputs.drain
+        if _accepts_keyword(create, "active_turn_id_provider"):
+            create_kwargs["active_turn_id_provider"] = lambda: inputs.active_turn_id
+        if _accepts_keyword(create, "runtime_input_sink"):
+            create_kwargs["runtime_input_sink"] = inputs.put_transient
+        goals_enabled = _accepts_keyword(create, "goal_runtime")
+        if goals_enabled:
+            create_kwargs["goal_runtime"] = goals
         agent = create(**create_kwargs)
         agent.load_history(self._visible_history(canonical))
         return LiveSessionRuntime(
@@ -184,7 +316,29 @@ class SessionRuntimeRegistry:
             approvals=approvals,
             canonical_message_count=len(canonical.messages),
             runtime_key=runtime_key,
+            inputs=inputs,
+            inputs_enabled=inputs_enabled,
+            goals=goals,
+            goals_enabled=goals_enabled,
         )
+
+    def _mailbox(self, session_id: str) -> TurnInputMailbox:
+        with self._mailbox_lock:
+            mailbox = self._mailboxes.get(session_id)
+            if mailbox is None:
+                mailbox = TurnInputMailbox()
+                self._mailboxes[session_id] = mailbox
+            return mailbox
+
+    def _goal_runtime(self, session_id: str) -> GoalRuntimeRouter:
+        with self._mailbox_lock:
+            runtime = self._goal_runtimes.get(session_id)
+            if runtime is None:
+                runtime = GoalRuntimeRouter()
+                if self._goal_handler is not None:
+                    runtime.configure(self._goal_handler)
+                self._goal_runtimes[session_id] = runtime
+            return runtime
 
     def _runtime_key(
         self,

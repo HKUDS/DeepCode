@@ -18,6 +18,7 @@ from pathlib import Path
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.history import FileHistory
+from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.patch_stdout import patch_stdout
 
 from cli.tui import theme
@@ -27,6 +28,10 @@ from core.skills.management import LocalSkillManager
 _HISTORY_PATH = Path.home() / ".deepcode" / "tui_history"
 _SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv"}
 _MAX_COMPLETIONS = 30
+
+
+class InputInterrupted(Exception):
+    """The user requested that the active Turn stop, not that the CLI exit."""
 
 
 class TuiCompleter(Completer):
@@ -99,10 +104,17 @@ class InputReader:
         self._prompt_session: PromptSession | None = None
         if self.interactive:
             _HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+            bindings = KeyBindings()
+
+            @bindings.add("escape")
+            def _interrupt(event) -> None:
+                event.app.exit(exception=InputInterrupted())
+
             self._prompt_session = PromptSession(
                 history=FileHistory(str(_HISTORY_PATH)),
                 completer=TuiCompleter(workspace),
                 complete_while_typing=True,
+                key_bindings=bindings,
             )
 
     async def read(self) -> str | None:
@@ -111,6 +123,8 @@ class InputReader:
             try:
                 with patch_stdout():
                     return await self._prompt_session.prompt_async(theme.PROMPT)
+            except KeyboardInterrupt as exc:
+                raise InputInterrupted() from exc
             except EOFError:
                 return None
         loop = asyncio.get_running_loop()

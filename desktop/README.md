@@ -11,8 +11,7 @@ P5 adds durable Paper2Code Threads with plan review, checkpoint retry, truthful
 test-gated completion, and bounded Artifact inspection.
 See the [P3 architecture](../docs/P3_DESKTOP_RUNTIME_ARCHITECTURE.md),
 [P4 architecture](../docs/P4_CODE_WORKBENCH_ARCHITECTURE.md), and
-[P5 architecture](../docs/P5_PAPER2CODE_ARCHITECTURE.md), and the
-[desktop rebuild plan](../docs/TAURI_DESKTOP_REBUILD_PLAN.md).
+[P5 architecture](../docs/P5_PAPER2CODE_ARCHITECTURE.md).
 
 ## Run from source
 
@@ -63,9 +62,10 @@ stored key back.
 The composer model picker changes the connection, model, and model-advertised
 Thinking effort for future Turns in the current Session. Existing history stays
 attached to the same canonical Session under `~/.deepcode/sessions/`. A switch
-is temporarily unavailable while a Turn is running or queued. Raw
-chain-of-thought is never shown as assistant text; only provider-designated
-summaries may be rendered, while opaque continuation state remains private.
+made while work is active leaves the current Turn's immutable execution profile
+unchanged and applies to the next Turn. Raw chain-of-thought is never shown as
+assistant text; only provider-designated summaries may be rendered, while
+opaque continuation state remains private.
 
 Every accepted Turn stores an immutable, secret-free execution profile. Later
 changes to defaults or credentials cannot silently change queued or historical
@@ -90,11 +90,20 @@ deepcode -c personal-openrouter -m moonshotai/kimi-k3 --effort low
 
 ### Run a durable Goal
 
-Use **Set a Goal** above the Session composer to define an outcome, optional
-acceptance criteria, and Skills. The compact Goal rail shows attempts, token
-usage, completion evidence, and pause/resume controls. Goals are not a Desktop
-workflow: the same ledger and ordinary Turn execution are available from the
-interactive CLI with `/goal`.
+Use **Set a Goal** above the Session composer to define one natural-language
+outcome and optional Skills. While it runs, the composer steers the current
+Turn; if that Turn has already ended, the same submission starts the next Turn
+with the same idempotency key. **Queue next** is the only way to request
+next-Turn delivery, and Desktop reports whether an input was started, steered,
+or queued. **Edit Goal** updates the same durable Goal identity and delivers the
+new objective to its active Turn when possible. Completed Goals can be reopened
+for new work without erasing the Session history.
+
+The compact Goal rail shows the current objective, status, token usage, and
+pause/resume controls. Tests, builds, diagnostics, diffs, and independent
+review remain visible evidence for the working Agent's completion decision.
+Goals are not a Desktop-only workflow: the same ledger and ordinary Turn
+execution are available from the interactive CLI with `/goal`.
 
 ## Development and verification
 

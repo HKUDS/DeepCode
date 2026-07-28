@@ -9,7 +9,6 @@ from typing import Any
 import pytest
 
 from core.application import DeepCodeApplication
-from core.application.errors import ConflictError
 from core.domain import TrustState
 from core.domain.execution_profile import ExecutionProfile
 from core.domain.turn import TurnStatus
@@ -223,41 +222,57 @@ def test_session_switch_rebuilds_runtime_but_preserves_history_and_turn_provenan
         application.close()
 
 
-def test_queued_turn_keeps_override_and_active_turn_blocks_session_switch(
+def test_active_goal_turn_keeps_snapshot_while_selection_updates_future_turns(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     factory = ProfileFactory(hang_first=True)
     application, thread_id, _sessions = _application(tmp_path, monkeypatch, factory)
     try:
+        goal = application.goals.create(
+            thread_id,
+            objective="Keep one Goal while changing the next Turn model",
+            start=False,
+        )
         active = application.turns.start(thread_id, prompt="active")
         _wait(application, active.turn.id, TurnStatus.RUNNING)
-        queued = application.turns.enqueue(
+        application.threads.set_execution_selection(
             thread_id,
-            prompt="queued",
             connection_id="router-b",
             model="openai/gpt-5-mini",
             reasoning_effort="high",
         )
+        queued = application.turns.enqueue(
+            thread_id,
+            prompt="queued",
+        )
 
+        active_snapshot = application.turns.read(active.turn.id)
+        assert active_snapshot.turn.execution_profile is not None
+        assert active_snapshot.turn.execution_profile.connection_id == "router-a"
+        assert active_snapshot.turn.execution_profile.model_id == "moonshotai/kimi-k2.5"
+        assert active_snapshot.turn.execution_profile.reasoning_effort == "low"
         assert queued.turn.status is TurnStatus.QUEUED
         assert queued.turn.execution_profile is not None
         assert queued.turn.execution_profile.connection_id == "router-b"
         assert queued.turn.execution_profile.model_id == "openai/gpt-5-mini"
         assert queued.turn.execution_profile.reasoning_effort == "high"
-        with pytest.raises(ConflictError, match="cannot change while a Turn is active"):
-            application.threads.set_execution_selection(
-                thread_id,
-                connection_id="router-b",
-                model="openai/gpt-5-mini",
-                reasoning_effort="high",
-            )
+        assert active_snapshot.turn.goal_id == goal.id
+        assert queued.turn.goal_id == goal.id
+        assert application.turns.active_for_thread(thread_id).id == active.turn.id
+        assert application.turns.executing_for_thread(thread_id).id == active.turn.id
 
-        application.turns.interrupt(active.turn.id)
+        paused = application.goals.pause(
+            thread_id,
+            expected_goal_id=goal.id,
+        )
+        assert paused.id == goal.id
+        application.turns.interrupt(thread_id, active.turn.id)
         _wait(application, active.turn.id, TurnStatus.INTERRUPTED)
         queued_done = _wait(application, queued.turn.id, TurnStatus.COMPLETED)
 
         assert queued_done.turn.execution_profile == queued.turn.execution_profile
+        assert application.goals.read(thread_id).id == goal.id
         assert [profile.connection_id for profile in factory.profiles] == [
             "router-a",
             "router-b",

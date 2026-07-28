@@ -180,7 +180,11 @@ def test_active_goal_blocks_deletion_but_paused_goal_can_be_deleted(
 ) -> None:
     application, _project_id, thread_id = _application(tmp_path)
     try:
-        goal = application.goals.create(thread_id, objective="Finish the task")
+        goal = application.goals.create(
+            thread_id,
+            objective="Finish the task",
+            start=False,
+        )
         with pytest.raises(ConflictError) as raised:
             application.deletions.delete(thread_id)
         codes = {item["code"] for item in raised.value.details["blockers"]}
@@ -188,7 +192,7 @@ def test_active_goal_blocks_deletion_but_paused_goal_can_be_deleted(
 
         application.goals.pause(
             thread_id,
-            expected_revision=goal.goal.revision,
+            expected_goal_id=goal.id,
         )
         application.deletions.delete(thread_id)
         assert application.session_store.get_session(thread_id) is None

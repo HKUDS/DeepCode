@@ -11,12 +11,15 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 
 import type {
   Goal,
+  GoalOutcome,
   Project,
   SettingsSnapshot,
   Thread,
+  Turn,
 } from "../../generated/app-server";
 import type { DesktopPermissionMode } from "../../app/useWorkspaceController";
 import type { GoalDefinitionInput } from "../../app/useWorkspaceController";
+import type { InteractiveDelivery } from "../../app/interactiveTurnRouter";
 import type { DesktopRuntime } from "../../rpc/contracts";
 import { useSkillCatalog } from "../skills/useSkillCatalog";
 import { GoalRail } from "../goal/GoalRail";
@@ -39,6 +42,8 @@ interface ComposerProps {
   thread: Thread | null;
   settings: SettingsSnapshot | null;
   goal: Goal | null;
+  goalOutcome: GoalOutcome | null;
+  goalTurns: readonly Turn[];
   disabledReason: string | null;
   onModelChange(
     connectionId: string | null,
@@ -49,11 +54,16 @@ interface ComposerProps {
   onSetGoal(input: GoalDefinitionInput): Promise<void>;
   onPauseGoal(): Promise<void>;
   onResumeGoal(): Promise<void>;
+  onContinueGoal(): Promise<void>;
   onClearGoal(): Promise<void>;
+  onSelectGoalEvidence(itemId: string): void;
   onPickContextFiles(): Promise<string[]>;
   onCommand(command: ComposerCommand): Promise<boolean>;
-  onSubmit(prompt: string, skillIds?: string[]): Promise<void>;
-  onQueue(prompt: string, skillIds?: string[]): Promise<void>;
+  onSend(
+    prompt: string,
+    skillIds?: string[],
+  ): Promise<InteractiveDelivery | null>;
+  onQueue(prompt: string, skillIds?: string[]): Promise<boolean>;
   onInterrupt(): void;
 }
 
@@ -67,16 +77,20 @@ export function Composer({
   thread,
   settings,
   goal,
+  goalOutcome,
+  goalTurns,
   disabledReason,
   onModelChange,
   onPermissionModeChange,
   onSetGoal,
   onPauseGoal,
   onResumeGoal,
+  onContinueGoal,
   onClearGoal,
+  onSelectGoalEvidence,
   onPickContextFiles,
   onCommand,
-  onSubmit,
+  onSend,
   onQueue,
   onInterrupt,
 }: ComposerProps) {
@@ -97,6 +111,7 @@ export function Composer({
   const [skillPickerOpen, setSkillPickerOpen] = useState(false);
   const [skillQuery, setSkillQuery] = useState("");
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
+  const [deliveryNotice, setDeliveryNotice] = useState<string | null>(null);
   const skillCatalog = useSkillCatalog(runtime, project?.id ?? null);
   const availableSkills = useMemo(() => {
     const query = skillQuery.trim().toLocaleLowerCase();
@@ -108,12 +123,13 @@ export function Composer({
     );
   }, [skillCatalog.activeSkills, skillQuery]);
   const selectedSkills = useMemo(() => {
+    if (active) return [];
     const byId = new Map(skillCatalog.skills.map((skill) => [skill.id, skill]));
     return selectedSkillIds.flatMap((skillId) => {
       const skill = byId.get(skillId);
       return skill ? [skill] : [];
     });
-  }, [selectedSkillIds, skillCatalog.skills]);
+  }, [active, selectedSkillIds, skillCatalog.skills]);
   const permissionMode = settingsPermissionMode(settings);
 
   useEffect(() => {
@@ -144,12 +160,42 @@ export function Composer({
       attachments,
       thread?.workspacePath,
     );
-    const selectedIds = selectedSkills.map((skill) => skill.id);
-    if (active) {
-      await onQueue(executionPrompt, selectedIds);
-    } else {
-      await onSubmit(executionPrompt, selectedIds);
+    const selectable = new Set(skillCatalog.activeSkills.map((skill) => skill.id));
+    const selectedIds = selectedSkillIds.filter((skillId) =>
+      selectable.has(skillId),
+    );
+    const delivery = await onSend(executionPrompt, selectedIds);
+    if (!delivery) return;
+    setDeliveryNotice(
+      delivery === "steered"
+        ? "Update delivered to the active Turn."
+        : "Started a new Turn.",
+    );
+    setPrompt("");
+    clearAttachments();
+    if (delivery === "started") setSelectedSkillIds([]);
+    setSkillPickerOpen(false);
+  };
+
+  const submitQueued = async () => {
+    const value = prompt.trim();
+    if (!value || !canExecute || busy) return;
+    if (parseComposerCommand(value)) {
+      await submit();
+      return;
     }
+    const executionPrompt = withContextFiles(
+      value,
+      attachments,
+      thread?.workspacePath,
+    );
+    const selectable = new Set(skillCatalog.activeSkills.map((skill) => skill.id));
+    const selectedIds = selectedSkillIds.filter((skillId) =>
+      selectable.has(skillId),
+    );
+    if (!(await onQueue(executionPrompt, selectedIds))) return;
+    record(value);
+    setDeliveryNotice("Queued for the next Turn.");
     setPrompt("");
     clearAttachments();
     setSelectedSkillIds([]);
@@ -204,13 +250,17 @@ export function Composer({
     <footer className={styles.region}>
       <GoalRail
         goal={goal}
+        outcome={goalOutcome}
+        turns={goalTurns}
         enabled={canExecute}
         busy={busy}
         skills={skillCatalog.activeSkills}
         onSet={onSetGoal}
         onPause={onPauseGoal}
         onResume={onResumeGoal}
+        onContinue={onContinueGoal}
         onClear={onClearGoal}
+        onSelectEvidence={onSelectGoalEvidence}
       />
       <div className={styles.composer}>
         <label htmlFor="turn-prompt">Task instruction</label>
@@ -221,11 +271,12 @@ export function Composer({
           onChange={(event) => {
             setPrompt(event.target.value);
             setCommandError(null);
+            setDeliveryNotice(null);
           }}
           onKeyDown={onKeyDown}
           placeholder={
             active
-              ? "Prepare the next instruction while DeepCode is working…"
+              ? "Send guidance or corrections to the active Turn…"
               : "Ask DeepCode to build, inspect, or verify…"
           }
           rows={1}
@@ -251,7 +302,7 @@ export function Composer({
             ))}
           </div>
         ) : null}
-        {skillPickerOpen ? (
+        {skillPickerOpen && !active ? (
           <section className={styles.skillMenu} aria-label="Select Skills">
             <header>
               <div>
@@ -374,7 +425,9 @@ export function Composer({
               className={styles.skillButton}
               type="button"
               onClick={() => setSkillPickerOpen((open) => !open)}
-              disabled={!editable || busy || !skillCatalog.activeSkills.length}
+              disabled={
+                !editable || busy || active || !skillCatalog.activeSkills.length
+              }
               aria-expanded={skillPickerOpen}
               aria-label="Select Skills for this turn"
               title={
@@ -394,7 +447,7 @@ export function Composer({
               project={project}
               thread={thread}
               settings={settings}
-              disabled={busy || active}
+              disabled={busy}
               onChange={onModelChange}
             />
             <label className={styles.selector} title="Tool permission mode">
@@ -407,23 +460,39 @@ export function Composer({
                     event.target.value as DesktopPermissionMode,
                   )
                 }
-                disabled={busy || active}
+                disabled={busy}
               >
                 <option value="default">Approval first</option>
                 <option value="plan">Plan only</option>
                 <option value="full_auto">Full auto</option>
               </select>
             </label>
+            {active ? (
+              <span
+                className={styles.nextTurnNotice}
+                title="The active Turn keeps its immutable execution profile."
+              >
+                Model & permissions apply next Turn
+              </span>
+            ) : null}
           </div>
           {active ? (
             <div className={styles.activeActions}>
               <button
-                className={styles.queueButton}
+                className={styles.steerButton}
                 type="button"
                 onClick={() => void submit()}
                 disabled={!canExecute || busy || !prompt.trim()}
               >
-                Queue
+                Steer
+              </button>
+              <button
+                className={styles.queueButton}
+                type="button"
+                onClick={() => void submitQueued()}
+                disabled={!canExecute || busy || !prompt.trim()}
+              >
+                Queue next
               </button>
               <button
                 className={styles.stopButton}
@@ -451,9 +520,10 @@ export function Composer({
       <p className={styles.hint}>
         {commandError ??
           contextError ??
+          deliveryNotice ??
           disabledReason ??
           "DeepCode may ask before sensitive tools run."}
-        <span>{active ? "↵ queue" : "↵ send"} · ⇧↵ newline</span>
+        <span>{active ? "↵ steer" : "↵ send"} · ⇧↵ newline</span>
       </p>
     </footer>
   );

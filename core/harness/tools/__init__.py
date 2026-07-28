@@ -49,6 +49,7 @@ def default_coding_tools(
     skill_runtime=None,
     ask_user=None,
     agent_control=None,
+    goal_runtime=None,
 ):
     """Build a :class:`ToolRegistry` with the native coding tool set.
 
@@ -74,6 +75,7 @@ def default_coding_tools(
     from core.harness.memory import MemoryTool
     from core.harness.skills import SkillTool, discover_skills
     from core.harness.tools.plan import UpdatePlanTool
+    from core.harness.tools.goal import GetGoalTool, UpdateGoalTool
     from core.harness.tools.spawn_agent import (
         InterruptAgentTool,
         ListAgentsTool,
@@ -115,6 +117,9 @@ def default_coding_tools(
         tools.append(ListAgentsTool(agent_control))
         tools.append(InterruptAgentTool(agent_control))
         tools.append(SendMessageTool(agent_control))
+    if goal_runtime is not None:
+        tools.append(GetGoalTool(goal_runtime))
+        tools.append(UpdateGoalTool(goal_runtime))
     for tool in tools:
         registry.register(tool)
     return registry

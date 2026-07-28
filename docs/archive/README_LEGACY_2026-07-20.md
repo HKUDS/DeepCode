@@ -84,8 +84,7 @@
 The legacy browser UI has been removed. The Tauri 2 workbench can be run from
 source today; packaged Desktop releases are still under active development.
 See the
-[`P1 architecture`](../P1_APP_SERVER_ARCHITECTURE.md) and
-[`desktop rebuild plan`](../TAURI_DESKTOP_REBUILD_PLAN.md).
+[`P1 architecture`](../P1_APP_SERVER_ARCHITECTURE.md).
 
 ---
 

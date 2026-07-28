@@ -28,6 +28,7 @@ from core.domain.automation import (
     AutomationTrigger,
 )
 from core.domain.common import utc_now
+from core.domain.message_provenance import ClientSurface, TurnInputSource
 from core.domain.event import DomainEvent
 from core.domain.project import TrustState
 from core.domain.thread import Thread, ThreadMode
@@ -482,6 +483,8 @@ class AutomationService:
                     touched.thread_id,
                     prompt=touched.prompt,
                     event_observer=lambda event: self._observe_run(run.id, event),
+                    client_surface=ClientSurface.AUTOMATION,
+                    input_source=TurnInputSource.AUTOMATION,
                 )
             except TurnAlreadyRunningError:
                 settled = self._settle_run(

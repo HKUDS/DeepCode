@@ -198,7 +198,8 @@ impl RpcBridge {
                 "protocolVersion": PROTOCOL_VERSION,
                 "clientInfo": {
                     "name": "deepcode-desktop-host",
-                    "version": env!("CARGO_PKG_VERSION")
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "surface": "desktop"
                 }
             }),
             STARTUP_TIMEOUT,

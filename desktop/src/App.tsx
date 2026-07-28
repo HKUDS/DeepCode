@@ -2,6 +2,7 @@ import { FolderOpen, MessageSquarePlus } from "lucide-react";
 import { lazy, Suspense } from "react";
 
 import { projectCanExecute } from "./app/projectPresentation";
+import { latestExecutingTurn } from "./app/interactiveTurnRouter";
 import { useDesktopUi } from "./app/useDesktopUi";
 import { useComposerCommands } from "./app/useComposerCommands";
 import { useWorkspaceController } from "./app/useWorkspaceController";
@@ -57,8 +58,14 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
   const ui = useDesktopUi();
   const runComposerCommand = useComposerCommands(controller, ui);
   const { state, selectedProject, selectedThread } = controller;
-  const activeTurn = state.turns.find((turn) =>
-    ["queued", "running", "waiting_approval"].includes(turn.status),
+  const activeTurn = latestExecutingTurn(
+    state.turns,
+    selectedThread?.id,
+  );
+  const hasPendingTurn = state.turns.some(
+    (turn) =>
+      turn.threadId === selectedThread?.id &&
+      ["queued", "running", "waiting_approval"].includes(turn.status),
   );
   const latestWorkflow =
     [...state.workflows].sort((left, right) =>
@@ -173,7 +180,7 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
               runtime={state.runtime}
               busy={state.busy}
               inspectorOpen={inspectorVisible}
-              hasActiveWork={Boolean(activeTurn) || activeWorkflow}
+              hasActiveWork={hasPendingTurn || activeWorkflow}
               onTrustProject={() => void controller.trustProject()}
               onForkThread={() => {
                 void (async () => {
@@ -303,6 +310,14 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
                 thread={selectedThread}
                 settings={state.settings}
                 goal={state.goal}
+                goalOutcome={state.goalOutcome}
+                goalTurns={
+                  state.goal
+                    ? state.turns.filter(
+                        (turn) => turn.goalId === state.goal?.id,
+                      )
+                    : []
+                }
                 disabledReason={disabledReason}
                 onModelChange={(connectionId, model, reasoningEffort) =>
                   void controller.setThreadExecution(
@@ -317,10 +332,15 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
                 onSetGoal={controller.setGoal}
                 onPauseGoal={controller.pauseGoal}
                 onResumeGoal={controller.resumeGoal}
+                onContinueGoal={controller.continueGoal}
                 onClearGoal={controller.clearGoal}
+                onSelectGoalEvidence={(itemId) => {
+                  controller.selectItem(itemId);
+                  ui.openInspector("details");
+                }}
                 onPickContextFiles={controller.pickContextFiles}
                 onCommand={runComposerCommand}
-                onSubmit={controller.startTurn}
+                onSend={controller.sendTurn}
                 onQueue={controller.queueTurn}
                 onInterrupt={() => void controller.interrupt()}
               />

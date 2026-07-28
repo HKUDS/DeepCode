@@ -14,13 +14,7 @@ from core.application.execution_registry import ExecutionRegistry
 from core.application.extension_service import ExtensionService
 from core.application.file_service import FileService
 from core.application.git_service import GitService
-from core.application.goal_coordinator import GoalCoordinator
-from core.application.goal_evaluator import (
-    GoalEvaluator,
-    ProviderSemanticEvaluator,
-    SemanticEvaluator,
-)
-from core.application.goal_service import GoalService
+from core.application.goal_extension import GoalExtension
 from core.application.mcp_service import McpService
 from core.application.llm_configuration_service import LLMConfigurationService
 from core.application.project_service import ProjectService
@@ -38,7 +32,11 @@ from core.application.workflow_service import WorkflowService
 from core.persistence.database import Database
 from core.persistence.event_repository import EventRepository
 from core.application.legacy_session_importer import LegacySessionImporter
-from core.sessions import GoalStore, SessionStore, get_default_store
+from core.sessions import (
+    SessionStore,
+    ThreadGoalStore,
+    get_default_store,
+)
 
 
 class DeepCodeApplication:
@@ -53,7 +51,6 @@ class DeepCodeApplication:
         session_factory: AgentSessionFactory | None = None,
         session_store: SessionStore | None = None,
         workflow_runner: WorkflowRunner | None = None,
-        semantic_goal_evaluator: SemanticEvaluator | None = None,
     ) -> None:
         self.database = database
         self.session_store = session_store or get_default_store()
@@ -95,26 +92,22 @@ class DeepCodeApplication:
             session_store=self.session_store,
             llm_configuration=self.llm,
         )
-        self.goal_store = GoalStore(self.session_store)
-        self.goals = GoalService(
-            self.goal_store,
-            update_sink=self._publish_goal_update,
-        )
-        self.goal_evaluator = GoalEvaluator(
-            self.tests,
-            semantic_goal_evaluator or ProviderSemanticEvaluator(self.llm),
-        )
-        self.goal_coordinator = GoalCoordinator(
-            self.goals,
+        self.thread_goal_store = ThreadGoalStore(self.session_store)
+        self.goals = GoalExtension(
+            self.thread_goal_store,
             self.turns,
-            self.goal_evaluator,
-            self.executions,
+            update_sink=self._publish_goal_update,
+            lifecycle_sink=self._publish_goal_lifecycle,
         )
-        self.turns.add_settled_listener(self.goal_coordinator.on_turn_settled)
+        self.turns.configure_goal_runtime(
+            self.goals,
+            context_provider=self.goals.turn_association,
+        )
+        self.turns.add_settled_listener(self.goals.on_turn_settled)
         self.deletions = SessionDeletionService(
             database,
             self.session_store,
-            self.goal_store,
+            self.thread_goal_store,
             ensure_projection=self.threads.read,
             on_deleted=self._on_session_deleted,
         )
@@ -143,19 +136,38 @@ class DeepCodeApplication:
         )
 
     def _publish_goal_update(self, thread_id, record) -> None:
-        from core.application.views import goal_view
+        from core.application.views import goal_outcome_view, thread_goal_view
 
+        outcome = self.goals.read_outcome(thread_id) if record is not None else None
         with self.database.transaction() as connection:
             event = EventRepository(connection).append(
                 thread_id=thread_id,
                 type="goal.updated",
-                payload={"goal": goal_view(record) if record is not None else None},
+                payload={
+                    "goal": (thread_goal_view(record) if record is not None else None),
+                    "outcome": (
+                        goal_outcome_view(outcome) if outcome is not None else None
+                    ),
+                },
+            )
+        self.broker.publish(event)
+
+    def _publish_goal_lifecycle(
+        self,
+        thread_id: str,
+        event_type: str,
+        payload: dict,
+    ) -> None:
+        with self.database.transaction() as connection:
+            event = EventRepository(connection).append(
+                thread_id=thread_id,
+                type=event_type,
+                payload=payload,
             )
         self.broker.publish(event)
 
     def _on_session_deleted(self, thread_id: str) -> None:
         self.threads.forget(thread_id)
-        self.goal_coordinator.remove_event_observer(thread_id)
         self.turns.discard_session_runtime(thread_id)
 
     @classmethod
@@ -168,7 +180,6 @@ class DeepCodeApplication:
         session_factory: AgentSessionFactory | None = None,
         session_store: SessionStore | None = None,
         workflow_runner: WorkflowRunner | None = None,
-        semantic_goal_evaluator: SemanticEvaluator | None = None,
     ) -> "DeepCodeApplication":
         database = Database(database_path)
         database.initialize()
@@ -182,18 +193,14 @@ class DeepCodeApplication:
                 session_factory=session_factory,
                 session_store=session_store,
                 workflow_runner=workflow_runner,
-                semantic_goal_evaluator=semantic_goal_evaluator,
             )
             application._application_lease = lease
             if lease.recovery_owner:
                 application.deletions.recover_pending()
                 application.threads.reconcile()
                 application.workflows.recover_incomplete()
-                application.goal_coordinator.recover_incomplete()
                 application.turns.recover_incomplete(
-                    resume_queued=(
-                        application.goal_coordinator.may_resume_queued_after_restart
-                    )
+                    resume_queued=application.turns.may_resume_queued_after_restart
                 )
             lease.downgrade()
             return application
@@ -208,10 +215,9 @@ class DeepCodeApplication:
         try:
             self.automations.close()
             self.terminals.close_all()
-            self.goal_coordinator.prepare_shutdown()
             self.executions.close(cleanup=self.turns.close_live_sessions)
         finally:
-            self.turns.remove_settled_listener(self.goal_coordinator.on_turn_settled)
+            self.turns.remove_settled_listener(self.goals.on_turn_settled)
             lease = self._application_lease
             self._application_lease = None
             if lease is not None:

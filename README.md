@@ -84,7 +84,7 @@ The legacy browser UI has been removed. The Tauri 2 workbench can be run from
 source today; packaged Desktop releases are still under active development.
 See the
 [`P1 architecture`](docs/P1_APP_SERVER_ARCHITECTURE.md) and
-[`desktop rebuild plan`](docs/TAURI_DESKTOP_REBUILD_PLAN.md).
+[`Desktop source guide`](desktop/README.md).
 
 ---
 
@@ -173,8 +173,8 @@ See the
 
 **2026-07-10 · Loop Engineering and parallel agents**
 
-- Give DeepCode a goal and a verification command; it can inspect, implement,
-  test, and repair through bounded rounds.
+- Give DeepCode a mutable goal; it can inspect, implement, verify where
+  appropriate, and repair through bounded rounds while remaining steerable.
 - Delegate focused work to agents in isolated worktrees, then surface conflicts
   explicitly before integration.
 
@@ -264,13 +264,18 @@ contract.
 ### Loop Engineering
 
 One good response is not the same as a finished change. Loop Engineering lets
-DeepCode work against an observable definition of done: a test command, build,
-lint check, or another verification you choose.
+DeepCode keep working across Turns against a mutable natural-language Goal.
+The working Agent uses the conversation, current code, and tool results to
+decide whether to continue, complete, or report a genuine blocker.
 
-Each round inspects the latest state, acts, runs the check, and uses the result
-to decide what comes next. Maximum rounds and scheduled-run limits keep the
-loop bounded, while Session history and project memory keep the reasoning
-continuous.
+Users can revise the Goal or steer the active Turn without discarding useful
+work. Tests, builds, lint checks, and other explicit verifiers remain strong
+evidence when they apply, while stable Goal identity, permissions, and bounded
+budgets keep the loop safe and honest. Session history and project memory keep
+the work continuous across restarts and model changes.
+
+The implementation sequence and invariants are defined in the
+[Loop Engineering implementation plan](docs/LOOP_ENGINEERING_IMPLEMENTATION_PLAN.md).
 
 ### Context Engineering
 
@@ -549,27 +554,56 @@ In the interactive CLI, attach a durable Goal to the current Session:
 
 ```text
 /goal Implement and verify the requested feature
-/goal status
+/goal show
+/goal edit Implement the feature and preserve the public API
 /goal pause
 /goal resume
+/goal wait
+/goal reopen Rework the completed result for the new requirement
 /goal clear
+/queue Run this instruction as the next Turn
+/stop
 ```
 
 The Goal is stored beside the canonical Session transcript and appears in
-Desktop. Every attempt is an ordinary Turn, so model selection, Skills,
-permissions, approvals, recovery, and history stay aligned across clients.
-Safety limits and the optional evaluator connection/model are user-configurable
-through the `goal` block shown in `deepcode_config.json.example`; no provider
-or model is fixed by the Goal engine.
+Desktop. Goal work runs beside the CLI prompt: ordinary input steers the active
+Turn; when the Turn has already ended, the same input starts the next Turn in
+the same Session. Queueing is always explicit through `/queue` or **Queue
+next**—a failed Steer never silently changes delivery semantics. `/stop`
+interrupts only the current Turn and leaves the CLI ready for the next input.
+Editing updates the same durable Goal identity and injects the new objective
+into its active Turn when possible. Every unit of work is an ordinary Turn, so
+model selection, Skills, permissions, approvals, recovery, and history stay
+aligned across clients. Switching a provider, model, or reasoning effort
+affects future Turns without replacing the Goal or Session.
+
+The working Agent requests `complete` or `blocked` from its full context.
+DeepCode enforces ownership, lifecycle, permission, and budget boundaries, but
+does not pretend a generic host-side rule can validate every coding task. A
+normal semantic result is labelled **Completed**; tests, builds, diagnostics,
+diffs, or independent review remain visible evidence. No provider, model, task
+type, or test command is fixed by the Goal engine.
 
 For scripts and CI, the compatibility command uses the same Goal engine and
-stops when its discovered, allowlisted verification command passes:
+adds the requested command to the model-visible completion evidence:
 
 ```bash
 deepcode loop "Implement the requested feature" \
-  --test-cmd pytest \
-  --max-rounds 6
+  --test-cmd pytest
 ```
+
+Resume the same Goal and canonical Session after leaving the process:
+
+```bash
+deepcode loop --resume <session-id>
+```
+
+Resume keeps the Session ID, Goal ID, transcript, and stored workspace. An
+explicit `--workspace` is a process-local override and does not rewrite the
+Session origin. `--connection`, `--model`, and `--effort` apply only to the
+next Turn started by this command. A Goal that reached its token limit requires
+a larger `--token-budget`; a completed Goal is reported without starting or
+rewriting work.
 
 Run a bounded scheduled job:
 

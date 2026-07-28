@@ -1,19 +1,22 @@
-"""Headless CLI adapter for the shared durable Goal application services."""
+"""Headless adapter for the shared Thread Goal extension."""
 
 from __future__ import annotations
 
 import asyncio
-import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
 from core.application.agent_adapter import ConfiguredAgentSessionFactory
 from core.application.application import DeepCodeApplication
-from core.application.errors import InvalidArgumentError
-from core.application.goal_evaluator import SemanticDecision
-from core.domain.goal import GoalBudget, GoalEvaluation, GoalRecord, GoalVerdict
+from core.application.errors import (
+    GoalNotFoundError,
+    InvalidArgumentError,
+    TurnNotFoundError,
+)
+from core.domain.message_provenance import ClientSurface
 from core.domain.project import TrustState
+from core.domain.thread_goal import GoalOutcome, ThreadGoal, ThreadGoalStatus
 from core.harness.permissions import PermissionMode
 
 
@@ -25,33 +28,31 @@ class GoalRunOptions:
     model: str | None = None
     reasoning_effort: str | None = None
     skill_ids: tuple[str, ...] = ()
-    acceptance_criteria: tuple[str, ...] = ()
-    verification: str = ""
-    max_attempts: int | None = None
+    completion_evidence_command: str = ""
+    token_budget: int | None = None
+    max_iterations: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class GoalResumeOptions:
+    session_id: str
+    workspace: str | None = None
+    connection_id: str | None = None
+    model: str | None = None
+    reasoning_effort: str | None = None
+    token_budget: int | None = None
     max_iterations: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class GoalRunResult:
-    record: GoalRecord
+    goal: ThreadGoal
     session_id: str
+    workspace: str
+    outcome: GoalOutcome | None
 
 
-ProgressHook = Callable[[GoalRecord, GoalEvaluation | None], None]
-
-
-class VerificationSufficientEvaluator:
-    """Declare completion only after GoalEvaluator has observed passing tests."""
-
-    async def evaluate(self, _context) -> SemanticDecision:
-        return SemanticDecision(
-            verdict=GoalVerdict.COMPLETE,
-            reason="The configured deterministic verification passed.",
-            evidence_refs=(),
-            provider_name="deterministic-verification",
-            model_id="none",
-            tokens_used=0,
-        )
+ProgressHook = Callable[[ThreadGoal], None]
 
 
 async def run_goal(
@@ -59,24 +60,20 @@ async def run_goal(
     *,
     on_progress: ProgressHook | None = None,
 ) -> GoalRunResult:
-    """Create a normal Session and drive its Goal through GoalCoordinator."""
+    """Create a canonical Session and wait on its ordinary-Turn Goal lifecycle."""
 
     workspace = Path(options.workspace).expanduser().resolve()
     workspace.mkdir(parents=True, exist_ok=True)
-    objective = options.objective.strip()
-    if not objective:
-        raise InvalidArgumentError("Goal objective must not be empty")
+    objective = _objective_with_completion_evidence(
+        options.objective,
+        options.completion_evidence_command,
+    )
     factory = ConfiguredAgentSessionFactory(
         default_permission_mode=PermissionMode.FULL_AUTO,
         streaming=False,
         max_iterations=options.max_iterations,
     )
-    application = DeepCodeApplication.open(
-        session_factory=factory,
-        semantic_goal_evaluator=(
-            VerificationSufficientEvaluator() if options.verification.strip() else None
-        ),
-    )
+    application = DeepCodeApplication.open(session_factory=factory)
     try:
         project = application.projects.add(
             str(workspace),
@@ -84,7 +81,7 @@ async def run_goal(
         )
         if project.trust_state is not TrustState.TRUSTED:
             raise InvalidArgumentError(
-                "the project is untrusted; trust it in Desktop before execution"
+                "the project is untrusted; trust it before execution"
             )
         thread = application.threads.start(
             project.id,
@@ -93,99 +90,215 @@ async def run_goal(
             model=options.model,
             reasoning_effort=options.reasoning_effort,
         )
-        verification_id = _verification_command_id(
-            application,
-            thread.id,
-            options.verification,
-        )
-        default_budget = application.goals.default_budget(thread.id)
-        record = application.goals.create(
+        goal = application.goals.create(
             thread.id,
             objective=objective,
-            acceptance_criteria=options.acceptance_criteria,
-            budget=(
-                GoalBudget(
-                    max_attempts=options.max_attempts,
-                    max_tokens=default_budget.max_tokens,
-                    max_elapsed_seconds=default_budget.max_elapsed_seconds,
-                )
-                if options.max_attempts is not None
-                else None
-            ),
+            token_budget=options.token_budget,
             skill_ids=options.skill_ids,
-            verification_command_id=verification_id,
+            start=True,
+            client_surface=ClientSurface.HEADLESS,
         )
-        application.goal_coordinator.start(thread.id)
-        seen_evaluations = 0
-        try:
-            while record.goal.status.automatically_continues:
-                await asyncio.sleep(0.05)
-                record = application.goals.read(thread.id) or record
-                if on_progress is not None:
-                    while seen_evaluations < len(record.evaluations):
-                        evaluation = record.evaluations[seen_evaluations]
-                        seen_evaluations += 1
-                        on_progress(record, evaluation)
-        except asyncio.CancelledError:
-            current = application.goals.read(thread.id)
-            if current is not None and current.goal.status.automatically_continues:
-                record = application.goal_coordinator.pause(
-                    thread.id,
-                    expected_revision=current.goal.revision,
-                )
-            raise
-        record = application.goals.read(thread.id) or record
-        if on_progress is not None and not record.evaluations:
-            on_progress(record, None)
-        return GoalRunResult(record=record, session_id=thread.id)
+        return await _wait_for_goal(
+            application,
+            thread_id=thread.id,
+            workspace=thread.workspace_path,
+            initial=goal,
+            on_progress=on_progress,
+        )
     finally:
         application.close()
 
 
-def _verification_command_id(
-    application: DeepCodeApplication,
-    thread_id: str,
-    requested: str,
-) -> str | None:
-    clean = requested.strip()
-    if not clean:
-        return None
-    available = application.tests.discover(thread_id)
-    by_id = next((command for command in available if command.id == clean), None)
-    if by_id is not None:
-        return by_id.id
+async def resume_goal(
+    options: GoalResumeOptions,
+    *,
+    on_progress: ProgressHook | None = None,
+) -> GoalRunResult:
+    """Resume the existing Goal without replacing Session identity or history."""
+
+    session_id = options.session_id.strip()
+    if not session_id:
+        raise InvalidArgumentError("Session ID must not be empty")
+    workspace_override = (
+        str(Path(options.workspace).expanduser().resolve())
+        if options.workspace is not None
+        else None
+    )
+    factory = ConfiguredAgentSessionFactory(
+        default_permission_mode=PermissionMode.FULL_AUTO,
+        streaming=False,
+        max_iterations=options.max_iterations,
+    )
+    application = DeepCodeApplication.open(session_factory=factory)
     try:
-        wanted = _normalized_argv(tuple(shlex.split(clean)))
-    except ValueError as exc:
-        raise InvalidArgumentError(f"invalid verification command: {exc}") from exc
-    matched = next(
-        (command for command in available if _normalized_argv(command.argv) == wanted),
-        None,
-    )
-    if matched is not None:
-        return matched.id
-    choices = ", ".join(
-        f"{command.id} ({shlex.join(command.argv)})" for command in available
-    )
-    suffix = f" Available: {choices}." if choices else " No tests were discovered."
-    raise InvalidArgumentError(
-        "verification must match a discovered allowlisted command." + suffix
+        if workspace_override is not None:
+            override_project = application.projects.add(
+                workspace_override,
+                trust_state=TrustState.TRUSTED,
+            )
+            if override_project.trust_state is not TrustState.TRUSTED:
+                application.projects.update(
+                    override_project.id,
+                    trust_state=TrustState.TRUSTED,
+                )
+        thread = application.threads.resume(
+            session_id,
+            workspace_path=workspace_override,
+        )
+        goal = application.goals.read(thread.id)
+        if goal is None:
+            raise GoalNotFoundError(f"no Goal is attached to Session {thread.id}")
+        if goal.status is ThreadGoalStatus.COMPLETE:
+            return _result(
+                application,
+                goal=goal,
+                workspace=thread.workspace_path,
+            )
+
+        goal = _apply_budget_override(
+            application,
+            goal=goal,
+            token_budget=options.token_budget,
+        )
+        execution_options = {
+            "client_surface": ClientSurface.HEADLESS,
+            "connection_id": options.connection_id,
+            "model": options.model,
+            "reasoning_effort": options.reasoning_effort,
+        }
+        if goal.status is ThreadGoalStatus.ACTIVE:
+            continued = application.goals.continue_goal(
+                thread.id,
+                expected_goal_id=goal.id,
+                **execution_options,
+            )
+            goal = continued.goal
+        elif goal.status in {
+            ThreadGoalStatus.PAUSED,
+            ThreadGoalStatus.BLOCKED,
+            ThreadGoalStatus.BUDGET_LIMITED,
+        }:
+            goal = application.goals.resume(
+                thread.id,
+                expected_goal_id=goal.id,
+                **execution_options,
+            )
+        else:  # pragma: no cover - exhaustive guard for future statuses
+            raise InvalidArgumentError(
+                f"Goal status cannot be resumed: {goal.status.value}"
+            )
+
+        return await _wait_for_goal(
+            application,
+            thread_id=thread.id,
+            workspace=thread.workspace_path,
+            initial=goal,
+            on_progress=on_progress,
+        )
+    finally:
+        application.close()
+
+
+def _apply_budget_override(
+    application: DeepCodeApplication,
+    *,
+    goal: ThreadGoal,
+    token_budget: int | None,
+) -> ThreadGoal:
+    if token_budget is None:
+        if goal.status is ThreadGoalStatus.BUDGET_LIMITED:
+            raise InvalidArgumentError(
+                "the Goal exhausted its token budget; provide a larger "
+                "--token-budget to resume"
+            )
+        return goal
+    if token_budget <= goal.tokens_used:
+        raise InvalidArgumentError(
+            "the resumed token budget must be greater than tokens already used "
+            f"({goal.tokens_used})"
+        )
+    return application.goals.edit(
+        goal.thread_id,
+        expected_goal_id=goal.id,
+        objective=goal.objective,
+        token_budget=token_budget,
+        skill_ids=goal.skill_ids,
+        continue_work=False,
+        client_surface=ClientSurface.HEADLESS,
     )
 
 
-def _normalized_argv(argv: tuple[str, ...]) -> tuple[str, ...]:
-    if not argv:
-        return ()
-    executable = Path(argv[0]).name.casefold()
-    if executable in {"python", "python3", "py"}:
-        executable = "python"
-    return (executable, *argv[1:])
+async def _wait_for_goal(
+    application: DeepCodeApplication,
+    *,
+    thread_id: str,
+    workspace: str,
+    initial: ThreadGoal,
+    on_progress: ProgressHook | None,
+) -> GoalRunResult:
+    goal = initial
+    last_snapshot: ThreadGoal | None = None
+    while True:
+        if on_progress is not None and goal != last_snapshot:
+            on_progress(goal)
+            last_snapshot = goal
+        if _goal_execution_settled(application, goal):
+            break
+        await asyncio.sleep(0.05)
+        goal = application.goals.read(thread_id) or goal
+    return _result(application, goal=goal, workspace=workspace)
+
+
+def _goal_execution_settled(
+    application: DeepCodeApplication,
+    goal: ThreadGoal,
+) -> bool:
+    if goal.status is ThreadGoalStatus.ACTIVE:
+        return False
+    outcome = application.goals.read_outcome(goal.thread_id)
+    deciding_turn_id = outcome.decided_by_turn_id if outcome is not None else None
+    if deciding_turn_id is None:
+        return True
+    try:
+        deciding_turn = application.turns.read(deciding_turn_id).turn
+    except TurnNotFoundError:
+        return True
+    return deciding_turn.status.is_terminal
+
+
+def _result(
+    application: DeepCodeApplication,
+    *,
+    goal: ThreadGoal,
+    workspace: str,
+) -> GoalRunResult:
+    return GoalRunResult(
+        goal=goal,
+        session_id=goal.thread_id,
+        workspace=workspace,
+        outcome=application.goals.read_outcome(goal.thread_id),
+    )
+
+
+def _objective_with_completion_evidence(objective: str, command: str) -> str:
+    clean = objective.strip()
+    if not clean:
+        raise InvalidArgumentError("Goal objective must not be empty")
+    command = command.strip()
+    if not command:
+        return clean
+    return (
+        f"{clean}\n\n"
+        "User-requested completion evidence:\n"
+        f"- Run `{command}` and only mark the Goal complete if it passes."
+    )
 
 
 __all__ = [
     "GoalRunOptions",
     "GoalRunResult",
+    "GoalResumeOptions",
     "ProgressHook",
-    "VerificationSufficientEvaluator",
+    "resume_goal",
     "run_goal",
 ]

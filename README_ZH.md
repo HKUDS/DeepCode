@@ -82,7 +82,7 @@
 旧浏览器界面已经移除。目前可以从源码运行新的 Tauri 2 桌面工作台；
 正式打包发布仍在开发中。详见
 [`P1 架构`](docs/P1_APP_SERVER_ARCHITECTURE.md)与
-[`完整路线`](docs/TAURI_DESKTOP_REBUILD_PLAN.md)。
+[`Desktop 源码运行指南`](desktop/README.md)。
 
 ---
 
@@ -158,8 +158,8 @@
 
 **2026-07-10 · Loop Engineering 与并行 Agent**
 
-- 给出目标和验证命令，DeepCode 可以在有边界的轮次中完成理解、实现、
-  测试与修复。
+- 给出一个可修改的目标，DeepCode 可以在有边界且随时可纠正的轮次中持续
+  理解、实现、按需验证与修复。
 - 将聚焦任务委派给隔离 worktree 中的 Agent，并在集成前明确暴露冲突。
 
 <details>
@@ -237,12 +237,16 @@ Harness 是 DeepCode 将模型回答转化为“用户可以监督的真实工�
 ### Loop Engineering
 
 一次看起来不错的回答，并不等于真正完成了修改。Loop Engineering 让
-DeepCode 围绕可观察的完成标准工作：一条测试命令、Build、Lint，或者用户
-指定的其他验证。
+DeepCode 围绕一段可修改的自然语言 Goal 跨 Turn 持续工作。工作 Agent 结合
+完整对话、当前代码和工具结果，判断应该继续、完成，还是报告真实阻碍。
 
-每一轮都会基于最新状态继续理解、执行并运行验证，再由结果决定下一步。
-最大轮数和定时执行上限保证 Loop 不会无限运行；Session 历史与项目记忆则
-让多轮推理保持连续。
+用户可以在运行中修订 Goal 或纠正当前 Turn，而不用丢弃仍然有效的工作。
+测试、Build、Lint 和其他显式验证在适用时继续提供强证据；稳定的 Goal 身份、
+权限和有界预算则保证 Loop 安全且诚实。Session 历史与项目记忆让任务在重启
+或切换模型后仍能连续。
+
+具体实施顺序与系统不变量见
+[Loop Engineering 实施方案](docs/LOOP_ENGINEERING_IMPLEMENTATION_PLAN.md)。
 
 ### Context Engineering
 
@@ -488,13 +492,60 @@ DeepCode 将执行安全视为产品边界，而不是客户端确认框：
 
 ### 长期任务
 
-让 Agent 持续工作，直到验证命令通过：
+在交互式 CLI 中，可以把可持久化的 Goal 绑定到当前 Session：
+
+```text
+/goal 实现并验证指定功能
+/goal show
+/goal edit 实现功能并保持公共 API 兼容
+/goal pause
+/goal resume
+/goal wait
+/goal reopen 根据新要求调整已完成结果
+/goal clear
+/queue 把这条指令安排为下一个 Turn
+/stop
+```
+
+Goal 与规范 Session transcript 一起保存，并会同步出现在 Desktop。Goal 在
+后台工作时，CLI 仍然可以继续输入：消息会优先纠正当前 Turn；如果当前 Turn
+已经结束，同一条消息会在相同 Session 中启动下一个 Turn。Queue 只能通过
+`/queue` 或 Desktop 的 **Queue next** 显式选择，失败的 Steer 不会偷偷改变
+投递语义。`/stop` 只中断当前 Turn，CLI 仍可继续接收下一条输入。编辑 Goal
+会更新同一个持久 Goal，并在条件允许时把新目标注入当前 Turn。所有工作单元
+都是普通 Turn，因此 model、Skills、权限、审批、恢复和历史在两端保持一致。
+切换 provider、model 或 thinking 档位只影响后续 Turn，不会替换 Goal 或
+Session。
+
+工作 Agent 根据完整上下文显式请求 `complete` 或 `blocked`。DeepCode 强制
+检查归属、生命周期、权限和预算边界，但不会用一条宿主规则冒充对所有 coding
+任务的验证。普通语义完成显示为 **Completed**；测试、Build、诊断、Diff 或
+独立复核继续作为可见证据。Goal 引擎不会硬编码 provider、模型、任务类型或
+测试命令。
+
+普通 Session 本身也支持一个 Turn 内的完整长工具循环；Goal 是需要跨 Turn、
+重启或无人持续输入时才使用的可选持久运行契约。
+
+兼容的脚本/CI 入口会把指定命令加入 Agent 可见的完成证据要求：
+
+让 Agent 运行并检查指定命令后再判断是否完成：
 
 ```bash
 deepcode loop "实现指定功能" \
-  --test-cmd "python -m pytest -q" \
-  --max-rounds 6
+  --test-cmd "python -m pytest -q"
 ```
+
+退出进程后，可以继续同一个 Goal 与规范 Session：
+
+```bash
+deepcode loop --resume <session-id>
+```
+
+Resume 会保留 Session ID、Goal ID、完整 transcript 和原始 workspace。只有显式
+传入 `--workspace` 才使用本次进程的临时 workspace override，且不会改写
+Session 来源。`--connection`、`--model` 和 `--effort` 只影响本命令启动的
+下一个 Turn。达到 token 上限的 Goal 必须提供更大的 `--token-budget`；
+已经完成的 Goal 只读取并报告结果，不会重新启动或改写任务。
 
 执行有边界的定时任务：
 

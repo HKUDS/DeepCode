@@ -12,19 +12,21 @@ from core.domain.automation import (
 )
 from core.domain.event import DomainEvent
 from core.domain.execution_profile import ExecutionProfile, ExecutionSelection
-from core.domain.goal import (
-    Goal,
-    GoalAttempt,
-    GoalAttemptStatus,
-    GoalBudget,
-    GoalEvaluation,
-    GoalRecord,
-    GoalStatus,
-    GoalVerdict,
-)
 from core.domain.item import Item, ItemKind, ItemStatus
+from core.domain.message_provenance import (
+    ClientSurface,
+    TurnInputDelivery,
+    TurnInputSource,
+)
 from core.domain.project import Project, TrustState
 from core.domain.thread import Thread, ThreadMode, ThreadStatus
+from core.domain.thread_goal import (
+    GoalDecisionSource,
+    GoalEvidenceRef,
+    GoalOutcome,
+    ThreadGoal,
+    ThreadGoalStatus,
+)
 from core.domain.turn import Turn, TurnStatus
 from core.domain.workflow import WorkflowRun, WorkflowStatus
 
@@ -42,21 +44,21 @@ __all__ = [
     "DomainEvent",
     "ExecutionProfile",
     "ExecutionSelection",
-    "Goal",
-    "GoalAttempt",
-    "GoalAttemptStatus",
-    "GoalBudget",
-    "GoalEvaluation",
-    "GoalRecord",
-    "GoalStatus",
-    "GoalVerdict",
     "Item",
     "ItemKind",
     "ItemStatus",
+    "ClientSurface",
+    "TurnInputDelivery",
+    "TurnInputSource",
     "Project",
     "Thread",
     "ThreadMode",
     "ThreadStatus",
+    "ThreadGoal",
+    "ThreadGoalStatus",
+    "GoalDecisionSource",
+    "GoalEvidenceRef",
+    "GoalOutcome",
     "TrustState",
     "Turn",
     "TurnStatus",

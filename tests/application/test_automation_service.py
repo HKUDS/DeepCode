@@ -142,6 +142,9 @@ def test_manual_automation_runs_through_normal_turn_and_session_lifecycle(
             "assistant",
         ]
         assert session.messages[0].content == created.automation.prompt
+        assert session.messages[0].metadata["client"] == "automation"
+        assert session.messages[0].metadata["source"] == "automation"
+        assert session.messages[1].metadata["client"] == "automation"
     finally:
         application.close()
 
@@ -187,7 +190,7 @@ def test_interval_automation_coalesces_missed_runs_and_skips_when_busy(
         assert refreshed.next_run_at is not None
         assert refreshed.next_run_at > first_due + timedelta(seconds=61)
 
-        application.turns.interrupt(running.turn_id)
+        application.turns.interrupt(running.thread_id, running.turn_id)
         _wait_for_run(
             application,
             created.automation.id,

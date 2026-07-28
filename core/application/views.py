@@ -6,17 +6,17 @@ leaking into JSON-RPC or CLI consumers.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
-from core.domain.event import DomainEvent
 from core.domain.approval import Approval
 from core.domain.artifact import Artifact
 from core.domain.automation import Automation, AutomationRun
-from core.domain.goal import GoalRecord
+from core.domain.event import DomainEvent
 from core.domain.item import Item
 from core.domain.project import Project
 from core.domain.thread import Thread
+from core.domain.thread_goal import GoalOutcome, ThreadGoal
 from core.domain.turn import Turn
 from core.domain.workflow import WorkflowRun
 
@@ -221,70 +221,39 @@ def automation_run_view(run: AutomationRun) -> dict[str, Any]:
     }
 
 
-def goal_view(record: GoalRecord) -> dict[str, Any]:
-    goal = record.goal
-    latest_attempt = record.latest_attempt
-    phase = None
-    if goal.status.value == "active":
-        if latest_attempt is None or latest_attempt.status.is_terminal:
-            phase = "idle"
-        else:
-            phase = latest_attempt.status.value
+def thread_goal_view(goal: ThreadGoal) -> dict[str, Any]:
+    """Project the minimal Goal without legacy Attempt aggregates."""
+
     return {
         "id": goal.id,
         "threadId": goal.thread_id,
         "objective": goal.objective,
-        "acceptanceCriteria": list(goal.acceptance_criteria),
         "status": goal.status.value,
-        "phase": phase,
-        "revision": goal.revision,
-        "definitionRevision": goal.definition_revision,
-        "attemptCount": record.attempt_count,
+        "tokenBudget": goal.token_budget,
         "tokensUsed": goal.tokens_used,
-        "elapsedSeconds": goal.elapsed_seconds,
-        "budget": {
-            "maxAttempts": goal.budget.max_attempts,
-            "maxTokens": goal.budget.max_tokens,
-            "maxElapsedSeconds": goal.budget.max_elapsed_seconds,
-        },
+        "timeUsedSeconds": goal.time_used_seconds,
         "skillIds": list(goal.skill_ids),
-        "verificationCommandId": goal.verification_command_id,
-        "verificationTimeoutSeconds": goal.verification_timeout_seconds,
-        "evaluatorConnectionId": goal.evaluator_connection_id,
-        "evaluatorModelId": goal.evaluator_model_id,
-        "lastVerdict": goal.last_verdict.value if goal.last_verdict else None,
-        "lastReason": goal.last_reason,
         "createdAt": timestamp(goal.created_at),
         "updatedAt": timestamp(goal.updated_at),
-        "completedAt": timestamp(goal.completed_at),
-        "attempts": [
+    }
+
+
+def goal_outcome_view(outcome: GoalOutcome) -> dict[str, Any]:
+    return {
+        "status": outcome.status.value,
+        "reason": outcome.reason,
+        "source": outcome.source.value,
+        "decidedByTurnId": outcome.decided_by_turn_id,
+        "decidedAt": timestamp(outcome.decided_at),
+        "evidenceRefs": [
             {
-                "id": attempt.id,
-                "goalRevision": attempt.goal_revision,
-                "ordinal": attempt.ordinal,
-                "turnId": attempt.turn_id,
-                "status": attempt.status.value,
-                "createdAt": timestamp(attempt.created_at),
-                "updatedAt": timestamp(attempt.updated_at),
-                "completedAt": timestamp(attempt.completed_at),
+                "itemId": evidence.item_id,
+                "turnId": evidence.turn_id,
+                "kind": evidence.kind,
+                "status": evidence.status,
+                "summary": evidence.summary,
             }
-            for attempt in record.attempts
-        ],
-        "evaluations": [
-            {
-                "id": evaluation.id,
-                "goalRevision": evaluation.goal_revision,
-                "attemptId": evaluation.attempt_id,
-                "turnId": evaluation.turn_id,
-                "verdict": evaluation.verdict.value,
-                "reason": evaluation.reason,
-                "evidenceRefs": list(evaluation.evidence_refs),
-                "evaluatorProvider": evaluation.evaluator_provider,
-                "evaluatorModel": evaluation.evaluator_model,
-                "tokensUsed": evaluation.tokens_used,
-                "createdAt": timestamp(evaluation.created_at),
-            }
-            for evaluation in record.evaluations
+            for evidence in outcome.evidence_refs
         ],
     }
 
@@ -292,7 +261,7 @@ def goal_view(record: GoalRecord) -> dict[str, Any]:
 def timestamp(value: datetime | None) -> str | None:
     if value is None:
         return None
-    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 def project_view(project: Project) -> dict[str, Any]:
@@ -340,8 +309,6 @@ def turn_view(turn: Turn) -> dict[str, Any]:
             else None
         ),
         "goalId": turn.goal_id,
-        "goalDefinitionRevision": turn.goal_definition_revision,
-        "goalAttemptId": turn.goal_attempt_id,
         "status": turn.status.value,
         "stopReason": turn.stop_reason,
         "errorCode": turn.error_code,

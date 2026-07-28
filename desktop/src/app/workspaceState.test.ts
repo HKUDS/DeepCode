@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type {
   Event,
+  Goal,
+  GoalOutcome,
   Item,
   JsonValue,
   Thread,
@@ -85,6 +87,49 @@ describe("workspace event projection", () => {
     expect(replayed.items[0].status).toBe("completed");
     expect(replayed.items[0].payload.text).toBe("final");
     expect(replayed.lastSequence).toBe(20);
+  });
+
+  it("projects Goal outcome from the same versioned event", () => {
+    const goal: Goal = {
+      id: "goal-1",
+      threadId: thread.id,
+      objective: "Ship",
+      status: "complete",
+      tokenBudget: null,
+      tokensUsed: 12,
+      timeUsedSeconds: 4,
+      skillIds: [],
+      createdAt: "2026-07-16T00:00:00Z",
+      updatedAt: "2026-07-16T00:00:04Z",
+    };
+    const outcome: GoalOutcome = {
+      status: "complete",
+      reason: "Focused tests passed.",
+      source: "agent",
+      decidedByTurnId: turn.id,
+      decidedAt: "2026-07-16T00:00:03Z",
+      evidenceRefs: [],
+    };
+
+    const projected = workspaceReducer(initialWorkspaceState, {
+      type: "event",
+      event: {
+        eventId: "event-goal",
+        sequence: 7,
+        type: "goal.updated",
+        threadId: thread.id,
+        turnId: turn.id,
+        itemId: null,
+        timestamp: "2026-07-16T00:00:04Z",
+        payload: {
+          goal: goal as unknown as JsonValue,
+          outcome: outcome as unknown as JsonValue,
+        },
+      },
+    });
+
+    expect(projected.goal).toEqual(goal);
+    expect(projected.goalOutcome).toEqual(outcome);
   });
 
   it("rebuilds streamed assistant text from compact delta events", () => {

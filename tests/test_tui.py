@@ -8,11 +8,14 @@ DEEPCODE_SESSIONS_DIR.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import sys
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -20,14 +23,20 @@ if str(ROOT) not in sys.path:
 
 import core.agent_setup as agent_setup  # noqa: E402
 import cli.tui.app as tui_app  # noqa: E402
-from cli.tui.input import expand_file_refs  # noqa: E402
-from core.providers.base import LLMResponse  # noqa: E402
+from cli.tui.input import InputInterrupted, InputReader, expand_file_refs  # noqa: E402
+from core.providers.base import LLMResponse, ToolCallRequest  # noqa: E402
 
 
 class _ScriptedProvider:
-    def __init__(self, replies: list[str]):
+    def __init__(
+        self,
+        replies: list[Any],
+        *,
+        first_call_delay: float = 0,
+    ):
         self.replies = list(replies)
         self.calls = 0
+        self.first_call_delay = first_call_delay
 
     def get_default_model(self):
         return "fake-model"
@@ -35,7 +44,12 @@ class _ScriptedProvider:
     async def chat_with_retry(self, **kwargs: Any):
         i = min(self.calls, len(self.replies) - 1)
         self.calls += 1
-        return LLMResponse(content=self.replies[i], finish_reason="stop")
+        if i == 0 and self.first_call_delay:
+            await asyncio.sleep(self.first_call_delay)
+        reply = self.replies[i]
+        if isinstance(reply, LLMResponse):
+            return reply
+        return LLMResponse(content=reply, finish_reason="stop")
 
 
 class _Profile:
@@ -57,11 +71,17 @@ def _run_tui(
     monkeypatch,
     tmp_path,
     stdin_text: str,
-    replies: list[str],
+    replies: list[Any],
     workspace: str = "ws",
+    first_call_delay: float = 0,
 ) -> tuple[int, Any]:
-    provider = _ScriptedProvider(replies)
+    (tmp_path / workspace).mkdir(parents=True, exist_ok=True)
+    provider = _ScriptedProvider(
+        replies,
+        first_call_delay=first_call_delay,
+    )
     _patch_provider(monkeypatch, provider)
+    monkeypatch.setenv("DEEPCODE_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("DEEPCODE_SESSIONS_DIR", str(tmp_path / "sessions"))
     # Fresh default store per test (the singleton caches the env root).
     import core.sessions.store as store_mod
@@ -150,29 +170,10 @@ def test_skill_command_is_one_turn_only_and_persists_invocation_metadata(
     assert invocation["invocation"] == "explicit"
 
 
-def test_goal_command_uses_shared_goal_ledger_and_selected_skill(
-    monkeypatch,
-    tmp_path,
-    capsys,
-):
-    from core.application.goal_evaluator import SemanticDecision
-    from core.domain import GoalStatus, GoalVerdict
-    from core.sessions import GoalStore, SessionStore
-
-    workspace = tmp_path / "ws"
-    skill = workspace / ".deepcode" / "skills" / "review"
-    skill.mkdir(parents=True)
-    (skill / "SKILL.md").write_text(
-        "---\n"
-        "name: review\n"
-        "description: Review the result\n"
-        "---\n"
-        "Inspect concrete evidence before declaring completion.\n",
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("DEEPCODE_HOME", str(tmp_path / "home"))
+def _configure_fake_goal_provider(monkeypatch, tmp_path) -> None:
     home = tmp_path / "home"
-    home.mkdir()
+    home.mkdir(exist_ok=True)
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
     (home / "deepcode_config.json").write_text(
         json.dumps(
             {
@@ -195,43 +196,214 @@ def test_goal_command_uses_shared_goal_ledger_and_selected_skill(
         encoding="utf-8",
     )
 
-    async def complete(_self, _context):
-        return SemanticDecision(
-            verdict=GoalVerdict.COMPLETE,
-            reason="The requested work is complete.",
-            evidence_refs=(),
-            provider_name="test",
-            model_id="fake-model",
-            tokens_used=3,
-        )
 
-    monkeypatch.setattr(
-        "core.application.goal_evaluator.ProviderSemanticEvaluator.evaluate",
-        complete,
+def test_goal_command_uses_shared_goal_ledger_and_selected_skill(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    from core.domain import ThreadGoalStatus
+    from core.sessions import SessionStore, ThreadGoalStore
+
+    workspace = tmp_path / "ws"
+    skill = workspace / ".deepcode" / "skills" / "review"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\n"
+        "name: review\n"
+        "description: Review the result\n"
+        "---\n"
+        "Inspect concrete evidence before declaring completion.\n",
+        encoding="utf-8",
     )
+    _configure_fake_goal_provider(monkeypatch, tmp_path)
+
     rc, provider = _run_tui(
         monkeypatch,
         tmp_path,
-        "/skill review\n/goal inspect and finish the work\n/exit\n",
-        ["goal work complete"],
+        "/skill review\n/goal inspect and finish the work\n/goal wait\n/exit\n",
+        [
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(id="goal-read", name="get_goal", arguments={})
+                ],
+                finish_reason="tool_calls",
+            ),
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(
+                        id="goal-complete",
+                        name="update_goal",
+                        arguments={
+                            "status": "complete",
+                            "reason": "The requested work is complete.",
+                        },
+                    )
+                ],
+                finish_reason="tool_calls",
+            ),
+            "goal work complete",
+        ],
     )
 
     assert rc == 0
-    assert provider.calls == 1
+    assert provider.calls == 3
     output = capsys.readouterr().out
-    assert "Skill review (explicit)" in output
-    assert "Goal completed" in output
+    assert "Goal complete" in output
+    assert "The requested work is complete." in output
 
     store = SessionStore(tmp_path / "sessions")
     summary = store.list_sessions()[0]
-    record = GoalStore(store).read(summary.session_id)
-    assert record is not None
-    assert record.goal.status is GoalStatus.COMPLETED
-    assert record.goal.skill_ids
+    goal = ThreadGoalStore(store).read(summary.session_id)
+    assert goal is not None
+    assert goal.status is ThreadGoalStatus.COMPLETE
+    assert goal.skill_ids
     stored = store.get_session(summary.session_id)
     assert stored is not None
     invocations = stored.messages[0].metadata["skillInvocations"]
     assert invocations[0]["name"] == "review"
+
+
+def test_goal_edit_and_steer_remain_available_while_work_runs_in_background(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    from core.domain import ThreadGoalStatus
+    from core.sessions import SessionStore, ThreadGoalStore
+
+    _configure_fake_goal_provider(monkeypatch, tmp_path)
+    rc, _provider = _run_tui(
+        monkeypatch,
+        tmp_path,
+        (
+            "/goal preserve the current behavior\n"
+            "Keep the public API compatible.\n"
+            "/goal edit preserve the behavior and public API\n"
+            "/goal pause\n"
+            "/exit\n"
+        ),
+        ["work remains"],
+        first_call_delay=0.5,
+    )
+
+    assert rc == 0
+    output = capsys.readouterr().out
+    assert "Steered Turn" in output
+    assert "Goal saved with the same identity" in output
+    store = SessionStore(tmp_path / "sessions")
+    goal = ThreadGoalStore(store).read(store.list_sessions()[0].session_id)
+    assert goal is not None
+    assert goal.status is ThreadGoalStatus.PAUSED
+    assert goal.objective == "preserve the behavior and public API"
+
+
+def test_goal_edit_uses_stable_identity_without_a_revision_retry_loop():
+    from types import SimpleNamespace
+
+    from cli.tui.goal_controller import TuiGoalController
+    from core.domain import ThreadGoal
+
+    thread_id = "ses_goal_edit_retry"
+    original = ThreadGoal(
+        thread_id=thread_id,
+        objective="original objective",
+    )
+
+    class GoalExtension:
+        goal = original
+        edit_calls = []
+
+        def read(self, requested_thread_id):
+            assert requested_thread_id == thread_id
+            return self.goal
+
+        def edit(self, requested_thread_id, **kwargs):
+            assert requested_thread_id == thread_id
+            self.edit_calls.append(kwargs)
+            self.goal = ThreadGoal(
+                thread_id=thread_id,
+                id=self.goal.id,
+                objective=kwargs["objective"],
+                status=self.goal.status,
+                token_budget=kwargs["token_budget"],
+                tokens_used=self.goal.tokens_used,
+                time_used_seconds=self.goal.time_used_seconds,
+                skill_ids=kwargs["skill_ids"],
+                created_at=self.goal.created_at,
+            )
+            return self.goal
+
+    extension = GoalExtension()
+    application = SimpleNamespace(
+        goals=extension,
+    )
+    owner = SimpleNamespace(
+        thread_client=SimpleNamespace(
+            application=application,
+            session_id=thread_id,
+        )
+    )
+    controller = TuiGoalController(owner)
+
+    result = controller._edit("revised objective", resume=False)
+
+    assert len(extension.edit_calls) == 1
+    assert extension.edit_calls[0]["expected_goal_id"] == original.id
+    assert extension.edit_calls[0]["continue_work"] is True
+    assert extension.goal.id == original.id
+    assert extension.goal.objective == "revised objective"
+    assert "same identity" in result.message
+
+
+def test_goal_continue_command_uses_the_shared_goal_extension():
+    from types import SimpleNamespace
+
+    from cli.tui.goal_controller import TuiGoalController
+    from core.application.goal_extension import (
+        GoalContinueDisposition,
+        GoalContinueResult,
+    )
+    from core.domain import ThreadGoal
+
+    thread_id = "ses_goal_continue"
+    goal = ThreadGoal(thread_id=thread_id, objective="finish the task")
+
+    class GoalExtension:
+        def read(self, requested_thread_id):
+            assert requested_thread_id == thread_id
+            return goal
+
+        def continue_goal(
+            self,
+            requested_thread_id,
+            *,
+            expected_goal_id,
+            **_kwargs,
+        ):
+            assert requested_thread_id == thread_id
+            assert expected_goal_id == goal.id
+            return GoalContinueResult(
+                goal=goal,
+                disposition=GoalContinueDisposition.STARTED,
+                turn_id="turn_000000000000000000000001",
+            )
+
+    controller = TuiGoalController(
+        SimpleNamespace(
+            thread_client=SimpleNamespace(
+                application=SimpleNamespace(goals=GoalExtension()),
+                session_id=thread_id,
+            )
+        )
+    )
+
+    result = asyncio.run(controller.execute("continue"))
+
+    assert "continuation started" in result.message
+    assert result.refresh_session is True
 
 
 def test_new_resets_history_and_model_switch_keeps_it(monkeypatch, tmp_path, capsys):
@@ -408,3 +580,17 @@ def test_file_refs_fenced_to_workspace(tmp_path):
     (tmp_path / "outside.txt").write_text("secret")
     out = expand_file_refs("read @../outside.txt", str(ws))
     assert "secret" not in out  # escape attempt is not attached
+
+
+@pytest.mark.asyncio
+async def test_interactive_ctrl_c_becomes_a_turn_interrupt_request() -> None:
+    class InterruptingPrompt:
+        async def prompt_async(self, _prompt: str) -> str:
+            raise KeyboardInterrupt
+
+    reader = InputReader.__new__(InputReader)
+    reader.interactive = True
+    reader._prompt_session = InterruptingPrompt()
+
+    with pytest.raises(InputInterrupted):
+        await reader.read()

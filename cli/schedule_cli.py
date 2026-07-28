@@ -7,7 +7,7 @@ open (clean exit ∧ not done ∧ under the run cap). Two jobs:
     # tidy this workspace's memory now, then every hour, up to 5 times
     python -m cli.schedule_cli autodream -w ./proj --every 3600 --max-runs 5
 
-    # drive a goal to green, re-attempting on a schedule until it passes
+    # run a durable Goal with an explicit evidence command
     python -m cli.schedule_cli loop "fix the failing tests" \\
         -w ./proj -t "python -m pytest -q" --every 60 --max-runs 10
 
@@ -27,9 +27,8 @@ from rich.console import Console
 
 from cli.goal_runner import GoalRunOptions, run_goal
 from cli.execution_options import add_reasoning_effort_argument
-from core.domain.goal import GoalStatus
+from core.domain.thread_goal import ThreadGoalStatus
 from core.loop.autodream import consolidate_memory
-from core.loop.compat import project_goal_to_loop_state
 from core.schedule.keepalive import Continuation
 from core.schedule.scheduler import RunOutcome, run_scheduled
 
@@ -69,23 +68,17 @@ def _loop_task(args) -> "callable":
             GoalRunOptions(
                 objective=args.goal,
                 workspace=workspace,
-                verification=args.test_cmd,
+                completion_evidence_command=args.test_cmd,
                 model=args.model,
                 connection_id=args.connection,
                 reasoning_effort=args.reasoning_effort,
-                max_attempts=args.max_rounds,
+                token_budget=args.token_budget,
+                max_iterations=args.max_iterations,
             )
         )
-        legacy = project_goal_to_loop_state(
-            result.record,
-            workspace=workspace,
-            test_command=args.test_cmd,
-            max_rounds=args.max_rounds,
-        )
-        legacy.save()
         return RunOutcome(
-            goal_reached=result.record.goal.status is GoalStatus.COMPLETED,
-            detail=result.record.goal.status.value,
+            goal_reached=result.goal.status is ThreadGoalStatus.COMPLETE,
+            detail=result.goal.status.value,
         )
 
     return task
@@ -152,9 +145,8 @@ def main(argv: list[str] | None = None) -> int:
         "--every", type=float, default=0, help="Interval seconds (0 = once)."
     )
     parser.add_argument("--max-runs", type=int, default=5)
-    parser.add_argument(
-        "--max-rounds", type=int, default=6, help="Loop rounds per run."
-    )
+    parser.add_argument("--token-budget", type=int, default=None)
+    parser.add_argument("--max-iterations", type=int, default=40)
     parser.add_argument("--once", action="store_true", help="Run a single pass.")
     args = parser.parse_args(argv)
     if args.job == "loop" and not args.goal:

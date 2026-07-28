@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
-import signal
 import sys
 
 sys.path.insert(
@@ -32,20 +31,21 @@ from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
 
-from core.agent_setup import DEFAULT_MAX_ITERATIONS, build_agent_session
+from core.agent_setup import DEFAULT_MAX_ITERATIONS
 from cli.execution_options import add_reasoning_effort_argument
 from cli.config_errors import format_config_error
 from core.config import ConfigError
 from core.file_lock import FileLease
 from cli.tui import commands, theme
-from cli.tui.input import InputReader, expand_file_refs
+from cli.tui.input import InputInterrupted, InputReader, expand_file_refs
 from cli.tui.goal_controller import TuiGoalController
 from cli.tui.renderer import EventRenderer
 from cli.tui.session_bridge import SessionBridge
-from core.events import Interrupt, SkillLoaded, TurnStarted, UserInput
+from cli.tui.thread_client import TuiThreadClient
+from core.domain.approval import ApprovalStatus
+from core.domain.event import DomainEvent
 from core.providers.reasoning import normalize_reasoning_effort
 from core.skills.management import LocalSkillManager
-from core.skills.models import SkillSelection
 
 
 class TuiApp:
@@ -77,64 +77,34 @@ class TuiApp:
         self.selected_skill_ids: list[str] = []
         self._session_activity: FileLease | None = None
         self._leased_session_id: str | None = None
-        self._rebuild_agent(resume_id=resume_id)
-        self.skill_manager = LocalSkillManager(self.workspace)
-        self.goal_controller = TuiGoalController(self)
-
-    # -- agent lifecycle ----------------------------------------------------
-
-    def _rebuild_agent(
-        self,
-        *,
-        resume_id: str | None = None,
-        carry_history: list | None = None,
-        title: str = "",
-    ) -> None:
-        """(Re)assemble the AgentSession + persistence bridge."""
-        if resume_id is not None:
-            stored_bridge = SessionBridge(
-                session_id=resume_id,
-                workspace=self.workspace,
-            )
-            stored_connection, stored_model, stored_effort = (
-                stored_bridge.execution_selection()
-            )
-            if self._requested_connection is None:
-                self._requested_connection = stored_connection
-            if self._requested_model is None:
-                self._requested_model = stored_model
-            if self._requested_reasoning_effort is None:
-                self._requested_reasoning_effort = stored_effort
-        agent, resolved_model, engine = build_agent_session(
+        self.thread_client = TuiThreadClient(
             workspace=self.workspace,
             model=self._requested_model,
             connection_id=self._requested_connection,
             reasoning_effort=self._requested_reasoning_effort,
             max_iterations=self.max_iterations,
-            approval_callback=self._approve,
-            # Streaming deltas only make sense on a live terminal; piped
-            # runs (tests, scripts) consume final messages.
             streaming=self.reader.interactive,
+            resume_id=resume_id,
+            event_sink=self.renderer.on_event,
         )
-        self.agent = agent
-        self.model = resolved_model
-        self.engine = engine
-        # workspace is always the scoping context for the resume picker;
-        # it is stamped into metadata only when creating a new session.
-        if resume_id is not None:
-            self.bridge = SessionBridge(session_id=resume_id, workspace=self.workspace)
-            self.bridge.load_into(agent)
-        else:
-            profile = self.agent.execution_profile
-            self.bridge = SessionBridge(
-                title=title,
-                workspace=self.workspace,
-                connection_id=profile.connection_id,
-                model=profile.model_id,
-                reasoning_effort=self._requested_reasoning_effort,
-            )
-            if carry_history:
-                agent.load_history(carry_history)
+        self._sync_thread_state()
+        self.skill_manager = LocalSkillManager(self.workspace)
+        self.goal_controller = TuiGoalController(self)
+
+    # -- shared Thread lifecycle -------------------------------------------
+
+    def _sync_thread_state(self) -> None:
+        profile = self.thread_client.execution_profile
+        thread = self.thread_client.thread
+        self.model = profile.model_id
+        self._requested_connection = profile.connection_id
+        self._requested_model = profile.model_id
+        self._requested_reasoning_effort = thread.reasoning_effort
+        self.bridge = SessionBridge(
+            store=self.thread_client.store,
+            session_id=thread.id,
+            workspace=self.workspace,
+        )
         self._lease_session(self.bridge.session_id)
 
     def _lease_session(self, session_id: str) -> None:
@@ -152,13 +122,18 @@ class TuiApp:
     # -- public surface used by slash commands -------------------------------
 
     def new_conversation(self, title: str = "") -> None:
+        self.goal_controller.close()
         self.selected_skill_ids.clear()
-        self._rebuild_agent(title=title)
+        self.thread_client.new_thread(title=title)
+        self._sync_thread_state()
 
     def resume_conversation(self, session_id: str) -> int:
+        self.goal_controller.close()
         self.selected_skill_ids.clear()
-        self._rebuild_agent(resume_id=session_id)
-        return len(self.agent.history)
+        self.thread_client.resume(session_id)
+        self._sync_thread_state()
+        stored = self.bridge.store.get_session(session_id)
+        return len(stored.messages) if stored is not None else 0
 
     async def switch_model(
         self,
@@ -166,47 +141,28 @@ class TuiApp:
         *,
         connection_id: str | None = None,
     ) -> None:
-        previous_model = self._requested_model
-        previous_connection = self._requested_connection
-        self._requested_model = model
-        if connection_id is not None:
-            self._requested_connection = connection_id
-        current_session = self.bridge.session_id
-        old_agent = self.agent
-        try:
-            self._rebuild_agent(resume_id=current_session)
-        except Exception:
-            self._requested_model = previous_model
-            self._requested_connection = previous_connection
-            raise
-        await old_agent.aclose()
-        profile = self.agent.execution_profile
-        self.bridge.update_execution_selection(
-            connection_id=profile.connection_id,
-            model=profile.model_id,
+        profile = self.thread_client.switch_execution(
+            connection_id=(
+                connection_id or self.thread_client.execution_profile.connection_id
+            ),
+            model=model,
             reasoning_effort=self._requested_reasoning_effort,
         )
+        self.model = profile.model_id
+        self._requested_connection = profile.connection_id
+        self._requested_model = profile.model_id
 
     async def switch_reasoning_effort(self, effort: str) -> None:
         """Change future turns while preserving this Session's history."""
 
         requested = normalize_reasoning_effort(effort)
-        previous = self._requested_reasoning_effort
-        self._requested_reasoning_effort = requested
-        current_session = self.bridge.session_id
-        old_agent = self.agent
-        try:
-            self._rebuild_agent(resume_id=current_session)
-        except Exception:
-            self._requested_reasoning_effort = previous
-            raise
-        await old_agent.aclose()
-        profile = self.agent.execution_profile
-        self.bridge.update_execution_selection(
-            connection_id=profile.connection_id,
-            model=profile.model_id,
+        profile = self.thread_client.switch_execution(
+            connection_id=self.thread_client.execution_profile.connection_id,
+            model=self.thread_client.execution_profile.model_id,
             reasoning_effort=requested,
         )
+        self.model = profile.model_id
+        self._requested_reasoning_effort = requested
 
     @property
     def requested_reasoning_effort(self) -> str:
@@ -215,7 +171,8 @@ class TuiApp:
         return self._requested_reasoning_effort or "auto"
 
     def clear_conversation(self) -> None:
-        self.agent.load_history([])
+        self.goal_controller.close()
+        self.thread_client.clear_context()
         if self.reader.interactive:
             self.console.clear()
 
@@ -271,79 +228,85 @@ class TuiApp:
         return result.message
 
     async def _reload_current_session(self) -> None:
-        session_id = self.bridge.session_id
-        old_agent = self.agent
-        await old_agent.aclose()
-        self._rebuild_agent(resume_id=session_id)
+        self.thread_client.refresh_thread()
+        self._sync_thread_state()
 
     def request_exit(self) -> None:
         self._exit_requested = True
 
-    # -- approvals ------------------------------------------------------------
-
-    async def _approve(self, tool_name: str, arguments, reason: str) -> bool:
-        self.console.print(
-            f"[{theme.APPROVAL_STYLE}]approval needed[/] {tool_name}: {reason}"
-        )
-        answer = await self.reader.read()
-        return bool(answer and answer.strip().lower() in ("y", "yes"))
-
     # -- turns ----------------------------------------------------------------
 
     async def run_turn(self, text: str) -> None:
-        if not self.agent.history:
-            self.bridge.set_title_from(text)
-        final_text: str | None = None
-        turn_started = False
-        invocations = {}
-        selected = tuple(
-            SkillSelection(skill_id=skill_id) for skill_id in self.selected_skill_ids
+        self.thread_client.set_event_loop(asyncio.get_running_loop())
+        self.send_turn(text)
+        await self.thread_client.wait_until_idle()
+
+    def send_turn(self, text: str) -> str:
+        delivery = self.thread_client.send(
+            text,
+            skill_ids=tuple(self.selected_skill_ids),
         )
-        loop = asyncio.get_running_loop()
-
-        def _interrupt() -> None:
-            asyncio.ensure_future(self.agent.submit(Interrupt()))
-
-        try:
-            loop.add_signal_handler(signal.SIGINT, _interrupt)
-        except (NotImplementedError, RuntimeError):  # non-main loop / windows
-            pass
-        try:
-            async for event in self.agent.run_stream(
-                UserInput(text=text, skills=selected)
-            ):
-                self.renderer.on_event(event)
-                if isinstance(event.msg, TurnStarted):
-                    turn_started = True
-                    for invocation in event.msg.skill_invocations:
-                        invocations[invocation.skill_id] = invocation
-                elif isinstance(event.msg, SkillLoaded):
-                    invocation = event.msg.invocation
-                    invocations[invocation.skill_id] = invocation
-                elif event.msg.type == "task_complete":
-                    final_text = event.msg.final_text
-        finally:
-            try:
-                loop.remove_signal_handler(signal.SIGINT)
-            except (NotImplementedError, RuntimeError, ValueError):
-                pass
+        if delivery.kind == "started":
             self.selected_skill_ids.clear()
-        if turn_started:
-            assistant_message = next(
-                (
-                    message
-                    for message in reversed(self.agent.history)
-                    if message.get("role") == "assistant"
-                ),
-                None,
-            )
-            self.bridge.record_turn(
-                text,
-                final_text,
-                skill_invocations=tuple(invocations.values()),
-                execution_profile=self.agent.execution_profile,
-                assistant_message=assistant_message,
-            )
+            return f"Started Turn {delivery.turn.id}."
+        suffix = (
+            " Selected next-Turn Skills remain selected."
+            if self.selected_skill_ids
+            else ""
+        )
+        return f"Steered Turn {delivery.turn.id}.{suffix}"
+
+    def queue_turn(self, text: str) -> str:
+        delivery = self.thread_client.queue(
+            text,
+            skill_ids=tuple(self.selected_skill_ids),
+        )
+        self.selected_skill_ids.clear()
+        return f"Queued Turn {delivery.turn.id}."
+
+    def stop_turn(self) -> str:
+        result = self.thread_client.interrupt()
+        if result is None:
+            return "no active Turn"
+        accepted, turn = result
+        return (
+            f"Stopped Turn {turn.id}."
+            if accepted
+            else f"Turn {turn.id} had already stopped."
+        )
+
+    def _respond_to_pending_approval(self, text: str) -> str | None:
+        approval = self.thread_client.pending_approval()
+        if approval is None:
+            return None
+        decision = {
+            "y": ApprovalStatus.APPROVED_ONCE,
+            "yes": ApprovalStatus.APPROVED_ONCE,
+            "a": ApprovalStatus.APPROVED_SESSION,
+            "always": ApprovalStatus.APPROVED_SESSION,
+            "n": ApprovalStatus.DENIED,
+            "no": ApprovalStatus.DENIED,
+        }.get(text.strip().casefold())
+        if decision is None:
+            return None
+        resolved = self.thread_client.respond_to_approval(approval.id, decision)
+        return f"Approval {resolved.status.value}."
+
+    def _on_domain_event(self, event: DomainEvent) -> None:
+        if event.type != "approval.requested":
+            return
+        approval = event.payload.get("approval")
+        if not isinstance(approval, dict):
+            return
+        request = approval.get("request")
+        request = request if isinstance(request, dict) else {}
+        tool = str(request.get("toolName") or "tool")
+        reason = str(request.get("reason") or "sensitive operation")
+        self.console.print(
+            f"[{theme.APPROVAL_STYLE}]approval needed[/] {escape(tool)}: "
+            f"{escape(reason)}\n"
+            f"[{theme.META_STYLE}]reply y = once · a = Session · n = deny[/]"
+        )
 
     # -- REPL -----------------------------------------------------------------
 
@@ -353,7 +316,8 @@ class TuiApp:
                 f"[bold {theme.ACCENT}]{theme.BRAND}[/]\n"
                 f"[{theme.META_STYLE}]model[/] {self.model}"
                 f"  [{theme.META_STYLE}]workspace[/] {self.workspace}\n"
-                f"[{theme.META_STYLE}]permission[/] {self.engine.mode.value}"
+                f"[{theme.META_STYLE}]permission[/] "
+                f"{self.thread_client.permission_mode.value}"
                 f"  [{theme.META_STYLE}]effort[/] {self.requested_reasoning_effort}"
                 f"  [{theme.META_STYLE}]session[/] {self.bridge.session_id}"
                 f"   [{theme.META_STYLE}]/help for commands[/]",
@@ -362,11 +326,23 @@ class TuiApp:
         )
 
     async def repl(self) -> int:
+        loop = asyncio.get_running_loop()
+        self.thread_client.set_event_loop(loop)
+        await self.thread_client.start_domain_events(self._on_domain_event)
         if self.reader.interactive:
             self._banner()
         try:
             while not self._exit_requested:
-                line = await self.reader.read()
+                try:
+                    line = await self.reader.read()
+                except InputInterrupted:
+                    status = self.stop_turn()
+                    self.console.print(
+                        f"[{theme.META_STYLE}]{escape(status)}[/]",
+                        soft_wrap=True,
+                        highlight=False,
+                    )
+                    continue
                 if line is None:
                     break
                 text = line.strip()
@@ -384,12 +360,27 @@ class TuiApp:
                             highlight=False,
                         )
                     continue
-                await self.run_turn(expand_file_refs(text, self.workspace))
+                approval_status = self._respond_to_pending_approval(text)
+                if approval_status is not None:
+                    self.console.print(
+                        f"[{theme.META_STYLE}]{escape(approval_status)}[/]"
+                    )
+                    continue
+                expanded = expand_file_refs(text, self.workspace)
+                status = self.send_turn(expanded)
+                self.console.print(
+                    f"[{theme.META_STYLE}]{escape(status)}[/]",
+                    soft_wrap=True,
+                    highlight=False,
+                )
+                if not self.reader.interactive:
+                    await self.thread_client.wait_until_idle()
             if self.reader.interactive:
                 self.console.print(f"[{theme.META_STYLE}]bye[/]")
             return 0
         finally:
-            await self.agent.aclose()
+            self.goal_controller.close()
+            await self.thread_client.close()
             if self._session_activity is not None:
                 self._session_activity.close()
                 self._session_activity = None

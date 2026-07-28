@@ -5,10 +5,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Callable
 
+from core.agent_runtime.goal_runtime import (
+    GoalRuntimeContext,
+    GoalRuntimeHandler,
+)
 from core.application.agent_adapter import (
     AgentSessionFactory,
     DefaultAgentSessionFactory,
@@ -16,17 +21,29 @@ from core.application.agent_adapter import (
 from core.application.approval_service import ApprovalService
 from core.application.errors import (
     ConflictError,
+    DuplicateMessageConflictError,
+    EmptyInputError,
+    ExpectedTurnMismatchError,
     InvalidArgumentError,
     ProjectNotTrustedError,
     ThreadNotFoundError,
     TurnAlreadyRunningError,
+    TurnInterruptTimeoutError,
     TurnNotFoundError,
     WorkspaceOutOfScopeError,
 )
 from core.application.event_service import EventBroker
 from core.application.execution_registry import ExecutionRegistry
-from core.application.session_runtime import SessionRuntimeRegistry
 from core.application.llm_configuration_service import LLMConfigurationService
+from core.application.goal_turn_port import (
+    GoalContextProvider,
+    GoalTurnAssociation,
+)
+from core.application.session_runtime import SessionRuntimeRegistry
+from core.application.turn_input_service import (
+    TurnInputReceipt,
+    TurnInputService,
+)
 from core.application.turn_projection import TurnEventProjector
 from core.application.views import (
     approval_view,
@@ -39,6 +56,11 @@ from core.domain.common import utc_now
 from core.domain.event import DomainEvent
 from core.domain.execution_profile import ExecutionProfile, ExecutionSelection
 from core.domain.item import Item, ItemKind, ItemStatus
+from core.domain.message_provenance import (
+    ClientSurface,
+    TurnInputDelivery,
+    TurnInputSource,
+)
 from core.domain.project import TrustState
 from core.domain.thread import Thread, ThreadStatus
 from core.domain.turn import Turn, TurnStatus
@@ -56,7 +78,6 @@ from core.sessions import SessionStore
 from core.sessions.continuation import assistant_continuation_metadata
 from core.skills.models import MAX_SELECTED_SKILLS, SkillInvocation, SkillSelection
 
-
 TurnSettledListener = Callable[[Turn], None]
 
 
@@ -65,6 +86,12 @@ class TurnSnapshot:
     turn: Turn
     items: tuple[Item, ...]
     approvals: tuple[Approval, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _TurnSubmission:
+    snapshot: TurnSnapshot
+    duplicate: bool = False
 
 
 class TurnService:
@@ -92,17 +119,34 @@ class TurnService:
             session_store,
             self.session_factory,
         )
+        self.turn_inputs = TurnInputService(
+            database,
+            self.session_runtimes,
+            session_store,
+            self._publish,
+        )
         self._observer_lock = threading.Lock()
         self._event_observers: dict[str, Callable[[Event], None]] = {}
         self._settled_listener_lock = threading.Lock()
         self._settled_listeners: list[TurnSettledListener] = []
+        self._terminal_condition = threading.Condition()
+        self._goal_context_provider: GoalContextProvider | None = None
+
+    def configure_goal_runtime(
+        self,
+        handler: GoalRuntimeHandler,
+        *,
+        context_provider: GoalContextProvider | None = None,
+    ) -> None:
+        self.session_runtimes.configure_goal_handler(handler)
+        self._goal_context_provider = context_provider
 
     def add_settled_listener(self, listener: TurnSettledListener) -> None:
         """Observe fully persisted terminal Turns.
 
         Listeners run after queued user work has been scheduled and must return
-        quickly. Goal orchestration uses this seam to enqueue its own bounded
-        background evaluation instead of running inside the Turn transaction.
+        quickly. Extensions use this seam only after the Turn transaction has
+        committed.
         """
 
         with self._settled_listener_lock:
@@ -119,73 +163,63 @@ class TurnService:
         thread_id: str,
         *,
         prompt: str,
+        message_id: str | None = None,
         skill_ids: tuple[str, ...] = (),
         connection_id: str | None = None,
         model: str | None = None,
         reasoning_effort: str | None = None,
         event_observer: Callable[[Event], None] | None = None,
+        client_surface: ClientSurface = ClientSurface.INTERNAL,
+        input_source: TurnInputSource = TurnInputSource.START,
     ) -> TurnSnapshot:
+        association = self._goal_association(thread_id)
         return self._submit(
             thread_id,
             prompt=prompt,
-            skill_ids=skill_ids,
+            skill_ids=self._merge_goal_skills(skill_ids, association),
             connection_id=connection_id,
             model=model,
             reasoning_effort=reasoning_effort,
             queue_if_busy=False,
             event_observer=event_observer,
-        )
-
-    def start_goal_attempt(
-        self,
-        thread_id: str,
-        *,
-        prompt: str,
-        skill_ids: tuple[str, ...],
-        goal_id: str,
-        goal_definition_revision: int,
-        goal_attempt_id: str,
-        event_observer: Callable[[Event], None] | None = None,
-    ) -> TurnSnapshot:
-        """Start one ordinary Turn attributed to a Goal Attempt."""
-
-        return self._submit(
-            thread_id,
-            prompt=prompt,
-            skill_ids=skill_ids,
-            connection_id=None,
-            model=None,
-            reasoning_effort=None,
-            queue_if_busy=False,
-            event_observer=event_observer,
-            goal_id=goal_id,
-            goal_definition_revision=goal_definition_revision,
-            goal_attempt_id=goal_attempt_id,
-        )
+            input_message_id=message_id,
+            client_surface=client_surface,
+            input_source=input_source,
+            input_delivery=TurnInputDelivery.CURRENT_TURN,
+            goal_id=association.goal_id if association is not None else None,
+        ).snapshot
 
     def enqueue(
         self,
         thread_id: str,
         *,
         prompt: str,
+        message_id: str | None = None,
         skill_ids: tuple[str, ...] = (),
         connection_id: str | None = None,
         model: str | None = None,
         reasoning_effort: str | None = None,
         event_observer: Callable[[Event], None] | None = None,
+        client_surface: ClientSurface = ClientSurface.INTERNAL,
     ) -> TurnSnapshot:
         """Persist a next Turn and run it after earlier Turns settle."""
 
+        association = self._goal_association(thread_id)
         return self._submit(
             thread_id,
             prompt=prompt,
-            skill_ids=skill_ids,
+            skill_ids=self._merge_goal_skills(skill_ids, association),
             connection_id=connection_id,
             model=model,
             reasoning_effort=reasoning_effort,
             queue_if_busy=True,
             event_observer=event_observer,
-        )
+            input_message_id=message_id,
+            client_surface=client_surface,
+            input_source=TurnInputSource.QUEUE,
+            input_delivery=TurnInputDelivery.NEXT_TURN,
+            goal_id=association.goal_id if association is not None else None,
+        ).snapshot
 
     def _submit(
         self,
@@ -200,12 +234,14 @@ class TurnService:
         event_observer: Callable[[Event], None] | None,
         execution_profile_override: ExecutionProfile | None = None,
         goal_id: str | None = None,
-        goal_definition_revision: int | None = None,
-        goal_attempt_id: str | None = None,
-    ) -> TurnSnapshot:
+        input_message_id: str | None = None,
+        client_surface: ClientSurface = ClientSurface.INTERNAL,
+        input_source: TurnInputSource = TurnInputSource.START,
+        input_delivery: TurnInputDelivery = TurnInputDelivery.CURRENT_TURN,
+    ) -> _TurnSubmission:
         clean_prompt = prompt.strip()
         if not clean_prompt:
-            raise InvalidArgumentError("turn prompt must not be empty")
+            raise EmptyInputError("turn prompt must not be empty")
         try:
             clean_skill_ids = tuple(
                 SkillSelection(skill_id=skill_id).skill_id for skill_id in skill_ids
@@ -236,10 +272,48 @@ class TurnService:
                 )
             self._validate_workspace(thread, project.canonical_path)
             turns = TurnRepository(connection)
+            items = ItemRepository(connection)
+            if input_message_id is not None:
+                input_message_id = input_message_id.strip()
+                if not input_message_id:
+                    raise EmptyInputError("messageId must not be empty")
+                existing_item = items.find_user_message_by_message_id(
+                    thread_id,
+                    input_message_id,
+                )
+                if existing_item is not None:
+                    if (
+                        existing_item.payload.get("text") != clean_prompt
+                        or existing_item.payload.get("source") != input_source.value
+                    ):
+                        raise DuplicateMessageConflictError(
+                            "messageId was already used with different content"
+                        )
+                    existing_turn = turns.get(existing_item.turn_id)
+                    if existing_turn is None:
+                        raise DuplicateMessageConflictError(
+                            "idempotent input references a missing Turn"
+                        )
+                    return _TurnSubmission(
+                        TurnSnapshot(
+                            existing_turn,
+                            tuple(items.list_for_turn(existing_turn.id)),
+                            tuple(
+                                ApprovalRepository(connection).list_for_turn(
+                                    existing_turn.id
+                                )
+                            ),
+                        ),
+                        duplicate=True,
+                    )
             active = turns.active_for_thread(thread_id)
             if active is not None and not queue_if_busy:
                 raise TurnAlreadyRunningError(
-                    f"thread already has an active turn: {active.id}"
+                    f"thread already has an active Turn: {active.id}",
+                    details={
+                        "threadId": thread_id,
+                        "actualTurnId": active.id,
+                    },
                 )
             schedule_now = active is None
             execution_profile = execution_profile_override
@@ -263,12 +337,19 @@ class TurnService:
                 skill_ids=clean_skill_ids,
                 execution_profile=execution_profile,
                 goal_id=goal_id,
-                goal_definition_revision=goal_definition_revision,
-                goal_attempt_id=goal_attempt_id,
             )
             turns.add(turn)
-            items = ItemRepository(connection)
             now = utc_now()
+            input_metadata = {
+                "client": client_surface.value,
+                "delivery": input_delivery.value,
+                "source": input_source.value,
+                **(
+                    {"messageId": input_message_id}
+                    if input_message_id is not None
+                    else {}
+                ),
+            }
             user_item = Item(
                 thread_id=thread_id,
                 turn_id=turn.id,
@@ -281,15 +362,8 @@ class TurnService:
                     "skillIds": list(clean_skill_ids),
                     "skills": [],
                     "executionProfile": execution_profile.to_dict(),
-                    "goal": (
-                        {
-                            "id": goal_id,
-                            "definitionRevision": goal_definition_revision,
-                            "attemptId": goal_attempt_id,
-                        }
-                        if goal_id is not None
-                        else None
-                    ),
+                    **input_metadata,
+                    "goal": ({"id": goal_id} if goal_id is not None else None),
                 },
                 created_at=now,
                 updated_at=now,
@@ -322,13 +396,31 @@ class TurnService:
                     ),
                 )
             )
+            if input_message_id is not None:
+                events.append(
+                    event_repo.append(
+                        thread_id=thread_id,
+                        turn_id=turn.id,
+                        item_id=user_item.id,
+                        type=(
+                            "turn.input_queued"
+                            if input_delivery is TurnInputDelivery.NEXT_TURN
+                            else "turn.input_started"
+                        ),
+                        payload={
+                            "turnId": turn.id,
+                            "messageId": input_message_id,
+                            "delivery": input_delivery.value,
+                        },
+                    )
+                )
         self._publish(events)
         if event_observer is not None:
             with self._observer_lock:
                 self._event_observers[turn.id] = event_observer
         if schedule_now:
             self._schedule(turn.id)
-        return TurnSnapshot(turn, (user_item,), ())
+        return _TurnSubmission(TurnSnapshot(turn, (user_item,), ()))
 
     def retry(
         self,
@@ -341,10 +433,11 @@ class TurnService:
             raise ConflictError(
                 "only a completed, failed, or interrupted Turn can retry"
             )
+        association = self._goal_association(original.thread_id)
         return self._submit(
             original.thread_id,
             prompt=original.prompt,
-            skill_ids=original.skill_ids,
+            skill_ids=self._merge_goal_skills(original.skill_ids, association),
             connection_id=None,
             model=None,
             reasoning_effort=None,
@@ -353,7 +446,29 @@ class TurnService:
             execution_profile_override=(
                 None if use_current_selection else original.execution_profile
             ),
-        )
+            goal_id=association.goal_id if association is not None else None,
+            client_surface=ClientSurface.INTERNAL,
+            input_source=TurnInputSource.RETRY,
+        ).snapshot
+
+    def _goal_association(self, thread_id: str) -> GoalTurnAssociation | None:
+        provider = self._goal_context_provider
+        return provider(thread_id) if provider is not None else None
+
+    @staticmethod
+    def _merge_goal_skills(
+        explicit: tuple[str, ...],
+        association: GoalTurnAssociation | None,
+    ) -> tuple[str, ...]:
+        if association is None or not association.skill_ids:
+            return explicit
+        merged = tuple(dict.fromkeys((*explicit, *association.skill_ids)))
+        if len(merged) > MAX_SELECTED_SKILLS:
+            raise InvalidArgumentError(
+                "the selected Turn and active Goal Skills exceed "
+                f"the {MAX_SELECTED_SKILLS}-Skill limit"
+            )
+        return merged
 
     def _schedule(self, turn_id: str, *, propagate: bool = True) -> None:
         try:
@@ -391,14 +506,108 @@ class TurnService:
                 raise ThreadNotFoundError(f"thread not found: {thread_id}")
             return TurnRepository(connection).active_for_thread(thread_id)
 
+    def executing_for_thread(self, thread_id: str) -> Turn | None:
+        with self.database.read() as connection:
+            if ThreadRepository(connection).get(thread_id) is None:
+                raise ThreadNotFoundError(f"thread not found: {thread_id}")
+            return TurnRepository(connection).executing_for_thread(thread_id)
+
+    def may_resume_queued_after_restart(self, turn: Turn) -> bool:
+        """Resume user Queue, never an automatic Goal continuation."""
+
+        if turn.goal_id is None:
+            return True
+        with self.database.read() as connection:
+            return any(
+                item.kind is ItemKind.USER_MESSAGE
+                and item.payload.get("source") == "queue"
+                for item in ItemRepository(connection).list_for_turn(turn.id)
+            )
+
+    def steer(
+        self,
+        thread_id: str,
+        *,
+        expected_turn_id: str,
+        prompt: str,
+        message_id: str,
+        client_surface: ClientSurface = ClientSurface.INTERNAL,
+    ) -> TurnInputReceipt:
+        """Deliver a follow-up to exactly one executing Turn."""
+
+        return self.turn_inputs.steer(
+            thread_id,
+            expected_turn_id=expected_turn_id,
+            prompt=prompt,
+            message_id=message_id,
+            client_surface=client_surface,
+        )
+
+    def wait_until_terminal(
+        self,
+        turn_id: str,
+        *,
+        timeout: float = 5.0,
+    ) -> Turn | None:
+        """Wait for one final-closing Turn without polling or changing it."""
+
+        if timeout < 0:
+            raise ValueError("timeout must not be negative")
+        deadline = time.monotonic() + timeout
+        with self._terminal_condition:
+            while True:
+                current = self.read(turn_id).turn
+                if current.status.is_terminal:
+                    return current
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                self._terminal_condition.wait(remaining)
+
+    def inject_goal_update(
+        self,
+        turn_id: str,
+        *,
+        message_id: str,
+        goal_id: str,
+        objective: str,
+    ) -> bool:
+        return self.turn_inputs.inject_goal_update(
+            turn_id,
+            message_id=message_id,
+            goal_id=goal_id,
+            objective=objective,
+        )
+
     def conversation_count(self, thread_id: str) -> int:
         with self.database.read() as connection:
             if ThreadRepository(connection).get(thread_id) is None:
                 raise ThreadNotFoundError(f"thread not found: {thread_id}")
             return ItemRepository(connection).conversation_count(thread_id)
 
-    def interrupt(self, turn_id: str) -> tuple[bool, Turn]:
+    def clear_live_context(self, thread_id: str) -> None:
+        """Clear resident model context without rewriting canonical Session data."""
+
+        if self.active_for_thread(thread_id) is not None:
+            raise ConflictError("cannot clear context while a Turn is active")
+        self.session_runtimes.clear_live_history(thread_id)
+
+    def interrupt(
+        self,
+        thread_id: str,
+        turn_id: str,
+        *,
+        timeout: float = 5.0,
+    ) -> tuple[bool, Turn]:
+        """Interrupt exactly one Turn and wait for its durable terminal state."""
+
+        active = self.active_for_thread(thread_id)
         snapshot = self.read(turn_id)
+        if snapshot.turn.thread_id != thread_id:
+            raise ExpectedTurnMismatchError(
+                turn_id,
+                active.id if active is not None else None,
+            )
         if snapshot.turn.status.is_terminal:
             return False, snapshot.turn
         accepted = self.registry.interrupt(turn_id)
@@ -412,7 +621,21 @@ class TurnService:
             finally:
                 self._remove_observer(turn_id)
             accepted = True
-        return accepted, self.read(turn_id).turn
+        if not accepted:
+            return False, self.read(turn_id).turn
+        deadline = time.monotonic() + timeout
+        with self._terminal_condition:
+            while True:
+                current = self.read(turn_id).turn
+                if current.status.is_terminal:
+                    return True, current
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TurnInterruptTimeoutError(
+                        f"Turn did not stop within {timeout:g} seconds",
+                        details={"threadId": thread_id, "turnId": turn_id},
+                    )
+                self._terminal_condition.wait(remaining)
 
     async def _execute(self, turn_id: str) -> None:
         projection: TurnEventProjector | None = None
@@ -454,17 +677,32 @@ class TurnService:
                 approval_callback=approve,
             )
             session_acquired = True
+            self.session_runtimes.prepare_inputs(
+                turn.thread_id,
+                turn_id=turn.id,
+            )
             skill_invocations: dict[str, SkillInvocation] = {}
             stored_user = False
-            goal_metadata = (
+            inputs_active = False
+            goal_metadata = {"goalId": turn.goal_id} if turn.goal_id is not None else {}
+            initial_item = next(
+                (
+                    item
+                    for item in self.read(turn.id).items
+                    if item.kind is ItemKind.USER_MESSAGE and item.ordinal == 1
+                ),
+                None,
+            )
+            initial_input_metadata = (
                 {
-                    "goalId": turn.goal_id,
-                    "goalDefinitionRevision": turn.goal_definition_revision,
-                    "goalAttemptId": turn.goal_attempt_id,
+                    key: initial_item.payload[key]
+                    for key in ("messageId", "client", "delivery", "source")
+                    if key in initial_item.payload
                 }
-                if turn.goal_id is not None
+                if initial_item is not None
                 else {}
             )
+            turn_client = _client_surface_value(initial_input_metadata.get("client"))
             async for event in session.run_stream(
                 UserInput(
                     text=turn.prompt,
@@ -483,8 +721,9 @@ class TurnService:
                             turn.prompt,
                             metadata={
                                 "schemaVersion": 3,
-                                "client": "desktop",
+                                "client": turn_client,
                                 "turnId": turn.id,
+                                **initial_input_metadata,
                                 "executionProfile": execution_profile.to_dict(),
                                 **goal_metadata,
                                 "skillInvocations": [
@@ -499,6 +738,21 @@ class TurnService:
                             )
                         stored_user = True
                         self.session_runtimes.mark_persisted(turn.thread_id)
+                    if not inputs_active:
+                        if turn.goal_id is not None:
+                            self.session_runtimes.activate_goal(
+                                turn.thread_id,
+                                context=GoalRuntimeContext(
+                                    thread_id=turn.thread_id,
+                                    goal_id=turn.goal_id,
+                                    turn_id=turn.id,
+                                ),
+                            )
+                        self.session_runtimes.activate_inputs(
+                            turn.thread_id,
+                            turn_id=turn.id,
+                        )
+                        inputs_active = True
                 elif isinstance(event.msg, SkillLoaded):
                     invocation = event.msg.invocation
                     skill_invocations[invocation.skill_id] = invocation
@@ -524,7 +778,7 @@ class TurnService:
                         projection.final_text,
                         metadata={
                             "schemaVersion": 3,
-                            "client": "desktop",
+                            "client": turn_client,
                             "turnId": turn.id,
                             "executionProfile": execution_profile.to_dict(),
                             **continuation_metadata,
@@ -570,7 +824,13 @@ class TurnService:
                 projection.add_error(code=error_code, message=error_message)
         finally:
             if session_acquired and session_thread_id is not None:
-                self.session_runtimes.release(session_thread_id)
+                self.session_runtimes.release(
+                    session_thread_id,
+                    turn_id=turn_id,
+                )
+
+        if status is TurnStatus.INTERRUPTED:
+            self._record_interruption_marker(self.read(turn_id).turn)
 
         if projection is not None:
             try:
@@ -610,6 +870,40 @@ class TurnService:
         finally:
             self._remove_observer(turn_id)
 
+    def _record_interruption_marker(self, turn: Turn) -> None:
+        """Persist one model-visible abort fact before terminal Turn events."""
+
+        session = self.session_store.get_session(turn.thread_id)
+        if session is None:
+            raise ThreadNotFoundError(
+                f"canonical session disappeared: {turn.thread_id}"
+            )
+        if any(
+            message.metadata.get("source") == TurnInputSource.TURN_INTERRUPT.value
+            and message.metadata.get("turnId") == turn.id
+            for message in session.messages
+        ):
+            return
+        stored = self.session_store.append_message(
+            turn.thread_id,
+            "user",
+            "[The previous Turn was interrupted before it completed.]",
+            metadata={
+                "schemaVersion": 3,
+                "client": ClientSurface.INTERNAL.value,
+                "turnId": turn.id,
+                "source": TurnInputSource.TURN_INTERRUPT.value,
+                "modelVisible": True,
+            },
+        )
+        if stored is None:
+            raise ThreadNotFoundError(
+                f"canonical session disappeared: {turn.thread_id}"
+            )
+        # The live Agent has not seen this marker. Deliberately leave its
+        # canonical count stale so the next acquire reloads authoritative
+        # Session history before another Turn starts.
+
     def _finish_unstarted(
         self,
         turn_id: str,
@@ -642,7 +936,7 @@ class TurnService:
             return
         try:
             observer(event)
-        except Exception:  # noqa: BLE001 - a client observer cannot fail the turn
+        except Exception:
             logging.getLogger(__name__).exception(
                 "turn event observer failed for %s",
                 turn_id,
@@ -777,6 +1071,8 @@ class TurnService:
                 )
             )
         self._publish(events)
+        with self._terminal_condition:
+            self._terminal_condition.notify_all()
         if schedule_next_id is not None:
             self._schedule(schedule_next_id, propagate=False)
         self._notify_settled(terminal)
@@ -788,7 +1084,7 @@ class TurnService:
         for listener in listeners:
             try:
                 listener(turn)
-            except Exception:  # noqa: BLE001 - observers cannot fail a Turn
+            except Exception:
                 logging.getLogger(__name__).exception(
                     "turn settled listener failed for %s",
                     turn.id,
@@ -802,8 +1098,8 @@ class TurnService:
         """Interrupt lost live work and resume explicitly safe queued Turns.
 
         Ordinary user-queued Turns remain resumable by default. Product-level
-        coordinators may reject a queued Turn (for example, a Goal continuation)
-        when replaying it after a process crash could repeat mutations.
+        extensions may reject a queued Turn when replaying it after a process
+        crash could repeat unknown mutations.
         """
 
         events: list[DomainEvent] = []
@@ -951,3 +1247,10 @@ class TurnService:
     def _publish(self, events: list[DomainEvent]) -> None:
         for event in events:
             self.broker.publish(event)
+
+
+def _client_surface_value(value: object) -> str:
+    try:
+        return ClientSurface(value).value
+    except (TypeError, ValueError):
+        return ClientSurface.INTERNAL.value

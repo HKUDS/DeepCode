@@ -35,7 +35,10 @@ async def _cmd_help(app, args: str) -> str | None:
 
 
 async def _cmd_new(app, args: str) -> str | None:
-    app.new_conversation(title=args.strip())
+    try:
+        app.new_conversation(title=args.strip())
+    except (RuntimeError, ValueError) as exc:
+        return str(exc)
     return "started a new conversation"
 
 
@@ -65,7 +68,7 @@ async def _cmd_resume(app, args: str) -> str | None:
         return "\n".join(lines)
     try:
         turns = app.resume_conversation(target)
-    except ValueError as exc:
+    except (RuntimeError, ValueError) as exc:
         return str(exc)
     status = f"resumed {target} ({turns} messages restored)"
     origin = app.bridge.stored_workspace()
@@ -77,7 +80,7 @@ async def _cmd_resume(app, args: str) -> str | None:
 async def _cmd_model(app, args: str) -> str | None:
     wanted = args.strip()
     if not wanted:
-        profile = app.agent.execution_profile
+        profile = app.thread_client.execution_profile
         return (
             f"connection: {profile.connection_id} · model: {app.model} · "
             f"effort: {app.requested_reasoning_effort}"
@@ -95,7 +98,7 @@ async def _cmd_model(app, args: str) -> str | None:
         return f"model switch failed: {exc}"
     return (
         f"model switched to {app.model} on connection "
-        f"{app.agent.execution_profile.connection_id} · effort "
+        f"{app.thread_client.execution_profile.connection_id} · effort "
         f"{app.requested_reasoning_effort} (history preserved)"
     )
 
@@ -103,14 +106,14 @@ async def _cmd_model(app, args: str) -> str | None:
 async def _cmd_effort(app, args: str) -> str | None:
     wanted = args.strip()
     if not wanted:
-        profile = app.agent.execution_profile
+        profile = app.thread_client.execution_profile
         effective = profile.reasoning_effort or "provider default"
         return f"effort: {app.requested_reasoning_effort} · effective: {effective}"
     try:
         await app.switch_reasoning_effort(wanted)
     except (OSError, ValueError) as exc:
         return f"effort switch failed: {exc}"
-    profile = app.agent.execution_profile
+    profile = app.thread_client.execution_profile
     effective = profile.reasoning_effort or "provider default"
     return (
         f"effort switched to {app.requested_reasoning_effort} "
@@ -119,7 +122,10 @@ async def _cmd_effort(app, args: str) -> str | None:
 
 
 async def _cmd_clear(app, args: str) -> str | None:
-    app.clear_conversation()
+    try:
+        app.clear_conversation()
+    except (RuntimeError, ValueError) as exc:
+        return str(exc)
     return "context cleared"
 
 
@@ -142,6 +148,17 @@ async def _cmd_skill(app, args: str) -> str | None:
 
 async def _cmd_goal(app, args: str) -> str | None:
     return await app.run_goal_command(args)
+
+
+async def _cmd_queue(app, args: str) -> str | None:
+    prompt = args.strip()
+    if not prompt:
+        return "usage: /queue <instruction>"
+    return app.queue_turn(prompt)
+
+
+async def _cmd_stop(app, args: str) -> str | None:
+    return app.stop_turn()
 
 
 async def _cmd_exit(app, args: str) -> str | None:
@@ -181,10 +198,17 @@ REGISTRY: dict[str, Command] = {
         ),
         Command(
             "goal",
-            "/goal <objective>",
-            "run or manage this Session's durable Goal",
+            "/goal <text> | show | edit <text> | pause | resume | continue | wait | reopen [text] | clear",
+            "run or manage this Session's durable, steerable Goal",
             _cmd_goal,
         ),
+        Command(
+            "queue",
+            "/queue <instruction>",
+            "send an instruction as the next durable Turn",
+            _cmd_queue,
+        ),
+        Command("stop", "/stop", "interrupt the active Turn", _cmd_stop),
         Command("clear", "/clear", "clear the conversation context", _cmd_clear),
         Command("exit", "/exit", "quit (ctrl-d also works)", _cmd_exit),
     )

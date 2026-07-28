@@ -18,6 +18,11 @@ import type {
   DesktopRuntime,
   SidecarStatus,
 } from "../rpc/contracts";
+import {
+  latestExecutingTurn,
+  sendInteractiveTurn,
+  type InteractiveDelivery,
+} from "./interactiveTurnRouter";
 import { replayThreadHistory } from "./replayThreadHistory";
 import {
   initialWorkspaceState,
@@ -62,8 +67,9 @@ export type DesktopPermissionMode = "default" | "plan" | "full_auto";
 
 export interface GoalDefinitionInput {
   objective: string;
-  acceptanceCriteria: string[];
+  tokenBudget: number | null;
   skillIds: string[];
+  resume?: boolean;
 }
 
 export interface WorkspaceController {
@@ -92,9 +98,13 @@ export interface WorkspaceController {
   setGoal(input: GoalDefinitionInput): Promise<void>;
   pauseGoal(): Promise<void>;
   resumeGoal(): Promise<void>;
+  continueGoal(): Promise<void>;
   clearGoal(): Promise<void>;
-  startTurn(prompt: string, skillIds?: string[]): Promise<void>;
-  queueTurn(prompt: string, skillIds?: string[]): Promise<void>;
+  sendTurn(
+    prompt: string,
+    skillIds?: string[],
+  ): Promise<InteractiveDelivery | null>;
+  queueTurn(prompt: string, skillIds?: string[]): Promise<boolean>;
   retryTurn(turnId: string): Promise<void>;
   interruptTurn(turnId: string): Promise<void>;
   pickContextFiles(): Promise<string[]>;
@@ -150,7 +160,11 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
   const loadGoal = useCallback(
     async (threadId: string) => {
       const result = await runtime.request("thread/goal/get", { threadId });
-      dispatch({ type: "goal", goal: result.goal });
+      dispatch({
+        type: "goal",
+        goal: result.goal,
+        outcome: result.outcome,
+      });
     },
     [runtime],
   );
@@ -278,13 +292,16 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
   }, [loadProjects, replayThread, reportError, runtime]);
 
   const withBusy = useCallback(
-    async (operation: () => Promise<void>) => {
+    async <Result,>(
+      operation: () => Promise<Result>,
+    ): Promise<Result | undefined> => {
       dispatch({ type: "busy", busy: true });
       dispatch({ type: "error", error: null });
       try {
-        await operation();
+        return await operation();
       } catch (error) {
         reportError(error);
+        return undefined;
       } finally {
         dispatch({ type: "busy", busy: false });
       }
@@ -534,19 +551,25 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
       withBusy(async () => {
         if (!selectedThread) return;
         const current = state.goal;
-        const editable =
-          current !== null &&
-          !["completed", "budget_limited"].includes(current.status);
-        const result = await runtime.request("thread/goal/set", {
+        let result = await runtime.request("thread/goal/set", {
           threadId: selectedThread.id,
           objective: input.objective,
-          acceptanceCriteria:
-            input.acceptanceCriteria as GoalSetParams["acceptanceCriteria"],
+          tokenBudget: input.tokenBudget,
           skills: input.skillIds as GoalSetParams["skills"],
-          ...(editable ? { expectedRevision: current.revision } : {}),
+          ...(current ? { expectedGoalId: current.id } : {}),
           start: true,
         });
-        dispatch({ type: "goal", goal: result.goal });
+        if (input.resume && result.goal && result.goal.status !== "active") {
+          result = await runtime.request("thread/goal/resume", {
+            threadId: selectedThread.id,
+            expectedGoalId: result.goal.id,
+          });
+        }
+        dispatch({
+          type: "goal",
+          goal: result.goal,
+          outcome: result.outcome,
+        });
       }),
     [runtime, selectedThread, state.goal, withBusy],
   );
@@ -557,9 +580,13 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
         if (!selectedThread || !state.goal) return;
         const result = await runtime.request("thread/goal/pause", {
           threadId: selectedThread.id,
-          expectedRevision: state.goal.revision,
+          expectedGoalId: state.goal.id,
         });
-        dispatch({ type: "goal", goal: result.goal });
+        dispatch({
+          type: "goal",
+          goal: result.goal,
+          outcome: result.outcome,
+        });
       }),
     [runtime, selectedThread, state.goal, withBusy],
   );
@@ -570,9 +597,30 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
         if (!selectedThread || !state.goal) return;
         const result = await runtime.request("thread/goal/resume", {
           threadId: selectedThread.id,
-          expectedRevision: state.goal.revision,
+          expectedGoalId: state.goal.id,
         });
-        dispatch({ type: "goal", goal: result.goal });
+        dispatch({
+          type: "goal",
+          goal: result.goal,
+          outcome: result.outcome,
+        });
+      }),
+    [runtime, selectedThread, state.goal, withBusy],
+  );
+
+  const continueGoal = useCallback(
+    () =>
+      withBusy(async () => {
+        if (!selectedThread || !state.goal) return;
+        const result = await runtime.request("thread/goal/continue", {
+          threadId: selectedThread.id,
+          expectedGoalId: state.goal.id,
+        });
+        dispatch({
+          type: "goal",
+          goal: result.goal,
+          outcome: result.outcome,
+        });
       }),
     [runtime, selectedThread, state.goal, withBusy],
   );
@@ -581,29 +629,46 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
     () =>
       withBusy(async () => {
         if (!selectedThread || !state.goal) return;
-        await runtime.request("thread/goal/clear", {
+        const result = await runtime.request("thread/goal/clear", {
           threadId: selectedThread.id,
-          expectedRevision: state.goal.revision,
+          expectedGoalId: state.goal.id,
         });
-        dispatch({ type: "goal", goal: null });
+        dispatch({
+          type: "goal",
+          goal: result.goal,
+          outcome: result.outcome,
+        });
       }),
     [runtime, selectedThread, state.goal, withBusy],
   );
 
-  const executeTurn = useCallback(
-    async (prompt: string, skillIds: string[] = []) => {
-      if (!selectedThread) return;
+  const sendTurn = useCallback(
+    async (
+      prompt: string,
+      skillIds: string[] = [],
+    ): Promise<InteractiveDelivery | null> => {
+      if (!selectedThread) return null;
       const shouldTitleSession =
         selectedThread.title === "New task" && state.turns.length === 0;
-      const snapshot = await runtime.request("turn/start", {
-        threadId: selectedThread.id,
-        prompt,
-        ...(skillIds.length
-          ? { skills: skillIds as TurnStartParams["skills"] }
-          : {}),
-      });
-      dispatch({ type: "snapshot", snapshot });
-      if (shouldTitleSession) {
+      const active = latestExecutingTurn(state.turns, selectedThread.id);
+      const result = await withBusy(() =>
+        sendInteractiveTurn(runtime, {
+          threadId: selectedThread.id,
+          prompt,
+          cachedActiveTurnId: active?.id ?? null,
+          skillIds,
+        }),
+      );
+      if (!result) return null;
+      if (result.delivery === "started") {
+        dispatch({ type: "snapshot", snapshot: result.snapshot });
+      } else {
+        dispatch({
+          type: "snapshot",
+          snapshot: { turn: result.turn, items: [], approvals: [] },
+        });
+      }
+      if (result.delivery === "started" && shouldTitleSession) {
         const title = titleFromPrompt(prompt);
         if (title) {
           try {
@@ -617,14 +682,15 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
           }
         }
       }
+      return result.delivery;
     },
-    [reportError, runtime, selectedThread, state.turns.length],
-  );
-
-  const startTurn = useCallback(
-    (prompt: string, skillIds: string[] = []) =>
-      withBusy(() => executeTurn(prompt, skillIds)),
-    [executeTurn, withBusy],
+    [
+      reportError,
+      runtime,
+      selectedThread,
+      state.turns,
+      withBusy,
+    ],
   );
 
   const retryTurn = useCallback(
@@ -642,18 +708,22 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
   );
 
   const queueTurn = useCallback(
-    (prompt: string, skillIds: string[] = []) =>
-      withBusy(async () => {
+    async (prompt: string, skillIds: string[] = []): Promise<boolean> => {
+      const accepted = await withBusy(async () => {
         if (!selectedThread) return;
         const snapshot = await runtime.request("turn/enqueue", {
           threadId: selectedThread.id,
           prompt,
+          messageId: `desktop-${crypto.randomUUID()}`,
           ...(skillIds.length
             ? { skills: skillIds as TurnStartParams["skills"] }
             : {}),
         });
         dispatch({ type: "snapshot", snapshot });
-      }),
+        return true;
+      });
+      return accepted === true;
+    },
     [runtime, selectedThread, withBusy],
   );
 
@@ -735,7 +805,10 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
           ) ??
           orderedTurns.find((turn) => turn.status === "queued");
         if (!active) return;
-        const result = await runtime.request("turn/interrupt", { turnId: active.id });
+        const result = await runtime.request("turn/interrupt", {
+          threadId: active.threadId,
+          turnId: active.id,
+        });
         dispatch({
           type: "snapshot",
           snapshot: { turn: result.turn, items: [], approvals: [] },
@@ -751,7 +824,10 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
         if (!turn || !["queued", "running", "waiting_approval"].includes(turn.status)) {
           return;
         }
-        const result = await runtime.request("turn/interrupt", { turnId });
+        const result = await runtime.request("turn/interrupt", {
+          threadId: turn.threadId,
+          turnId,
+        });
         dispatch({
           type: "snapshot",
           snapshot: { turn: result.turn, items: [], approvals: [] },
@@ -806,8 +882,9 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
       setGoal,
       pauseGoal,
       resumeGoal,
+      continueGoal,
       clearGoal,
-      startTurn,
+      sendTurn,
       queueTurn,
       retryTurn,
       interruptTurn,
@@ -842,6 +919,7 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
       clearGoal,
       pauseGoal,
       resumeGoal,
+      continueGoal,
       setGoal,
       setPermissionMode,
       setThreadExecution,
@@ -853,7 +931,7 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
       selectedThread,
       retryTurn,
       queueTurn,
-      startTurn,
+      sendTurn,
       startWorkflow,
       state,
       trustProject,

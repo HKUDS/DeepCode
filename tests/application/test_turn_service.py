@@ -7,11 +7,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from core.application import DeepCodeApplication
 from core.domain import TrustState
 from core.domain.approval import ApprovalStatus
 from core.domain.approval import Approval, ApprovalCategory
 from core.domain.item import Item, ItemKind, ItemStatus
+from core.domain.message_provenance import ClientSurface, TurnInputSource
 from core.domain.thread import ThreadStatus
 from core.domain.turn import Turn, TurnStatus
 from core.events import (
@@ -269,6 +272,73 @@ def test_turn_projects_stream_into_durable_items(tmp_path: Path) -> None:
     assert factory.sessions[0].closed is True
 
 
+@pytest.mark.parametrize(
+    "surface",
+    [
+        ClientSurface.CLI,
+        ClientSurface.DESKTOP,
+        ClientSurface.HEADLESS,
+        ClientSurface.APP_SERVER,
+    ],
+)
+def test_turn_preserves_typed_client_surface_for_user_and_assistant(
+    tmp_path: Path,
+    surface: ClientSurface,
+) -> None:
+    application, thread_id = _application(tmp_path, ScriptedFactory())
+    try:
+        started = application.turns.start(
+            thread_id,
+            prompt=f"Run from {surface.value}",
+            client_surface=surface,
+        )
+        snapshot = _wait_for(
+            application,
+            started.turn.id,
+            TurnStatus.COMPLETED,
+        )
+        initial = snapshot.items[0]
+        assert initial.payload["client"] == surface.value
+        assert initial.payload["source"] == TurnInputSource.START.value
+
+        session = application.session_store.get_session(thread_id)
+        assert session is not None
+        assert [message.metadata["client"] for message in session.messages] == [
+            surface.value,
+            surface.value,
+        ]
+    finally:
+        application.close()
+
+
+def test_one_session_preserves_each_turns_client_surface(tmp_path: Path) -> None:
+    application, thread_id = _application(tmp_path, ScriptedFactory())
+    try:
+        cli_turn = application.turns.start(
+            thread_id,
+            prompt="Start in CLI",
+            client_surface=ClientSurface.CLI,
+        )
+        _wait_for(application, cli_turn.turn.id, TurnStatus.COMPLETED)
+        desktop_turn = application.turns.start(
+            thread_id,
+            prompt="Continue in Desktop",
+            client_surface=ClientSurface.DESKTOP,
+        )
+        _wait_for(application, desktop_turn.turn.id, TurnStatus.COMPLETED)
+
+        session = application.session_store.get_session(thread_id)
+        assert session is not None
+        assert [message.metadata["client"] for message in session.messages] == [
+            "cli",
+            "cli",
+            "desktop",
+            "desktop",
+        ]
+    finally:
+        application.close()
+
+
 def test_streaming_projection_logs_only_new_assistant_text(tmp_path: Path) -> None:
     factory = LongStreamingFactory()
     application, thread_id = _application(tmp_path, factory)
@@ -427,15 +497,29 @@ def test_interrupt_cancels_background_turn_and_leaves_terminal_state(
         started = application.turns.start(thread_id, prompt="Wait")
         _wait_for(application, started.turn.id, TurnStatus.RUNNING)
 
-        accepted, _turn = application.turns.interrupt(started.turn.id)
+        accepted, _turn = application.turns.interrupt(thread_id, started.turn.id)
         interrupted = _wait_for(application, started.turn.id, TurnStatus.INTERRUPTED)
 
         assert accepted is True
+        assert _turn.status is TurnStatus.INTERRUPTED
         assert interrupted.turn.stop_reason == "interrupted"
         assert factory.sessions[0].closed is False
         assert all(
             item.status not in {ItemStatus.PENDING, ItemStatus.IN_PROGRESS}
             for item in interrupted.items
+        )
+        canonical = application.session_store.get_session(thread_id)
+        assert canonical is not None
+        marker = next(
+            message
+            for message in canonical.messages
+            if message.metadata.get("source") == "turn_interrupt"
+        )
+        assert marker.metadata["turnId"] == started.turn.id
+        assert marker.metadata["modelVisible"] is True
+        assert any(
+            event.type == "turn.completed" and event.turn_id == started.turn.id
+            for event in application.events.replay(thread_id)
         )
     finally:
         application.close()
@@ -449,7 +533,7 @@ def test_interrupt_cancels_pending_approval(tmp_path: Path) -> None:
         started = application.turns.start(thread_id, prompt="Write, then stop")
         _wait_for(application, started.turn.id, TurnStatus.WAITING_APPROVAL)
 
-        application.turns.interrupt(started.turn.id)
+        application.turns.interrupt(thread_id, started.turn.id)
         interrupted = _wait_for(application, started.turn.id, TurnStatus.INTERRUPTED)
 
         assert interrupted.approvals[0].status is ApprovalStatus.CANCELLED
@@ -542,13 +626,13 @@ def test_execution_registry_bounds_concurrent_turns(tmp_path: Path) -> None:
         assert application.turns.read(second.turn.id).turn.status is TurnStatus.QUEUED
         assert application.turns.read(third.turn.id).turn.status is TurnStatus.QUEUED
 
-        assert application.turns.interrupt(third.turn.id)[0] is True
+        assert application.turns.interrupt(third_thread.id, third.turn.id)[0] is True
         _wait_for(application, third.turn.id, TurnStatus.INTERRUPTED)
 
-        application.turns.interrupt(first.turn.id)
+        application.turns.interrupt(first_thread.id, first.turn.id)
         _wait_for(application, first.turn.id, TurnStatus.INTERRUPTED)
         _wait_for(application, second.turn.id, TurnStatus.RUNNING)
-        application.turns.interrupt(second.turn.id)
+        application.turns.interrupt(second_thread.id, second.turn.id)
         _wait_for(application, second.turn.id, TurnStatus.INTERRUPTED)
     finally:
         application.close()

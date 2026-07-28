@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core.application.errors import (
-    ConflictError,
     InvalidArgumentError,
     ProjectNotFoundError,
     ThreadNotFoundError,
@@ -81,6 +80,7 @@ class ThreadService:
         project_id: str,
         *,
         title: str,
+        session_kind: str = _DESKTOP_KIND,
         mode: ThreadMode = ThreadMode.CODE,
         model: str | None = None,
         connection_id: str | None = None,
@@ -91,6 +91,9 @@ class ThreadService:
         clean_title = title.strip()
         if not clean_title:
             raise InvalidArgumentError("thread title must not be empty")
+        clean_session_kind = session_kind.strip()
+        if not clean_session_kind:
+            raise InvalidArgumentError("session kind must not be empty")
         with self.database.read() as connection:
             project = ProjectRepository(connection).get(project_id)
             if project is None:
@@ -118,7 +121,7 @@ class ThreadService:
         )
         resolved_reasoning = normalize_reasoning_effort(reasoning_effort)
         metadata = {
-            "kind": _DESKTOP_KIND,
+            "kind": clean_session_kind,
             "workspace": str(workspace),
             "project_path": project.canonical_path,
             "mode": mode.value,
@@ -228,7 +231,8 @@ class ThreadService:
         return self._project_updated_session(thread_id, "thread.renamed")
 
     def set_model(self, thread_id: str, model: str | None) -> Thread:
-        self._require_no_active_turn(thread_id)
+        """Change the model snapshot used by future Turns."""
+
         resolved = model.strip() if model and model.strip() else None
         if not self.session_store.update_metadata(thread_id, {"model": resolved}):
             raise ThreadNotFoundError(f"thread not found: {thread_id}")
@@ -244,7 +248,6 @@ class ThreadService:
     ) -> Thread:
         """Atomically change the selection used by future Turns."""
 
-        self._require_no_active_turn(thread_id)
         resolved_connection = (
             connection_id.strip().lower()
             if connection_id and connection_id.strip()
@@ -262,16 +265,6 @@ class ThreadService:
         if not self.session_store.update_metadata(thread_id, metadata):
             raise ThreadNotFoundError(f"thread not found: {thread_id}")
         return self._project_updated_session(thread_id, "thread.model_changed")
-
-    def _require_no_active_turn(self, thread_id: str) -> None:
-        with self.database.read() as connection:
-            if ThreadRepository(connection).get(thread_id) is None:
-                raise ThreadNotFoundError(f"thread not found: {thread_id}")
-            active = TurnRepository(connection).active_for_thread(thread_id)
-        if active is not None:
-            raise ConflictError(
-                "connection and model cannot change while a Turn is active"
-            )
 
     def archive(self, thread_id: str) -> Thread:
         now = utc_now()

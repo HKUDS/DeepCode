@@ -41,11 +41,6 @@ from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
 from core.agent_runtime.tools.mcp import MCPServerConfig
-from core.domain.goal import (
-    DEFAULT_GOAL_POLICY,
-    GOAL_EVALUATOR_MIN_TOKENS,
-    GOAL_VERIFICATION_TIMEOUT_MAX_SECONDS,
-)
 from core.providers.base import GenerationSettings, LLMProvider
 from core.providers.registry import (
     PROVIDERS,
@@ -226,46 +221,6 @@ class SkillsConfig(_Base):
     disabled: list[str] = Field(default_factory=list)
 
 
-class GoalPolicyConfig(_Base):
-    """User-overridable guardrails for multi-Turn Goal execution."""
-
-    max_attempts: int | None = Field(
-        default=DEFAULT_GOAL_POLICY.max_attempts,
-        ge=1,
-    )
-    max_tokens: int | None = Field(
-        default=DEFAULT_GOAL_POLICY.max_tokens,
-        ge=1,
-    )
-    max_elapsed_seconds: int | None = Field(
-        default=DEFAULT_GOAL_POLICY.max_elapsed_seconds,
-        ge=1,
-    )
-    stall_threshold: int = Field(
-        default=DEFAULT_GOAL_POLICY.stall_threshold,
-        ge=1,
-    )
-    evaluator_retry_limit: int = Field(
-        default=DEFAULT_GOAL_POLICY.evaluator_retry_limit,
-        ge=0,
-    )
-    evaluator_max_tokens: int = Field(
-        default=DEFAULT_GOAL_POLICY.evaluator_max_tokens,
-        ge=GOAL_EVALUATOR_MIN_TOKENS,
-    )
-    evaluator_temperature: float = Field(
-        default=DEFAULT_GOAL_POLICY.evaluator_temperature,
-        ge=0,
-    )
-    verification_timeout_seconds: int = Field(
-        default=DEFAULT_GOAL_POLICY.verification_timeout_seconds,
-        ge=1,
-        le=GOAL_VERIFICATION_TIMEOUT_MAX_SECONDS,
-    )
-    evaluator_connection: str | None = None
-    evaluator_model: str | None = None
-
-
 # ---------------------------------------------------------------------------
 # DeepCode-specific
 # ---------------------------------------------------------------------------
@@ -377,7 +332,6 @@ class DeepCodeConfig(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
-    goal: GoalPolicyConfig = Field(default_factory=GoalPolicyConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     workspace: WorkspaceConfig = Field(default_factory=WorkspaceConfig)
     document_segmentation: DocumentSegmentationConfig = Field(

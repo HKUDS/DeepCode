@@ -132,6 +132,6 @@ def test_second_application_does_not_recover_another_process_live_turn(
         assert second.turns.read(started.turn.id).turn.status is TurnStatus.RUNNING
     finally:
         second.close()
-        first.turns.interrupt(started.turn.id)
+        first.turns.interrupt(thread.id, started.turn.id)
         _wait_for_status(first, started.turn.id, TurnStatus.INTERRUPTED)
         first.close()

@@ -215,6 +215,7 @@ class AgentSession:
         streaming_transport: bool | None = None,
         skill_runtime: SkillRuntime | None = None,
         execution_profile: Any | None = None,
+        tool_filter: Any | None = None,
     ) -> None:
         self._runner = AgentRunner(provider)
         self._provider = provider
@@ -254,6 +255,10 @@ class AgentSession:
         # A turn holds one immutable catalog snapshot, so a concurrent file
         # change can only affect the next turn.
         self._skill_runtime = skill_runtime
+        # Application-owned dynamic capability narrowing (for example Goal
+        # tools that exist only during a Goal-associated Turn). It composes with the
+        # Skill visibility snapshot and can never add registry capabilities.
+        self._tool_filter = tool_filter
         # Secret-free immutable selection used by persistence/frontends.
         self.execution_profile = execution_profile
 
@@ -309,7 +314,15 @@ class AgentSession:
                     "shutdown_complete",
                 ):
                     break
-        finally:
+        except BaseException:
+            # Cancellation of the stream is the Turn interrupt boundary. Do
+            # not keep awaiting a provider/tool submission that the caller has
+            # explicitly abandoned; propagate cancellation into the active
+            # task and wait only for its cleanup.
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            raise
+        else:
             await task
 
     def drain_events(self) -> list[Event]:
@@ -552,6 +565,19 @@ class AgentSession:
             streaming=self._streaming_transport,
             emit_deltas=self._streaming,
         )
+
+        def visible_tool_names() -> tuple[str, ...] | None:
+            names = tuple(self._tools.tool_names)
+            if self._skill_runtime is not None:
+                skill_names = self._skill_runtime.visible_tool_names(names)
+                if skill_names is not None:
+                    names = tuple(skill_names)
+            if self._tool_filter is not None:
+                value = self._tool_filter(names)
+                if value is not None:
+                    names = tuple(str(name) for name in value)
+            return names
+
         spec = AgentRunSpec(
             initial_messages=initial,
             tools=self._tools,
@@ -570,12 +596,8 @@ class AgentSession:
             pre_compact_hook=pre_compact_hook,
             post_compact_hook=post_compact_hook,
             tool_filter=(
-                (
-                    lambda: self._skill_runtime.visible_tool_names(
-                        tuple(self._tools.tool_names)
-                    )
-                )
-                if self._skill_runtime is not None
+                visible_tool_names
+                if self._skill_runtime is not None or self._tool_filter is not None
                 else None
             ),
         )

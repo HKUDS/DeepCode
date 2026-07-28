@@ -6,6 +6,7 @@ recursive-include prompts *
 recursive-include schema *
 recursive-include cli *.py
 recursive-include core *.py
+recursive-include core/application/goal_prompts *.md
 recursive-include app_server *.py
 recursive-include protocol *.json
 recursive-include utils *.py

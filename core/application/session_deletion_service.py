@@ -13,13 +13,13 @@ from core.application.errors import (
     ConflictError,
     ThreadNotFoundError,
 )
-from core.domain.goal import GoalStatus
+from core.domain.thread_goal import ThreadGoalStatus
 from core.persistence.automation_repository import AutomationRepository
 from core.persistence.database import Database
 from core.persistence.execution_repository import TurnRepository
 from core.persistence.thread_repository import ThreadRepository
 from core.persistence.workflow_repository import WorkflowRepository
-from core.sessions import GoalStore, SessionStore
+from core.sessions import SessionStore, ThreadGoalStore
 from core.sessions.deletion import SessionDeletionTicket
 from core.sessions.store import SessionDeletionGuard
 
@@ -48,7 +48,7 @@ class SessionDeletionService:
         self,
         database: Database,
         sessions: SessionStore,
-        goals: GoalStore,
+        goals: ThreadGoalStore,
         *,
         ensure_projection: ProjectionCallback | None = None,
         on_deleted: DeletionCallback | None = None,
@@ -220,7 +220,7 @@ class SessionDeletionService:
                 }
             )
         goal = self.goals.read_guarded(thread_id, directory)
-        if goal is not None and goal.goal.status is GoalStatus.ACTIVE:
+        if goal is not None and goal.status is ThreadGoalStatus.ACTIVE:
             blockers.append(
                 {
                     "code": "ACTIVE_GOAL",

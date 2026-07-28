@@ -23,6 +23,7 @@ from core.harness.agents.control import (  # noqa: E402
     AgentLimitError,
     DuplicateAgentError,
 )
+from core.agent_runtime.injections import SubagentMessage  # noqa: E402
 from core.harness.tools.spawn_agent import (  # noqa: E402
     InterruptAgentTool,
     ListAgentsTool,
@@ -88,8 +89,47 @@ def test_spawn_is_non_blocking_and_concurrent(tmp_path):
         assert "result" in outcome.lower() or "finished" in outcome.lower()
         injections = await ctrl.drain_injections()
         assert len(injections) == 2
-        assert all(i["role"] == "user" for i in injections)
-        assert all("Message Type: RESULT" in i["content"] for i in injections)
+        assert all(isinstance(item, SubagentMessage) for item in injections)
+        assert all(
+            item.target_turn_id.startswith("local-agent-runtime-")
+            for item in injections
+        )
+        assert all("Message Type: RESULT" in item.payload for item in injections)
+
+    asyncio.run(scenario())
+
+
+def test_application_backed_result_uses_the_active_turn_sink(tmp_path):
+    async def scenario():
+        active_turn_id: str | None = "turn-parent"
+        delivered: list[SubagentMessage] = []
+
+        def target() -> str | None:
+            return active_turn_id
+
+        def sink(message: SubagentMessage) -> bool:
+            delivered.append(message)
+            return True
+
+        ctrl = _HeldControl(
+            str(tmp_path),
+            active_turn_id_provider=target,
+            runtime_input_sink=sink,
+        )
+        ctrl.spawn("t1", isolate=False)
+        await asyncio.sleep(0)
+        ctrl.release.set()
+        await ctrl.wait_for_activity(5.0)
+
+        assert len(delivered) == 1
+        assert delivered[0].target_turn_id == "turn-parent"
+        assert await ctrl.drain_injections() == []
+
+        active_turn_id = None
+        second_id = ctrl.spawn("t2", isolate=False)
+        await ctrl.get(second_id).handle
+        assert len(delivered) == 1
+        assert await ctrl.drain_injections() == []
 
     asyncio.run(scenario())
 
@@ -308,8 +348,15 @@ def test_send_message_to_running_and_finished(tmp_path):
 
     out, inbox, injected, finished = asyncio.run(scenario())
     assert "delivered" in out
-    assert inbox and "use value 42" in inbox[0] and "Message Type: MESSAGE" in inbox[0]
-    assert injected == [{"role": "user", "content": inbox[0]}]
+    assert inbox == [("parent:agent-1:1", "use value 42")]
+    assert injected == [
+        SubagentMessage(
+            message_id="parent:agent-1:1",
+            target_turn_id="agent-1",
+            agent_id="parent",
+            payload="use value 42",
+        )
+    ]
     assert "already finished" in finished
 
 

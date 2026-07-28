@@ -2,6 +2,7 @@ import type {
   Approval,
   Event,
   Goal,
+  GoalOutcome,
   Artifact,
   Item,
   Project,
@@ -35,6 +36,7 @@ export interface WorkspaceState {
   artifacts: Artifact[];
   plansByTurnId: Record<string, TurnPlanState>;
   goal: Goal | null;
+  goalOutcome: GoalOutcome | null;
   lastSequence: number;
   entitySequences: Record<string, number>;
   selectedItemId: string | null;
@@ -57,7 +59,7 @@ export type WorkspaceAction =
   | { type: "snapshot"; snapshot: TurnSnapshotResult }
   | { type: "approval-upsert"; approval: Approval }
   | { type: "workflow-snapshot"; snapshot: WorkflowSnapshotResult }
-  | { type: "goal"; goal: Goal | null }
+  | { type: "goal"; goal: Goal | null; outcome: GoalOutcome | null }
   | { type: "event"; event: Event }
   | { type: "select-item"; itemId: string | null }
   | { type: "busy"; busy: boolean }
@@ -85,6 +87,7 @@ export const initialWorkspaceState: WorkspaceState = {
   artifacts: [],
   plansByTurnId: {},
   goal: null,
+  goalOutcome: null,
   lastSequence: 0,
   entitySequences: {},
   selectedItemId: null,
@@ -239,9 +242,13 @@ function applyDomainEvent(state: WorkspaceState, event: Event): WorkspaceState {
       };
     }
     const rawGoal = event.payload.goal;
+    const rawOutcome = event.payload.outcome;
     return {
       ...state,
       goal: isRecord(rawGoal) ? (rawGoal as unknown as Goal) : null,
+      goalOutcome: isRecord(rawOutcome)
+        ? (rawOutcome as unknown as GoalOutcome)
+        : null,
       lastSequence: Math.max(state.lastSequence, event.sequence),
       entitySequences: {
         ...state.entitySequences,
@@ -336,6 +343,7 @@ export function workspaceReducer(
         artifacts: [],
         plansByTurnId: {},
         goal: null,
+        goalOutcome: null,
         lastSequence: 0,
         entitySequences: {},
         selectedItemId: null,
@@ -367,6 +375,7 @@ export function workspaceReducer(
         artifacts: selected ? [] : state.artifacts,
         plansByTurnId: selected ? {} : state.plansByTurnId,
         goal: selected ? null : state.goal,
+        goalOutcome: selected ? null : state.goalOutcome,
         lastSequence: selected ? 0 : state.lastSequence,
         entitySequences: selected ? {} : state.entitySequences,
         selectedItemId: selected ? null : state.selectedItemId,
@@ -383,6 +392,7 @@ export function workspaceReducer(
         artifacts: [],
         plansByTurnId: {},
         goal: null,
+        goalOutcome: null,
         lastSequence: 0,
         entitySequences: {},
         selectedItemId: null,
@@ -397,6 +407,7 @@ export function workspaceReducer(
         artifacts: [],
         plansByTurnId: {},
         goal: null,
+        goalOutcome: null,
         lastSequence: 0,
         entitySequences: {},
         selectedItemId: null,
@@ -451,7 +462,11 @@ export function workspaceReducer(
         ),
       };
     case "goal":
-      return { ...state, goal: action.goal };
+      return {
+        ...state,
+        goal: action.goal,
+        goalOutcome: action.outcome,
+      };
     case "event":
       return applyDomainEvent(state, action.event);
     case "select-item":

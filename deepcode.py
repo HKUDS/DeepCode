@@ -147,7 +147,7 @@ def main():
             print_banner()
 
             def row(cmd, desc):
-                return f"   {cmd:<37}{desc}"
+                return f"   {cmd:<48}{desc}"
 
             print(
                 "\n".join(
@@ -180,7 +180,11 @@ def main():
                         ),
                         row(
                             "deepcode loop <goal>",
-                            "Drive a goal to passing tests",
+                            "Run a durable Goal on the shared Turn runtime",
+                        ),
+                        row(
+                            "deepcode loop --resume <session-id>",
+                            "Continue the same durable Goal and Session",
                         ),
                         row(
                             "deepcode schedule ...",
@@ -194,7 +198,11 @@ def main():
                         ),
                         row(
                             'python -m cli.loop_cli "<goal>"',
-                            "Autonomous loop to passing tests",
+                            "Headless durable Goal",
+                        ),
+                        row(
+                            "python -m cli.loop_cli --resume <session-id>",
+                            "Resume a durable Goal without replacing history",
                         ),
                         row(
                             "python -m cli.schedule_cli ...",

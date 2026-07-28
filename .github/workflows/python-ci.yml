@@ -61,8 +61,11 @@ jobs:
         run: |
           python -m venv wheel-smoke
           wheel-smoke/bin/python -m pip install dist/*.whl
-          wheel-smoke/bin/deepcode --help
-          wheel-smoke/bin/deepcode-app-server --verify-runtime
+          WHEEL_SMOKE="$PWD/wheel-smoke/bin"
+          cd "$(mktemp -d)"
+          "$WHEEL_SMOKE/python" -c "from importlib.resources import files; assert files('core.application.goal_prompts').joinpath('continuation.md').read_text(encoding='utf-8').strip()"
+          "$WHEEL_SMOKE/deepcode" --help
+          "$WHEEL_SMOKE/deepcode-app-server" --verify-runtime
 
       - name: Upload distributions
         uses: actions/upload-artifact@v4

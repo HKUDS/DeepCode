@@ -41,8 +41,6 @@ class Turn:
     skill_ids: tuple[str, ...] = ()
     execution_profile: ExecutionProfile | None = None
     goal_id: str | None = None
-    goal_definition_revision: int | None = None
-    goal_attempt_id: str | None = None
     status: TurnStatus = TurnStatus.QUEUED
     stop_reason: str | None = None
     error_code: str | None = None
@@ -66,18 +64,8 @@ class Turn:
                 SkillSelection(skill_id=skill_id)
         except (TypeError, ValueError) as exc:
             raise ValueError("skill_ids must contain opaque sk_ identifiers") from exc
-        goal_fields = (
-            self.goal_id,
-            self.goal_definition_revision,
-            self.goal_attempt_id,
-        )
-        if any(value is not None for value in goal_fields):
-            if any(value is None for value in goal_fields):
-                raise ValueError("Goal Turn fields must be provided together")
+        if self.goal_id is not None:
             require_prefixed_id(str(self.goal_id), "goal")
-            require_prefixed_id(str(self.goal_attempt_id), "gatt")
-            if int(self.goal_definition_revision or 0) < 1:
-                raise ValueError("goal_definition_revision must be positive")
         if self.started_at is not None:
             require_aware(self.started_at, "started_at")
         if self.completed_at is not None:
