@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -102,7 +102,7 @@ class AgentRunSpec:
     initial_messages: list[dict[str, Any]]
     tools: ToolRegistry
     model: str
-    max_iterations: int
+    max_iterations: int | None
     max_tool_result_chars: int
     temperature: float | None = None
     max_tokens: int | None = None
@@ -181,6 +181,36 @@ class AgentRunSpec:
             for schema in definitions
             if ToolRegistry._schema_name(schema) in allowed
         ]
+
+
+@dataclass(slots=True)
+class _SamplingLimit:
+    """Optional caller-selected sampling limit.
+
+    Normal agent turns are unbounded and stop on model completion,
+    cancellation, or runtime failure. Tests and explicit CLI overrides may
+    still set a positive limit without spreading ``None`` checks throughout
+    the execution loop.
+    """
+
+    maximum: int | None
+    remaining: int | None = field(init=False)
+
+    def __post_init__(self) -> None:
+        if self.maximum is not None and self.maximum < 1:
+            raise ValueError("max_iterations must be positive when provided")
+        self.remaining = self.maximum
+
+    @property
+    def exhausted(self) -> bool:
+        return self.remaining == 0
+
+    def consume(self) -> None:
+        if self.remaining is not None:
+            self.remaining -= 1
+
+    def reset(self) -> None:
+        self.remaining = self.maximum
 
 
 @dataclass(slots=True)
@@ -328,6 +358,24 @@ class AgentRunner:
         had_injections = False
         stop_hook_active = False  # C3.1: set once a Stop hook has forced a continuation
         skip_stop_check_once = False
+        response_ordinal = 0
+
+        async def record_response(
+            response: LLMResponse,
+            context: AgentHookContext,
+        ) -> dict[str, int]:
+            """Account a provider response before any cancellable tool work."""
+
+            nonlocal response_ordinal
+            response_ordinal += 1
+            raw_usage = self._usage_dict(response.usage)
+            self._accumulate_usage(usage, raw_usage)
+            context.response_ordinal = response_ordinal
+            context.response = response
+            context.usage = dict(raw_usage)
+            context.tool_calls = list(response.tool_calls)
+            await hook.on_model_response(context)
+            return raw_usage
 
         initial_drained = await self._try_drain_injections(
             spec,
@@ -339,9 +387,9 @@ class AgentRunner:
             had_injections = True
 
         iteration = 0
-        iterations_remaining = spec.max_iterations
+        sampling_limit = _SamplingLimit(spec.max_iterations)
         while True:
-            if iterations_remaining <= 0:
+            if sampling_limit.exhausted:
                 resumed = await self._try_drain_injections(
                     spec,
                     messages,
@@ -351,7 +399,7 @@ class AgentRunner:
                 )
                 if resumed:
                     had_injections = True
-                    iterations_remaining = spec.max_iterations
+                    sampling_limit.reset()
                 else:
                     stop_reason = "max_iterations"
                     template = (
@@ -363,7 +411,7 @@ class AgentRunner:
 
             current_iteration = iteration
             iteration += 1
-            iterations_remaining -= 1
+            sampling_limit.consume()
 
             check_stop = not skip_stop_check_once
             skip_stop_check_once = False
@@ -392,7 +440,7 @@ class AgentRunner:
                     )
                     if resumed:
                         had_injections = True
-                        iterations_remaining = spec.max_iterations
+                        sampling_limit.reset()
                         skip_stop_check_once = True
                         continue
                     break
@@ -400,7 +448,20 @@ class AgentRunner:
             # Summarization-based compaction (C4a): when the running history
             # nears the budget, replace old turns with a model summary. Persisted
             # in `messages` so later iterations (and turns) reuse it.
-            messages = await self._maybe_compact(spec, messages)
+            async def record_compaction_response(response: LLMResponse) -> None:
+                await record_response(
+                    response,
+                    AgentHookContext(
+                        iteration=current_iteration,
+                        messages=messages,
+                    ),
+                )
+
+            messages = await self._maybe_compact(
+                spec,
+                messages,
+                response_observer=record_compaction_response,
+            )
 
             try:
                 messages_for_model = self._drop_orphan_tool_results(messages)
@@ -438,11 +499,7 @@ class AgentRunner:
             response = await self._request_model(
                 spec, messages_for_model, hook, context
             )
-            raw_usage = self._usage_dict(response.usage)
-            context.response = response
-            context.usage = dict(raw_usage)
-            context.tool_calls = list(response.tool_calls)
-            self._accumulate_usage(usage, raw_usage)
+            raw_usage = await record_response(response, context)
 
             if response.should_execute_tools:
                 if hook.wants_streaming():
@@ -515,7 +572,7 @@ class AgentRunner:
                     )
                     if should_continue:
                         had_injections = True
-                        iterations_remaining = spec.max_iterations
+                        sampling_limit.reset()
                         stop_reason = "completed"
                         error = None
                         continue
@@ -541,7 +598,7 @@ class AgentRunner:
                 )
                 if drained:
                     had_injections = True
-                    iterations_remaining = spec.max_iterations
+                    sampling_limit.reset()
                 await hook.after_iteration(context)
                 continue
 
@@ -578,12 +635,9 @@ class AgentRunner:
                 response = await self._request_finalization_retry(
                     spec, messages_for_model
                 )
-                retry_usage = self._usage_dict(response.usage)
-                self._accumulate_usage(usage, retry_usage)
+                retry_usage = await record_response(response, context)
                 raw_usage = self._merge_usage(raw_usage, retry_usage)
-                context.response = response
                 context.usage = dict(raw_usage)
-                context.tool_calls = list(response.tool_calls)
                 clean = hook.finalize_content(context, response.content)
 
             if response.finish_reason == "length" and not is_blank_text(clean):
@@ -635,7 +689,7 @@ class AgentRunner:
                 await hook.on_stream_end(context, resuming=should_continue)
 
             if should_continue:
-                iterations_remaining = spec.max_iterations
+                sampling_limit.reset()
                 await hook.after_iteration(context)
                 continue
 
@@ -657,7 +711,7 @@ class AgentRunner:
                 )
                 if should_continue:
                     had_injections = True
-                    iterations_remaining = spec.max_iterations
+                    sampling_limit.reset()
                     stop_reason = "completed"
                     error = None
                     continue
@@ -680,7 +734,7 @@ class AgentRunner:
                 )
                 if should_continue:
                     had_injections = True
-                    iterations_remaining = spec.max_iterations
+                    sampling_limit.reset()
                     stop_reason = "completed"
                     error = None
                     continue
@@ -713,8 +767,8 @@ class AgentRunner:
             await hook.after_iteration(context)
             # Stop hook (C3.1): a last chance to keep the turn going. If it asks
             # to continue, inject its reason as a follow-up and loop again. The
-            # `stop_hook_active` flag lets a well-behaved hook stand down after
-            # one continuation; max_iterations remains the hard backstop.
+            # `stop_hook_active` lets a well-behaved hook stand down after one
+            # continuation so a closure check cannot loop on itself.
             continuation = await self._run_stop_hook(spec, stop_hook_active)
             if continuation is not None:
                 stop_hook_active = True
@@ -734,7 +788,7 @@ class AgentRunner:
             )
             if resumed:
                 had_injections = True
-                iterations_remaining = spec.max_iterations
+                sampling_limit.reset()
                 continue
             break
 
@@ -1103,6 +1157,9 @@ class AgentRunner:
         except Exception:
             logger.exception("stop hook failed")
             return None
+        if isinstance(outcome, str):
+            reason = outcome.strip()
+            return reason or None
         if outcome is not None and getattr(outcome, "block", False):
             reason = getattr(outcome, "block_reason", None)
             if reason and reason.strip():
@@ -1392,7 +1449,11 @@ class AgentRunner:
         return budget if budget > 0 else None
 
     async def _maybe_compact(
-        self, spec: AgentRunSpec, messages: list[dict[str, Any]]
+        self,
+        spec: AgentRunSpec,
+        messages: list[dict[str, Any]],
+        *,
+        response_observer: Callable[[LLMResponse], Awaitable[None]] | None = None,
     ) -> list[dict[str, Any]]:
         """Summarize the conversation into a handoff summary when it nears the
         context budget (C4a) — semantic compaction that replaces old turns,
@@ -1423,7 +1484,11 @@ class AgentRunner:
             if pre is not None and getattr(pre, "block", False):
                 return messages  # a PreCompact hook aborted compaction this turn
 
-        summary = await self._summarize(spec, messages)
+        summary = await self._summarize(
+            spec,
+            messages,
+            response_observer=response_observer,
+        )
         if not summary:
             return messages  # summarization failed → leave it to _snip_history
 
@@ -1442,7 +1507,11 @@ class AgentRunner:
         return compacted
 
     async def _summarize(
-        self, spec: AgentRunSpec, messages: list[dict[str, Any]]
+        self,
+        spec: AgentRunSpec,
+        messages: list[dict[str, Any]],
+        *,
+        response_observer: Callable[[LLMResponse], Awaitable[None]] | None = None,
     ) -> str | None:
         """Ask the model for a handoff summary of ``messages`` (no tools)."""
         request = list(messages) + [{"role": "user", "content": _SUMMARIZATION_PROMPT}]
@@ -1460,6 +1529,8 @@ class AgentRunner:
         except Exception:
             logger.exception("compaction summarization call failed")
             return None
+        if response_observer is not None:
+            await response_observer(response)
         if getattr(response, "finish_reason", None) == "error":
             return None
         content = getattr(response, "content", None)

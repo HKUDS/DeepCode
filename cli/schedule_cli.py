@@ -146,7 +146,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--max-runs", type=int, default=5)
     parser.add_argument("--token-budget", type=int, default=None)
-    parser.add_argument("--max-iterations", type=int, default=40)
+    parser.add_argument(
+        "--max-iterations",
+        type=int,
+        default=None,
+        help="Optional model-sampling limit for diagnostics (unlimited by default).",
+    )
     parser.add_argument("--once", action="store_true", help="Run a single pass.")
     args = parser.parse_args(argv)
     if args.job == "loop" and not args.goal:

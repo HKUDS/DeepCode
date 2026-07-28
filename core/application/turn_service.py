@@ -45,6 +45,11 @@ from core.application.turn_input_service import (
     TurnInputService,
 )
 from core.application.turn_projection import TurnEventProjector
+from core.application.turn_usage import (
+    TURN_USAGE_EVENT_TYPE,
+    aggregate_recorded_usage,
+    normalize_usage,
+)
 from core.application.views import (
     approval_view,
     item_view,
@@ -759,14 +764,8 @@ class TurnService:
                 self._notify_observer(turn_id, event)
                 projection.project(event)
             raw_usage = getattr(session, "last_usage", {})
-            if isinstance(raw_usage, dict):
-                turn_usage = {
-                    str(key): int(value)
-                    for key, value in raw_usage.items()
-                    if isinstance(value, int)
-                    and not isinstance(value, bool)
-                    and value >= 0
-                }
+            if not projection.usage:
+                turn_usage = normalize_usage(raw_usage)
             if projection.saw_terminal:
                 if projection.final_text:
                     continuation_metadata = assistant_continuation_metadata(
@@ -834,6 +833,7 @@ class TurnService:
 
         if projection is not None:
             try:
+                turn_usage = projection.usage or turn_usage
                 projection.close_open_items(
                     interrupted=status is TurnStatus.INTERRUPTED
                 )
@@ -1104,6 +1104,7 @@ class TurnService:
 
         events: list[DomainEvent] = []
         schedule_ids: list[str] = []
+        recovered_turns: list[Turn] = []
         should_resume = resume_queued or (lambda _turn: True)
         with self.database.transaction() as connection:
             turns = TurnRepository(connection)
@@ -1156,6 +1157,13 @@ class TurnService:
                             payload={"item": item_view(settled)},
                         )
                     )
+                recorded_usage = aggregate_recorded_usage(
+                    event_repo.list_for_turn(
+                        turn.thread_id,
+                        turn.id,
+                        event_type=TURN_USAGE_EVENT_TYPE,
+                    )
+                )
                 completion = Item(
                     thread_id=turn.thread_id,
                     turn_id=turn.id,
@@ -1163,7 +1171,10 @@ class TurnService:
                     kind=ItemKind.COMPLETION,
                     status=ItemStatus.FAILED,
                     summary="Turn interrupted after application restart",
-                    payload={"stopReason": "application_restarted"},
+                    payload={
+                        "stopReason": "application_restarted",
+                        **({"usage": recorded_usage} if recorded_usage else {}),
+                    },
                     created_at=now,
                     updated_at=now,
                 )
@@ -1184,6 +1195,7 @@ class TurnService:
                     completed_at=now,
                 )
                 turns.update(interrupted)
+                recovered_turns.append(interrupted)
                 events.append(
                     event_repo.append(
                         thread_id=turn.thread_id,
@@ -1220,6 +1232,8 @@ class TurnService:
         self._publish(events)
         for turn_id in schedule_ids:
             self._schedule(turn_id, propagate=False)
+        for turn in recovered_turns:
+            self._notify_settled(turn)
         return len(active_turns)
 
     @staticmethod

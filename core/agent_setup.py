@@ -30,13 +30,6 @@ from core.harness.tools import default_coding_tools
 from core.llm_runtime import get_workflow_provider
 from core.providers.catalog import resolve_model_info
 
-# A general coding task can legitimately need many tool-call turns. This is a
-# runaway backstop, not a task budget — the reference agents run effectively
-# unbounded, relying on the model to stop and on context compaction to stay in
-# window; DeepCode's per-turn history snipping already prevents overflow, so we
-# set a high ceiling instead of cutting real work off early.
-DEFAULT_MAX_ITERATIONS = 200
-
 SYSTEM_PROMPT = (
     "You are a coding agent working in a workspace directory. You have tools: "
     "read, write, edit, apply_patch, bash, grep, glob, update_plan. Navigate "
@@ -180,7 +173,7 @@ def build_agent_session(
     connection_id: str | None = None,
     reasoning_effort: str | None = None,
     execution_profile: ExecutionProfile | None = None,
-    max_iterations: int = DEFAULT_MAX_ITERATIONS,
+    max_iterations: int | None = None,
     system_prompt: str = SYSTEM_PROMPT,
     approval_callback: Any | None = None,
     ask_user_callback: Any | None = None,
@@ -348,6 +341,9 @@ def build_agent_session(
         execution_profile=resolved_execution,
         tool_filter=(
             goal_runtime.visible_tool_names if goal_runtime is not None else None
+        ),
+        closure_callback=(
+            goal_runtime.closure_prompt if goal_runtime is not None else None
         ),
     )
     if control is not None:

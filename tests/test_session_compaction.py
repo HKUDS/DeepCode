@@ -141,10 +141,24 @@ class _CompactProvider:
         self.calls += 1
         if self.calls == 1:
             return LLMResponse(
-                content="HANDOFF: did X, next do Y", finish_reason="stop"
+                content="HANDOFF: did X, next do Y",
+                finish_reason="stop",
+                usage={
+                    "prompt_tokens": 100,
+                    "completion_tokens": 10,
+                    "total_tokens": 110,
+                },
             )
         self.main_request = kwargs.get("messages")
-        return LLMResponse(content="done", finish_reason="stop")
+        return LLMResponse(
+            content="done",
+            finish_reason="stop",
+            usage={
+                "prompt_tokens": 50,
+                "completion_tokens": 5,
+                "total_tokens": 55,
+            },
+        )
 
 
 def _big_history(n: int = 20) -> list[dict[str, Any]]:
@@ -182,6 +196,11 @@ def test_over_budget_history_is_summarized_not_just_dropped():
     assert "FINAL question" in joined
     assert "MSG0 " not in joined  # old turns replaced by the summary
     assert result.final_content == "done"
+    assert result.usage == {
+        "prompt_tokens": 150,
+        "completion_tokens": 15,
+        "total_tokens": 165,
+    }
 
 
 def test_under_budget_history_is_not_compacted():

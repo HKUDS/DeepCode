@@ -136,6 +136,15 @@ class AgentReasoningSummary:
     type: str = field(default="agent_reasoning_summary", init=False)
 
 
+@dataclass(frozen=True)
+class ModelUsageRecorded:
+    """Incremental usage for one completed provider response in this Turn."""
+
+    response_ordinal: int
+    usage: dict[str, int]
+    type: str = field(default="model_usage_recorded", init=False)
+
+
 class PlanStepStatus(str, Enum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
@@ -366,6 +375,7 @@ EventMsg = Union[
     AgentMessageDelta,
     AgentMessageCompleted,
     AgentReasoningSummary,
+    ModelUsageRecorded,
     PlanUpdated,
     ToolStarted,
     ToolCompleted,

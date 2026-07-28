@@ -438,6 +438,47 @@ def test_loop_resume_budget_limited_requires_a_larger_budget(
     assert len(sessions.list_sessions()) == 1
 
 
+def test_loop_resume_budget_limited_goal_after_budget_is_removed(
+    monkeypatch,
+    tmp_path,
+):
+    from core.application import DeepCodeApplication
+    from core.domain import ThreadGoalStatus
+    from core.sessions import SessionStore, ThreadGoalStore
+
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    provider = _Provider("complete")
+    _configure(monkeypatch, tmp_path, provider)
+    session_id, goal_id = _create_idle_goal(
+        workspace,
+        token_budget=10,
+        tokens_used=10,
+    )
+    application = DeepCodeApplication.open()
+    try:
+        limited = application.goals.read(session_id)
+        assert limited is not None
+        application.goals.edit(
+            session_id,
+            expected_goal_id=goal_id,
+            objective=limited.objective,
+            token_budget=None,
+            skill_ids=limited.skill_ids,
+            continue_work=False,
+        )
+    finally:
+        application.close()
+
+    assert loop_cli.main(["--resume", session_id]) == 0
+
+    resumed = ThreadGoalStore(SessionStore(tmp_path / "sessions")).read(session_id)
+    assert resumed is not None
+    assert resumed.id == goal_id
+    assert resumed.token_budget is None
+    assert resumed.status is ThreadGoalStatus.COMPLETE
+
+
 def test_loop_resume_execution_override_is_one_turn_only(
     monkeypatch,
     tmp_path,

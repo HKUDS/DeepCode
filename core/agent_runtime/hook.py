@@ -24,6 +24,7 @@ class AgentHookContext:
     final_content: str | None = None
     stop_reason: str | None = None
     error: str | None = None
+    response_ordinal: int = 0
 
 
 class AgentHook:
@@ -42,6 +43,11 @@ class AgentHook:
         pass
 
     async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
+        pass
+
+    async def on_model_response(self, context: AgentHookContext) -> None:
+        """Observe one completed provider response before tools can run."""
+
         pass
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
@@ -91,6 +97,9 @@ class CompositeHook(AgentHook):
 
     async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
         await self._for_each_hook_safe("on_stream_end", context, resuming=resuming)
+
+    async def on_model_response(self, context: AgentHookContext) -> None:
+        await self._for_each_hook_safe("on_model_response", context)
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         await self._for_each_hook_safe("before_execute_tools", context)

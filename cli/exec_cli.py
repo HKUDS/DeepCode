@@ -25,7 +25,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.agent_setup import DEFAULT_MAX_ITERATIONS, build_agent_session
+from core.agent_setup import build_agent_session
 from cli.config_errors import format_config_error
 from cli.execution_options import add_reasoning_effort_argument
 from core.config import ConfigError
@@ -151,8 +151,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--max-iterations",
         type=int,
-        default=DEFAULT_MAX_ITERATIONS,
-        help=f"Max agent turns, a runaway backstop (default {DEFAULT_MAX_ITERATIONS}).",
+        default=None,
+        help="Optional model-sampling limit for diagnostics (unlimited by default).",
     )
     args = parser.parse_args(argv)
     if len(args.skill) > MAX_SELECTED_SKILLS:

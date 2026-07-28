@@ -23,6 +23,7 @@ from core.events import (
     AgentMessageDelta,
     AgentMessagePhase,
     Event,
+    ModelUsageRecorded,
     PlanStep,
     PlanStepStatus,
     PlanUpdated,
@@ -38,6 +39,7 @@ from core.persistence.execution_repository import (
     ItemRepository,
     TurnRepository,
 )
+from core.persistence.event_repository import EventRepository
 from core.persistence.thread_repository import ThreadRepository
 
 
@@ -223,6 +225,80 @@ class PlannedFactory(ScriptedFactory):
             approval=False,
             hang=False,
         )
+        self.sessions.append(session)
+        return session
+
+
+class UsageThenHangSession(ScriptedSession):
+    async def run_stream(self, _op):
+        self.history.append({"role": "user", "content": _op.text})
+        yield Event("1", TurnStarted())
+        yield Event(
+            "2",
+            ModelUsageRecorded(
+                response_ordinal=1,
+                usage={
+                    "prompt_tokens": 17,
+                    "completion_tokens": 8,
+                    "total_tokens": 25,
+                },
+            ),
+        )
+        # A provider response has been billed; cancellation now happens while
+        # later work is still active.
+        await asyncio.Event().wait()
+
+
+class UsageThenHangFactory(ScriptedFactory):
+    def create(self, *, workspace, model, approval_callback):
+        session = UsageThenHangSession(
+            approval_callback,
+            approval=False,
+            hang=True,
+        )
+        self.sessions.append(session)
+        return session
+
+
+class DuplicateUsageSession(ScriptedSession):
+    async def run_stream(self, _op):
+        self.history.append({"role": "user", "content": _op.text})
+        usage = ModelUsageRecorded(
+            response_ordinal=1,
+            usage={"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10},
+        )
+        yield Event("1", TurnStarted())
+        yield Event("2", usage)
+        yield Event("3", usage)
+        yield Event("4", AgentMessage("done"))
+        yield Event("5", TaskComplete("done", "completed"))
+        self.history.append({"role": "assistant", "content": "done"})
+
+
+class DuplicateUsageFactory(ScriptedFactory):
+    def create(self, *, workspace, model, approval_callback):
+        session = DuplicateUsageSession(
+            approval_callback,
+            approval=False,
+            hang=False,
+        )
+        self.sessions.append(session)
+        return session
+
+
+class LegacyUsageSession(ScriptedSession):
+    def __init__(self, approval_callback) -> None:
+        super().__init__(approval_callback, approval=False, hang=False)
+        self.last_usage = {
+            "prompt_tokens": 6,
+            "completion_tokens": 4,
+            "total_tokens": 10,
+        }
+
+
+class LegacyUsageFactory(ScriptedFactory):
+    def create(self, *, workspace, model, approval_callback):
+        session = LegacyUsageSession(approval_callback)
         self.sessions.append(session)
         return session
 
@@ -526,6 +602,94 @@ def test_interrupt_cancels_background_turn_and_leaves_terminal_state(
     assert factory.sessions[0].closed is True
 
 
+def test_interrupted_turn_persists_usage_and_accounts_it_to_active_goal(
+    tmp_path: Path,
+) -> None:
+    application, thread_id = _application(tmp_path, UsageThenHangFactory())
+    try:
+        goal = application.goals.create(
+            thread_id,
+            objective="Finish the task",
+            start=False,
+        )
+        started = application.turns.start(thread_id, prompt="Begin")
+        deadline = time.monotonic() + 2
+        while not any(
+            event.type == "turn.usage.recorded" and event.turn_id == started.turn.id
+            for event in application.events.replay(thread_id, limit=1000)
+        ):
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+
+        application.turns.interrupt(thread_id, started.turn.id)
+        snapshot = _wait_for(
+            application,
+            started.turn.id,
+            TurnStatus.INTERRUPTED,
+        )
+
+        completion = next(
+            item for item in snapshot.items if item.kind is ItemKind.COMPLETION
+        )
+        assert completion.payload["usage"] == {
+            "prompt_tokens": 17,
+            "completion_tokens": 8,
+            "total_tokens": 25,
+        }
+        updated_goal = application.goals.read(thread_id)
+        deadline = time.monotonic() + 2
+        while updated_goal is not None and updated_goal.tokens_used != 25:
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+            updated_goal = application.goals.read(thread_id)
+        assert updated_goal is not None
+        assert updated_goal.id == goal.id
+        assert updated_goal.tokens_used == 25
+        assert updated_goal.status.value == "active"
+    finally:
+        application.close()
+
+
+def test_duplicate_response_usage_is_idempotent(tmp_path: Path) -> None:
+    application, thread_id = _application(tmp_path, DuplicateUsageFactory())
+    try:
+        started = application.turns.start(thread_id, prompt="Count once")
+        snapshot = _wait_for(application, started.turn.id, TurnStatus.COMPLETED)
+
+        completion = next(
+            item for item in snapshot.items if item.kind is ItemKind.COMPLETION
+        )
+        assert completion.payload["usage"]["total_tokens"] == 10
+        usage_events = [
+            event
+            for event in application.events.replay(thread_id, limit=1000)
+            if event.type == "turn.usage.recorded"
+        ]
+        assert len(usage_events) == 1
+    finally:
+        application.close()
+
+
+def test_legacy_session_usage_remains_compatible_without_incremental_events(
+    tmp_path: Path,
+) -> None:
+    application, thread_id = _application(tmp_path, LegacyUsageFactory())
+    try:
+        started = application.turns.start(thread_id, prompt="Legacy adapter")
+        snapshot = _wait_for(application, started.turn.id, TurnStatus.COMPLETED)
+
+        completion = next(
+            item for item in snapshot.items if item.kind is ItemKind.COMPLETION
+        )
+        assert completion.payload["usage"] == {
+            "prompt_tokens": 6,
+            "completion_tokens": 4,
+            "total_tokens": 10,
+        }
+    finally:
+        application.close()
+
+
 def test_interrupt_cancels_pending_approval(tmp_path: Path) -> None:
     factory = ScriptedFactory(approval=True)
     application, thread_id = _application(tmp_path, factory)
@@ -549,6 +713,11 @@ def test_open_recovers_incomplete_turn_and_pending_approval(tmp_path: Path) -> N
     factory = ScriptedFactory()
     first, thread_id = _application(tmp_path, factory)
     database_path = first.database.path
+    goal = first.goals.create(
+        thread_id,
+        objective="Survive a restart",
+        start=False,
+    )
     first.close()
     now = datetime.now(timezone.utc)
     with first.database.transaction() as connection:
@@ -561,6 +730,7 @@ def test_open_recovers_incomplete_turn_and_pending_approval(tmp_path: Path) -> N
             thread_id=thread_id,
             ordinal=turns.next_ordinal(thread_id),
             prompt="Interrupted by crash",
+            goal_id=goal.id,
             status=TurnStatus.WAITING_APPROVAL,
             started_at=now,
         )
@@ -587,6 +757,19 @@ def test_open_recovers_incomplete_turn_and_pending_approval(tmp_path: Path) -> N
                 requested_at=now,
             )
         )
+        EventRepository(connection).append(
+            thread_id=thread_id,
+            turn_id=turn.id,
+            type="turn.usage.recorded",
+            payload={
+                "responseOrdinal": 1,
+                "usage": {
+                    "prompt_tokens": 31,
+                    "completion_tokens": 9,
+                    "total_tokens": 40,
+                },
+            },
+        )
 
     recovered = DeepCodeApplication.open(database_path, session_factory=factory)
     try:
@@ -596,10 +779,16 @@ def test_open_recovers_incomplete_turn_and_pending_approval(tmp_path: Path) -> N
         assert snapshot.approvals[0].status is ApprovalStatus.CANCELLED
         assert snapshot.items[0].status is ItemStatus.DECLINED
         assert snapshot.items[-1].kind is ItemKind.COMPLETION
+        assert snapshot.items[-1].payload["usage"]["total_tokens"] == 40
+        recovered_goal = recovered.goals.read(thread_id)
+        assert recovered_goal is not None
+        assert recovered_goal.tokens_used == 40
+        assert recovered_goal.status.value == "active"
         assert recovered.threads.read(thread_id).status is ThreadStatus.IDLE
         event_types = [event.type for event in recovered.events.replay(thread_id)]
         assert "turn.recovered" in event_types
-        assert event_types[-1] == "thread.status_changed"
+        assert "thread.status_changed" in event_types
+        assert event_types[-1] == "goal.updated"
     finally:
         recovered.close()
 

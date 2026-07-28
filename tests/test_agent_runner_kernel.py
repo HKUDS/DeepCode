@@ -1,11 +1,11 @@
 """Kernel-level tests for the shared AgentRunSpec seams.
 
-The runner has no semantic limit on user corrections. Safety comes from the
-bounded active-Turn mailbox and the normal model/context budgets:
+The runner has no default semantic limit on task length. It ends when the
+model finishes, the caller cancels, or an explicit diagnostic limit is set:
 
 - ``should_stop_callback`` — external stop conditions checked at the top of
-  every iteration (budgets, completion checks, loop detectors).
-- accepted input always reaches another model sample, including at the regular
+  every sampling step.
+- accepted input always reaches another model sample, including at an explicit
   max-iteration boundary.
 """
 
@@ -79,6 +79,15 @@ class StreamingHook(AgentHook):
         self.deltas.append(delta)
 
 
+class UsageRecordingHook(AgentHook):
+    def __init__(self) -> None:
+        super().__init__()
+        self.responses: list[tuple[int, dict[str, int]]] = []
+
+    async def on_model_response(self, context: AgentHookContext) -> None:
+        self.responses.append((context.response_ordinal, dict(context.usage)))
+
+
 class DelayedStreamingProvider:
     def __init__(self, delay_s: float) -> None:
         self.delay_s = delay_s
@@ -145,6 +154,117 @@ async def test_tool_call_roundtrip_feeds_result_back():
     assert len(tool_messages) == 1
     assert tool_messages[0]["content"] == "echo: hi"
     assert provider.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_each_provider_response_reports_incremental_usage_before_settlement():
+    provider = ScriptedProvider(
+        [
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(id="c1", name="echo", arguments={"text": "hi"})
+                ],
+                finish_reason="tool_calls",
+                usage={
+                    "prompt_tokens": 10,
+                    "completion_tokens": 3,
+                    "total_tokens": 13,
+                },
+            ),
+            LLMResponse(
+                content="done",
+                finish_reason="stop",
+                usage={
+                    "prompt_tokens": 20,
+                    "completion_tokens": 4,
+                    "total_tokens": 24,
+                },
+            ),
+        ]
+    )
+    hook = UsageRecordingHook()
+
+    result = await AgentRunner(provider).run(_spec(provider, hook=hook))
+
+    assert hook.responses == [
+        (
+            1,
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 3,
+                "total_tokens": 13,
+            },
+        ),
+        (
+            2,
+            {
+                "prompt_tokens": 20,
+                "completion_tokens": 4,
+                "total_tokens": 24,
+            },
+        ),
+    ]
+    assert result.usage == {
+        "prompt_tokens": 30,
+        "completion_tokens": 7,
+        "total_tokens": 37,
+    }
+
+
+@pytest.mark.asyncio
+async def test_unbounded_run_can_exceed_legacy_sampling_defaults() -> None:
+    responses = [
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id=f"c{index}",
+                    name="echo",
+                    arguments={"text": str(index)},
+                )
+            ],
+            finish_reason="tool_calls",
+        )
+        for index in range(60)
+    ]
+    responses.append(
+        LLMResponse(content="done after sixty tools", finish_reason="stop")
+    )
+    provider = ScriptedProvider(responses)
+
+    result = await AgentRunner(provider).run(_spec(provider, max_iterations=None))
+
+    assert result.stop_reason == "completed"
+    assert result.final_content == "done after sixty tools"
+    assert provider.calls == 61
+    assert len(result.tools_used) == 60
+
+
+@pytest.mark.asyncio
+async def test_explicit_sampling_limit_remains_available_for_diagnostics() -> None:
+    provider = ScriptedProvider(
+        [
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(
+                        id=f"c{index}",
+                        name="echo",
+                        arguments={"text": str(index)},
+                    )
+                ],
+                finish_reason="tool_calls",
+            )
+            for index in range(4)
+        ]
+    )
+
+    result = await AgentRunner(provider).run(_spec(provider, max_iterations=3))
+
+    assert result.stop_reason == "max_iterations"
+    assert provider.calls == 3
+    assert "maximum number of tool call iterations (3)" in (result.final_content or "")
 
 
 @pytest.mark.asyncio

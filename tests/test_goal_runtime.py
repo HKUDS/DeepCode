@@ -9,6 +9,7 @@ from core.agent_runtime.goal_runtime import (
 from core.agent_runtime.runner import AgentRunner, AgentRunSpec
 from core.agent_runtime.tools.base import Tool, tool_parameters
 from core.agent_runtime.tools.registry import ToolRegistry
+from core.events import AgentSession, UserInput
 from core.harness.tools.goal import GetGoalTool, UpdateGoalTool
 from core.providers.base import LLMResponse, ToolCallRequest
 
@@ -54,6 +55,8 @@ def test_goal_tools_are_hidden_outside_an_attempt_and_freeze_after_request() -> 
 
     runtime.activate(_context())
     assert runtime.visible_tool_names(registered) == registered
+    assert runtime.closure_prompt() is not None
+    assert runtime.closure_prompt(stop_hook_active=True) is None
     result = runtime.request(
         status="complete",
         reason="The latest Goal is complete.",
@@ -61,10 +64,88 @@ def test_goal_tools_are_hidden_outside_an_attempt_and_freeze_after_request() -> 
 
     assert result["status"] == "complete"
     assert runtime.visible_tool_names(registered) == ()
+    assert runtime.closure_prompt() is None
     assert handler.requests[0]["turnId"] == "turn_1"
 
     runtime.deactivate("turn_1")
     assert runtime.visible_tool_names(registered) == ("read", "bash")
+
+
+class ClosureProvider:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.requests: list[dict] = []
+
+    async def chat_with_retry(self, **kwargs):
+        self.requests.append(kwargs)
+        self.calls += 1
+        if self.calls == 1:
+            return LLMResponse(
+                content="The implementation looks done.",
+                finish_reason="stop",
+            )
+        if self.calls == 2:
+            return LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(
+                        id="complete-goal",
+                        name="update_goal",
+                        arguments={
+                            "status": "complete",
+                            "reason": "Focused tests pass.",
+                        },
+                    )
+                ],
+                finish_reason="tool_calls",
+            )
+        return LLMResponse(
+            content="Goal completed with passing tests.",
+            finish_reason="stop",
+        )
+
+
+@pytest.mark.asyncio
+async def test_goal_session_gets_one_model_owned_closure_check() -> None:
+    runtime = GoalRuntimeRouter()
+    handler = FakeGoalHandler()
+    runtime.configure(handler)
+    runtime.activate(_context())
+    registry = ToolRegistry()
+    registry.register(GetGoalTool(runtime))
+    registry.register(UpdateGoalTool(runtime))
+    provider = ClosureProvider()
+    session = AgentSession(
+        provider,
+        registry,
+        model="fake",
+        max_iterations=None,
+        tool_filter=runtime.visible_tool_names,
+        closure_callback=runtime.closure_prompt,
+    )
+
+    events = []
+    try:
+        async for event in session.run_stream(UserInput(text="finish the Goal")):
+            events.append(event)
+    finally:
+        await session.aclose()
+
+    assert provider.calls == 3
+    assert handler.requests == [
+        {
+            "turnId": "turn_1",
+            "status": "complete",
+            "reason": "Focused tests pass.",
+        }
+    ]
+    assert any(
+        message.get("role") == "user"
+        and "Before ending this Goal-associated Turn" in str(message.get("content"))
+        for message in provider.requests[1]["messages"]
+    )
+    assert events[-1].msg.type == "task_complete"
+    assert events[-1].msg.final_text == "Goal completed with passing tests."
 
 
 def test_goal_tool_schemas_expose_only_the_minimal_protocol() -> None:

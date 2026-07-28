@@ -6,6 +6,11 @@ from dataclasses import replace
 from time import monotonic
 
 from core.application.event_service import EventBroker
+from core.application.turn_usage import (
+    TURN_USAGE_EVENT_TYPE,
+    add_usage,
+    normalize_usage,
+)
 from core.application.views import item_view, timestamp
 from core.domain.common import utc_now
 from core.domain.event import DomainEvent
@@ -18,6 +23,7 @@ from core.events import (
     AgentReasoningSummary,
     ErrorEvent,
     Event,
+    ModelUsageRecorded,
     PlanUpdated,
     SkillLoaded,
     TaskComplete,
@@ -57,6 +63,12 @@ class TurnEventProjector:
         self._tool_item_ids: dict[str, str] = {}
         self._plan_tool_calls: set[str] = set()
         self._skill_invocations: dict[str, dict[str, str]] = {}
+        self._usage: dict[str, int] = {}
+        self._usage_ordinals: set[int] = set()
+
+    @property
+    def usage(self) -> dict[str, int]:
+        return dict(self._usage)
 
     def project(self, event: Event) -> None:
         message = event.msg
@@ -84,6 +96,8 @@ class TurnEventProjector:
                 summary=message.text[:160],
                 payload={"text": message.text},
             )
+        elif isinstance(message, ModelUsageRecorded):
+            self._record_usage(message)
         elif isinstance(message, AgentMessage):
             self.final_text = message.text
             self._complete_assistant(
@@ -169,6 +183,25 @@ class TurnEventProjector:
                         message.final_text,
                         phase=AgentMessagePhase.FINAL_ANSWER,
                     )
+
+    def _record_usage(self, message: ModelUsageRecorded) -> None:
+        ordinal = message.response_ordinal
+        usage = normalize_usage(message.usage)
+        if ordinal < 1 or ordinal in self._usage_ordinals or not usage:
+            return
+        with self.database.transaction() as connection:
+            event = EventRepository(connection).append(
+                thread_id=self.thread_id,
+                turn_id=self.turn_id,
+                type=TURN_USAGE_EVENT_TYPE,
+                payload={
+                    "responseOrdinal": ordinal,
+                    "usage": usage,
+                },
+            )
+        self._usage_ordinals.add(ordinal)
+        add_usage(self._usage, usage)
+        self.broker.publish(event)
 
     def _persist_skill_invocations(self) -> None:
         """Attach the auditable Skill ledger to the existing user message."""

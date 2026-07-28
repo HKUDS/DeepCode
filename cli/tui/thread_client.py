@@ -44,7 +44,7 @@ class TuiThreadClient:
         model: str | None,
         connection_id: str | None,
         reasoning_effort: str | None,
-        max_iterations: int,
+        max_iterations: int | None,
         streaming: bool,
         resume_id: str | None = None,
         store: SessionStore | None = None,

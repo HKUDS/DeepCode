@@ -8,6 +8,17 @@ from typing import Any, Protocol
 
 
 GOAL_TOOL_NAMES = frozenset({"get_goal", "update_goal"})
+_GOAL_CLOSURE_PROMPT = """\
+Before ending this Goal-associated Turn, call get_goal and compare the latest
+objective with the current workspace and evidence.
+
+- If the complete Goal is satisfied, call update_goal(status="complete") and
+  give a concise reason grounded in evidence from this Turn.
+- If a persistent external blocker leaves no safe action, call
+  update_goal(status="blocked") and explain it.
+- Otherwise continue concrete work toward the Goal.
+
+Do not mark the Goal complete merely because one intermediate check passed."""
 
 
 class GoalRuntimeError(RuntimeError):
@@ -99,6 +110,16 @@ class GoalRuntimeRouter:
             # response pass, but no further side-effecting tools.
             return ()
         return names
+
+    def closure_prompt(self, stop_hook_active: bool = False) -> str | None:
+        """Request one model-owned Goal decision before a clean Turn exit."""
+
+        with self._lock:
+            active = self._context is not None and self._handler is not None
+            terminal_requested = self._terminal_requested
+        if not active or terminal_requested or stop_hook_active:
+            return None
+        return _GOAL_CLOSURE_PROMPT
 
     def _snapshot(self) -> tuple[GoalRuntimeHandler, GoalRuntimeContext]:
         with self._lock:

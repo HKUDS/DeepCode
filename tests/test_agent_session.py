@@ -28,6 +28,7 @@ from core.events import (  # noqa: E402
     AgentSession,
     Event,
     Interrupt,
+    ModelUsageRecorded,
     PlanStepStatus,
     PlanUpdated,
     Shutdown,
@@ -56,6 +57,20 @@ class EchoTool(Tool):
 
     async def execute(self, **kwargs: Any) -> Any:
         return f"echo: {kwargs.get('text', '')}"
+
+
+@tool_parameters({"type": "object", "properties": {}})
+class BlockingTool(Tool):
+    @property
+    def name(self) -> str:
+        return "block"
+
+    @property
+    def description(self) -> str:
+        return "Wait until the Turn is interrupted."
+
+    async def execute(self, **kwargs: Any) -> Any:
+        await asyncio.Event().wait()
 
 
 class ScriptedProvider:
@@ -122,6 +137,34 @@ async def test_plain_text_turn_emits_started_message_complete():
     complete = events[-1].msg
     assert isinstance(complete, TaskComplete)
     assert complete.stop_reason == "completed"
+
+
+@pytest.mark.asyncio
+async def test_failed_model_response_still_records_reported_usage():
+    provider = ScriptedProvider(
+        [
+            LLMResponse(
+                content="provider rejected request",
+                finish_reason="error",
+                usage={
+                    "prompt_tokens": 5,
+                    "completion_tokens": 0,
+                    "total_tokens": 5,
+                },
+            )
+        ]
+    )
+    session = _session(provider)
+
+    await session.submit(UserInput(text="fail"))
+    events = session.drain_events()
+
+    usage = next(
+        event.msg for event in events if isinstance(event.msg, ModelUsageRecorded)
+    )
+    assert usage.usage["total_tokens"] == 5
+    assert session.last_usage["total_tokens"] == 5
+    assert events[-1].msg.stop_reason == "error"
 
 
 @pytest.mark.asyncio
@@ -456,3 +499,47 @@ async def test_interrupt_terminates_the_active_submission_with_original_id():
     assert terminal.submission_id == "turn-submission"
     with pytest.raises(StopAsyncIteration):
         await anext(stream)
+
+
+@pytest.mark.asyncio
+async def test_interrupt_preserves_usage_observed_before_blocking_tool():
+    provider = ScriptedProvider(
+        [
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(id="c1", name="block", arguments={}),
+                ],
+                finish_reason="tool_calls",
+                usage={
+                    "prompt_tokens": 11,
+                    "completion_tokens": 2,
+                    "total_tokens": 13,
+                },
+            )
+        ]
+    )
+    tools = ToolRegistry()
+    tools.register(BlockingTool())
+    session = AgentSession(provider, tools, model="fake-model")
+    stream = session.run_stream_envelope(
+        Submission(id="turn-submission", op=UserInput(text="wait"))
+    )
+
+    started = await anext(stream)
+    usage_event = await anext(stream)
+    tool_started = await anext(stream)
+    assert started.msg.type == "turn_started"
+    assert isinstance(usage_event.msg, ModelUsageRecorded)
+    assert usage_event.msg.response_ordinal == 1
+    assert tool_started.msg.type == "tool_started"
+
+    await session.submit_envelope(Submission(id="control-submission", op=Interrupt()))
+    terminal = await anext(stream)
+
+    assert terminal.msg.stop_reason == "interrupted"
+    assert session.last_usage == {
+        "prompt_tokens": 11,
+        "completion_tokens": 2,
+        "total_tokens": 13,
+    }

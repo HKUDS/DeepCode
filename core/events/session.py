@@ -39,6 +39,7 @@ from core.events.protocol import (
     ErrorEvent,
     Event,
     Interrupt,
+    ModelUsageRecorded,
     Op,
     Shutdown,
     ShutdownComplete,
@@ -59,7 +60,6 @@ from core.providers.base import LLMProvider
 from core.skills.models import SkillError
 from core.skills.runtime import SkillRuntime, SkillTurnContext
 
-_DEFAULT_MAX_ITERATIONS = 50
 _DEFAULT_MAX_TOOL_RESULT_CHARS = 60_000
 
 
@@ -67,6 +67,16 @@ def _is_error_result(result: Any) -> bool:
     text = result if isinstance(result, str) else str(result)
     stripped = text.lstrip()
     return stripped.startswith("Error") or "permission denied" in stripped[:40]
+
+
+def _stop_continuation_reason(outcome: Any) -> str | None:
+    if isinstance(outcome, str):
+        reason = outcome.strip()
+        return reason or None
+    if outcome is None or not getattr(outcome, "block", False):
+        return None
+    reason = getattr(outcome, "block_reason", None)
+    return reason.strip() if isinstance(reason, str) and reason.strip() else None
 
 
 class _EventEmittingHook(AgentHook):
@@ -78,11 +88,13 @@ class _EventEmittingHook(AgentHook):
         *,
         streaming: bool = False,
         emit_deltas: bool | None = None,
+        usage_sink=None,
     ) -> None:
         super().__init__()
         self._emit = emit
         self._streaming = streaming
         self._emit_deltas = streaming if emit_deltas is None else emit_deltas
+        self._usage_sink = usage_sink
         self._reasoning_iterations: set[int] = set()
         self._message_id: str | None = None
         self._message_text = ""
@@ -150,6 +162,23 @@ class _EventEmittingHook(AgentHook):
         self._message_id = None
         self._message_text = ""
 
+    async def on_model_response(self, context: AgentHookContext) -> None:
+        usage = {
+            str(key): value
+            for key, value in context.usage.items()
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0
+        }
+        if not usage:
+            return
+        if self._usage_sink is not None:
+            self._usage_sink(usage)
+        self._emit(
+            ModelUsageRecorded(
+                response_ordinal=context.response_ordinal,
+                usage=usage,
+            )
+        )
+
     def final_message_id(self, text: str) -> str:
         """Reuse the streamed item's ID only when its authoritative text matches."""
 
@@ -204,7 +233,7 @@ class AgentSession:
         *,
         model: str,
         system_prompt: str = "",
-        max_iterations: int = _DEFAULT_MAX_ITERATIONS,
+        max_iterations: int | None = None,
         permission_checker: Any | None = None,
         approval_callback: Any | None = None,
         injection_callback: Any | None = None,
@@ -216,6 +245,7 @@ class AgentSession:
         skill_runtime: SkillRuntime | None = None,
         execution_profile: Any | None = None,
         tool_filter: Any | None = None,
+        closure_callback: Any | None = None,
     ) -> None:
         self._runner = AgentRunner(provider)
         self._provider = provider
@@ -259,6 +289,10 @@ class AgentSession:
         # tools that exist only during a Goal-associated Turn). It composes with the
         # Skill visibility snapshot and can never add registry capabilities.
         self._tool_filter = tool_filter
+        # Optional application-owned clean-exit check. Goal-associated Turns use
+        # this to ask the model for one final complete/blocked/continue decision;
+        # ordinary Turns leave it unset.
+        self._closure_callback = closure_callback
         # Secret-free immutable selection used by persistence/frontends.
         self.execution_profile = execution_profile
 
@@ -338,9 +372,13 @@ class AgentSession:
 
     @property
     def last_usage(self) -> dict[str, int]:
-        """Token usage for the most recently completed kernel run."""
+        """Usage observed so far in the current or most recent Turn."""
 
         return dict(self._last_usage)
+
+    def _record_usage(self, usage: dict[str, int]) -> None:
+        for key, value in usage.items():
+            self._last_usage[key] = self._last_usage.get(key, 0) + value
 
     def load_history(self, messages: list[dict[str, Any]]) -> None:
         """Replace the conversation history (session resume).
@@ -560,10 +598,37 @@ class AgentSession:
             elif self._hooks_engine.has_event("Stop"):
                 stop_hook = self._hooks_engine.run_stop
 
+        if stop_hook is not None or self._closure_callback is not None:
+            external_stop_hook = stop_hook
+
+            async def combined_stop_hook(stop_hook_active: bool) -> str | None:
+                reasons: list[str] = []
+                if external_stop_hook is not None:
+                    try:
+                        external_outcome = await external_stop_hook(stop_hook_active)
+                    except Exception:
+                        logger.exception("external stop hook failed")
+                    else:
+                        reason = _stop_continuation_reason(external_outcome)
+                        if reason is not None:
+                            reasons.append(reason)
+                if self._closure_callback is not None:
+                    try:
+                        reason = self._closure_callback(stop_hook_active)
+                    except Exception:
+                        logger.exception("turn closure callback failed")
+                    else:
+                        if isinstance(reason, str) and reason.strip():
+                            reasons.append(reason.strip())
+                return "\n\n".join(reasons) or None
+
+            stop_hook = combined_stop_hook
+
         event_hook = _EventEmittingHook(
             self._emit,
             streaming=self._streaming_transport,
             emit_deltas=self._streaming,
+            usage_sink=self._record_usage,
         )
 
         def visible_tool_names() -> tuple[str, ...] | None:

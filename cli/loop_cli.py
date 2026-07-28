@@ -200,7 +200,12 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Total budget for a new Goal, or a larger budget when resuming.",
     )
-    parser.add_argument("--max-iterations", type=int, default=40)
+    parser.add_argument(
+        "--max-iterations",
+        type=int,
+        default=None,
+        help="Optional model-sampling limit for diagnostics (unlimited by default).",
+    )
     args = parser.parse_args(argv)
     if (args.goal is None) == (args.resume is None):
         parser.error("provide exactly one of GOAL or --resume SESSION_ID")

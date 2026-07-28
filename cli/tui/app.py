@@ -31,7 +31,6 @@ from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
 
-from core.agent_setup import DEFAULT_MAX_ITERATIONS
 from cli.execution_options import add_reasoning_effort_argument
 from cli.config_errors import format_config_error
 from core.config import ConfigError
@@ -58,7 +57,7 @@ class TuiApp:
         model: str | None,
         connection_id: str | None = None,
         reasoning_effort: str | None = None,
-        max_iterations: int,
+        max_iterations: int | None,
         resume_id: str | None = None,
     ) -> None:
         self.workspace = os.path.abspath(workspace)
@@ -397,7 +396,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--connection", "-c", default=None)
     add_reasoning_effort_argument(parser)
     parser.add_argument("--resume", "-r", default=None, help="Session id to resume.")
-    parser.add_argument("--max-iterations", type=int, default=DEFAULT_MAX_ITERATIONS)
+    parser.add_argument(
+        "--max-iterations",
+        type=int,
+        default=None,
+        help="Optional model-sampling limit for diagnostics (unlimited by default).",
+    )
     args = parser.parse_args(argv)
 
     try:

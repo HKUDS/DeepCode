@@ -206,7 +206,10 @@ def _apply_budget_override(
     token_budget: int | None,
 ) -> ThreadGoal:
     if token_budget is None:
-        if goal.status is ThreadGoalStatus.BUDGET_LIMITED:
+        if (
+            goal.status is ThreadGoalStatus.BUDGET_LIMITED
+            and goal.token_budget is not None
+        ):
             raise InvalidArgumentError(
                 "the Goal exhausted its token budget; provide a larger "
                 "--token-budget to resume"

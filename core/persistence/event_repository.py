@@ -69,6 +69,25 @@ class EventRepository:
         ).fetchall()
         return [self._from_row(row) for row in rows]
 
+    def list_for_turn(
+        self,
+        thread_id: str,
+        turn_id: str,
+        *,
+        event_type: str | None = None,
+    ) -> list[DomainEvent]:
+        parameters: list[object] = [thread_id, turn_id]
+        type_filter = ""
+        if event_type is not None:
+            type_filter = " AND type = ?"
+            parameters.append(event_type)
+        rows = self.connection.execute(
+            "SELECT * FROM event_log WHERE thread_id = ? AND turn_id = ?"
+            f"{type_filter} ORDER BY sequence",
+            parameters,
+        ).fetchall()
+        return [self._from_row(row) for row in rows]
+
     def has_type(self, thread_id: str, event_type: str) -> bool:
         row = self.connection.execute(
             "SELECT 1 FROM event_log WHERE thread_id = ? AND type = ? LIMIT 1",
