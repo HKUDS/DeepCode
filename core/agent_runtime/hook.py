@@ -8,6 +8,7 @@ from typing import Any
 from loguru import logger
 
 from core.providers.base import LLMResponse, ToolCallRequest
+from core.reasoning import ReasoningChannel
 
 
 @dataclass(slots=True)
@@ -39,7 +40,20 @@ class AgentHook:
     async def before_iteration(self, context: AgentHookContext) -> None:
         pass
 
+    async def before_model_request(self, context: AgentHookContext) -> None:
+        """Observe a user-visible model request before provider I/O begins."""
+
+        pass
+
     async def on_stream(self, context: AgentHookContext, delta: str) -> None:
+        pass
+
+    async def on_reasoning_stream(
+        self,
+        context: AgentHookContext,
+        delta: str,
+        channel: ReasoningChannel,
+    ) -> None:
         pass
 
     async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
@@ -92,8 +106,24 @@ class CompositeHook(AgentHook):
     async def before_iteration(self, context: AgentHookContext) -> None:
         await self._for_each_hook_safe("before_iteration", context)
 
+    async def before_model_request(self, context: AgentHookContext) -> None:
+        await self._for_each_hook_safe("before_model_request", context)
+
     async def on_stream(self, context: AgentHookContext, delta: str) -> None:
         await self._for_each_hook_safe("on_stream", context, delta)
+
+    async def on_reasoning_stream(
+        self,
+        context: AgentHookContext,
+        delta: str,
+        channel: ReasoningChannel,
+    ) -> None:
+        await self._for_each_hook_safe(
+            "on_reasoning_stream",
+            context,
+            delta,
+            channel,
+        )
 
     async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
         await self._for_each_hook_safe("on_stream_end", context, resuming=resuming)

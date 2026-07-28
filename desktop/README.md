@@ -64,8 +64,22 @@ Thinking effort for future Turns in the current Session. Existing history stays
 attached to the same canonical Session under `~/.deepcode/sessions/`. A switch
 made while work is active leaves the current Turn's immutable execution profile
 unchanged and applies to the next Turn. Raw chain-of-thought is never shown as
-assistant text; only provider-designated summaries may be rendered, while
-opaque continuation state remains private.
+assistant text. Provider-designated summaries and reasoning details are kept in
+a separate typed timeline item, while opaque continuation state remains
+private.
+
+The transcript picker beside the composer controls presentation independently
+of model effort:
+
+- **Normal** shows a compact completed reasoning preview and keeps provider
+  details behind a disclosure.
+- **Verbose** expands returned reasoning details and ordinary execution
+  activity.
+- **Summary** keeps the final answer and important outcomes while hiding
+  reasoning and routine tool activity.
+
+`Ctrl+O` cycles the same three modes. The preference is local UI state; changing
+it never changes the Session, model request, Goal, tools, or stored evidence.
 
 Every accepted Turn stores an immutable, secret-free execution profile. Later
 changes to defaults or credentials cannot silently change queued or historical

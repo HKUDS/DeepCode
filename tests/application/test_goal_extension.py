@@ -177,10 +177,7 @@ def test_explicit_goal_continuation_preserves_requesting_surface(tmp_path) -> No
     )
 
     assert turns.start_options[-1]["client_surface"] is ClientSurface.HEADLESS
-    assert (
-        turns.start_options[-1]["input_source"]
-        is TurnInputSource.GOAL_CONTINUATION
-    )
+    assert turns.start_options[-1]["input_source"] is TurnInputSource.GOAL_CONTINUATION
     assert turns.start_options[-1]["connection_id"] == "router"
     assert turns.start_options[-1]["model"] == "model-next"
     assert turns.start_options[-1]["reasoning_effort"] == "high"
@@ -260,11 +257,7 @@ def test_outcome_projects_only_bounded_existing_items_from_deciding_turn(
             thread_id=session_id,
             turn_id=active.id,
             ordinal=ordinal,
-            kind=(
-                ItemKind.TEST_RESULT
-                if ordinal % 2
-                else ItemKind.COMMAND_EXECUTION
-            ),
+            kind=(ItemKind.TEST_RESULT if ordinal % 2 else ItemKind.COMMAND_EXECUTION),
             status=ItemStatus.COMPLETED,
             summary=("verified " + ("x" * 300)) if ordinal == 1 else f"step {ordinal}",
             payload={},
@@ -300,9 +293,10 @@ def test_outcome_projects_only_bounded_existing_items_from_deciding_turn(
     assert outcome.decided_by_turn_id == active.id
     assert len(outcome.evidence_refs) == 12
     assert {evidence.turn_id for evidence in outcome.evidence_refs} == {active.id}
-    assert {
-        evidence.kind for evidence in outcome.evidence_refs
-    } <= {"test_result", "command_execution"}
+    assert {evidence.kind for evidence in outcome.evidence_refs} <= {
+        "test_result",
+        "command_execution",
+    }
     assert all(len(evidence.summary) <= 240 for evidence in outcome.evidence_refs)
 
 

@@ -64,7 +64,11 @@ class TuiApp:
         self.max_iterations = max_iterations
         self.console = Console()
         self.renderer = EventRenderer(self.console)
-        self.reader = InputReader(self.workspace)
+        self.reader = InputReader(
+            self.workspace,
+            status_provider=self.renderer.status_line,
+            toggle_transcript=self.renderer.cycle_transcript_mode,
+        )
         self._exit_requested = False
         self._requested_model = model
         self._requested_connection = connection_id
@@ -162,6 +166,10 @@ class TuiApp:
         )
         self.model = profile.model_id
         self._requested_reasoning_effort = requested
+
+    def set_transcript_mode(self, mode: str) -> str:
+        selected = self.renderer.set_transcript_mode(mode)
+        return f"transcript mode: {selected.value}"
 
     @property
     def requested_reasoning_effort(self) -> str:
@@ -319,6 +327,8 @@ class TuiApp:
                 f"{self.thread_client.permission_mode.value}"
                 f"  [{theme.META_STYLE}]effort[/] {self.requested_reasoning_effort}"
                 f"  [{theme.META_STYLE}]session[/] {self.bridge.session_id}"
+                f"  [{theme.META_STYLE}]transcript[/] "
+                f"{self.renderer.transcript_mode.value}"
                 f"   [{theme.META_STYLE}]/help for commands[/]",
                 border_style=theme.DIM,
             )

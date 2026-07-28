@@ -22,6 +22,9 @@ from core.events import (
     AgentMessageCompleted,
     AgentMessageDelta,
     AgentMessagePhase,
+    AgentReasoningCompleted,
+    AgentReasoningDelta,
+    AgentReasoningStarted,
     Event,
     ModelUsageRecorded,
     PlanStep,
@@ -41,6 +44,7 @@ from core.persistence.execution_repository import (
 )
 from core.persistence.event_repository import EventRepository
 from core.persistence.thread_repository import ThreadRepository
+from core.reasoning import ReasoningAvailability, ReasoningChannel, ReasoningPayload
 
 
 class ScriptedSession:
@@ -224,6 +228,81 @@ class PlannedFactory(ScriptedFactory):
             approval_callback,
             approval=False,
             hang=False,
+        )
+        self.sessions.append(session)
+        return session
+
+
+class ReasoningSession(ScriptedSession):
+    async def run_stream(self, _op):
+        self.history.append({"role": "user", "content": _op.text})
+        yield Event("1", TurnStarted())
+        yield Event("2", AgentReasoningStarted("reasoning-1", effort="high"))
+        yield Event(
+            "3",
+            AgentReasoningDelta(
+                "reasoning-1",
+                ReasoningChannel.SUMMARY,
+                "Checked constraints.",
+            ),
+        )
+        yield Event(
+            "4",
+            AgentReasoningDelta(
+                "reasoning-1",
+                ReasoningChannel.PROVIDER_TRACE,
+                "provider trace",
+            ),
+        )
+        yield Event(
+            "5",
+            AgentReasoningCompleted(
+                "reasoning-1",
+                summary_text="Checked constraints.",
+                trace_text="provider trace",
+                availability=ReasoningAvailability.AVAILABLE,
+                effort="high",
+                duration_ms=1250,
+            ),
+        )
+        yield Event("6", AgentMessage("done"))
+        yield Event("7", TaskComplete("done", "completed"))
+        self.history.append({"role": "assistant", "content": "done"})
+
+
+class ReasoningFactory(ScriptedFactory):
+    def create(self, *, workspace, model, approval_callback):
+        session = ReasoningSession(
+            approval_callback,
+            approval=False,
+            hang=False,
+        )
+        self.sessions.append(session)
+        return session
+
+
+class StreamingReasoningHangSession(ScriptedSession):
+    async def run_stream(self, _op):
+        self.history.append({"role": "user", "content": _op.text})
+        yield Event("1", TurnStarted())
+        yield Event("2", AgentReasoningStarted("reasoning-1", effort="medium"))
+        yield Event(
+            "3",
+            AgentReasoningDelta(
+                "reasoning-1",
+                ReasoningChannel.SUMMARY,
+                "Partial reasoning",
+            ),
+        )
+        await asyncio.Event().wait()
+
+
+class StreamingReasoningHangFactory(ScriptedFactory):
+    def create(self, *, workspace, model, approval_callback):
+        session = StreamingReasoningHangSession(
+            approval_callback,
+            approval=False,
+            hang=True,
         )
         self.sessions.append(session)
         return session
@@ -519,6 +598,102 @@ def test_streaming_projection_logs_only_new_assistant_text(tmp_path: Path) -> No
         assert replayed == ["item.created", "item.delta", "item.updated"]
     finally:
         reopened.close()
+
+
+def test_reasoning_projects_once_and_replays_from_durable_events(
+    tmp_path: Path,
+) -> None:
+    factory = ReasoningFactory()
+    application, thread_id = _application(tmp_path, factory)
+    database_path = application.database.path
+    turn_id = ""
+    reasoning_id = ""
+    try:
+        started = application.turns.start(thread_id, prompt="Think carefully")
+        turn_id = started.turn.id
+        snapshot = _wait_for(application, turn_id, TurnStatus.COMPLETED)
+        reasoning = next(
+            item for item in snapshot.items if item.kind is ItemKind.REASONING
+        )
+        reasoning_id = reasoning.id
+        payload = ReasoningPayload.from_dict(reasoning.payload)
+
+        assert payload.summary_text == "Checked constraints."
+        assert payload.trace_text == "provider trace"
+        assert payload.effort == "high"
+        assert payload.duration_ms == 1250
+        assert payload.streaming is False
+        events = [
+            event
+            for event in application.events.replay(thread_id, limit=1000)
+            if event.item_id == reasoning.id
+        ]
+        assert [event.type for event in events] == [
+            "item.created",
+            "item.delta",
+            "item.delta",
+            "item.updated",
+        ]
+        assert [event.payload.get("reasoningChannel") for event in events[1:3]] == [
+            "summary",
+            "provider_trace",
+        ]
+    finally:
+        application.close()
+
+    reopened = DeepCodeApplication.open(database_path, session_factory=factory)
+    try:
+        restored = reopened.turns.read(turn_id)
+        reasoning = next(item for item in restored.items if item.id == reasoning_id)
+        assert (
+            ReasoningPayload.from_dict(reasoning.payload).trace_text == "provider trace"
+        )
+    finally:
+        reopened.close()
+
+
+def test_interrupted_reasoning_preserves_partial_text_and_closes_live_item(
+    tmp_path: Path,
+) -> None:
+    application, thread_id = _application(
+        tmp_path,
+        StreamingReasoningHangFactory(),
+    )
+    try:
+        started = application.turns.start(thread_id, prompt="Think for a while")
+        deadline = time.monotonic() + 2
+        reasoning = None
+        while reasoning is None:
+            assert time.monotonic() < deadline
+            snapshot = application.turns.read(started.turn.id)
+            reasoning = next(
+                (
+                    item
+                    for item in snapshot.items
+                    if item.kind is ItemKind.REASONING
+                    and ReasoningPayload.from_dict(item.payload).summary_text
+                ),
+                None,
+            )
+            if reasoning is None:
+                time.sleep(0.01)
+
+        accepted, _ = application.turns.interrupt(thread_id, started.turn.id)
+        interrupted = _wait_for(
+            application,
+            started.turn.id,
+            TurnStatus.INTERRUPTED,
+        )
+        reasoning = next(item for item in interrupted.items if item.id == reasoning.id)
+
+        assert accepted is True
+        assert reasoning.status is ItemStatus.FAILED
+        assert ReasoningPayload.from_dict(reasoning.payload).summary_text == (
+            "Partial reasoning"
+        )
+        assert reasoning.payload["interrupted"] is True
+    finally:
+        application.close()
 
 
 def test_projection_preserves_interleaved_message_and_tool_order(

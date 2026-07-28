@@ -21,6 +21,9 @@ class ItemKind(StrEnum):
     USER_MESSAGE = "user_message"
     ASSISTANT_MESSAGE = "assistant_message"
     REASONING_SUMMARY = "reasoning_summary"
+    # Stable storage/wire value retained for existing Session databases.
+    # New code uses the semantic name while legacy readers keep working.
+    REASONING = "reasoning_summary"
     PLAN = "plan"
     TOOL_CALL = "tool_call"
     COMMAND_EXECUTION = "command_execution"

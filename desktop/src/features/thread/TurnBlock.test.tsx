@@ -71,6 +71,7 @@ describe("TurnBlock", () => {
         group={group}
         approvalsByItem={new Map()}
         selectedItemId={null}
+        transcriptMode="normal"
         busy={false}
         onSelectItem={vi.fn()}
         onOpenInspector={vi.fn()}

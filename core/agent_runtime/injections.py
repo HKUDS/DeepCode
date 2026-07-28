@@ -231,11 +231,10 @@ class TurnInputMailbox:
             raise ValueError("turn_id must not be empty")
         with self._condition:
             if self._active_turn_id is not None:
-                if (
-                    self._active_turn_id == clean_turn_id
-                    and self._state
-                    in {MailboxState.STARTING, MailboxState.OPEN}
-                ):
+                if self._active_turn_id == clean_turn_id and self._state in {
+                    MailboxState.STARTING,
+                    MailboxState.OPEN,
+                }:
                     self._state = MailboxState.OPEN
                     self._condition.notify_all()
                     return

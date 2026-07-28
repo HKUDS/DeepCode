@@ -14,6 +14,7 @@ from core.providers.reasoning import (
     OPENROUTER_REASONING_DETAILS,
 )
 from core.providers.registry import find_by_name
+from core.reasoning import ReasoningChannel
 
 
 def _openai_compatible_provider(
@@ -92,7 +93,7 @@ def test_openrouter_off_is_explicit_and_provider_state_round_trips() -> None:
     assert "provider_state" not in assistant
 
 
-def test_openrouter_raw_reasoning_never_becomes_visible_content() -> None:
+def test_openrouter_provider_trace_stays_separate_from_visible_content() -> None:
     provider = _openrouter_provider()
     details = [{"type": "reasoning.text", "text": "private chain", "id": "r1"}]
 
@@ -115,6 +116,29 @@ def test_openrouter_raw_reasoning_never_becomes_visible_content() -> None:
     assert response.reasoning_content == "private chain"
     assert response.reasoning_summary is None
     assert response.provider_state == {OPENROUTER_REASONING_DETAILS: details}
+
+
+@pytest.mark.asyncio
+async def test_openrouter_stream_reasoning_is_typed_without_model_checks() -> None:
+    observed: list[tuple[str, ReasoningChannel]] = []
+
+    async def on_reasoning(delta: str, channel: ReasoningChannel) -> None:
+        observed.append((delta, channel))
+
+    await OpenAICompatProvider._emit_stream_reasoning(
+        {
+            "reasoning_details": [
+                {"type": "reasoning.summary", "summary": "Checked inputs."},
+                {"type": "reasoning.text", "text": "provider trace"},
+            ]
+        },
+        on_reasoning,
+    )
+
+    assert observed == [
+        ("Checked inputs.", ReasoningChannel.SUMMARY),
+        ("provider trace", ReasoningChannel.PROVIDER_TRACE),
+    ]
 
 
 def test_openrouter_only_projects_provider_designated_summary() -> None:
@@ -263,11 +287,22 @@ def test_anthropic_summary_is_safe_while_signed_block_is_replayable() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("model", "expected_channel"),
+    [
+        ("claude-opus-4-6", ReasoningChannel.SUMMARY),
+        ("claude-sonnet-4-20250514", ReasoningChannel.PROVIDER_TRACE),
+    ],
+)
 async def test_anthropic_reasoning_events_keep_stream_alive_without_becoming_text(
     monkeypatch: pytest.MonkeyPatch,
+    model: str,
+    expected_channel: ReasoningChannel,
 ) -> None:
     provider = _anthropic_provider()
+    provider.default_model = model
     visible_deltas: list[str] = []
+    reasoning_deltas: list[tuple[str, ReasoningChannel]] = []
     events = [
         {"delta": {"type": "thinking_delta", "thinking": "private-1"}},
         {"delta": {"type": "thinking_delta", "thinking": "private-2"}},
@@ -314,12 +349,20 @@ async def test_anthropic_reasoning_events_keep_stream_alive_without_becoming_tex
     async def on_content(delta: str) -> None:
         visible_deltas.append(delta)
 
+    async def on_reasoning(delta: str, channel: ReasoningChannel) -> None:
+        reasoning_deltas.append((delta, channel))
+
     response = await provider.chat_stream(
         [{"role": "user", "content": "hello"}],
         reasoning_effort="high",
         on_content_delta=on_content,
+        on_reasoning_delta=on_reasoning,
     )
 
     assert response.finish_reason == "stop"
     assert response.content == "visible"
     assert visible_deltas == ["visible"]
+    assert reasoning_deltas == [
+        ("private-1", expected_channel),
+        ("private-2", expected_channel),
+    ]

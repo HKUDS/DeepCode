@@ -21,6 +21,7 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any, Mapping, Union
 
+from core.reasoning import ReasoningAvailability, ReasoningChannel
 from core.skills.models import SkillInvocation, SkillSelection
 
 # --------------------------------------------------------------------------
@@ -130,10 +131,42 @@ class AgentMessageCompleted:
 
 @dataclass(frozen=True)
 class AgentReasoningSummary:
-    """Provider-designated safe summary; never raw chain-of-thought."""
+    """Legacy completed summary event retained for replay compatibility."""
 
     text: str
     type: str = field(default="agent_reasoning_summary", init=False)
+
+
+@dataclass(frozen=True)
+class AgentReasoningStarted:
+    """One provider response began returning reasoning metadata."""
+
+    reasoning_id: str
+    effort: str | None = None
+    type: str = field(default="agent_reasoning_started", init=False)
+
+
+@dataclass(frozen=True)
+class AgentReasoningDelta:
+    """An incremental provider summary or provider trace."""
+
+    reasoning_id: str
+    channel: ReasoningChannel
+    delta: str
+    type: str = field(default="agent_reasoning_delta", init=False)
+
+
+@dataclass(frozen=True)
+class AgentReasoningCompleted:
+    """Authoritative final reasoning item for one provider response."""
+
+    reasoning_id: str
+    summary_text: str = ""
+    trace_text: str = ""
+    availability: ReasoningAvailability = ReasoningAvailability.AVAILABLE
+    effort: str | None = None
+    duration_ms: int | None = None
+    type: str = field(default="agent_reasoning_completed", init=False)
 
 
 @dataclass(frozen=True)
@@ -375,6 +408,9 @@ EventMsg = Union[
     AgentMessageDelta,
     AgentMessageCompleted,
     AgentReasoningSummary,
+    AgentReasoningStarted,
+    AgentReasoningDelta,
+    AgentReasoningCompleted,
     ModelUsageRecorded,
     PlanUpdated,
     ToolStarted,

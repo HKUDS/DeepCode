@@ -593,20 +593,12 @@ class AutomationService:
         return attached
 
     def _observe_run(self, run_id: str, event: Event) -> None:
-        event_type = event.msg.type
-        if event_type == "turn_started":
+        if event.msg.type == "turn_started":
             self._mark_run_running(run_id)
-            return
-        if event_type != "task_complete":
-            return
-        stop_reason = str(getattr(event.msg, "stop_reason", "") or "completed")
-        if stop_reason == "interrupted":
-            status = AutomationRunStatus.INTERRUPTED
-        elif stop_reason in {"error", "empty_final_response", "busy"}:
-            status = AutomationRunStatus.FAILED
-        else:
-            status = AutomationRunStatus.COMPLETED
-        self._settle_run(run_id, status=status, detail=stop_reason)
+        # A TaskComplete protocol event precedes TurnService's durable terminal
+        # commit. Terminal Automation state is therefore derived only by
+        # reconcile_runs() from the persisted Turn, never from this transient
+        # stream notification.
 
     def _mark_run_running(self, run_id: str) -> None:
         now = utc_now()

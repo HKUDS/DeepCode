@@ -23,6 +23,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Union
 
 from core.providers.base import LLMResponse
+from core.reasoning import ReasoningChannel
 
 
 @dataclass(frozen=True)
@@ -35,9 +36,10 @@ class TextDelta:
 
 @dataclass(frozen=True)
 class ReasoningDelta:
-    """A chunk of reasoning / thinking content (not user-visible answer)."""
+    """A provider-designated reasoning chunk (not user-visible answer text)."""
 
     text: str
+    channel: ReasoningChannel = ReasoningChannel.SUMMARY
     type: str = field(default="reasoning_delta", init=False)
 
 
@@ -127,7 +129,22 @@ def llm_response_to_events(response: LLMResponse) -> list[LLMEvent]:
 
     events: list[LLMEvent] = []
     if response.reasoning_summary:
-        events.append(ReasoningDelta(text=response.reasoning_summary))
+        events.append(
+            ReasoningDelta(
+                text=response.reasoning_summary,
+                channel=ReasoningChannel.SUMMARY,
+            )
+        )
+    if (
+        response.reasoning_content
+        and response.reasoning_content != response.reasoning_summary
+    ):
+        events.append(
+            ReasoningDelta(
+                text=response.reasoning_content,
+                channel=ReasoningChannel.PROVIDER_TRACE,
+            )
+        )
     if response.content:
         events.append(TextDelta(text=response.content))
     for call in response.tool_calls:

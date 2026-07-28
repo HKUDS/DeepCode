@@ -21,8 +21,13 @@ export function presentItem(item: Item): ItemPresentation {
     case "reasoning_summary":
       return {
         stage: "Reasoning",
-        label: "Reasoning summary",
-        body: text ?? result ?? item.summary,
+        label: "Thinking",
+        body:
+          stringValue(item.payload.summaryText) ??
+          stringValue(item.payload.traceText) ??
+          text ??
+          result ??
+          item.summary,
       };
     case "plan":
       return {

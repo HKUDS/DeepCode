@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
@@ -99,7 +100,13 @@ class TuiCompleter(Completer):
 class InputReader:
     """One awaitable ``read()`` for both interactive and piped stdin."""
 
-    def __init__(self, workspace: str) -> None:
+    def __init__(
+        self,
+        workspace: str,
+        *,
+        status_provider: Callable[[], str] | None = None,
+        toggle_transcript: Callable[[], str] | None = None,
+    ) -> None:
         self.interactive = sys.stdin.isatty()
         self._prompt_session: PromptSession | None = None
         if self.interactive:
@@ -110,11 +117,19 @@ class InputReader:
             def _interrupt(event) -> None:
                 event.app.exit(exception=InputInterrupted())
 
+            @bindings.add("c-o")
+            def _toggle_transcript(event) -> None:
+                if toggle_transcript is not None:
+                    toggle_transcript()
+                event.app.invalidate()
+
             self._prompt_session = PromptSession(
                 history=FileHistory(str(_HISTORY_PATH)),
                 completer=TuiCompleter(workspace),
                 complete_while_typing=True,
                 key_bindings=bindings,
+                bottom_toolbar=status_provider,
+                refresh_interval=0.5 if status_provider is not None else None,
             )
 
     async def read(self) -> str | None:

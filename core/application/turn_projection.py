@@ -20,6 +20,9 @@ from core.events import (
     AgentMessageCompleted,
     AgentMessageDelta,
     AgentMessagePhase,
+    AgentReasoningCompleted,
+    AgentReasoningDelta,
+    AgentReasoningStarted,
     AgentReasoningSummary,
     ErrorEvent,
     Event,
@@ -35,6 +38,10 @@ from core.events import (
 from core.persistence.database import Database
 from core.persistence.event_repository import EventRepository
 from core.persistence.execution_repository import ItemRepository
+from core.reasoning import ReasoningChannel, ReasoningPayload
+
+_STREAM_FLUSH_INTERVAL_S = 0.05
+_STREAM_FLUSH_MIN_CHARS = 256
 
 
 class TurnEventProjector:
@@ -60,6 +67,10 @@ class TurnEventProjector:
         self._last_delta_flush: dict[str, float] = {}
         self._last_flushed_length: dict[str, int] = {}
         self._saw_final_assistant = False
+        self._reasoning_item_ids: dict[str, str] = {}
+        self._reasoning_payloads: dict[str, ReasoningPayload] = {}
+        self._reasoning_last_flush: dict[tuple[str, ReasoningChannel], float] = {}
+        self._reasoning_last_length: dict[tuple[str, ReasoningChannel], int] = {}
         self._tool_item_ids: dict[str, str] = {}
         self._plan_tool_calls: set[str] = set()
         self._skill_invocations: dict[str, dict[str, str]] = {}
@@ -89,12 +100,29 @@ class TurnEventProjector:
                 message_id=message.message_id,
                 phase=message.phase,
             )
+        elif isinstance(message, AgentReasoningStarted):
+            self._start_reasoning(
+                message.reasoning_id,
+                effort=message.effort,
+            )
+        elif isinstance(message, AgentReasoningDelta):
+            self._append_reasoning_delta(
+                message.reasoning_id,
+                channel=message.channel,
+                delta=message.delta,
+            )
+        elif isinstance(message, AgentReasoningCompleted):
+            self._complete_reasoning(message)
         elif isinstance(message, AgentReasoningSummary):
+            payload = ReasoningPayload(
+                summary_text=message.text,
+                streaming=False,
+            )
             self._add_item(
-                kind=ItemKind.REASONING_SUMMARY,
+                kind=ItemKind.REASONING,
                 status=ItemStatus.COMPLETED,
-                summary=message.text[:160],
-                payload={"text": message.text},
+                summary="Thinking",
+                payload=payload.to_dict(),
             )
         elif isinstance(message, ModelUsageRecorded):
             self._record_usage(message)
@@ -344,8 +372,9 @@ class TurnEventProjector:
             return
         now = monotonic()
         if (
-            now - self._last_delta_flush.get(key, 0.0) < 0.05
-            and len(text) - self._last_flushed_length.get(key, 0) < 256
+            now - self._last_delta_flush.get(key, 0.0) < _STREAM_FLUSH_INTERVAL_S
+            and len(text) - self._last_flushed_length.get(key, 0)
+            < _STREAM_FLUSH_MIN_CHARS
         ):
             return
         pending_delta = text[self._last_flushed_length.get(key, 0) :]
@@ -393,6 +422,90 @@ class TurnEventProjector:
         self._last_flushed_length[key] = len(text)
         if phase is AgentMessagePhase.FINAL_ANSWER:
             self._saw_final_assistant = True
+
+    def _start_reasoning(
+        self,
+        reasoning_id: str,
+        *,
+        effort: str | None,
+    ) -> Item:
+        item_id = self._reasoning_item_ids.get(reasoning_id)
+        if item_id is not None:
+            with self.database.read() as connection:
+                existing = ItemRepository(connection).get(item_id)
+            if existing is not None:
+                return existing
+        payload = ReasoningPayload(effort=effort, streaming=True)
+        item = self._add_item(
+            kind=ItemKind.REASONING,
+            status=ItemStatus.IN_PROGRESS,
+            summary="Thinking",
+            payload=payload.to_dict(),
+        )
+        self._reasoning_item_ids[reasoning_id] = item.id
+        self._reasoning_payloads[reasoning_id] = payload
+        return item
+
+    def _append_reasoning_delta(
+        self,
+        reasoning_id: str,
+        *,
+        channel: ReasoningChannel,
+        delta: str,
+    ) -> None:
+        if not delta:
+            return
+        if reasoning_id not in self._reasoning_item_ids:
+            self._start_reasoning(reasoning_id, effort=None)
+        payload = self._reasoning_payloads.get(reasoning_id, ReasoningPayload())
+        payload = payload.with_delta(channel, delta)
+        self._reasoning_payloads[reasoning_id] = payload
+        key = (reasoning_id, channel)
+        text = payload.text_for(channel)
+        now = monotonic()
+        if (
+            now - self._reasoning_last_flush.get(key, 0.0) < _STREAM_FLUSH_INTERVAL_S
+            and len(text) - self._reasoning_last_length.get(key, 0)
+            < _STREAM_FLUSH_MIN_CHARS
+        ):
+            return
+        pending = text[self._reasoning_last_length.get(key, 0) :]
+        item_id = self._reasoning_item_ids[reasoning_id]
+        updated = self._append_reasoning_item_delta(
+            item_id,
+            channel=channel,
+            delta=pending,
+        )
+        if updated is None:
+            return
+        self._reasoning_last_flush[key] = now
+        self._reasoning_last_length[key] = len(text)
+
+    def _complete_reasoning(self, message: AgentReasoningCompleted) -> None:
+        if message.reasoning_id not in self._reasoning_item_ids:
+            self._start_reasoning(
+                message.reasoning_id,
+                effort=message.effort,
+            )
+        payload = ReasoningPayload(
+            summary_text=message.summary_text,
+            trace_text=message.trace_text,
+            availability=message.availability,
+            effort=message.effort,
+            duration_ms=message.duration_ms,
+            streaming=False,
+        )
+        self._reasoning_payloads[message.reasoning_id] = payload
+        item_id = self._reasoning_item_ids[message.reasoning_id]
+        self._update_item(
+            item_id,
+            status=ItemStatus.COMPLETED,
+            summary="Thinking",
+            payload_update=payload.to_dict(),
+        )
+        for channel in ReasoningChannel:
+            key = (message.reasoning_id, channel)
+            self._reasoning_last_length[key] = len(payload.text_for(channel))
 
     def _add_item(
         self,
@@ -496,6 +609,48 @@ class TurnEventProjector:
                 payload={
                     "delta": delta,
                     "summary": updated.summary,
+                    "streaming": True,
+                    "updatedAt": timestamp(updated.updated_at),
+                },
+            )
+        self.broker.publish(event)
+        return updated
+
+    def _append_reasoning_item_delta(
+        self,
+        item_id: str,
+        *,
+        channel: ReasoningChannel,
+        delta: str,
+    ) -> Item | None:
+        """Persist and publish one typed reasoning delta."""
+
+        if not delta:
+            return None
+        with self.database.transaction() as connection:
+            repository = ItemRepository(connection)
+            item = repository.get(item_id)
+            if item is None:
+                return None
+            payload = ReasoningPayload.from_dict(item.payload).with_delta(
+                channel,
+                delta,
+            )
+            updated = replace(
+                item,
+                status=ItemStatus.IN_PROGRESS,
+                payload=payload.to_dict(),
+                updated_at=utc_now(),
+            )
+            repository.update(updated)
+            event = EventRepository(connection).append(
+                thread_id=self.thread_id,
+                turn_id=self.turn_id,
+                item_id=updated.id,
+                type="item.delta",
+                payload={
+                    "delta": delta,
+                    "reasoningChannel": channel.value,
                     "streaming": True,
                     "updatedAt": timestamp(updated.updated_at),
                 },

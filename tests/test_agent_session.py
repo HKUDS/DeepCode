@@ -24,7 +24,9 @@ from core.events import (  # noqa: E402
     AgentMessageCompleted,
     AgentMessageDelta,
     AgentMessagePhase,
-    AgentReasoningSummary,
+    AgentReasoningCompleted,
+    AgentReasoningDelta,
+    AgentReasoningStarted,
     AgentSession,
     Event,
     Interrupt,
@@ -42,6 +44,7 @@ from core.events import (  # noqa: E402
 from core.harness.tools.plan import UpdatePlanTool  # noqa: E402
 from core.harness.tools.shell import BashTool  # noqa: E402
 from core.providers.base import LLMResponse, ToolCallRequest  # noqa: E402
+from core.reasoning import ReasoningAvailability, ReasoningChannel  # noqa: E402
 
 
 @tool_parameters(
@@ -98,6 +101,21 @@ class StreamingTransportProvider(ScriptedProvider):
         i = min(self.calls, len(self.responses) - 1)
         self.calls += 1
         response = self.responses[i]
+        reasoning_callback = kwargs.get("on_reasoning_delta")
+        if reasoning_callback is not None:
+            if response.reasoning_summary:
+                await reasoning_callback(
+                    response.reasoning_summary,
+                    ReasoningChannel.SUMMARY,
+                )
+            if (
+                response.reasoning_content
+                and response.reasoning_content != response.reasoning_summary
+            ):
+                await reasoning_callback(
+                    response.reasoning_content,
+                    ReasoningChannel.PROVIDER_TRACE,
+                )
         callback = kwargs.get("on_content_delta")
         if callback is not None and response.content:
             await callback(response.content)
@@ -203,12 +221,12 @@ async def test_session_falls_back_for_provider_without_streaming_transport():
 
 
 @pytest.mark.asyncio
-async def test_safe_reasoning_summary_emits_but_raw_reasoning_does_not():
+async def test_reasoning_lifecycle_keeps_summary_trace_and_answer_separate():
     provider = ScriptedProvider(
         [
             LLMResponse(
                 content="answer",
-                reasoning_content="private raw chain",
+                reasoning_content="provider trace",
                 reasoning_summary="Checked the constraints.",
                 provider_state={"opaque": ["state"]},
             )
@@ -219,17 +237,118 @@ async def test_safe_reasoning_summary_emits_but_raw_reasoning_does_not():
     await session.submit(UserInput(text="solve"))
     events = session.drain_events()
 
-    summaries = [
-        event.msg for event in events if isinstance(event.msg, AgentReasoningSummary)
+    started = [
+        event.msg for event in events if isinstance(event.msg, AgentReasoningStarted)
     ]
-    assert [message.text for message in summaries] == ["Checked the constraints."]
-    assert "private raw chain" not in repr(events)
+    deltas = [
+        event.msg for event in events if isinstance(event.msg, AgentReasoningDelta)
+    ]
+    completed = [
+        event.msg for event in events if isinstance(event.msg, AgentReasoningCompleted)
+    ]
+    assert len(started) == 1
+    assert [(message.channel, message.delta) for message in deltas] == [
+        (ReasoningChannel.SUMMARY, "Checked the constraints."),
+        (ReasoningChannel.PROVIDER_TRACE, "provider trace"),
+    ]
+    assert len(completed) == 1
+    assert completed[0].reasoning_id == started[0].reasoning_id
+    assert completed[0].summary_text == "Checked the constraints."
+    assert completed[0].trace_text == "provider trace"
+    assert completed[0].availability is ReasoningAvailability.AVAILABLE
+    answer = next(event.msg for event in events if isinstance(event.msg, AgentMessage))
+    assert answer.text == "answer"
+    assert "provider trace" not in answer.text
     assistant = next(
         message
         for message in reversed(session.history)
         if message["role"] == "assistant"
     )
     assert assistant["provider_state"] == {"opaque": ["state"]}
+
+
+@pytest.mark.asyncio
+async def test_opaque_reasoning_state_has_lifecycle_without_display_text():
+    provider = ScriptedProvider(
+        [
+            LLMResponse(
+                content="answer",
+                provider_state={"encrypted": "opaque"},
+            )
+        ]
+    )
+    session = _session(provider)
+
+    await session.submit(UserInput(text="solve"))
+    events = session.drain_events()
+
+    assert not any(isinstance(event.msg, AgentReasoningDelta) for event in events)
+    completed = next(
+        event.msg for event in events if isinstance(event.msg, AgentReasoningCompleted)
+    )
+    assert completed.availability is ReasoningAvailability.OPAQUE
+    assert completed.summary_text == ""
+    assert completed.trace_text == ""
+
+
+@pytest.mark.asyncio
+async def test_streamed_reasoning_is_ordered_before_visible_answer():
+    provider = StreamingTransportProvider(
+        [
+            LLMResponse(
+                content="answer",
+                reasoning_summary="Checked inputs.",
+                reasoning_content="provider trace",
+            )
+        ]
+    )
+    session = _session(provider, streaming=True)
+
+    await session.submit(UserInput(text="solve"))
+    events = session.drain_events()
+    event_types = _types(events)
+
+    start_index = event_types.index("agent_reasoning_started")
+    completed_index = event_types.index("agent_reasoning_completed")
+    answer_delta_index = event_types.index("agent_message_delta")
+    assert start_index < answer_delta_index < completed_index
+    deltas = [
+        event.msg for event in events if isinstance(event.msg, AgentReasoningDelta)
+    ]
+    assert [(message.channel, message.delta) for message in deltas] == [
+        (ReasoningChannel.SUMMARY, "Checked inputs."),
+        (ReasoningChannel.PROVIDER_TRACE, "provider trace"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_finalization_retry_has_its_own_reasoning_lifecycle():
+    provider = ScriptedProvider(
+        [
+            LLMResponse(content="", finish_reason="stop"),
+            LLMResponse(content="", finish_reason="stop"),
+            LLMResponse(
+                content="recovered answer",
+                reasoning_summary="Recovered from empty responses.",
+                finish_reason="stop",
+            ),
+        ]
+    )
+    session = _session(provider)
+
+    await session.submit(UserInput(text="solve"))
+    events = session.drain_events()
+
+    completed = [
+        event.msg for event in events if isinstance(event.msg, AgentReasoningCompleted)
+    ]
+    assert provider.calls == 3
+    assert len(completed) == 1
+    assert completed[0].summary_text == "Recovered from empty responses."
+    assert (
+        next(event.msg.text for event in events if isinstance(event.msg, AgentMessage))
+        == "recovered answer"
+    )
 
 
 @pytest.mark.asyncio

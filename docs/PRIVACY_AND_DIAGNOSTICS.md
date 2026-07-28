@@ -10,6 +10,10 @@ server.
   and task links remain in the existing central JSONL Session store.
 - Desktop-only projections, execution state, workflow checkpoints, test
   results, and event replay data are stored in the Desktop SQLite database.
+- Provider-returned reasoning summaries or details, when available, remain
+  separate from assistant messages. Safe summaries may be retained in canonical
+  Session metadata; display details stay in the local execution projection.
+  Opaque provider continuation state is not rendered as text.
 - Generated code and workflow artifacts stay inside the selected project or
   its DeepCode-owned worktree.
 - Provider credentials are written only through the existing DeepCode

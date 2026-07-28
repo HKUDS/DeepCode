@@ -16,6 +16,7 @@ import type {
   WorkflowSnapshotResult,
 } from "../generated/app-server";
 import type { BridgeError, SidecarStatus } from "../rpc/contracts";
+import { appendReasoningDelta } from "./reasoningPayload";
 
 export interface TurnPlanState extends TurnPlan {
   turnId: string;
@@ -174,6 +175,21 @@ function applyItemDelta(state: WorkspaceState, event: Event): WorkspaceState {
   }
 
   const current = state.items[index];
+  const reasoningChannel = event.payload.reasoningChannel;
+  const isReasoningDelta =
+    current.kind === "reasoning_summary" &&
+    (reasoningChannel === "summary" ||
+      reasoningChannel === "provider_trace");
+  if (current.kind === "reasoning_summary" && !isReasoningDelta) {
+    return {
+      ...state,
+      lastSequence: Math.max(state.lastSequence, event.sequence),
+      entitySequences: {
+        ...state.entitySequences,
+        [key]: event.sequence,
+      },
+    };
+  }
   const currentText =
     typeof current.payload.text === "string" ? current.payload.text : "";
   const summary =
@@ -184,16 +200,19 @@ function applyItemDelta(state: WorkspaceState, event: Event): WorkspaceState {
     typeof event.payload.updatedAt === "string"
       ? event.payload.updatedAt
       : event.timestamp;
+  const payload = isReasoningDelta
+    ? appendReasoningDelta(current.payload, reasoningChannel, delta)
+    : {
+        ...current.payload,
+        text: currentText + delta,
+        streaming: true,
+      };
   const items = state.items.slice();
   items[index] = {
     ...current,
     status: "in_progress",
     summary,
-    payload: {
-      ...current.payload,
-      text: currentText + delta,
-      streaming: true,
-    },
+    payload,
     updatedAt,
   };
   return {

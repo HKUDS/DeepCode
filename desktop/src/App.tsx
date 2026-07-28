@@ -10,6 +10,7 @@ import { RuntimeNotice } from "./components/RuntimeNotice";
 import { Composer } from "./features/execution/Composer";
 import { DesktopSidebar } from "./features/navigation/DesktopSidebar";
 import { ThreadHeader } from "./features/thread/ThreadHeader";
+import { useTranscriptMode } from "./features/thread/transcriptMode";
 import type { DesktopRuntime } from "./rpc/contracts";
 import { tauriRuntime } from "./rpc/tauriRuntime";
 import styles from "./App.module.css";
@@ -56,6 +57,7 @@ function LoadingSurface({
 export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
   const controller = useWorkspaceController(runtime);
   const ui = useDesktopUi();
+  const transcript = useTranscriptMode();
   const runComposerCommand = useComposerCommands(controller, ui);
   const { state, selectedProject, selectedThread } = controller;
   const activeTurn = latestExecutingTurn(
@@ -263,6 +265,7 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
                     approvals={state.approvals}
                     plansByTurnId={state.plansByTurnId}
                     selectedItemId={state.selectedItemId}
+                    transcriptMode={transcript.mode}
                     busy={state.busy}
                     onSelectItem={controller.selectItem}
                     onOpenInspector={ui.openInspector}
@@ -319,6 +322,8 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
                     : []
                 }
                 disabledReason={disabledReason}
+                transcriptMode={transcript.mode}
+                onTranscriptModeChange={transcript.selectMode}
                 onModelChange={(connectionId, model, reasoningEffort) =>
                   void controller.setThreadExecution(
                     connectionId,

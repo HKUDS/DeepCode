@@ -21,6 +21,7 @@ import type { DesktopPermissionMode } from "../../app/useWorkspaceController";
 import type { GoalDefinitionInput } from "../../app/useWorkspaceController";
 import type { InteractiveDelivery } from "../../app/interactiveTurnRouter";
 import type { DesktopRuntime } from "../../rpc/contracts";
+import type { TranscriptMode } from "../thread/transcriptMode";
 import { useSkillCatalog } from "../skills/useSkillCatalog";
 import { GoalRail } from "../goal/GoalRail";
 import {
@@ -31,6 +32,7 @@ import {
 import styles from "./Composer.module.css";
 import { usePromptDraft } from "./usePromptDraft";
 import { ModelPicker } from "./ModelPicker";
+import { TranscriptModePicker } from "./TranscriptModePicker";
 
 interface ComposerProps {
   editable: boolean;
@@ -45,6 +47,8 @@ interface ComposerProps {
   goalOutcome: GoalOutcome | null;
   goalTurns: readonly Turn[];
   disabledReason: string | null;
+  transcriptMode: TranscriptMode;
+  onTranscriptModeChange(mode: TranscriptMode): void;
   onModelChange(
     connectionId: string | null,
     model: string | null,
@@ -80,6 +84,8 @@ export function Composer({
   goalOutcome,
   goalTurns,
   disabledReason,
+  transcriptMode,
+  onTranscriptModeChange,
   onModelChange,
   onPermissionModeChange,
   onSetGoal,
@@ -449,6 +455,10 @@ export function Composer({
               settings={settings}
               disabled={busy}
               onChange={onModelChange}
+            />
+            <TranscriptModePicker
+              mode={transcriptMode}
+              onChange={onTranscriptModeChange}
             />
             <label className={styles.selector} title="Tool permission mode">
               <ShieldCheck size={12} />

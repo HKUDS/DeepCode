@@ -12,6 +12,7 @@ from loguru import logger
 
 from core.providers.base import LLMResponse, ToolCallRequest
 from core.providers.reasoning import OPENAI_RESPONSE_REASONING_ITEMS
+from core.reasoning import ReasoningChannel
 
 FINISH_REASON_MAP = {
     "completed": "stop",
@@ -63,6 +64,9 @@ async def iter_sse(response: httpx.Response) -> AsyncGenerator[dict[str, Any], N
 async def consume_sse(
     response: httpx.Response,
     on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+    on_reasoning_delta: (
+        Callable[[str, ReasoningChannel], Awaitable[None]] | None
+    ) = None,
 ) -> tuple[str, list[ToolCallRequest], str]:
     """Consume a Responses API SSE stream into ``(content, tool_calls, finish_reason)``."""
     content = ""
@@ -88,6 +92,10 @@ async def consume_sse(
             content += delta_text
             if on_content_delta and delta_text:
                 await on_content_delta(delta_text)
+        elif event_type == "response.reasoning_summary_text.delta":
+            delta_text = event.get("delta") or ""
+            if on_reasoning_delta and delta_text:
+                await on_reasoning_delta(delta_text, ReasoningChannel.SUMMARY)
         elif event_type == "response.function_call_arguments.delta":
             call_id = event.get("call_id")
             if call_id and call_id in tool_call_buffers:
@@ -226,6 +234,9 @@ def parse_response_output(response: Any) -> LLMResponse:
 async def consume_sdk_stream(
     stream: Any,
     on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+    on_reasoning_delta: (
+        Callable[[str, ReasoningChannel], Awaitable[None]] | None
+    ) = None,
 ) -> tuple[
     str,
     list[ToolCallRequest],
@@ -261,6 +272,10 @@ async def consume_sdk_stream(
             content += delta_text
             if on_content_delta and delta_text:
                 await on_content_delta(delta_text)
+        elif event_type == "response.reasoning_summary_text.delta":
+            delta_text = getattr(event, "delta", "") or ""
+            if on_reasoning_delta and delta_text:
+                await on_reasoning_delta(delta_text, ReasoningChannel.SUMMARY)
         elif event_type == "response.function_call_arguments.delta":
             call_id = getattr(event, "call_id", None)
             if call_id and call_id in tool_call_buffers:

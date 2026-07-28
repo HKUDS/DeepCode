@@ -28,23 +28,35 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.agent_setup import build_agent_session
 from cli.config_errors import format_config_error
 from cli.execution_options import add_reasoning_effort_argument
+from cli.transcript import TranscriptMode
 from core.config import ConfigError
 from core.events import UserInput, serialize_event
 from core.skills.management import LocalSkillManager
 from core.skills.models import MAX_SELECTED_SKILLS, SkillSelection
 
 
-def _emit_human(event) -> None:
+def _reasoning_preview(text: str, limit: int = 240) -> str:
+    first = next((line.strip() for line in text.splitlines() if line.strip()), "")
+    return first[:limit] + ("…" if len(first) > limit else "")
+
+
+def _emit_human(event, transcript_mode: TranscriptMode) -> None:
     msg = event.msg
     t = msg.type
     if t == "turn_started":
         print("· turn started", flush=True)
     elif t == "tool_started":
+        if transcript_mode is TranscriptMode.SUMMARY:
+            return
         print(f"  → {msg.name}", flush=True)
     elif t == "tool_completed":
+        if transcript_mode is TranscriptMode.SUMMARY:
+            return
         mark = "✗" if msg.is_error else "✓"
         print(f"  {mark} {msg.name}", flush=True)
     elif t == "skill_loaded":
+        if transcript_mode is TranscriptMode.SUMMARY:
+            return
         print(
             f"  ◇ skill {msg.invocation.name} ({msg.invocation.kind.value})",
             flush=True,
@@ -53,6 +65,27 @@ def _emit_human(event) -> None:
         print(f"! skill error: {msg.message}", file=sys.stderr, flush=True)
     elif t == "agent_message":
         print(f"\n{msg.text}\n", flush=True)
+    elif t == "agent_reasoning_started":
+        if transcript_mode is not TranscriptMode.SUMMARY:
+            effort = (msg.effort or "auto").title()
+            print(f"  ◇ thinking · {effort}", flush=True)
+    elif t == "agent_reasoning_completed":
+        if transcript_mode is TranscriptMode.SUMMARY:
+            return
+        if msg.availability.value == "opaque":
+            print("    details unavailable from this model", flush=True)
+            return
+        if transcript_mode is TranscriptMode.NORMAL:
+            text = _reasoning_preview(msg.summary_text or msg.trace_text)
+            if text:
+                print(f"    {text}", flush=True)
+            return
+        if msg.summary_text:
+            print(f"    {msg.summary_text}", flush=True)
+        if msg.trace_text and msg.trace_text != msg.summary_text:
+            if msg.summary_text:
+                print("    provider reasoning details", flush=True)
+            print(f"    {msg.trace_text}", flush=True)
     elif t == "error":
         print(f"! error: {msg.message}", file=sys.stderr, flush=True)
     elif t == "task_complete":
@@ -60,6 +93,9 @@ def _emit_human(event) -> None:
 
 
 async def _run(args: argparse.Namespace) -> int:
+    transcript_mode = TranscriptMode.parse(
+        "verbose" if args.verbose else args.transcript
+    )
     try:
         session, model, engine = build_agent_session(
             workspace=args.workspace,
@@ -107,7 +143,7 @@ async def _run(args: argparse.Namespace) -> int:
                     flush=True,
                 )
             else:
-                _emit_human(event)
+                _emit_human(event, transcript_mode)
             if event.msg.type == "task_complete":
                 stop_reason = event.msg.stop_reason
 
@@ -132,6 +168,18 @@ def main(argv: list[str] | None = None) -> int:
         "--json",
         action="store_true",
         help="Emit one JSON event per line (NDJSON) instead of a transcript.",
+    )
+    transcript = parser.add_mutually_exclusive_group()
+    transcript.add_argument(
+        "--transcript",
+        choices=[mode.value for mode in TranscriptMode],
+        default=TranscriptMode.NORMAL.value,
+        help="Choose how much reasoning and tool detail to print.",
+    )
+    transcript.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Alias for --transcript verbose.",
     )
     parser.add_argument("--model", "-m", default=None, help="Override the model id.")
     parser.add_argument(

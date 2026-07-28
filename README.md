@@ -407,9 +407,19 @@ connection and model from the Session composer.
 /resume <id>             restore one Session
 /model [connection] [id] show or change the model for future Turns
 /effort [auto|off|level] show or change Thinking for future Turns
+/transcript [mode]       choose normal, verbose, or summary detail
 /clear                   clear the current in-memory context
 @src/main.py             attach a file to the next prompt
 ```
+
+Thinking effort controls what the model is asked to do; transcript mode controls
+only what DeepCode displays. In the interactive CLI, press `Ctrl+O` to cycle
+`normal → verbose → summary`. Headless runs accept the same choice through
+`deepcode exec --transcript <mode>`. Reasoning remains a typed timeline item and
+is never merged into the assistant's final answer. DeepCode labels and displays
+only provider-returned summaries or provider reasoning details; some providers
+return only opaque continuation state, in which case the UI says that details
+are unavailable.
 
 Start or resume directly:
 

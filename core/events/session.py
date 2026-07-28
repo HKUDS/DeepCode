@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 from contextvars import ContextVar
 from functools import partial
+from time import monotonic
 from typing import Any
 from uuid import uuid4
 
@@ -36,7 +37,9 @@ from core.events.protocol import (
     AgentMessageCompleted,
     AgentMessageDelta,
     AgentMessagePhase,
-    AgentReasoningSummary,
+    AgentReasoningCompleted,
+    AgentReasoningDelta,
+    AgentReasoningStarted,
     ErrorEvent,
     Event,
     Interrupt,
@@ -58,6 +61,7 @@ from core.events.protocol import (
     summarize_result,
 )
 from core.providers.base import LLMProvider
+from core.reasoning import ReasoningAvailability, ReasoningChannel
 from core.skills.models import SkillError
 from core.skills.runtime import SkillRuntime, SkillTurnContext
 
@@ -92,13 +96,19 @@ class _EventEmittingHook(AgentHook):
         streaming: bool = False,
         emit_deltas: bool | None = None,
         usage_sink=None,
+        reasoning_effort: str | None = None,
     ) -> None:
         super().__init__()
         self._emit = emit
         self._streaming = streaming
         self._emit_deltas = streaming if emit_deltas is None else emit_deltas
         self._usage_sink = usage_sink
-        self._reasoning_iterations: set[int] = set()
+        self._reasoning_effort = reasoning_effort
+        self._reasoning_context_id: int | None = None
+        self._reasoning_id: str | None = None
+        self._reasoning_summary = ""
+        self._reasoning_trace = ""
+        self._reasoning_started_at: float | None = None
         self._message_id: str | None = None
         self._message_text = ""
         self._last_message_id: str | None = None
@@ -108,6 +118,19 @@ class _EventEmittingHook(AgentHook):
         # Routes the kernel through chat_stream_with_retry so assistant text
         # arrives as deltas; each delta is forwarded onto the event queue.
         return self._streaming
+
+    async def before_model_request(self, context: AgentHookContext) -> None:
+        """Arm one displayable provider response.
+
+        Internal compaction requests do not cross this boundary, so their
+        reasoning never leaks into the user transcript.
+        """
+
+        self._reasoning_context_id = id(context)
+        self._reasoning_id = None
+        self._reasoning_summary = ""
+        self._reasoning_trace = ""
+        self._reasoning_started_at = monotonic()
 
     async def on_stream(self, context: AgentHookContext, delta: str) -> None:
         if not delta:
@@ -123,6 +146,50 @@ class _EventEmittingHook(AgentHook):
                     message_id=self._message_id,
                 )
             )
+
+    def _ensure_reasoning_started(self) -> str:
+        reasoning_id = self._reasoning_id
+        if reasoning_id is None:
+            reasoning_id = uuid4().hex
+            self._reasoning_id = reasoning_id
+            self._emit(
+                AgentReasoningStarted(
+                    reasoning_id=reasoning_id,
+                    effort=self._reasoning_effort,
+                )
+            )
+        return reasoning_id
+
+    def _emit_reasoning_delta(
+        self,
+        channel: ReasoningChannel,
+        delta: str,
+    ) -> None:
+        if not delta:
+            return
+        reasoning_id = self._ensure_reasoning_started()
+        self._emit(
+            AgentReasoningDelta(
+                reasoning_id=reasoning_id,
+                channel=channel,
+                delta=delta,
+            )
+        )
+
+    async def on_reasoning_stream(
+        self,
+        context: AgentHookContext,
+        delta: str,
+        channel: ReasoningChannel,
+    ) -> None:
+        if not delta or id(context) != self._reasoning_context_id:
+            return
+        if channel is ReasoningChannel.SUMMARY:
+            self._reasoning_summary += delta
+        else:
+            self._reasoning_trace += delta
+        if self._emit_deltas:
+            self._emit_reasoning_delta(channel, delta)
 
     async def on_stream_end(
         self,
@@ -171,16 +238,70 @@ class _EventEmittingHook(AgentHook):
             for key, value in context.usage.items()
             if isinstance(value, int) and not isinstance(value, bool) and value >= 0
         }
-        if not usage:
+        if usage:
+            if self._usage_sink is not None:
+                self._usage_sink(usage)
+            self._emit(
+                ModelUsageRecorded(
+                    response_ordinal=context.response_ordinal,
+                    usage=usage,
+                )
+            )
+        if id(context) != self._reasoning_context_id or context.response is None:
             return
-        if self._usage_sink is not None:
-            self._usage_sink(usage)
+
+        response = context.response
+        summary = response.reasoning_summary or self._reasoning_summary
+        trace = response.reasoning_content or self._reasoning_trace
+        if trace and trace == summary:
+            trace = ""
+        has_opaque_state = bool(response.provider_state or response.thinking_blocks)
+        if not summary and not trace and not has_opaque_state:
+            self._reasoning_context_id = None
+            self._reasoning_started_at = None
+            return
+
+        if not self._emit_deltas:
+            self._emit_reasoning_delta(ReasoningChannel.SUMMARY, summary)
+            self._emit_reasoning_delta(ReasoningChannel.PROVIDER_TRACE, trace)
+        else:
+            if summary.startswith(self._reasoning_summary):
+                self._emit_reasoning_delta(
+                    ReasoningChannel.SUMMARY,
+                    summary[len(self._reasoning_summary) :],
+                )
+            if trace.startswith(self._reasoning_trace):
+                self._emit_reasoning_delta(
+                    ReasoningChannel.PROVIDER_TRACE,
+                    trace[len(self._reasoning_trace) :],
+                )
+
+        reasoning_id = self._ensure_reasoning_started()
+        started_at = self._reasoning_started_at
+        duration_ms = (
+            max(0, int((monotonic() - started_at) * 1000))
+            if started_at is not None
+            else None
+        )
         self._emit(
-            ModelUsageRecorded(
-                response_ordinal=context.response_ordinal,
-                usage=usage,
+            AgentReasoningCompleted(
+                reasoning_id=reasoning_id,
+                summary_text=summary,
+                trace_text=trace,
+                availability=(
+                    ReasoningAvailability.AVAILABLE
+                    if summary or trace
+                    else ReasoningAvailability.OPAQUE
+                ),
+                effort=self._reasoning_effort,
+                duration_ms=duration_ms,
             )
         )
+        self._reasoning_context_id = None
+        self._reasoning_id = None
+        self._reasoning_summary = ""
+        self._reasoning_trace = ""
+        self._reasoning_started_at = None
 
     def final_message_id(self, text: str) -> str:
         """Reuse the streamed item's ID only when its authoritative text matches."""
@@ -201,12 +322,6 @@ class _EventEmittingHook(AgentHook):
             )
 
     async def after_iteration(self, context: AgentHookContext) -> None:
-        summary = (
-            context.response.reasoning_summary if context.response is not None else None
-        )
-        if summary and context.iteration not in self._reasoning_iterations:
-            self._reasoning_iterations.add(context.iteration)
-            self._emit(AgentReasoningSummary(text=summary))
         for call, result in zip(context.tool_calls, context.tool_results):
             is_error = _is_error_result(result)
             if call.name.lower() == "update_plan" and not is_error:
@@ -632,6 +747,11 @@ class AgentSession:
             streaming=self._streaming_transport,
             emit_deltas=self._streaming,
             usage_sink=self._record_usage,
+            reasoning_effort=(
+                getattr(self.execution_profile, "reasoning_effort", None)
+                if self.execution_profile is not None
+                else None
+            ),
         )
 
         def visible_tool_names() -> tuple[str, ...] | None:

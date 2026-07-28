@@ -44,6 +44,7 @@ from core.providers.timeouts import (
     resolve_request_timeout_s,
     resolve_stream_max_runtime_s,
 )
+from core.reasoning import ReasoningChannel
 
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
 _PERSISTED_MODEL_ERROR_PLACEHOLDER = "[Assistant reply unavailable due to model error.]"
@@ -497,6 +498,7 @@ class AgentRunner:
                 messages=messages,
             )
             await hook.before_iteration(context)
+            await hook.before_model_request(context)
             response = await self._request_model(
                 spec, messages_for_model, hook, context
             )
@@ -633,6 +635,7 @@ class AgentRunner:
                 )
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=False)
+                await hook.before_model_request(context)
                 response = await self._request_finalization_retry(
                     spec, messages_for_model
                 )
@@ -851,9 +854,16 @@ class AgentRunner:
             async def _stream(delta: str) -> None:
                 await hook.on_stream(context, delta)
 
+            async def _reasoning_stream(
+                delta: str,
+                channel: ReasoningChannel,
+            ) -> None:
+                await hook.on_reasoning_stream(context, delta, channel)
+
             coro = stream_request(
                 **kwargs,
                 on_content_delta=_stream,
+                on_reasoning_delta=_reasoning_stream,
             )
         else:
             coro = self.provider.chat_with_retry(**kwargs)

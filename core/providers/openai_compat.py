@@ -30,7 +30,12 @@ else:
         )
     from openai import AsyncOpenAI
 
-from core.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from core.providers.base import (
+    LLMProvider,
+    LLMResponse,
+    ReasoningDeltaCallback,
+    ToolCallRequest,
+)
 from core.providers.model_compat import resolve_model_compat
 from core.providers.openai_responses import (
     consume_sdk_stream,
@@ -39,6 +44,7 @@ from core.providers.openai_responses import (
     parse_response_output,
 )
 from core.providers.reasoning import OPENROUTER_REASONING_DETAILS
+from core.reasoning import ReasoningChannel
 from core.providers.timeouts import (
     StreamIdleTimeoutError,
     iter_with_stream_idle_timeout,
@@ -667,6 +673,40 @@ class OpenAICompatProvider(LLMProvider):
         return "".join(parts).strip() or None
 
     @classmethod
+    async def _emit_stream_reasoning(
+        cls,
+        delta: Any,
+        callback: ReasoningDeltaCallback | None,
+    ) -> None:
+        """Normalize one reasoning delta without model-name conditionals."""
+
+        if callback is None:
+            return
+        delta_map = cls._maybe_mapping(delta) or {}
+        details = cls._reasoning_details(delta_map.get("reasoning_details"))
+        emitted_detail = False
+        for detail in details:
+            detail_type = str(detail.get("type") or "").lower()
+            if "summary" in detail_type:
+                value = detail.get("summary", detail.get("text"))
+                channel = ReasoningChannel.SUMMARY
+            elif detail_type.endswith(".text") or detail_type == "text":
+                value = detail.get("text")
+                channel = ReasoningChannel.PROVIDER_TRACE
+            else:
+                continue
+            if isinstance(value, str) and value:
+                emitted_detail = True
+                await callback(value, channel)
+        if emitted_detail:
+            return
+        text = cls._extract_text_content(delta_map.get("reasoning_content"))
+        if not text:
+            text = cls._extract_text_content(delta_map.get("reasoning"))
+        if text:
+            await callback(text, ReasoningChannel.PROVIDER_TRACE)
+
+    @classmethod
     def _extract_usage(cls, response: Any) -> dict[str, int]:
         """Extract token usage from an OpenAI-compatible response.
 
@@ -1174,6 +1214,7 @@ class OpenAICompatProvider(LLMProvider):
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_reasoning_delta: ReasoningDeltaCallback | None = None,
     ) -> LLMResponse:
         idle_timeout_s = resolve_stream_idle_timeout_s()
         started = time.monotonic()
@@ -1209,6 +1250,7 @@ class OpenAICompatProvider(LLMProvider):
                     ) = await consume_sdk_stream(
                         _timed_stream(),
                         on_content_delta,
+                        on_reasoning_delta,
                     )
                     self._record_responses_success(model, reasoning_effort)
                     response = LLMResponse(
@@ -1246,6 +1288,11 @@ class OpenAICompatProvider(LLMProvider):
                     text = getattr(chunk.choices[0].delta, "content", None)
                     if text:
                         await on_content_delta(text)
+                if chunk.choices:
+                    await self._emit_stream_reasoning(
+                        chunk.choices[0].delta,
+                        on_reasoning_delta,
+                    )
             response = self._parse_chunks(chunks)
             return response
         except StreamIdleTimeoutError:

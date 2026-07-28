@@ -24,10 +24,21 @@ if str(ROOT) not in sys.path:
 
 import core.agent_setup as agent_setup  # noqa: E402
 import cli.tui.app as tui_app  # noqa: E402
+from cli.transcript import TranscriptMode  # noqa: E402
 from cli.tui.input import InputInterrupted, InputReader, expand_file_refs  # noqa: E402
 from cli.tui.renderer import EventRenderer  # noqa: E402
-from core.events import Event, ToolCompleted  # noqa: E402
+from core.events import (  # noqa: E402
+    AgentMessage,
+    AgentMessageCompleted,
+    AgentMessageDelta,
+    AgentReasoningCompleted,
+    AgentReasoningDelta,
+    AgentReasoningStarted,
+    Event,
+    ToolCompleted,
+)
 from core.providers.base import LLMResponse, ToolCallRequest  # noqa: E402
+from core.reasoning import ReasoningAvailability, ReasoningChannel  # noqa: E402
 
 
 class _ScriptedProvider:
@@ -117,6 +128,7 @@ def test_slash_help_lists_registry(monkeypatch, tmp_path, capsys):
         "/resume",
         "/model",
         "/effort",
+        "/transcript",
         "/skills",
         "/skill",
         "/goal",
@@ -153,6 +165,151 @@ def test_cli_renderer_marks_a_nonzero_command_as_failed():
     rendered = output.getvalue()
     assert "bash failed" in rendered
     assert "[exit 2]" in rendered
+
+
+def _reasoning_events() -> list[Event]:
+    return [
+        Event("1", AgentReasoningStarted("reasoning-1", effort="high")),
+        Event(
+            "2",
+            AgentReasoningDelta(
+                "reasoning-1",
+                ReasoningChannel.SUMMARY,
+                "Checked inputs.\nAdditional summary detail.",
+            ),
+        ),
+        Event(
+            "3",
+            AgentReasoningDelta(
+                "reasoning-1",
+                ReasoningChannel.PROVIDER_TRACE,
+                "Provider trace detail.",
+            ),
+        ),
+        Event(
+            "4",
+            AgentReasoningCompleted(
+                "reasoning-1",
+                summary_text="Checked inputs.\nAdditional summary detail.",
+                trace_text="Provider trace detail.",
+                availability=ReasoningAvailability.AVAILABLE,
+                effort="high",
+                duration_ms=2200,
+            ),
+        ),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("mode", "included", "excluded"),
+    [
+        (
+            TranscriptMode.NORMAL,
+            ("Thought for 2s", "Checked inputs."),
+            ("Additional summary detail.", "Provider trace detail."),
+        ),
+        (
+            TranscriptMode.VERBOSE,
+            (
+                "Thought for 2s",
+                "Additional summary detail.",
+                "Provider trace detail.",
+            ),
+            (),
+        ),
+        (
+            TranscriptMode.SUMMARY,
+            (),
+            ("Thought for 2s", "Checked inputs.", "Provider trace detail."),
+        ),
+    ],
+)
+def test_cli_reasoning_respects_transcript_mode(mode, included, excluded):
+    output = io.StringIO()
+    renderer = EventRenderer(
+        Console(file=output, color_system=None, width=120),
+        transcript_mode=mode,
+    )
+
+    for event in _reasoning_events():
+        renderer.on_event(event)
+
+    rendered = output.getvalue()
+    for text in included:
+        assert text in rendered
+    for text in excluded:
+        assert text not in rendered
+
+
+def test_cli_status_line_tracks_live_reasoning_without_printing_deltas():
+    output = io.StringIO()
+    renderer = EventRenderer(Console(file=output, color_system=None, width=120))
+    events = _reasoning_events()
+
+    renderer.on_event(events[0])
+    renderer.on_event(events[1])
+
+    status = renderer.status_line()
+    assert "Thinking · High" in status
+    assert "Checked inputs." in status
+    assert output.getvalue() == ""
+
+
+def test_summary_mode_suppresses_stream_but_keeps_final_answer():
+    output = io.StringIO()
+    renderer = EventRenderer(
+        Console(file=output, color_system=None, width=120),
+        transcript_mode=TranscriptMode.SUMMARY,
+    )
+
+    renderer.on_event(Event("1", AgentMessageDelta("final answer", "message-1")))
+    renderer.on_event(
+        Event(
+            "2",
+            AgentMessageCompleted(
+                "message-1",
+                "final answer",
+            ),
+        ),
+    )
+    renderer.on_event(Event("3", AgentMessage("final answer", "message-1")))
+
+    assert output.getvalue().count("final answer") == 1
+
+
+def test_interactive_input_accepts_status_and_transcript_callbacks(
+    monkeypatch,
+    tmp_path,
+):
+    captured: dict[str, Any] = {}
+
+    class InteractiveInput(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    class FakePromptSession:
+        def __init__(self, **kwargs: Any) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr("sys.stdin", InteractiveInput())
+    monkeypatch.setattr("cli.tui.input.PromptSession", FakePromptSession)
+    monkeypatch.setattr("cli.tui.input._HISTORY_PATH", tmp_path / "history")
+
+    def status_provider() -> str:
+        return "Thinking"
+
+    def toggle() -> str:
+        return "verbose"
+
+    reader = InputReader(
+        str(tmp_path),
+        status_provider=status_provider,
+        toggle_transcript=toggle,
+    )
+
+    assert reader.interactive is True
+    assert captured["bottom_toolbar"] is status_provider
+    assert captured["refresh_interval"] == 0.5
 
 
 def test_skill_command_is_one_turn_only_and_persists_invocation_metadata(

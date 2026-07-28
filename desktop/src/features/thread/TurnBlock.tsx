@@ -35,12 +35,15 @@ import {
   type TimelineActivityGroup,
 } from "./conversationModel";
 import { MarkdownContent } from "./MarkdownContent";
+import { ReasoningBlock } from "./ReasoningBlock";
+import type { TranscriptMode } from "./transcriptMode";
 import styles from "./ThreadConversation.module.css";
 
 interface TurnBlockProps {
   group: ConversationTurn;
   approvalsByItem: ReadonlyMap<string, Approval>;
   selectedItemId: string | null;
+  transcriptMode: TranscriptMode;
   busy: boolean;
   onSelectItem(itemId: string): void;
   onOpenInspector(tab?: DesktopInspectorTab): void;
@@ -50,6 +53,13 @@ interface TurnBlockProps {
 }
 
 const activeTurnStatuses = new Set(["queued", "running", "waiting_approval"]);
+const summaryVisibleItemKinds = new Set<Item["kind"]>([
+  "file_change",
+  "diff",
+  "test_result",
+  "approval_request",
+  "error",
+]);
 
 interface SkillInvocationView {
   skillId: string;
@@ -208,6 +218,7 @@ function ActivityItem({
   onSelectItem,
   onOpenInspector,
   onRespondToApproval,
+  transcriptMode,
 }: {
   item: Item;
   approval: Approval | undefined;
@@ -216,7 +227,11 @@ function ActivityItem({
   onSelectItem(itemId: string): void;
   onOpenInspector(tab?: DesktopInspectorTab): void;
   onRespondToApproval(approvalId: string, decision: ApprovalDecision): void;
+  transcriptMode: TranscriptMode;
 }) {
+  if (item.kind === "reasoning_summary") {
+    return <ReasoningBlock item={item} mode={transcriptMode} />;
+  }
   if (item.kind === "approval_request" && approval) {
     const pending = approval.status === "pending";
     return (
@@ -281,14 +296,17 @@ function ActivityItem({
     );
   }
 
-  const markdownDetail =
-    item.kind === "plan" || item.kind === "reasoning_summary";
+  const markdownDetail = item.kind === "plan";
   return (
     <details
       className={styles.runStep}
       data-active={active}
       data-status={item.status}
-      open={item.status === "in_progress" || active}
+      open={
+        item.status === "in_progress" ||
+        active ||
+        transcriptMode === "verbose"
+      }
     >
       <summary>{heading}</summary>
       <div className={styles.runStepDetail}>
@@ -334,6 +352,7 @@ function ExplorationGroup({
   onSelectItem,
   onOpenInspector,
   onRespondToApproval,
+  transcriptMode,
 }: {
   group: TimelineActivityGroup;
   approvalsByItem: ReadonlyMap<string, Approval>;
@@ -342,6 +361,7 @@ function ExplorationGroup({
   onSelectItem(itemId: string): void;
   onOpenInspector(tab?: DesktopInspectorTab): void;
   onRespondToApproval(approvalId: string, decision: ApprovalDecision): void;
+  transcriptMode: TranscriptMode;
 }) {
   const active = group.items.some(
     (item) => item.status === "in_progress" || item.id === selectedItemId,
@@ -351,7 +371,10 @@ function ExplorationGroup({
   ).length;
 
   return (
-    <details className={styles.activityGroup} open={active}>
+    <details
+      className={styles.activityGroup}
+      open={active || transcriptMode === "verbose"}
+    >
       <summary>
         <Search size={14} aria-hidden="true" />
         <span>
@@ -373,6 +396,7 @@ function ExplorationGroup({
             onSelectItem={onSelectItem}
             onOpenInspector={onOpenInspector}
             onRespondToApproval={onRespondToApproval}
+            transcriptMode={transcriptMode}
           />
         ))}
       </div>
@@ -425,6 +449,7 @@ export function TurnBlock({
   onRespondToApproval,
   onRetryTurn,
   onCancelQueuedTurn,
+  transcriptMode,
 }: TurnBlockProps) {
   const queued = group.turn?.status === "queued";
   const turnId = group.turn?.id ?? null;
@@ -505,6 +530,7 @@ export function TurnBlock({
       <div className={styles.timeline}>
         {group.timeline.map((entry) => {
           if (entry.type === "activity_group") {
+            if (transcriptMode === "summary") return null;
             return (
               <ExplorationGroup
                 key={entry.id}
@@ -515,11 +541,24 @@ export function TurnBlock({
                 onSelectItem={onSelectItem}
                 onOpenInspector={onOpenInspector}
                 onRespondToApproval={onRespondToApproval}
+                transcriptMode={transcriptMode}
               />
             );
           }
           if (entry.item.kind === "assistant_message") {
+            if (
+              transcriptMode === "summary" &&
+              entry.item.payload.phase === "commentary"
+            ) {
+              return null;
+            }
             return <AssistantMessage key={entry.id} item={entry.item} />;
+          }
+          if (
+            transcriptMode === "summary" &&
+            !summaryVisibleItemKinds.has(entry.item.kind)
+          ) {
+            return null;
           }
           return (
             <div className={styles.activityEntry} key={entry.id}>
@@ -531,6 +570,7 @@ export function TurnBlock({
                 onSelectItem={onSelectItem}
                 onOpenInspector={onOpenInspector}
                 onRespondToApproval={onRespondToApproval}
+                transcriptMode={transcriptMode}
               />
             </div>
           );

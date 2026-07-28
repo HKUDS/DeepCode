@@ -121,6 +121,16 @@ async def _cmd_effort(app, args: str) -> str | None:
     )
 
 
+async def _cmd_transcript(app, args: str) -> str | None:
+    wanted = args.strip()
+    if not wanted:
+        return f"transcript mode: {app.renderer.transcript_mode.value}"
+    try:
+        return app.set_transcript_mode(wanted)
+    except ValueError as exc:
+        return str(exc)
+
+
 async def _cmd_clear(app, args: str) -> str | None:
     try:
         app.clear_conversation()
@@ -188,6 +198,12 @@ REGISTRY: dict[str, Command] = {
             "/effort [auto|off|level]",
             "show or switch reasoning effort",
             _cmd_effort,
+        ),
+        Command(
+            "transcript",
+            "/transcript [normal|verbose|summary]",
+            "show or switch transcript detail (ctrl-o cycles)",
+            _cmd_transcript,
         ),
         Command("skills", "/skills", "list discovered Skills", _cmd_skills),
         Command(

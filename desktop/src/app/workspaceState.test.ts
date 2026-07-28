@@ -174,6 +174,100 @@ describe("workspace event projection", () => {
     expect(duplicate.items[0].payload.text).toBe("Hello world");
   });
 
+  it("rebuilds typed reasoning channels without mixing them into answer text", () => {
+    const reasoning: Item = {
+      ...item("in_progress", "Thinking"),
+      id: "reasoning-1",
+      kind: "reasoning_summary",
+      payload: {
+        schemaVersion: 1,
+        summaryText: "",
+        traceText: "",
+        availability: "available",
+        effort: "high",
+        durationMs: null,
+        streaming: true,
+      },
+    };
+    const created = workspaceReducer(initialWorkspaceState, {
+      type: "event",
+      event: event(1, reasoning),
+    });
+    const summary = workspaceReducer(created, {
+      type: "event",
+      event: {
+        eventId: "reasoning-summary",
+        sequence: 2,
+        type: "item.delta",
+        threadId: turn.threadId,
+        turnId: turn.id,
+        itemId: reasoning.id,
+        timestamp: "2026-07-16T00:00:01Z",
+        payload: {
+          delta: "Checked constraints.",
+          reasoningChannel: "summary",
+          streaming: true,
+        },
+      },
+    });
+    const trace = workspaceReducer(summary, {
+      type: "event",
+      event: {
+        eventId: "reasoning-trace",
+        sequence: 3,
+        type: "item.delta",
+        threadId: turn.threadId,
+        turnId: turn.id,
+        itemId: reasoning.id,
+        timestamp: "2026-07-16T00:00:02Z",
+        payload: {
+          delta: "Provider trace.",
+          reasoningChannel: "provider_trace",
+          streaming: true,
+        },
+      },
+    });
+
+    expect(trace.items[0].payload.summaryText).toBe("Checked constraints.");
+    expect(trace.items[0].payload.traceText).toBe("Provider trace.");
+    expect(trace.items[0].payload.text).toBeUndefined();
+  });
+
+  it("ignores malformed untyped deltas for reasoning items", () => {
+    const reasoning: Item = {
+      ...item("in_progress", "Thinking"),
+      id: "reasoning-invalid",
+      kind: "reasoning_summary",
+      payload: {
+        schemaVersion: 1,
+        summaryText: "Stable",
+        traceText: "",
+        availability: "available",
+        streaming: true,
+      },
+    };
+    const created = workspaceReducer(initialWorkspaceState, {
+      type: "event",
+      event: event(1, reasoning),
+    });
+    const projected = workspaceReducer(created, {
+      type: "event",
+      event: {
+        eventId: "reasoning-invalid-delta",
+        sequence: 2,
+        type: "item.delta",
+        threadId: turn.threadId,
+        turnId: turn.id,
+        itemId: reasoning.id,
+        timestamp: "2026-07-16T00:00:01Z",
+        payload: { delta: "must not leak into text" },
+      },
+    });
+
+    expect(projected.items[0].payload.summaryText).toBe("Stable");
+    expect(projected.items[0].payload.text).toBeUndefined();
+  });
+
   it("does not let an older request snapshot overwrite a live update", () => {
     const live = workspaceReducer(initialWorkspaceState, {
       type: "event",

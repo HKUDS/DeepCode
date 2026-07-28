@@ -13,6 +13,7 @@ import { buildConversationTurns } from "./conversationModel";
 import { PlanProgress } from "./PlanProgress";
 import styles from "./ThreadConversation.module.css";
 import { TurnBlock } from "./TurnBlock";
+import type { TranscriptMode } from "./transcriptMode";
 
 interface ThreadConversationProps {
   turns: Turn[];
@@ -20,6 +21,7 @@ interface ThreadConversationProps {
   approvals: Approval[];
   plansByTurnId: Record<string, TurnPlanState>;
   selectedItemId: string | null;
+  transcriptMode: TranscriptMode;
   busy: boolean;
   onSelectItem(itemId: string): void;
   onOpenInspector(tab?: DesktopInspectorTab): void;
@@ -36,6 +38,7 @@ export function ThreadConversation({
   approvals,
   plansByTurnId,
   selectedItemId,
+  transcriptMode,
   busy,
   onSelectItem,
   onOpenInspector,
@@ -153,6 +156,7 @@ export function ThreadConversation({
               group={group}
               approvalsByItem={approvalsByItem}
               selectedItemId={selectedItemId}
+              transcriptMode={transcriptMode}
               busy={busy}
               onSelectItem={onSelectItem}
               onOpenInspector={onOpenInspector}

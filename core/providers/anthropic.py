@@ -12,12 +12,18 @@ from typing import Any
 import json_repair
 
 from core.observability import log_llm_call
-from core.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from core.providers.base import (
+    LLMProvider,
+    LLMResponse,
+    ReasoningDeltaCallback,
+    ToolCallRequest,
+)
 from core.providers.reasoning import (
     ANTHROPIC_THINKING_BLOCKS,
     infer_reasoning_capabilities,
     normalize_reasoning_effort,
 )
+from core.reasoning import ReasoningChannel
 from core.providers.timeouts import (
     StreamIdleTimeoutError,
     iter_with_stream_idle_timeout,
@@ -45,6 +51,25 @@ def _stream_text_delta(event: Any) -> str | None:
         return None
     text = (
         delta.get("text") if isinstance(delta, dict) else getattr(delta, "text", None)
+    )
+    return text if isinstance(text, str) and text else None
+
+
+def _stream_reasoning_delta(event: Any) -> str | None:
+    """Return Anthropic's provider-designated summarized thinking delta."""
+
+    delta = (
+        event.get("delta") if isinstance(event, dict) else getattr(event, "delta", None)
+    )
+    delta_type = (
+        delta.get("type") if isinstance(delta, dict) else getattr(delta, "type", None)
+    )
+    if delta_type != "thinking_delta":
+        return None
+    text = (
+        delta.get("thinking")
+        if isinstance(delta, dict)
+        else getattr(delta, "thinking", None)
     )
     return text if isinstance(text, str) and text else None
 
@@ -602,6 +627,9 @@ class AnthropicProvider(LLMProvider):
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
+        model_name = self._strip_prefix(model or self.default_model)
+        effort = normalize_reasoning_effort(reasoning_effort)
+        summarized_thinking = self._uses_summarized_thinking(model_name, effort)
         kwargs = self._build_kwargs(
             messages,
             tools,
@@ -617,10 +645,7 @@ class AnthropicProvider(LLMProvider):
             response = await self._client.messages.create(**kwargs)
             result = self._parse_response(
                 response,
-                expose_reasoning_summary=self._uses_summarized_thinking(
-                    self._strip_prefix(model or self.default_model),
-                    normalize_reasoning_effort(reasoning_effort),
-                ),
+                expose_reasoning_summary=summarized_thinking,
             )
             return result
         except Exception as e:
@@ -645,7 +670,11 @@ class AnthropicProvider(LLMProvider):
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_reasoning_delta: ReasoningDeltaCallback | None = None,
     ) -> LLMResponse:
+        model_name = self._strip_prefix(model or self.default_model)
+        effort = normalize_reasoning_effort(reasoning_effort)
+        summarized_thinking = self._uses_summarized_thinking(model_name, effort)
         kwargs = self._build_kwargs(
             messages,
             tools,
@@ -666,15 +695,22 @@ class AnthropicProvider(LLMProvider):
                     text = _stream_text_delta(event)
                     if text and on_content_delta:
                         await on_content_delta(text)
+                    reasoning = _stream_reasoning_delta(event)
+                    if reasoning and on_reasoning_delta:
+                        await on_reasoning_delta(
+                            reasoning,
+                            (
+                                ReasoningChannel.SUMMARY
+                                if summarized_thinking
+                                else ReasoningChannel.PROVIDER_TRACE
+                            ),
+                        )
                 response = await wait_for_stream_activity(
                     stream.get_final_message(), timeout_s=idle_timeout_s
                 )
             result = self._parse_response(
                 response,
-                expose_reasoning_summary=self._uses_summarized_thinking(
-                    self._strip_prefix(model or self.default_model),
-                    normalize_reasoning_effort(reasoning_effort),
-                ),
+                expose_reasoning_summary=summarized_thinking,
             )
             return result
         except StreamIdleTimeoutError:

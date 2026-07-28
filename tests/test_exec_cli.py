@@ -107,3 +107,69 @@ def test_exec_human_output(tmp_path, monkeypatch, capsys):
     out = captured.out
     assert "all done" in out  # agent message rendered
     assert "effort=high" in captured.err
+
+
+def test_exec_verbose_keeps_summary_and_provider_trace_separate(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    provider = _ScriptedProvider(
+        [
+            LLMResponse(
+                content="all done",
+                reasoning_summary="Checked the constraints.",
+                reasoning_content="Provider trace detail.",
+                finish_reason="stop",
+            )
+        ]
+    )
+    _patch(monkeypatch, provider)
+
+    rc = exec_cli.main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--transcript",
+            "verbose",
+            "say hello",
+        ]
+    )
+
+    assert rc == 0
+    output = capsys.readouterr().out
+    assert "Checked the constraints." in output
+    assert "provider reasoning details" in output
+    assert "Provider trace detail." in output
+
+
+def test_exec_summary_hides_reasoning_but_keeps_final_answer(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    provider = _ScriptedProvider(
+        [
+            LLMResponse(
+                content="all done",
+                reasoning_content="Provider trace detail.",
+                finish_reason="stop",
+            )
+        ]
+    )
+    _patch(monkeypatch, provider)
+
+    rc = exec_cli.main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--transcript",
+            "summary",
+            "say hello",
+        ]
+    )
+
+    assert rc == 0
+    output = capsys.readouterr().out
+    assert "Provider trace detail." not in output
+    assert "all done" in output

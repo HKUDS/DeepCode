@@ -129,9 +129,7 @@ def test_no_active_then_continuation_race_steers_the_winning_turn_once() -> None
     ]
     assert turns.calls[-1][1]["expected_turn_id"] == "turn_continuation"
     assert {
-        call[1]["message_id"]
-        for call in turns.calls
-        if "message_id" in call[1]
+        call[1]["message_id"] for call in turns.calls if "message_id" in call[1]
     } == {"message-1"}
 
 
@@ -249,7 +247,5 @@ def test_final_input_boundary_then_start_race_steers_next_turn_once(
     ]
     assert turns.calls[-1][1]["expected_turn_id"] == "turn_continuation"
     assert {
-        call[1]["message_id"]
-        for call in turns.calls
-        if "message_id" in call[1]
+        call[1]["message_id"] for call in turns.calls if "message_id" in call[1]
     } == {"message-1"}

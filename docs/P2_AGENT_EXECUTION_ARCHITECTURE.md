@@ -142,8 +142,10 @@ adapters:
   with `DEEPCODE_LLM_TIMEOUT_S`.
 - Streaming calls use an activity deadline instead of that short wall-clock
   deadline. Every provider event renews the default 90-second idle window,
-  including hidden reasoning events; only user-visible text is projected to
-  clients. Configure the idle window with `DEEPCODE_STREAM_IDLE_TIMEOUT_S`.
+  including reasoning events. Provider-returned reasoning is projected through
+  a typed channel separate from assistant text; each client decides whether to
+  collapse or display it. Configure the idle window with
+  `DEEPCODE_STREAM_IDLE_TIMEOUT_S`.
 - Active streams have no total runtime limit by default because token limits,
   interruption, and the idle deadline already bound normal execution. Operators
   can add a hard ceiling with `DEEPCODE_LLM_STREAM_MAX_RUNTIME_S`; a non-positive
