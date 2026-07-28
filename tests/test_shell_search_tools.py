@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from core.agent_runtime.tools.base import ToolResult  # noqa: E402
 from core.harness.tools.search import GlobTool, GrepTool  # noqa: E402
 from core.harness.tools.shell import BashTool, _preflight  # noqa: E402
 
@@ -24,6 +25,9 @@ from core.harness.tools.shell import BashTool, _preflight  # noqa: E402
 async def test_bash_runs_and_captures_output(tmp_path):
     b = BashTool(str(tmp_path))
     out = await b.execute(command="echo hello-deepcode")
+    assert isinstance(out, ToolResult)
+    assert out.is_error is False
+    assert out.metadata["exit_code"] == 0
     assert "hello-deepcode" in out
 
 
@@ -31,6 +35,9 @@ async def test_bash_runs_and_captures_output(tmp_path):
 async def test_bash_nonzero_exit_reported(tmp_path):
     b = BashTool(str(tmp_path))
     out = await b.execute(command="exit 3")
+    assert isinstance(out, ToolResult)
+    assert out.is_error is True
+    assert out.metadata["exit_code"] == 3
     assert "exit 3" in out
 
 

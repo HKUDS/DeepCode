@@ -1,6 +1,6 @@
 """Tools subsystem: native :class:`Tool` ABC + registry + MCP wrappers."""
 
-from core.agent_runtime.tools.base import Schema, Tool, tool_parameters
+from core.agent_runtime.tools.base import Schema, Tool, ToolResult, tool_parameters
 from core.agent_runtime.tools.mcp import (
     MCPPromptWrapper,
     MCPResourceWrapper,
@@ -15,6 +15,7 @@ __all__ = [
     "MCPToolWrapper",
     "Schema",
     "Tool",
+    "ToolResult",
     "ToolRegistry",
     "connect_mcp_servers",
     "tool_parameters",

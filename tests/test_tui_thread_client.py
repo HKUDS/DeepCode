@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import io
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,7 @@ from cli.tui.app import TuiApp
 from cli.tui.thread_client import TuiThreadClient
 from core.application.application import DeepCodeApplication
 from core.domain.turn import TurnStatus
+from core.events import Event
 from core.providers.base import LLMResponse, ToolCallRequest
 from core.sessions import SessionStore
 
@@ -91,6 +93,8 @@ def _make_client(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     provider: Any,
+    *,
+    event_sink: Callable[[Event], None] | None = None,
 ) -> TuiThreadClient:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -105,9 +109,49 @@ def _make_client(
         max_iterations=20,
         streaming=False,
         store=SessionStore(tmp_path / "sessions"),
+        event_sink=event_sink,
     )
     client.set_event_loop(asyncio.get_running_loop())
     return client
+
+
+@pytest.mark.asyncio
+async def test_cli_event_subscription_follows_session_switches_without_duplicates(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    provider = _BlockingProvider()
+    provider.release_first_call.set()
+    events: list[Event] = []
+    client = _make_client(
+        monkeypatch,
+        tmp_path,
+        provider,
+        event_sink=events.append,
+    )
+    original_session_id = client.session_id
+    try:
+        first = client.send("first")
+        await asyncio.wait_for(client.wait_until_idle(), timeout=5)
+        await asyncio.sleep(0)
+
+        client.new_thread()
+        second = client.send("second")
+        await asyncio.wait_for(client.wait_until_idle(), timeout=5)
+        await asyncio.sleep(0)
+
+        client.resume(original_session_id)
+        third = client.send("third")
+        await asyncio.wait_for(client.wait_until_idle(), timeout=5)
+        await asyncio.sleep(0)
+
+        assert len({first.turn.id, second.turn.id, third.turn.id}) == 3
+        assert [event.msg.type for event in events].count("turn_started") == 3
+        assert [event.msg.type for event in events].count("task_complete") == 3
+    finally:
+        await client.close()
+
+    assert client.application.turns._thread_event_observers == {}
 
 
 async def _wait_for_first_call(provider: _BlockingProvider) -> None:

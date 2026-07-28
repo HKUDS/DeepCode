@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from rich.console import Console
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -24,6 +25,8 @@ if str(ROOT) not in sys.path:
 import core.agent_setup as agent_setup  # noqa: E402
 import cli.tui.app as tui_app  # noqa: E402
 from cli.tui.input import InputInterrupted, InputReader, expand_file_refs  # noqa: E402
+from cli.tui.renderer import EventRenderer  # noqa: E402
+from core.events import Event, ToolCompleted  # noqa: E402
 from core.providers.base import LLMResponse, ToolCallRequest  # noqa: E402
 
 
@@ -127,6 +130,29 @@ def test_unknown_command_hints(monkeypatch, tmp_path, capsys):
     rc, _ = _run_tui(monkeypatch, tmp_path, "/nope\n/exit\n", ["unused"])
     assert rc == 0
     assert "unknown command" in capsys.readouterr().out
+
+
+def test_cli_renderer_marks_a_nonzero_command_as_failed():
+    output = io.StringIO()
+    renderer = EventRenderer(
+        Console(file=output, color_system=None, width=120),
+    )
+
+    renderer.on_event(
+        Event(
+            "1",
+            ToolCompleted(
+                "bash-failed",
+                "bash",
+                True,
+                "[exit 2]\nruff failed",
+            ),
+        )
+    )
+
+    rendered = output.getvalue()
+    assert "bash failed" in rendered
+    assert "[exit 2]" in rendered
 
 
 def test_skill_command_is_one_turn_only_and_persists_invocation_metadata(
@@ -253,6 +279,8 @@ def test_goal_command_uses_shared_goal_ledger_and_selected_skill(
     output = capsys.readouterr().out
     assert "Goal complete" in output
     assert "The requested work is complete." in output
+    assert "get_goal" in output
+    assert "update_goal" in output
 
     store = SessionStore(tmp_path / "sessions")
     summary = store.list_sessions()[0]
@@ -264,6 +292,44 @@ def test_goal_command_uses_shared_goal_ledger_and_selected_skill(
     assert stored is not None
     invocations = stored.messages[0].metadata["skillInvocations"]
     assert invocations[0]["name"] == "review"
+
+
+def test_goal_command_renders_tools_from_an_automatic_continuation(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    _configure_fake_goal_provider(monkeypatch, tmp_path)
+
+    rc, provider = _run_tui(
+        monkeypatch,
+        tmp_path,
+        "/goal finish across turns\n/goal wait\n/exit\n",
+        [
+            "The first Turn gathered evidence; more work remains.",
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(
+                        id="goal-complete-on-continuation",
+                        name="update_goal",
+                        arguments={
+                            "status": "complete",
+                            "reason": "The continuation finished the work.",
+                        },
+                    )
+                ],
+                finish_reason="tool_calls",
+            ),
+            "The Goal is complete.",
+        ],
+    )
+
+    assert rc == 0
+    assert provider.calls == 3
+    output = capsys.readouterr().out
+    assert "update_goal" in output
+    assert "The continuation finished the work." in output
 
 
 def test_goal_edit_and_steer_remain_available_while_work_runs_in_background(

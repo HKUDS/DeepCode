@@ -96,6 +96,21 @@ class GoalExtension(GoalRuntimeHandler):
     def read(self, thread_id: str) -> ThreadGoal | None:
         return self.store.read(thread_id)
 
+    def is_turn_accounted(
+        self,
+        thread_id: str,
+        *,
+        goal_id: str,
+        turn_id: str,
+    ) -> bool:
+        """Report whether Goal usage settlement for a Turn is durable."""
+
+        return self.store.has_turn_settlement(
+            thread_id,
+            goal_id=goal_id,
+            turn_id=turn_id,
+        )
+
     def read_outcome(self, thread_id: str) -> GoalOutcome | None:
         outcome = self.store.read_record(thread_id).outcome
         if outcome is None or outcome.decided_by_turn_id is None:
@@ -115,9 +130,9 @@ class GoalExtension(GoalRuntimeHandler):
                 turn_id=item.turn_id,
                 kind=item.kind.value,
                 status=item.status.value,
-                summary=(
-                    item.summary.strip() or item.kind.value.replace("_", " ")
-                )[:GOAL_OUTCOME_EVIDENCE_SUMMARY_MAX_CHARS],
+                summary=(item.summary.strip() or item.kind.value.replace("_", " "))[
+                    :GOAL_OUTCOME_EVIDENCE_SUMMARY_MAX_CHARS
+                ],
             )
             for item in sorted(snapshot.items, key=lambda candidate: candidate.ordinal)
             if item.kind in _EVIDENCE_KINDS
@@ -292,9 +307,7 @@ class GoalExtension(GoalRuntimeHandler):
         with self._lock(thread_id):
             goal = self.read(thread_id)
             if goal is None:
-                raise GoalNotFoundError(
-                    f"no Goal is attached to Session {thread_id}"
-                )
+                raise GoalNotFoundError(f"no Goal is attached to Session {thread_id}")
             if goal.id != expected_goal_id:
                 raise ConflictError(
                     f"Goal identity changed: expected {expected_goal_id}, actual {goal.id}"

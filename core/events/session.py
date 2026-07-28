@@ -28,6 +28,7 @@ from loguru import logger
 
 from core.agent_runtime.hook import AgentHook, AgentHookContext
 from core.agent_runtime.runner import AgentRunner, AgentRunSpec
+from core.agent_runtime.tools.base import ToolResult
 from core.agent_runtime.tools.registry import ToolRegistry
 from core.providers.catalog import context_window_for
 from core.events.protocol import (
@@ -64,6 +65,8 @@ _DEFAULT_MAX_TOOL_RESULT_CHARS = 60_000
 
 
 def _is_error_result(result: Any) -> bool:
+    if isinstance(result, ToolResult):
+        return result.is_error
     text = result if isinstance(result, str) else str(result)
     stripped = text.lstrip()
     return stripped.startswith("Error") or "permission denied" in stripped[:40]

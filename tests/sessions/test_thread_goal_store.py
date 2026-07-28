@@ -71,11 +71,14 @@ def test_outcome_preserves_the_decision_across_usage_snapshots(tmp_path) -> None
     completed = goals.update(
         session_id,
         expected_goal_id=created.id,
-        transform=lambda current: current.agent_transition(
-            ThreadGoalStatus.COMPLETE
-        ),
+        transform=lambda current: current.agent_transition(ThreadGoalStatus.COMPLETE),
         reason="Tests passed and the requested change is present.",
         source="agent",
+        turn_id="turn_deciding",
+    )
+    assert not goals.has_turn_settlement(
+        session_id,
+        goal_id=created.id,
         turn_id="turn_deciding",
     )
     goals.update(
@@ -89,12 +92,22 @@ def test_outcome_preserves_the_decision_across_usage_snapshots(tmp_path) -> None
         source="runtime",
         turn_id="turn_deciding",
     )
+    assert goals.has_turn_settlement(
+        session_id,
+        goal_id=created.id,
+        turn_id="turn_deciding",
+    )
 
     # Reopen both stores so the assertion proves recovery from disk rather than
     # an in-memory projection left behind by the deciding process.
     reopened = ThreadGoalStore(SessionStore(sessions.root))
     record = reopened.read_record(session_id)
 
+    assert reopened.has_turn_settlement(
+        session_id,
+        goal_id=created.id,
+        turn_id="turn_deciding",
+    )
     assert record.goal is not None
     assert record.goal.tokens_used == 42
     assert record.outcome is not None
@@ -113,9 +126,7 @@ def test_resuming_a_terminal_goal_clears_its_previous_outcome(tmp_path) -> None:
     goals.update(
         session_id,
         expected_goal_id=created.id,
-        transform=lambda current: current.agent_transition(
-            ThreadGoalStatus.BLOCKED
-        ),
+        transform=lambda current: current.agent_transition(ThreadGoalStatus.BLOCKED),
         reason="Dependency is unavailable.",
         source="agent",
         turn_id="turn_blocked",
@@ -123,9 +134,7 @@ def test_resuming_a_terminal_goal_clears_its_previous_outcome(tmp_path) -> None:
     goals.update(
         session_id,
         expected_goal_id=created.id,
-        transform=lambda current: current.user_transition(
-            ThreadGoalStatus.ACTIVE
-        ),
+        transform=lambda current: current.user_transition(ThreadGoalStatus.ACTIVE),
         reason="resumed by user",
         source="user",
     )

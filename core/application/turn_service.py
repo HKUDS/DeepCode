@@ -9,6 +9,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
+from uuid import uuid4
 
 from core.agent_runtime.goal_runtime import (
     GoalRuntimeContext,
@@ -132,6 +133,10 @@ class TurnService:
         )
         self._observer_lock = threading.Lock()
         self._event_observers: dict[str, Callable[[Event], None]] = {}
+        self._thread_event_observers: dict[
+            str,
+            tuple[str, Callable[[Event], None]],
+        ] = {}
         self._settled_listener_lock = threading.Lock()
         self._settled_listeners: list[TurnSettledListener] = []
         self._terminal_condition = threading.Condition()
@@ -157,6 +162,30 @@ class TurnService:
         with self._settled_listener_lock:
             if listener not in self._settled_listeners:
                 self._settled_listeners.append(listener)
+
+    def subscribe_thread_events(
+        self,
+        thread_id: str,
+        observer: Callable[[Event], None],
+    ) -> str:
+        """Observe every live SQ/EQ event for future Turns in one Thread.
+
+        Frontends use this Session-scoped subscription for ordinary, queued,
+        Goal, retry, and automatic continuation Turns alike. Persistence and
+        execution remain independent of the best-effort observer.
+        """
+
+        with self.database.read() as connection:
+            if ThreadRepository(connection).get(thread_id) is None:
+                raise ThreadNotFoundError(f"thread not found: {thread_id}")
+        token = uuid4().hex
+        with self._observer_lock:
+            self._thread_event_observers[token] = (thread_id, observer)
+        return token
+
+    def unsubscribe_thread_events(self, token: str) -> None:
+        with self._observer_lock:
+            self._thread_event_observers.pop(token, None)
 
     def remove_settled_listener(self, listener: TurnSettledListener) -> None:
         with self._settled_listener_lock:
@@ -761,7 +790,7 @@ class TurnService:
                 elif isinstance(event.msg, SkillLoaded):
                     invocation = event.msg.invocation
                     skill_invocations[invocation.skill_id] = invocation
-                self._notify_observer(turn_id, event)
+                self._notify_observer(turn_id, turn.thread_id, event)
                 projection.project(event)
             raw_usage = getattr(session, "last_usage", {})
             if not projection.usage:
@@ -929,18 +958,33 @@ class TurnService:
             error_message=error_message,
         )
 
-    def _notify_observer(self, turn_id: str, event: Event) -> None:
+    def _notify_observer(
+        self,
+        turn_id: str,
+        thread_id: str,
+        event: Event,
+    ) -> None:
         with self._observer_lock:
-            observer = self._event_observers.get(turn_id)
-        if observer is None:
-            return
-        try:
-            observer(event)
-        except Exception:
-            logging.getLogger(__name__).exception(
-                "turn event observer failed for %s",
-                turn_id,
-            )
+            observers = [
+                self._event_observers.get(turn_id),
+                *(
+                    observer
+                    for observed_thread_id, observer in self._thread_event_observers.values()
+                    if observed_thread_id == thread_id
+                ),
+            ]
+        seen: set[int] = set()
+        for observer in observers:
+            if observer is None or id(observer) in seen:
+                continue
+            seen.add(id(observer))
+            try:
+                observer(event)
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "turn event observer failed for %s",
+                    turn_id,
+                )
 
     def _remove_observer(self, turn_id: str) -> None:
         with self._observer_lock:

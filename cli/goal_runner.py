@@ -17,6 +17,7 @@ from core.application.errors import (
 from core.domain.message_provenance import ClientSurface
 from core.domain.project import TrustState
 from core.domain.thread_goal import GoalOutcome, ThreadGoal, ThreadGoalStatus
+from core.events import Event
 from core.harness.permissions import PermissionMode
 
 
@@ -53,12 +54,14 @@ class GoalRunResult:
 
 
 ProgressHook = Callable[[ThreadGoal], None]
+EventHook = Callable[[Event], None]
 
 
 async def run_goal(
     options: GoalRunOptions,
     *,
     on_progress: ProgressHook | None = None,
+    on_event: EventHook | None = None,
 ) -> GoalRunResult:
     """Create a canonical Session and wait on its ordinary-Turn Goal lifecycle."""
 
@@ -74,6 +77,7 @@ async def run_goal(
         max_iterations=options.max_iterations,
     )
     application = DeepCodeApplication.open(session_factory=factory)
+    event_token: str | None = None
     try:
         project = application.projects.add(
             str(workspace),
@@ -90,6 +94,11 @@ async def run_goal(
             model=options.model,
             reasoning_effort=options.reasoning_effort,
         )
+        if on_event is not None:
+            event_token = application.turns.subscribe_thread_events(
+                thread.id,
+                on_event,
+            )
         goal = application.goals.create(
             thread.id,
             objective=objective,
@@ -106,6 +115,8 @@ async def run_goal(
             on_progress=on_progress,
         )
     finally:
+        if event_token is not None:
+            application.turns.unsubscribe_thread_events(event_token)
         application.close()
 
 
@@ -113,6 +124,7 @@ async def resume_goal(
     options: GoalResumeOptions,
     *,
     on_progress: ProgressHook | None = None,
+    on_event: EventHook | None = None,
 ) -> GoalRunResult:
     """Resume the existing Goal without replacing Session identity or history."""
 
@@ -130,6 +142,7 @@ async def resume_goal(
         max_iterations=options.max_iterations,
     )
     application = DeepCodeApplication.open(session_factory=factory)
+    event_token: str | None = None
     try:
         if workspace_override is not None:
             override_project = application.projects.add(
@@ -153,6 +166,11 @@ async def resume_goal(
                 application,
                 goal=goal,
                 workspace=thread.workspace_path,
+            )
+        if on_event is not None:
+            event_token = application.turns.subscribe_thread_events(
+                thread.id,
+                on_event,
             )
 
         goal = _apply_budget_override(
@@ -196,6 +214,8 @@ async def resume_goal(
             on_progress=on_progress,
         )
     finally:
+        if event_token is not None:
+            application.turns.unsubscribe_thread_events(event_token)
         application.close()
 
 
@@ -242,10 +262,15 @@ async def _wait_for_goal(
     goal = initial
     last_snapshot: ThreadGoal | None = None
     while True:
-        if on_progress is not None and goal != last_snapshot:
+        settled = _goal_execution_settled(application, goal)
+        if (
+            on_progress is not None
+            and goal != last_snapshot
+            and (goal.status is ThreadGoalStatus.ACTIVE or settled)
+        ):
             on_progress(goal)
             last_snapshot = goal
-        if _goal_execution_settled(application, goal):
+        if settled:
             break
         await asyncio.sleep(0.05)
         goal = application.goals.read(thread_id) or goal
@@ -266,7 +291,11 @@ def _goal_execution_settled(
         deciding_turn = application.turns.read(deciding_turn_id).turn
     except TurnNotFoundError:
         return True
-    return deciding_turn.status.is_terminal
+    return deciding_turn.status.is_terminal and application.goals.is_turn_accounted(
+        goal.thread_id,
+        goal_id=goal.id,
+        turn_id=deciding_turn.id,
+    )
 
 
 def _result(
@@ -301,6 +330,7 @@ __all__ = [
     "GoalRunOptions",
     "GoalRunResult",
     "GoalResumeOptions",
+    "EventHook",
     "ProgressHook",
     "resume_goal",
     "run_goal",

@@ -37,6 +37,7 @@ from core.agent_runtime.runtime import (
     is_blank_text,
     repeated_external_lookup_error,
 )
+from core.agent_runtime.tools.base import ToolResult
 from core.agent_runtime.tools.registry import ToolRegistry
 from core.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from core.providers.timeouts import (
@@ -1103,6 +1104,22 @@ class AgentRunner:
                 pre_contexts,
             )
 
+        if isinstance(result, ToolResult) and result.is_error:
+            detail = str(result).replace("\n", " ").strip()[:120]
+            event = {
+                "name": tool_call.name,
+                "status": "error",
+                "detail": detail,
+            }
+            return await self._finish_tool(
+                spec,
+                tool_call,
+                result,
+                event,
+                RuntimeError(str(result)) if spec.fail_on_tool_error else None,
+                pre_contexts,
+            )
+
         detail = "" if result is None else str(result)
         detail = detail.replace("\n", " ").strip()
         if not detail:
@@ -1172,7 +1189,10 @@ class AgentRunner:
         if not contexts:
             return result
         joined = "\n\n".join(f"[hook] {c}" for c in contexts)
-        return f"{result}\n\n{joined}"
+        content = f"{result}\n\n{joined}"
+        if isinstance(result, ToolResult):
+            return result.with_content(content)
+        return content
 
     @staticmethod
     def _decision_value(decision: Any) -> str:

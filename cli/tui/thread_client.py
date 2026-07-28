@@ -54,6 +54,7 @@ class TuiThreadClient:
         self.store = store or get_default_store()
         self._event_sink = event_sink
         self._event_loop: asyncio.AbstractEventLoop | None = None
+        self._thread_event_token: str | None = None
         self._domain_token: str | None = None
         self._domain_task: asyncio.Task[None] | None = None
         self._factory = ConfiguredAgentSessionFactory(
@@ -91,6 +92,7 @@ class TuiThreadClient:
                 reasoning_effort=reasoning_effort,
             )
             self.thread = self._open_thread(resume_id)
+            self._subscribe_thread_events()
             self.execution_profile = self._resolve_selection(self.thread)
         except BaseException:
             self.application.close()
@@ -154,7 +156,6 @@ class TuiThreadClient:
             message_id=new_id("tinp"),
             cached_active_turn_id=active.id if active is not None else None,
             skill_ids=skill_ids,
-            event_observer=self._observe,
         )
         if result.delivery is InteractiveDelivery.STARTED:
             self._title_from_first_prompt(prompt)
@@ -171,7 +172,6 @@ class TuiThreadClient:
             prompt=prompt,
             message_id=new_id("tinp"),
             skill_ids=skill_ids,
-            event_observer=self._observe,
             client_surface=ClientSurface.CLI,
         )
         self._title_from_first_prompt(prompt)
@@ -213,7 +213,7 @@ class TuiThreadClient:
 
     def new_thread(self, *, title: str = "") -> Thread:
         self._require_idle()
-        self.thread = self.application.threads.start(
+        thread = self.application.threads.start(
             self.project.id,
             title=title.strip() or "New task",
             session_kind="tui",
@@ -222,14 +222,16 @@ class TuiThreadClient:
             reasoning_effort=self._requested.reasoning_effort,
             workspace_path=self.workspace,
         )
+        self._replace_thread(thread)
         return self.thread
 
     def resume(self, session_id: str) -> Thread:
         self._require_idle()
-        self.thread = self.application.threads.resume(
+        thread = self.application.threads.resume(
             session_id,
             workspace_path=self.workspace,
         )
+        self._replace_thread(thread)
         self.execution_profile = self._resolve_selection(self.thread)
         return self.thread
 
@@ -266,6 +268,10 @@ class TuiThreadClient:
 
     async def close(self) -> None:
         await self.stop_domain_events()
+        token = self._thread_event_token
+        self._thread_event_token = None
+        if token is not None:
+            self.application.turns.unsubscribe_thread_events(token)
         self.application.close()
 
     def _open_thread(self, resume_id: str | None) -> Thread:
@@ -323,6 +329,23 @@ class TuiThreadClient:
             self._event_sink(event)
             return
         loop.call_soon_threadsafe(self._event_sink, event)
+
+    def _subscribe_thread_events(self) -> None:
+        self._thread_event_token = self.application.turns.subscribe_thread_events(
+            self.thread.id,
+            self._observe,
+        )
+
+    def _replace_thread(self, thread: Thread) -> None:
+        new_token = self.application.turns.subscribe_thread_events(
+            thread.id,
+            self._observe,
+        )
+        previous_token = self._thread_event_token
+        self.thread = thread
+        self._thread_event_token = new_token
+        if previous_token is not None:
+            self.application.turns.unsubscribe_thread_events(previous_token)
 
     def _title_from_first_prompt(self, prompt: str) -> None:
         if self.thread.title != "New task":

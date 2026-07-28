@@ -40,6 +40,7 @@ from core.events import (  # noqa: E402
     serialize_event,
 )
 from core.harness.tools.plan import UpdatePlanTool  # noqa: E402
+from core.harness.tools.shell import BashTool  # noqa: E402
 from core.providers.base import LLMResponse, ToolCallRequest  # noqa: E402
 
 
@@ -258,6 +259,43 @@ async def test_tool_turn_emits_tool_started_and_completed():
     assert started.name == "echo"
     assert completed.is_error is False
     assert kinds[-1] == "task_complete"
+
+
+@pytest.mark.asyncio
+async def test_nonzero_bash_exit_emits_failed_tool_completion(tmp_path):
+    provider = ScriptedProvider(
+        [
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(
+                        id="bash-failed",
+                        name="bash",
+                        arguments={"command": "printf 'failed'; exit 9"},
+                    )
+                ],
+                finish_reason="tool_calls",
+            ),
+            LLMResponse(content="recovered", finish_reason="stop"),
+        ]
+    )
+    tools = ToolRegistry()
+    tools.register(BashTool(str(tmp_path)))
+    session = AgentSession(provider, tools, model="fake-model")
+
+    await session.submit(UserInput(text="run verification"))
+    events = session.drain_events()
+
+    completed = next(
+        event.msg for event in events if isinstance(event.msg, ToolCompleted)
+    )
+    assert completed.name == "bash"
+    assert completed.is_error is True
+    assert completed.result_preview.startswith("[exit 9]")
+    tool_message = next(
+        message for message in session.history if message.get("role") == "tool"
+    )
+    assert tool_message["content"].startswith("[exit 9]")
 
 
 @pytest.mark.asyncio

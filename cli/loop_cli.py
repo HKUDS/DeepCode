@@ -31,6 +31,7 @@ from cli.goal_runner import (
     resume_goal,
     run_goal,
 )
+from cli.tui.renderer import EventRenderer
 from core.application.errors import ApplicationError
 from core.config import ConfigError
 from core.domain.thread_goal import ThreadGoalStatus
@@ -46,6 +47,7 @@ _STATUS_STYLE = {
 
 def _run(args: argparse.Namespace) -> int:
     console = Console()
+    renderer = EventRenderer(console)
     resuming = args.resume is not None
     workspace = (
         os.path.abspath(args.workspace or os.getcwd())
@@ -92,6 +94,7 @@ def _run(args: argparse.Namespace) -> int:
                         max_iterations=args.max_iterations,
                     ),
                     on_progress=on_progress,
+                    on_event=renderer.on_event,
                 )
             )
         else:
@@ -112,6 +115,7 @@ def _run(args: argparse.Namespace) -> int:
                         max_iterations=args.max_iterations,
                     ),
                     on_progress=on_progress,
+                    on_event=renderer.on_event,
                 )
             )
     except (ApplicationError, ConfigError, OSError, ValueError) as exc:

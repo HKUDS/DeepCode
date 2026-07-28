@@ -72,6 +72,29 @@ class ThreadGoalStore:
                 expected_thread_id=thread_id,
             )
 
+    def has_turn_settlement(
+        self,
+        thread_id: str,
+        *,
+        goal_id: str,
+        turn_id: str,
+    ) -> bool:
+        """Return whether runtime accounting for one Goal Turn is durable."""
+
+        with self.sessions.session_guard(thread_id) as directory:
+            if directory is None:
+                raise ThreadGoalSessionNotFoundError(f"session not found: {thread_id}")
+            entries = self._read_entries(directory)
+        return any(
+            entry.get("_type") == THREAD_GOAL_SNAPSHOT
+            and entry.get("schemaVersion") == THREAD_GOAL_SCHEMA_VERSION
+            and entry.get("source") == GoalDecisionSource.RUNTIME.value
+            and entry.get("turnId") == turn_id
+            and isinstance(entry.get("goal"), dict)
+            and entry["goal"].get("id") == goal_id
+            for entry in reversed(entries)
+        )
+
     def read_guarded(self, thread_id: str, directory: Path) -> ThreadGoal | None:
         expected = self.sessions.root / self.sessions._validated_session_id(thread_id)
         if directory != expected:

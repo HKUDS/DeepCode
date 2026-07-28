@@ -229,6 +229,36 @@ class PlannedFactory(ScriptedFactory):
         return session
 
 
+class FailedCommandSession(ScriptedSession):
+    async def run_stream(self, _op):
+        self.history.append({"role": "user", "content": _op.text})
+        yield Event("1", TurnStarted())
+        yield Event("2", ToolStarted("bash-failed", "bash", "pytest -q"))
+        yield Event(
+            "3",
+            ToolCompleted(
+                "bash-failed",
+                "bash",
+                True,
+                "[exit 1]\n1 failed",
+            ),
+        )
+        yield Event("4", AgentMessage("failure handled"))
+        yield Event("5", TaskComplete("failure handled", "completed"))
+        self.history.append({"role": "assistant", "content": "failure handled"})
+
+
+class FailedCommandFactory(ScriptedFactory):
+    def create(self, *, workspace, model, approval_callback):
+        session = FailedCommandSession(
+            approval_callback,
+            approval=False,
+            hang=False,
+        )
+        self.sessions.append(session)
+        return session
+
+
 class UsageThenHangSession(ScriptedSession):
     async def run_stream(self, _op):
         self.history.append({"role": "user", "content": _op.text})
@@ -346,6 +376,35 @@ def test_turn_projects_stream_into_durable_items(tmp_path: Path) -> None:
     finally:
         application.close()
     assert factory.sessions[0].closed is True
+
+
+def test_thread_event_subscription_spans_turns_and_can_be_removed(
+    tmp_path: Path,
+) -> None:
+    application, thread_id = _application(tmp_path, ScriptedFactory())
+    observed: list[Event] = []
+    try:
+        token = application.turns.subscribe_thread_events(
+            thread_id,
+            observed.append,
+        )
+
+        first = application.turns.start(thread_id, prompt="first")
+        _wait_for(application, first.turn.id, TurnStatus.COMPLETED)
+        second = application.turns.start(thread_id, prompt="second")
+        _wait_for(application, second.turn.id, TurnStatus.COMPLETED)
+
+        event_types = [event.msg.type for event in observed]
+        assert event_types.count("turn_started") == 2
+        assert event_types.count("task_complete") == 2
+
+        application.turns.unsubscribe_thread_events(token)
+        observed_count = len(observed)
+        third = application.turns.start(thread_id, prompt="third")
+        _wait_for(application, third.turn.id, TurnStatus.COMPLETED)
+        assert len(observed) == observed_count
+    finally:
+        application.close()
 
 
 @pytest.mark.parametrize(
@@ -515,6 +574,24 @@ def test_plan_updates_replay_without_creating_transcript_items(
                 ],
             }
         }
+    finally:
+        application.close()
+
+
+def test_failed_command_event_projects_a_failed_desktop_item(
+    tmp_path: Path,
+) -> None:
+    application, thread_id = _application(tmp_path, FailedCommandFactory())
+    try:
+        started = application.turns.start(thread_id, prompt="Run tests")
+        snapshot = _wait_for(application, started.turn.id, TurnStatus.COMPLETED)
+
+        command = next(
+            item for item in snapshot.items if item.kind is ItemKind.COMMAND_EXECUTION
+        )
+        assert command.status is ItemStatus.FAILED
+        assert command.payload["isError"] is True
+        assert command.payload["resultPreview"].startswith("[exit 1]")
     finally:
         application.close()
 

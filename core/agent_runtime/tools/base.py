@@ -17,6 +17,37 @@ _JSON_TYPE_MAP: dict[str, type | tuple[type, ...]] = {
 }
 
 
+class ToolResult(str):
+    """Model-visible tool text with frontend-safe execution metadata.
+
+    This remains a ``str`` so providers, hooks, persistence, and existing
+    tools keep their current contract. Tools that have authoritative status
+    information can attach it without forcing frontends to parse display text.
+    """
+
+    is_error: bool
+    metadata: dict[str, Any]
+
+    def __new__(
+        cls,
+        content: str,
+        *,
+        is_error: bool = False,
+        metadata: dict[str, Any] | None = None,
+    ) -> "ToolResult":
+        result = super().__new__(cls, content)
+        result.is_error = is_error
+        result.metadata = dict(metadata or {})
+        return result
+
+    def with_content(self, content: str) -> "ToolResult":
+        return type(self)(
+            content,
+            is_error=self.is_error,
+            metadata=self.metadata,
+        )
+
+
 class Schema(ABC):
     """Abstract base for JSON Schema fragments describing tool parameters."""
 

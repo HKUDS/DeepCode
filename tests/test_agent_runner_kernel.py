@@ -24,7 +24,7 @@ if str(ROOT) not in sys.path:
 
 from core.agent_runtime.hook import AgentHook, AgentHookContext
 from core.agent_runtime.runner import AgentRunner, AgentRunSpec
-from core.agent_runtime.tools.base import Tool, tool_parameters
+from core.agent_runtime.tools.base import Tool, ToolResult, tool_parameters
 from core.agent_runtime.tools.registry import ToolRegistry
 from core.providers.base import LLMResponse, ToolCallRequest
 
@@ -47,6 +47,24 @@ class EchoTool(Tool):
 
     async def execute(self, **kwargs: Any) -> Any:
         return f"echo: {kwargs.get('text', '')}"
+
+
+@tool_parameters({"type": "object", "properties": {}})
+class StructuredFailureTool(Tool):
+    @property
+    def name(self) -> str:
+        return "structured_failure"
+
+    @property
+    def description(self) -> str:
+        return "Return a model-visible structured failure."
+
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        return ToolResult(
+            "[exit 7]\nverification failed",
+            is_error=True,
+            metadata={"exit_code": 7},
+        )
 
 
 class ScriptedProvider:
@@ -154,6 +172,43 @@ async def test_tool_call_roundtrip_feeds_result_back():
     assert len(tool_messages) == 1
     assert tool_messages[0]["content"] == "echo: hi"
     assert provider.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_structured_tool_failure_remains_model_visible_and_marks_event_error():
+    provider = ScriptedProvider(
+        [
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(
+                        id="c1",
+                        name="structured_failure",
+                        arguments={},
+                    )
+                ],
+                finish_reason="tool_calls",
+            ),
+            LLMResponse(content="handled failure", finish_reason="stop"),
+        ]
+    )
+    tools = ToolRegistry()
+    tools.register(StructuredFailureTool())
+
+    result = await AgentRunner(provider).run(_spec(provider, tools=tools))
+
+    tool_message = next(
+        message for message in result.messages if message.get("role") == "tool"
+    )
+    assert tool_message["content"].startswith("[exit 7]")
+    assert result.tool_events == [
+        {
+            "name": "structured_failure",
+            "status": "error",
+            "detail": "[exit 7] verification failed",
+        }
+    ]
+    assert result.final_content == "handled failure"
 
 
 @pytest.mark.asyncio

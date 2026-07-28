@@ -18,7 +18,7 @@ from core.agent_runtime.processes import (
     subprocess_group_kwargs,
     terminate_process_tree,
 )
-from core.agent_runtime.tools.base import Tool, tool_parameters
+from core.agent_runtime.tools.base import Tool, ToolResult, tool_parameters
 from core.harness.sandbox import build_exec_command
 
 _MAX_OUTPUT_CHARS = 30_000
@@ -113,16 +113,27 @@ class BashTool(Tool):
 
         text = out.decode("utf-8", errors="replace")
         rc = proc.returncode
+        assert rc is not None
         header = f"[exit {rc}]" if rc else ""
         if len(text) <= _MAX_OUTPUT_CHARS:
-            return f"{header}\n{text}".strip() if header else text
+            content = f"{header}\n{text}".strip() if header else text
+            return ToolResult(
+                content,
+                is_error=rc != 0,
+                metadata={"exit_code": rc},
+            )
 
         # Spill full output to a file; return a bounded preview + the path.
         fd, path = tempfile.mkstemp(prefix="deepcode-bash-", suffix=".txt")
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
         preview = text[-_MAX_OUTPUT_CHARS:]
-        return (
+        content = (
             f"{header}\n...output truncated ({len(text)} chars). "
             f"Full output saved to: {path}\n\n{preview}"
         ).strip()
+        return ToolResult(
+            content,
+            is_error=rc != 0,
+            metadata={"exit_code": rc},
+        )
