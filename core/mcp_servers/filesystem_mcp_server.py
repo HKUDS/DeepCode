@@ -15,7 +15,7 @@ v2.0 新增: shell_run — 在沙箱内执行命令，完全替代 Bash
   }
 }
 """
-import json, os, io, stat, shutil, mimetypes, base64, fnmatch, difflib, re, hashlib, subprocess, signal, time
+import json, os, io, stat, shutil, mimetypes, base64, fnmatch, difflib, re, hashlib, subprocess, signal, time, threading, uuid
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
@@ -23,6 +23,9 @@ from typing import Optional
 from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("filesystem")
+
+# ── 后台进程管理 ──
+_background_procs: dict[str, dict] = {}  # {proc_id: {proc, command, cwd, started_at, log_file}}
 
 # ── 安全: 只允许访问这些目录 ──
 ALLOWED_ROOTS = [
@@ -684,6 +687,7 @@ def shell_run(
     env: dict = None,
     shell: bool = True,
     capture_both: bool = True,
+    background: bool = False,
 ) -> str:
     """🚀 在沙箱白名单目录内执行 Shell 命令。
 
@@ -703,9 +707,7 @@ def shell_run(
 
     Examples:
         shell_run("git status")
-        shell_run("python --version")
-        shell_run("git diff --stat HEAD~1")
-        shell_run("pip list | grep torch")
+        shell_run("python -m http.server 8080", background=True)
         shell_run("find . -name '*.py' | head -20")
     """
     # ── CWD 验证 ──
@@ -723,10 +725,44 @@ def shell_run(
         return json.dumps({"ok": False, "error": reason, "was_blocked": True})
 
     # ── 超时限制 ──
-    if timeout > 300:
+    if timeout > 300 and not background:
         timeout = 300
 
-    # ── 执行 ──
+    # ── 后台模式 ──
+    if background:
+        proc_id = uuid.uuid4().hex[:8]
+        log_file = Path(cwd) / f".shell_bg_{proc_id}.log"
+        log_f = open(log_file, "w", encoding="utf-8")
+
+        kwargs = {"cwd": cwd, "stdout": log_f, "stderr": log_f}
+        if env:
+            merged_env = os.environ.copy()
+            merged_env.update(env)
+            kwargs["env"] = merged_env
+        if shell:
+            kwargs["shell"] = True
+
+        proc = subprocess.Popen(command, **kwargs)
+
+        _background_procs[proc_id] = {
+            "proc": proc,
+            "command": command[:500],
+            "cwd": cwd,
+            "started_at": datetime.now().isoformat(),
+            "log_file": str(log_file),
+        }
+
+        return json.dumps({
+            "ok": True,
+            "proc_id": proc_id,
+            "command": command[:500],
+            "cwd": cwd,
+            "log_file": str(log_file),
+            "background": True,
+            "note": f"Use shell_background_output('{proc_id}') to read output, shell_background_kill('{proc_id}') to stop."
+        }, ensure_ascii=False)
+
+    # ── 前台执行 ──
     start = time.time()
     try:
         kwargs = {
@@ -814,6 +850,98 @@ def shell_check_command(command: str) -> str:
     """检查命令是否在白名单中（不实际执行）。用于预检。"""
     allowed, reason = _check_command(command)
     return json.dumps({"command": command[:200], "allowed": allowed, "reason": reason})
+
+
+@mcp.tool()
+def shell_background_list() -> str:
+    """列出所有后台运行的进程"""
+    procs = []
+    for pid, info in _background_procs.items():
+        p = info["proc"]
+        running = p.poll() is None
+        procs.append({
+            "proc_id": pid,
+            "command": info["command"][:120],
+            "cwd": info["cwd"],
+            "started_at": info["started_at"],
+            "log_file": info["log_file"],
+            "running": running,
+            "exit_code": p.returncode if not running else None,
+        })
+    return json.dumps({"ok": True, "count": len(procs), "processes": procs}, ensure_ascii=False, indent=2)
+
+
+@mcp.tool()
+def shell_background_output(proc_id: str, tail: int = 50) -> str:
+    """读取后台进程的日志输出
+
+    Args:
+        proc_id: shell_run(background=True) 返回的进程 ID
+        tail:    只返回最后 N 行 (默认 50，0 表示全部)
+    """
+    if proc_id not in _background_procs:
+        return json.dumps({"ok": False, "error": f"Process not found: {proc_id}"})
+
+    info = _background_procs[proc_id]
+    log_file = info["log_file"]
+    running = info["proc"].poll() is None
+
+    if not Path(log_file).exists():
+        return json.dumps({"ok": True, "proc_id": proc_id, "running": running, "output": "(no output yet)", "log_file": log_file})
+
+    try:
+        content = Path(log_file).read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return json.dumps({"ok": True, "proc_id": proc_id, "running": running, "output": "(cannot read log)", "log_file": log_file})
+
+    lines = content.splitlines()
+    if tail > 0 and len(lines) > tail:
+        content = "\n".join(lines[-tail:]) + f"\n... [{len(lines) - tail} earlier lines omitted]"
+
+    max_chars = 30000
+    if len(content) > max_chars:
+        content = content[:max_chars] + f"\n... [truncated at {max_chars} chars]"
+
+    return json.dumps({
+        "ok": True,
+        "proc_id": proc_id,
+        "running": running,
+        "exit_code": info["proc"].returncode if not running else None,
+        "output": content,
+        "log_file": log_file,
+    }, ensure_ascii=False)
+
+
+@mcp.tool()
+def shell_background_kill(proc_id: str) -> str:
+    """终止后台进程
+
+    Args:
+        proc_id: shell_run(background=True) 返回的进程 ID
+    """
+    if proc_id not in _background_procs:
+        return json.dumps({"ok": False, "error": f"Process not found: {proc_id}"})
+
+    info = _background_procs[proc_id]
+    proc = info["proc"]
+    running = proc.poll() is None
+
+    if not running:
+        exit_code = proc.returncode
+        del _background_procs[proc_id]
+        return json.dumps({"ok": True, "proc_id": proc_id, "was_running": False, "exit_code": exit_code, "killed": False})
+
+    # 优雅终止 → 强制终止
+    proc.terminate()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+
+    exit_code = proc.returncode
+    del _background_procs[proc_id]
+    return json.dumps({"ok": True, "proc_id": proc_id, "was_running": True, "exit_code": exit_code, "killed": True})
 
 
 # ════════════════════════════════════════════════════════════════
