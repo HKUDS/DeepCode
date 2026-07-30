@@ -1,0 +1,12 @@
+{
+  "name": "deepcode-agent",
+  "version": "2.0.0",
+  "description": "DeepCode Agent — 完整 Agent 体系 (消息类型 + 线程派生系统), 移植自 codex.exe v0.145.0",
+  "author": "DeepCode + RE (codex.exe v0.145.0)",
+  "entry": "SKILL.md",
+  "dependencies": [],
+  "modules": [
+    "agent.py",
+    "agent_thread_manager.py"
+  ]
+}
