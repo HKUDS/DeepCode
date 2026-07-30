@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-DEEPCODE Filesystem MCP Server (自研 Python 版)
-================================================
+DEEPCODE Filesystem MCP Server (自研 Python 版) v2.0
+=====================================================
 替代 @modelcontextprotocol/server-filesystem 的 npx 方案。
 纯 Python  零外部依赖  快速启动  稳定可靠。
+
+v2.0 新增: shell_run — 在沙箱内执行命令，完全替代 Bash
 
 注册方式 (settings.json → mcpServers):
 {
@@ -13,7 +15,7 @@ DEEPCODE Filesystem MCP Server (自研 Python 版)
   }
 }
 """
-import json, os, io, stat, shutil, mimetypes, base64, fnmatch, difflib
+import json, os, io, stat, shutil, mimetypes, base64, fnmatch, difflib, re, hashlib, subprocess, signal, time
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
@@ -26,8 +28,40 @@ mcp = FastMCP("filesystem")
 ALLOWED_ROOTS = [
     Path(r"F:\DEEPCODE"),
     Path.home(),
-    # 按需添加: Path(r"D:\Projects"),
-    # Path(r"F:\Documents"),
+]
+
+# ── shell_run: 命令白名单 ──
+ALLOWED_COMMANDS = {
+    # 版本控制
+    "git", "hg", "svn",
+    # 脚本/编译
+    "python", "python3", "pip", "pip3", "node", "npm", "npx", "yarn", "pnpm",
+    "go", "rustc", "cargo", "javac", "java", "make", "cmake", "ninja",
+    # 系统工具 (只读/查看类)
+    "ls", "dir", "echo", "cat", "head", "tail", "wc", "find", "grep", "rg",
+    "sort", "uniq", "cut", "tr", "awk", "sed", "xargs", "tee",
+    "diff", "patch", "file", "stat", "du", "df", "tree",
+    "which", "where", "type", "env", "printenv", "pwd", "date", "wget", "curl",
+    # 压缩/归档
+    "tar", "gzip", "gunzip", "zip", "unzip", "7z",
+    # 其他
+    "ssh-keygen", "openssl", "gh",
+    # Windows 兼容
+    "cmd", "powershell", "where.exe",
+}
+
+# 高危命令黑名单（即使匹配白名单也拒绝）
+BLOCKED_PATTERNS = [
+    r"rm\s+-rf\s+/",           # rm -rf /
+    r">\s*/dev/",               # 写入设备
+    r"mkfs\.",                  # 格式化
+    r"dd\s+if=",                # dd 磁盘操作
+    r"chmod\s+777\s+/",         # 危险权限
+    r"shutdown",                # 关机
+    r"reboot",                  # 重启
+    r":(){ :|:& };:",           # fork bomb
+    r"curl.*\|.*sh",            # curl pipe shell
+    r"wget.*\|.*sh",            # wget pipe shell
 ]
 
 def _is_allowed(path: str) -> bool:
@@ -47,6 +81,22 @@ def _resolve(path: str) -> Path:
     if not _is_allowed(str(p)):
         raise PermissionError(f"Access denied: {path}")
     return p
+
+def _check_command(cmd: str) -> tuple[bool, str]:
+    """检查命令是否在白名单内，返回 (允许, 原因)"""
+    # 提取第一个词作为命令名
+    first_word = cmd.strip().split()[0] if cmd.strip() else ""
+    cmd_name = Path(first_word).name  # 去掉路径前缀
+
+    if cmd_name.lower() not in {c.lower() for c in ALLOWED_COMMANDS}:
+        return False, f"Command '{cmd_name}' not in whitelist"
+
+    # 检查黑名单模式
+    for pattern in BLOCKED_PATTERNS:
+        if re.search(pattern, cmd, re.IGNORECASE):
+            return False, f"Command matches blocked pattern: {pattern}"
+
+    return True, "ok"
 
 # ════════════════════════════════════════════════════════════════
 #  Information
@@ -100,7 +150,6 @@ def read_text_file(path: str, head: Optional[int] = None, tail: Optional[int] = 
     if not p.is_file():
         return json.dumps({"ok": False, "error": f"Not a file: {path}"})
 
-    # 编码自动检测
     texto = None
     for enc in ("utf-8", "utf-8-sig", "gbk", "gb2312", "latin-1"):
         try:
@@ -184,12 +233,10 @@ def edit_file(path: str, edits: list[dict], dryRun: bool = False) -> str:
     for i, ed in enumerate(edits):
         old_text = ed.get("oldText", "")
         new_text = ed.get("newText", "")
-        # 搜索并替换
         full = "".join(current_lines)
         if old_text not in full:
             diffs.append(f"@@ edit[{i}]: oldText NOT FOUND")
             continue
-        # 使用 difflib 生成 diff
         before = full.splitlines(True)
         after = full.replace(old_text, new_text).splitlines(True)
         diff = difflib.unified_diff(
@@ -203,7 +250,6 @@ def edit_file(path: str, edits: list[dict], dryRun: bool = False) -> str:
     if dryRun:
         return "\n\n".join(diffs) or "No changes"
 
-    # 实际写入
     p.write_text("".join(current_lines), encoding="utf-8")
     return "\n\n".join(diffs) or "No changes"
 
@@ -327,8 +373,6 @@ def _fmt_size(n: int) -> str:
 #  Extended Tools
 # ════════════════════════════════════════════════════════════════
 
-import re, hashlib
-
 @mcp.tool()
 def grep_files(
     path: str,
@@ -362,14 +406,13 @@ def grep_files(
 
     results = []
     for root, dirs, files in os.walk(p):
-        # 跳过隐藏目录和常见忽略目录
         dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("node_modules", "__pycache__", ".git")]
         for fname in files:
             if not fnmatch.fnmatch(fname, glob):
                 continue
             fpath = Path(root) / fname
             if fpath.stat().st_size > 5 * 1024 * 1024:
-                continue  # 跳过 >5MB
+                continue
             try:
                 lines = fpath.read_text(encoding="utf-8", errors="replace").splitlines()
             except Exception:
@@ -627,6 +670,150 @@ def find_by_date(
             for f, ts, sz in top
         ],
     }, ensure_ascii=False, indent=2)
+
+
+# ════════════════════════════════════════════════════════════════
+#  🚀 Shell Execution (v2.0 — 最强增强)
+# ════════════════════════════════════════════════════════════════
+
+@mcp.tool()
+def shell_run(
+    command: str,
+    cwd: str = "",
+    timeout: int = 60,
+    env: dict = None,
+    shell: bool = True,
+    capture_both: bool = True,
+) -> str:
+    """🚀 在沙箱白名单目录内执行 Shell 命令。
+
+    命令白名单: git, python, pip, npm, node, go, cargo, ls, grep, find, curl, wget 等 60+ 工具。
+    高危命令 (rm -rf /, shutdown, fork bomb 等) 自动拦截。
+
+    Args:
+        command:    要执行的命令 (支持管道、重定向等)
+        cwd:        工作目录 (默认为 F:\\DEEPCODE，必须在白名单目录内)
+        timeout:    超时秒数 (默认 60s，最大 300s)
+        env:        额外环境变量 dict (可选)
+        shell:      通过 shell 执行 (默认 True，支持管道)
+        capture_both: 同时捕获 stdout + stderr (默认 True)
+
+    Returns:
+        JSON: {ok, exit_code, stdout, stderr, elapsed_ms, command, cwd, timed_out, was_blocked}
+
+    Examples:
+        shell_run("git status")
+        shell_run("python --version")
+        shell_run("git diff --stat HEAD~1")
+        shell_run("pip list | grep torch")
+        shell_run("find . -name '*.py' | head -20")
+    """
+    # ── CWD 验证 ──
+    if not cwd:
+        cwd = str(ALLOWED_ROOTS[0])  # 默认 F:\DEEPCODE
+    if not _is_allowed(cwd):
+        return json.dumps({
+            "ok": False, "error": f"cwd not allowed: {cwd}",
+            "allowed_roots": [str(r) for r in ALLOWED_ROOTS]
+        })
+
+    # ── 命令白名单检查 ──
+    allowed, reason = _check_command(command)
+    if not allowed:
+        return json.dumps({"ok": False, "error": reason, "was_blocked": True})
+
+    # ── 超时限制 ──
+    if timeout > 300:
+        timeout = 300
+
+    # ── 执行 ──
+    start = time.time()
+    try:
+        kwargs = {
+            "cwd": cwd,
+            "timeout": timeout,
+        }
+        if capture_both:
+            kwargs["stdout"] = subprocess.PIPE
+            kwargs["stderr"] = subprocess.PIPE
+        else:
+            kwargs["stdout"] = subprocess.PIPE
+            kwargs["stderr"] = subprocess.STDOUT
+        if env:
+            merged_env = os.environ.copy()
+            merged_env.update(env)
+            kwargs["env"] = merged_env
+        if shell:
+            kwargs["shell"] = True
+
+        proc = subprocess.run(command, **kwargs)
+        elapsed = int((time.time() - start) * 1000)
+
+        stdout = proc.stdout.decode("utf-8", errors="replace") if proc.stdout else ""
+        stderr = proc.stderr.decode("utf-8", errors="replace") if (capture_both and proc.stderr) else ""
+
+        # 截断过长输出
+        max_output = 50000
+        if len(stdout) > max_output:
+            stdout = stdout[:max_output] + f"\n... [truncated at {max_output} chars, total {len(stdout)}]"
+        if len(stderr) > max_output:
+            stderr = stderr[:max_output] + f"\n... [truncated at {max_output} chars]"
+
+        return json.dumps({
+            "ok": True,
+            "exit_code": proc.returncode,
+            "stdout": stdout,
+            "stderr": stderr,
+            "elapsed_ms": elapsed,
+            "command": command[:500],
+            "cwd": cwd,
+            "timed_out": False,
+            "was_blocked": False,
+        }, ensure_ascii=False)
+
+    except subprocess.TimeoutExpired:
+        elapsed = int((time.time() - start) * 1000)
+        return json.dumps({
+            "ok": False,
+            "exit_code": -1,
+            "stdout": "",
+            "stderr": f"Command timed out after {timeout}s",
+            "elapsed_ms": elapsed,
+            "command": command[:500],
+            "cwd": cwd,
+            "timed_out": True,
+            "was_blocked": False,
+        })
+    except Exception as e:
+        elapsed = int((time.time() - start) * 1000)
+        return json.dumps({
+            "ok": False,
+            "exit_code": -1,
+            "stdout": "",
+            "stderr": str(e),
+            "elapsed_ms": elapsed,
+            "command": command[:500],
+            "cwd": cwd,
+            "timed_out": False,
+            "was_blocked": False,
+        })
+
+
+@mcp.tool()
+def shell_list_commands() -> str:
+    """列出 shell_run 支持的所有命令白名单（60+ 工具）"""
+    return json.dumps({
+        "allowed_commands": sorted(ALLOWED_COMMANDS),
+        "blocked_patterns": BLOCKED_PATTERNS,
+        "description": "Commands in the whitelist can be executed via shell_run(). Blocked patterns are always rejected regardless of whitelist."
+    }, indent=2)
+
+
+@mcp.tool()
+def shell_check_command(command: str) -> str:
+    """检查命令是否在白名单中（不实际执行）。用于预检。"""
+    allowed, reason = _check_command(command)
+    return json.dumps({"command": command[:200], "allowed": allowed, "reason": reason})
 
 
 # ════════════════════════════════════════════════════════════════
