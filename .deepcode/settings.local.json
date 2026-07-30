@@ -1,0 +1,31 @@
+{
+  "//note": "Local settings (not committed to git). Intended to override project and user settings.",
+  "//status": "⚠️ 三级加载机制（user→project→local）尚未在核心 CLI 中实现。当前此文件未被核心引擎读取。",
+  "//permissions": "Local overrides for this machine only",
+  "permissions": {
+    "defaultMode": "askAll",
+    "allow": [
+      "read-in-cwd",
+      "write-in-cwd",
+      "read-out-cwd",
+      "write-out-cwd",
+      "delete-in-cwd",
+      "network",
+      "mcp",
+      "query-git-log",
+      "mutate-git-log"
+    ],
+    "deny": [],
+    "ask": [
+      "delete-out-cwd"
+    ]
+  },
+  "//mcpServers": "Override GitHub MCP with env var reference (WARNING: never hardcode tokens here)",
+  "mcpServers": {
+    "github": {
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+      }
+    }
+  }
+}
