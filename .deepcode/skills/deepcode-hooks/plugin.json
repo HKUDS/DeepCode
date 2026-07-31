@@ -1,0 +1,11 @@
+{
+  "name": "deepcode-hooks",
+  "version": "1.0.0",
+  "description": "DeepCode Hook System — 通用 Pre/Post 钩子框架 (对标 Claude Code hook-handler.cjs)",
+  "author": "DeepCode + Ghidra RE (Claude Code v2.1.216)",
+  "entry": "SKILL.md",
+  "dependencies": [],
+  "modules": [
+    "hooks.py"
+  ]
+}

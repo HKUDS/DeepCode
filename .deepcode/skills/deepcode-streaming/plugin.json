@@ -1,0 +1,11 @@
+{
+  "name": "deepcode-streaming",
+  "version": "1.0.0",
+  "description": "DeepCode Streaming API — SSE 流式 API 客户端，支持流式 Chat 补全",
+  "author": "DeepCode + Ghidra RE (Claude Code v2.1.216)",
+  "entry": "SKILL.md",
+  "dependencies": [],
+  "modules": [
+    "streaming_api.py"
+  ]
+}
