@@ -85,11 +85,10 @@ memory-bank/
 deepcode_lab/
 uploads/
 
-# secrets (use .env or environment variables instead)
-# NEVER commit real API keys; use the *.example files as templates.
+# Secrets belong in DeepCode's credential store or environment variables.
+# NEVER commit real API keys or local user configuration.
 deepcode_config.json
 deepcode_config.json.lock
-nanobot_config.json
 *.secrets.yaml
 *.secrets.yml
 secrets.json

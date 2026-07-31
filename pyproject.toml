@@ -26,5 +26,4 @@ ignore = [
     "rust-toolchain.toml",
     "scripts/**",
     "tests/**",
-    "uv.lock",
 ]

@@ -1,12 +1,9 @@
 include README.md
 include README_ZH.md
-include CHANGELOG.md
 include LICENSE
 include THIRD_PARTY_NOTICES.md
 include requirements.txt
 include __init__.py
-include deepcode_config.json.example
-include nanobot_config.json.example
 recursive-include prompts *
 recursive-include schema *
 recursive-include cli *.py
