@@ -4,10 +4,17 @@ from __future__ import annotations
 
 import sqlite3
 
-from core.domain.approval import Approval, ApprovalCategory, ApprovalStatus
-from core.domain.item import Item, ItemKind, ItemStatus
-from core.domain.turn import Turn, TurnStatus
+from core.domain.approval import (
+    Approval,
+    ApprovalCategory,
+    ApprovalGrant,
+    ApprovalStatus,
+)
+from core.domain.execution_permission import ExecutionPermissionMode
 from core.domain.execution_profile import ExecutionProfile
+from core.domain.item import Item, ItemKind, ItemStatus
+from core.domain.runtime_coordination import ExecutionClass
+from core.domain.turn import Turn, TurnExecutor, TurnStatus
 from core.persistence.serde import (
     dump_datetime,
     dump_json,
@@ -30,31 +37,81 @@ class TurnRepository:
         return int(row[0])
 
     def add(self, turn: Turn) -> None:
-        self.connection.execute(
-            "INSERT INTO turns (id, thread_id, ordinal, prompt, skill_ids_json, "
-            "execution_profile_json, goal_id, status, stop_reason, "
-            "error_code, error_message, "
-            "started_at, completed_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                turn.id,
-                turn.thread_id,
-                turn.ordinal,
-                turn.prompt,
-                dump_json(list(turn.skill_ids)),
+        if not self._has_coordination_columns():
+            self.connection.execute(
+                "INSERT INTO turns (id, thread_id, ordinal, prompt, skill_ids_json, "
+                "execution_profile_json, goal_id, status, stop_reason, "
+                "error_code, error_message, started_at, completed_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    dump_json(turn.execution_profile.to_dict())
-                    if turn.execution_profile is not None
+                    turn.id,
+                    turn.thread_id,
+                    turn.ordinal,
+                    turn.prompt,
+                    dump_json(list(turn.skill_ids)),
+                    (
+                        dump_json(turn.execution_profile.to_dict())
+                        if turn.execution_profile is not None
+                        else None
+                    ),
+                    turn.goal_id,
+                    turn.status.value,
+                    turn.stop_reason,
+                    turn.error_code,
+                    turn.error_message,
+                    dump_datetime(turn.started_at),
+                    dump_datetime(turn.completed_at),
+                ),
+            )
+            return
+        columns = (
+            "id, thread_id, ordinal, prompt, skill_ids_json, "
+            "execution_profile_json, goal_id, status, stop_reason, "
+            "error_code, error_message, started_at, completed_at, enqueued_at, "
+            "execution_class, home_worker_id, execution_owner_id, "
+            "execution_epoch, cancel_requested_at"
+        )
+        values: tuple[object, ...] = (
+            turn.id,
+            turn.thread_id,
+            turn.ordinal,
+            turn.prompt,
+            dump_json(list(turn.skill_ids)),
+            (
+                dump_json(turn.execution_profile.to_dict())
+                if turn.execution_profile is not None
+                else None
+            ),
+            turn.goal_id,
+            turn.status.value,
+            turn.stop_reason,
+            turn.error_code,
+            turn.error_message,
+            dump_datetime(turn.started_at),
+            dump_datetime(turn.completed_at),
+            dump_datetime(turn.enqueued_at),
+            turn.execution_class.value,
+            turn.home_worker_id,
+            turn.execution_owner_id,
+            turn.execution_epoch,
+            dump_datetime(turn.cancel_requested_at),
+        )
+        if self._has_executor_column():
+            columns += ", executor"
+            values += (turn.executor.value,)
+        if self._has_execution_permission_column():
+            columns += ", execution_permission_mode"
+            values += (
+                (
+                    turn.execution_permission_mode.value
+                    if turn.execution_permission_mode is not None
                     else None
                 ),
-                turn.goal_id,
-                turn.status.value,
-                turn.stop_reason,
-                turn.error_code,
-                turn.error_message,
-                dump_datetime(turn.started_at),
-                dump_datetime(turn.completed_at),
-            ),
+            )
+        placeholders = ", ".join("?" for _ in values)
+        self.connection.execute(
+            f"INSERT INTO turns ({columns}) VALUES ({placeholders})",
+            values,
         )
 
     def get(self, turn_id: str) -> Turn | None:
@@ -64,10 +121,36 @@ class TurnRepository:
         return self._from_row(row) if row is not None else None
 
     def update(self, turn: Turn) -> None:
+        if not self._has_coordination_columns():
+            cursor = self.connection.execute(
+                "UPDATE turns SET execution_profile_json = ?, status = ?, "
+                "stop_reason = ?, error_code = ?, error_message = ?, "
+                "started_at = ?, completed_at = ? WHERE id = ?",
+                (
+                    (
+                        dump_json(turn.execution_profile.to_dict())
+                        if turn.execution_profile is not None
+                        else None
+                    ),
+                    turn.status.value,
+                    turn.stop_reason,
+                    turn.error_code,
+                    turn.error_message,
+                    dump_datetime(turn.started_at),
+                    dump_datetime(turn.completed_at),
+                    turn.id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(turn.id)
+            return
         cursor = self.connection.execute(
             "UPDATE turns SET execution_profile_json = ?, status = ?, "
             "stop_reason = ?, error_code = ?, "
-            "error_message = ?, started_at = ?, completed_at = ? WHERE id = ?",
+            "error_message = ?, started_at = ?, completed_at = ?, "
+            "home_worker_id = ?, execution_owner_id = ?, execution_epoch = ?, "
+            "cancel_requested_at = ? "
+            "WHERE id = ? AND execution_owner_id IS ? AND execution_epoch = ?",
             (
                 (
                     dump_json(turn.execution_profile.to_dict())
@@ -80,11 +163,23 @@ class TurnRepository:
                 turn.error_message,
                 dump_datetime(turn.started_at),
                 dump_datetime(turn.completed_at),
+                turn.home_worker_id,
+                turn.execution_owner_id,
+                turn.execution_epoch,
+                dump_datetime(turn.cancel_requested_at),
                 turn.id,
+                turn.execution_owner_id,
+                turn.execution_epoch,
             ),
         )
         if cursor.rowcount != 1:
-            raise KeyError(turn.id)
+            row = self.connection.execute(
+                "SELECT 1 FROM turns WHERE id = ?",
+                (turn.id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(turn.id)
+            raise TurnWriteConflictError(f"Turn execution ownership changed: {turn.id}")
 
     def active_for_thread(self, thread_id: str) -> Turn | None:
         row = self.connection.execute(
@@ -127,8 +222,18 @@ class TurnRepository:
         ).fetchall()
         return [self._from_row(row) for row in rows]
 
+    def list_for_goal(self, thread_id: str, goal_id: str) -> list[Turn]:
+        rows = self.connection.execute(
+            "SELECT * FROM turns WHERE thread_id = ? AND goal_id = ? ORDER BY ordinal",
+            (thread_id, goal_id),
+        ).fetchall()
+        return [self._from_row(row) for row in rows]
+
     @staticmethod
     def _from_row(row: sqlite3.Row) -> Turn:
+        coordination_available = "execution_epoch" in row.keys()
+        executor_available = "executor" in row.keys()
+        execution_permission_available = "execution_permission_mode" in row.keys()
         return Turn(
             id=row["id"],
             thread_id=row["thread_id"],
@@ -140,14 +245,67 @@ class TurnRepository:
                 if row["execution_profile_json"] is not None
                 else None
             ),
+            execution_permission_mode=(
+                ExecutionPermissionMode(row["execution_permission_mode"])
+                if execution_permission_available
+                and row["execution_permission_mode"] is not None
+                else None
+            ),
             goal_id=row["goal_id"],
+            executor=(
+                TurnExecutor(row["executor"])
+                if executor_available
+                else TurnExecutor.AGENT
+            ),
             status=TurnStatus(row["status"]),
             stop_reason=row["stop_reason"],
             error_code=row["error_code"],
             error_message=row["error_message"],
+            execution_class=(
+                ExecutionClass(row["execution_class"])
+                if coordination_available
+                else ExecutionClass.INTERACTIVE
+            ),
+            home_worker_id=(row["home_worker_id"] if coordination_available else None),
+            execution_owner_id=(
+                row["execution_owner_id"] if coordination_available else None
+            ),
+            execution_epoch=(
+                int(row["execution_epoch"]) if coordination_available else 0
+            ),
+            enqueued_at=load_required_datetime(
+                row["enqueued_at"] if coordination_available else "1970-01-01T00:00:00Z"
+            ),
+            cancel_requested_at=(
+                load_datetime(row["cancel_requested_at"])
+                if coordination_available
+                else None
+            ),
             started_at=load_datetime(row["started_at"]),
             completed_at=load_datetime(row["completed_at"]),
         )
+
+    def _has_coordination_columns(self) -> bool:
+        return any(
+            row["name"] == "execution_epoch"
+            for row in self.connection.execute("PRAGMA table_info(turns)")
+        )
+
+    def _has_executor_column(self) -> bool:
+        return any(
+            row["name"] == "executor"
+            for row in self.connection.execute("PRAGMA table_info(turns)")
+        )
+
+    def _has_execution_permission_column(self) -> bool:
+        return any(
+            row["name"] == "execution_permission_mode"
+            for row in self.connection.execute("PRAGMA table_info(turns)")
+        )
+
+
+class TurnWriteConflictError(RuntimeError):
+    """A stale worker attempted to mutate a Turn after its fence changed."""
 
 
 class ItemRepository:
@@ -318,6 +476,30 @@ class ApprovalRepository:
         if cursor.rowcount != 1:
             raise KeyError(approval.id)
 
+    def resolve_pending(self, approval: Approval) -> bool:
+        """Resolve one pending approval with a compare-and-swap transition.
+
+        ``pending`` is the approval state machine's natural compare token:
+        terminal decisions are immutable, so a separate mutable version column
+        would add state without strengthening the invariant.  Callers must run
+        this method inside the same write transaction as the related Item,
+        Turn, Thread, and event-log updates.
+        """
+
+        if approval.status is ApprovalStatus.PENDING:
+            raise ValueError("resolve_pending requires a terminal approval")
+        cursor = self.connection.execute(
+            "UPDATE approvals SET status = ?, decision_json = ?, resolved_at = ? "
+            "WHERE id = ? AND status = 'pending'",
+            (
+                approval.status.value,
+                dump_json(approval.decision) if approval.decision is not None else None,
+                dump_datetime(approval.resolved_at),
+                approval.id,
+            ),
+        )
+        return cursor.rowcount == 1
+
     def list_for_turn(self, turn_id: str) -> list[Approval]:
         rows = self.connection.execute(
             "SELECT * FROM approvals WHERE turn_id = ? ORDER BY requested_at, id",
@@ -348,4 +530,50 @@ class ApprovalRepository:
             else None,
             requested_at=load_required_datetime(row["requested_at"]),
             resolved_at=load_datetime(row["resolved_at"]),
+        )
+
+
+class ApprovalGrantRepository:
+    """Persist exact-tool grants shared by every worker for one Thread."""
+
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection = connection
+
+    def allows(self, thread_id: str, tool_name: str) -> bool:
+        row = self.connection.execute(
+            "SELECT 1 FROM approval_grants WHERE thread_id = ? AND tool_name = ?",
+            (thread_id, tool_name),
+        ).fetchone()
+        return row is not None
+
+    def add_if_absent(self, grant: ApprovalGrant) -> bool:
+        cursor = self.connection.execute(
+            "INSERT INTO approval_grants ("
+            "thread_id, tool_name, source_approval_id, granted_at"
+            ") VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(thread_id, tool_name) DO NOTHING",
+            (
+                grant.thread_id,
+                grant.tool_name,
+                grant.source_approval_id,
+                dump_datetime(grant.granted_at),
+            ),
+        )
+        return cursor.rowcount == 1
+
+    def list_for_thread(self, thread_id: str) -> list[ApprovalGrant]:
+        rows = self.connection.execute(
+            "SELECT * FROM approval_grants "
+            "WHERE thread_id = ? ORDER BY granted_at, tool_name",
+            (thread_id,),
+        ).fetchall()
+        return [self._from_row(row) for row in rows]
+
+    @staticmethod
+    def _from_row(row: sqlite3.Row) -> ApprovalGrant:
+        return ApprovalGrant(
+            thread_id=row["thread_id"],
+            tool_name=row["tool_name"],
+            source_approval_id=row["source_approval_id"],
+            granted_at=load_required_datetime(row["granted_at"]),
         )

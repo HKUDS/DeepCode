@@ -398,6 +398,827 @@ _DROP_THREAD_REASONING_EFFORT_V7 = r"""
 ALTER TABLE threads DROP COLUMN reasoning_effort;
 """
 
+_AUTOMATION_EXECUTION_FACTS_V8 = r"""
+DROP TRIGGER IF EXISTS enforce_automation_run_scope_update;
+DROP TRIGGER IF EXISTS enforce_automation_run_scope_insert;
+DROP TRIGGER IF EXISTS enforce_automation_thread_scope_insert;
+DROP INDEX IF EXISTS idx_automation_runs_active;
+DROP INDEX IF EXISTS idx_automation_runs_turn;
+DROP INDEX IF EXISTS idx_automation_runs_job;
+DROP INDEX IF EXISTS idx_automations_due;
+DROP INDEX IF EXISTS idx_automations_project;
+
+ALTER TABLE automation_runs RENAME TO automation_runs_v7;
+ALTER TABLE automations RENAME TO automations_v7;
+
+CREATE TABLE automations (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    thread_id TEXT NOT NULL UNIQUE REFERENCES threads(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    current_revision_id TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (
+        status IN ('enabled', 'paused', 'retired')
+    ),
+    schedule_kind TEXT NOT NULL CHECK (
+        schedule_kind IN ('manual', 'interval')
+    ),
+    interval_seconds INTEGER,
+    next_run_at TEXT,
+    last_run_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(current_revision_id, id)
+        REFERENCES automation_revisions(id, automation_id)
+        ON DELETE NO ACTION DEFERRABLE INITIALLY DEFERRED,
+    CHECK (
+        (
+            schedule_kind = 'manual' AND
+            interval_seconds IS NULL AND
+            next_run_at IS NULL
+        ) OR (
+            schedule_kind = 'interval' AND
+            interval_seconds >= 60 AND
+            (status <> 'enabled' OR next_run_at IS NOT NULL)
+        )
+    ),
+    CHECK (status <> 'retired' OR next_run_at IS NULL)
+);
+
+CREATE TABLE automation_revisions (
+    id TEXT PRIMARY KEY,
+    automation_id TEXT NOT NULL,
+    ordinal INTEGER NOT NULL CHECK (ordinal > 0),
+    instruction TEXT NOT NULL CHECK (length(trim(instruction)) > 0),
+    created_at TEXT NOT NULL,
+    UNIQUE(automation_id, ordinal),
+    UNIQUE(id, automation_id),
+    FOREIGN KEY(automation_id) REFERENCES automations(id)
+        ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
+);
+
+CREATE TABLE automation_occurrences (
+    id TEXT PRIMARY KEY,
+    automation_id TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('manual', 'scheduled')),
+    occurrence_key TEXT NOT NULL CHECK (length(trim(occurrence_key)) > 0),
+    nominal_at TEXT NOT NULL,
+    observed_at TEXT NOT NULL,
+    UNIQUE(automation_id, kind, occurrence_key),
+    UNIQUE(id, automation_id)
+);
+
+CREATE TABLE automation_runs (
+    id TEXT PRIMARY KEY,
+    automation_id TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+    revision_id TEXT NOT NULL,
+    occurrence_id TEXT NOT NULL UNIQUE,
+    goal_id TEXT,
+    thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE NO ACTION,
+    turn_id TEXT REFERENCES turns(id) ON DELETE SET NULL,
+    trigger TEXT NOT NULL CHECK (trigger IN ('manual', 'scheduled')),
+    status TEXT NOT NULL CHECK (
+        status IN (
+            'queued', 'running', 'waiting', 'blocked', 'completed',
+            'failed', 'interrupted', 'skipped'
+        )
+    ),
+    scheduled_for TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    started_at TEXT,
+    completed_at TEXT,
+    FOREIGN KEY(revision_id, automation_id)
+        REFERENCES automation_revisions(id, automation_id)
+        ON DELETE NO ACTION,
+    FOREIGN KEY(occurrence_id, automation_id)
+        REFERENCES automation_occurrences(id, automation_id)
+        ON DELETE NO ACTION,
+    CHECK (
+        (
+            status IN ('completed', 'failed', 'interrupted', 'skipped') AND
+            completed_at IS NOT NULL
+        ) OR (
+            status NOT IN ('completed', 'failed', 'interrupted', 'skipped') AND
+            completed_at IS NULL
+        )
+    )
+);
+
+INSERT INTO automations (
+    id, project_id, thread_id, name, current_revision_id, status,
+    schedule_kind, interval_seconds, next_run_at, last_run_at,
+    created_at, updated_at
+)
+SELECT
+    id, project_id, thread_id, name, 'arev_legacy_' || id, status,
+    schedule_kind, interval_seconds, next_run_at, last_run_at,
+    created_at, updated_at
+FROM automations_v7;
+
+INSERT INTO automation_revisions (
+    id, automation_id, ordinal, instruction, created_at
+)
+SELECT
+    'arev_legacy_' || id, id, 1, prompt, created_at
+FROM automations_v7;
+
+INSERT INTO automation_occurrences (
+    id, automation_id, kind, occurrence_key, nominal_at, observed_at
+)
+SELECT
+    'aocc_legacy_' || id,
+    automation_id,
+    trigger,
+    'legacy:' || id,
+    scheduled_for,
+    created_at
+FROM automation_runs_v7;
+
+INSERT INTO automation_runs (
+    id, automation_id, revision_id, occurrence_id, goal_id, thread_id,
+    turn_id, trigger, status, scheduled_for, detail, created_at,
+    updated_at, started_at, completed_at
+)
+SELECT
+    id,
+    automation_id,
+    'arev_legacy_' || automation_id,
+    'aocc_legacy_' || id,
+    (
+        SELECT goal_id
+        FROM turns
+        WHERE turns.id = automation_runs_v7.turn_id
+    ),
+    thread_id,
+    turn_id,
+    trigger,
+    status,
+    scheduled_for,
+    detail,
+    created_at,
+    updated_at,
+    started_at,
+    completed_at
+FROM automation_runs_v7;
+
+UPDATE automation_runs
+SET
+    status = 'interrupted',
+    detail = CASE
+        WHEN detail = '' THEN
+            'Interrupted during v8 migration: superseded duplicate open run'
+        ELSE
+            detail || '; interrupted during v8 migration: superseded duplicate open run'
+    END,
+    updated_at = CASE
+        WHEN updated_at < created_at THEN created_at
+        ELSE updated_at
+    END,
+    completed_at = COALESCE(completed_at, updated_at, created_at)
+WHERE id IN (
+    SELECT id
+    FROM (
+        SELECT
+            id,
+            ROW_NUMBER() OVER (
+                PARTITION BY automation_id
+                ORDER BY updated_at DESC, created_at DESC, id DESC
+            ) AS open_rank
+        FROM automation_runs
+        WHERE status IN ('queued', 'running', 'waiting', 'blocked')
+    )
+    WHERE open_rank > 1
+);
+
+UPDATE automation_runs
+SET
+    goal_id = NULL,
+    turn_id = NULL,
+    status = 'interrupted',
+    detail = CASE
+        WHEN detail = '' THEN
+            'Interrupted during v8 migration: duplicate Goal ownership'
+        ELSE
+            detail || '; interrupted during v8 migration: duplicate Goal ownership'
+    END,
+    updated_at = CASE
+        WHEN updated_at < created_at THEN created_at
+        ELSE updated_at
+    END,
+    completed_at = COALESCE(completed_at, updated_at, created_at)
+WHERE id IN (
+    SELECT id
+    FROM (
+        SELECT
+            id,
+            ROW_NUMBER() OVER (
+                PARTITION BY goal_id
+                ORDER BY
+                    CASE WHEN turn_id IS NOT NULL THEN 0 ELSE 1 END,
+                    CASE
+                        WHEN status IN ('queued', 'running', 'waiting', 'blocked')
+                        THEN 0
+                        ELSE 1
+                    END,
+                    updated_at DESC,
+                    created_at DESC,
+                    id DESC
+            ) AS goal_rank
+        FROM automation_runs
+        WHERE goal_id IS NOT NULL
+    )
+    WHERE goal_rank > 1
+);
+
+DROP TABLE automation_runs_v7;
+DROP TABLE automations_v7;
+
+CREATE INDEX idx_automations_project
+    ON automations(project_id, updated_at DESC);
+CREATE INDEX idx_automations_due
+    ON automations(status, schedule_kind, next_run_at);
+CREATE INDEX idx_automation_revisions_definition
+    ON automation_revisions(automation_id, ordinal DESC);
+CREATE INDEX idx_automation_occurrences_nominal
+    ON automation_occurrences(automation_id, nominal_at DESC);
+CREATE INDEX idx_automation_runs_job
+    ON automation_runs(automation_id, created_at DESC);
+CREATE INDEX idx_automation_runs_turn ON automation_runs(turn_id);
+CREATE UNIQUE INDEX idx_automation_runs_goal
+    ON automation_runs(goal_id)
+    WHERE goal_id IS NOT NULL;
+CREATE INDEX idx_automation_runs_active
+    ON automation_runs(status, updated_at DESC);
+CREATE UNIQUE INDEX idx_automation_runs_one_open
+    ON automation_runs(automation_id)
+    WHERE status IN ('queued', 'running', 'waiting', 'blocked');
+
+CREATE TRIGGER enforce_automation_thread_scope_insert
+BEFORE INSERT ON automations
+WHEN NOT EXISTS (
+    SELECT 1 FROM threads
+    WHERE id = NEW.thread_id AND project_id = NEW.project_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'automation references a different project');
+END;
+
+CREATE TRIGGER enforce_automation_thread_scope_update
+BEFORE UPDATE OF project_id, thread_id ON automations
+WHEN NOT EXISTS (
+    SELECT 1 FROM threads
+    WHERE id = NEW.thread_id AND project_id = NEW.project_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'automation references a different project');
+END;
+
+CREATE TRIGGER prevent_automation_revision_update
+BEFORE UPDATE ON automation_revisions
+BEGIN
+    SELECT RAISE(ABORT, 'automation revisions are immutable');
+END;
+
+CREATE TRIGGER prevent_automation_occurrence_update
+BEFORE UPDATE ON automation_occurrences
+BEGIN
+    SELECT RAISE(ABORT, 'automation occurrences are immutable');
+END;
+
+CREATE TRIGGER enforce_automation_run_scope_insert
+BEFORE INSERT ON automation_runs
+WHEN
+    NOT EXISTS (
+        SELECT 1 FROM automations
+        WHERE id = NEW.automation_id AND thread_id = NEW.thread_id
+    ) OR
+    NOT EXISTS (
+        SELECT 1 FROM automation_occurrences
+        WHERE
+            id = NEW.occurrence_id AND
+            automation_id = NEW.automation_id AND
+            kind = NEW.trigger AND
+            nominal_at = NEW.scheduled_for
+    ) OR (
+        NEW.turn_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM turns
+            WHERE
+                id = NEW.turn_id AND
+                thread_id = NEW.thread_id AND
+                (NEW.goal_id IS NULL OR goal_id = NEW.goal_id)
+        )
+    )
+BEGIN
+    SELECT RAISE(ABORT, 'automation run references inconsistent execution scope');
+END;
+
+CREATE TRIGGER enforce_automation_run_scope_update
+BEFORE UPDATE OF
+    automation_id, revision_id, occurrence_id, goal_id,
+    thread_id, turn_id, trigger, scheduled_for
+ON automation_runs
+WHEN
+    NOT EXISTS (
+        SELECT 1 FROM automations
+        WHERE id = NEW.automation_id AND thread_id = NEW.thread_id
+    ) OR
+    NOT EXISTS (
+        SELECT 1 FROM automation_occurrences
+        WHERE
+            id = NEW.occurrence_id AND
+            automation_id = NEW.automation_id AND
+            kind = NEW.trigger AND
+            nominal_at = NEW.scheduled_for
+    ) OR (
+        NEW.turn_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM turns
+            WHERE
+                id = NEW.turn_id AND
+                thread_id = NEW.thread_id AND
+                (NEW.goal_id IS NULL OR goal_id = NEW.goal_id)
+        )
+    )
+BEGIN
+    SELECT RAISE(ABORT, 'automation run references inconsistent execution scope');
+END;
+"""
+
+_DROP_AUTOMATION_EXECUTION_FACTS_V8 = r"""
+DROP TRIGGER IF EXISTS enforce_automation_run_scope_update;
+DROP TRIGGER IF EXISTS enforce_automation_run_scope_insert;
+DROP TRIGGER IF EXISTS prevent_automation_occurrence_update;
+DROP TRIGGER IF EXISTS prevent_automation_revision_update;
+DROP TRIGGER IF EXISTS enforce_automation_thread_scope_update;
+DROP TRIGGER IF EXISTS enforce_automation_thread_scope_insert;
+DROP INDEX IF EXISTS idx_automation_runs_one_open;
+DROP INDEX IF EXISTS idx_automation_runs_active;
+DROP INDEX IF EXISTS idx_automation_runs_goal;
+DROP INDEX IF EXISTS idx_automation_runs_turn;
+DROP INDEX IF EXISTS idx_automation_runs_job;
+DROP INDEX IF EXISTS idx_automation_occurrences_nominal;
+DROP INDEX IF EXISTS idx_automation_revisions_definition;
+DROP INDEX IF EXISTS idx_automations_due;
+DROP INDEX IF EXISTS idx_automations_project;
+
+ALTER TABLE automation_runs RENAME TO automation_runs_v8;
+ALTER TABLE automation_occurrences RENAME TO automation_occurrences_v8;
+ALTER TABLE automation_revisions RENAME TO automation_revisions_v8;
+ALTER TABLE automations RENAME TO automations_v8;
+
+CREATE TABLE automations (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    thread_id TEXT NOT NULL UNIQUE REFERENCES threads(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('enabled', 'paused')),
+    schedule_kind TEXT NOT NULL CHECK (schedule_kind IN ('manual', 'interval')),
+    interval_seconds INTEGER,
+    next_run_at TEXT,
+    last_run_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CHECK (
+        (
+            schedule_kind = 'manual' AND
+            interval_seconds IS NULL AND
+            next_run_at IS NULL
+        ) OR (
+            schedule_kind = 'interval' AND
+            interval_seconds >= 60 AND
+            (status = 'paused' OR next_run_at IS NOT NULL)
+        )
+    )
+);
+
+CREATE TABLE automation_runs (
+    id TEXT PRIMARY KEY,
+    automation_id TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+    thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    turn_id TEXT REFERENCES turns(id) ON DELETE SET NULL,
+    trigger TEXT NOT NULL CHECK (trigger IN ('manual', 'scheduled')),
+    status TEXT NOT NULL CHECK (
+        status IN (
+            'queued', 'running', 'waiting', 'completed',
+            'failed', 'interrupted', 'skipped'
+        )
+    ),
+    scheduled_for TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    started_at TEXT,
+    completed_at TEXT,
+    CHECK (
+        (
+            status IN ('completed', 'failed', 'interrupted', 'skipped') AND
+            completed_at IS NOT NULL
+        ) OR (
+            status NOT IN ('completed', 'failed', 'interrupted', 'skipped') AND
+            completed_at IS NULL
+        )
+    )
+);
+
+INSERT INTO automations (
+    id, project_id, thread_id, name, prompt, status, schedule_kind,
+    interval_seconds, next_run_at, last_run_at, created_at, updated_at
+)
+SELECT
+    automation.id,
+    automation.project_id,
+    automation.thread_id,
+    automation.name,
+    revision.instruction,
+    CASE
+        WHEN automation.status = 'retired' THEN 'paused'
+        ELSE automation.status
+    END,
+    automation.schedule_kind,
+    automation.interval_seconds,
+    automation.next_run_at,
+    automation.last_run_at,
+    automation.created_at,
+    automation.updated_at
+FROM automations_v8 AS automation
+JOIN automation_revisions_v8 AS revision
+    ON revision.id = automation.current_revision_id
+    AND revision.automation_id = automation.id;
+
+INSERT INTO automation_runs (
+    id, automation_id, thread_id, turn_id, trigger, status,
+    scheduled_for, detail, created_at, updated_at, started_at, completed_at
+)
+SELECT
+    id,
+    automation_id,
+    thread_id,
+    turn_id,
+    trigger,
+    CASE
+        WHEN status = 'blocked' THEN 'waiting'
+        ELSE status
+    END,
+    scheduled_for,
+    detail,
+    created_at,
+    updated_at,
+    started_at,
+    completed_at
+FROM automation_runs_v8;
+
+DROP TABLE automation_runs_v8;
+DROP TABLE automation_occurrences_v8;
+DELETE FROM automation_revisions_v8;
+DELETE FROM automations_v8;
+DROP TABLE automation_revisions_v8;
+DROP TABLE automations_v8;
+
+CREATE INDEX idx_automations_project ON automations(project_id, updated_at DESC);
+CREATE INDEX idx_automations_due
+    ON automations(status, schedule_kind, next_run_at);
+CREATE INDEX idx_automation_runs_job
+    ON automation_runs(automation_id, created_at DESC);
+CREATE INDEX idx_automation_runs_turn ON automation_runs(turn_id);
+CREATE INDEX idx_automation_runs_active
+    ON automation_runs(status, updated_at DESC);
+
+CREATE TRIGGER enforce_automation_thread_scope_insert
+BEFORE INSERT ON automations
+WHEN NOT EXISTS (
+    SELECT 1 FROM threads
+    WHERE id = NEW.thread_id AND project_id = NEW.project_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'automation references a different project');
+END;
+
+CREATE TRIGGER enforce_automation_run_scope_insert
+BEFORE INSERT ON automation_runs
+WHEN
+    NOT EXISTS (
+        SELECT 1 FROM automations
+        WHERE id = NEW.automation_id AND thread_id = NEW.thread_id
+    ) OR (
+        NEW.turn_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM turns
+            WHERE id = NEW.turn_id AND thread_id = NEW.thread_id
+        )
+    )
+BEGIN
+    SELECT RAISE(ABORT, 'automation run references a different thread');
+END;
+
+CREATE TRIGGER enforce_automation_run_scope_update
+BEFORE UPDATE OF automation_id, thread_id, turn_id ON automation_runs
+WHEN
+    NOT EXISTS (
+        SELECT 1 FROM automations
+        WHERE id = NEW.automation_id AND thread_id = NEW.thread_id
+    ) OR (
+        NEW.turn_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM turns
+            WHERE id = NEW.turn_id AND thread_id = NEW.thread_id
+        )
+    )
+BEGIN
+    SELECT RAISE(ABORT, 'automation run references a different thread');
+END;
+"""
+
+_AUTOMATION_RUN_INVARIANTS_V9 = r"""
+ALTER TABLE automation_runs
+    ADD COLUMN version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0);
+
+CREATE TRIGGER prevent_automation_run_identity_update
+BEFORE UPDATE ON automation_runs
+WHEN
+    OLD.automation_id IS NOT NEW.automation_id OR
+    OLD.revision_id IS NOT NEW.revision_id OR
+    OLD.occurrence_id IS NOT NEW.occurrence_id OR
+    OLD.goal_id IS NOT NEW.goal_id OR
+    OLD.thread_id IS NOT NEW.thread_id OR
+    OLD.trigger IS NOT NEW.trigger OR
+    OLD.scheduled_for IS NOT NEW.scheduled_for OR
+    OLD.created_at IS NOT NEW.created_at
+BEGIN
+    SELECT RAISE(ABORT, 'automation run identity is immutable');
+END;
+
+CREATE TRIGGER prevent_automation_run_turn_reassignment
+BEFORE UPDATE OF turn_id ON automation_runs
+WHEN
+    OLD.turn_id IS NOT NEW.turn_id AND (
+        OLD.turn_id IS NOT NULL OR
+        NEW.turn_id IS NULL OR
+        OLD.status IN ('completed', 'failed', 'interrupted', 'skipped')
+    )
+BEGIN
+    SELECT RAISE(ABORT, 'automation run Turn ownership is immutable');
+END;
+
+CREATE TRIGGER prevent_automation_run_terminal_update
+BEFORE UPDATE ON automation_runs
+WHEN OLD.status IN ('completed', 'failed', 'interrupted', 'skipped')
+BEGIN
+    SELECT RAISE(ABORT, 'terminal automation runs are immutable');
+END;
+
+CREATE TRIGGER enforce_automation_run_version_update
+BEFORE UPDATE ON automation_runs
+WHEN NEW.version <> OLD.version + 1
+BEGIN
+    SELECT RAISE(ABORT, 'automation run version must advance exactly once');
+END;
+"""
+
+_DROP_AUTOMATION_RUN_INVARIANTS_V9 = r"""
+DROP TRIGGER IF EXISTS enforce_automation_run_version_update;
+DROP TRIGGER IF EXISTS prevent_automation_run_terminal_update;
+DROP TRIGGER IF EXISTS prevent_automation_run_turn_reassignment;
+DROP TRIGGER IF EXISTS prevent_automation_run_identity_update;
+ALTER TABLE automation_runs DROP COLUMN version;
+"""
+
+_RUNTIME_COORDINATION_V10 = r"""
+CREATE TABLE runtime_workers (
+    id TEXT NOT NULL PRIMARY KEY,
+    pid INTEGER NOT NULL CHECK (pid > 0),
+    surface TEXT NOT NULL CHECK (length(trim(surface)) > 0),
+    started_at TEXT NOT NULL,
+    heartbeat_at TEXT NOT NULL,
+    stopped_at TEXT,
+    CHECK (heartbeat_at >= started_at),
+    CHECK (stopped_at IS NULL OR stopped_at >= heartbeat_at)
+);
+CREATE INDEX idx_runtime_workers_liveness
+    ON runtime_workers(stopped_at, heartbeat_at);
+
+ALTER TABLE turns ADD COLUMN enqueued_at TEXT NOT NULL
+    DEFAULT '1970-01-01T00:00:00Z';
+ALTER TABLE turns ADD COLUMN execution_class TEXT NOT NULL DEFAULT 'interactive'
+    CHECK (execution_class IN (
+        'interactive',
+        'manual_automation',
+        'goal_continuation',
+        'event_automation',
+        'scheduled_automation',
+        'backfill'
+    ));
+ALTER TABLE turns ADD COLUMN home_worker_id TEXT
+    REFERENCES runtime_workers(id) ON DELETE RESTRICT;
+ALTER TABLE turns ADD COLUMN execution_owner_id TEXT
+    REFERENCES runtime_workers(id) ON DELETE RESTRICT;
+ALTER TABLE turns ADD COLUMN execution_epoch INTEGER NOT NULL DEFAULT 0
+    CHECK (execution_epoch >= 0);
+ALTER TABLE turns ADD COLUMN cancel_requested_at TEXT;
+
+UPDATE turns
+SET enqueued_at = COALESCE(
+    (
+        SELECT MIN(event_log.timestamp)
+        FROM event_log
+        WHERE event_log.turn_id = turns.id
+    ),
+    started_at,
+    completed_at,
+    '1970-01-01T00:00:00Z'
+);
+
+CREATE TRIGGER initialize_turn_enqueued_at
+AFTER INSERT ON turns
+WHEN NEW.enqueued_at = '1970-01-01T00:00:00Z'
+BEGIN
+    UPDATE turns
+    SET enqueued_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER enforce_turn_execution_owner_insert
+BEFORE INSERT ON turns
+WHEN
+    (NEW.execution_owner_id IS NOT NULL AND NEW.execution_epoch < 1) OR
+    (
+        NEW.execution_owner_id IS NOT NULL AND
+        NEW.status IN ('completed', 'failed', 'interrupted')
+    )
+BEGIN
+    SELECT RAISE(ABORT, 'invalid Turn execution ownership');
+END;
+
+CREATE TRIGGER enforce_turn_execution_owner_update
+BEFORE UPDATE OF status, execution_owner_id, execution_epoch ON turns
+WHEN
+    (NEW.execution_owner_id IS NOT NULL AND NEW.execution_epoch < 1) OR
+    (
+        NEW.execution_owner_id IS NOT NULL AND
+        NEW.status IN ('completed', 'failed', 'interrupted')
+    )
+BEGIN
+    SELECT RAISE(ABORT, 'invalid Turn execution ownership');
+END;
+
+CREATE INDEX idx_turns_coordination_queue
+    ON turns(
+        status,
+        home_worker_id,
+        execution_owner_id,
+        enqueued_at,
+        thread_id,
+        ordinal,
+        id
+    );
+CREATE INDEX idx_turns_execution_owner
+    ON turns(execution_owner_id, status)
+    WHERE execution_owner_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_turns_execution_fence
+    ON turns(id, execution_epoch);
+
+CREATE TABLE resource_leases (
+    resource_key TEXT NOT NULL PRIMARY KEY
+        CHECK (
+            length(trim(resource_key)) > 0 AND
+            length(resource_key) <= 512
+        ),
+    epoch INTEGER NOT NULL CHECK (epoch > 0),
+    holder_worker_id TEXT
+        REFERENCES runtime_workers(id) ON DELETE RESTRICT,
+    holder_turn_id TEXT,
+    holder_turn_epoch INTEGER,
+    acquired_at TEXT NOT NULL,
+    heartbeat_at TEXT NOT NULL,
+    released_at TEXT,
+    release_reason TEXT,
+    FOREIGN KEY(holder_turn_id, holder_turn_epoch)
+        REFERENCES turns(id, execution_epoch) ON DELETE RESTRICT,
+    CHECK (heartbeat_at >= acquired_at),
+    CHECK (
+        (holder_turn_id IS NULL AND holder_turn_epoch IS NULL) OR
+        (
+            holder_worker_id IS NOT NULL AND
+            holder_turn_id IS NOT NULL AND
+            holder_turn_epoch > 0
+        )
+    ),
+    CHECK (
+        (
+            holder_worker_id IS NOT NULL AND
+            released_at IS NULL AND
+            release_reason IS NULL
+        ) OR (
+            holder_worker_id IS NULL AND
+            holder_turn_id IS NULL AND
+            holder_turn_epoch IS NULL AND
+            released_at IS NOT NULL AND
+            release_reason IS NOT NULL AND
+            length(trim(release_reason)) > 0 AND
+            released_at >= heartbeat_at
+        )
+    )
+);
+CREATE INDEX idx_resource_leases_holder
+    ON resource_leases(holder_worker_id, holder_turn_id)
+    WHERE holder_worker_id IS NOT NULL;
+"""
+
+_DROP_RUNTIME_COORDINATION_V10 = r"""
+DROP INDEX IF EXISTS idx_resource_leases_holder;
+DROP TABLE IF EXISTS resource_leases;
+
+DROP INDEX IF EXISTS idx_turns_execution_fence;
+DROP INDEX IF EXISTS idx_turns_execution_owner;
+DROP INDEX IF EXISTS idx_turns_coordination_queue;
+DROP TRIGGER IF EXISTS enforce_turn_execution_owner_update;
+DROP TRIGGER IF EXISTS enforce_turn_execution_owner_insert;
+DROP TRIGGER IF EXISTS initialize_turn_enqueued_at;
+
+ALTER TABLE turns DROP COLUMN cancel_requested_at;
+ALTER TABLE turns DROP COLUMN execution_epoch;
+ALTER TABLE turns DROP COLUMN execution_owner_id;
+ALTER TABLE turns DROP COLUMN home_worker_id;
+ALTER TABLE turns DROP COLUMN execution_class;
+ALTER TABLE turns DROP COLUMN enqueued_at;
+
+DROP INDEX IF EXISTS idx_runtime_workers_liveness;
+DROP TABLE IF EXISTS runtime_workers;
+"""
+
+_TURN_EXECUTORS_V11 = r"""
+ALTER TABLE turns
+    ADD COLUMN executor TEXT NOT NULL DEFAULT 'agent'
+    CHECK (executor IN ('agent', 'workflow'));
+
+UPDATE turns
+SET executor = 'workflow'
+WHERE EXISTS (
+    SELECT 1
+    FROM workflow_runs
+    WHERE workflow_runs.turn_id = turns.id
+);
+
+CREATE INDEX idx_turns_executor_queue
+    ON turns(
+        executor,
+        status,
+        home_worker_id,
+        execution_owner_id,
+        enqueued_at,
+        thread_id,
+        ordinal,
+        id
+    );
+"""
+
+_DROP_TURN_EXECUTORS_V11 = r"""
+DROP INDEX IF EXISTS idx_turns_executor_queue;
+ALTER TABLE turns DROP COLUMN executor;
+"""
+
+_APPROVAL_GRANTS_V12 = r"""
+CREATE UNIQUE INDEX idx_approvals_id_thread
+    ON approvals(id, thread_id);
+
+CREATE TABLE approval_grants (
+    thread_id TEXT NOT NULL
+        REFERENCES threads(id) ON DELETE CASCADE,
+    tool_name TEXT NOT NULL
+        CHECK (length(trim(tool_name)) > 0),
+    source_approval_id TEXT NOT NULL UNIQUE,
+    granted_at TEXT NOT NULL,
+    PRIMARY KEY(thread_id, tool_name),
+    FOREIGN KEY(source_approval_id, thread_id)
+        REFERENCES approvals(id, thread_id) ON DELETE CASCADE
+);
+"""
+
+_DROP_APPROVAL_GRANTS_V12 = r"""
+DROP TABLE IF EXISTS approval_grants;
+DROP INDEX IF EXISTS idx_approvals_id_thread;
+"""
+
+_TURN_EXECUTION_PERMISSION_V13 = r"""
+ALTER TABLE turns
+    ADD COLUMN execution_permission_mode TEXT
+    CHECK (
+        execution_permission_mode IS NULL OR
+        execution_permission_mode IN ('default', 'plan', 'full_auto')
+    );
+
+UPDATE turns
+SET execution_permission_mode = 'default'
+WHERE goal_id IN (
+    SELECT goal_id
+    FROM automation_runs
+    WHERE goal_id IS NOT NULL
+);
+"""
+
+_DROP_TURN_EXECUTION_PERMISSION_V13 = r"""
+ALTER TABLE turns DROP COLUMN execution_permission_mode;
+"""
+
 MIGRATIONS = (
     Migration(1, "initial_domain", _INITIAL_SCHEMA, _DROP_INITIAL_SCHEMA),
     Migration(
@@ -435,6 +1256,42 @@ MIGRATIONS = (
         "thread_reasoning_effort",
         _THREAD_REASONING_EFFORT_V7,
         _DROP_THREAD_REASONING_EFFORT_V7,
+    ),
+    Migration(
+        8,
+        "automation_execution_facts",
+        _AUTOMATION_EXECUTION_FACTS_V8,
+        _DROP_AUTOMATION_EXECUTION_FACTS_V8,
+    ),
+    Migration(
+        9,
+        "automation_run_invariants",
+        _AUTOMATION_RUN_INVARIANTS_V9,
+        _DROP_AUTOMATION_RUN_INVARIANTS_V9,
+    ),
+    Migration(
+        10,
+        "runtime_coordination",
+        _RUNTIME_COORDINATION_V10,
+        _DROP_RUNTIME_COORDINATION_V10,
+    ),
+    Migration(
+        11,
+        "turn_executors",
+        _TURN_EXECUTORS_V11,
+        _DROP_TURN_EXECUTORS_V11,
+    ),
+    Migration(
+        12,
+        "approval_grants",
+        _APPROVAL_GRANTS_V12,
+        _DROP_APPROVAL_GRANTS_V12,
+    ),
+    Migration(
+        13,
+        "turn_execution_permission",
+        _TURN_EXECUTION_PERMISSION_V13,
+        _DROP_TURN_EXECUTION_PERMISSION_V13,
     ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

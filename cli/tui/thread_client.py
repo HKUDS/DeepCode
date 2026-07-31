@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from cli.tui.domain_events import DurableThreadEventCursor
 from core.application.agent_adapter import ConfiguredAgentSessionFactory
 from core.application.application import DeepCodeApplication
 from core.application.interactive_turn_router import (
@@ -13,6 +14,7 @@ from core.application.interactive_turn_router import (
     InteractiveTurnResult,
     InteractiveTurnRouter,
 )
+from core.config import load_config_for_workspace
 from core.domain.approval import Approval, ApprovalStatus
 from core.domain.common import new_id
 from core.domain.event import DomainEvent
@@ -24,7 +26,6 @@ from core.domain.turn import Turn
 from core.events import Event
 from core.harness.permissions import PermissionMode
 from core.harness.policy import build_permission_engine
-from core.config import load_config_for_workspace
 from core.sessions import SessionStore, get_default_store
 
 
@@ -57,6 +58,7 @@ class TuiThreadClient:
         self._thread_event_token: str | None = None
         self._domain_token: str | None = None
         self._domain_task: asyncio.Task[None] | None = None
+        self._domain_cursor: DurableThreadEventCursor | None = None
         self._factory = ConfiguredAgentSessionFactory(
             default_permission_mode=PermissionMode.FULL_AUTO,
             streaming=streaming,
@@ -65,6 +67,8 @@ class TuiThreadClient:
         self.application = DeepCodeApplication.open(
             session_factory=self._factory,
             session_store=self.store,
+            host_surface="cli",
+            run_automation_scheduler=False,
         )
         try:
             project = self.application.projects.add(
@@ -115,18 +119,20 @@ class TuiThreadClient:
     ) -> None:
         if self._domain_task is not None:
             return
-        self._domain_token = self.application.broker.subscribe()
+        self._reset_domain_subscription(self.thread.id)
 
         async def pump() -> None:
-            assert self._domain_token is not None
             while True:
-                batch = self.application.broker.drain(self._domain_token)
-                for event in batch.events:
-                    if event.thread_id == self.thread.id:
-                        sink(event)
+                token = self._domain_token
+                cursor = self._domain_cursor
+                if token is None or cursor is None:
+                    return
+                batch = self.application.broker.drain(token)
+                if token == self._domain_token and cursor is self._domain_cursor:
+                    cursor.consume(batch, sink)
                 await asyncio.to_thread(
                     self.application.broker.wait_for_events,
-                    self._domain_token,
+                    token,
                     timeout=0.25,
                 )
 
@@ -137,6 +143,7 @@ class TuiThreadClient:
         token = self._domain_token
         self._domain_task = None
         self._domain_token = None
+        self._domain_cursor = None
         if token is not None:
             self.application.broker.unsubscribe(token)
         if task is not None:
@@ -157,7 +164,10 @@ class TuiThreadClient:
             cached_active_turn_id=active.id if active is not None else None,
             skill_ids=skill_ids,
         )
-        if result.delivery is InteractiveDelivery.STARTED:
+        if result.delivery in {
+            InteractiveDelivery.STARTED,
+            InteractiveDelivery.QUEUED,
+        }:
             self._title_from_first_prompt(prompt)
         return TuiDelivery(result.delivery.value, result.turn)
 
@@ -344,8 +354,24 @@ class TuiThreadClient:
         previous_token = self._thread_event_token
         self.thread = thread
         self._thread_event_token = new_token
+        if self._domain_task is not None:
+            self._reset_domain_subscription(thread.id)
         if previous_token is not None:
             self.application.turns.unsubscribe_thread_events(previous_token)
+
+    def _reset_domain_subscription(self, thread_id: str) -> None:
+        """Start at history head, then replay the head/subscribe race."""
+
+        cursor = DurableThreadEventCursor.at_head(
+            self.application.events,
+            thread_id,
+        )
+        token = self.application.broker.subscribe()
+        previous = self._domain_token
+        self._domain_cursor = cursor
+        self._domain_token = token
+        if previous is not None:
+            self.application.broker.unsubscribe(previous)
 
     def _title_from_first_prompt(self, prompt: str) -> None:
         if self.thread.title != "New task":

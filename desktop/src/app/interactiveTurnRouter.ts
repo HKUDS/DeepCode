@@ -5,7 +5,7 @@ import type {
 } from "../generated/app-server";
 import type { BridgeError, DesktopRuntime } from "../rpc/contracts";
 
-export type InteractiveDelivery = "started" | "steered";
+export type InteractiveDelivery = "started" | "steered" | "queued";
 
 export type InteractiveTurnResult =
   | {
@@ -19,6 +19,12 @@ export type InteractiveTurnResult =
       messageId: string;
       turn: Turn;
       duplicate: boolean;
+    }
+  | {
+      delivery: "queued";
+      messageId: string;
+      turn: Turn;
+      snapshot: MethodResults["turn/enqueue"];
     };
 
 export interface InteractiveTurnInput {
@@ -51,8 +57,11 @@ export async function sendInteractiveTurn(
       if (errorCode(error) === "EXPECTED_TURN_MISMATCH") {
         const actualTurnId = actualTurnIdFrom(error);
         if (actualTurnId) {
-          return steer(runtime, input, actualTurnId, messageId);
+          return steerOrEnqueue(runtime, input, actualTurnId, messageId);
         }
+      }
+      if (crossedFinalInputBoundary(error)) {
+        return enqueue(runtime, input, messageId);
       }
       throw error;
     }
@@ -109,8 +118,46 @@ async function startOrSteerOnce(
     if (errorCode(error) === "TURN_ALREADY_ACTIVE") {
       const actualTurnId = actualTurnIdFrom(error);
       if (actualTurnId) {
-        return steer(runtime, input, actualTurnId, messageId);
+        return steerOrEnqueue(runtime, input, actualTurnId, messageId);
       }
+    }
+    throw error;
+  }
+}
+
+async function enqueue(
+  runtime: DesktopRuntime,
+  input: InteractiveTurnInput,
+  messageId: string,
+): Promise<InteractiveTurnResult> {
+  const skillIds = input.skillIds ?? [];
+  const snapshot = await runtime.request("turn/enqueue", {
+    threadId: input.threadId,
+    prompt: input.prompt,
+    messageId,
+    ...(skillIds.length
+      ? { skills: skillIds as TurnStartParams["skills"] }
+      : {}),
+  });
+  return {
+    delivery: "queued",
+    messageId,
+    turn: snapshot.turn,
+    snapshot,
+  };
+}
+
+async function steerOrEnqueue(
+  runtime: DesktopRuntime,
+  input: InteractiveTurnInput,
+  expectedTurnId: string,
+  messageId: string,
+): Promise<InteractiveTurnResult> {
+  try {
+    return await steer(runtime, input, expectedTurnId, messageId);
+  } catch (error) {
+    if (errorCode(error) === "NO_ACTIVE_TURN" || crossedFinalInputBoundary(error)) {
+      return enqueue(runtime, input, messageId);
     }
     throw error;
   }
@@ -155,4 +202,17 @@ function actualTurnIdFrom(error: unknown): string | null {
   return typeof actualTurnId === "string" && actualTurnId
     ? actualTurnId
     : null;
+}
+
+function crossedFinalInputBoundary(error: unknown): boolean {
+  if (errorCode(error) !== "TURN_NOT_STEERABLE") return false;
+  if (typeof error !== "object" || error === null) return false;
+  const data = (error as Partial<BridgeError>).data;
+  if (typeof data !== "object" || data === null) return false;
+  const details =
+    "details" in data && typeof data.details === "object" && data.details !== null
+      ? data.details
+      : data;
+  if (!("state" in details)) return false;
+  return details.state === "closing" || details.state === "closed";
 }

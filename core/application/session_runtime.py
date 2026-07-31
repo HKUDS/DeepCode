@@ -24,6 +24,7 @@ from core.application.agent_adapter import (
     ApprovalCallback,
 )
 from core.application.errors import ConflictError, ThreadNotFoundError
+from core.domain.execution_permission import ExecutionPermissionMode
 from core.domain.execution_profile import ExecutionProfile
 from core.sessions import Session, SessionStore
 from core.sessions.continuation import session_message_history_entry
@@ -56,6 +57,7 @@ class LiveSessionRuntime:
     workspace: str
     model: str | None
     execution_profile: ExecutionProfile | None
+    permission_mode_override: ExecutionPermissionMode | None
     agent: AgentSessionPort
     approvals: ApprovalRouter
     canonical_message_count: int
@@ -103,6 +105,7 @@ class SessionRuntimeRegistry:
         workspace: str,
         model: str | None,
         execution_profile: ExecutionProfile | None = None,
+        permission_mode_override: ExecutionPermissionMode | None = None,
         approval_callback: ApprovalCallback,
     ) -> AgentSessionPort:
         canonical = self.store.get_session(session_id)
@@ -113,6 +116,7 @@ class SessionRuntimeRegistry:
             workspace=workspace,
             model=model,
             execution_profile=execution_profile,
+            permission_mode_override=permission_mode_override,
         )
         runtime = self._runtimes.pop(session_id, None)
         if runtime is not None and runtime.active:
@@ -127,6 +131,7 @@ class SessionRuntimeRegistry:
                 workspace=workspace,
                 model=model,
                 execution_profile=execution_profile,
+                permission_mode_override=permission_mode_override,
                 runtime_key=runtime_key,
             )
         elif runtime.canonical_message_count != len(canonical.messages):
@@ -142,14 +147,18 @@ class SessionRuntimeRegistry:
         return runtime.agent
 
     def prepare_inputs(self, session_id: str, *, turn_id: str) -> None:
-        """Claim the Turn mailbox before canonical message persistence."""
+        """Claim input ownership before asynchronous Session startup.
 
-        runtime = self._runtimes.get(session_id)
-        if runtime is None or not runtime.active:
-            raise ConflictError(f"session runtime is not active: {session_id}")
-        if not runtime.inputs_enabled:
+        A coordinator claim is durable before the AgentSession coroutine gets
+        CPU time. Preparing the mailbox at that boundary lets an immediate
+        Steer wait for activation instead of observing a false ``closed``
+        state. Whether the adapter supports live input is a factory capability,
+        not a property of an already-created runtime.
+        """
+
+        if not _accepts_keyword(self.factory.create, "injection_callback"):
             return
-        runtime.inputs.prepare(turn_id)
+        self._mailbox(session_id).prepare(turn_id)
 
     def activate_inputs(self, session_id: str, *, turn_id: str) -> None:
         """Open injection after the Turn's first user message is durable."""
@@ -178,11 +187,11 @@ class SessionRuntimeRegistry:
 
     def release(self, session_id: str, *, turn_id: str | None = None) -> None:
         runtime = self._runtimes.get(session_id)
+        if turn_id is not None:
+            self._mailbox(session_id).deactivate(turn_id)
+            self._goal_runtime(session_id).deactivate(turn_id)
         if runtime is None:
             return
-        if turn_id is not None:
-            runtime.inputs.deactivate(turn_id)
-            runtime.goals.deactivate(turn_id)
         runtime.approvals.current = None
         runtime.active = False
 
@@ -282,6 +291,7 @@ class SessionRuntimeRegistry:
         workspace: str,
         model: str | None,
         execution_profile: ExecutionProfile | None,
+        permission_mode_override: ExecutionPermissionMode | None,
         runtime_key: object,
     ) -> LiveSessionRuntime:
         approvals = ApprovalRouter()
@@ -295,6 +305,8 @@ class SessionRuntimeRegistry:
         }
         if _accepts_keyword(create, "execution_profile"):
             create_kwargs["execution_profile"] = execution_profile
+        if _accepts_keyword(create, "permission_mode_override"):
+            create_kwargs["permission_mode_override"] = permission_mode_override
         inputs_enabled = _accepts_keyword(create, "injection_callback")
         if inputs_enabled:
             create_kwargs["injection_callback"] = inputs.drain
@@ -312,6 +324,7 @@ class SessionRuntimeRegistry:
             workspace=workspace,
             model=model,
             execution_profile=execution_profile,
+            permission_mode_override=permission_mode_override,
             agent=agent,
             approvals=approvals,
             canonical_message_count=len(canonical.messages),
@@ -346,27 +359,39 @@ class SessionRuntimeRegistry:
         workspace: str,
         model: str | None,
         execution_profile: ExecutionProfile | None,
+        permission_mode_override: ExecutionPermissionMode | None,
     ) -> object:
         resolver = getattr(self.factory, "runtime_key", None)
         if callable(resolver):
             kwargs = {"workspace": workspace, "model": model}
             if _accepts_keyword(resolver, "execution_profile"):
                 kwargs["execution_profile"] = execution_profile
-            return resolver(**kwargs)
-        return (
-            workspace,
-            model,
-            (
-                execution_profile.connection_id,
-                execution_profile.config_revision,
-                execution_profile.context_window,
-                execution_profile.max_output_tokens,
-                execution_profile.max_tokens,
-                execution_profile.temperature,
-                execution_profile.reasoning_effort,
+            if _accepts_keyword(resolver, "permission_mode_override"):
+                kwargs["permission_mode_override"] = permission_mode_override
+            factory_key = resolver(**kwargs)
+        else:
+            factory_key = (
+                workspace,
+                model,
+                (
+                    execution_profile.connection_id,
+                    execution_profile.config_revision,
+                    execution_profile.context_window,
+                    execution_profile.max_output_tokens,
+                    execution_profile.max_tokens,
+                    execution_profile.temperature,
+                    execution_profile.reasoning_effort,
+                )
+                if execution_profile
+                else None,
             )
-            if execution_profile
-            else None,
+        return (
+            factory_key,
+            (
+                permission_mode_override.value
+                if permission_mode_override is not None
+                else None
+            ),
         )
 
     async def _evict_idle(self) -> None:

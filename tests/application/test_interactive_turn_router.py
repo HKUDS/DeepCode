@@ -33,6 +33,10 @@ class ScriptedTurns:
         self.calls.append(("steer", {"thread_id": thread_id, **kwargs}))
         return self._next()
 
+    def enqueue(self, thread_id: str, **kwargs):
+        self.calls.append(("enqueue", {"thread_id": thread_id, **kwargs}))
+        return self._next()
+
     def wait_until_terminal(self, turn_id: str):
         self.calls.append(("wait", {"turn_id": turn_id}))
         return self.terminal
@@ -158,6 +162,68 @@ def test_start_race_steers_the_reported_active_turn_once() -> None:
     assert {call[1]["message_id"] for call in turns.calls} == {"message-1"}
 
 
+def test_start_race_preserves_input_when_reported_turn_closes() -> None:
+    turns = ScriptedTurns(
+        [
+            TurnAlreadyRunningError(
+                "active",
+                details={"actualTurnId": "turn_closing"},
+            ),
+            TurnNotSteerableError(
+                "closed",
+                details={"state": "closed"},
+            ),
+            _started("turn_queued"),
+        ],
+    )
+    router = InteractiveTurnRouter(turns)  # type: ignore[arg-type]
+
+    result = router.send(
+        "session-1",
+        prompt="Keep this input after the closing Turn.",
+        message_id="message-1",
+        cached_active_turn_id=None,
+    )
+
+    assert result.delivery is InteractiveDelivery.QUEUED
+    assert [name for name, _kwargs in turns.calls] == [
+        "start",
+        "steer",
+        "enqueue",
+    ]
+    assert {
+        call[1]["message_id"] for call in turns.calls if "message_id" in call[1]
+    } == {"message-1"}
+
+
+def test_start_race_queues_when_reported_turn_ends_before_steer() -> None:
+    turns = ScriptedTurns(
+        [
+            TurnAlreadyRunningError(
+                "active",
+                details={"actualTurnId": "turn_finishing"},
+            ),
+            NoActiveTurnError("finished"),
+            _started("turn_queued"),
+        ]
+    )
+    router = InteractiveTurnRouter(turns)  # type: ignore[arg-type]
+
+    result = router.send(
+        "session-1",
+        prompt="Keep this after the finishing Turn.",
+        message_id="message-1",
+        cached_active_turn_id=None,
+    )
+
+    assert result.delivery is InteractiveDelivery.QUEUED
+    assert [name for name, _kwargs in turns.calls] == [
+        "start",
+        "steer",
+        "enqueue",
+    ]
+
+
 def test_mismatch_retries_only_once_and_surfaces_the_second_race() -> None:
     turns = ScriptedTurns(
         [
@@ -181,16 +247,14 @@ def test_mismatch_retries_only_once_and_surfaces_the_second_race() -> None:
 
 
 def test_final_close_waits_for_terminal_then_starts_same_message_once() -> None:
-    terminal = _turn("turn_old")
     turns = ScriptedTurns(
         [
             TurnNotSteerableError(
                 "closed",
                 details={"state": "closed"},
             ),
-            _started("turn_new"),
+            _started("turn_queued"),
         ],
-        terminal=terminal,
     )
     router = InteractiveTurnRouter(turns)  # type: ignore[arg-type]
 
@@ -201,33 +265,26 @@ def test_final_close_waits_for_terminal_then_starts_same_message_once() -> None:
         cached_active_turn_id="turn_old",
     )
 
-    assert result.delivery is InteractiveDelivery.STARTED
+    assert result.delivery is InteractiveDelivery.QUEUED
     assert [name for name, _kwargs in turns.calls] == [
         "steer",
-        "wait",
-        "start",
+        "enqueue",
     ]
     assert turns.calls[-1][1]["message_id"] == "message-1"
 
 
 @pytest.mark.parametrize("boundary_state", ["closing", "closed"])
-def test_final_input_boundary_then_start_race_steers_next_turn_once(
+def test_final_input_boundary_queues_once_without_a_continuation_race(
     boundary_state: str,
 ) -> None:
-    terminal = _turn("turn_old")
     turns = ScriptedTurns(
         [
             TurnNotSteerableError(
                 f"input is {boundary_state}",
                 details={"state": boundary_state},
             ),
-            TurnAlreadyRunningError(
-                "goal continuation won",
-                details={"actualTurnId": "turn_continuation"},
-            ),
-            _steered("turn_continuation"),
+            _started("turn_queued"),
         ],
-        terminal=terminal,
     )
     router = InteractiveTurnRouter(turns)  # type: ignore[arg-type]
 
@@ -238,14 +295,11 @@ def test_final_input_boundary_then_start_race_steers_next_turn_once(
         cached_active_turn_id="turn_old",
     )
 
-    assert result.delivery is InteractiveDelivery.STEERED
+    assert result.delivery is InteractiveDelivery.QUEUED
     assert [name for name, _kwargs in turns.calls] == [
         "steer",
-        "wait",
-        "start",
-        "steer",
+        "enqueue",
     ]
-    assert turns.calls[-1][1]["expected_turn_id"] == "turn_continuation"
     assert {
         call[1]["message_id"] for call in turns.calls if "message_id" in call[1]
     } == {"message-1"}

@@ -30,12 +30,18 @@ export type SkillReadParams1 =
       [k: string]: unknown;
     };
 export type AutomationScheduleKind = "manual" | "interval";
-export type AutomationStatus = "enabled" | "paused";
+/**
+ * Controls interval scheduling. Manual Automations are always enabled.
+ */
+export type AutomationActivationStatus = "enabled" | "paused";
 export type ThreadMode = "code" | "paper" | "brief" | "review" | "goal";
 export type ApprovalDecision = "approved_once" | "approved_session" | "denied";
+export type AutomationStatus = "enabled" | "paused" | "retired";
 export type AutomationTrigger = "manual" | "scheduled";
-export type AutomationRunStatus = "queued" | "running" | "waiting" | "completed" | "failed" | "interrupted" | "skipped";
+export type AutomationRunStatus =
+  "queued" | "running" | "waiting" | "blocked" | "completed" | "failed" | "interrupted" | "skipped";
 export type ThreadStatus = "idle" | "running" | "waiting" | "failed" | "archived";
+export type ExecutionPermissionMode = "default" | "plan" | "full_auto";
 export type TurnStatus = "queued" | "running" | "waiting_approval" | "completed" | "failed" | "interrupted";
 export type GoalStatus = "active" | "paused" | "blocked" | "budget_limited" | "complete";
 export type ItemKind =
@@ -98,11 +104,11 @@ export interface MethodParams {
   "mcp/upsert": McpUpsertParams;
   "mcp/remove": McpRemoveParams;
   "diagnostics/read": OptionalProjectParams;
-  "automation/list": OptionalProjectParams;
+  "automation/list": AutomationListParams;
   "automation/create": AutomationCreateParams;
   "automation/update": AutomationUpdateParams;
   "automation/remove": AutomationIdentityParams;
-  "automation/run": AutomationIdentityParams;
+  "automation/run": AutomationRunParams;
   "automation/runs": AutomationRunsParams;
   "thread/start": ThreadStartParams;
   "thread/list": ThreadListParams;
@@ -244,28 +250,41 @@ export interface McpRemoveParams {
   scope: ConfigScope;
   name: string;
 }
+export interface AutomationListParams {
+  projectId?: string;
+  limit?: number;
+  offset?: number;
+}
 export interface AutomationCreateParams {
   projectId: string;
   name: string;
   prompt: string;
   scheduleKind: AutomationScheduleKind;
   intervalSeconds?: number;
+  /**
+   * Controls interval scheduling. Manual Automations must omit this field or set it to true.
+   */
   enabled?: boolean;
 }
 export interface AutomationUpdateParams {
   automationId: string;
   name?: string;
   prompt?: string;
-  status?: AutomationStatus;
+  status?: AutomationActivationStatus;
   scheduleKind?: AutomationScheduleKind;
   intervalSeconds?: number;
 }
 export interface AutomationIdentityParams {
   automationId: string;
 }
+export interface AutomationRunParams {
+  automationId: string;
+  requestId?: string;
+}
 export interface AutomationRunsParams {
   automationId: string;
   limit?: number;
+  offset?: number;
 }
 export interface ThreadStartParams {
   projectId: string;
@@ -521,7 +540,9 @@ export interface MethodResults {
     automations: Automation[];
     latestRuns: AutomationRun[];
     schedulerActive: boolean;
-    executionMode: "while_app_running";
+    executionMode: "requires_live_runtime";
+    hasMore: boolean;
+    nextOffset: number | null;
   };
   "automation/create": {
     automation: Automation;
@@ -539,6 +560,8 @@ export interface MethodResults {
   };
   "automation/runs": {
     runs: AutomationRun[];
+    hasMore: boolean;
+    nextOffset: number | null;
   };
   "thread/start": {
     thread: Thread;
@@ -877,6 +900,7 @@ export interface Automation {
   projectId: string;
   threadId: string;
   name: string;
+  currentRevisionId: string;
   prompt: string;
   status: AutomationStatus;
   scheduleKind: AutomationScheduleKind;
@@ -889,7 +913,10 @@ export interface Automation {
 export interface AutomationRun {
   id: string;
   automationId: string;
+  revisionId: string;
+  occurrenceId: string;
   threadId: string;
+  goalId: string | null;
   turnId: string | null;
   trigger: AutomationTrigger;
   status: AutomationRunStatus;
@@ -935,6 +962,7 @@ export interface Turn {
     | [string, string, string, string, string, string, string]
     | [string, string, string, string, string, string, string, string];
   executionProfile?: ExecutionProfile | null;
+  executionPermissionMode?: ExecutionPermissionMode | null;
   goalId?: string | null;
   status: TurnStatus;
   stopReason: string | null;

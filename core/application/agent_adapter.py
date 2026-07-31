@@ -11,6 +11,7 @@ from core.agent_runtime.goal_runtime import GoalRuntimeRouter
 from core.agent_setup import build_agent_session
 from core.compat import DeepCodeRuntime, get_runtime
 from core.config import home_config_path, load_config_for_workspace, project_config_path
+from core.domain.execution_permission import ExecutionPermissionMode
 from core.domain.execution_profile import ExecutionProfile
 from core.events import Event, Op
 from core.harness.permissions import PermissionMode
@@ -37,6 +38,7 @@ class AgentSessionFactory(Protocol):
         workspace: str,
         model: str | None,
         execution_profile: ExecutionProfile | None = None,
+        permission_mode_override: ExecutionPermissionMode | None = None,
     ) -> object: ...
 
     def create(
@@ -45,6 +47,7 @@ class AgentSessionFactory(Protocol):
         workspace: str,
         model: str | None,
         execution_profile: ExecutionProfile | None = None,
+        permission_mode_override: ExecutionPermissionMode | None = None,
         approval_callback: ApprovalCallback,
         injection_callback: InjectionCallback | None = None,
         active_turn_id_provider: Callable[[], str | None] | None = None,
@@ -73,6 +76,7 @@ class ConfiguredAgentSessionFactory:
         workspace: str,
         model: str | None,
         execution_profile: ExecutionProfile | None = None,
+        permission_mode_override: ExecutionPermissionMode | None = None,
         approval_callback: ApprovalCallback,
         injection_callback: InjectionCallback | None = None,
         active_turn_id_provider: Callable[[], str | None] | None = None,
@@ -94,6 +98,11 @@ class ConfiguredAgentSessionFactory:
             goal_runtime=goal_runtime,
             streaming=self.streaming,
             default_permission_mode=self.default_permission_mode,
+            permission_mode_override=(
+                PermissionMode(permission_mode_override.value)
+                if permission_mode_override is not None
+                else None
+            ),
             runtime=runtime,
             **options,
         )
@@ -105,6 +114,7 @@ class ConfiguredAgentSessionFactory:
         workspace: str,
         model: str | None,
         execution_profile: ExecutionProfile | None = None,
+        permission_mode_override: ExecutionPermissionMode | None = None,
     ) -> object:
         """Invalidate idle sessions after an in-process config reload."""
 
@@ -122,6 +132,11 @@ class ConfiguredAgentSessionFactory:
             )
             if execution_profile is not None
             else None,
+            (
+                permission_mode_override.value
+                if permission_mode_override is not None
+                else None
+            ),
             _config_signature(home_config_path()),
             _config_signature(project_config_path(workspace)),
             _config_signature(default_credentials_path()),

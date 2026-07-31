@@ -5,7 +5,6 @@ use diagnostics::export_report;
 use serde_json::Value;
 use sidecar::{BridgeError, RpcBridge, SidecarStatus};
 use std::sync::Arc;
-use std::time::Duration;
 use tauri::{Manager, State};
 
 #[tauri::command]
@@ -83,7 +82,7 @@ pub fn run() {
     app.run(|app_handle, event| {
         if matches!(event, tauri::RunEvent::Exit) {
             if let Some(bridge) = app_handle.try_state::<Arc<RpcBridge>>() {
-                bridge.shutdown(Duration::from_secs(3));
+                bridge.shutdown();
             }
         }
     });

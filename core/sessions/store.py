@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import threading
 import uuid
 from collections.abc import Iterator
@@ -180,12 +181,16 @@ class SessionStore:
         title: str = "",
         session_id: str | None = None,
         metadata: dict | None = None,
+        created_at: str | None = None,
+        updated_at: str | None = None,
     ) -> Session:
         """Create and persist a new empty session.
 
         Picks an unused ``session_id`` (8-char hex) when not given.
         Generated ids re-roll on collision; an explicit existing id raises
         ``FileExistsError`` so projection recovery can remain idempotent.
+        Explicit timestamps let a committed SQLite bootstrap preserve the
+        canonical Thread clock instead of creating a synthetic reconciliation.
         """
         with self._lock, exclusive_file_lock(self._store_lock()):
             sid = session_id or _new_session_id()
@@ -198,17 +203,41 @@ class SessionStore:
                 if attempts > 8:
                     raise RuntimeError("Could not allocate a unique session_id")
 
-            session = Session(
-                session_id=sid,
-                title=title,
-                metadata=dict(metadata or {}),
-            )
-            self._session_dir(sid).mkdir(parents=True, exist_ok=False)
-            self._rewrite_metadata(session)
-            self._cache[sid] = session
-            self._remember_signature(sid)
-            self._index_session(session)
-            return session
+            with exclusive_file_lock(self._session_lock(sid)):
+                if self._session_dir(sid).exists() or self._deletions.pending(sid):
+                    if session_id is not None:
+                        raise FileExistsError(f"session already exists: {sid}")
+                    raise RuntimeError("session id collided while creation was locked")
+
+                canonical_created_at = created_at or _utcnow_iso()
+                session = Session(
+                    session_id=sid,
+                    title=title,
+                    created_at=canonical_created_at,
+                    updated_at=updated_at or canonical_created_at,
+                    metadata=dict(metadata or {}),
+                )
+                temporary = self.root / f".{sid}.{uuid.uuid4().hex}.creating"
+                try:
+                    temporary.mkdir(parents=True, mode=0o700)
+                    metadata_path = temporary / "session.jsonl"
+                    with metadata_path.open("x", encoding="utf-8") as handle:
+                        handle.write(session.metadata_line())
+                        handle.write("\n")
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                    self._fsync_directory(temporary)
+                    os.replace(temporary, self._session_dir(sid))
+                    self._fsync_directory(self.root)
+                except BaseException:
+                    if temporary.exists():
+                        shutil.rmtree(temporary, ignore_errors=True)
+                    raise
+
+                self._cache[sid] = session
+                self._remember_signature(sid)
+                self._index_session(session)
+                return session
 
     def get_session(self, session_id: str) -> Session | None:
         """Load a session from disk (cached on subsequent calls)."""
@@ -664,6 +693,7 @@ class SessionStore:
             entry.name
             for entry in self.root.iterdir()
             if entry.is_dir()
+            and not entry.name.startswith(".")
             and (entry / "session.jsonl").exists()
             and not self._deletions.pending(entry.name)
         ]
@@ -703,6 +733,20 @@ class SessionStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
+
+    @staticmethod
+    def _fsync_directory(path: Path) -> None:
+        if os.name == "nt" or not path.is_dir():
+            return
+        descriptor: int | None = None
+        try:
+            descriptor = os.open(path, os.O_RDONLY)
+            os.fsync(descriptor)
+        except OSError:
+            pass
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
 
     def _read_metadata(self, session_id: str) -> dict | None:
         path = self._session_jsonl(session_id)

@@ -256,6 +256,9 @@ class TuiApp:
         if delivery.kind == "started":
             self.selected_skill_ids.clear()
             return f"Started Turn {delivery.turn.id}."
+        if delivery.kind == "queued":
+            self.selected_skill_ids.clear()
+            return f"Queued Turn {delivery.turn.id}."
         suffix = (
             " Selected next-Turn Skills remain selected."
             if self.selected_skill_ids

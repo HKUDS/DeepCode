@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core.application.errors import (
+    ConflictError,
     InvalidArgumentError,
     ProjectNotFoundError,
     ThreadNotFoundError,
@@ -21,8 +22,9 @@ from core.domain.execution_profile import ExecutionProfile
 from core.domain.item import Item, ItemKind, ItemStatus
 from core.domain.project import Project, TrustState
 from core.domain.thread import Thread, ThreadMode, ThreadStatus
-from core.domain.turn import Turn, TurnStatus
+from core.domain.turn import Turn, TurnExecutor, TurnStatus
 from core.domain.workflow import WorkflowRun, WorkflowStatus
+from core.persistence.automation_repository import AutomationRepository
 from core.persistence.database import Database
 from core.persistence.event_repository import EventRepository
 from core.persistence.execution_repository import ItemRepository, TurnRepository
@@ -35,6 +37,7 @@ from core.providers.reasoning import normalize_reasoning_effort
 
 
 _DESKTOP_KIND = "desktop"
+_AUTOMATION_KIND = "automation"
 _MISSING_WORKSPACE_DIR = ".missing-workspaces"
 _UNSET = object()
 
@@ -169,6 +172,122 @@ class ThreadService:
             event_type="thread.resumed",
         )
         return thread
+
+    def materialize_session(self, thread_id: str) -> Session:
+        """Create the exact canonical Session for one committed SQLite Thread.
+
+        Automation creation is the one narrow bootstrap exception to the
+        usual Session-first lifecycle: its Thread, definition, revision, and
+        events commit atomically before this idempotent filesystem step. Every
+        read/recovery caller uses this same method, so a stopped creator and a
+        second live process converge on identical Session metadata.
+        """
+
+        while True:
+            thread, project_path, automation_id = self._materialization_snapshot(
+                thread_id
+            )
+            metadata = self._materialization_metadata(
+                thread,
+                project_path=project_path,
+                automation_id=automation_id,
+            )
+            created_here = False
+            created_fingerprint: tuple[object, ...] | None = None
+            try:
+                session = self.session_store.create_session(
+                    session_id=thread.id,
+                    title=thread.title,
+                    metadata=metadata,
+                    created_at=thread.created_at.isoformat(),
+                    updated_at=thread.updated_at.isoformat(),
+                )
+                created_here = True
+                created_fingerprint = self._empty_session_fingerprint(session)
+            except FileExistsError:
+                session = self.session_store.get_session(thread.id)
+                if session is None:
+                    raise ConflictError(
+                        "the canonical Session path exists without readable metadata"
+                    )
+
+            try:
+                current, current_project_path, current_automation_id = (
+                    self._materialization_snapshot(thread_id)
+                )
+            except ThreadNotFoundError:
+                if created_here and automation_id is not None:
+                    assert created_fingerprint is not None
+                    self._discard_new_empty_automation_session(
+                        thread_id,
+                        automation_id=automation_id,
+                        expected_fingerprint=created_fingerprint,
+                    )
+                raise
+
+            if (
+                current.project_id != thread.project_id
+                or current_automation_id != automation_id
+            ):
+                if created_here and automation_id is not None:
+                    assert created_fingerprint is not None
+                    self._discard_new_empty_automation_session(
+                        thread_id,
+                        automation_id=automation_id,
+                        expected_fingerprint=created_fingerprint,
+                    )
+                raise ThreadNotFoundError(
+                    f"thread ownership changed during materialization: {thread_id}"
+                )
+
+            refreshed = self.session_store.get_session(thread.id)
+            if refreshed is None:
+                raise ConflictError(
+                    f"canonical Session disappeared during materialization: {thread.id}"
+                )
+            if not self._session_matches_materialization(
+                refreshed,
+                thread=current,
+                project_path=current_project_path,
+                automation_id=current_automation_id,
+            ):
+                raise ConflictError(
+                    "an existing canonical Session conflicts with the committed "
+                    f"Thread ownership: {thread.id}"
+                )
+
+            if (
+                created_here
+                and automation_id is not None
+                and self._materialization_signature(
+                    thread,
+                    project_path=project_path,
+                    automation_id=automation_id,
+                )
+                != self._materialization_signature(
+                    current,
+                    project_path=current_project_path,
+                    automation_id=current_automation_id,
+                )
+            ):
+                assert created_fingerprint is not None
+                if self._discard_new_empty_automation_session(
+                    thread_id,
+                    automation_id=automation_id,
+                    expected_fingerprint=created_fingerprint,
+                ):
+                    continue
+                refreshed = self.session_store.get_session(thread.id)
+                if refreshed is None or not self._session_matches_materialization(
+                    refreshed,
+                    thread=current,
+                    project_path=current_project_path,
+                    automation_id=current_automation_id,
+                ):
+                    raise ConflictError(
+                        "Thread changed while its canonical Session was materialized"
+                    )
+            return refreshed
 
     def read(self, thread_id: str) -> Thread:
         session = self.session_store.get_session(thread_id)
@@ -643,6 +762,7 @@ class ThreadService:
                 thread_id=thread.id,
                 ordinal=turns.next_ordinal(thread.id),
                 prompt=f"Recovered workflow task {task.task_id}",
+                executor=TurnExecutor.WORKFLOW,
                 status=turn_status,
                 stop_reason="session_task_projection",
                 error_code=(
@@ -794,7 +914,6 @@ class ThreadService:
 
         with self.database.read() as connection:
             messages = ItemRepository(connection).conversation_for_thread(thread.id)
-            project = ProjectRepository(connection).get(thread.project_id)
             legacy_source = LegacyImportRepository(connection).source_for_thread(
                 thread.id
             )
@@ -813,10 +932,49 @@ class ThreadService:
                 )
             ):
                 return
+        session = self.materialize_session(thread.id)
+        self._merge_projection_tail(
+            session,
+            messages,
+            projection_thread_id=thread.id,
+        )
+
+    def _materialization_snapshot(
+        self,
+        thread_id: str,
+    ) -> tuple[Thread, str, str | None]:
+        """Read Thread ownership in one SQLite snapshot."""
+
+        with self.database.read() as connection:
+            thread = ThreadRepository(connection).get(thread_id)
+            if thread is None:
+                raise ThreadNotFoundError(f"thread not found: {thread_id}")
+            project = ProjectRepository(connection).get(thread.project_id)
+            if project is None:
+                raise ThreadNotFoundError(
+                    f"thread project no longer exists: {thread_id}"
+                )
+            automation = AutomationRepository(connection).get_for_thread(
+                thread_id,
+                include_retired=True,
+            )
+        return (
+            thread,
+            project.canonical_path,
+            automation.id if automation is not None else None,
+        )
+
+    @staticmethod
+    def _materialization_metadata(
+        thread: Thread,
+        *,
+        project_path: str,
+        automation_id: str | None,
+    ) -> dict:
         metadata = {
-            "kind": _DESKTOP_KIND,
+            "kind": (_AUTOMATION_KIND if automation_id is not None else _DESKTOP_KIND),
             "workspace": thread.workspace_path,
-            "project_path": project.canonical_path if project is not None else None,
+            "project_path": project_path,
             "mode": thread.mode.value,
             "model": thread.model,
             "connection_id": thread.connection_id,
@@ -827,29 +985,106 @@ class ThreadService:
                 if thread.archived_at is not None
                 else None
             ),
-            "recovered_from_sqlite_projection": True,
         }
+        if automation_id is not None:
+            metadata["automation_id"] = automation_id
         if thread.parent_thread_id is not None:
             metadata["parent_session_id"] = thread.parent_thread_id
-        try:
-            self.session_store.create_session(
-                session_id=thread.id,
-                title=thread.title,
-                metadata=metadata,
-            )
-        except FileExistsError:
-            return
-        for item in messages:
-            role = "user" if item.kind is ItemKind.USER_MESSAGE else "assistant"
-            self.session_store.append_message(
-                thread.id,
-                role,
-                str(item.payload.get("text", item.summary)),
-                metadata={
-                    "recoveredFromItemId": item.id,
-                    "createdAt": item.created_at.isoformat(),
-                },
-            )
+        return metadata
+
+    @staticmethod
+    def _materialization_signature(
+        thread: Thread,
+        *,
+        project_path: str,
+        automation_id: str | None,
+    ) -> tuple[object, ...]:
+        """Fields a new empty Session would make canonical on projection."""
+
+        return (
+            thread.id,
+            thread.project_id,
+            thread.parent_thread_id,
+            thread.title,
+            thread.mode,
+            thread.workspace_path,
+            thread.model,
+            thread.connection_id,
+            thread.reasoning_effort,
+            thread.status is ThreadStatus.ARCHIVED,
+            thread.archived_at,
+            project_path,
+            automation_id,
+        )
+
+    @staticmethod
+    def _session_matches_materialization(
+        session: Session,
+        *,
+        thread: Thread,
+        project_path: str,
+        automation_id: str | None,
+    ) -> bool:
+        """Reject identity collisions while allowing later presentation edits."""
+
+        if session.session_id != thread.id:
+            return False
+        # Outside the narrow DB-first Automation bootstrap, JSONL remains
+        # canonical. A concurrently appearing CLI/TUI Session may legitimately
+        # have a different surface kind; ordinary projection reconciliation
+        # owns those metadata semantics.
+        if automation_id is None:
+            return True
+        metadata = session.metadata or {}
+        return bool(
+            metadata.get("kind") == _AUTOMATION_KIND
+            and metadata.get("automation_id") == automation_id
+            and metadata.get("workspace") == thread.workspace_path
+            and metadata.get("project_path") == project_path
+            and metadata.get("mode") == thread.mode.value
+        )
+
+    def _discard_new_empty_automation_session(
+        self,
+        thread_id: str,
+        *,
+        automation_id: str,
+        expected_fingerprint: tuple[object, ...],
+    ) -> bool:
+        """Remove only this materializer's untouched, now-ownerless Session."""
+
+        with self.session_store.deletion_guard(thread_id) as guarded:
+            if not guarded.exists or guarded.pending:
+                return False
+            session = self.session_store.get_session(thread_id)
+            if (
+                session is None
+                or session.messages
+                or session.tasks
+                or session.metadata.get("kind") != _AUTOMATION_KIND
+                or session.metadata.get("automation_id") != automation_id
+            ):
+                return False
+            if self._empty_session_fingerprint(session) != expected_fingerprint:
+                return False
+            try:
+                children = {child.name for child in guarded.directory.iterdir()}
+            except OSError:
+                return False
+            if children != {"session.jsonl"}:
+                return False
+            ticket = guarded.stage()
+            return guarded.finalize(ticket)
+
+    @staticmethod
+    def _empty_session_fingerprint(session: Session) -> tuple[object, ...]:
+        return (
+            session.session_id,
+            session.title,
+            session.created_at,
+            session.updated_at,
+            dict(session.metadata),
+        )
 
     def _merge_projection_tail(
         self,

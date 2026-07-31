@@ -39,6 +39,28 @@ class ApprovalStatus(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class ApprovalGrant:
+    """A durable Thread-scoped grant for one exact tool capability.
+
+    The permission engine still evaluates every call before the approval
+    callback runs.  This record only remembers a user's ``approved_session``
+    response for the same canonical Thread and tool; it cannot widen policy,
+    bypass a deny, or authorize a different tool.
+    """
+
+    thread_id: str
+    tool_name: str
+    source_approval_id: str
+    granted_at: datetime = field(default_factory=utc_now)
+
+    def __post_init__(self) -> None:
+        require_non_empty(self.thread_id, "thread_id")
+        require_non_empty(self.tool_name, "tool_name")
+        require_prefixed_id(self.source_approval_id, "apr")
+        require_aware(self.granted_at, "granted_at")
+
+
+@dataclass(frozen=True, slots=True)
 class Approval:
     thread_id: str
     turn_id: str

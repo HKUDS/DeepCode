@@ -119,6 +119,38 @@ review remain visible evidence for the working Agent's completion decision.
 Goals are not a Desktop-only workflow: the same ledger and ordinary Turn
 execution are available from the interactive CLI with `/goal`.
 
+### Run an Automation
+
+Open **Automations** after selecting a trusted Project. A definition may be
+manual or interval-based and owns one canonical Goal Thread. **Run now**
+creates an idempotent Run; **Runs** shows its durable history; **Open Thread**
+opens the same conversation, tools, approvals, evidence, and continuation
+controls used by interactive work.
+
+Pause/resume controls only an interval schedule. Manual definitions are always
+enabled, and **Run now** remains available while an interval is paused.
+
+Desktop loads one bounded page of definitions and one bounded page of expanded
+Run history at a time. **Load more automations** and **Load more runs** append
+the next explicit page with stable ID deduplication. Live notifications refresh
+the first page; an overflow warning also resets the visible pages safely rather
+than presenting a partial cache as complete.
+
+Interval schedules execute while a scheduler-enabled Desktop or App Server is
+active. If several compatible processes share the database, one holds the
+scheduler leader lease and the others remain available for takeover. Agent and
+Workflow Turns still use the shared cross-process capacity and workspace
+fences, so another Session cannot mutate the same canonical checkout at the
+same time.
+
+Automation instructions never grant trust or elevated permissions. Each Turn
+captures the workspace's explicit permission setting or the safe default, and
+an approval can be answered from another connected DeepCode client. The same
+definitions and Run history are available through `deepcode automation`.
+See the
+[Automation architecture](../docs/AUTOMATION_ARCHITECTURE.md) for lifecycle,
+idempotency, and recovery details.
+
 ## Development and verification
 
 Desktop packaging uses an isolated Python 3.12 environment installed from

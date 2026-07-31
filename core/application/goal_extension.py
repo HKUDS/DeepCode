@@ -5,11 +5,12 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from importlib.resources import files
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from core.agent_runtime.goal_runtime import GoalRuntimeContext, GoalRuntimeHandler
 from core.application.errors import (
@@ -36,6 +37,8 @@ from core.domain.thread_goal import (
 from core.domain.turn import Turn, TurnStatus
 from core.sessions.thread_goal_store import (
     ThreadGoalConflictError,
+    ThreadGoalIdentityRetiredError,
+    ThreadGoalRecord,
     ThreadGoalStore,
 )
 from core.skills.models import MAX_SELECTED_SKILLS, SkillSelection
@@ -55,6 +58,7 @@ _EVIDENCE_KINDS = frozenset(
 
 GoalUpdateSink = Callable[[str, ThreadGoal | None], None]
 GoalLifecycleSink = Callable[[str, str, dict[str, Any]], None]
+GoalContinuationGuard = Callable[[ThreadGoal], None]
 
 
 class GoalContinueDisposition(StrEnum):
@@ -67,6 +71,14 @@ class GoalContinueResult:
     goal: ThreadGoal
     disposition: GoalContinueDisposition
     turn_id: str
+
+
+class GoalContinuationRejected(ConflictError):
+    """A durable owner or settlement invariant prevents continuation."""
+
+
+class GoalIdentityRetiredError(ConflictError):
+    """A caller-owned Goal was explicitly cleared and cannot be recreated."""
 
 
 class GoalExtension(GoalRuntimeHandler):
@@ -86,12 +98,19 @@ class GoalExtension(GoalRuntimeHandler):
         self._lifecycle_sink = lifecycle_sink
         self._locks_guard = threading.Lock()
         self._locks: dict[str, threading.RLock] = {}
+        self._continuation_guards: list[GoalContinuationGuard] = []
         self._continuation_template = (
             files("core.application.goal_prompts")
             .joinpath("continuation.md")
             .read_text(encoding="utf-8")
             .strip()
         )
+
+    def add_continuation_guard(self, guard: GoalContinuationGuard) -> None:
+        """Register an owner policy without coupling Goal to that owner."""
+
+        if guard not in self._continuation_guards:
+            self._continuation_guards.append(guard)
 
     def read(self, thread_id: str) -> ThreadGoal | None:
         return self.store.read(thread_id)
@@ -109,6 +128,19 @@ class GoalExtension(GoalRuntimeHandler):
             thread_id,
             goal_id=goal_id,
             turn_id=turn_id,
+        )
+
+    def are_turns_accounted(
+        self,
+        thread_id: str,
+        *,
+        goal_id: str,
+        turn_ids: tuple[str, ...],
+    ) -> bool:
+        return self.store.has_turn_settlements(
+            thread_id,
+            goal_id=goal_id,
+            turn_ids=turn_ids,
         )
 
     def read_outcome(self, thread_id: str) -> GoalOutcome | None:
@@ -143,10 +175,39 @@ class GoalExtension(GoalRuntimeHandler):
         return self.store.read_guarded(thread_id, directory)
 
     def turn_association(self, thread_id: str) -> GoalTurnAssociation | None:
-        goal = self.read(thread_id)
+        record = self.store.read_record(thread_id)
+        goal = record.goal
         if goal is None or goal.status is not ThreadGoalStatus.ACTIVE:
             return None
-        return GoalTurnAssociation(goal_id=goal.id, skill_ids=goal.skill_ids)
+        return GoalTurnAssociation(
+            goal_id=goal.id,
+            skill_ids=goal.skill_ids,
+            turn_settlement_ids=record.turn_settlement_ids,
+        )
+
+    @contextmanager
+    def turn_submission_scope(
+        self,
+        thread_id: str,
+    ) -> Iterator[GoalTurnAssociation | None]:
+        """Freeze Goal association until the proposed Turn has committed.
+
+        The Session file lock is held only across the short SQLite submission
+        transaction. This closes clear/replace races without moving Goal state
+        into TurnService or introducing an Automation-specific branch.
+        """
+
+        with self._lock(thread_id), self.store.guarded_record(thread_id) as record:
+            goal = record.goal
+            yield (
+                GoalTurnAssociation(
+                    goal_id=goal.id,
+                    skill_ids=goal.skill_ids,
+                    turn_settlement_ids=record.turn_settlement_ids,
+                )
+                if goal is not None and goal.status is ThreadGoalStatus.ACTIVE
+                else None
+            )
 
     def create(
         self,
@@ -181,6 +242,93 @@ class GoalExtension(GoalRuntimeHandler):
                     client_surface=client_surface,
                 )
             return self.read(thread_id) or created
+
+    def provision(
+        self,
+        thread_id: str,
+        *,
+        goal_id: str,
+        objective: str,
+        token_budget: int | None = None,
+        skill_ids: tuple[str, ...] = (),
+    ) -> ThreadGoal:
+        """Idempotently provision one caller-owned Goal without starting a Turn.
+
+        Callers may persist ``goal_id`` before invoking this method and safely
+        retry after a crash. A retry must present the same declarative Goal
+        content; a different identity or content fails with a conflict.
+        """
+
+        requested = self._caller_owned_goal(
+            thread_id,
+            goal_id=goal_id,
+            objective=objective,
+            token_budget=token_budget,
+            skill_ids=skill_ids,
+        )
+        with self._lock(thread_id):
+            try:
+                provisioned, created = self.store.provision(requested)
+            except ThreadGoalIdentityRetiredError as exc:
+                raise GoalIdentityRetiredError(str(exc)) from exc
+            except ThreadGoalConflictError as exc:
+                raise ConflictError(str(exc)) from exc
+            if created:
+                self._notify(thread_id, provisioned)
+                self._emit(
+                    thread_id,
+                    "goal.created",
+                    {
+                        "goalId": provisioned.id,
+                        "status": provisioned.status.value,
+                    },
+                )
+            return provisioned
+
+    def provision_replacing_completed(
+        self,
+        thread_id: str,
+        *,
+        expected_current_goal_id: str,
+        goal_id: str,
+        objective: str,
+        token_budget: int | None = None,
+        skill_ids: tuple[str, ...] = (),
+    ) -> ThreadGoal:
+        """Atomically replace one exact completed Goal with a fresh identity."""
+
+        requested = self._caller_owned_goal(
+            thread_id,
+            goal_id=goal_id,
+            objective=objective,
+            token_budget=token_budget,
+            skill_ids=skill_ids,
+        )
+        with self._lock(thread_id):
+            try:
+                provisioned = self.store.provision_replacing_completed(
+                    requested,
+                    expected_current_goal_id=expected_current_goal_id,
+                )
+            except ThreadGoalIdentityRetiredError as exc:
+                raise GoalIdentityRetiredError(str(exc)) from exc
+            except ThreadGoalConflictError as exc:
+                raise ConflictError(str(exc)) from exc
+            self._notify(thread_id, provisioned)
+            self._emit(
+                thread_id,
+                "goal.cleared",
+                {"goalId": expected_current_goal_id},
+            )
+            self._emit(
+                thread_id,
+                "goal.created",
+                {
+                    "goalId": provisioned.id,
+                    "status": provisioned.status.value,
+                },
+            )
+            return provisioned
 
     def edit(
         self,
@@ -331,6 +479,46 @@ class GoalExtension(GoalRuntimeHandler):
             if goal is not None:
                 self._continue_if_idle_locked(goal)
 
+    def reconcile_turn_settlements(
+        self,
+        thread_id: str,
+        *,
+        expected_goal_id: str,
+        continue_from_latest_completion: bool = False,
+    ) -> int:
+        """Account durable terminal Turns for one exact current Goal.
+
+        Reconciliation is idempotent and never submits work by default. An
+        owning runtime may explicitly restore the ordinary settled-listener
+        behavior when the latest Goal Turn completed normally. Interrupted,
+        failed, non-terminal, replaced, and cleared Goals are never replayed.
+        """
+
+        with self._lock(thread_id):
+            current = self.read(thread_id)
+            if current is None or current.id != expected_goal_id:
+                return 0
+            goal_turns = self.turns.list_for_goal(thread_id, expected_goal_id)
+            applied = 0
+            for turn in goal_turns:
+                if not turn.status.is_terminal:
+                    continue
+                _, settled = self._account_goal_turn_locked(turn)
+                applied += int(settled)
+
+            latest = goal_turns[-1] if goal_turns else None
+            current = self.read(thread_id)
+            if (
+                continue_from_latest_completion
+                and current is not None
+                and current.id == expected_goal_id
+                and current.status is ThreadGoalStatus.ACTIVE
+                and latest is not None
+                and latest.status is TurnStatus.COMPLETED
+            ):
+                self._continue_if_idle_locked(current)
+            return applied
+
     def read_goal(self, context: GoalRuntimeContext) -> dict[str, Any]:
         goal = self.read(context.thread_id)
         return {
@@ -406,6 +594,34 @@ class GoalExtension(GoalRuntimeHandler):
                 "updated": True,
             }
 
+    def recover_incomplete(self) -> int:
+        """Replay committed Goal Turns whose ledger settlement may be missing."""
+
+        recovered = 0
+        for discovered in self.store.list_current():
+            with self._lock(discovered.thread_id):
+                current = self.read(discovered.thread_id)
+                if current is None or current.id != discovered.id:
+                    continue
+                turns = self.turns.list_for_goal(current.thread_id, current.id)
+                for turn in turns:
+                    if not turn.status.is_terminal:
+                        continue
+                    _, applied = self._account_goal_turn_locked(turn)
+                    recovered += int(applied)
+
+                latest = turns[-1] if turns else None
+                current = self.read(discovered.thread_id)
+                if (
+                    current is not None
+                    and current.id == discovered.id
+                    and current.status is ThreadGoalStatus.ACTIVE
+                    and latest is not None
+                    and latest.status is not TurnStatus.INTERRUPTED
+                ):
+                    self._continue_if_idle_locked(current)
+        return recovered
+
     def on_turn_settled(self, turn: Turn) -> None:
         """Account a durable Turn and continue only from normal completion."""
 
@@ -414,53 +630,70 @@ class GoalExtension(GoalRuntimeHandler):
                 self.continue_if_idle(turn.thread_id)
             return
         with self._lock(turn.thread_id):
-            goal = self.read(turn.thread_id)
-            if goal is None or goal.id != turn.goal_id:
-                return
-            tokens = self._turn_tokens(turn.id)
-            elapsed = self._turn_elapsed_seconds(turn)
-            reason = {
-                TurnStatus.COMPLETED: "turn completed",
-                TurnStatus.INTERRUPTED: "turn interrupted",
-                TurnStatus.FAILED: self._runtime_failure_reason(turn),
-            }.get(turn.status, "turn settled")
-            try:
-                updated = self.store.update(
-                    turn.thread_id,
-                    expected_goal_id=goal.id,
-                    transform=lambda current: self._settled_goal(
-                        current,
-                        turn=turn,
-                        tokens=tokens,
-                        elapsed_seconds=elapsed,
-                    ),
-                    reason=reason,
-                    source="runtime",
-                    turn_id=turn.id,
-                )
-            except ThreadGoalConflictError:
-                logger.info(
-                    "Goal changed while Turn %s was being accounted",
-                    turn.id,
-                )
-                return
-            self._notify(turn.thread_id, updated)
+            updated, _ = self._account_goal_turn_locked(turn)
+            goal_turns = (
+                self.turns.list_for_goal(turn.thread_id, turn.goal_id)
+                if updated is not None
+                else ()
+            )
             if (
-                turn.status is TurnStatus.FAILED
-                and updated.status is ThreadGoalStatus.BLOCKED
+                updated is not None
+                and turn.status is TurnStatus.COMPLETED
+                and goal_turns
+                and goal_turns[-1].id == turn.id
             ):
-                self._emit(
-                    turn.thread_id,
-                    "goal.blocked",
-                    {
-                        "goalId": updated.id,
-                        "turnId": turn.id,
-                        "reason": reason,
-                    },
-                )
-                return
-            if turn.status is TurnStatus.COMPLETED:
                 self._continue_if_idle_locked(updated)
+
+    def _account_goal_turn_locked(
+        self,
+        turn: Turn,
+    ) -> tuple[ThreadGoal | None, bool]:
+        goal = self.read(turn.thread_id)
+        if goal is None or goal.id != turn.goal_id:
+            return None, False
+        tokens = self._turn_tokens(turn.id)
+        elapsed = self._turn_elapsed_seconds(turn)
+        reason = {
+            TurnStatus.COMPLETED: "turn completed",
+            TurnStatus.INTERRUPTED: "turn interrupted",
+            TurnStatus.FAILED: self._runtime_failure_reason(turn),
+        }.get(turn.status, "turn settled")
+        try:
+            updated, applied = self.store.settle_turn(
+                turn.thread_id,
+                expected_goal_id=goal.id,
+                turn_id=turn.id,
+                transform=lambda current: self._settled_goal(
+                    current,
+                    turn=turn,
+                    tokens=tokens,
+                    elapsed_seconds=elapsed,
+                ),
+                reason=reason,
+            )
+        except ThreadGoalConflictError:
+            logger.info(
+                "Goal changed while Turn %s was being accounted",
+                turn.id,
+            )
+            return None, False
+        if not applied:
+            return updated, False
+        self._notify(turn.thread_id, updated)
+        if (
+            turn.status is TurnStatus.FAILED
+            and updated.status is ThreadGoalStatus.BLOCKED
+        ):
+            self._emit(
+                turn.thread_id,
+                "goal.blocked",
+                {
+                    "goalId": updated.id,
+                    "turnId": turn.id,
+                    "reason": reason,
+                },
+            )
+        return updated, True
 
     def _user_transition(
         self,
@@ -493,6 +726,11 @@ class GoalExtension(GoalRuntimeHandler):
                 transform=lambda current: current.user_transition(status),
                 reason=reason,
                 source="user",
+                guard=(
+                    self._ensure_continuation_allowed_record
+                    if status is ThreadGoalStatus.ACTIVE
+                    else None
+                ),
             )
         except ThreadGoalConflictError as exc:
             raise ConflictError(str(exc)) from exc
@@ -522,13 +760,16 @@ class GoalExtension(GoalRuntimeHandler):
             or latest.status is not ThreadGoalStatus.ACTIVE
         ):
             return
-        self._start_continuation_locked(
-            latest,
-            client_surface=client_surface,
-            connection_id=connection_id,
-            model=model,
-            reasoning_effort=reasoning_effort,
-        )
+        try:
+            self._start_continuation_locked(
+                latest,
+                client_surface=client_surface,
+                connection_id=connection_id,
+                model=model,
+                reasoning_effort=reasoning_effort,
+            )
+        except GoalContinuationRejected as exc:
+            logger.info("Goal %s remains idle: %s", latest.id, exc)
 
     def _start_continuation_locked(
         self,
@@ -539,6 +780,7 @@ class GoalExtension(GoalRuntimeHandler):
         model: str | None = None,
         reasoning_effort: str | None = None,
     ) -> GoalContinueResult:
+        self._ensure_continuation_allowed(goal)
         active = self.turns.active_for_thread(goal.thread_id)
         if active is not None:
             return GoalContinueResult(
@@ -555,6 +797,7 @@ class GoalExtension(GoalRuntimeHandler):
                 reasoning_effort=reasoning_effort,
                 client_surface=client_surface,
                 input_source=TurnInputSource.GOAL_CONTINUATION,
+                expected_goal_id=goal.id,
             )
         except TurnAlreadyRunningError as exc:
             actual_turn_id = exc.details.get("actualTurnId")
@@ -573,6 +816,46 @@ class GoalExtension(GoalRuntimeHandler):
             disposition=GoalContinueDisposition.STARTED,
             turn_id=snapshot.turn.id,
         )
+
+    def _ensure_continuation_allowed(self, goal: ThreadGoal) -> None:
+        terminal_turn_ids = tuple(
+            turn.id
+            for turn in self.turns.list_for_goal(goal.thread_id, goal.id)
+            if turn.status.is_terminal
+        )
+        if terminal_turn_ids and not self.store.has_turn_settlements(
+            goal.thread_id,
+            goal_id=goal.id,
+            turn_ids=terminal_turn_ids,
+        ):
+            raise GoalContinuationRejected(
+                "Goal Turn settlement is incomplete; recover it before continuing"
+            )
+        for guard in tuple(self._continuation_guards):
+            guard(goal)
+
+    def _ensure_continuation_allowed_record(
+        self,
+        record: ThreadGoalRecord,
+    ) -> None:
+        """Revalidate a resume inside the canonical Goal mutation lock."""
+
+        goal = record.goal
+        if goal is None:
+            raise GoalContinuationRejected("Goal no longer exists")
+        terminal_turn_ids = tuple(
+            turn.id
+            for turn in self.turns.list_for_goal(goal.thread_id, goal.id)
+            if turn.status.is_terminal
+        )
+        if any(
+            turn_id not in record.turn_settlement_ids for turn_id in terminal_turn_ids
+        ):
+            raise GoalContinuationRejected(
+                "Goal Turn settlement is incomplete; recover it before continuing"
+            )
+        for guard in tuple(self._continuation_guards):
+            guard(goal)
 
     def _continuation_prompt(self, goal: ThreadGoal) -> str:
         return self._continuation_template.replace(
@@ -647,6 +930,26 @@ class GoalExtension(GoalRuntimeHandler):
     def _lock(self, thread_id: str) -> threading.RLock:
         with self._locks_guard:
             return self._locks.setdefault(thread_id, threading.RLock())
+
+    def _caller_owned_goal(
+        self,
+        thread_id: str,
+        *,
+        goal_id: str,
+        objective: str,
+        token_budget: int | None,
+        skill_ids: tuple[str, ...],
+    ) -> ThreadGoal:
+        try:
+            return ThreadGoal(
+                id=goal_id,
+                thread_id=thread_id,
+                objective=self._objective(objective),
+                token_budget=token_budget,
+                skill_ids=self._skills(skill_ids),
+            )
+        except ValueError as exc:
+            raise InvalidArgumentError(str(exc)) from exc
 
     @staticmethod
     def _objective(value: str) -> str:

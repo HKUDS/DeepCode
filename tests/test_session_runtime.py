@@ -4,6 +4,7 @@ import asyncio
 
 from core.agent_runtime.injections import SubagentMessage
 from core.application.session_runtime import SessionRuntimeRegistry
+from core.domain.execution_permission import ExecutionPermissionMode
 from core.sessions import SessionStore
 
 
@@ -75,6 +76,63 @@ def test_idle_agent_runtime_is_rebuilt_when_configuration_token_changes(
         )
         assert replaced is not first
         assert first.closed is True
+        await registry.close_all()
+
+    asyncio.run(exercise())
+
+
+def test_permission_snapshot_is_part_of_runtime_identity(tmp_path) -> None:
+    class PermissionFactory(_Factory):
+        def __init__(self) -> None:
+            super().__init__()
+            self.permission_modes = []
+
+        def create(
+            self,
+            *,
+            workspace,
+            model,
+            approval_callback,
+            permission_mode_override,
+        ):
+            self.permission_modes.append(permission_mode_override)
+            return super().create(
+                workspace=workspace,
+                model=model,
+                approval_callback=approval_callback,
+            )
+
+    store = SessionStore(tmp_path / "sessions")
+    session = store.create_session(
+        title="runtime",
+        metadata={"workspace": str(tmp_path)},
+    )
+    factory = PermissionFactory()
+    registry = SessionRuntimeRegistry(store, factory)
+
+    async def exercise() -> None:
+        inherited = await registry.acquire(
+            session.session_id,
+            workspace=str(tmp_path),
+            model=None,
+            permission_mode_override=None,
+            approval_callback=lambda *_args: False,
+        )
+        registry.release(session.session_id)
+        explicit = await registry.acquire(
+            session.session_id,
+            workspace=str(tmp_path),
+            model=None,
+            permission_mode_override=ExecutionPermissionMode.DEFAULT,
+            approval_callback=lambda *_args: False,
+        )
+
+        assert explicit is not inherited
+        assert inherited.closed is True
+        assert factory.permission_modes == [
+            None,
+            ExecutionPermissionMode.DEFAULT,
+        ]
         await registry.close_all()
 
     asyncio.run(exercise())

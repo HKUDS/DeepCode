@@ -4,7 +4,6 @@ import {
   FolderClock,
   FolderOpen,
   MessageSquare,
-  Plug,
   Plus,
   Search,
   Settings,
@@ -239,15 +238,7 @@ export function DesktopSidebar({
           onClick={() => onDestination("skills")}
         >
           <WandSparkles size={15} />
-          Skills &amp; Hooks
-        </button>
-        <button
-          type="button"
-          data-active={destination === "mcp"}
-          onClick={() => onDestination("mcp")}
-        >
-          <Plug size={15} />
-          MCP
+          Skills
         </button>
         <button
           type="button"

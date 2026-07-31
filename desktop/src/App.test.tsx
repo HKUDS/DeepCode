@@ -390,46 +390,6 @@ class TestRuntime implements DesktopRuntime {
       }
       case "skills/reload":
         return this.skillCatalog() as unknown as MethodResults[M];
-      case "hooks/list":
-        return {
-          hooks: [
-            {
-              eventName: "PreToolUse",
-              matcher: "Bash",
-              command: "python3 check.py",
-              timeoutSeconds: 15,
-              source: "project",
-              sourcePath: "/workspace/deepcode/.deepcode/hooks.json",
-              displayOrder: 0,
-              statusMessage: null,
-            },
-          ],
-          warnings: [],
-          truncated: false,
-        } as unknown as MethodResults[M];
-      case "mcp/list":
-        return {
-          servers: [
-            {
-              name: "filesystem",
-              transport: "stdio",
-              command: "npx",
-              args: ["-y", "@modelcontextprotocol/server-filesystem"],
-              url: null,
-              enabledTools: ["*"],
-              toolTimeout: 300,
-              description: "Workspace filesystem tools",
-              envKeys: [],
-              headerKeys: [],
-              source: "user",
-              configurationState: "configured",
-              configurationMessage:
-                "Configuration is ready; connection is checked on use",
-            },
-          ],
-          userConfigPath: "/tmp/deepcode_config.json",
-          projectConfigPath: "/workspace/deepcode/deepcode_config.json",
-        } as unknown as MethodResults[M];
       case "diagnostics/read":
         return { diagnostics } as MethodResults[M];
       case "automation/list":
@@ -439,7 +399,9 @@ class TestRuntime implements DesktopRuntime {
           ],
           latestRuns: [automationRun],
           schedulerActive: true,
-          executionMode: "while_app_running",
+          executionMode: "requires_live_runtime",
+          hasMore: false,
+          nextOffset: null,
         } as unknown as MethodResults[M];
       case "automation/create":
         return {
@@ -472,7 +434,11 @@ class TestRuntime implements DesktopRuntime {
           },
         } as unknown as MethodResults[M];
       case "automation/runs":
-        return { runs: [automationRun] } as unknown as MethodResults[M];
+        return {
+          runs: [automationRun],
+          hasMore: false,
+          nextOffset: null,
+        } as unknown as MethodResults[M];
       case "thread/list":
         return {
           threads: this.threadState.filter((candidate) => candidate.status !== "archived"),
@@ -906,6 +872,7 @@ const automation: Automation = {
   projectId: project.id,
   threadId: goalThread.id,
   name: "Repository caretaker",
+  currentRevisionId: "arev-test",
   prompt: "Review and maintain the repository",
   status: "enabled",
   scheduleKind: "interval",
@@ -919,6 +886,9 @@ const automation: Automation = {
 const automationRun: AutomationRun = {
   id: "arun-test",
   automationId: automation.id,
+  revisionId: automation.currentRevisionId,
+  occurrenceId: "aocc-test",
+  goalId: "goal-automation",
   threadId: goalThread.id,
   turnId: "turn-automation",
   trigger: "scheduled",
@@ -1269,18 +1239,19 @@ describe("desktop command center", () => {
     await waitFor(() => expect(screen.getByText("Local agent ready")).toBeTruthy());
   });
 
-  it("navigates to the real Skill and Hook inventory for the selected project", async () => {
+  it("navigates to the shared Skill inventory for the selected project", async () => {
     const runtime = new TestRuntime([project], [thread], []);
     render(<App runtime={runtime} />);
 
     await screen.findByRole("heading", { name: "Recovered task" });
-    fireEvent.click(screen.getByRole("button", { name: "Skills & Hooks" }));
+    fireEvent.click(screen.getByRole("button", { name: "Skills" }));
 
-    await screen.findByRole("heading", { name: "Skills & Hooks" });
+    await screen.findByRole("heading", { name: "Skills" });
     await waitFor(() => {
       expect(runtime.calls).toContain("skills/list");
-      expect(runtime.calls).toContain("hooks/list");
     });
+    expect(runtime.calls).not.toContain("hooks/list");
+    expect(screen.queryByRole("tab", { name: /Hooks/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /review/i }));
     expect(await screen.findByText("concrete evidence")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Disable" }));
@@ -1304,8 +1275,6 @@ describe("desktop command center", () => {
       enabled: false,
       scope: "project",
     });
-    fireEvent.click(screen.getByRole("tab", { name: /Hooks 1/ }));
-    expect(screen.getByText("python3 check.py")).toBeTruthy();
 
     const skillsRequest = runtime.requests.find(
       (candidate) => candidate.method === "skills/list",
@@ -1332,7 +1301,7 @@ describe("desktop command center", () => {
       await screen.findByRole("heading", { name: "Repository caretaker" }),
     ).toBeTruthy();
     expect(
-      screen.getByText(/runs while DeepCode Desktop is open/),
+      screen.getByText(/runs while a compatible DeepCode runtime is active/),
     ).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Run now" }));
@@ -1568,20 +1537,18 @@ describe("desktop command center", () => {
     ).toMatchObject({ expectedGoalId: "goal-completed" });
   });
 
-  it("shows honest MCP configuration state without claiming a live connection", async () => {
+  it("keeps dormant Hook and MCP management out of primary navigation", async () => {
     const runtime = new TestRuntime([project], [thread], []);
     render(<App runtime={runtime} />);
 
     await screen.findByRole("heading", { name: "Recovered task" });
-    fireEvent.click(screen.getByRole("button", { name: "MCP" }));
+    expect(screen.queryByRole("button", { name: "MCP" })).toBeNull();
 
-    await screen.findByRole("heading", { name: "MCP configuration" });
-    expect(await screen.findByRole("heading", { name: "filesystem" })).toBeTruthy();
-    expect(
-      screen.getByText(/“Configured” does not claim a live connection/),
-    ).toBeTruthy();
-    expect(runtime.requests.find((request) => request.method === "mcp/list")?.params)
-      .toEqual({ projectId: project.id });
+    fireEvent.click(screen.getByRole("button", { name: "Skills" }));
+    await screen.findByRole("heading", { name: "Skills" });
+    expect(screen.queryByRole("tab", { name: /Hooks/ })).toBeNull();
+    expect(runtime.calls).not.toContain("hooks/list");
+    expect(runtime.calls).not.toContain("mcp/list");
   });
 
   it("loads effective Settings and sanitized diagnostics for the selected project", async () => {

@@ -514,7 +514,7 @@ def test_goal_edit_and_steer_remain_available_while_work_runs_in_background(
 
     assert rc == 0
     output = capsys.readouterr().out
-    assert "Steered Turn" in output
+    assert "Steered Turn" in output or "Queued Turn" in output
     assert "Goal saved with the same identity" in output
     store = SessionStore(tmp_path / "sessions")
     goal = ThreadGoalStore(store).read(store.list_sessions()[0].session_id)

@@ -210,7 +210,6 @@ def test_automation_and_worktree_ownership_block_implicit_orphans(
             name="Nightly check",
             prompt="inspect the repository",
             schedule_kind=AutomationScheduleKind.MANUAL,
-            enabled=False,
         )
         with pytest.raises(ConflictError) as automation_error:
             application.deletions.delete(created.thread.id)

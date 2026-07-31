@@ -19,7 +19,7 @@ from core.application.views import thread_view
 from core.domain.common import utc_now
 from core.domain.item import Item, ItemKind, ItemStatus
 from core.domain.thread import Thread, ThreadMode
-from core.domain.turn import Turn, TurnStatus
+from core.domain.turn import Turn, TurnExecutor, TurnStatus
 from core.domain.workflow import WorkflowRun, WorkflowStatus
 from core.persistence.database import Database
 from core.persistence.event_repository import EventRepository
@@ -199,6 +199,11 @@ class LegacySessionImporter:
                 thread_id=thread.id,
                 ordinal=ordinal,
                 prompt=prompt,
+                executor=(
+                    TurnExecutor.WORKFLOW
+                    if source.tasks and ordinal == len(groups)
+                    else TurnExecutor.AGENT
+                ),
                 status=TurnStatus.COMPLETED,
                 stop_reason="legacy_import",
                 started_at=min(timestamps),
@@ -249,6 +254,7 @@ class LegacySessionImporter:
                 thread_id=thread.id,
                 ordinal=1,
                 prompt="Imported legacy workflow session",
+                executor=TurnExecutor.WORKFLOW,
                 status=TurnStatus.COMPLETED,
                 stop_reason="legacy_import",
                 started_at=now,

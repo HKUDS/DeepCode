@@ -21,6 +21,7 @@ from core.events import Event
 class InteractiveDelivery(StrEnum):
     STARTED = "started"
     STEERED = "steered"
+    QUEUED = "queued"
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,10 +114,7 @@ class InteractiveTurnRouter:
         except TurnNotSteerableError as exc:
             if not exc.crossed_final_input_boundary:
                 raise
-            terminal = self.turns.wait_until_terminal(expected_turn_id)
-            if terminal is None:
-                raise
-            return self._start_or_steer_once(
+            return self._enqueue_after_final_boundary(
                 thread_id,
                 prompt=prompt,
                 message_id=message_id,
@@ -145,12 +143,61 @@ class InteractiveTurnRouter:
             actual_turn_id = _actual_turn_id(exc)
             if actual_turn_id is None:
                 raise
-            return self._steer_once(
-                thread_id,
-                expected_turn_id=actual_turn_id,
-                prompt=prompt,
-                message_id=message_id,
-            )
+            try:
+                return self._steer_once(
+                    thread_id,
+                    expected_turn_id=actual_turn_id,
+                    prompt=prompt,
+                    message_id=message_id,
+                )
+            except NoActiveTurnError:
+                return self._enqueue_after_final_boundary(
+                    thread_id,
+                    prompt=prompt,
+                    message_id=message_id,
+                    skill_ids=skill_ids,
+                    event_observer=event_observer,
+                )
+            except TurnNotSteerableError as steer_error:
+                if not steer_error.crossed_final_input_boundary:
+                    raise
+                return self._enqueue_after_final_boundary(
+                    thread_id,
+                    prompt=prompt,
+                    message_id=message_id,
+                    skill_ids=skill_ids,
+                    event_observer=event_observer,
+                )
+
+    def _enqueue_after_final_boundary(
+        self,
+        thread_id: str,
+        *,
+        prompt: str,
+        message_id: str,
+        skill_ids: tuple[str, ...],
+        event_observer: Callable[[Event], None] | None,
+    ) -> InteractiveTurnResult:
+        """Persist one input for the next Turn after the live boundary closes.
+
+        ``enqueue`` decides under the Turn write transaction whether this is a
+        new head or a follower. It therefore cannot lose a race to an automatic
+        Goal continuation and needs no timing retry loop.
+        """
+
+        snapshot = self.turns.enqueue(
+            thread_id,
+            prompt=prompt,
+            message_id=message_id,
+            skill_ids=skill_ids,
+            event_observer=event_observer,
+            client_surface=self.client_surface,
+        )
+        return InteractiveTurnResult(
+            delivery=InteractiveDelivery.QUEUED,
+            turn=snapshot.turn,
+            message_id=message_id,
+        )
 
     def _start(
         self,

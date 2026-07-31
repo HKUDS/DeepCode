@@ -22,9 +22,9 @@ class WorkflowRepository:
     def add(self, run: WorkflowRun) -> None:
         self.connection.execute(
             "INSERT INTO workflow_runs (id, thread_id, turn_id, kind, status, "
-            "input_json, result_json, attempt, retry_of, current_stage, progress_current, "
-            "progress_total, checkpoint_json, created_at, updated_at, started_at, "
-            "completed_at, error_code, error_message) "
+            "input_json, result_json, attempt, retry_of, current_stage, "
+            "progress_current, progress_total, checkpoint_json, created_at, "
+            "updated_at, started_at, completed_at, error_code, error_message) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 run.id,
@@ -50,31 +50,62 @@ class WorkflowRepository:
         )
 
     def update(self, run: WorkflowRun) -> None:
-        cursor = self.connection.execute(
+        cursor = self._update(run)
+        if cursor.rowcount != 1:
+            raise KeyError(run.id)
+
+    def update_if_current(
+        self,
+        run: WorkflowRun,
+        *,
+        expected: WorkflowRun,
+    ) -> bool:
+        """Compare-and-swap one mutable Workflow snapshot."""
+
+        if run.id != expected.id:
+            raise ValueError("workflow compare-and-swap ids must match")
+        cursor = self._update(
+            run,
+            where=("id = ? AND status = ? AND checkpoint_json = ? AND updated_at = ?"),
+            where_values=(
+                run.id,
+                expected.status.value,
+                dump_json(expected.checkpoint),
+                dump_datetime(expected.updated_at),
+            ),
+        )
+        return cursor.rowcount == 1
+
+    def _update(
+        self,
+        run: WorkflowRun,
+        *,
+        where: str = "id = ?",
+        where_values: tuple[object, ...] | None = None,
+    ) -> sqlite3.Cursor:
+        values = (
+            run.status.value,
+            dump_json(run.input),
+            dump_json(run.result),
+            run.attempt,
+            run.retry_of,
+            run.current_stage,
+            run.progress_current,
+            run.progress_total,
+            dump_json(run.checkpoint),
+            dump_datetime(run.updated_at),
+            dump_datetime(run.started_at),
+            dump_datetime(run.completed_at),
+            run.error_code,
+            run.error_message,
+        )
+        return self.connection.execute(
             "UPDATE workflow_runs SET status = ?, input_json = ?, result_json = ?, "
             "attempt = ?, retry_of = ?, current_stage = ?, progress_current = ?, "
             "progress_total = ?, checkpoint_json = ?, updated_at = ?, started_at = ?, "
-            "completed_at = ?, error_code = ?, error_message = ? WHERE id = ?",
-            (
-                run.status.value,
-                dump_json(run.input),
-                dump_json(run.result),
-                run.attempt,
-                run.retry_of,
-                run.current_stage,
-                run.progress_current,
-                run.progress_total,
-                dump_json(run.checkpoint),
-                dump_datetime(run.updated_at),
-                dump_datetime(run.started_at),
-                dump_datetime(run.completed_at),
-                run.error_code,
-                run.error_message,
-                run.id,
-            ),
+            f"completed_at = ?, error_code = ?, error_message = ? WHERE {where}",
+            values + (where_values or (run.id,)),
         )
-        if cursor.rowcount != 1:
-            raise KeyError(run.id)
 
     def get(self, run_id: str) -> WorkflowRun | None:
         row = self.connection.execute(
@@ -83,6 +114,14 @@ class WorkflowRepository:
         if row is None:
             return None
         return self._from_row(row)
+
+    def get_for_turn(self, turn_id: str) -> WorkflowRun | None:
+        row = self.connection.execute(
+            "SELECT * FROM workflow_runs WHERE turn_id = ? "
+            "ORDER BY created_at DESC LIMIT 1",
+            (turn_id,),
+        ).fetchone()
+        return self._from_row(row) if row is not None else None
 
     def list_for_thread(self, thread_id: str, *, limit: int = 100) -> list[WorkflowRun]:
         rows = self.connection.execute(
@@ -103,8 +142,8 @@ class WorkflowRepository:
 
     def list_incomplete(self) -> list[WorkflowRun]:
         rows = self.connection.execute(
-            "SELECT * FROM workflow_runs WHERE status IN ('queued', 'running', 'waiting') "
-            "ORDER BY created_at"
+            "SELECT * FROM workflow_runs "
+            "WHERE status IN ('queued', 'running', 'waiting') ORDER BY created_at"
         ).fetchall()
         return [self._from_row(row) for row in rows]
 

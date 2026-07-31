@@ -175,11 +175,13 @@ export function Composer({
     setDeliveryNotice(
       delivery === "steered"
         ? "Update delivered to the active Turn."
-        : "Started a new Turn.",
+        : delivery === "queued"
+          ? "Queued for the next Turn."
+          : "Started a new Turn.",
     );
     setPrompt("");
     clearAttachments();
-    if (delivery === "started") setSelectedSkillIds([]);
+    if (delivery !== "steered") setSelectedSkillIds([]);
     setSkillPickerOpen(false);
   };
 

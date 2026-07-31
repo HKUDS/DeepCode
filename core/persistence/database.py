@@ -50,6 +50,14 @@ class Database:
             finally:
                 connection.close()
 
+    def schema_version(self) -> int:
+        """Read the installed schema without creating or migrating it."""
+
+        if not self._has_existing_database():
+            return 0
+        with self.read() as connection:
+            return current_version(connection)
+
     @staticmethod
     def _enable_wal(connection: sqlite3.Connection) -> None:
         deadline = time.monotonic() + 10.0
@@ -131,8 +139,8 @@ class Database:
     def transaction(self) -> Iterator[sqlite3.Connection]:
         """Open a short write transaction and commit or fully roll it back."""
         connection = self._connect()
-        connection.execute("BEGIN IMMEDIATE")
         try:
+            connection.execute("BEGIN IMMEDIATE")
             yield connection
         except BaseException:
             connection.rollback()

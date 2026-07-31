@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, Iterator, TypeVar
 
 from core.domain.thread_goal import (
     GOAL_OUTCOME_REASON_MAX_CHARS,
@@ -41,6 +42,10 @@ class ThreadGoalConflictError(ThreadGoalStoreError):
     pass
 
 
+class ThreadGoalIdentityRetiredError(ThreadGoalConflictError):
+    """A cleared Goal identity cannot be provisioned again."""
+
+
 class ThreadGoalLedgerCorruptError(ThreadGoalStoreError):
     pass
 
@@ -52,6 +57,8 @@ _T = TypeVar("_T")
 class ThreadGoalRecord:
     goal: ThreadGoal | None
     outcome: GoalOutcome | None
+    seen_goal_ids: frozenset[str] = frozenset()
+    turn_settlement_ids: frozenset[str] = frozenset()
 
 
 class ThreadGoalStore:
@@ -72,6 +79,18 @@ class ThreadGoalStore:
                 expected_thread_id=thread_id,
             )
 
+    @contextmanager
+    def guarded_record(self, thread_id: str) -> Iterator[ThreadGoalRecord]:
+        """Hold the canonical cross-process Session lock while a caller acts."""
+
+        with self.sessions.session_guard(thread_id) as directory:
+            if directory is None:
+                raise ThreadGoalSessionNotFoundError(f"session not found: {thread_id}")
+            yield self._fold_record(
+                self._read_entries(directory),
+                expected_thread_id=thread_id,
+            )
+
     def has_turn_settlement(
         self,
         thread_id: str,
@@ -81,18 +100,123 @@ class ThreadGoalStore:
     ) -> bool:
         """Return whether runtime accounting for one Goal Turn is durable."""
 
+        return self.has_turn_settlements(
+            thread_id,
+            goal_id=goal_id,
+            turn_ids=(turn_id,),
+        )
+
+    def has_turn_settlements(
+        self,
+        thread_id: str,
+        *,
+        goal_id: str,
+        turn_ids: tuple[str, ...],
+    ) -> bool:
+        """Check a bounded Turn set with one canonical ledger read."""
+
+        if not turn_ids:
+            return True
         with self.sessions.session_guard(thread_id) as directory:
             if directory is None:
                 raise ThreadGoalSessionNotFoundError(f"session not found: {thread_id}")
             entries = self._read_entries(directory)
-        return any(
-            entry.get("_type") == THREAD_GOAL_SNAPSHOT
-            and entry.get("schemaVersion") == THREAD_GOAL_SCHEMA_VERSION
-            and entry.get("source") == GoalDecisionSource.RUNTIME.value
-            and entry.get("turnId") == turn_id
-            and isinstance(entry.get("goal"), dict)
-            and entry["goal"].get("id") == goal_id
-            for entry in reversed(entries)
+        settled = self._turn_settlement_ids(
+            entries,
+            goal_id=goal_id,
+        )
+        return all(turn_id in settled for turn_id in turn_ids)
+
+    def list_current(self) -> tuple[ThreadGoal, ...]:
+        """Read current Goals from canonical Session-owned ledgers."""
+
+        root = self.sessions.root
+        if not root.exists():
+            return ()
+        session_ids = sorted(
+            entry.name
+            for entry in root.iterdir()
+            if entry.is_dir()
+            and (entry / "session.jsonl").is_file()
+            and (entry / "goal.jsonl").is_file()
+        )
+        goals: list[ThreadGoal] = []
+        for session_id in session_ids:
+            try:
+                goal = self.read(session_id)
+            except ThreadGoalSessionNotFoundError:
+                continue
+            if goal is not None:
+                goals.append(goal)
+        return tuple(goals)
+
+    def settle_turn(
+        self,
+        thread_id: str,
+        *,
+        expected_goal_id: str,
+        turn_id: str,
+        transform: Callable[[ThreadGoal], ThreadGoal],
+        reason: str,
+    ) -> tuple[ThreadGoal, bool]:
+        """Account one runtime Turn exactly once across recovery retries."""
+
+        with self.sessions.session_guard(thread_id) as directory:
+            if directory is None:
+                raise ThreadGoalSessionNotFoundError(f"session not found: {thread_id}")
+            entries = self._read_entries(directory)
+            current = self._fold_record(
+                entries,
+                expected_thread_id=thread_id,
+            ).goal
+            matched = self._matching_goal(current, expected_goal_id)
+            if self._has_turn_settlement_entry(
+                entries,
+                goal_id=matched.id,
+                turn_id=turn_id,
+            ):
+                return matched, False
+            entry, updated = self._updated_snapshot(
+                matched,
+                expected_goal_id=expected_goal_id,
+                transform=transform,
+                reason=reason,
+                source="runtime",
+                turn_id=turn_id,
+            )
+            if entry.get("_type") != "thread_goal.noop":
+                self._append_entry(directory, entry)
+            return updated, True
+
+    @staticmethod
+    def _has_turn_settlement_entry(
+        entries: list[dict[str, Any]],
+        *,
+        goal_id: str,
+        turn_id: str,
+    ) -> bool:
+        return turn_id in ThreadGoalStore._turn_settlement_ids(
+            entries,
+            goal_id=goal_id,
+        )
+
+    @staticmethod
+    def _turn_settlement_ids(
+        entries: list[dict[str, Any]],
+        *,
+        goal_id: str,
+    ) -> frozenset[str]:
+        return frozenset(
+            str(entry["turnId"])
+            for entry in entries
+            if (
+                entry.get("_type") == THREAD_GOAL_SNAPSHOT
+                and entry.get("schemaVersion") == THREAD_GOAL_SCHEMA_VERSION
+                and entry.get("source") == GoalDecisionSource.RUNTIME.value
+                and isinstance(entry.get("turnId"), str)
+                and isinstance(entry.get("goal"), dict)
+                and entry["goal"].get("id") == goal_id
+            )
         )
 
     def read_guarded(self, thread_id: str, directory: Path) -> ThreadGoal | None:
@@ -111,14 +235,106 @@ class ThreadGoalStore:
         reason: str = "created",
         source: str = "user",
     ) -> ThreadGoal:
-        def mutation(current: ThreadGoal | None) -> tuple[dict[str, Any], ThreadGoal]:
+        def mutation(record: ThreadGoalRecord) -> tuple[dict[str, Any], ThreadGoal]:
+            current = record.goal
             if current is not None:
                 raise ThreadGoalConflictError(
                     f"session already has a Goal: {current.id}"
                 )
+            self._ensure_fresh_identity(record, goal.id)
             return self._snapshot_entry(goal, reason=reason, source=source), goal
 
         return self._mutate(goal.thread_id, mutation)
+
+    def provision(
+        self,
+        goal: ThreadGoal,
+        *,
+        reason: str = "provisioned",
+        source: str = "user",
+    ) -> tuple[ThreadGoal, bool]:
+        """Create a caller-owned Goal identity or return its durable retry.
+
+        The comparison intentionally covers only the declarative provisioning
+        content. Status and usage may advance after provisioning and must not
+        turn a recovery retry into a conflict.
+        """
+
+        def mutation(
+            record: ThreadGoalRecord,
+        ) -> tuple[dict[str, Any], tuple[ThreadGoal, bool]]:
+            current = record.goal
+            if current is None:
+                self._ensure_fresh_identity(record, goal.id)
+                return (
+                    self._snapshot_entry(goal, reason=reason, source=source),
+                    (goal, True),
+                )
+            if current.id != goal.id:
+                raise ThreadGoalConflictError(
+                    "session already has a different Goal: "
+                    f"requested {goal.id}, actual {current.id}"
+                )
+            if (
+                current.objective != goal.objective
+                or current.token_budget != goal.token_budget
+                or current.skill_ids != goal.skill_ids
+            ):
+                raise ThreadGoalConflictError(
+                    f"Goal provisioning content changed for {goal.id}"
+                )
+            return self._noop_entry(), (current, False)
+
+        return self._mutate(goal.thread_id, mutation)
+
+    def provision_replacing_completed(
+        self,
+        goal: ThreadGoal,
+        *,
+        expected_current_goal_id: str,
+        reason: str = "provisioned",
+        source: str = "user",
+    ) -> ThreadGoal:
+        """Replace one exact completed Goal while holding the Session lock.
+
+        Identity freshness is checked before the old Goal is cleared. The two
+        append-only transitions are recovery-safe: if a process stops after the
+        clear record, a retry may still provision the fresh requested identity.
+        """
+
+        with self.sessions.session_guard(goal.thread_id) as directory:
+            if directory is None:
+                raise ThreadGoalSessionNotFoundError(
+                    f"session not found: {goal.thread_id}"
+                )
+            record = self._fold_record(
+                self._read_entries(directory),
+                expected_thread_id=goal.thread_id,
+            )
+            current = self._matching_goal(
+                record.goal,
+                expected_current_goal_id,
+            )
+            if current.status is not ThreadGoalStatus.COMPLETE:
+                raise ThreadGoalConflictError(
+                    f"Goal {current.id} is not complete and cannot be replaced"
+                )
+            self._ensure_fresh_identity(record, goal.id)
+            self._append_entry(
+                directory,
+                {
+                    "_type": THREAD_GOAL_CLEARED,
+                    "schemaVersion": THREAD_GOAL_SCHEMA_VERSION,
+                    "goalId": current.id,
+                    "reason": "replaced by caller-owned Goal",
+                    "source": self._clean_source(source),
+                },
+            )
+            self._append_entry(
+                directory,
+                self._snapshot_entry(goal, reason=reason, source=source),
+            )
+            return goal
 
     def update(
         self,
@@ -129,30 +345,26 @@ class ThreadGoalStore:
         reason: str,
         source: str,
         turn_id: str | None = None,
+        guard: Callable[[ThreadGoalRecord], None] | None = None,
     ) -> ThreadGoal:
-        """Transform the latest Goal while holding the cross-process guard."""
+        """Transform the latest Goal while holding its cross-process guard.
 
-        def mutation(current: ThreadGoal | None) -> tuple[dict[str, Any], ThreadGoal]:
-            matched = self._matching_goal(current, expected_goal_id)
-            goal = transform(matched)
-            if goal.id != matched.id or goal.thread_id != matched.thread_id:
-                raise ThreadGoalConflictError(
-                    "Goal identity cannot change during update"
-                )
-            if goal == matched:
-                return self._noop_entry(), matched
-            if goal.created_at != matched.created_at:
-                raise ThreadGoalConflictError("Goal created_at cannot change")
-            if goal.updated_at < matched.updated_at:
-                raise ThreadGoalConflictError("Goal updated_at cannot move backwards")
-            return (
-                self._snapshot_entry(
-                    goal,
-                    reason=reason,
-                    source=source,
-                    turn_id=turn_id,
-                ),
-                goal,
+        ``guard`` runs against the same record immediately before append. It
+        must not re-enter this Goal store. Callers that inspect SQLite must
+        preserve the global Session-lock-before-SQLite lock order.
+        """
+
+        def mutation(record: ThreadGoalRecord) -> tuple[dict[str, Any], ThreadGoal]:
+            self._matching_goal(record.goal, expected_goal_id)
+            if guard is not None:
+                guard(record)
+            return self._updated_snapshot(
+                record.goal,
+                expected_goal_id=expected_goal_id,
+                transform=transform,
+                reason=reason,
+                source=source,
+                turn_id=turn_id,
             )
 
         return self._mutate(thread_id, mutation)
@@ -165,7 +377,8 @@ class ThreadGoalStore:
         reason: str = "cleared",
         source: str = "user",
     ) -> bool:
-        def mutation(current: ThreadGoal | None) -> tuple[dict[str, Any], bool]:
+        def mutation(record: ThreadGoalRecord) -> tuple[dict[str, Any], bool]:
+            current = record.goal
             if current is None:
                 return self._noop_entry(), False
             self._matching_goal(current, expected_goal_id)
@@ -186,21 +399,28 @@ class ThreadGoalStore:
         self,
         thread_id: str,
         mutation: Callable[
-            [ThreadGoal | None],
+            [ThreadGoalRecord],
             tuple[dict[str, Any], _T],
         ],
     ) -> _T:
         with self.sessions.session_guard(thread_id) as directory:
             if directory is None:
                 raise ThreadGoalSessionNotFoundError(f"session not found: {thread_id}")
-            current = self._fold_record(
+            record = self._fold_record(
                 self._read_entries(directory),
                 expected_thread_id=thread_id,
-            ).goal
-            entry, result = mutation(current)
+            )
+            entry, result = mutation(record)
             if entry.get("_type") != "thread_goal.noop":
                 self._append_entry(directory, entry)
             return result
+
+    @staticmethod
+    def _ensure_fresh_identity(record: ThreadGoalRecord, goal_id: str) -> None:
+        if goal_id in record.seen_goal_ids:
+            raise ThreadGoalIdentityRetiredError(
+                f"Goal identity {goal_id} was cleared and cannot be reused"
+            )
 
     @staticmethod
     def _matching_goal(
@@ -212,6 +432,37 @@ class ThreadGoalStore:
                 "Goal no longer exists or has a different identity"
             )
         return current
+
+    @classmethod
+    def _updated_snapshot(
+        cls,
+        current: ThreadGoal | None,
+        *,
+        expected_goal_id: str,
+        transform: Callable[[ThreadGoal], ThreadGoal],
+        reason: str,
+        source: str,
+        turn_id: str | None,
+    ) -> tuple[dict[str, Any], ThreadGoal]:
+        matched = cls._matching_goal(current, expected_goal_id)
+        goal = transform(matched)
+        if goal.id != matched.id or goal.thread_id != matched.thread_id:
+            raise ThreadGoalConflictError("Goal identity cannot change during update")
+        if goal == matched:
+            return cls._noop_entry(), matched
+        if goal.created_at != matched.created_at:
+            raise ThreadGoalConflictError("Goal created_at cannot change")
+        if goal.updated_at < matched.updated_at:
+            raise ThreadGoalConflictError("Goal updated_at cannot move backwards")
+        return (
+            cls._snapshot_entry(
+                goal,
+                reason=reason,
+                source=source,
+                turn_id=turn_id,
+            ),
+            goal,
+        )
 
     @staticmethod
     def _noop_entry() -> dict[str, Any]:
@@ -239,6 +490,7 @@ class ThreadGoalStore:
         legacy: list[dict[str, Any]] = []
         current: ThreadGoal | None = None
         outcome: GoalOutcome | None = None
+        seen_goal_ids: set[str] = set()
         saw_v2 = False
         for entry in entries:
             schema_version = entry.get("schemaVersion")
@@ -255,6 +507,8 @@ class ThreadGoalStore:
                 )
             if not saw_v2:
                 current = cls._legacy_current(legacy)
+                if current is not None:
+                    seen_goal_ids.add(current.id)
                 outcome = None
                 saw_v2 = True
             entry_type = entry.get("_type")
@@ -265,6 +519,7 @@ class ThreadGoalStore:
                         raise ThreadGoalLedgerCorruptError(
                             "Goal snapshot belongs to another Session"
                         )
+                    seen_goal_ids.add(goal.id)
                     if current is not None and goal.id != current.id:
                         raise ThreadGoalLedgerCorruptError(
                             "a new Goal requires a preceding clear transition"
@@ -308,12 +563,23 @@ class ThreadGoalStore:
                 ) from exc
         if not saw_v2:
             current = cls._legacy_current(legacy)
+            if current is not None:
+                seen_goal_ids.add(current.id)
             outcome = None
         if current is not None and current.thread_id != expected_thread_id:
             raise ThreadGoalLedgerCorruptError(
                 "Goal snapshot belongs to another Session"
             )
-        return ThreadGoalRecord(goal=current, outcome=outcome)
+        return ThreadGoalRecord(
+            goal=current,
+            outcome=outcome,
+            seen_goal_ids=frozenset(seen_goal_ids),
+            turn_settlement_ids=(
+                cls._turn_settlement_ids(entries, goal_id=current.id)
+                if current is not None
+                else frozenset()
+            ),
+        )
 
     @classmethod
     def _outcome_from_entry(
@@ -490,6 +756,7 @@ __all__ = [
     "THREAD_GOAL_SCHEMA_VERSION",
     "THREAD_GOAL_SNAPSHOT",
     "ThreadGoalConflictError",
+    "ThreadGoalIdentityRetiredError",
     "ThreadGoalLedgerCorruptError",
     "ThreadGoalRecord",
     "ThreadGoalSessionNotFoundError",

@@ -2,7 +2,11 @@ import { useCallback, useMemo, useState } from "react";
 
 import { confirmAction } from "../platform/confirmAction";
 
-export type DesktopDestination = "threads" | "automations" | "skills" | "mcp" | "settings";
+export type DesktopDestination =
+  | "threads"
+  | "automations"
+  | "skills"
+  | "settings";
 export type DesktopInspectorTab =
   | "changes"
   | "files"

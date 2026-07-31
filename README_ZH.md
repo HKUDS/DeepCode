@@ -547,17 +547,27 @@ Session 来源。`--connection`、`--model` 和 `--effort` 只影响本命令启
 下一个 Turn。达到 token 上限的 Goal 必须提供更大的 `--token-budget`；
 已经完成的 Goal 只读取并报告结果，不会重新启动或改写任务。
 
-执行有边界的定时任务：
+当前仓库在 DeepCode 中打开并完成信任后，可以创建持久化 Automation：
 
 ```bash
-deepcode schedule loop "修复失败的测试套件" \
-  --test-cmd "python -m pytest -q" \
-  --every 3600 \
-  --max-runs 5
+deepcode automation create "Repository caretaker" \
+  --prompt "修复失败的测试并验证结果。" \
+  --schedule interval \
+  --interval-seconds 3600
+
+deepcode automation list --limit 100 --offset 0
+deepcode automation run <automation-id>
+deepcode automation runs <automation-id> --limit 100 --offset 0
 ```
 
 Automation 通过正常 Turn 路径提交工作，因此手动和定时执行都遵守同一套
-Session、权限、模型和恢复规则。
+Session、权限、模型、审批和恢复规则。每个 Run 使用的不可变指令 revision
+会保留；Automation 后续被编辑或退役也不会改写历史。Interval schedule 需要
+一个启用了 scheduler 的 Desktop 或 App Server runtime 保持运行。
+暂停/启用只控制 interval schedule；manual 定义始终为 enabled，而且 interval
+被暂停后仍可使用 **Run now** 手动执行。
+Automation 定义和 Run 历史使用显式分页。JSON 响应会返回 `hasMore` 与
+`nextOffset`；人类可读输出在仍有后续结果时会明确打印下一页 offset。
 
 ## Paper2Code
 
@@ -714,6 +724,7 @@ Desktop 打包、Rust 检查、签名和发布流程请参考
 | 持久化 Paper2Code 工作流   | [P5 Paper2Code](docs/P5_PAPER2CODE_ARCHITECTURE.md)           |
 | 中央 Session 与跨目录恢复  | [P6 Session alignment](docs/P6_SESSION_ALIGNMENT_REVIEW.md)   |
 | Skills 身份、安全与持久化  | [Skills architecture](docs/SKILLS_PRODUCT_ARCHITECTURE.md)    |
+| Automation 调度与执行      | [Automation architecture](docs/AUTOMATION_ARCHITECTURE.md)    |
 | Desktop 产品与交互模型     | [Desktop UI specification](docs/DESKTOP_PRODUCT_UI_SPEC.md)   |
 | 隐私与诊断                 | [Privacy contract](docs/PRIVACY_AND_DIAGNOSTICS.md)           |
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, ContextManager, Protocol
 
 from core.domain.turn import Turn
 from core.domain.message_provenance import ClientSurface, TurnInputSource
@@ -18,9 +18,14 @@ if TYPE_CHECKING:
 class GoalTurnAssociation:
     goal_id: str
     skill_ids: tuple[str, ...] = ()
+    turn_settlement_ids: frozenset[str] = frozenset()
 
 
 GoalContextProvider = Callable[[str], GoalTurnAssociation | None]
+GoalSubmissionScope = Callable[
+    [str],
+    ContextManager[GoalTurnAssociation | None],
+]
 
 
 class GoalTurnPort(Protocol):
@@ -37,6 +42,7 @@ class GoalTurnPort(Protocol):
         event_observer: Callable[["Event"], None] | None = None,
         client_surface: ClientSurface = ClientSurface.INTERNAL,
         input_source: TurnInputSource = TurnInputSource.START,
+        expected_goal_id: str | None = None,
     ) -> "TurnSnapshot": ...
 
     def read(self, turn_id: str) -> "TurnSnapshot": ...
@@ -44,6 +50,8 @@ class GoalTurnPort(Protocol):
     def active_for_thread(self, thread_id: str) -> Turn | None: ...
 
     def executing_for_thread(self, thread_id: str) -> Turn | None: ...
+
+    def list_for_goal(self, thread_id: str, goal_id: str) -> tuple[Turn, ...]: ...
 
     def inject_goal_update(
         self,
@@ -55,4 +63,9 @@ class GoalTurnPort(Protocol):
     ) -> bool: ...
 
 
-__all__ = ["GoalContextProvider", "GoalTurnAssociation", "GoalTurnPort"]
+__all__ = [
+    "GoalContextProvider",
+    "GoalSubmissionScope",
+    "GoalTurnAssociation",
+    "GoalTurnPort",
+]

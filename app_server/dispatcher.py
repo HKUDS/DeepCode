@@ -45,8 +45,8 @@ from core.application.views import (
 )
 from core.domain.approval import ApprovalStatus
 from core.domain.automation import (
+    AutomationActivationStatus,
     AutomationScheduleKind,
-    AutomationStatus,
 )
 from core.domain.execution_profile import ExecutionSelection
 from core.domain.message_provenance import ClientSurface
@@ -88,12 +88,14 @@ class Params:
         *,
         default: int,
         minimum: int = 0,
-        maximum: int = 1000,
+        maximum: int | None = 1000,
     ) -> int:
         value = self.values.get(name, default)
         if isinstance(value, bool) or not isinstance(value, int):
             raise InvalidParams(f"{name} must be an integer")
-        if not minimum <= value <= maximum:
+        if value < minimum or (maximum is not None and value > maximum):
+            if maximum is None:
+                raise InvalidParams(f"{name} must be at least {minimum}")
             raise InvalidParams(f"{name} must be between {minimum} and {maximum}")
         return value
 
@@ -292,7 +294,6 @@ class Dispatcher:
         except ValueError as exc:
             raise InvalidParams(f"unsupported client surface: {surface_value}") from exc
         self.connection.initialize(str(client_name), client_surface)
-        self.application.automations.start_scheduler()
         return {
             "protocolVersion": PROTOCOL_VERSION,
             "serverInfo": {"name": "deepcode-app-server", "version": SERVER_VERSION},
@@ -525,9 +526,11 @@ class Dispatcher:
         }
 
     def _automation_list(self, params: Params) -> dict[str, Any]:
-        params.only("projectId")
+        params.only("projectId", "limit", "offset")
         inventory = self.application.automations.list(
-            params.string("projectId", required=False)
+            params.string("projectId", required=False),
+            limit=params.integer("limit", default=100, minimum=1, maximum=500),
+            offset=params.integer("offset", default=0, minimum=0, maximum=None),
         )
         return {
             "automations": [
@@ -535,7 +538,9 @@ class Dispatcher:
             ],
             "latestRuns": [automation_run_view(run) for run in inventory.latest_runs],
             "schedulerActive": inventory.scheduler_active,
-            "executionMode": "while_app_running",
+            "executionMode": "requires_live_runtime",
+            "hasMore": inventory.has_more,
+            "nextOffset": inventory.next_offset,
         }
 
     def _automation_create(self, params: Params) -> dict[str, Any]:
@@ -577,17 +582,35 @@ class Dispatcher:
             "scheduleKind",
             "intervalSeconds",
         )
+        if not any(
+            params.values.get(field) is not None
+            for field in (
+                "name",
+                "prompt",
+                "status",
+                "scheduleKind",
+                "intervalSeconds",
+            )
+        ):
+            raise InvalidParams("automation/update requires at least one changed field")
         raw_status = params.string("status", required=False)
         raw_schedule = params.string("scheduleKind", required=False)
         try:
-            status = AutomationStatus(raw_status) if raw_status is not None else None
+            status = (
+                AutomationActivationStatus(raw_status)
+                if raw_status is not None
+                else None
+            )
+        except ValueError as exc:
+            raise InvalidParams("status must be enabled or paused") from exc
+        try:
             schedule_kind = (
                 AutomationScheduleKind(raw_schedule)
                 if raw_schedule is not None
                 else None
             )
         except ValueError as exc:
-            raise InvalidParams("invalid automation status or scheduleKind") from exc
+            raise InvalidParams("scheduleKind must be manual or interval") from exc
         automation = self.application.automations.update(
             str(params.string("automationId")),
             name=params.string("name", required=False),
@@ -611,9 +634,13 @@ class Dispatcher:
         }
 
     def _automation_run(self, params: Params) -> dict[str, Any]:
-        params.only("automationId")
+        params.only("automationId", "requestId")
+        request_id = params.string("requestId", required=False)
+        if request_id is not None and len(request_id) > 255:
+            raise InvalidParams("requestId must be at most 255 characters")
         execution = self.application.automations.run_now(
-            str(params.string("automationId"))
+            str(params.string("automationId")),
+            request_id=request_id,
         )
         return {
             "run": automation_run_view(execution.run),
@@ -621,12 +648,17 @@ class Dispatcher:
         }
 
     def _automation_runs(self, params: Params) -> dict[str, Any]:
-        params.only("automationId", "limit")
-        runs = self.application.automations.list_runs(
+        params.only("automationId", "limit", "offset")
+        page = self.application.automations.list_runs(
             str(params.string("automationId")),
             limit=params.integer("limit", default=100, minimum=1, maximum=500),
+            offset=params.integer("offset", default=0, minimum=0, maximum=None),
         )
-        return {"runs": [automation_run_view(run) for run in runs]}
+        return {
+            "runs": [automation_run_view(run) for run in page.runs],
+            "hasMore": page.has_more,
+            "nextOffset": page.next_offset,
+        }
 
     def _thread_start(self, params: Params) -> dict[str, Any]:
         params.only(

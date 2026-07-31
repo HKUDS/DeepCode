@@ -7,9 +7,8 @@ import type {
 } from "../../generated/app-server";
 import type { DesktopDestination } from "../../app/useDesktopUi";
 import type { DesktopRuntime } from "../../rpc/contracts";
-import { ExtensionsPage } from "../extensions/ExtensionsPage";
 import { AutomationsPage } from "../automations/AutomationsPage";
-import { McpPage } from "../extensions/McpPage";
+import { SkillsPage } from "../extensions/SkillsPage";
 import { SettingsPage } from "../settings/SettingsPage";
 
 interface ManagementWorkspaceProps {
@@ -47,10 +46,7 @@ export function ManagementWorkspace({
     );
   }
   if (destination === "skills") {
-    return <ExtensionsPage runtime={runtime} project={project} />;
-  }
-  if (destination === "mcp") {
-    return <McpPage runtime={runtime} project={project} />;
+    return <SkillsPage runtime={runtime} project={project} />;
   }
   return (
     <SettingsPage

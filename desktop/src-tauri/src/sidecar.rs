@@ -18,6 +18,8 @@ use tauri::{AppHandle, Emitter, Manager};
 const PROTOCOL_VERSION: &str = "1.0";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(45);
+const SHUTDOWN_REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
+const SHUTDOWN_EXIT_GRACE: Duration = Duration::from_secs(35);
 const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 
 type PendingResult = Result<Value, BridgeError>;
@@ -227,19 +229,24 @@ impl RpcBridge {
     }
 
     pub fn restart(self: &Arc<Self>) -> Result<SidecarStatus, BridgeError> {
-        self.shutdown(Duration::from_secs(3));
+        self.shutdown();
         self.start()
     }
 
-    pub fn shutdown(&self, timeout: Duration) {
+    pub fn shutdown(&self) {
         if self.lock_process().is_none() {
             self.update_phase(SidecarPhase::Stopped, None);
             return;
         }
         self.update_phase(SidecarPhase::Stopping, None);
-        let _ = self.request_with_timeout("shutdown", json!({}), timeout);
+        let _ = self.request_with_timeout("shutdown", json!({}), SHUTDOWN_REQUEST_TIMEOUT);
 
-        let deadline = Instant::now() + timeout;
+        // The App Server acknowledges shutdown before its application-level
+        // cleanup finishes. Give that cleanup one independent grace period:
+        // coordinator quiescing, scheduler release, live Turn cancellation,
+        // terminal process groups, and the lifetime lease all complete before
+        // the Python process exits.
+        let deadline = Instant::now() + SHUTDOWN_EXIT_GRACE;
         loop {
             let exited = {
                 let mut process_slot = self.lock_process();

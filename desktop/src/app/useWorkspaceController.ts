@@ -660,7 +660,7 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
         }),
       );
       if (!result) return null;
-      if (result.delivery === "started") {
+      if (result.delivery === "started" || result.delivery === "queued") {
         dispatch({ type: "snapshot", snapshot: result.snapshot });
       } else {
         dispatch({
@@ -668,7 +668,10 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
           snapshot: { turn: result.turn, items: [], approvals: [] },
         });
       }
-      if (result.delivery === "started" && shouldTitleSession) {
+      if (
+        (result.delivery === "started" || result.delivery === "queued") &&
+        shouldTitleSession
+      ) {
         const title = titleFromPrompt(prompt);
         if (title) {
           try {

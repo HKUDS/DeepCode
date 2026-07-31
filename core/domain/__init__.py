@@ -1,9 +1,17 @@
 """UI- and transport-independent product domain."""
 
-from core.domain.approval import Approval, ApprovalCategory, ApprovalStatus
+from core.domain.approval import (
+    Approval,
+    ApprovalCategory,
+    ApprovalGrant,
+    ApprovalStatus,
+)
 from core.domain.artifact import Artifact
 from core.domain.automation import (
     Automation,
+    AutomationActivationStatus,
+    AutomationOccurrence,
+    AutomationRevision,
     AutomationRun,
     AutomationRunStatus,
     AutomationScheduleKind,
@@ -11,6 +19,7 @@ from core.domain.automation import (
     AutomationTrigger,
 )
 from core.domain.event import DomainEvent
+from core.domain.execution_permission import ExecutionPermissionMode
 from core.domain.execution_profile import ExecutionProfile, ExecutionSelection
 from core.domain.item import Item, ItemKind, ItemStatus
 from core.domain.message_provenance import (
@@ -19,6 +28,12 @@ from core.domain.message_provenance import (
     TurnInputSource,
 )
 from core.domain.project import Project, TrustState
+from core.domain.runtime_coordination import (
+    ExecutionClass,
+    ResourceClaim,
+    ResourceLease,
+    RuntimeWorker,
+)
 from core.domain.thread import Thread, ThreadMode, ThreadStatus
 from core.domain.thread_goal import (
     GoalDecisionSource,
@@ -27,23 +42,29 @@ from core.domain.thread_goal import (
     ThreadGoal,
     ThreadGoalStatus,
 )
-from core.domain.turn import Turn, TurnStatus
+from core.domain.turn import Turn, TurnExecutor, TurnStatus
 from core.domain.workflow import WorkflowRun, WorkflowStatus
 
 __all__ = [
     "Approval",
     "ApprovalCategory",
+    "ApprovalGrant",
     "ApprovalStatus",
     "Artifact",
     "Automation",
+    "AutomationActivationStatus",
+    "AutomationOccurrence",
+    "AutomationRevision",
     "AutomationRun",
     "AutomationRunStatus",
     "AutomationScheduleKind",
     "AutomationStatus",
     "AutomationTrigger",
     "DomainEvent",
+    "ExecutionPermissionMode",
     "ExecutionProfile",
     "ExecutionSelection",
+    "ExecutionClass",
     "Item",
     "ItemKind",
     "ItemStatus",
@@ -51,6 +72,9 @@ __all__ = [
     "TurnInputDelivery",
     "TurnInputSource",
     "Project",
+    "ResourceClaim",
+    "ResourceLease",
+    "RuntimeWorker",
     "Thread",
     "ThreadMode",
     "ThreadStatus",
@@ -61,6 +85,7 @@ __all__ = [
     "GoalOutcome",
     "TrustState",
     "Turn",
+    "TurnExecutor",
     "TurnStatus",
     "WorkflowRun",
     "WorkflowStatus",

@@ -10,6 +10,10 @@ from typing import Any
 import pytest
 
 from core.application import DeepCodeApplication
+from core.application.turn_service import (
+    TurnTransactionContext,
+    TurnTransactionContribution,
+)
 from core.domain import TrustState
 from core.domain.approval import ApprovalStatus
 from core.domain.approval import Approval, ApprovalCategory
@@ -99,6 +103,27 @@ class ScriptedFactory:
         )
         self.sessions.append(session)
         return session
+
+
+class PermissionCaptureFactory(ScriptedFactory):
+    def __init__(self) -> None:
+        super().__init__()
+        self.permission_modes = []
+
+    def create(
+        self,
+        *,
+        workspace,
+        model,
+        approval_callback,
+        permission_mode_override,
+    ):
+        self.permission_modes.append(permission_mode_override)
+        return super().create(
+            workspace=workspace,
+            model=model,
+            approval_callback=approval_callback,
+        )
 
 
 class LongStreamingSession(ScriptedSession):
@@ -437,6 +462,139 @@ def _wait_for(application: DeepCodeApplication, turn_id: str, status) -> Any:
     )
 
 
+def test_turn_transaction_participant_commits_with_turn_and_publishes_after_commit(
+    tmp_path: Path,
+) -> None:
+    factory = ScriptedFactory(hang=True)
+    application, thread_id = _application(tmp_path, factory)
+    subscriber = application.broker.subscribe()
+    published_during_participant = []
+    try:
+        existing_events = application.events.replay(thread_id)
+        previous_sequence = existing_events[-1].sequence if existing_events else 0
+
+        def persist_sidecar(
+            context: TurnTransactionContext,
+        ) -> TurnTransactionContribution[dict[str, str]]:
+            assert context.connection.in_transaction is True
+            assert (
+                TurnRepository(context.connection).get(context.turn.id) == context.turn
+            )
+            assert ItemRepository(context.connection).list_for_turn(
+                context.turn.id
+            ) == [context.user_item]
+            assert ThreadRepository(context.connection).get(thread_id) == context.thread
+            assert context.thread.status is ThreadStatus.RUNNING
+            published_during_participant.extend(
+                application.broker.drain(subscriber).events
+            )
+            event = EventRepository(context.connection).append(
+                thread_id=thread_id,
+                turn_id=context.turn.id,
+                type="test.sidecar_attached",
+                payload={"owner": "test"},
+            )
+            return TurnTransactionContribution(
+                value={"sidecarEventId": event.id},
+                events=(event,),
+            )
+
+        submitted = application.turns.start_with_participant(
+            thread_id,
+            prompt="Commit the Turn and sidecar together",
+            participant=persist_sidecar,
+            client_surface=ClientSurface.AUTOMATION,
+            input_source=TurnInputSource.AUTOMATION,
+        )
+
+        assert published_during_participant == []
+        assert submitted.participant_result["sidecarEventId"].startswith("evt_")
+        assert submitted.snapshot.items[0].payload["client"] == "automation"
+        assert submitted.snapshot.items[0].payload["source"] == "automation"
+
+        live_events = application.broker.drain(subscriber).events
+        sidecar_live = [
+            event for event in live_events if event.type == "test.sidecar_attached"
+        ]
+        assert len(sidecar_live) == 1
+        assert sidecar_live[0].id == submitted.participant_result["sidecarEventId"]
+
+        committed_events = [
+            event
+            for event in application.events.replay(thread_id)
+            if event.sequence > previous_sequence
+        ]
+        assert [event.type for event in committed_events[:4]] == [
+            "turn.started",
+            "item.created",
+            "thread.status_changed",
+            "test.sidecar_attached",
+        ]
+        assert committed_events[3].id == sidecar_live[0].id
+    finally:
+        application.broker.unsubscribe(subscriber)
+        application.close()
+
+
+def test_turn_transaction_participant_exception_rolls_back_every_write(
+    tmp_path: Path,
+) -> None:
+    factory = ScriptedFactory(hang=True)
+    application, thread_id = _application(tmp_path, factory)
+    subscriber = application.broker.subscribe()
+    original_thread = application.threads.read(thread_id)
+    original_events = application.events.replay(thread_id)
+    attempted_ids: dict[str, str] = {}
+    try:
+
+        def reject_sidecar(context: TurnTransactionContext):
+            attempted_ids["turn"] = context.turn.id
+            attempted_ids["item"] = context.user_item.id
+            assert (
+                TurnRepository(context.connection).get(context.turn.id) == context.turn
+            )
+            assert ItemRepository(context.connection).list_for_turn(
+                context.turn.id
+            ) == [context.user_item]
+            assert ThreadRepository(context.connection).get(thread_id) == context.thread
+            EventRepository(context.connection).append(
+                thread_id=thread_id,
+                turn_id=context.turn.id,
+                type="test.sidecar_rejected",
+                payload={"owner": "test"},
+            )
+            context.connection.execute(
+                "UPDATE threads SET title = ? WHERE id = ?",
+                ("Must roll back", thread_id),
+            )
+            raise RuntimeError("sidecar rejected")
+
+        with pytest.raises(RuntimeError, match="sidecar rejected"):
+            application.turns.start_with_participant(
+                thread_id,
+                prompt="This entire submission must roll back",
+                participant=reject_sidecar,
+            )
+
+        with application.database.read() as connection:
+            assert TurnRepository(connection).get(attempted_ids["turn"]) is None
+            assert (
+                connection.execute(
+                    "SELECT COUNT(*) FROM items WHERE id = ?",
+                    (attempted_ids["item"],),
+                ).fetchone()[0]
+                == 0
+            )
+            assert ThreadRepository(connection).get(thread_id) == original_thread
+            assert EventRepository(connection).replay(thread_id) == original_events
+        assert application.broker.drain(subscriber).events == ()
+        assert application.turns.active_for_thread(thread_id) is None
+        assert factory.sessions == []
+    finally:
+        application.broker.unsubscribe(subscriber)
+        application.close()
+
+
 def test_turn_projects_stream_into_durable_items(tmp_path: Path) -> None:
     factory = ScriptedFactory()
     application, thread_id = _application(tmp_path, factory)
@@ -521,6 +679,34 @@ def test_turn_preserves_typed_client_surface_for_user_and_assistant(
             surface.value,
             surface.value,
         ]
+    finally:
+        application.close()
+
+
+@pytest.mark.parametrize(
+    "surface",
+    (ClientSurface.CLI, ClientSurface.DESKTOP),
+)
+def test_ordinary_cli_and_desktop_turns_keep_host_permission_default(
+    tmp_path: Path,
+    surface: ClientSurface,
+) -> None:
+    factory = PermissionCaptureFactory()
+    application, thread_id = _application(tmp_path, factory)
+    try:
+        started = application.turns.start(
+            thread_id,
+            prompt="Keep the existing host policy",
+            client_surface=surface,
+        )
+        completed = _wait_for(
+            application,
+            started.turn.id,
+            TurnStatus.COMPLETED,
+        )
+
+        assert completed.turn.execution_permission_mode is None
+        assert factory.permission_modes == [None]
     finally:
         application.close()
 

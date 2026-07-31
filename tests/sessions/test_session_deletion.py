@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import multiprocessing
+import os
 from pathlib import Path
+
+import pytest
 
 from core.sessions import SessionStore
 
@@ -67,6 +70,42 @@ def test_pending_tombstone_prevents_explicit_id_recreation(tmp_path: Path) -> No
         pass
     else:  # pragma: no cover - explicit regression assertion
         raise AssertionError("a pending deletion must reserve its Session id")
+
+
+def test_session_creation_failure_never_leaves_an_unreadable_final_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = SessionStore(tmp_path / "sessions")
+    original_replace = os.replace
+    failed = False
+
+    def fail_first_session_publish(source, destination):
+        nonlocal failed
+        if not failed and str(source).endswith(".creating"):
+            failed = True
+            raise OSError("injected publish failure")
+        return original_replace(source, destination)
+
+    monkeypatch.setattr("core.sessions.store.os.replace", fail_first_session_publish)
+    with pytest.raises(OSError, match="injected publish failure"):
+        store.create_session(session_id="session-a", title="Atomic")
+
+    assert not (store.root / "session-a").exists()
+    assert list(store.root.glob(".session-a.*.creating")) == []
+
+    interrupted = store.root / ".session-a.interrupted.creating"
+    interrupted.mkdir()
+    (interrupted / "session.jsonl").write_text(
+        '{"_type":"metadata","session_id":"session-a","title":"partial",'
+        '"created_at":"2026-07-29T00:00:00+00:00",'
+        '"updated_at":"2026-07-29T00:00:00+00:00","metadata":{}}\n',
+        encoding="utf-8",
+    )
+    assert store.list_sessions() == []
+
+    created = store.create_session(session_id="session-a", title="Atomic")
+    assert store.get_session(created.session_id) is not None
 
 
 def test_activity_lease_excludes_permanent_deletion_lease(tmp_path: Path) -> None:

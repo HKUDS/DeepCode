@@ -18,6 +18,12 @@ import type {
 import { confirmAction } from "../../platform/confirmAction";
 import type { DesktopRuntime } from "../../rpc/contracts";
 import styles from "../management/ManagementWorkspace.module.css";
+import {
+  automationIntervalInput,
+  automationIntervalLabel,
+  automationIntervalSeconds,
+  type AutomationIntervalUnit,
+} from "./automationInterval";
 import { useAutomations } from "./useAutomations";
 
 interface AutomationsPageProps {
@@ -32,7 +38,8 @@ interface AutomationDraft {
   name: string;
   prompt: string;
   scheduleKind: AutomationScheduleKind;
-  intervalMinutes: string;
+  intervalValue: string;
+  intervalUnit: AutomationIntervalUnit;
   enabled: boolean;
 }
 
@@ -41,7 +48,8 @@ const emptyDraft: AutomationDraft = {
   name: "",
   prompt: "",
   scheduleKind: "manual",
-  intervalMinutes: "60",
+  intervalValue: "1",
+  intervalUnit: "hours",
   enabled: true,
 };
 
@@ -51,10 +59,14 @@ export function AutomationsPage({
   onThreadCreated,
   onOpenThread,
 }: AutomationsPageProps) {
-  const automations = useAutomations(runtime, project?.id ?? null);
   const [draft, setDraft] = useState<AutomationDraft | null>(null);
   const [expandedRuns, setExpandedRuns] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const automations = useAutomations(
+    runtime,
+    project?.id ?? null,
+    expandedRuns,
+  );
   const canExecute = project?.trustState === "trusted";
   const latestRuns = useMemo(
     () =>
@@ -69,12 +81,14 @@ export function AutomationsPage({
 
   const edit = (automation: Automation) => {
     setFormError(null);
+    const interval = automationIntervalInput(automation.intervalSeconds);
     setDraft({
       id: automation.id,
       name: automation.name,
       prompt: automation.prompt,
       scheduleKind: automation.scheduleKind,
-      intervalMinutes: String((automation.intervalSeconds ?? 3600) / 60),
+      intervalValue: interval.value,
+      intervalUnit: interval.unit,
       enabled: automation.status === "enabled",
     });
   };
@@ -82,16 +96,17 @@ export function AutomationsPage({
   const save = async () => {
     if (!draft || !project) return;
     setFormError(null);
-    const intervalSeconds =
-      draft.scheduleKind === "interval"
-        ? Number(draft.intervalMinutes) * 60
-        : undefined;
-    if (
-      intervalSeconds !== undefined &&
-      (!Number.isSafeInteger(intervalSeconds) || intervalSeconds < 60)
-    ) {
-      setFormError("Interval must be a whole number of minutes.");
-      return;
+    let intervalSeconds: number | undefined;
+    if (draft.scheduleKind === "interval") {
+      const interval = automationIntervalSeconds({
+        value: draft.intervalValue,
+        unit: draft.intervalUnit,
+      });
+      if (interval.error !== null) {
+        setFormError(interval.error);
+        return;
+      }
+      intervalSeconds = interval.intervalSeconds;
     }
     if (draft.id) {
       const updated = await automations.update({
@@ -195,8 +210,8 @@ export function AutomationsPage({
             <strong>{project.displayName}</strong>
             <span>
               {automations.inventory?.schedulerActive
-                ? "Scheduler active · runs while DeepCode Desktop is open"
-                : "Scheduler unavailable · scheduled work will not start"}
+                ? "Scheduler active · scheduled work runs while a compatible DeepCode runtime is active"
+                : "Scheduler unavailable · start a scheduler-enabled DeepCode runtime to run scheduled work"}
             </span>
           </div>
           {!canExecute ? (
@@ -211,7 +226,8 @@ export function AutomationsPage({
           <div className={styles.cardList}>
             {(automations.inventory?.automations ?? []).map((automation) => {
               const latest = latestRuns.get(automation.id);
-              const runHistory = automations.runs[automation.id] ?? [];
+              const runPage = automations.runs[automation.id];
+              const runHistory = runPage?.runs ?? [];
               return (
                 <article className={styles.card} key={automation.id}>
                   <header>
@@ -221,12 +237,22 @@ export function AutomationsPage({
                       </p>
                       <h2>{automation.name}</h2>
                     </div>
-                    <span
-                      className={styles.badge}
-                      data-status={latest?.status ?? automation.status}
-                    >
-                      {latest?.status ?? automation.status}
-                    </span>
+                    <div className={styles.headerActions}>
+                      <span
+                        className={styles.badge}
+                        data-status={automation.status}
+                      >
+                        Status: {automation.status}
+                      </span>
+                      {latest ? (
+                        <span
+                          className={styles.badge}
+                          data-status={latest.status}
+                        >
+                          Latest run: {latest.status}
+                        </span>
+                      ) : null}
+                    </div>
                   </header>
                   <p>{automation.prompt}</p>
                   <dl className={styles.metadata}>
@@ -285,6 +311,7 @@ export function AutomationsPage({
                     </button>
                     <button
                       type="button"
+                      disabled={automations.loadingRunsFor === automation.id}
                       onClick={() => void toggleRuns(automation.id)}
                     >
                       <History size={13} />
@@ -317,6 +344,21 @@ export function AutomationsPage({
                       ) : (
                         <p className={styles.emptyCopy}>No runs recorded yet.</p>
                       )}
+                      {runPage?.hasMore ? (
+                        <footer className={styles.cardActions}>
+                          <button
+                            type="button"
+                            disabled={
+                              automations.loadingRunsFor === automation.id
+                            }
+                            onClick={() =>
+                              void automations.loadMoreRuns(automation.id)
+                            }
+                          >
+                            Load more runs
+                          </button>
+                        </footer>
+                      ) : null}
                     </div>
                   ) : null}
                 </article>
@@ -329,6 +371,21 @@ export function AutomationsPage({
               </p>
             ) : null}
           </div>
+          {automations.inventory?.hasMore ? (
+            <footer className={styles.formActions}>
+              <span>
+                Showing {automations.inventory.automations.length} automations.
+                More are available.
+              </span>
+              <button
+                type="button"
+                disabled={automations.loadingMoreAutomations}
+                onClick={() => void automations.loadMoreAutomations()}
+              >
+                Load more automations
+              </button>
+            </footer>
+          ) : null}
 
           {draft ? (
             <section className={styles.formCard} aria-label="Automation editor">
@@ -372,17 +429,34 @@ export function AutomationsPage({
                 {draft.scheduleKind === "interval" ? (
                   <>
                     <label>
-                      Interval minutes
+                      Repeat every
                       <input
                         inputMode="numeric"
-                        value={draft.intervalMinutes}
+                        value={draft.intervalValue}
                         onChange={(event) =>
                           setDraft({
                             ...draft,
-                            intervalMinutes: event.target.value,
+                            intervalValue: event.target.value,
                           })
                         }
                       />
+                    </label>
+                    <label>
+                      Unit
+                      <select
+                        value={draft.intervalUnit}
+                        onChange={(event) =>
+                          setDraft({
+                            ...draft,
+                            intervalUnit: event.target
+                              .value as AutomationIntervalUnit,
+                          })
+                        }
+                      >
+                        <option value="seconds">Seconds</option>
+                        <option value="minutes">Minutes</option>
+                        <option value="hours">Hours</option>
+                      </select>
                     </label>
                     <label className={styles.checkboxField}>
                       <input
@@ -446,8 +520,7 @@ export function AutomationsPage({
 
 function scheduleLabel(automation: Automation): string {
   if (automation.scheduleKind === "manual") return "Manual Goal";
-  const minutes = (automation.intervalSeconds ?? 60) / 60;
-  return `Every ${minutes} minute${minutes === 1 ? "" : "s"}`;
+  return `Every ${automationIntervalLabel(automation.intervalSeconds)}`;
 }
 
 function dateLabel(value: string | null, fallback: string): string {

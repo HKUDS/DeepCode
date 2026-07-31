@@ -1,7 +1,7 @@
 # DeepCode Desktop Product UI Specification
 
 Status: active implementation contract
-Date: 2026-07-16
+Updated: 2026-07-29
 
 ## Product thesis
 
@@ -28,7 +28,6 @@ Desktop
 │       └── Sessions grouped by recency
 ├── Automations
 ├── Skills
-├── MCP
 └── Settings
 
 Thread workspace
@@ -99,6 +98,20 @@ quiet.
   strongest hierarchy.
 - Empty states provide one next action and do not show irrelevant panels.
 - Runtime, trust, and recovery errors explain both the cause and the next action.
+- Hooks remain an advanced runtime capability and are not presented as a
+  user-invoked Skill. A future Desktop surface belongs under Settings and must
+  expose exact-definition trust before it can enable command Hooks.
+- MCP configuration remains available to CLI, Paper2Code, and compatibility
+  runtimes, but Desktop does not expose it until the shared AgentSession can
+  report real connection, authentication, tool, and lifecycle state.
+- Automations are Project-scoped definitions, not detached chat prompts. Every
+  card links to its canonical Goal Thread; Run history shows durable status and
+  reason, while detailed tools, approvals, evidence, and continuation remain
+  in that Thread.
+- Desktop reports whether a scheduler runtime is active. It must not imply that
+  an interval will execute while every compatible DeepCode runtime is closed.
+- Removing an Automation is distinct from deleting its Session. The definition
+  is retired while its Thread and Run history remain available.
 - Keyboard focus is visible. Reduced motion is respected.
 
 ## Code ownership
@@ -112,7 +125,7 @@ features/navigation/          projects, Session search, primary destinations
 features/thread/              header, conversation, composer
 features/inspector/           review/workbench surfaces
 features/settings/            models, permissions, diagnostics
-features/extensions/          Skills and MCP
+features/extensions/          Skills management
 features/automations/         schedules and review queue
 styles/                       tokens and global reset only
 ```
@@ -124,8 +137,9 @@ removed as the workbench migration completes.
 ## Quality gates
 
 - No component should combine protocol loading, navigation state, and rendering.
-- No fake management data: Skills, MCP, Goals, and Automations appear only when a
-  real backend contract exists.
+- No fake management data: Skills, Goals, and Automations appear only when a
+  complete product path exists. A writable configuration record alone is not
+  enough to expose a runtime capability.
 - Desktop tests cover cross-project Session selection, search, replay, approval,
   Inspector accessibility, and error/recovery states.
 - Visual checks cover empty, populated, running, waiting approval, failed, and

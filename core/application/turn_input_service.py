@@ -95,7 +95,7 @@ class TurnInputService:
         if duplicate is not None:
             return duplicate
 
-        executing = self._executing(thread_id)
+        executing = self._input_target(thread_id)
         if executing is None:
             raise NoActiveTurnError(
                 f"thread has no active Turn: {thread_id}",
@@ -186,11 +186,30 @@ class TurnInputService:
             ),
         )
 
-    def _executing(self, thread_id: str) -> Turn | None:
+    def _input_target(self, thread_id: str) -> Turn | None:
+        """Return an executing Turn or one already claimed for local startup.
+
+        A claim-owning Turn remains durably ``queued`` until its execution
+        coroutine marks it running. Its mailbox is prepared synchronously by
+        the claim handler, so it is safe for a producer to wait on that
+        ordering boundary. Unclaimed queued work is deliberately excluded.
+        """
+
         with self.database.read() as connection:
             if ThreadRepository(connection).get(thread_id) is None:
                 raise ThreadNotFoundError(f"thread not found: {thread_id}")
-            return TurnRepository(connection).executing_for_thread(thread_id)
+            turns = TurnRepository(connection)
+            executing = turns.executing_for_thread(thread_id)
+            if executing is not None:
+                return executing
+            active = turns.active_for_thread(thread_id)
+            if (
+                active is not None
+                and active.status is TurnStatus.QUEUED
+                and active.execution_owner_id is not None
+            ):
+                return active
+            return None
 
     def _persisted_input(
         self,

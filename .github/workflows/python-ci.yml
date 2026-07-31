@@ -38,6 +38,34 @@ jobs:
           python -m pip check
           python -m pytest -q
 
+  windows-lifecycle:
+    name: Windows lifecycle locks
+    runs-on: windows-2022
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package and test tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest
+
+      - name: Verify shared leases, startup recovery, and scheduler leadership
+        run: >-
+          python -m pytest -q
+          tests/application/test_application_lease.py
+          tests/application/test_automation_scheduler_leadership.py
+          tests/application/test_session_deletion_service.py
+          tests/application/test_execution_coordinator.py
+
   package:
     runs-on: ubuntu-latest
 

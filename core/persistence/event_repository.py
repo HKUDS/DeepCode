@@ -69,6 +69,25 @@ class EventRepository:
         ).fetchall()
         return [self._from_row(row) for row in rows]
 
+    def sequence_heads(self) -> dict[str, int]:
+        """Return each durable event stream's current contiguous head."""
+
+        rows = self.connection.execute(
+            "SELECT thread_id, MAX(sequence) AS sequence "
+            "FROM event_log GROUP BY thread_id"
+        ).fetchall()
+        return {str(row["thread_id"]): int(row["sequence"]) for row in rows}
+
+    def sequence_head(self, thread_id: str) -> int:
+        """Return one stream head without scanning unrelated Threads."""
+
+        row = self.connection.execute(
+            "SELECT COALESCE(MAX(sequence), 0) AS sequence "
+            "FROM event_log WHERE thread_id = ?",
+            (thread_id,),
+        ).fetchone()
+        return int(row["sequence"]) if row is not None else 0
+
     def list_for_turn(
         self,
         thread_id: str,

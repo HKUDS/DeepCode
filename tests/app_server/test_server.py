@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 import os
@@ -5,7 +6,6 @@ import select
 import subprocess
 import sys
 import threading
-import asyncio
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,24 +13,24 @@ from typing import Any
 
 import pytest
 
-from app_server.dispatcher import Dispatcher, Params
 from app_server.connection import ConnectionState
+from app_server.dispatcher import Dispatcher, Params
 from app_server.server import AppServer
 from core.application import DeepCodeApplication
 from core.application.errors import NoActiveTurnError, TurnNotSteerableError
+from core.application.event_service import EventBroker
 from core.application.goal_extension import (
     GoalContinueDisposition,
     GoalContinueResult,
 )
 from core.application.views import thread_goal_view
-from core.domain.thread_goal import ThreadGoal
 from core.domain import (
     ClientSurface,
     ThreadGoalStatus,
     TrustState,
     Turn,
 )
-from core.application.event_service import EventBroker
+from core.domain.thread_goal import ThreadGoal
 from core.events import (
     AgentMessage,
     Event,
@@ -101,10 +101,6 @@ def test_notification_errors_do_not_produce_responses(tmp_path: Path) -> None:
 
 
 def test_app_server_uses_explicit_client_surface_without_name_inference() -> None:
-    class Automations:
-        def start_scheduler(self) -> None:
-            return None
-
     class Turns:
         def __init__(self) -> None:
             self.kwargs: dict[str, Any] = {}
@@ -125,7 +121,7 @@ def test_app_server_uses_explicit_client_surface_without_name_inference() -> Non
     turns = Turns()
     connection = ConnectionState(EventBroker())
     dispatcher = Dispatcher(
-        SimpleNamespace(automations=Automations(), turns=turns),
+        SimpleNamespace(turns=turns),
         connection,
     )
 
@@ -249,7 +245,6 @@ def test_thread_goal_continue_has_one_explicit_typed_rpc() -> None:
     class Goals:
         def read_outcome(self, thread_id: str):
             assert thread_id == goal.thread_id
-            return None
 
         def continue_goal(
             self,
@@ -893,11 +888,18 @@ def test_management_methods_round_trip_real_project_state(
 
 
 class _AutomationSession:
+    def __init__(self, goal_runtime) -> None:
+        self.goal_runtime = goal_runtime
+
     def load_history(self, _messages) -> None:
         return None
 
     async def run_stream(self, _op):
         yield Event("1", TurnStarted())
+        self.goal_runtime.request(
+            status="complete",
+            reason="Scheduled repository work and verification completed.",
+        )
         yield Event("2", AgentMessage("scheduled work complete"))
         yield Event("3", TaskComplete("scheduled work complete", "completed"))
 
@@ -906,8 +908,8 @@ class _AutomationSession:
 
 
 class _AutomationFactory:
-    def create(self, *, workspace, model, approval_callback):
-        return _AutomationSession()
+    def create(self, *, workspace, model, approval_callback, goal_runtime):
+        return _AutomationSession(goal_runtime)
 
 
 def test_json_rpc_automation_lifecycle_uses_a_real_goal_thread(
@@ -918,6 +920,7 @@ def test_json_rpc_automation_lifecycle_uses_a_real_goal_thread(
     application = DeepCodeApplication.open(
         tmp_path / "state.sqlite3",
         session_factory=_AutomationFactory(),
+        run_automation_scheduler=True,
     )
     project = application.projects.add(
         str(workspace),
@@ -954,6 +957,29 @@ def test_json_rpc_automation_lifecycle_uses_a_real_goal_thread(
 
         writer.write(
             _request(
+                19,
+                "automation/create",
+                {
+                    "projectId": project.id,
+                    "name": "Invalid paused manual",
+                    "prompt": "This must be rejected",
+                    "scheduleKind": "manual",
+                    "enabled": False,
+                },
+            )
+        )
+        rejected_create = _read_until(
+            reader,
+            lambda message: message.get("id") == 19,
+        )
+        assert rejected_create["error"]["data"]["code"] == "INVALID_REQUEST"
+        assert (
+            "manual automations are always enabled"
+            in rejected_create["error"]["message"]
+        )
+
+        writer.write(
+            _request(
                 2,
                 "automation/create",
                 {
@@ -970,12 +996,34 @@ def test_json_rpc_automation_lifecycle_uses_a_real_goal_thread(
         assert created["thread"]["mode"] == "goal"
         assert created["automation"]["threadId"] == thread_id
 
+        writer.write(
+            _request(
+                20,
+                "automation/update",
+                {
+                    "automationId": automation_id,
+                    "status": "paused",
+                },
+            )
+        )
+        rejected_update = _read_until(
+            reader,
+            lambda message: message.get("id") == 20,
+        )
+        assert rejected_update["error"]["data"]["code"] == "INVALID_REQUEST"
+        assert (
+            "manual automations are always enabled"
+            in rejected_update["error"]["message"]
+        )
+
         writer.write(_request(3, "automation/list", {"projectId": project.id}))
         inventory = _read_until(reader, lambda message: message.get("id") == 3)[
             "result"
         ]
-        assert inventory["executionMode"] == "while_app_running"
+        assert inventory["executionMode"] == "requires_live_runtime"
         assert inventory["schedulerActive"] is True
+        assert inventory["hasMore"] is False
+        assert inventory["nextOffset"] is None
         assert inventory["automations"][0]["id"] == automation_id
 
         writer.write(_request(4, "automation/run", {"automationId": automation_id}))
@@ -998,10 +1046,11 @@ def test_json_rpc_automation_lifecycle_uses_a_real_goal_thread(
                 {"automationId": automation_id, "limit": 10},
             )
         )
-        runs = _read_until(reader, lambda message: message.get("id") == 5)["result"][
-            "runs"
-        ]
+        run_page = _read_until(reader, lambda message: message.get("id") == 5)["result"]
+        runs = run_page["runs"]
         assert runs[0]["status"] == "completed"
+        assert run_page["hasMore"] is False
+        assert run_page["nextOffset"] is None
 
         writer.write(_request(6, "automation/remove", {"automationId": automation_id}))
         assert _read_until(reader, lambda message: message.get("id") == 6)[

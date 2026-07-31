@@ -58,7 +58,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     source, protocol_sink = isolate_protocol_streams()
     _trace_startup("opening-application")
-    application = DeepCodeApplication.open(args.database)
+    application = DeepCodeApplication.open(
+        args.database,
+        host_surface="app_server",
+        run_automation_scheduler=True,
+    )
     _trace_startup("application-ready")
     return AppServer(application).serve(source, protocol_sink)
 

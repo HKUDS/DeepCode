@@ -7,31 +7,45 @@ from pathlib import Path
 from core.application.agent_adapter import AgentSessionFactory
 from core.application.application_lease import ApplicationLease
 from core.application.approval_service import ApprovalService
+from core.application.automation_schedule_policy import AutomationSchedulePolicy
+from core.application.automation_scheduler import AutomationScheduler
 from core.application.automation_service import AutomationService
 from core.application.diagnostics_service import DiagnosticsService
-from core.application.event_service import EventBroker, EventService
+from core.application.errors import UpgradeRequiresExclusiveAccessError
+from core.application.event_service import (
+    DEFAULT_RELAY_BATCH_SIZE,
+    DEFAULT_RELAY_POLL_INTERVAL,
+    DurableEventRelay,
+    EventBroker,
+    EventService,
+)
+from core.application.execution_coordinator import ExecutionCoordinator
+from core.application.execution_handler_registry import ExecutionHandlerRegistry
 from core.application.execution_registry import ExecutionRegistry
 from core.application.extension_service import ExtensionService
 from core.application.file_service import FileService
 from core.application.git_service import GitService
 from core.application.goal_extension import GoalExtension
-from core.application.mcp_service import McpService
+from core.application.legacy_session_importer import LegacySessionImporter
 from core.application.llm_configuration_service import LLMConfigurationService
+from core.application.mcp_service import McpService
 from core.application.project_service import ProjectService
-from core.application.settings_service import SettingsService
 from core.application.session_deletion_service import SessionDeletionService
+from core.application.settings_service import SettingsService
 from core.application.skill_service import SkillService
 from core.application.terminal_service import TerminalService
 from core.application.test_service import TestService
 from core.application.thread_service import ThreadService
 from core.application.turn_service import TurnService
-from core.application.workspace_service import WorkspaceService
-from core.application.worktree_service import WorktreeService
 from core.application.workflow_adapter import WorkflowRunner
 from core.application.workflow_service import WorkflowService
+from core.application.workspace_service import WorkspaceService
+from core.application.worktree_service import WorktreeService
+from core.domain.common import utc_now
+from core.domain.turn import TurnExecutor
 from core.persistence.database import Database
 from core.persistence.event_repository import EventRepository
-from core.application.legacy_session_importer import LegacySessionImporter
+from core.persistence.migrations import LATEST_SCHEMA_VERSION
 from core.sessions import (
     SessionStore,
     ThreadGoalStore,
@@ -51,11 +65,24 @@ class DeepCodeApplication:
         session_factory: AgentSessionFactory | None = None,
         session_store: SessionStore | None = None,
         workflow_runner: WorkflowRunner | None = None,
+        automation_schedule_policy: AutomationSchedulePolicy | None = None,
+        host_surface: str = "application",
+        worker_stale_after: float = 15.0,
+        run_automation_scheduler: bool = False,
+        event_relay_poll_interval: float = DEFAULT_RELAY_POLL_INTERVAL,
+        event_relay_batch_size: int = DEFAULT_RELAY_BATCH_SIZE,
     ) -> None:
         self.database = database
+        self.run_automation_scheduler = run_automation_scheduler
         self.session_store = session_store or get_default_store()
         self._application_lease: ApplicationLease | None = None
         self.broker = EventBroker(default_capacity=event_queue_capacity)
+        self.event_relay = DurableEventRelay(
+            database,
+            self.broker,
+            poll_interval=event_relay_poll_interval,
+            batch_size=event_relay_batch_size,
+        )
         self.projects = ProjectService(database)
         self.settings = SettingsService(self.projects)
         self.llm = LLMConfigurationService(self.projects)
@@ -92,6 +119,29 @@ class DeepCodeApplication:
             session_store=self.session_store,
             llm_configuration=self.llm,
         )
+        self.workflows = WorkflowService(
+            database,
+            self.broker,
+            self.workspaces,
+            self.executions,
+            session_store=self.session_store,
+            runner=workflow_runner,
+        )
+        self.execution_handlers = ExecutionHandlerRegistry()
+        self.execution_handlers.register(TurnExecutor.AGENT, self.turns)
+        self.execution_handlers.register(TurnExecutor.WORKFLOW, self.workflows)
+        self.execution_coordinator = ExecutionCoordinator(
+            database,
+            self.execution_handlers.start_claimed_execution,
+            max_concurrent_turns=max_concurrent_turns,
+            surface=host_surface,
+            stale_worker_after=worker_stale_after,
+            on_start_failure=self.execution_handlers.fail_claimed_start,
+            on_orphaned_execution=(self.execution_handlers.recover_orphaned_execution),
+            on_cancel_requested=self.execution_handlers.cancel_claimed_execution,
+        )
+        self.turns.configure_execution_coordinator(self.execution_coordinator)
+        self.workflows.configure_execution_coordinator(self.execution_coordinator)
         self.thread_goal_store = ThreadGoalStore(self.session_store)
         self.goals = GoalExtension(
             self.thread_goal_store,
@@ -102,6 +152,7 @@ class DeepCodeApplication:
         self.turns.configure_goal_runtime(
             self.goals,
             context_provider=self.goals.turn_association,
+            submission_scope=self.goals.turn_submission_scope,
         )
         self.turns.add_settled_listener(self.goals.on_turn_settled)
         self.deletions = SessionDeletionService(
@@ -117,15 +168,18 @@ class DeepCodeApplication:
             self.projects,
             self.threads,
             self.turns,
+            self.goals,
+            schedule_policy=automation_schedule_policy,
         )
-        self.workflows = WorkflowService(
-            database,
-            self.broker,
-            self.workspaces,
-            self.executions,
-            session_store=self.session_store,
-            runner=workflow_runner,
+        self.automation_scheduler = AutomationScheduler(
+            database.path,
+            run_due=self.automations.run_due,
+            next_due=self.automations.next_due,
         )
+        self.automations.set_scheduler(self.automation_scheduler)
+        self.turns.add_admission_guard(self.automations.ensure_turn_admitted)
+        self.goals.add_continuation_guard(self.automations.ensure_goal_continuable)
+        self.turns.add_settled_listener(self.automations.on_turn_settled)
 
     def legacy_importer(self, store: SessionStore) -> LegacySessionImporter:
         return LegacySessionImporter(
@@ -180,12 +234,26 @@ class DeepCodeApplication:
         session_factory: AgentSessionFactory | None = None,
         session_store: SessionStore | None = None,
         workflow_runner: WorkflowRunner | None = None,
-    ) -> "DeepCodeApplication":
+        automation_schedule_policy: AutomationSchedulePolicy | None = None,
+        host_surface: str = "application",
+        worker_stale_after: float = 15.0,
+        run_automation_scheduler: bool = False,
+        event_relay_poll_interval: float = DEFAULT_RELAY_POLL_INTERVAL,
+        event_relay_batch_size: int = DEFAULT_RELAY_BATCH_SIZE,
+    ) -> DeepCodeApplication:
         database = Database(database_path)
-        database.initialize()
         lease = ApplicationLease.acquire(database.path)
         application: DeepCodeApplication | None = None
         try:
+            if lease.recovery_owner:
+                database.initialize()
+            else:
+                installed_version = database.schema_version()
+                if installed_version != LATEST_SCHEMA_VERSION:
+                    raise UpgradeRequiresExclusiveAccessError(
+                        installed_version,
+                        LATEST_SCHEMA_VERSION,
+                    )
             application = cls(
                 database,
                 event_queue_capacity=event_queue_capacity,
@@ -193,8 +261,16 @@ class DeepCodeApplication:
                 session_factory=session_factory,
                 session_store=session_store,
                 workflow_runner=workflow_runner,
+                automation_schedule_policy=automation_schedule_policy,
+                host_surface=host_surface,
+                worker_stale_after=worker_stale_after,
+                run_automation_scheduler=run_automation_scheduler,
+                event_relay_poll_interval=event_relay_poll_interval,
+                event_relay_batch_size=event_relay_batch_size,
             )
             application._application_lease = lease
+            application.event_relay.start()
+            application.execution_coordinator.start(background=False)
             if lease.recovery_owner:
                 application.deletions.recover_pending()
                 application.threads.reconcile()
@@ -202,7 +278,16 @@ class DeepCodeApplication:
                 application.turns.recover_incomplete(
                     resume_queued=application.turns.may_resume_queued_after_restart
                 )
+            application.execution_coordinator.recover_candidates(
+                heartbeat_before=utc_now(),
+            )
+            if lease.recovery_owner:
+                application.goals.recover_incomplete()
+                application.automations.reconcile_runs()
             lease.downgrade()
+            application.execution_coordinator.start_background()
+            if application.run_automation_scheduler:
+                application.automation_scheduler.start()
             return application
         except BaseException:
             if application is not None:
@@ -212,13 +297,65 @@ class DeepCodeApplication:
             raise
 
     def close(self) -> None:
-        try:
-            self.automations.close()
-            self.terminals.close_all()
-            self.executions.close(cleanup=self.turns.close_live_sessions)
-        finally:
-            self.turns.remove_settled_listener(self.goals.on_turn_settled)
-            lease = self._application_lease
-            self._application_lease = None
-            if lease is not None:
-                lease.close()
+        errors: list[Exception] = []
+
+        def attempt(stage: str, operation) -> None:
+            try:
+                operation()
+            except Exception as exc:  # noqa: BLE001 - aggregate every cleanup failure
+                exc.add_note(f"DeepCode shutdown stage: {stage}")
+                errors.append(exc)
+
+        attempt("event relay", self.event_relay.close)
+        attempt("execution coordinator quiesce", self.execution_coordinator.quiesce)
+        attempt("automation scheduler", self.automation_scheduler.close)
+        attempt("terminal sessions", self.terminals.close_all)
+        attempt(
+            "execution runtime",
+            lambda: self.executions.close(cleanup=self.turns.close_live_sessions),
+        )
+        attempt(
+            "queued execution settlement",
+            lambda: self.execution_handlers.interrupt_unclaimed_queued_for_worker(
+                self.execution_coordinator.worker_id
+            ),
+        )
+        if self.execution_coordinator.active_claims:
+            errors.append(
+                RuntimeError(
+                    "cannot close DeepCode while execution claims remain active"
+                )
+            )
+        else:
+            attempt("execution coordinator", self.execution_coordinator.close)
+
+        # A failed stage may still own background work. Retain the application
+        # lifetime lease so another process cannot mistake that work for crash
+        # residue; callers may retry close after handling the failure.
+        if not errors:
+            attempt(
+                "automation admission guard",
+                lambda: self.turns.remove_admission_guard(
+                    self.automations.ensure_turn_admitted
+                ),
+            )
+            attempt(
+                "automation settled listener",
+                lambda: self.turns.remove_settled_listener(
+                    self.automations.on_turn_settled
+                ),
+            )
+            attempt(
+                "goal settled listener",
+                lambda: self.turns.remove_settled_listener(self.goals.on_turn_settled),
+            )
+            if not errors:
+                lease = self._application_lease
+                self._application_lease = None
+                if lease is not None:
+                    attempt("application lifetime lease", lease.close)
+
+        if len(errors) == 1:
+            raise errors[0]
+        if errors:
+            raise ExceptionGroup("DeepCode application shutdown failed", errors)

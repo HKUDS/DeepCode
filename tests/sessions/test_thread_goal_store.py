@@ -15,6 +15,7 @@ from core.sessions import SessionStore
 from core.sessions.thread_goal_store import (
     THREAD_GOAL_SCHEMA_VERSION,
     ThreadGoalConflictError,
+    ThreadGoalIdentityRetiredError,
     ThreadGoalLedgerCorruptError,
     ThreadGoalSessionNotFoundError,
     ThreadGoalStore,
@@ -171,6 +172,52 @@ def test_goal_identity_is_the_cross_process_cas_token(tmp_path) -> None:
         )
 
     assert second_store.read(session_id) == second
+
+
+def test_cleared_goal_identity_cannot_be_reused_by_create_or_provision(
+    tmp_path,
+) -> None:
+    _sessions, goals, session_id = _store(tmp_path)
+    retired = ThreadGoal(thread_id=session_id, objective="First")
+    goals.create(retired)
+    assert goals.clear(session_id, expected_goal_id=retired.id)
+
+    with pytest.raises(ThreadGoalIdentityRetiredError, match="cannot be reused"):
+        goals.provision(retired)
+    with pytest.raises(ThreadGoalIdentityRetiredError, match="cannot be reused"):
+        goals.create(retired)
+
+    replacement = ThreadGoal(thread_id=session_id, objective="Replacement")
+    created, was_created = goals.provision(replacement)
+    assert was_created
+    assert created == replacement
+    assert goals.read(session_id) == replacement
+
+
+def test_replacing_completed_goal_checks_new_identity_before_clearing(
+    tmp_path,
+) -> None:
+    _sessions, goals, session_id = _store(tmp_path)
+    retired = ThreadGoal(thread_id=session_id, objective="Retired target")
+    goals.create(retired)
+    assert goals.clear(session_id, expected_goal_id=retired.id)
+    current = ThreadGoal(thread_id=session_id, objective="Keep this Goal")
+    goals.create(current)
+    completed = goals.update(
+        session_id,
+        expected_goal_id=current.id,
+        transform=lambda goal: goal.agent_transition(ThreadGoalStatus.COMPLETE),
+        reason="Current Goal completed",
+        source="agent",
+    )
+
+    with pytest.raises(ThreadGoalIdentityRetiredError, match="cannot be reused"):
+        goals.provision_replacing_completed(
+            retired,
+            expected_current_goal_id=completed.id,
+        )
+
+    assert goals.read(session_id) == completed
 
 
 def test_v1_ledger_is_read_losslessly_without_rewriting(tmp_path) -> None:
@@ -378,3 +425,34 @@ def test_concurrent_usage_updates_do_not_lose_committed_state(tmp_path) -> None:
     assert current.tokens_used == 40
     assert current.time_used_seconds == 40
     assert len(_ledger_entries(sessions, session_id)) == 41
+
+
+def test_concurrent_turn_settlement_is_applied_exactly_once(tmp_path) -> None:
+    sessions, goals, session_id = _store(tmp_path)
+    goal = goals.create(ThreadGoal(thread_id=session_id, objective="Settle once"))
+    stores = [
+        ThreadGoalStore(SessionStore(sessions.root, use_index=False)) for _ in range(4)
+    ]
+
+    def settle(store: ThreadGoalStore) -> bool:
+        _updated, applied = store.settle_turn(
+            session_id,
+            expected_goal_id=goal.id,
+            turn_id="turn_shared_settlement",
+            transform=lambda current: current.add_usage(
+                tokens=7,
+                elapsed_seconds=2,
+            ),
+            reason="turn completed",
+        )
+        return applied
+
+    with ThreadPoolExecutor(max_workers=len(stores)) as executor:
+        applied = list(executor.map(settle, stores))
+
+    current = goals.read(session_id)
+    assert current is not None
+    assert applied.count(True) == 1
+    assert current.tokens_used == 7
+    assert current.time_used_seconds == 2
+    assert len(_ledger_entries(sessions, session_id)) == 2

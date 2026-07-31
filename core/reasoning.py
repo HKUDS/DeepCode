@@ -116,11 +116,7 @@ class ReasoningPayload:
         if not isinstance(effort, str) or not effort.strip():
             effort = None
         duration = raw.get("durationMs")
-        if (
-            not isinstance(duration, int)
-            or isinstance(duration, bool)
-            or duration < 0
-        ):
+        if not isinstance(duration, int) or isinstance(duration, bool) or duration < 0:
             duration = None
         return cls(
             summary_text=summary,

@@ -76,7 +76,11 @@ async def run_goal(
         streaming=False,
         max_iterations=options.max_iterations,
     )
-    application = DeepCodeApplication.open(session_factory=factory)
+    application = DeepCodeApplication.open(
+        session_factory=factory,
+        host_surface="headless",
+        run_automation_scheduler=False,
+    )
     event_token: str | None = None
     try:
         project = application.projects.add(
@@ -141,7 +145,11 @@ async def resume_goal(
         streaming=False,
         max_iterations=options.max_iterations,
     )
-    application = DeepCodeApplication.open(session_factory=factory)
+    application = DeepCodeApplication.open(
+        session_factory=factory,
+        host_surface="headless",
+        run_automation_scheduler=False,
+    )
     event_token: str | None = None
     try:
         if workspace_override is not None:

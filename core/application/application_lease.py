@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
-import errno
 import os
 import threading
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
+
+from core.platform_file_lock import acquire_file_lock, release_file_lock
+
+_ACQUIRE_RETRY_INTERVAL = 0.01
 
 
 class ApplicationLease:
@@ -17,8 +23,16 @@ class ApplicationLease:
     reinterpret the first process's live work as crash residue.
     """
 
-    def __init__(self, path: Path, descriptor: int, *, recovery_owner: bool) -> None:
+    def __init__(
+        self,
+        path: Path,
+        transition_path: Path,
+        descriptor: int,
+        *,
+        recovery_owner: bool,
+    ) -> None:
         self.path = path
+        self.transition_path = transition_path
         self._descriptor = descriptor
         self._exclusive = recovery_owner
         self.recovery_owner = recovery_owner
@@ -26,8 +40,11 @@ class ApplicationLease:
         self._closed = False
 
     @classmethod
-    def acquire(cls, database_path: Path) -> "ApplicationLease":
+    def acquire(cls, database_path: Path) -> ApplicationLease:
         path = database_path.with_name(f"{database_path.name}.application.lock")
+        transition_path = database_path.with_name(
+            f"{database_path.name}.application-transition.lock"
+        )
         path.parent.mkdir(parents=True, exist_ok=True)
         descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
         try:
@@ -35,10 +52,33 @@ class ApplicationLease:
                 os.chmod(path, 0o600)
             except OSError:
                 pass
-            recovery_owner = _try_lock(descriptor, exclusive=True)
-            if not recovery_owner:
-                _lock(descriptor, exclusive=False)
-            return cls(path, descriptor, recovery_owner=recovery_owner)
+            while True:
+                with _transition_gate(transition_path):
+                    recovery_owner = acquire_file_lock(
+                        descriptor,
+                        shared=False,
+                        blocking=False,
+                    )
+                    if recovery_owner:
+                        return cls(
+                            path,
+                            transition_path,
+                            descriptor,
+                            recovery_owner=True,
+                        )
+                    joined = acquire_file_lock(
+                        descriptor,
+                        shared=True,
+                        blocking=False,
+                    )
+                    if joined:
+                        return cls(
+                            path,
+                            transition_path,
+                            descriptor,
+                            recovery_owner=False,
+                        )
+                time.sleep(_ACQUIRE_RETRY_INTERVAL)
         except BaseException:
             os.close(descriptor)
             raise
@@ -49,13 +89,15 @@ class ApplicationLease:
         with self._lock:
             if self._closed or not self._exclusive:
                 return
-            _unlock(self._descriptor)
-            try:
-                _lock(self._descriptor, exclusive=False)
-            except BaseException:
-                self._closed = True
-                os.close(self._descriptor)
-                raise
+            with _transition_gate(self.transition_path):
+                if os.name == "nt":
+                    release_file_lock(self._descriptor)
+                try:
+                    acquire_file_lock(self._descriptor, shared=True)
+                except BaseException:
+                    self._closed = True
+                    os.close(self._descriptor)
+                    raise
             self._exclusive = False
 
     def close(self) -> None:
@@ -64,121 +106,24 @@ class ApplicationLease:
                 return
             self._closed = True
             try:
-                _unlock(self._descriptor)
+                release_file_lock(self._descriptor)
             finally:
                 os.close(self._descriptor)
 
 
-if os.name == "nt":
-    import ctypes
-    import msvcrt
-    from ctypes import wintypes
-
-    _LOCKFILE_FAIL_IMMEDIATELY = 0x00000001
-    _LOCKFILE_EXCLUSIVE_LOCK = 0x00000002
-    _ERROR_LOCK_VIOLATION = 33
-    _ERROR_IO_PENDING = 997
-
-    class _Overlapped(ctypes.Structure):
-        _fields_ = [
-            ("Internal", wintypes.ULONG_PTR),
-            ("InternalHigh", wintypes.ULONG_PTR),
-            ("Offset", wintypes.DWORD),
-            ("OffsetHigh", wintypes.DWORD),
-            ("hEvent", wintypes.HANDLE),
-        ]
-
-    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    _kernel32.LockFileEx.argtypes = [
-        wintypes.HANDLE,
-        wintypes.DWORD,
-        wintypes.DWORD,
-        wintypes.DWORD,
-        wintypes.DWORD,
-        ctypes.POINTER(_Overlapped),
-    ]
-    _kernel32.LockFileEx.restype = wintypes.BOOL
-    _kernel32.UnlockFileEx.argtypes = [
-        wintypes.HANDLE,
-        wintypes.DWORD,
-        wintypes.DWORD,
-        wintypes.DWORD,
-        ctypes.POINTER(_Overlapped),
-    ]
-    _kernel32.UnlockFileEx.restype = wintypes.BOOL
-    _WINDOWS_OVERLAPPED: dict[int, _Overlapped] = {}
-
-    def _windows_lock(
-        descriptor: int,
-        *,
-        exclusive: bool,
-        nonblocking: bool,
-    ) -> bool:
-        flags = _LOCKFILE_EXCLUSIVE_LOCK if exclusive else 0
-        if nonblocking:
-            flags |= _LOCKFILE_FAIL_IMMEDIATELY
-        overlapped = _Overlapped()
-        handle = wintypes.HANDLE(msvcrt.get_osfhandle(descriptor))
-        if _kernel32.LockFileEx(
-            handle,
-            flags,
-            0,
-            0xFFFFFFFF,
-            0xFFFFFFFF,
-            ctypes.byref(overlapped),
-        ):
-            _WINDOWS_OVERLAPPED[descriptor] = overlapped
-            return True
-        error = ctypes.get_last_error()
-        if nonblocking and error in {_ERROR_LOCK_VIOLATION, _ERROR_IO_PENDING}:
-            return False
-        raise OSError(error, os.strerror(error))
-
-    def _try_lock(descriptor: int, *, exclusive: bool) -> bool:
-        return _windows_lock(
-            descriptor,
-            exclusive=exclusive,
-            nonblocking=True,
-        )
-
-    def _lock(descriptor: int, *, exclusive: bool) -> None:
-        _windows_lock(
-            descriptor,
-            exclusive=exclusive,
-            nonblocking=False,
-        )
-
-    def _unlock(descriptor: int) -> None:
-        overlapped = _WINDOWS_OVERLAPPED.pop(descriptor, None)
-        if overlapped is None:
-            return
-        handle = wintypes.HANDLE(msvcrt.get_osfhandle(descriptor))
-        if not _kernel32.UnlockFileEx(
-            handle,
-            0,
-            0xFFFFFFFF,
-            0xFFFFFFFF,
-            ctypes.byref(overlapped),
-        ):
-            error = ctypes.get_last_error()
-            raise OSError(error, os.strerror(error))
-
-else:
-    import fcntl
-
-    def _try_lock(descriptor: int, *, exclusive: bool) -> bool:
-        operation = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+@contextmanager
+def _transition_gate(path: Path) -> Iterator[None]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
         try:
-            fcntl.flock(descriptor, operation | fcntl.LOCK_NB)
-            return True
-        except OSError as exc:
-            if exc.errno in {errno.EACCES, errno.EAGAIN}:
-                return False
-            raise
-
-    def _lock(descriptor: int, *, exclusive: bool) -> None:
-        operation = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
-        fcntl.flock(descriptor, operation)
-
-    def _unlock(descriptor: int) -> None:
-        fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+        acquire_file_lock(descriptor, shared=False)
+        try:
+            yield
+        finally:
+            release_file_lock(descriptor)
+    finally:
+        os.close(descriptor)

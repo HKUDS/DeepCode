@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
+import logging
+import math
 import threading
 import uuid
 from collections import deque
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 
 from core.domain.event import DomainEvent
 from core.persistence.database import Database
 from core.persistence.event_repository import EventRepository
+
+
+logger = logging.getLogger(__name__)
+DEFAULT_RELAY_POLL_INTERVAL = 0.1
+DEFAULT_RELAY_BATCH_SIZE = 500
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +39,34 @@ class _Subscriber:
     dropped: int = 0
 
 
+@dataclass(slots=True)
+class _SequenceWatermark:
+    contiguous: int = 0
+    out_of_order: set[int] = field(default_factory=set)
+
+    def accept(self, sequence: int) -> bool:
+        if sequence <= self.contiguous or sequence in self.out_of_order:
+            return False
+        self.out_of_order.add(sequence)
+        self._advance()
+        return True
+
+    def seed(self, sequence: int) -> None:
+        if sequence > self.contiguous:
+            self.contiguous = sequence
+        self.out_of_order = {
+            candidate for candidate in self.out_of_order if candidate > self.contiguous
+        }
+        self._advance()
+
+    def _advance(self) -> None:
+        next_sequence = self.contiguous + 1
+        while next_sequence in self.out_of_order:
+            self.out_of_order.remove(next_sequence)
+            self.contiguous = next_sequence
+            next_sequence += 1
+
+
 class EventBroker:
     """Best-effort live delivery; durable replay remains authoritative."""
 
@@ -40,6 +76,7 @@ class EventBroker:
         self.default_capacity = default_capacity
         self._condition = threading.Condition()
         self._subscribers: dict[str, _Subscriber] = {}
+        self._watermarks: dict[str, _SequenceWatermark] = {}
 
     def subscribe(self, *, capacity: int | None = None) -> str:
         size = capacity or self.default_capacity
@@ -55,13 +92,35 @@ class EventBroker:
             self._subscribers.pop(token, None)
             self._condition.notify_all()
 
-    def publish(self, event: DomainEvent) -> None:
+    def seed_sequences(self, heads: Mapping[str, int]) -> None:
+        """Mark pre-existing durable history without delivering it live."""
+
         with self._condition:
+            for thread_id, sequence in heads.items():
+                if sequence < 0:
+                    raise ValueError("sequence heads cannot be negative")
+                watermark = self._watermarks.setdefault(
+                    thread_id,
+                    _SequenceWatermark(),
+                )
+                watermark.seed(sequence)
+
+    def publish(self, event: DomainEvent) -> bool:
+        """Deliver an event at most once for its authoritative stream sequence."""
+
+        with self._condition:
+            watermark = self._watermarks.setdefault(
+                event.thread_id,
+                _SequenceWatermark(),
+            )
+            if not watermark.accept(event.sequence):
+                return False
             for subscriber in self._subscribers.values():
                 if len(subscriber.queue) == subscriber.queue.maxlen:
                     subscriber.dropped += 1
                 subscriber.queue.append(event)
             self._condition.notify_all()
+            return True
 
     def drain(self, token: str) -> DeliveryBatch:
         with self._condition:
@@ -99,6 +158,12 @@ class EventService:
         self.database = database
         self.broker = broker
 
+    def head(self, thread_id: str) -> int:
+        """Return the latest committed sequence for one Thread event stream."""
+
+        with self.database.read() as connection:
+            return EventRepository(connection).sequence_head(thread_id)
+
     def replay(
         self, thread_id: str, *, after: int = 0, limit: int = 500
     ) -> list[DomainEvent]:
@@ -122,3 +187,125 @@ class EventService:
             next_after=page[-1].sequence if has_more and page else None,
             has_more=has_more,
         )
+
+
+class DurableEventRelay:
+    """Relay committed events from other processes into one local broker.
+
+    Per-thread relay cursors advance only from rows actually read from
+    ``event_log``. Broker delivery watermarks are deliberately separate so a
+    newer local publication cannot make the relay skip an older external row.
+    """
+
+    def __init__(
+        self,
+        database: Database,
+        broker: EventBroker,
+        *,
+        poll_interval: float = DEFAULT_RELAY_POLL_INTERVAL,
+        batch_size: int = DEFAULT_RELAY_BATCH_SIZE,
+    ) -> None:
+        if (
+            isinstance(poll_interval, bool)
+            or not isinstance(poll_interval, (int, float))
+            or not math.isfinite(poll_interval)
+            or poll_interval <= 0
+        ):
+            raise ValueError("poll_interval must be a finite positive number")
+        if isinstance(batch_size, bool) or not isinstance(batch_size, int):
+            raise ValueError("batch_size must be a positive integer")
+        if batch_size < 1:
+            raise ValueError("batch_size must be a positive integer")
+        self.database = database
+        self.broker = broker
+        self.poll_interval = float(poll_interval)
+        self.batch_size = batch_size
+        self._cursors: dict[str, int] = {}
+        self._lifecycle_lock = threading.Lock()
+        self._poll_lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._initialized = False
+        self._closed = False
+
+    @property
+    def active(self) -> bool:
+        with self._lifecycle_lock:
+            return bool(
+                self._thread is not None
+                and self._thread.is_alive()
+                and not self._stop.is_set()
+            )
+
+    def start(self, *, background: bool = True) -> None:
+        with self._lifecycle_lock:
+            if self._closed:
+                raise RuntimeError("a closed durable event relay cannot restart")
+            self._initialize_locked()
+            if not background:
+                return
+            if self._thread is not None and self._thread.is_alive():
+                return
+            self._stop.clear()
+            self._thread = threading.Thread(
+                target=self._run,
+                name="deepcode-durable-event-relay",
+                daemon=True,
+            )
+            self._thread.start()
+
+    def poll_once(self) -> int:
+        """Publish at most one configured page per changed event stream."""
+
+        with self._lifecycle_lock:
+            if self._closed:
+                return 0
+            self._initialize_locked()
+        delivered = 0
+        with self._poll_lock:
+            with self.database.read() as connection:
+                repository = EventRepository(connection)
+                heads = repository.sequence_heads()
+                for thread_id in sorted(heads):
+                    after = self._cursors.get(thread_id, 0)
+                    if heads[thread_id] <= after:
+                        continue
+                    events = repository.replay(
+                        thread_id,
+                        after=after,
+                        limit=self.batch_size,
+                    )
+                    for event in events:
+                        if self.broker.publish(event):
+                            delivered += 1
+                    if events:
+                        self._cursors[thread_id] = events[-1].sequence
+        return delivered
+
+    def close(self) -> None:
+        with self._lifecycle_lock:
+            if self._closed:
+                return
+            self._closed = True
+            self._stop.set()
+            thread = self._thread
+            self._thread = None
+        if thread is not None and thread is not threading.current_thread():
+            thread.join()
+
+    def _initialize_locked(self) -> None:
+        if self._initialized:
+            return
+        with self.database.read() as connection:
+            heads = EventRepository(connection).sequence_heads()
+        self._cursors = dict(heads)
+        self.broker.seed_sequences(heads)
+        self._initialized = True
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                self.poll_once()
+            except Exception:  # noqa: BLE001 - a transient read must not kill relay
+                logger.exception("durable event relay poll failed")
+            self._stop.wait(self.poll_interval)

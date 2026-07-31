@@ -97,6 +97,7 @@ def test_enabled_interval_automation_requires_a_due_time() -> None:
             project_id="proj_test",
             thread_id="session-test",
             name="Nightly review",
+            current_revision_id="arev_test",
             prompt="Review the repository",
             schedule_kind=AutomationScheduleKind.INTERVAL,
             interval_seconds=3600,

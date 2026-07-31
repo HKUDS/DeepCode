@@ -9,9 +9,9 @@ from typing import Any
 
 import pytest
 
-import core.agent_setup as agent_setup
 from cli.tui.app import TuiApp
 from cli.tui.thread_client import TuiThreadClient
+from core import agent_setup
 from core.application.application import DeepCodeApplication
 from core.domain.turn import TurnStatus
 from core.events import Event
@@ -113,6 +113,20 @@ def _make_client(
     )
     client.set_event_loop(asyncio.get_running_loop())
     return client
+
+
+@pytest.mark.asyncio
+async def test_tui_client_does_not_start_resident_automation_scheduler(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    provider = _BlockingProvider()
+    client = _make_client(monkeypatch, tmp_path, provider)
+    try:
+        assert client.application.run_automation_scheduler is False
+        assert client.application.automation_scheduler.active is False
+    finally:
+        await client.close()
 
 
 @pytest.mark.asyncio

@@ -22,6 +22,27 @@ class ApplicationError(RuntimeError):
         self.details = details or {}
 
 
+class UpgradeRequiresExclusiveAccessError(ApplicationError):
+    """The database cannot be migrated while another application is live."""
+
+    code = "UPGRADE_REQUIRES_EXCLUSIVE_ACCESS"
+    retryable = True
+
+    def __init__(self, installed_version: int, required_version: int) -> None:
+        super().__init__(
+            "database schema upgrade requires exclusive application access "
+            f"(installed v{installed_version}, required v{required_version})",
+            user_message=(
+                "DeepCode needs to upgrade its local database. Close other "
+                "DeepCode CLI/Desktop processes, then try again."
+            ),
+            details={
+                "installedSchemaVersion": installed_version,
+                "requiredSchemaVersion": required_version,
+            },
+        )
+
+
 class InvalidArgumentError(ApplicationError):
     code = "INVALID_REQUEST"
 
@@ -52,6 +73,28 @@ class ArtifactNotFoundError(ApplicationError):
 
 class AutomationNotFoundError(ApplicationError):
     code = "AUTOMATION_NOT_FOUND"
+
+
+class AutomationBootstrapPendingError(ApplicationError):
+    """A durable Automation exists but its canonical Session needs repair."""
+
+    code = "AUTOMATION_BOOTSTRAP_PENDING"
+    retryable = False
+
+    def __init__(self, automation_id: str, thread_id: str) -> None:
+        super().__init__(
+            "automation was durably created but Session materialization failed",
+            user_message=(
+                "The Automation was durably created, but its Session is not "
+                "ready yet. Refresh or reopen DeepCode; do not retry Create."
+            ),
+            details={
+                "automationId": automation_id,
+                "threadId": thread_id,
+                "accepted": True,
+                "recovery": "refresh_or_reopen",
+            },
+        )
 
 
 class GoalNotFoundError(ApplicationError):

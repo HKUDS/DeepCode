@@ -21,6 +21,11 @@ from core.application.errors import (
     WorkflowNotFoundError,
 )
 from core.application.event_service import EventBroker
+from core.application.execution_coordinator import (
+    ExecutionCoordinator,
+    ExecutionDispatch,
+    OrphanedExecution,
+)
 from core.application.execution_registry import ExecutionRegistry
 from core.application.views import (
     artifact_view,
@@ -44,12 +49,18 @@ from core.domain.common import JsonObject, new_id, utc_now, validate_json_object
 from core.domain.event import DomainEvent
 from core.domain.item import Item, ItemKind, ItemStatus
 from core.domain.project import TrustState
+from core.domain.runtime_coordination import ResourceClaim
 from core.domain.thread import ThreadStatus
-from core.domain.turn import Turn, TurnStatus
+from core.domain.turn import Turn, TurnExecutor, TurnStatus
 from core.domain.workflow import WorkflowRun, WorkflowStatus
+from core.persistence.coordination_repository import RuntimeCoordinationRepository
 from core.persistence.database import Database
 from core.persistence.event_repository import EventRepository
-from core.persistence.execution_repository import ItemRepository, TurnRepository
+from core.persistence.execution_repository import (
+    ItemRepository,
+    TurnRepository,
+    TurnWriteConflictError,
+)
 from core.persistence.project_repository import ProjectRepository
 from core.persistence.thread_repository import ThreadRepository
 from core.persistence.workflow_repository import ArtifactRepository, WorkflowRepository
@@ -61,6 +72,7 @@ SUPPORTED_SOURCE_TYPES = frozenset({"local", "url", "repository", "requirement"}
 MAX_SOURCE_LENGTH = 16_384
 MAX_SUMMARY_LENGTH = 4_000
 MAX_PREVIEW_BYTES = 128 * 1024
+DEFAULT_INTERACTION_POLL_SECONDS = 0.2
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,8 +93,9 @@ class ArtifactContent:
 
 @dataclass(slots=True)
 class _InteractionWaiter:
+    interaction_id: str
     loop: asyncio.AbstractEventLoop
-    future: asyncio.Future[JsonObject]
+    future: asyncio.Future[None]
 
 
 class WorkflowService:
@@ -97,15 +110,33 @@ class WorkflowService:
         *,
         session_store: SessionStore,
         runner: WorkflowRunner | None = None,
+        interaction_poll_seconds: float = DEFAULT_INTERACTION_POLL_SECONDS,
     ) -> None:
+        if interaction_poll_seconds <= 0:
+            raise ValueError("interaction_poll_seconds must be positive")
         self.database = database
         self.broker = broker
         self.workspaces = workspaces
         self.registry = registry
         self.session_store = session_store
         self.runner = runner or DefaultWorkflowRunner()
+        self.interaction_poll_seconds = interaction_poll_seconds
+        self._execution_coordinator: ExecutionCoordinator | None = None
         self._interaction_lock = threading.RLock()
         self._interactions: dict[str, _InteractionWaiter] = {}
+
+    def configure_execution_coordinator(
+        self,
+        coordinator: ExecutionCoordinator,
+    ) -> None:
+        """Attach the shared claim/fencing owner before accepting work."""
+
+        if (
+            self._execution_coordinator is not None
+            and self._execution_coordinator is not coordinator
+        ):
+            raise RuntimeError("workflow execution coordinator is already configured")
+        self._execution_coordinator = coordinator
 
     def start(
         self,
@@ -194,12 +225,33 @@ class WorkflowService:
         )
 
     def interrupt(self, run_id: str) -> tuple[bool, WorkflowRun]:
-        run = self.read(run_id).run
+        snapshot = self.read(run_id)
+        run = snapshot.run
+        turn = snapshot.turn
         if run.status.is_terminal:
             return False, run
-        accepted = self.registry.interrupt(run.id)
+        if turn.status is TurnStatus.QUEUED and turn.execution_owner_id is None:
+            try:
+                cancelled = self._finish(
+                    run.id,
+                    status=WorkflowStatus.CANCELLED,
+                )
+            except TurnWriteConflictError:
+                pass
+            else:
+                return True, cancelled
+
+        requested = self._request_cancellation(turn.id)
+        if requested.status.is_terminal:
+            return False, self.read(run_id).run
+        accepted = self.registry.interrupt(turn.id)
+        if not accepted and requested.execution_owner_id is not None:
+            accepted = True
+        coordinator = self._execution_coordinator
+        if coordinator is not None:
+            coordinator.offer()
         if not accepted:
-            self._finish(run.id, status=WorkflowStatus.CANCELLED)
+            return False, self.read(run_id).run
         return True, self.read(run_id).run
 
     def respond(
@@ -209,31 +261,106 @@ class WorkflowService:
         interaction_id: str,
         response: JsonObject,
     ) -> WorkflowRun:
+        """Resolve a durable interaction from any application process."""
+
         clean_response = _bounded_json(response, "response")
         events: list[DomainEvent] = []
-        with self._interaction_lock:
-            waiter = self._interactions.get(run_id)
-        if waiter is None:
-            raise WorkflowInteractionError("workflow has no live interaction")
-
         with self.database.transaction() as connection:
             runs = WorkflowRepository(connection)
             run = runs.get(run_id)
             if run is None:
                 raise WorkflowNotFoundError(f"workflow not found: {run_id}")
             interaction = run.checkpoint.get("interaction")
-            if run.status is not WorkflowStatus.WAITING or not isinstance(
-                interaction, dict
-            ):
-                raise WorkflowInteractionError("workflow is not waiting for input")
+            if not isinstance(interaction, dict):
+                if run.status.is_terminal:
+                    raise WorkflowInteractionError(
+                        "workflow interaction is no longer active",
+                        details={
+                            "reason": "terminal",
+                            "interactionId": interaction_id,
+                        },
+                    )
+                last_interaction = run.checkpoint.get("lastInteraction")
+                if (
+                    isinstance(last_interaction, dict)
+                    and last_interaction.get("id") == interaction_id
+                ):
+                    raise WorkflowInteractionError(
+                        "workflow interaction is already resolved",
+                        details={
+                            "reason": "already_resolved",
+                            "interactionId": interaction_id,
+                        },
+                    )
+                raise WorkflowInteractionError(
+                    "workflow interaction is no longer active",
+                    details={
+                        "reason": "stale",
+                        "interactionId": interaction_id,
+                    },
+                )
             if interaction.get("id") != interaction_id:
-                raise WorkflowInteractionError("interaction is stale")
+                raise WorkflowInteractionError(
+                    "workflow interaction is stale",
+                    details={
+                        "reason": "stale",
+                        "interactionId": interaction_id,
+                        "activeInteractionId": interaction.get("id"),
+                    },
+                )
+            if run.status is not WorkflowStatus.WAITING:
+                raise WorkflowInteractionError(
+                    "workflow interaction is no longer waiting",
+                    details={
+                        "reason": "expired",
+                        "interactionId": interaction_id,
+                    },
+                )
+            turns = TurnRepository(connection)
+            turn = turns.get(run.turn_id)
+            if turn is None:
+                raise ConflictError("workflow turn is missing")
+            if (
+                turn.executor is not TurnExecutor.WORKFLOW
+                or turn.status is not TurnStatus.WAITING_APPROVAL
+            ):
+                raise WorkflowInteractionError(
+                    "workflow interaction has expired",
+                    details={
+                        "reason": "expired",
+                        "interactionId": interaction_id,
+                    },
+                )
+            if turn.cancel_requested_at is not None:
+                raise WorkflowInteractionError(
+                    "workflow interaction cannot be resolved after cancellation",
+                    details={
+                        "reason": "cancel_requested",
+                        "interactionId": interaction_id,
+                    },
+                )
+            claim = RuntimeCoordinationRepository(connection).current_claim_for_turn(
+                turn.id
+            )
+            if claim is None or not _interaction_matches_claim(
+                interaction,
+                claim,
+            ):
+                raise WorkflowInteractionError(
+                    "workflow interaction execution claim is stale",
+                    details={
+                        "reason": "claim_stale",
+                        "interactionId": interaction_id,
+                    },
+                )
             now = utc_now()
             checkpoint = dict(run.checkpoint)
             checkpoint.pop("interaction", None)
             checkpoint["lastInteraction"] = {
                 "id": interaction_id,
                 "response": clean_response,
+                "workerId": claim.worker_id,
+                "turnEpoch": claim.turn_epoch,
             }
             resumed = replace(
                 run,
@@ -241,11 +368,14 @@ class WorkflowService:
                 checkpoint=checkpoint,
                 updated_at=now,
             )
-            runs.update(resumed)
-            turns = TurnRepository(connection)
-            turn = turns.get(run.turn_id)
-            if turn is None:
-                raise ConflictError("workflow turn is missing")
+            if not runs.update_if_current(resumed, expected=run):
+                raise WorkflowInteractionError(
+                    "workflow interaction changed before response",
+                    details={
+                        "reason": "concurrent_update",
+                        "interactionId": interaction_id,
+                    },
+                )
             resumed_turn = replace(turn, status=TurnStatus.RUNNING)
             turns.update(resumed_turn)
             threads = ThreadRepository(connection)
@@ -259,24 +389,31 @@ class WorkflowService:
             item_id = interaction.get("itemId")
             items = ItemRepository(connection)
             item = items.get(str(item_id)) if item_id else None
+            if item is None or item.status is not ItemStatus.PENDING:
+                raise WorkflowInteractionError(
+                    "workflow interaction item is no longer pending",
+                    details={
+                        "reason": "expired",
+                        "interactionId": interaction_id,
+                    },
+                )
             event_repo = EventRepository(connection)
-            if item is not None:
-                answered = replace(
-                    item,
-                    status=ItemStatus.COMPLETED,
-                    payload={**item.payload, "response": clean_response},
-                    updated_at=now,
+            answered = replace(
+                item,
+                status=ItemStatus.COMPLETED,
+                payload={**item.payload, "response": clean_response},
+                updated_at=now,
+            )
+            items.update(answered)
+            events.append(
+                event_repo.append(
+                    thread_id=run.thread_id,
+                    turn_id=run.turn_id,
+                    item_id=answered.id,
+                    type="item.updated",
+                    payload={"item": item_view(answered)},
                 )
-                items.update(answered)
-                events.append(
-                    event_repo.append(
-                        thread_id=run.thread_id,
-                        turn_id=run.turn_id,
-                        item_id=answered.id,
-                        type="item.updated",
-                        payload={"item": item_view(answered)},
-                    )
-                )
+            )
             events.extend(
                 (
                     event_repo.append(
@@ -299,12 +436,18 @@ class WorkflowService:
                 )
             )
         self._publish(events)
-
-        def deliver() -> None:
-            if not waiter.future.done():
-                waiter.future.set_result(clean_response)
-
-        waiter.loop.call_soon_threadsafe(deliver)
+        with self._interaction_lock:
+            waiter = self._interactions.get(run_id)
+        if waiter is not None and waiter.interaction_id == interaction_id:
+            try:
+                waiter.loop.call_soon_threadsafe(
+                    self._wake_interaction_waiter,
+                    waiter.future,
+                )
+            except RuntimeError:
+                # The durable response already committed.  A concurrently
+                # closing owner loop simply does not receive the latency hint.
+                pass
         return resumed
 
     def recover_incomplete(self) -> int:
@@ -312,7 +455,13 @@ class WorkflowService:
 
         with self.database.read() as connection:
             run_ids = [
-                run.id for run in WorkflowRepository(connection).list_incomplete()
+                run.id
+                for run in WorkflowRepository(connection).list_incomplete()
+                if (
+                    (turn := TurnRepository(connection).get(run.turn_id)) is not None
+                    and turn.executor is TurnExecutor.WORKFLOW
+                    and turn.execution_owner_id is None
+                )
             ]
         for run_id in run_ids:
             self._finish(
@@ -325,6 +474,179 @@ class WorkflowService:
                 turn_stop_reason="application_restarted",
             )
         return len(run_ids)
+
+    def start_claimed_execution(self, dispatch: ExecutionDispatch) -> None:
+        """Start one Workflow only after its typed Turn claim is durable."""
+
+        coordinator = self._require_execution_coordinator()
+        if dispatch.executor is not TurnExecutor.WORKFLOW:
+            raise TurnWriteConflictError(
+                f"Workflow handler received {dispatch.executor.value} Turn "
+                f"{dispatch.turn_id}"
+            )
+        if dispatch.claim.worker_id != coordinator.worker_id:
+            raise TurnWriteConflictError(
+                f"Workflow claim belongs to another worker: {dispatch.turn_id}"
+            )
+        with self.database.read() as connection:
+            run = WorkflowRepository(connection).get_for_turn(dispatch.turn_id)
+        if run is None:
+            raise WorkflowNotFoundError(
+                f"workflow for Turn not found: {dispatch.turn_id}"
+            )
+        workspace = self.workspaces.resolve(
+            run.thread_id,
+            require_trusted=True,
+        ).root
+        self.registry.start(
+            dispatch.turn_id,
+            lambda: self._execute(
+                run.id,
+                workspace,
+                claim=dispatch.claim,
+            ),
+            on_cancelled_before_start=lambda: self._finish(
+                run.id,
+                status=WorkflowStatus.CANCELLED,
+                claim=dispatch.claim,
+            ),
+        )
+
+    def fail_claimed_start(
+        self,
+        dispatch: ExecutionDispatch,
+        error: Exception,
+    ) -> None:
+        """Fail closed when the shared runtime rejects an admitted Workflow."""
+
+        with self.database.read() as connection:
+            run = WorkflowRepository(connection).get_for_turn(dispatch.turn_id)
+        if run is None:
+            raise WorkflowNotFoundError(
+                f"workflow for Turn not found: {dispatch.turn_id}"
+            )
+        self._finish(
+            run.id,
+            status=WorkflowStatus.FAILED,
+            error_code="SCHEDULER_ERROR",
+            error_message=str(error),
+            claim=dispatch.claim,
+        )
+
+    def cancel_claimed_execution(self, claim: ResourceClaim) -> None:
+        """Deliver cancellation only inside the Workflow claim-owning process."""
+
+        coordinator = self._require_execution_coordinator()
+        if claim.worker_id != coordinator.worker_id or claim.turn_id is None:
+            raise TurnWriteConflictError("cancellation claim belongs to another worker")
+        if self.registry.interrupt(claim.turn_id):
+            return
+        with self.database.read() as connection:
+            turn = TurnRepository(connection).get(claim.turn_id)
+            run = WorkflowRepository(connection).get_for_turn(claim.turn_id)
+        if turn is None:
+            raise ConflictError("workflow turn is missing")
+        if run is None:
+            raise WorkflowNotFoundError(f"workflow for Turn not found: {claim.turn_id}")
+        if turn.status.is_terminal:
+            return
+        if turn.status is TurnStatus.QUEUED:
+            self._finish(
+                run.id,
+                status=WorkflowStatus.CANCELLED,
+                claim=claim,
+            )
+            return
+        raise ConflictError(
+            "claim-owning runtime could not interrupt an executing Workflow",
+            details={"turnId": claim.turn_id, "status": turn.status.value},
+        )
+
+    def recover_orphaned_execution(self, orphan: OrphanedExecution) -> None:
+        """Fail dead-worker Workflow execution without replaying mutations."""
+
+        if orphan.executor is not TurnExecutor.WORKFLOW:
+            raise ValueError(f"Workflow handler cannot recover {orphan.executor.value}")
+        with self.database.read() as connection:
+            run = WorkflowRepository(connection).get_for_turn(orphan.turn_id)
+        if run is None:
+            raise WorkflowNotFoundError(
+                f"workflow for Turn not found: {orphan.turn_id}"
+            )
+        self._finish(
+            run.id,
+            status=WorkflowStatus.FAILED,
+            error_code="WORKFLOW_INTERRUPTED",
+            error_message="workflow interrupted after its worker crashed",
+            checkpoint_patch={"resumable": True},
+            turn_status=TurnStatus.INTERRUPTED,
+            turn_stop_reason="worker_crashed",
+            claim=orphan.claim,
+        )
+
+    def interrupt_unclaimed_queued_for_worker(self, worker_id: str) -> int:
+        """Settle this closing worker's queued Workflow Turns."""
+
+        with self.database.read() as connection:
+            run_ids = [
+                str(row["run_id"])
+                for row in connection.execute(
+                    "SELECT workflow_runs.id AS run_id "
+                    "FROM workflow_runs "
+                    "JOIN turns ON turns.id = workflow_runs.turn_id "
+                    "WHERE turns.executor = ? AND turns.status = 'queued' "
+                    "AND turns.execution_owner_id IS NULL "
+                    "AND turns.home_worker_id = ? "
+                    "ORDER BY turns.enqueued_at, turns.thread_id, "
+                    "turns.ordinal, turns.id",
+                    (TurnExecutor.WORKFLOW.value, worker_id),
+                ).fetchall()
+            ]
+        for run_id in run_ids:
+            self._finish(
+                run_id,
+                status=WorkflowStatus.CANCELLED,
+                turn_stop_reason="application_closed",
+            )
+        return len(run_ids)
+
+    def _request_cancellation(self, turn_id: str) -> Turn:
+        events: tuple[DomainEvent, ...] = ()
+        with self.database.transaction() as connection:
+            turns = TurnRepository(connection)
+            turn = turns.get(turn_id)
+            if turn is None:
+                raise ConflictError("workflow turn is missing")
+            if turn.executor is not TurnExecutor.WORKFLOW:
+                raise TurnWriteConflictError(
+                    f"Turn is not owned by the Workflow executor: {turn.id}"
+                )
+            if turn.status.is_terminal or turn.cancel_requested_at is not None:
+                return turn
+            requested = replace(turn, cancel_requested_at=utc_now())
+            turns.update(requested)
+            event = EventRepository(connection).append(
+                thread_id=turn.thread_id,
+                turn_id=turn.id,
+                type="turn.cancel_requested",
+                payload={"turnId": turn.id},
+            )
+            events = (event,)
+        self._publish(list(events))
+        return requested
+
+    def _submitting_worker_id(self) -> str:
+        coordinator = self._require_execution_coordinator()
+        worker = coordinator.worker
+        if worker is None:
+            raise RuntimeError("execution coordinator is not started")
+        return worker.id
+
+    def _require_execution_coordinator(self) -> ExecutionCoordinator:
+        coordinator = self._execution_coordinator
+        if coordinator is None:
+            raise RuntimeError("workflow execution coordinator is not configured")
+        return coordinator
 
     def _start(
         self,
@@ -339,6 +661,7 @@ class WorkflowService:
         clean_kind, clean_source_type, clean_source, clean_options = _validate_input(
             kind, source_type, source, options
         )
+        submitting_worker_id = self._submitting_worker_id()
         context = self.workspaces.resolve(thread_id, require_trusted=True)
         if clean_source_type == "local":
             try:
@@ -377,6 +700,7 @@ class WorkflowService:
                 thread_id=thread_id,
                 ordinal=turns.next_ordinal(thread_id),
                 prompt=prompt,
+                executor=TurnExecutor.WORKFLOW,
             )
             turns.add(turn)
             runs = WorkflowRepository(connection)
@@ -423,7 +747,7 @@ class WorkflowService:
                     event_repo.append(
                         thread_id=thread_id,
                         turn_id=turn.id,
-                        type="turn.started",
+                        type="turn.queued",
                         payload={"turn": turn_view(turn)},
                     ),
                     event_repo.append(
@@ -457,39 +781,47 @@ class WorkflowService:
                 error_message=str(exc),
             )
             raise
-        try:
-            self.registry.start(
-                run.id,
-                lambda: self._execute(run.id, context.root),
-                on_cancelled_before_start=lambda: self._finish(
-                    run.id, status=WorkflowStatus.CANCELLED
-                ),
+        with self.database.transaction() as connection:
+            turns = TurnRepository(connection)
+            current_turn = turns.get(turn.id)
+            if current_turn is None:
+                raise ConflictError("workflow turn is missing")
+            if (
+                current_turn.status is not TurnStatus.QUEUED
+                or current_turn.execution_owner_id is not None
+            ):
+                raise TurnWriteConflictError(
+                    f"Workflow Turn changed before admission: {turn.id}"
+                )
+            turn = replace(
+                current_turn,
+                home_worker_id=submitting_worker_id,
             )
-        except Exception as exc:
-            self._finish(
-                run.id,
-                status=WorkflowStatus.FAILED,
-                error_code="SCHEDULER_ERROR",
-                error_message=str(exc),
-            )
-            raise
+            turns.update(turn)
+        self._require_execution_coordinator().offer()
         return WorkflowSnapshot(run, turn, (user_item,), ())
 
-    async def _execute(self, run_id: str, workspace: Path) -> None:
-        run = self._mark_running(run_id)
-        source_type = str(run.input["sourceType"])
-        source = str(run.input["source"])
-        options = _require_object(run.input.get("options", {}), "options")
-        request = WorkflowExecutionRequest(
-            run_id=run.id,
-            kind=run.kind,
-            source_type=source_type,
-            source=source,
-            options=options,
-            workspace=workspace,
-            checkpoint=run.checkpoint,
-        )
+    async def _execute(
+        self,
+        run_id: str,
+        workspace: Path,
+        *,
+        claim: ResourceClaim,
+    ) -> None:
         try:
+            run = self._mark_running(run_id, claim=claim)
+            source_type = str(run.input["sourceType"])
+            source = str(run.input["source"])
+            options = _require_object(run.input.get("options", {}), "options")
+            request = WorkflowExecutionRequest(
+                run_id=run.id,
+                kind=run.kind,
+                source_type=source_type,
+                source=source,
+                options=options,
+                workspace=workspace,
+                checkpoint=run.checkpoint,
+            )
             runtime = DeepCodeRuntime(load_config_for_workspace(workspace))
             with use_runtime(runtime):
                 outcome = await self.runner.run(
@@ -506,7 +838,9 @@ class WorkflowService:
                             )
                         ),
                         interact=lambda interaction: self._interact(
-                            run.id, interaction
+                            run.id,
+                            interaction,
+                            claim=claim,
                         ),
                     ),
                 )
@@ -515,12 +849,14 @@ class WorkflowService:
                     run.id,
                     status=WorkflowStatus.COMPLETED,
                     outcome=outcome,
+                    claim=claim,
                 )
             elif outcome.status == "cancelled":
                 self._finish(
                     run.id,
                     status=WorkflowStatus.CANCELLED,
                     outcome=outcome,
+                    claim=claim,
                 )
             else:
                 self._finish(
@@ -530,23 +866,36 @@ class WorkflowService:
                     error_code="WORKFLOW_INCOMPLETE",
                     error_message=outcome.summary,
                     checkpoint_patch={"resumable": True},
+                    claim=claim,
                 )
         except asyncio.CancelledError:
-            self._finish(run.id, status=WorkflowStatus.CANCELLED)
+            self._finish(
+                run_id,
+                status=WorkflowStatus.CANCELLED,
+                claim=claim,
+            )
             raise
         except Exception as exc:  # noqa: BLE001 - durable failure boundary
             self._finish(
-                run.id,
+                run_id,
                 status=WorkflowStatus.FAILED,
                 error_code="WORKFLOW_EXECUTION_ERROR",
                 error_message=f"{type(exc).__name__}: {exc}",
                 checkpoint_patch={"resumable": True},
+                claim=claim,
             )
         finally:
             with self._interaction_lock:
-                self._interactions.pop(run.id, None)
+                current = self._interactions.get(run_id)
+                if current is not None:
+                    self._interactions.pop(run_id, None)
 
-    def _mark_running(self, run_id: str) -> WorkflowRun:
+    def _mark_running(
+        self,
+        run_id: str,
+        *,
+        claim: ResourceClaim,
+    ) -> WorkflowRun:
         events: list[DomainEvent] = []
         with self.database.transaction() as connection:
             runs = WorkflowRepository(connection)
@@ -567,6 +916,20 @@ class WorkflowService:
             turn = turns.get(run.turn_id)
             if turn is None:
                 raise ConflictError("workflow turn is missing")
+            if turn.executor is not TurnExecutor.WORKFLOW:
+                raise TurnWriteConflictError(
+                    f"Turn is not owned by the Workflow executor: {turn.id}"
+                )
+            if turn.status is not TurnStatus.QUEUED:
+                raise ConflictError("only a queued Workflow Turn can begin execution")
+            if claim.turn_id != turn.id:
+                raise TurnWriteConflictError(
+                    f"claim does not belong to Workflow Turn: {turn.id}"
+                )
+            if not RuntimeCoordinationRepository(connection).claim_is_current(claim):
+                raise TurnWriteConflictError(
+                    f"Workflow execution fence is stale: {turn.id}"
+                )
             running_turn = replace(
                 turn,
                 status=TurnStatus.RUNNING,
@@ -731,11 +1094,17 @@ class WorkflowService:
             },
         )
 
-    async def _interact(self, run_id: str, request: JsonObject) -> JsonObject:
+    async def _interact(
+        self,
+        run_id: str,
+        request: JsonObject,
+        *,
+        claim: ResourceClaim,
+    ) -> JsonObject:
         clean_request = _bounded_json(request, "interaction")
         interaction_id = new_id("wfi")
         loop = asyncio.get_running_loop()
-        future: asyncio.Future[JsonObject] = loop.create_future()
+        future: asyncio.Future[None] = loop.create_future()
         events: list[DomainEvent] = []
         with self._interaction_lock:
             if run_id in self._interactions:
@@ -745,6 +1114,32 @@ class WorkflowService:
             run = runs.get(run_id)
             if run is None or run.status.is_terminal:
                 raise WorkflowInteractionError("workflow is no longer active")
+            if run.status is not WorkflowStatus.RUNNING:
+                raise WorkflowInteractionError(
+                    "workflow is not ready for an interaction"
+                )
+            if isinstance(run.checkpoint.get("interaction"), dict):
+                raise WorkflowInteractionError(
+                    "workflow already has a durable interaction"
+                )
+            turns = TurnRepository(connection)
+            turn = turns.get(run.turn_id)
+            if turn is None:
+                raise ConflictError("workflow turn is missing")
+            if (
+                turn.executor is not TurnExecutor.WORKFLOW
+                or turn.status is not TurnStatus.RUNNING
+                or turn.cancel_requested_at is not None
+            ):
+                raise WorkflowInteractionError(
+                    "workflow is no longer eligible for interaction"
+                )
+            if claim.turn_id != turn.id or not RuntimeCoordinationRepository(
+                connection
+            ).claim_is_current(claim):
+                raise TurnWriteConflictError(
+                    f"Workflow interaction fence is stale: {turn.id}"
+                )
             now = utc_now()
             items = ItemRepository(connection)
             item = Item(
@@ -770,6 +1165,8 @@ class WorkflowService:
                 "id": interaction_id,
                 "itemId": item.id,
                 "request": clean_request,
+                "workerId": claim.worker_id,
+                "turnEpoch": claim.turn_epoch,
             }
             waiting = replace(
                 run,
@@ -777,11 +1174,10 @@ class WorkflowService:
                 checkpoint=checkpoint,
                 updated_at=now,
             )
-            runs.update(waiting)
-            turns = TurnRepository(connection)
-            turn = turns.get(run.turn_id)
-            if turn is None:
-                raise ConflictError("workflow turn is missing")
+            if not runs.update_if_current(waiting, expected=run):
+                raise WorkflowInteractionError(
+                    "workflow changed before interaction could be persisted"
+                )
             waiting_turn = replace(turn, status=TurnStatus.WAITING_APPROVAL)
             turns.update(waiting_turn)
             threads = ThreadRepository(connection)
@@ -822,15 +1218,98 @@ class WorkflowService:
                 )
             )
         with self._interaction_lock:
-            self._interactions[run_id] = _InteractionWaiter(loop, future)
+            self._interactions[run_id] = _InteractionWaiter(
+                interaction_id,
+                loop,
+                future,
+            )
         self._publish(events)
         try:
-            return await future
+            return await self._await_durable_interaction_response(
+                run_id,
+                interaction_id,
+                claim,
+                future,
+            )
         finally:
             with self._interaction_lock:
                 current = self._interactions.get(run_id)
                 if current is not None and current.future is future:
                     self._interactions.pop(run_id, None)
+
+    async def _await_durable_interaction_response(
+        self,
+        run_id: str,
+        interaction_id: str,
+        claim: ResourceClaim,
+        local_wake: asyncio.Future[None],
+    ) -> JsonObject:
+        """Wait indefinitely while reconciling the response from shared SQLite."""
+
+        while True:
+            with self.database.read() as connection:
+                run = WorkflowRepository(connection).get(run_id)
+                if run is None:
+                    raise WorkflowNotFoundError(f"workflow not found: {run_id}")
+                turn = TurnRepository(connection).get(run.turn_id)
+                if turn is None:
+                    raise ConflictError("workflow turn is missing")
+                last_interaction = run.checkpoint.get("lastInteraction")
+                if (
+                    isinstance(last_interaction, dict)
+                    and last_interaction.get("id") == interaction_id
+                ):
+                    if not _interaction_matches_claim(last_interaction, claim):
+                        raise TurnWriteConflictError(
+                            f"Workflow interaction response fence is stale: {turn.id}"
+                        )
+                    response = last_interaction.get("response")
+                    if not isinstance(response, dict):
+                        raise WorkflowInteractionError(
+                            "workflow interaction response is invalid"
+                        )
+                    return _bounded_json(response, "response")
+
+                if (
+                    turn.cancel_requested_at is not None
+                    or run.status is WorkflowStatus.CANCELLED
+                ):
+                    raise asyncio.CancelledError
+                if run.status.is_terminal or turn.status.is_terminal:
+                    raise WorkflowInteractionError(
+                        "workflow interaction ended without a response",
+                        details={
+                            "reason": "terminal",
+                            "interactionId": interaction_id,
+                        },
+                    )
+                interaction = run.checkpoint.get("interaction")
+                if (
+                    not isinstance(interaction, dict)
+                    or interaction.get("id") != interaction_id
+                ):
+                    raise WorkflowInteractionError(
+                        "workflow interaction was superseded",
+                        details={
+                            "reason": "stale",
+                            "interactionId": interaction_id,
+                        },
+                    )
+                if (
+                    run.status is not WorkflowStatus.WAITING
+                    or turn.status is not TurnStatus.WAITING_APPROVAL
+                    or not _interaction_matches_claim(interaction, claim)
+                    or not RuntimeCoordinationRepository(connection).claim_is_current(
+                        claim
+                    )
+                ):
+                    raise TurnWriteConflictError(
+                        f"Workflow interaction fence is stale: {turn.id}"
+                    )
+            await asyncio.wait(
+                (local_wake,),
+                timeout=self.interaction_poll_seconds,
+            )
 
     def _finish(
         self,
@@ -843,22 +1322,87 @@ class WorkflowService:
         checkpoint_patch: JsonObject | None = None,
         turn_status: TurnStatus | None = None,
         turn_stop_reason: str | None = None,
+        claim: ResourceClaim | None = None,
     ) -> WorkflowRun:
         if not status.is_terminal:
             raise ValueError("finish requires a terminal workflow status")
         current = self.read(run_id).run
         if current.status.is_terminal:
+            if claim is not None:
+                coordinator = self._require_execution_coordinator()
+                with self.database.read() as connection:
+                    if RuntimeCoordinationRepository(connection).claim_is_current(
+                        claim
+                    ):
+                        raise TurnWriteConflictError(
+                            f"terminal Workflow still holds its execution fence: "
+                            f"{current.turn_id}"
+                        )
+                coordinator.confirm_released(claim)
             return current
         artifacts = self._prepare_artifacts(current, outcome)
         events: list[DomainEvent] = []
+        released_claim = False
+        coordinator = self._execution_coordinator
         with self.database.transaction() as connection:
             runs = WorkflowRepository(connection)
             run = runs.get(run_id)
             if run is None:
                 raise WorkflowNotFoundError(f"workflow not found: {run_id}")
             if run.status.is_terminal:
+                if claim is not None:
+                    coordination = RuntimeCoordinationRepository(connection)
+                    if coordination.claim_is_current(claim):
+                        raise TurnWriteConflictError(
+                            f"terminal Workflow still holds its execution fence: "
+                            f"{run.turn_id}"
+                        )
+                    if coordinator is None:
+                        raise RuntimeError(
+                            "cannot confirm a claim without an execution coordinator"
+                        )
+                    coordinator.confirm_released(claim)
                 return run
             now = utc_now()
+            turns = TurnRepository(connection)
+            turn = turns.get(run.turn_id)
+            if turn is None:
+                raise ConflictError("workflow turn is missing")
+            if turn.executor is not TurnExecutor.WORKFLOW:
+                raise TurnWriteConflictError(
+                    f"Turn is not owned by the Workflow executor: {turn.id}"
+                )
+            if claim is not None:
+                if claim.turn_id != turn.id:
+                    raise TurnWriteConflictError(
+                        f"claim does not belong to Workflow Turn: {turn.id}"
+                    )
+                if coordinator is None:
+                    raise RuntimeError(
+                        "cannot release a claim without an execution coordinator"
+                    )
+                release_at = max(
+                    now,
+                    *(lease.heartbeat_at for lease in claim.leases),
+                )
+                if not coordinator.release_in_transaction(
+                    connection,
+                    claim,
+                    reason=turn_stop_reason or status.value,
+                    released_at=release_at,
+                ):
+                    raise TurnWriteConflictError(
+                        f"Workflow execution fence is stale: {turn.id}"
+                    )
+                released_claim = True
+                now = max(now, release_at)
+                turn = turns.get(run.turn_id)
+                if turn is None:  # pragma: no cover - FK prevents deletion
+                    raise ConflictError("workflow turn is missing")
+            elif turn.execution_owner_id is not None:
+                raise TurnWriteConflictError(
+                    f"owned Workflow Turn requires its execution claim: {turn.id}"
+                )
             checkpoint = dict(run.checkpoint)
             checkpoint.pop("interaction", None)
             if checkpoint_patch:
@@ -882,7 +1426,10 @@ class WorkflowService:
                 if status is WorkflowStatus.FAILED
                 else None,
             )
-            runs.update(terminal)
+            if not runs.update_if_current(terminal, expected=run):
+                raise TurnWriteConflictError(
+                    f"Workflow changed before terminal settlement: {run.id}"
+                )
             items = ItemRepository(connection)
             event_repo = EventRepository(connection)
             for active_item in items.list_active_for_turn(run.turn_id):
@@ -958,10 +1505,6 @@ class WorkflowService:
                 updated_at=now,
             )
             items.add(completion)
-            turns = TurnRepository(connection)
-            turn = turns.get(run.turn_id)
-            if turn is None:
-                raise ConflictError("workflow turn is missing")
             resolved_turn_status = turn_status or (
                 TurnStatus.COMPLETED
                 if status is WorkflowStatus.COMPLETED
@@ -979,6 +1522,7 @@ class WorkflowService:
                 error_message=terminal.error_message
                 if resolved_turn_status is TurnStatus.FAILED
                 else None,
+                home_worker_id=None,
                 completed_at=now,
             )
             turns.update(terminal_turn)
@@ -986,11 +1530,16 @@ class WorkflowService:
             thread = threads.get(run.thread_id)
             if thread is None:
                 raise ThreadNotFoundError(f"thread not found: {run.thread_id}")
+            next_queued = turns.next_queued_for_thread(run.thread_id)
             settled_thread = replace(
                 thread,
-                status=ThreadStatus.FAILED
-                if status is WorkflowStatus.FAILED
-                else ThreadStatus.IDLE,
+                status=(
+                    ThreadStatus.RUNNING
+                    if next_queued is not None
+                    else ThreadStatus.FAILED
+                    if status is WorkflowStatus.FAILED
+                    else ThreadStatus.IDLE
+                ),
                 updated_at=now,
             )
             threads.update(settled_thread)
@@ -1022,6 +1571,12 @@ class WorkflowService:
                     ),
                 )
             )
+        if released_claim:
+            assert claim is not None
+            assert coordinator is not None
+            coordinator.confirm_released(claim)
+        elif coordinator is not None:
+            coordinator.offer()
         self._publish(events)
         self._persist_workflow_terminal(terminal, summary)
         return terminal
@@ -1166,6 +1721,11 @@ class WorkflowService:
         for event in events:
             self.broker.publish(event)
 
+    @staticmethod
+    def _wake_interaction_waiter(future: asyncio.Future[None]) -> None:
+        if not future.done():
+            future.set_result(None)
+
 
 def _validate_input(
     kind: str, source_type: str, source: str, options: JsonObject
@@ -1198,6 +1758,19 @@ def _validate_input(
         if not isinstance(value, bool):
             raise InvalidArgumentError(f"workflow option {key} must be boolean")
     return clean_kind, clean_source_type, clean_source, clean_options
+
+
+def _interaction_matches_claim(
+    interaction: dict[str, Any],
+    claim: ResourceClaim,
+) -> bool:
+    turn_epoch = interaction.get("turnEpoch")
+    return bool(
+        interaction.get("workerId") == claim.worker_id
+        and not isinstance(turn_epoch, bool)
+        and isinstance(turn_epoch, int)
+        and turn_epoch == claim.turn_epoch
+    )
 
 
 def _require_object(value: Any, name: str) -> JsonObject:

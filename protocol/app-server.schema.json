@@ -94,6 +94,14 @@
         "interrupted"
       ]
     },
+    "ExecutionPermissionMode": {
+      "type": "string",
+      "enum": [
+        "default",
+        "plan",
+        "full_auto"
+      ]
+    },
     "GoalStatus": {
       "type": "string",
       "enum": [
@@ -119,6 +127,15 @@
       "type": "string",
       "enum": [
         "enabled",
+        "paused",
+        "retired"
+      ]
+    },
+    "AutomationActivationStatus": {
+      "type": "string",
+      "description": "Controls interval scheduling. Manual Automations are always enabled.",
+      "enum": [
+        "enabled",
         "paused"
       ]
     },
@@ -142,6 +159,7 @@
         "queued",
         "running",
         "waiting",
+        "blocked",
         "completed",
         "failed",
         "interrupted",
@@ -503,6 +521,16 @@
           "oneOf": [
             {
               "$ref": "#/$defs/ExecutionProfile"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "executionPermissionMode": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ExecutionPermissionMode"
             },
             {
               "type": "null"
@@ -2344,6 +2372,10 @@
         "name": {
           "type": "string"
         },
+        "currentRevisionId": {
+          "type": "string",
+          "pattern": "^arev_"
+        },
         "prompt": {
           "type": "string"
         },
@@ -2389,6 +2421,7 @@
         "projectId",
         "threadId",
         "name",
+        "currentRevisionId",
         "prompt",
         "status",
         "scheduleKind",
@@ -2411,10 +2444,25 @@
           "type": "string",
           "pattern": "^auto_"
         },
+        "revisionId": {
+          "type": "string",
+          "pattern": "^arev_"
+        },
+        "occurrenceId": {
+          "type": "string",
+          "pattern": "^aocc_"
+        },
         "threadId": {
           "type": "string",
           "minLength": 1,
           "maxLength": 255
+        },
+        "goalId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^goal_"
         },
         "turnId": {
           "type": [
@@ -2462,7 +2510,10 @@
       "required": [
         "id",
         "automationId",
+        "revisionId",
+        "occurrenceId",
         "threadId",
+        "goalId",
         "turnId",
         "trigger",
         "status",
@@ -2501,7 +2552,8 @@
           "maximum": 31622400
         },
         "enabled": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Controls interval scheduling. Manual Automations must omit this field or set it to true."
         }
       },
       "required": [
@@ -2510,6 +2562,25 @@
         "prompt",
         "scheduleKind"
       ]
+    },
+    "AutomationListParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^proj_"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
     },
     "AutomationIdentityParams": {
       "type": "object",
@@ -2524,9 +2595,28 @@
         "automationId"
       ]
     },
+    "AutomationRunParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "automationId": {
+          "type": "string",
+          "pattern": "^auto_"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        }
+      },
+      "required": [
+        "automationId"
+      ]
+    },
     "AutomationUpdateParams": {
       "type": "object",
       "additionalProperties": false,
+      "minProperties": 2,
       "properties": {
         "automationId": {
           "type": "string",
@@ -2543,7 +2633,7 @@
           "maxLength": 16384
         },
         "status": {
-          "$ref": "#/$defs/AutomationStatus"
+          "$ref": "#/$defs/AutomationActivationStatus"
         },
         "scheduleKind": {
           "$ref": "#/$defs/AutomationScheduleKind"
@@ -2570,6 +2660,10 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 500
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
         }
       },
       "required": [
@@ -4204,7 +4298,7 @@
           "$ref": "#/$defs/OptionalProjectParams"
         },
         "automation/list": {
-          "$ref": "#/$defs/OptionalProjectParams"
+          "$ref": "#/$defs/AutomationListParams"
         },
         "automation/create": {
           "$ref": "#/$defs/AutomationCreateParams"
@@ -4216,7 +4310,7 @@
           "$ref": "#/$defs/AutomationIdentityParams"
         },
         "automation/run": {
-          "$ref": "#/$defs/AutomationIdentityParams"
+          "$ref": "#/$defs/AutomationRunParams"
         },
         "automation/runs": {
           "$ref": "#/$defs/AutomationRunsParams"
@@ -4673,14 +4767,26 @@
               "type": "boolean"
             },
             "executionMode": {
-              "const": "while_app_running"
+              "const": "requires_live_runtime"
+            },
+            "hasMore": {
+              "type": "boolean"
+            },
+            "nextOffset": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
             }
           },
           "required": [
             "automations",
             "latestRuns",
             "schedulerActive",
-            "executionMode"
+            "executionMode",
+            "hasMore",
+            "nextOffset"
           ]
         },
         "automation/create": {
@@ -4755,10 +4861,22 @@
               "items": {
                 "$ref": "#/$defs/AutomationRun"
               }
+            },
+            "hasMore": {
+              "type": "boolean"
+            },
+            "nextOffset": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
             }
           },
           "required": [
-            "runs"
+            "runs",
+            "hasMore",
+            "nextOffset"
           ]
         },
         "thread/start": {

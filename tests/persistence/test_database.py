@@ -23,8 +23,11 @@ from core.domain import (
     Thread,
     ThreadMode,
     Turn,
+    TurnExecutor,
     WorkflowRun,
 )
+from core.domain.automation import AutomationOccurrence, AutomationRevision
+from core.domain.common import utc_now
 from core.persistence import (
     ApprovalRepository,
     ArtifactRepository,
@@ -37,8 +40,11 @@ from core.persistence import (
     TurnRepository,
     WorkflowRepository,
 )
+from core.persistence.automation_repository import (
+    AutomationOccurrenceRepository,
+    AutomationRevisionRepository,
+)
 from core.persistence.migrations import LATEST_SCHEMA_VERSION, current_version, migrate
-from core.domain.common import utc_now
 
 
 def test_database_enables_wal_foreign_keys_and_migrations(tmp_path: Path) -> None:
@@ -136,6 +142,7 @@ def test_repositories_round_trip_every_p1_entity(tmp_path: Path) -> None:
         thread_id=thread.id,
         ordinal=1,
         prompt="Build P1",
+        executor=TurnExecutor.WORKFLOW,
         execution_profile=ExecutionProfile(
             connection_id="router-test",
             provider_name="openrouter",
@@ -213,17 +220,34 @@ def test_automation_repositories_round_trip_and_find_due_jobs(
         mode=ThreadMode.GOAL,
         workspace_path=str(tmp_path),
     )
+    automation_id = "auto_repository_review"
+    revision = AutomationRevision(
+        automation_id=automation_id,
+        ordinal=1,
+        instruction="Review the repository and fix regressions",
+    )
     automation = Automation(
+        id=automation_id,
         project_id=project.id,
         thread_id=thread.id,
         name="Repository review",
-        prompt="Review the repository and fix regressions",
+        current_revision_id=revision.id,
+        prompt=revision.instruction,
         schedule_kind=AutomationScheduleKind.INTERVAL,
         interval_seconds=3600,
         next_run_at=now,
     )
+    occurrence = AutomationOccurrence(
+        automation_id=automation.id,
+        kind=AutomationTrigger.SCHEDULED,
+        occurrence_key=f"scheduled:{now.isoformat()}",
+        nominal_at=now,
+        observed_at=now,
+    )
     run = AutomationRun(
         automation_id=automation.id,
+        revision_id=revision.id,
+        occurrence_id=occurrence.id,
         thread_id=thread.id,
         trigger=AutomationTrigger.SCHEDULED,
         status=AutomationRunStatus.QUEUED,
@@ -233,7 +257,9 @@ def test_automation_repositories_round_trip_and_find_due_jobs(
     with database.transaction() as connection:
         ProjectRepository(connection).add(project)
         ThreadRepository(connection).add(thread)
+        AutomationRevisionRepository(connection).add(revision)
         AutomationRepository(connection).add(automation)
+        AutomationOccurrenceRepository(connection).add(occurrence)
         AutomationRunRepository(connection).add(run)
 
     with database.read() as connection:
@@ -259,11 +285,19 @@ def test_due_automation_is_claimed_once_across_connections(
         mode=ThreadMode.GOAL,
         workspace_path=str(tmp_path),
     )
+    automation_id = "auto_claim_once"
+    revision = AutomationRevision(
+        automation_id=automation_id,
+        ordinal=1,
+        instruction="Run exactly once",
+    )
     automation = Automation(
+        id=automation_id,
         project_id=project.id,
         thread_id=thread.id,
         name="Claim once",
-        prompt="Run exactly once",
+        current_revision_id=revision.id,
+        prompt=revision.instruction,
         schedule_kind=AutomationScheduleKind.INTERVAL,
         interval_seconds=60,
         next_run_at=now,
@@ -277,6 +311,7 @@ def test_due_automation_is_claimed_once_across_connections(
     with database.transaction() as connection:
         ProjectRepository(connection).add(project)
         ThreadRepository(connection).add(thread)
+        AutomationRevisionRepository(connection).add(revision)
         AutomationRepository(connection).add(automation)
 
     def claim(_index: int) -> bool:

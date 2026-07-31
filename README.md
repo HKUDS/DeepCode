@@ -615,17 +615,30 @@ next Turn started by this command. A Goal that reached its token limit requires
 a larger `--token-budget`; a completed Goal is reported without starting or
 rewriting work.
 
-Run a bounded scheduled job:
+After the current repository has been opened and trusted in DeepCode, create a
+durable Automation:
 
 ```bash
-deepcode schedule loop "Repair the failing test suite" \
-  --test-cmd "python -m pytest -q" \
-  --every 3600 \
-  --max-runs 5
+deepcode automation create "Repository caretaker" \
+  --prompt "Repair failing tests and verify the result." \
+  --schedule interval \
+  --interval-seconds 3600
+
+deepcode automation list --limit 100 --offset 0
+deepcode automation run <automation-id>
+deepcode automation runs <automation-id> --limit 100 --offset 0
 ```
 
 Automations submit work through the normal Turn path, so scheduled and manual
-runs retain the same Session, permission, model, and recovery rules.
+runs retain the same Session, permission, model, approval, and recovery rules.
+The immutable instruction revision used by each Run remains auditable after the
+Automation is edited or retired. Interval schedules run while a
+scheduler-enabled Desktop or App Server runtime is active.
+Paused/enabled controls only an interval schedule: manual definitions are
+always enabled, and **Run now** remains available while an interval is paused.
+Definition and Run-history queries are explicitly paged. JSON responses expose
+`hasMore` and `nextOffset`; human-readable output prints the next offset
+whenever additional results exist.
 
 ## Paper2Code
 
@@ -791,6 +804,7 @@ in [`desktop/README.md`](desktop/README.md) and the
 | Durable Paper2Code workflow                   | [P5 Paper2Code](docs/P5_PAPER2CODE_ARCHITECTURE.md)           |
 | Canonical Sessions and cross-directory resume | [P6 Session alignment](docs/P6_SESSION_ALIGNMENT_REVIEW.md)   |
 | Skills identity, security, and persistence    | [Skills architecture](docs/SKILLS_PRODUCT_ARCHITECTURE.md)    |
+| Automation scheduling and execution           | [Automation architecture](docs/AUTOMATION_ARCHITECTURE.md)    |
 | Desktop product and interaction model         | [Desktop UI specification](docs/DESKTOP_PRODUCT_UI_SPEC.md)   |
 | Privacy and diagnostics                       | [Privacy contract](docs/PRIVACY_AND_DIAGNOSTICS.md)           |
 

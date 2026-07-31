@@ -30,7 +30,10 @@ def _delete(args: argparse.Namespace) -> int:
             print("Deletion cancelled.")
         return 2
 
-    application = DeepCodeApplication.open()
+    application = DeepCodeApplication.open(
+        host_surface="session_cli",
+        run_automation_scheduler=False,
+    )
     try:
         result = application.deletions.delete(args.session_id)
     except ApplicationError as exc:

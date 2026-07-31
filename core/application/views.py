@@ -193,6 +193,7 @@ def automation_view(automation: Automation) -> dict[str, Any]:
         "projectId": automation.project_id,
         "threadId": automation.thread_id,
         "name": automation.name,
+        "currentRevisionId": automation.current_revision_id,
         "prompt": automation.prompt,
         "status": automation.status.value,
         "scheduleKind": automation.schedule_kind.value,
@@ -208,7 +209,10 @@ def automation_run_view(run: AutomationRun) -> dict[str, Any]:
     return {
         "id": run.id,
         "automationId": run.automation_id,
+        "revisionId": run.revision_id,
+        "occurrenceId": run.occurrence_id,
         "threadId": run.thread_id,
+        "goalId": run.goal_id,
         "turnId": run.turn_id,
         "trigger": run.trigger.value,
         "status": run.status.value,
@@ -306,6 +310,11 @@ def turn_view(turn: Turn) -> dict[str, Any]:
         "executionProfile": (
             turn.execution_profile.to_dict()
             if turn.execution_profile is not None
+            else None
+        ),
+        "executionPermissionMode": (
+            turn.execution_permission_mode.value
+            if turn.execution_permission_mode is not None
             else None
         ),
         "goalId": turn.goal_id,

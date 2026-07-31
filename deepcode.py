@@ -143,6 +143,10 @@ def main():
             from cli.schedule_cli import main as schedule_main
 
             raise SystemExit(schedule_main(sys.argv[2:]))
+        elif sys.argv[1] in {"automation", "automations"}:
+            from cli.automation_cli import run as automation_run
+
+            raise SystemExit(automation_run(sys.argv[2:]))
         elif sys.argv[1] in ["--help", "-h", "help"]:
             print_banner()
 
@@ -189,6 +193,10 @@ def main():
                         row(
                             "deepcode schedule ...",
                             "Run loop or memory maintenance on a schedule",
+                        ),
+                        row(
+                            "deepcode automation <command>",
+                            "Manage durable Agent Automations",
                         ),
                         "",
                         "   More agent entry points:",

@@ -72,6 +72,7 @@ function startResult(started: Turn) {
 function bridgeError(
   code: string,
   actualTurnId: string | null,
+  state?: "starting" | "open" | "closing" | "closed",
 ): BridgeError {
   return {
     code,
@@ -81,7 +82,7 @@ function bridgeError(
       code,
       retryable: true,
       correlationId: "test",
-      details: { actualTurnId },
+      details: { actualTurnId, ...(state ? { state } : {}) },
     },
   };
 }
@@ -249,6 +250,81 @@ describe("sendInteractiveTurn", () => {
     expect(calls.map((call) => call.method)).toEqual([
       "turn/start",
       "turn/steer",
+    ]);
+  });
+
+  it("durably queues input when the reported Turn crosses its final boundary", async () => {
+    const calls: RecordedCall[] = [];
+    const queued = turn("turn-queued", "queued", 3);
+    const runtime = scriptedRuntime(
+      [
+        {
+          method: "turn/start",
+          error: bridgeError("TURN_ALREADY_ACTIVE", "turn-closing"),
+        },
+        {
+          method: "turn/steer",
+          error: bridgeError(
+            "TURN_NOT_STEERABLE",
+            "turn-closing",
+            "closed",
+          ),
+        },
+        { method: "turn/enqueue", result: startResult(queued) },
+      ],
+      calls,
+    );
+
+    const result = await sendInteractiveTurn(runtime, {
+      threadId: "thread-1",
+      prompt: "preserve this instruction",
+      cachedActiveTurnId: null,
+      skillIds: ["skill-1"],
+      messageId: "message-1",
+    });
+
+    expect(result.delivery).toBe("queued");
+    expect(calls.map((call) => call.method)).toEqual([
+      "turn/start",
+      "turn/steer",
+      "turn/enqueue",
+    ]);
+    expect(calls[2]?.params).toMatchObject({
+      messageId: "message-1",
+      skills: ["skill-1"],
+    });
+  });
+
+  it("queues once when a continuation ends before the corrective steer", async () => {
+    const calls: RecordedCall[] = [];
+    const queued = turn("turn-queued", "queued", 4);
+    const runtime = scriptedRuntime(
+      [
+        {
+          method: "turn/start",
+          error: bridgeError("TURN_ALREADY_ACTIVE", "turn-continuation"),
+        },
+        {
+          method: "turn/steer",
+          error: bridgeError("NO_ACTIVE_TURN", null),
+        },
+        { method: "turn/enqueue", result: startResult(queued) },
+      ],
+      calls,
+    );
+
+    const result = await sendInteractiveTurn(runtime, {
+      threadId: "thread-1",
+      prompt: "keep this next",
+      cachedActiveTurnId: null,
+      messageId: "message-1",
+    });
+
+    expect(result.delivery).toBe("queued");
+    expect(calls.map((call) => call.method)).toEqual([
+      "turn/start",
+      "turn/steer",
+      "turn/enqueue",
     ]);
   });
 

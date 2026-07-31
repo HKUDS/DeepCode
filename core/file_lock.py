@@ -7,21 +7,21 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Self
+
+from core.platform_file_lock import acquire_file_lock, release_file_lock
 
 
 class FileLease:
     """Hold a cross-process advisory lock until :meth:`close` is called.
 
-    POSIX supports shared leases, which lets multiple readers keep a Session
-    open while a permanent deletion requests an exclusive lease.  ``msvcrt``
-    has no shared byte-range lock, so Windows deliberately serialises those
-    uncommon lifetime leases; correctness is more important than parallel
-    Session ownership on that platform.
+    Shared leases let multiple readers keep a Session open while a permanent
+    deletion requests an exclusive lease.  Both POSIX and Windows preserve
+    those semantics.
     """
 
-    def __init__(self, descriptor: int, *, windows: bool) -> None:
+    def __init__(self, descriptor: int) -> None:
         self._descriptor = descriptor
-        self._windows = windows
         self._closed = False
         self._lock = threading.Lock()
 
@@ -32,7 +32,7 @@ class FileLease:
         *,
         shared: bool,
         blocking: bool = True,
-    ) -> "FileLease | None":
+    ) -> FileLease | None:
         path.parent.mkdir(parents=True, exist_ok=True)
         descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
         try:
@@ -40,33 +40,15 @@ class FileLease:
                 os.chmod(path, 0o600)
             except OSError:
                 pass
-            if os.name == "nt":
-                import msvcrt
-
-                if os.path.getsize(path) == 0:
-                    os.write(descriptor, b"\0")
-                os.lseek(descriptor, 0, os.SEEK_SET)
-                mode = msvcrt.LK_LOCK if blocking else msvcrt.LK_NBLCK
-                try:
-                    msvcrt.locking(descriptor, mode, 1)
-                except OSError:
-                    if not blocking:
-                        os.close(descriptor)
-                        return None
-                    raise
-                return cls(descriptor, windows=True)
-
-            import fcntl
-
-            operation = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
-            if not blocking:
-                operation |= fcntl.LOCK_NB
-            try:
-                fcntl.flock(descriptor, operation)
-            except BlockingIOError:
+            acquired = acquire_file_lock(
+                descriptor,
+                shared=shared,
+                blocking=blocking,
+            )
+            if not acquired:
                 os.close(descriptor)
                 return None
-            return cls(descriptor, windows=False)
+            return cls(descriptor)
         except BaseException:
             try:
                 os.close(descriptor)
@@ -80,19 +62,11 @@ class FileLease:
                 return
             self._closed = True
             try:
-                if self._windows:
-                    import msvcrt
-
-                    os.lseek(self._descriptor, 0, os.SEEK_SET)
-                    msvcrt.locking(self._descriptor, msvcrt.LK_UNLCK, 1)
-                else:
-                    import fcntl
-
-                    fcntl.flock(self._descriptor, fcntl.LOCK_UN)
+                release_file_lock(self._descriptor)
             finally:
                 os.close(self._descriptor)
 
-    def __enter__(self) -> "FileLease":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *_exc_info) -> None:
@@ -110,26 +84,11 @@ def exclusive_file_lock(path: Path) -> Iterator[None]:
             os.chmod(path, 0o600)
         except OSError:
             pass
-        if os.name == "nt":
-            import msvcrt
-
-            if os.path.getsize(path) == 0:
-                os.write(descriptor, b"\0")
-            os.lseek(descriptor, 0, os.SEEK_SET)
-            msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)
-            try:
-                yield
-            finally:
-                os.lseek(descriptor, 0, os.SEEK_SET)
-                msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
-        else:
-            import fcntl
-
-            fcntl.flock(descriptor, fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(descriptor, fcntl.LOCK_UN)
+        acquire_file_lock(descriptor, shared=False)
+        try:
+            yield
+        finally:
+            release_file_lock(descriptor)
     finally:
         os.close(descriptor)
 
