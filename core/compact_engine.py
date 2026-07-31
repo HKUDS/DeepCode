@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-CompactEngine v3.0 — 完全对齐 Claude Code 内核压缩管线
+CompactEngine v3.0 — 内核压缩管线
 =======================================================
 补齐全部关键差距:
   ✅ #2 工具链完整性 — 保护 tool_call/result 配对，白名单压缩
@@ -93,13 +93,13 @@ COMPACT_LEVELS = {
 
 DEFAULT_CONTEXT_WINDOW = 32000
 MODEL_OUTPUT_RESERVE = 8192            # 模型输出预留
-MAX_CONSECUTIVE_FAILURES = 3            # 连续失败上限 (Claude Code: 3)
+MAX_CONSECUTIVE_FAILURES = 3            # 连续失败上限 (3)
 MAX_COMPACT_PER_SESSION = 30            # 单会话上限
 MAX_COMPACT_BUDGET_RATIO = 0.25         # 摘要消耗 <= 释放的 25%
 LARGE_TOOL_THRESHOLD_CHARS = 2000
 MAX_SUMMARY_LENGTH = 800
 
-# Claude Code 对齐: 只压缩这些工具类型的结果
+# 只压缩这些工具类型的结果
 COMPACTABLE_TOOLS = {
     "read", "Read", "mcp__filesystem__read_file", "mcp__filesystem__read_text_file",
     "bash", "Bash",
@@ -305,7 +305,7 @@ def _make_summary(content: str, use_llm: bool = False,
 
 class CompactMemory:
     """
-    跨会话记忆存储 — 对齐 Claude Code SessionMemory。
+    跨会话记忆存储 — 对齐 SessionMemory 设计。
     在 deep 压缩时提取关键事实到 ~/.deepcode/compact_memory.json。
     """
 
@@ -388,7 +388,7 @@ class CompactMemory:
 
 class CompactEngine:
     """
-    Claude Code 对齐的内部压缩引擎。
+    内部压缩引擎。
 
     三级管线:
       micro   → 白名单工具结果替换 (PostToolUse hook)
@@ -849,7 +849,7 @@ class CompactEngine:
 
     def normalize_messages_for_api(self, messages: List[dict] = None) -> List[dict]:
         """
-        将消息正规化为 API 请求格式 — 对齐 Claude Code normalizeMessagesForAPI。
+        将消息正规化为 API 请求格式 — 对齐 normalizeMessagesForAPI。
         1. 过滤 compacted:true 消息
         2. 保留工具链完整性
         3. 格式化 content 为 API 兼容格式

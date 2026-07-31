@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-MCP Connection Manager v1.0 — Claude Code 风格 MCP 连接运行时管理
+MCP Connection Manager v1.0 — MCP 连接运行时管理
 ==================================================================
-参考: Claude Code v2.1.88 MCPConnectionManager.tsx / useManageMCPConnections.ts
+参考: MCPConnectionManager 设计
 
 核心设计:
   - 运行时连接状态监控 (health check 每30秒)
@@ -65,7 +65,7 @@ class MCPServerState:
 class MCPConnectionManager:
     """
     MCP 连接运行时管理器
-    模拟 Claude Code 的 MCPConnectionManager + useManageMCPConnections
+    实现 MCPConnectionManager 的运行时管理逻辑
     """
 
     def __init__(self, config_path: str = None):

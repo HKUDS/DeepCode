@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-AutoCompact Engine v1.0 — Claude Code 风格自动上下文压缩
+AutoCompact Engine v1.0 — 自动上下文压缩
 =========================================================
-参考: Claude Code v2.1.88 autoCompact.ts / compact.ts
+参考: Deep Code autoCompact 设计
 
 核心设计:
   - 监控会话 token 水位 (通过 JSONL 文件)
   - 水位 >70% → 自动触发 microCompact (单轮压缩)
   - 水位 >85% → 自动触发 compact (对话摘要)
   - 水位 >95% → 自动触发 sessionMemoryCompact (提取记忆+深度压缩)
-  - 多级压缩策略仿照 Claude Code:
+  - 多级压缩策略:
     microCompact → compactConversation → sessionMemoryCompact
 
 用法:
@@ -54,7 +54,7 @@ class AutoCompactEngine:
     """
     自动上下文压缩引擎
 
-    模拟 Claude Code 的 autoCompact → compactConversation → sessionMemoryCompact 调用链
+    实现 autoCompact → compactConversation → sessionMemoryCompact 调用链
     """
 
     def __init__(
@@ -83,7 +83,6 @@ class AutoCompactEngine:
         home = os.environ.get("HOME", os.environ.get("USERPROFILE", ""))
         candidates = [
             os.path.join(home, ".deepcode", "sessions"),
-            os.path.join(home, ".claude", "sessions"),
             os.path.join(home, "AppData", "Local", "deepcode", "sessions"),
         ]
         for d in candidates:
@@ -195,7 +194,7 @@ class AutoCompactEngine:
 
     def get_effective_window(self, model_output_tokens: int = 20000) -> int:
         """
-        获取有效上下文窗口 (模拟 Claude Code 的 getEffectiveContextWindowSize)
+        获取有效上下文窗口 (实现 getEffectiveContextWindowSize)
 
         参数:
           model_output_tokens: 预留给模型输出的 token 数
