@@ -119,11 +119,11 @@ Skills, permissions, Goals, and Automations. See the
 
 ---
 
-## Table of contents
+## 📑 Table of Contents
 
-- [News](#news)
-- [What Deep means in DeepCode](#what-deep-means-in-deepcode)
-- [Core capabilities](#core-capabilities)
+- [📰 News](#news)
+- [🧠 What Deep means in DeepCode](#what-deep-means-in-deepcode)
+- [🚀 Core capabilities](#core-capabilities)
   - [Agent Harness](#agent-harness)
   - [Loop Engineering](#loop-engineering)
   - [Context Engineering](#context-engineering)
@@ -131,14 +131,16 @@ Skills, permissions, Goals, and Automations. See the
   - [Durable local work](#durable-local-work)
   - [Models and Skills under your control](#models-and-skills-under-your-control)
   - [Parallel and repeatable work](#parallel-and-repeatable-work)
-- [Quick start](#quick-start)
-- [Using DeepCode](#using-deepcode)
-- [Paper2Code](#paper2code)
+- [⚡ Quick start](#quick-start)
+- [🧭 Using DeepCode](#using-deepcode)
+- [🔬 Paper2Code](#paper2code)
   - [The original architecture](#the-original-architecture)
   - [Research results](#research-results)
-- [Development](#development)
-- [Community and research](#community-and-research)
-- [License](#license)
+- [🎬 Live demonstrations](#live-demonstrations)
+- [🛠️ Development](#development)
+- [⭐ Star History](#star-history)
+- [📖 Citation](#citation)
+- [📄 License](#license)
 
 <p align="center">
   <img src="assets/readme/deepcode-overview.png" alt="A verified task completed with DeepCode" width="1080" />
@@ -777,6 +779,27 @@ The original DeepCode study evaluates scientific code reproduction on
 [PaperBench](https://openai.com/index/paperbench/), which asks agents to
 reproduce 20 ICML 2024 papers across 8,316 gradable components.
 
+<table align="center" width="100%">
+<tr>
+<td width="25%" align="center">
+  <strong>75.9%</strong><br/>
+  <sub>Human expert subset<br/>+3.5 points</sub>
+</td>
+<td width="25%" align="center">
+  <strong>84.8%</strong><br/>
+  <sub>Commercial-agent subset<br/>+26.1 points</sub>
+</td>
+<td width="25%" align="center">
+  <strong>73.5%</strong><br/>
+  <sub>Scientific coding<br/>+22.4 points</sub>
+</td>
+<td width="25%" align="center">
+  <strong>73.5%</strong><br/>
+  <sub>LLM-agent baseline<br/>+30.2 points</sub>
+</td>
+</tr>
+</table>
+
 <p align="center">
   <img src="assets/result_main02.jpg" alt="DeepCode PaperBench results" width="920" />
 </p>
@@ -795,11 +818,65 @@ updated products.
 Read the [paper](https://arxiv.org/abs/2512.07921) for methodology, evaluation
 scope, models, and baseline details.
 
-Legacy demonstrations remain available as historical examples:
+<a id="live-demonstrations"></a>
 
-- [Paper2Code demonstration](https://www.youtube.com/watch?v=MQZYpLkzsbw)
-- [Frontend implementation demonstration](https://www.youtube.com/watch?v=78wx3dkTaAU)
-- [Project introduction](https://youtu.be/PRgmP8pOI08)
+## 🎬 Live Demonstrations
+
+These recordings show projects produced by earlier DeepCode workflows. They
+are output demonstrations rather than screenshots of the current Desktop UI.
+
+<table align="center" width="100%">
+<tr>
+<td width="33%" align="center">
+
+#### 📄 Paper2Code
+
+**Research to implementation**
+
+<a href="https://www.youtube.com/watch?v=MQZYpLkzsbw">
+  <img src="https://img.youtube.com/vi/MQZYpLkzsbw/maxresdefault.jpg" alt="Paper2Code demonstration" width="100%" />
+</a>
+
+**[▶ Watch demonstration](https://www.youtube.com/watch?v=MQZYpLkzsbw)**
+
+<sub>Reproduce a research paper as an executable project.</sub>
+
+</td>
+<td width="33%" align="center">
+
+#### 🖼️ Generated vision project
+
+**Image workflow example**
+
+<a href="https://www.youtube.com/watch?v=nFt5mLaMEac">
+  <img src="https://img.youtube.com/vi/nFt5mLaMEac/maxresdefault.jpg" alt="Generated image-processing project" width="100%" />
+</a>
+
+**[▶ Watch demonstration](https://www.youtube.com/watch?v=nFt5mLaMEac)**
+
+<sub>See an earlier generated image-processing workflow in use.</sub>
+
+</td>
+<td width="33%" align="center">
+
+#### 🌐 Generated web project
+
+**Frontend implementation example**
+
+<a href="https://www.youtube.com/watch?v=78wx3dkTaAU">
+  <img src="https://img.youtube.com/vi/78wx3dkTaAU/maxresdefault.jpg" alt="Generated frontend project" width="100%" />
+</a>
+
+**[▶ Watch demonstration](https://www.youtube.com/watch?v=78wx3dkTaAU)**
+
+<sub>Follow a complete frontend implementation from idea to result.</sub>
+
+</td>
+</tr>
+</table>
+
+The [project introduction](https://youtu.be/PRgmP8pOI08) remains available for
+a broader walkthrough.
 
 ## Development
 
@@ -821,7 +898,9 @@ On Windows, activate with `.venv\Scripts\activate`.
 
 ```bash
 uvx pre-commit run --all-files
-PYTHONPATH=. pytest -q
+python -m compileall -q app_server cli core tools workflows
+deepcode --version
+deepcode-app-server --verify-runtime
 
 cd desktop
 npm run lint
@@ -855,17 +934,45 @@ The pre-restructure README is preserved in
 The empty product-image slots have a shared
 [capture brief](assets/readme/README.md).
 
-## Community and research
+---
 
-<p align="center">
+<a id="star-history"></a>
+
+## ⭐ Star History
+
+<div align="center">
+
+*Community growth trajectory*
+
   <a href="https://star-history.com/#HKUDS/DeepCode&Date">
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=HKUDS/DeepCode&type=Date&theme=dark" />
       <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=HKUDS/DeepCode&type=Date" />
-      <img src="https://api.star-history.com/svg?repos=HKUDS/DeepCode&type=Date" alt="DeepCode star history" width="720" />
+      <img src="https://api.star-history.com/svg?repos=HKUDS/DeepCode&type=Date" alt="DeepCode Star History chart" width="900" />
     </picture>
   </a>
+
+</div>
+
+---
+
+### 🚀 Ready to build with DeepCode?
+
+<div align="center">
+
+<p>
+  <a href="#quick-start"><img src="https://img.shields.io/badge/🚀_Get_Started-00d4ff?style=for-the-badge&logo=rocket&logoColor=white" alt="Get started" /></a>
+  <a href="https://github.com/HKUDS/DeepCode"><img src="https://img.shields.io/badge/🏛️_View_on_GitHub-00d4ff?style=for-the-badge&logo=github&logoColor=white" alt="View DeepCode on GitHub" /></a>
+  <a href="https://github.com/HKUDS/DeepCode/stargazers"><img src="https://img.shields.io/badge/⭐_Star_Project-00d4ff?style=for-the-badge&logo=star&logoColor=white" alt="Star DeepCode" /></a>
 </p>
+
+</div>
+
+---
+
+<a id="citation"></a>
+
+## 📖 Citation
 
 If DeepCode contributes to your research, cite:
 
@@ -881,6 +988,17 @@ If DeepCode contributes to your research, cite:
 }
 ```
 
-## License
+---
 
-DeepCode is available under the [MIT License](LICENSE).
+<a id="license"></a>
+
+## 📄 License
+
+<div align="center">
+
+<a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-4ecdc4?style=for-the-badge&logo=opensourceinitiative&logoColor=white" alt="MIT License" /></a>
+
+DeepCode is available under the [MIT License](LICENSE).<br/>
+Copyright © 2025 Data Intelligence Lab at The University of Hong Kong.
+
+</div>

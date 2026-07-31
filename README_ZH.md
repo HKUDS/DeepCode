@@ -118,11 +118,11 @@ Automations。从源码启动请参考
 
 ---
 
-## 目录
+## 📑 目录
 
-- [新闻](#新闻)
-- [DeepCode 中的 Deep](#deepcode-中的-deep)
-- [核心能力](#核心能力)
+- [📰 新闻](#新闻)
+- [🧠 DeepCode 中的 Deep](#deepcode-中的-deep)
+- [🚀 核心能力](#核心能力)
   - [Agent Harness](#agent-harness)
   - [Loop Engineering](#loop-engineering)
   - [Context Engineering](#context-engineering)
@@ -130,14 +130,16 @@ Automations。从源码启动请参考
   - [持久化本地工作](#持久化本地工作)
   - [由用户控制的模型与 Skills](#由用户控制的模型与-skills)
   - [并行且可重复的工作](#并行且可重复的工作)
-- [快速开始](#快速开始)
-- [使用 DeepCode](#使用-deepcode)
-- [Paper2Code](#paper2code)
+- [⚡ 快速开始](#快速开始)
+- [🧭 使用 DeepCode](#使用-deepcode)
+- [🔬 Paper2Code](#paper2code)
   - [原始架构](#原始架构)
   - [研究结果](#研究结果)
-- [开发](#开发)
-- [社区与研究](#社区与研究)
-- [许可证](#许可证)
+- [🎬 实时演示](#live-demonstrations)
+- [🛠️ 开发](#开发)
+- [⭐ 星标历史](#star-history)
+- [📖 引用](#citation)
+- [📄 许可证](#license)
 
 <p align="center">
   <img src="assets/readme/deepcode-overview.png" alt="DeepCode 完成并验证一个真实任务" width="1080" />
@@ -722,6 +724,27 @@ DeepCode 原始研究使用
 [PaperBench](https://openai.com/index/paperbench/) 评估科研代码复现能力。
 该基准要求 Agent 复现 20 篇 ICML 2024 论文，共包含 8,316 个可评分组件。
 
+<table align="center" width="100%">
+<tr>
+<td width="25%" align="center">
+  <strong>75.9%</strong><br/>
+  <sub>人类专家子集<br/>领先 3.5 个百分点</sub>
+</td>
+<td width="25%" align="center">
+  <strong>84.8%</strong><br/>
+  <sub>商业 Agent 子集<br/>领先 26.1 个百分点</sub>
+</td>
+<td width="25%" align="center">
+  <strong>73.5%</strong><br/>
+  <sub>科研编程<br/>领先 22.4 个百分点</sub>
+</td>
+<td width="25%" align="center">
+  <strong>73.5%</strong><br/>
+  <sub>LLM Agent 基线<br/>领先 30.2 个百分点</sub>
+</td>
+</tr>
+</table>
+
 <p align="center">
   <img src="assets/result_main02.jpg" alt="DeepCode PaperBench 结果" width="920" />
 </p>
@@ -739,11 +762,64 @@ DeepCode 原始研究使用
 评估方法、范围、模型和基线详情请阅读
 [论文](https://arxiv.org/abs/2512.07921)。
 
-旧版演示继续作为历史案例保留：
+<a id="live-demonstrations"></a>
 
-- [Paper2Code 演示](https://www.youtube.com/watch?v=MQZYpLkzsbw)
-- [前端实现演示](https://www.youtube.com/watch?v=78wx3dkTaAU)
-- [项目介绍视频](https://youtu.be/PRgmP8pOI08)
+## 🎬 实时演示
+
+下面的录像展示了早期 DeepCode 工作流生成的项目结果。它们是输出案例，
+不是当前 Desktop 界面的截图。
+
+<table align="center" width="100%">
+<tr>
+<td width="33%" align="center">
+
+#### 📄 Paper2Code
+
+**从研究到实现**
+
+<a href="https://www.youtube.com/watch?v=MQZYpLkzsbw">
+  <img src="https://img.youtube.com/vi/MQZYpLkzsbw/maxresdefault.jpg" alt="Paper2Code 演示" width="100%" />
+</a>
+
+**[▶ 观看演示](https://www.youtube.com/watch?v=MQZYpLkzsbw)**
+
+<sub>将研究论文复现为可以执行的工程项目。</sub>
+
+</td>
+<td width="33%" align="center">
+
+#### 🖼️ 生成式视觉项目
+
+**图像工作流案例**
+
+<a href="https://www.youtube.com/watch?v=nFt5mLaMEac">
+  <img src="https://img.youtube.com/vi/nFt5mLaMEac/maxresdefault.jpg" alt="生成的图像处理项目" width="100%" />
+</a>
+
+**[▶ 观看演示](https://www.youtube.com/watch?v=nFt5mLaMEac)**
+
+<sub>查看早期 DeepCode 生成的图像处理工作流。</sub>
+
+</td>
+<td width="33%" align="center">
+
+#### 🌐 生成式 Web 项目
+
+**前端实现案例**
+
+<a href="https://www.youtube.com/watch?v=78wx3dkTaAU">
+  <img src="https://img.youtube.com/vi/78wx3dkTaAU/maxresdefault.jpg" alt="生成的前端项目" width="100%" />
+</a>
+
+**[▶ 观看演示](https://www.youtube.com/watch?v=78wx3dkTaAU)**
+
+<sub>从想法开始，查看完整前端项目的实现结果。</sub>
+
+</td>
+</tr>
+</table>
+
+[项目介绍视频](https://youtu.be/PRgmP8pOI08)继续提供更完整的产品说明。
 
 ## 开发
 
@@ -765,7 +841,9 @@ Windows 请使用 `.venv\Scripts\activate` 激活环境。
 
 ```bash
 uvx pre-commit run --all-files
-PYTHONPATH=. pytest -q
+python -m compileall -q app_server cli core tools workflows
+deepcode --version
+deepcode-app-server --verify-runtime
 
 cd desktop
 npm run lint
@@ -799,17 +877,45 @@ Desktop 打包、Rust 检查、签名和发布流程请参考
 新版产品图片占位使用同一份
 [截图要求](assets/readme/README.md)。
 
-## 社区与研究
+---
 
-<p align="center">
+<a id="star-history"></a>
+
+## ⭐ 星标历史
+
+<div align="center">
+
+*社区增长轨迹*
+
   <a href="https://star-history.com/#HKUDS/DeepCode&Date">
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=HKUDS/DeepCode&type=Date&theme=dark" />
       <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=HKUDS/DeepCode&type=Date" />
-      <img src="https://api.star-history.com/svg?repos=HKUDS/DeepCode&type=Date" alt="DeepCode Star History" width="720" />
+      <img src="https://api.star-history.com/svg?repos=HKUDS/DeepCode&type=Date" alt="DeepCode 星标历史图" width="900" />
     </picture>
   </a>
+
+</div>
+
+---
+
+### 🚀 准备好使用 DeepCode 了吗？
+
+<div align="center">
+
+<p>
+  <a href="#快速开始"><img src="https://img.shields.io/badge/🚀_立即开始-00d4ff?style=for-the-badge&logo=rocket&logoColor=white" alt="立即开始" /></a>
+  <a href="https://github.com/HKUDS/DeepCode"><img src="https://img.shields.io/badge/🏛️_在_GitHub_查看-00d4ff?style=for-the-badge&logo=github&logoColor=white" alt="在 GitHub 查看 DeepCode" /></a>
+  <a href="https://github.com/HKUDS/DeepCode/stargazers"><img src="https://img.shields.io/badge/⭐_Star_项目-00d4ff?style=for-the-badge&logo=star&logoColor=white" alt="Star DeepCode" /></a>
 </p>
+
+</div>
+
+---
+
+<a id="citation"></a>
+
+## 📖 引用
 
 如果 DeepCode 对您的研究有所帮助，请引用：
 
@@ -825,6 +931,17 @@ Desktop 打包、Rust 检查、签名和发布流程请参考
 }
 ```
 
-## 许可证
+---
 
-DeepCode 采用 [MIT License](LICENSE)。
+<a id="license"></a>
+
+## 📄 许可证
+
+<div align="center">
+
+<a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-4ecdc4?style=for-the-badge&logo=opensourceinitiative&logoColor=white" alt="MIT License" /></a>
+
+DeepCode 采用 [MIT License](LICENSE)。<br/>
+版权所有 © 2025 香港大学数据智能实验室。
+
+</div>
