@@ -274,6 +274,7 @@ def test_settings_layering_and_scoped_updates_do_not_copy_project_overrides(
         )
         assert user_result["agents"]["defaults"]["model"] == "openai/project"
         assert user_result["security"] == {
+            "accessPreset": None,
             "permissionMode": "plan",
             "permissions": {},
             "sandbox": False,
@@ -284,6 +285,76 @@ def test_settings_layering_and_scoped_updates_do_not_copy_project_overrides(
         assert user_raw["agents"]["defaults"]["model"] == "openai/user"
         assert "project" not in json.dumps(user_raw)
         assert user_raw["security"] == {"permissionMode": "plan"}
+    finally:
+        application.close()
+
+
+def test_settings_projects_resolved_access_and_unsets_scope_override(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    home.mkdir()
+    workspace.mkdir()
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+    _write_json(
+        home / "deepcode_config.json",
+        {"security": {"accessPreset": "ask"}},
+    )
+    _write_json(
+        workspace / "deepcode_config.json",
+        {"security": {"accessPreset": "read_only"}},
+    )
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    project = application.projects.add(
+        str(workspace),
+        trust_state=TrustState.TRUSTED,
+    )
+    try:
+        effective = application.settings.read(project.id)
+        assert effective["userAccessPreset"] == "ask"
+        assert effective["projectAccessPreset"] == "read_only"
+        assert effective["resolvedDefaultSecuritySource"] == "project"
+        assert (
+            effective["resolvedDefaultSecurityProfile"]["accessPreset"] == "read_only"
+        )
+
+        inherited = application.settings.update(
+            {"security": {"accessPreset": None}},
+            scope="project",
+            project_id=project.id,
+        )
+
+        assert inherited["projectAccessPreset"] is None
+        assert inherited["resolvedDefaultSecuritySource"] == "user"
+        assert inherited["resolvedDefaultSecurityProfile"]["accessPreset"] == "ask"
+        project_raw = json.loads(
+            (workspace / "deepcode_config.json").read_text(encoding="utf-8")
+        )
+        assert "accessPreset" not in project_raw.get("security", {})
+    finally:
+        application.close()
+
+
+def test_settings_projects_environment_legacy_security_without_ui_guessing(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+    monkeypatch.setenv("DEEPCODE_PERMISSION_MODE", "full_auto")
+    monkeypatch.setenv("DEEPCODE_SANDBOX", "false")
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    try:
+        settings = application.settings.read()
+        resolved = settings["resolvedDefaultSecurityProfile"]
+        assert settings["resolvedDefaultSecuritySource"] == "environment"
+        assert resolved["accessPreset"] is None
+        assert resolved["permissionMode"] == "full_auto"
+        assert resolved["commandSandbox"] is False
+        assert resolved["filesystemScope"] == "workspace"
     finally:
         application.close()
 

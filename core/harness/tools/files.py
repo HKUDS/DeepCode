@@ -129,11 +129,18 @@ class ReadTool(Tool):
 class WriteTool(Tool):
     """Create or overwrite a file with the given content."""
 
-    def __init__(self, workspace: str, diagnostics=run_diagnostics):
+    def __init__(
+        self,
+        workspace: str,
+        diagnostics=run_diagnostics,
+        *,
+        allow_outside_workspace: bool = False,
+    ):
         self._workspace = str(workspace)
         # Injected post-write checker (default: the declarative registry).
         # Pass ``lambda _p: []`` to disable; a fake in tests to assert wiring.
         self._diagnostics = diagnostics
+        self._allow_outside_workspace = allow_outside_workspace
 
     @property
     def name(self) -> str:
@@ -141,16 +148,21 @@ class WriteTool(Tool):
 
     @property
     def description(self) -> str:
+        scope = (
+            " Absolute paths outside the workspace are allowed by Full Access."
+            if self._allow_outside_workspace
+            else ""
+        )
         return (
             "Write content to a file, creating parent directories as needed. "
-            "Overwrites an existing file. Use edit for targeted changes."
+            f"Overwrites an existing file. Use edit for targeted changes.{scope}"
         )
 
     async def execute(self, **kwargs: Any) -> Any:
         file_path = kwargs.get("file_path", "")
         content = kwargs.get("content", "")
         target = _resolve(self._workspace, file_path)
-        if not _within(self._workspace, target):
+        if not self._allow_outside_workspace and not _within(self._workspace, target):
             return (
                 f"Error: refusing to write outside the workspace: {file_path}. "
                 "Writes are fenced to the workspace directory."
@@ -192,9 +204,16 @@ class WriteTool(Tool):
 class EditTool(Tool):
     """Replace ``old_string`` with ``new_string`` using fuzzy matching."""
 
-    def __init__(self, workspace: str, diagnostics=run_diagnostics):
+    def __init__(
+        self,
+        workspace: str,
+        diagnostics=run_diagnostics,
+        *,
+        allow_outside_workspace: bool = False,
+    ):
         self._workspace = str(workspace)
         self._diagnostics = diagnostics
+        self._allow_outside_workspace = allow_outside_workspace
 
     @property
     def name(self) -> str:
@@ -202,10 +221,15 @@ class EditTool(Tool):
 
     @property
     def description(self) -> str:
+        scope = (
+            " Absolute paths outside the workspace are allowed by Full Access."
+            if self._allow_outside_workspace
+            else ""
+        )
         return (
             "Edit a file by replacing old_string with new_string. Matching is "
             "resilient to whitespace/indentation drift; provide enough context "
-            "for old_string to be unique, or set replace_all."
+            f"for old_string to be unique, or set replace_all.{scope}"
         )
 
     async def execute(self, **kwargs: Any) -> Any:
@@ -215,7 +239,7 @@ class EditTool(Tool):
         replace_all = bool(kwargs.get("replace_all", False))
 
         target = _resolve(self._workspace, file_path)
-        if not _within(self._workspace, target):
+        if not self._allow_outside_workspace and not _within(self._workspace, target):
             return (
                 f"Error: refusing to edit outside the workspace: {file_path}. "
                 "Edits are fenced to the workspace directory."

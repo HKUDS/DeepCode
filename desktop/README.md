@@ -1,17 +1,14 @@
 # DeepCode Desktop
 
-Tauri 2 desktop execution workbench for DeepCode. The desktop is a client of
-the same Python application layer and Agent kernel used by the CLI; it does not
-contain a second implementation of Agent or Workflow business rules.
+DeepCode Desktop is the Tauri 2 workbench for DeepCode. It opens the same local
+Projects, canonical Sessions, Agent runtime, models, Skills, Goals,
+Automations, permissions, and evidence as the CLI. Desktop is a visual client,
+not a second implementation of Agent behavior.
 
-P3 provides the packaged sidecar, lifecycle supervision and durable execution
-workspace. P4 adds the code workbench: structured Git review and safe discard,
-bounded file editing, owned worktrees, PTY terminal and durable test results.
-P5 adds durable Paper2Code Threads with plan review, checkpoint retry, truthful
-test-gated completion, and bounded Artifact inspection.
-See the [P3 architecture](../docs/P3_DESKTOP_RUNTIME_ARCHITECTURE.md),
-[P4 architecture](../docs/P4_CODE_WORKBENCH_ARCHITECTURE.md), and
-[P5 architecture](../docs/P5_PAPER2CODE_ARCHITECTURE.md).
+The workbench combines conversation history with structured tool progress,
+approvals, Git review, files, terminals, tests, Artifacts, and provider
+settings. Work started in one interface can be resumed in the other without
+converting or copying its Session.
 
 ## Run from source
 
@@ -23,22 +20,39 @@ Prerequisites:
 | Node.js | 22+ | React frontend and build scripts |
 | Rust | stable | Tauri application shell |
 
-Install dependencies once:
+Install the platform toolchain required by
+[Tauri 2](https://v2.tauri.app/start/prerequisites/), then prepare the Python
+runtime and frontend dependencies from the repository root:
 
 ```bash
-cd desktop
-npm ci
+uv venv --python 3.12
+uv pip install -e .
+cd desktop && npm ci && cd ..
 ```
 
-Then start the development application from any directory with the repository
+On macOS or Linux, start the development application with the repository
 launcher:
 
 ```bash
-deepcode-desktop
+./scripts/deepcode-desktop
 ```
 
-Install the launcher command once by linking `scripts/deepcode-desktop` into a
-directory on `PATH`, for example `~/.local/bin`.
+To use `deepcode-desktop` from any working directory, link the launcher into a
+directory on `PATH` once:
+
+```bash
+mkdir -p ~/.local/bin
+ln -sf "$(pwd)/scripts/deepcode-desktop" ~/.local/bin/deepcode-desktop
+```
+
+On Windows, run the same Tauri development command from PowerShell after the
+setup above:
+
+```powershell
+cd desktop
+$env:DEEPCODE_PYTHON = (Resolve-Path ..\.venv\Scripts\python.exe)
+npm run tauri -- dev
+```
 
 Debug builds prefer the repository `.venv`, so normal Python and React edits do
 not require rebuilding the packaged PyInstaller sidecar.
@@ -53,9 +67,9 @@ not require rebuilding the packaged PyInstaller sidecar.
 5. Open a Session and choose the connection/model from the picker below the
    composer.
 
-API keys are written to `~/.deepcode/credentials.json` with user-only
-permissions. Desktop receives only configured/missing status and never reads a
-stored key back.
+API keys are written to `~/.deepcode/credentials.json` in user-private storage.
+Desktop receives only configured/missing status and never reads a stored key
+back.
 
 ### Use models inside a Session
 
@@ -85,6 +99,25 @@ Every accepted Turn stores an immutable, secret-free execution profile. Later
 changes to defaults or credentials cannot silently change queued or historical
 work.
 
+### Trust and tool access
+
+The first time a Project is used for Agent execution, review and trust its
+canonical folder. Trust remembers which workspace DeepCode may execute in; it
+does not grant unrestricted tool access.
+
+The composer access picker controls future Turns in the current Session:
+
+- **Ask** keeps workspace protections and requests approval for sensitive
+  actions.
+- **Read only** allows inspection while denying mutating tools.
+- **Full access** removes approvals and filesystem sandbox boundaries after an
+  explicit warning. Use it only for a workspace you are prepared to expose to
+  unrestricted local execution.
+
+An active or queued Turn keeps the access profile captured when it was
+accepted. Changing the picker applies to later submissions and is immediately
+visible to the CLI because both clients edit the same Session setting.
+
 The Session menu separates **Archive** from **Delete permanently**. Archive
 preserves the canonical transcript. Permanent deletion removes the transcript,
 Goal ledger, and rebuildable application records but never deletes repository
@@ -99,7 +132,7 @@ deepcode provider list
 deepcode provider set personal-openrouter --template openrouter --api-key
 deepcode provider test personal-openrouter
 deepcode provider models personal-openrouter --refresh
-deepcode -c personal-openrouter -m moonshotai/kimi-k3 --effort low
+deepcode -c personal-openrouter -m <model-id> --effort auto
 ```
 
 ### Run a durable Goal
@@ -221,9 +254,3 @@ fails closed until the protected release environment contains every required
 credential. See the
 [release runbook](../docs/DESKTOP_RELEASE_RUNBOOK.md) and
 [privacy/diagnostics contract](../docs/PRIVACY_AND_DIAGNOSTICS.md).
-
-The first visual pass now covers the real empty, populated Session, Inspector,
-Settings, system dark-mode, and narrow-window states. It is deliberately
-isolated to the React/Tauri client: future visual refinement and the temporary
-native application icon can evolve without changing CLI, Agent, or canonical
-Session behavior.

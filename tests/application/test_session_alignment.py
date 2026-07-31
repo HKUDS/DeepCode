@@ -5,10 +5,15 @@ from pathlib import Path
 import pytest
 
 from core.application import DeepCodeApplication
-from core.application.errors import ProjectNotTrustedError
+from core.application.errors import ConflictError, ProjectNotTrustedError
 from core.domain.common import utc_now
+from core.domain.execution_security import (
+    ExecutionAccessPreset,
+    ExecutionSecurityProfile,
+)
 from core.domain.item import Item, ItemKind, ItemStatus
 from core.domain.project import Project
+from core.domain.runtime_coordination import ExecutionClass
 from core.domain.thread import Thread, ThreadMode
 from core.domain.turn import Turn, TurnStatus
 from core.persistence.database import Database
@@ -92,6 +97,122 @@ def test_projection_database_can_be_deleted_and_rebuilt_from_jsonl(
         ]
     finally:
         rebuilt.close()
+
+
+def test_projection_rebuild_restores_the_canonical_turn_security_snapshot(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = SessionStore(tmp_path / "sessions")
+    session = store.create_session(
+        title="secured",
+        metadata={"kind": "tui", "workspace": str(workspace)},
+    )
+    profile = ExecutionSecurityProfile.for_preset(ExecutionAccessPreset.FULL_ACCESS)
+    metadata = {
+        "executionSecurityProfile": profile.to_dict(),
+        "goalId": "goal_projection",
+        "executionClass": "scheduled_automation",
+    }
+    store.append_message(session.session_id, "user", "change it", metadata=metadata)
+    store.append_message(session.session_id, "assistant", "done", metadata=metadata)
+
+    application = DeepCodeApplication.open(
+        tmp_path / "state.sqlite3",
+        session_store=store,
+    )
+    try:
+        with application.database.read() as connection:
+            turns = TurnRepository(connection).list_for_thread(session.session_id)
+        assert len(turns) == 1
+        assert turns[0].execution_security_profile == profile
+        assert turns[0].execution_permission_mode is profile.permission_mode
+        assert turns[0].goal_id == "goal_projection"
+        assert turns[0].execution_class is ExecutionClass.SCHEDULED_AUTOMATION
+    finally:
+        application.close()
+
+
+def test_projection_rebuild_rejects_a_corrupt_canonical_security_snapshot(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = SessionStore(tmp_path / "sessions")
+    session = store.create_session(
+        title="corrupt",
+        metadata={"kind": "tui", "workspace": str(workspace)},
+    )
+    store.append_message(
+        session.session_id,
+        "user",
+        "change it",
+        metadata={"executionSecurityProfile": {"permissionMode": "full_auto"}},
+    )
+
+    with pytest.raises(ConflictError, match="invalid execution security profile"):
+        DeepCodeApplication.open(
+            tmp_path / "state.sqlite3",
+            session_store=store,
+        )
+
+
+def test_session_access_preset_is_canonical_and_forks_fail_closed(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = SessionStore(tmp_path / "sessions")
+    database = tmp_path / "state.sqlite3"
+    application = DeepCodeApplication.open(database, session_store=store)
+    try:
+        project = application.projects.add(str(workspace))
+        source = application.threads.start(
+            project.id,
+            title="Explicit full access",
+            access_preset_override=ExecutionAccessPreset.FULL_ACCESS,
+        )
+        assert source.access_preset_override is ExecutionAccessPreset.FULL_ACCESS
+        assert (
+            store.get_session(source.id).metadata["access_preset_override"]
+            == "full_access"
+        )
+
+        fork = application.threads.fork(source.id)
+        assert fork.access_preset_override is None
+        assert store.get_session(fork.id).metadata["access_preset_override"] is None
+
+        changed = application.threads.set_access_preset(
+            source.id,
+            ExecutionAccessPreset.ASK,
+        )
+        assert changed.access_preset_override is ExecutionAccessPreset.ASK
+        assert application.events.replay(source.id)[-1].type == (
+            "thread.permission_changed"
+        )
+    finally:
+        application.close()
+
+    reopened = DeepCodeApplication.open(database, session_store=store)
+    try:
+        assert (
+            reopened.threads.read(source.id).access_preset_override
+            is ExecutionAccessPreset.ASK
+        )
+        inherited_default = reopened.threads.set_access_preset(source.id, None)
+        assert inherited_default.access_preset_override is None
+        # Explicitly clearing the canonical setting must win over stale
+        # compatibility metadata and cannot resurrect Full Access.
+        store.update_metadata(source.id, {"accessPresetOverride": "full_access"})
+        assert reopened.threads.read(source.id).access_preset_override is None
+        store.update_metadata(source.id, {"access_preset_override": "corrupt"})
+        assert (
+            reopened.threads.read(source.id).access_preset_override
+            is ExecutionAccessPreset.ASK
+        )
+    finally:
+        reopened.close()
 
 
 def test_session_listing_supports_exact_cwd_and_all_directories(tmp_path: Path) -> None:

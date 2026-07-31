@@ -11,8 +11,9 @@ state (switch sessions, rebuild the agent) through the app's public methods.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 Handler = Callable[[Any, str], Awaitable[str | None]]
 
@@ -121,6 +122,27 @@ async def _cmd_effort(app, args: str) -> str | None:
     )
 
 
+async def _cmd_permissions(app, args: str) -> str | None:
+    wanted = args.strip().casefold()
+    if not wanted:
+        return app.access_status()
+    aliases = {
+        "ask": "ask",
+        "read-only": "read_only",
+        "read_only": "read_only",
+        "full-access": "full_access",
+        "full_access": "full_access",
+        "inherit": None,
+        "default": None,
+    }
+    if wanted not in aliases:
+        return "usage: /permissions [ask|read-only|full-access|inherit]"
+    try:
+        return await app.set_access_preset(aliases[wanted])
+    except (OSError, RuntimeError, ValueError) as exc:
+        return f"Session access update failed: {exc}"
+
+
 async def _cmd_transcript(app, args: str) -> str | None:
     wanted = args.strip()
     if not wanted:
@@ -198,6 +220,12 @@ REGISTRY: dict[str, Command] = {
             "/effort [auto|off|level]",
             "show or switch reasoning effort",
             _cmd_effort,
+        ),
+        Command(
+            "permissions",
+            "/permissions [preset]",
+            "show or set this Session's tool access",
+            _cmd_permissions,
         ),
         Command(
             "transcript",

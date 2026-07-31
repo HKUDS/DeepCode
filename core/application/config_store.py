@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from core.config import DeepCodeConfig, home_config_path
+from core.private_storage import ensure_private_directory, open_private_file
 
 
 class ConfigStore:
@@ -35,7 +36,7 @@ class ConfigStore:
         except json.JSONDecodeError as exc:
             raise ValueError(f"invalid DeepCode config JSON: {exc}") from exc
         if not isinstance(value, dict):
-            raise ValueError("DeepCode config must contain a JSON object")
+            raise TypeError("DeepCode config must contain a JSON object")
         return value
 
     def mutate(
@@ -52,13 +53,12 @@ class ConfigStore:
             return updated
 
     def _replace(self, value: dict[str, Any]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        ensure_private_directory(self.path.parent)
         temporary = self.path.with_name(f".{self.path.name}.{uuid.uuid4().hex}.tmp")
         payload = (json.dumps(value, indent=2, ensure_ascii=False) + "\n").encode()
-        descriptor = os.open(
+        descriptor = open_private_file(
             temporary,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-            0o600,
         )
         try:
             with os.fdopen(descriptor, "wb") as handle:
@@ -94,8 +94,8 @@ def _json_copy(value):
 
 @contextmanager
 def _file_lock(path: Path) -> Iterator[None]:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    ensure_private_directory(path.parent)
+    descriptor = open_private_file(path, os.O_RDWR | os.O_CREAT)
     try:
         if os.name == "nt":
             import msvcrt

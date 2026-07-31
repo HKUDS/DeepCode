@@ -15,6 +15,7 @@ from core.domain.common import (
 )
 from core.domain.execution_permission import ExecutionPermissionMode
 from core.domain.execution_profile import ExecutionProfile
+from core.domain.execution_security import ExecutionSecurityProfile
 from core.domain.runtime_coordination import ExecutionClass
 from core.skills.models import MAX_SELECTED_SKILLS, SkillSelection
 
@@ -51,6 +52,7 @@ class Turn:
     skill_ids: tuple[str, ...] = ()
     execution_profile: ExecutionProfile | None = None
     execution_permission_mode: ExecutionPermissionMode | None = None
+    execution_security_profile: ExecutionSecurityProfile | None = None
     goal_id: str | None = None
     executor: TurnExecutor = TurnExecutor.AGENT
     execution_class: ExecutionClass = ExecutionClass.INTERACTIVE
@@ -88,6 +90,22 @@ class Turn:
         ):
             raise TypeError(
                 "execution_permission_mode must be an ExecutionPermissionMode"
+            )
+        if self.execution_security_profile is not None and not isinstance(
+            self.execution_security_profile,
+            ExecutionSecurityProfile,
+        ):
+            raise TypeError(
+                "execution_security_profile must be an ExecutionSecurityProfile"
+            )
+        if (
+            self.execution_security_profile is not None
+            and self.execution_permission_mode is not None
+            and self.execution_security_profile.permission_mode
+            is not self.execution_permission_mode
+        ):
+            raise ValueError(
+                "execution permission mode must match the security profile"
             )
         if self.goal_id is not None:
             require_prefixed_id(str(self.goal_id), "goal")

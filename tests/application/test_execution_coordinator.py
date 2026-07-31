@@ -663,9 +663,7 @@ def test_dead_worker_recovery_requires_os_proof_and_is_selective(
     assert recovery is not None
     assert recovery.released_queued_turn_ids == (queued.id,)
     assert recovery.rehomed_turn_ids == (queued.id,)
-    assert [orphan.turn_id for orphan in recovery.requires_settlement] == [
-        running.id
-    ]
+    assert [orphan.turn_id for orphan in recovery.requires_settlement] == [running.id]
     assert recovery.requires_settlement[0].status == "running"
     with database.read() as connection:
         coordination = RuntimeCoordinationRepository(connection)

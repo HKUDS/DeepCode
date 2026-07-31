@@ -10,6 +10,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 import type {
+  ExecutionAccessPreset,
   Goal,
   GoalOutcome,
   Project,
@@ -17,9 +18,15 @@ import type {
   Thread,
   Turn,
 } from "../../generated/app-server";
-import type { DesktopPermissionMode } from "../../app/useWorkspaceController";
 import type { GoalDefinitionInput } from "../../app/useWorkspaceController";
 import type { InteractiveDelivery } from "../../app/interactiveTurnRouter";
+import {
+  ACCESS_PRESET_OPTIONS,
+  settingsDefaultAccessLabel,
+  settingsProductAccessPreset,
+  turnExecutionAccessLabel,
+  turnExecutionAccessState,
+} from "../../app/accessPreset";
 import type { DesktopRuntime } from "../../rpc/contracts";
 import type { TranscriptMode } from "../thread/transcriptMode";
 import { useSkillCatalog } from "../skills/useSkillCatalog";
@@ -38,7 +45,8 @@ interface ComposerProps {
   editable: boolean;
   canExecute: boolean;
   busy: boolean;
-  active: boolean;
+  executingTurn: Turn | null;
+  queuedTurns: readonly Turn[];
   runtime: DesktopRuntime;
   project: Project | null;
   thread: Thread | null;
@@ -54,7 +62,7 @@ interface ComposerProps {
     model: string | null,
     reasoningEffort: string | null,
   ): void;
-  onPermissionModeChange(mode: DesktopPermissionMode): void;
+  onAccessPresetChange(preset: ExecutionAccessPreset | null): Promise<boolean>;
   onSetGoal(input: GoalDefinitionInput): Promise<void>;
   onPauseGoal(): Promise<void>;
   onResumeGoal(): Promise<void>;
@@ -75,7 +83,8 @@ export function Composer({
   editable,
   canExecute,
   busy,
-  active,
+  executingTurn,
+  queuedTurns,
   runtime,
   project,
   thread,
@@ -87,7 +96,7 @@ export function Composer({
   transcriptMode,
   onTranscriptModeChange,
   onModelChange,
-  onPermissionModeChange,
+  onAccessPresetChange,
   onSetGoal,
   onPauseGoal,
   onResumeGoal,
@@ -100,6 +109,7 @@ export function Composer({
   onQueue,
   onInterrupt,
 }: ComposerProps) {
+  const active = executingTurn !== null;
   const {
     prompt,
     setPrompt,
@@ -136,7 +146,25 @@ export function Composer({
       return skill ? [skill] : [];
     });
   }, [active, selectedSkillIds, skillCatalog.skills]);
-  const permissionMode = settingsPermissionMode(settings);
+  const accessPresetOverride = thread?.accessPresetOverride ?? null;
+  const effectiveProductAccess =
+    accessPresetOverride ?? settingsProductAccessPreset(settings);
+  const defaultAccessLabel = settingsDefaultAccessLabel(settings);
+  const executingAccessLabel = executingTurn
+    ? turnExecutionAccessLabel(executingTurn)
+    : null;
+  const executingAccessState = executingTurn
+    ? turnExecutionAccessState(executingTurn)
+    : null;
+  const queuedAccessLabels = [
+    ...new Set(queuedTurns.map(turnExecutionAccessLabel)),
+  ];
+  const queuedAccessStates = queuedTurns.map(turnExecutionAccessState);
+  const queuedAccessState = queuedAccessStates.includes("full_access")
+    ? "full_access"
+    : new Set(queuedAccessStates).size === 1
+      ? queuedAccessStates[0]
+      : "mixed";
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -271,7 +299,9 @@ export function Composer({
         onSelectEvidence={onSelectGoalEvidence}
       />
       <div className={styles.composer}>
-        <label htmlFor="turn-prompt">Task instruction</label>
+        <label className={styles.promptLabel} htmlFor="turn-prompt">
+          Task instruction
+        </label>
         <textarea
           ref={textareaRef}
           id="turn-prompt"
@@ -417,6 +447,42 @@ export function Composer({
             ))}
           </div>
         ) : null}
+        {executingTurn || queuedTurns.length ? (
+          <div
+            className={styles.accessStatusRail}
+            aria-label="Frozen Turn access"
+          >
+            <div className={styles.accessStatuses}>
+              {executingTurn && executingAccessLabel ? (
+                <span
+                  className={styles.accessStatus}
+                  data-access={executingAccessState}
+                  aria-label={`Current Turn access: ${executingAccessLabel}`}
+                >
+                  <strong>Current Turn</strong>
+                  <i aria-hidden="true">·</i>
+                  {executingAccessLabel}
+                </span>
+              ) : null}
+              {queuedTurns.length ? (
+                <span
+                  className={styles.accessStatus}
+                  data-access={queuedAccessState}
+                  aria-label={`Queued Turn access: ${queuedAccessLabels.join(
+                    ", ",
+                  )}`}
+                >
+                  <strong>Queued ({queuedTurns.length})</strong>
+                  <i aria-hidden="true">·</i>
+                  {queuedAccessLabels.join(" · ")}
+                </span>
+              ) : null}
+            </div>
+            <p className={styles.accessFrozenNote}>
+              Active and queued Turns keep their frozen model and access.
+            </p>
+          </div>
+        ) : null}
         <div className={styles.toolbar}>
           <div className={styles.context}>
             <button
@@ -462,31 +528,38 @@ export function Composer({
               mode={transcriptMode}
               onChange={onTranscriptModeChange}
             />
-            <label className={styles.selector} title="Tool permission mode">
+            <label
+              className={styles.selector}
+              data-access={effectiveProductAccess ?? "inherit"}
+              title={
+                effectiveProductAccess === "full_access"
+                  ? "New submissions use Full access"
+                  : "Tool access for new submissions"
+              }
+            >
               <ShieldCheck size={12} />
+              <small className={styles.selectorCaption}>New</small>
               <select
-                aria-label="Permission mode"
-                value={permissionMode}
-                onChange={(event) =>
-                  onPermissionModeChange(
-                    event.target.value as DesktopPermissionMode,
-                  )
-                }
-                disabled={busy}
+                aria-label="New submissions access"
+                value={accessPresetOverride ?? ""}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  void onAccessPresetChange(
+                    value ? (value as ExecutionAccessPreset) : null,
+                  );
+                }}
+                disabled={busy || !thread}
               >
-                <option value="default">Approval first</option>
-                <option value="plan">Plan only</option>
-                <option value="full_auto">Full auto</option>
+                <option value="">
+                  Default · {defaultAccessLabel}
+                </option>
+                {ACCESS_PRESET_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
             </label>
-            {active ? (
-              <span
-                className={styles.nextTurnNotice}
-                title="The active Turn keeps its immutable execution profile."
-              >
-                Model & permissions apply next Turn
-              </span>
-            ) : null}
           </div>
           {active ? (
             <div className={styles.activeActions}>
@@ -574,14 +647,4 @@ function withContextFiles(
     "Attached workspace context:",
     ...references.map((path) => `- ${path}`),
   ].join("\n");
-}
-
-function settingsPermissionMode(
-  settings: SettingsSnapshot | null,
-): DesktopPermissionMode {
-  if (!settings?.permissionModeExplicit) return "default";
-  const mode = settings.security.permissionMode;
-  return mode === "plan" || mode === "full_auto" || mode === "default"
-    ? mode
-    : "default";
 }

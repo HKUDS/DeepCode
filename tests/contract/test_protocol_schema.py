@@ -5,7 +5,6 @@ from app_server.connection import ConnectionState
 from app_server.dispatcher import Dispatcher
 from core.application import DeepCodeApplication
 
-
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMA = ROOT / "protocol" / "app-server.schema.json"
 GENERATED_TYPES = ROOT / "desktop" / "src" / "generated" / "app-server.ts"
@@ -51,6 +50,94 @@ def test_turn_contract_exposes_nullable_execution_permission_snapshot() -> None:
         in generated
     )
     assert "executionPermissionMode?: ExecutionPermissionMode | null;" in generated
+
+
+def test_protocol_exposes_session_access_and_immutable_security_profile() -> None:
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    definitions = schema["$defs"]
+
+    assert definitions["ExecutionAccessPreset"]["enum"] == [
+        "ask",
+        "read_only",
+        "full_access",
+    ]
+    assert definitions["Thread"]["properties"]["accessPresetOverride"] == {
+        "description": (
+            "Session override. Null inherits the effective Settings default."
+        ),
+        "oneOf": [
+            {"$ref": "#/$defs/ExecutionAccessPreset"},
+            {"type": "null"},
+        ],
+    }
+    assert "accessPresetOverride" in definitions["Thread"]["required"]
+    assert definitions["Turn"]["properties"]["executionSecurityProfile"] == {
+        "oneOf": [
+            {"$ref": "#/$defs/ExecutionSecurityProfile"},
+            {"type": "null"},
+        ]
+    }
+    assert "executionSecurityProfile" not in definitions["Turn"]["required"]
+
+    profile = definitions["ExecutionSecurityProfile"]
+    assert profile["additionalProperties"] is False
+    assert profile["properties"]["accessPreset"] == {
+        "oneOf": [
+            {"$ref": "#/$defs/ExecutionAccessPreset"},
+            {"type": "null"},
+        ]
+    }
+    assert profile["properties"]["permissionMode"] == {
+        "$ref": "#/$defs/ExecutionPermissionMode"
+    }
+    assert profile["properties"]["commandSandbox"] == {"type": "boolean"}
+    assert profile["properties"]["filesystemScope"] == {
+        "type": "string",
+        "enum": ["workspace", "unrestricted"],
+    }
+    assert profile["properties"]["approvalPolicy"] == {
+        "type": "string",
+        "enum": ["on_request", "never"],
+    }
+    assert definitions["ExecutionPermissionRule"]["required"] == [
+        "permission",
+        "pattern",
+        "action",
+    ]
+    assert definitions["ExecutionPermissionRule"]["properties"]["action"] == {
+        "type": "string",
+        "enum": ["allow", "ask", "deny"],
+    }
+    assert profile["properties"]["permissionRules"] == {
+        "type": "array",
+        "description": (
+            "Ordered, immutable rules evaluated within the preset safety boundary."
+        ),
+        "items": {"$ref": "#/$defs/ExecutionPermissionRule"},
+    }
+    assert profile["required"] == [
+        "accessPreset",
+        "permissionMode",
+        "commandSandbox",
+        "filesystemScope",
+        "approvalPolicy",
+        "permissionRules",
+    ]
+    params = definitions["ThreadPermissionUpdateParams"]
+    assert params["required"] == ["threadId", "accessPreset"]
+    assert definitions["MethodParams"]["properties"]["thread/permission/update"] == {
+        "$ref": "#/$defs/ThreadPermissionUpdateParams"
+    }
+
+    generated = GENERATED_TYPES.read_text(encoding="utf-8")
+    assert (
+        'export type ExecutionAccessPreset = "ask" | "read_only" | '
+        '"full_access";' in generated
+    )
+    assert "accessPresetOverride: ExecutionAccessPreset | null;" in generated
+    assert "executionSecurityProfile?: ExecutionSecurityProfile | null;" in generated
+    assert "permissionRules: ExecutionPermissionRule[];" in generated
+    assert '"thread/permission/update": ThreadPermissionUpdateParams;' in generated
 
 
 def test_automation_transport_contract_exposes_p0_run_identity() -> None:

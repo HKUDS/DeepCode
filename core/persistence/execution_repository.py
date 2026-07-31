@@ -12,6 +12,7 @@ from core.domain.approval import (
 )
 from core.domain.execution_permission import ExecutionPermissionMode
 from core.domain.execution_profile import ExecutionProfile
+from core.domain.execution_security import ExecutionSecurityProfile
 from core.domain.item import Item, ItemKind, ItemStatus
 from core.domain.runtime_coordination import ExecutionClass
 from core.domain.turn import Turn, TurnExecutor, TurnStatus
@@ -105,6 +106,15 @@ class TurnRepository:
                 (
                     turn.execution_permission_mode.value
                     if turn.execution_permission_mode is not None
+                    else None
+                ),
+            )
+        if self._has_execution_security_profile_column():
+            columns += ", execution_security_profile_json"
+            values += (
+                (
+                    dump_json(turn.execution_security_profile.to_dict())
+                    if turn.execution_security_profile is not None
                     else None
                 ),
             )
@@ -234,6 +244,7 @@ class TurnRepository:
         coordination_available = "execution_epoch" in row.keys()
         executor_available = "executor" in row.keys()
         execution_permission_available = "execution_permission_mode" in row.keys()
+        execution_security_available = "execution_security_profile_json" in row.keys()
         return Turn(
             id=row["id"],
             thread_id=row["thread_id"],
@@ -249,6 +260,12 @@ class TurnRepository:
                 ExecutionPermissionMode(row["execution_permission_mode"])
                 if execution_permission_available
                 and row["execution_permission_mode"] is not None
+                else None
+            ),
+            execution_security_profile=(
+                _load_execution_security_profile(row["execution_security_profile_json"])
+                if execution_security_available
+                and row["execution_security_profile_json"] is not None
                 else None
             ),
             goal_id=row["goal_id"],
@@ -303,9 +320,27 @@ class TurnRepository:
             for row in self.connection.execute("PRAGMA table_info(turns)")
         )
 
+    def _has_execution_security_profile_column(self) -> bool:
+        return any(
+            row["name"] == "execution_security_profile_json"
+            for row in self.connection.execute("PRAGMA table_info(turns)")
+        )
+
 
 class TurnWriteConflictError(RuntimeError):
     """A stale worker attempted to mutate a Turn after its fence changed."""
+
+
+def _load_execution_security_profile(raw: str) -> ExecutionSecurityProfile:
+    """Decode a present snapshot or reject the row instead of failing open."""
+
+    try:
+        profile = ExecutionSecurityProfile.from_dict(load_json(raw))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("persisted execution security profile is invalid") from exc
+    if profile is None:
+        raise ValueError("persisted execution security profile is invalid")
+    return profile
 
 
 class ItemRepository:

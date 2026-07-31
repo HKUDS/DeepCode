@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
+from core.domain.execution_security import ExecutionAccessPreset
 from core.domain.thread import Thread, ThreadMode, ThreadStatus
 from core.persistence.serde import (
     dump_datetime,
@@ -17,50 +18,71 @@ class ThreadRepository:
         self.connection = connection
 
     def add(self, thread: Thread) -> None:
+        columns = (
+            "id, project_id, parent_thread_id, title, mode, status, model, "
+            "connection_id, workspace_path, worktree_path, reasoning_effort, "
+            "created_at, updated_at, archived_at"
+        )
+        values: tuple[object, ...] = (
+            thread.id,
+            thread.project_id,
+            thread.parent_thread_id,
+            thread.title,
+            thread.mode.value,
+            thread.status.value,
+            thread.model,
+            thread.connection_id,
+            thread.workspace_path,
+            thread.worktree_path,
+            thread.reasoning_effort,
+            dump_datetime(thread.created_at),
+            dump_datetime(thread.updated_at),
+            dump_datetime(thread.archived_at),
+        )
+        if self._has_access_preset_column():
+            columns += ", access_preset_override"
+            values += (
+                thread.access_preset_override.value
+                if thread.access_preset_override is not None
+                else None,
+            )
+        placeholders = ", ".join("?" for _ in values)
         self.connection.execute(
-            "INSERT INTO threads (id, project_id, parent_thread_id, title, mode, "
-            "status, model, connection_id, workspace_path, worktree_path, "
-            "reasoning_effort, created_at, updated_at, archived_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                thread.id,
-                thread.project_id,
-                thread.parent_thread_id,
-                thread.title,
-                thread.mode.value,
-                thread.status.value,
-                thread.model,
-                thread.connection_id,
-                thread.workspace_path,
-                thread.worktree_path,
-                thread.reasoning_effort,
-                dump_datetime(thread.created_at),
-                dump_datetime(thread.updated_at),
-                dump_datetime(thread.archived_at),
-            ),
+            f"INSERT INTO threads ({columns}) VALUES ({placeholders})",
+            values,
         )
 
     def update(self, thread: Thread) -> None:
+        access_assignment = (
+            ", access_preset_override = ?" if self._has_access_preset_column() else ""
+        )
+        values: tuple[object, ...] = (
+            thread.project_id,
+            thread.parent_thread_id,
+            thread.title,
+            thread.mode.value,
+            thread.status.value,
+            thread.model,
+            thread.connection_id,
+            thread.workspace_path,
+            thread.worktree_path,
+            thread.reasoning_effort,
+            dump_datetime(thread.updated_at),
+            dump_datetime(thread.archived_at),
+        )
+        if access_assignment:
+            values += (
+                thread.access_preset_override.value
+                if thread.access_preset_override is not None
+                else None,
+            )
+        values += (thread.id,)
         cursor = self.connection.execute(
             "UPDATE threads SET project_id = ?, parent_thread_id = ?, title = ?, "
             "mode = ?, status = ?, model = ?, connection_id = ?, "
             "workspace_path = ?, worktree_path = ?, reasoning_effort = ?, "
-            "updated_at = ?, archived_at = ? WHERE id = ?",
-            (
-                thread.project_id,
-                thread.parent_thread_id,
-                thread.title,
-                thread.mode.value,
-                thread.status.value,
-                thread.model,
-                thread.connection_id,
-                thread.workspace_path,
-                thread.worktree_path,
-                thread.reasoning_effort,
-                dump_datetime(thread.updated_at),
-                dump_datetime(thread.archived_at),
-                thread.id,
-            ),
+            f"updated_at = ?, archived_at = ?{access_assignment} WHERE id = ?",
+            values,
         )
         if cursor.rowcount != 1:
             raise KeyError(thread.id)
@@ -110,6 +132,7 @@ class ThreadRepository:
 
     @staticmethod
     def _from_row(row: sqlite3.Row) -> Thread:
+        access_preset_available = "access_preset_override" in row.keys()
         return Thread(
             id=row["id"],
             project_id=row["project_id"],
@@ -120,9 +143,20 @@ class ThreadRepository:
             model=row["model"],
             connection_id=row["connection_id"],
             reasoning_effort=row["reasoning_effort"],
+            access_preset_override=(
+                ExecutionAccessPreset(row["access_preset_override"])
+                if access_preset_available and row["access_preset_override"] is not None
+                else None
+            ),
             workspace_path=row["workspace_path"],
             worktree_path=row["worktree_path"],
             created_at=load_required_datetime(row["created_at"]),
             updated_at=load_required_datetime(row["updated_at"]),
             archived_at=load_datetime(row["archived_at"]),
+        )
+
+    def _has_access_preset_column(self) -> bool:
+        return any(
+            row["name"] == "access_preset_override"
+            for row in self.connection.execute("PRAGMA table_info(threads)")
         )

@@ -6,13 +6,14 @@ from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any, Protocol
 
-from core.agent_runtime.injections import InjectionCallback, TurnInputSink
 from core.agent_runtime.goal_runtime import GoalRuntimeRouter
+from core.agent_runtime.injections import InjectionCallback, TurnInputSink
 from core.agent_setup import build_agent_session
 from core.compat import DeepCodeRuntime, get_runtime
 from core.config import home_config_path, load_config_for_workspace, project_config_path
 from core.domain.execution_permission import ExecutionPermissionMode
 from core.domain.execution_profile import ExecutionProfile
+from core.domain.execution_security import ExecutionSecurityProfile
 from core.events import Event, Op
 from core.harness.permissions import PermissionMode
 from core.providers.credentials import default_credentials_path
@@ -38,6 +39,7 @@ class AgentSessionFactory(Protocol):
         workspace: str,
         model: str | None,
         execution_profile: ExecutionProfile | None = None,
+        execution_security_profile: ExecutionSecurityProfile | None = None,
         permission_mode_override: ExecutionPermissionMode | None = None,
     ) -> object: ...
 
@@ -47,6 +49,7 @@ class AgentSessionFactory(Protocol):
         workspace: str,
         model: str | None,
         execution_profile: ExecutionProfile | None = None,
+        execution_security_profile: ExecutionSecurityProfile | None = None,
         permission_mode_override: ExecutionPermissionMode | None = None,
         approval_callback: ApprovalCallback,
         injection_callback: InjectionCallback | None = None,
@@ -76,6 +79,7 @@ class ConfiguredAgentSessionFactory:
         workspace: str,
         model: str | None,
         execution_profile: ExecutionProfile | None = None,
+        execution_security_profile: ExecutionSecurityProfile | None = None,
         permission_mode_override: ExecutionPermissionMode | None = None,
         approval_callback: ApprovalCallback,
         injection_callback: InjectionCallback | None = None,
@@ -91,6 +95,7 @@ class ConfiguredAgentSessionFactory:
             workspace=workspace,
             model=model,
             execution_profile=execution_profile,
+            execution_security_profile=execution_security_profile,
             approval_callback=approval_callback,
             injection_callback=injection_callback,
             active_turn_id_provider=active_turn_id_provider,
@@ -114,6 +119,7 @@ class ConfiguredAgentSessionFactory:
         workspace: str,
         model: str | None,
         execution_profile: ExecutionProfile | None = None,
+        execution_security_profile: ExecutionSecurityProfile | None = None,
         permission_mode_override: ExecutionPermissionMode | None = None,
     ) -> object:
         """Invalidate idle sessions after an in-process config reload."""
@@ -132,6 +138,11 @@ class ConfiguredAgentSessionFactory:
             )
             if execution_profile is not None
             else None,
+            (
+                execution_security_profile.to_dict()
+                if execution_security_profile is not None
+                else None
+            ),
             (
                 permission_mode_override.value
                 if permission_mode_override is not None

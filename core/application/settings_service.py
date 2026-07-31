@@ -11,6 +11,7 @@ from core.application.errors import (
     InvalidArgumentError,
     ProjectNotTrustedError,
 )
+from core.application.execution_security_policy import ExecutionSecurityPolicy
 from core.application.project_service import ProjectService
 from core.config import (
     DeepCodeConfig,
@@ -18,10 +19,13 @@ from core.config import (
     load_config,
     load_config_for_workspace,
 )
+from core.domain.execution_security import (
+    ExecutionAccessPreset,
+    normalize_permission_rules,
+)
 from core.domain.project import TrustState
 from core.providers.catalog import known_model_ids, resolve_model_info
 from core.providers.registry import PROVIDERS
-
 
 _ALLOWED_ROOTS = {"agents", "providers", "security"}
 _AGENT_SECTIONS = {"defaults", "planning", "implementation"}
@@ -40,7 +44,7 @@ _AGENT_FIELDS = {
     "contextWindowTokens",
 }
 _PROVIDER_FIELDS = {"apiKey", "apiBase", "extraHeaders"}
-_SECURITY_FIELDS = {"permissionMode", "permissions", "sandbox"}
+_SECURITY_FIELDS = {"accessPreset", "permissionMode", "permissions", "sandbox"}
 
 
 class SettingsService:
@@ -48,9 +52,13 @@ class SettingsService:
         self,
         projects: ProjectService | None = None,
         store: ConfigStore | None = None,
+        execution_security_policy: ExecutionSecurityPolicy | None = None,
     ) -> None:
         self.projects = projects
         self.store = store or ConfigStore()
+        self.execution_security_policy = (
+            execution_security_policy or ExecutionSecurityPolicy()
+        )
 
     def read(self, project_id: str | None = None) -> dict[str, Any]:
         workspace = self._workspace(project_id)
@@ -59,7 +67,7 @@ class SettingsService:
             if workspace is not None and workspace.is_dir()
             else load_config(config_path=self.store.path)
         )
-        return self._view(config)
+        return self._view(config, workspace=workspace)
 
     def update(
         self,
@@ -74,7 +82,7 @@ class SettingsService:
                 "provider connections and credentials are user-scoped only"
             )
         store = self._store(scope, project_id)
-        store.mutate(lambda current: deep_merge(current, patch))
+        store.mutate(lambda current: _merge_settings_patch(current, patch))
         return self.read(project_id)
 
     def _workspace(self, project_id: str | None) -> Path | None:
@@ -109,7 +117,12 @@ class SettingsService:
             raise InvalidArgumentError("project path must be a directory")
         return ConfigStore(workspace / home_config_path().name)
 
-    def _view(self, config: DeepCodeConfig) -> dict[str, Any]:
+    def _view(
+        self,
+        config: DeepCodeConfig,
+        *,
+        workspace: Path | None,
+    ) -> dict[str, Any]:
         providers = []
         for spec in PROVIDERS:
             provider = getattr(config.providers, spec.name)
@@ -146,11 +159,30 @@ class SettingsService:
                 }
             )
         security_fields = getattr(config.security, "model_fields_set", set())
+        user_raw = self.store.read()
+        project_raw = (
+            ConfigStore(workspace / home_config_path().name).read()
+            if workspace is not None and workspace.is_dir()
+            else {}
+        )
+        user_access_preset = _raw_access_preset(user_raw)
+        project_access_preset = _raw_access_preset(project_raw)
+        resolved_security = self.execution_security_policy.resolve_default(
+            str(workspace or Path.cwd()),
+            security_config=config.security,
+        )
         return {
             "configPath": str(self.store.path),
             "agents": config.agents.model_dump(by_alias=True),
             "security": config.security.model_dump(by_alias=True),
             "permissionModeExplicit": "permission_mode" in security_fields,
+            "userAccessPreset": user_access_preset,
+            "projectAccessPreset": project_access_preset,
+            "resolvedDefaultSecurityProfile": resolved_security.to_dict(),
+            "resolvedDefaultSecuritySource": _resolved_security_source(
+                user_raw,
+                project_raw,
+            ),
             "providers": providers,
             "models": models,
         }
@@ -182,6 +214,13 @@ class SettingsService:
         security = patch.get("security")
         if security is not None:
             _require_fields(security, _SECURITY_FIELDS, "security")
+            if "permissions" in security:
+                try:
+                    normalize_permission_rules(security["permissions"])
+                except (TypeError, ValueError) as exc:
+                    raise InvalidArgumentError(
+                        f"invalid security.permissions: {exc}"
+                    ) from exc
 
         try:
             DeepCodeConfig.model_validate(patch)
@@ -201,3 +240,57 @@ def _require_fields(value: Any, allowed: set[str], name: str) -> None:
         raise InvalidArgumentError(
             f"unsupported {name} field(s): {', '.join(sorted(unknown))}"
         )
+
+
+def _merge_settings_patch(
+    current: dict[str, Any],
+    patch: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge settings while giving optional access overrides real unset semantics."""
+
+    merged = deep_merge(current, patch)
+    security_patch = patch.get("security")
+    if (
+        isinstance(security_patch, dict)
+        and "accessPreset" in security_patch
+        and security_patch["accessPreset"] is None
+    ):
+        security = merged.get("security")
+        if isinstance(security, dict):
+            security.pop("accessPreset", None)
+            security.pop("access_preset", None)
+            if not security:
+                merged.pop("security", None)
+    return merged
+
+
+def _raw_security(config: dict[str, Any]) -> dict[str, Any]:
+    security = config.get("security")
+    return security if isinstance(security, dict) else {}
+
+
+def _raw_access_preset(config: dict[str, Any]) -> str | None:
+    security = _raw_security(config)
+    raw = security.get("accessPreset", security.get("access_preset"))
+    if raw is None:
+        return None
+    return ExecutionAccessPreset(str(raw)).value
+
+
+def _resolved_security_source(
+    user_config: dict[str, Any],
+    project_config: dict[str, Any],
+) -> str:
+    project_security = _raw_security(project_config)
+    user_security = _raw_security(user_config)
+    if _raw_access_preset(project_config) is not None:
+        return "project"
+    if _raw_access_preset(user_config) is not None:
+        return "user"
+    if os.environ.get("DEEPCODE_PERMISSION_MODE", "").strip():
+        return "environment"
+    if "permissionMode" in project_security or "permission_mode" in project_security:
+        return "project_legacy"
+    if "permissionMode" in user_security or "permission_mode" in user_security:
+        return "user_legacy"
+    return "built_in"

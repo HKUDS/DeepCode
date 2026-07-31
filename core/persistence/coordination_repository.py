@@ -230,9 +230,7 @@ class RuntimeCoordinationRepository:
         if claim.turn_id is None or not self.claim_is_current(claim):
             return None
         projection = (
-            "executor"
-            if self._turn_executor_available()
-            else "'agent' AS executor"
+            "executor" if self._turn_executor_available() else "'agent' AS executor"
         )
         row = self.connection.execute(
             f"SELECT {projection} FROM turns WHERE id = ?",
@@ -245,8 +243,7 @@ class RuntimeCoordinationRepository:
 
         require_prefixed_id(turn_id, "turn")
         row = self.connection.execute(
-            "SELECT execution_owner_id, execution_epoch "
-            "FROM turns WHERE id = ?",
+            "SELECT execution_owner_id, execution_epoch FROM turns WHERE id = ?",
             (turn_id,),
         ).fetchone()
         if (

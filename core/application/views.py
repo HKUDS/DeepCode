@@ -292,6 +292,11 @@ def thread_view(thread: Thread) -> dict[str, Any]:
         "model": thread.model,
         "connectionId": thread.connection_id,
         "reasoningEffort": thread.reasoning_effort,
+        "accessPresetOverride": (
+            thread.access_preset_override.value
+            if thread.access_preset_override is not None
+            else None
+        ),
         "workspacePath": thread.workspace_path,
         "worktreePath": thread.worktree_path,
         "createdAt": timestamp(thread.created_at),
@@ -315,6 +320,11 @@ def turn_view(turn: Turn) -> dict[str, Any]:
         "executionPermissionMode": (
             turn.execution_permission_mode.value
             if turn.execution_permission_mode is not None
+            else None
+        ),
+        "executionSecurityProfile": (
+            turn.execution_security_profile.to_dict()
+            if turn.execution_security_profile is not None
             else None
         ),
         "goalId": turn.goal_id,

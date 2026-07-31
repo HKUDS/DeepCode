@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import importlib
-from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
+from core.version import __version__
 
 RUNTIME_MODULES = (
     "core.agent_setup",
@@ -33,12 +33,5 @@ def verify_runtime() -> dict[str, Any]:
         "providers": ["anthropic", "openai_compat"],
         "paperFallback": "pypdf",
         "documentFormats": ["pdf", "md", "markdown", "txt", "docx", "html", "htm"],
-        "version": _package_version(),
+        "version": __version__,
     }
-
-
-def _package_version() -> str:
-    try:
-        return version("deepcode-hku")
-    except PackageNotFoundError:
-        return "1.2.0"

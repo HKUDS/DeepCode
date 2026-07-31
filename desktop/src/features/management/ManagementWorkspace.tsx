@@ -18,7 +18,11 @@ interface ManagementWorkspaceProps {
   settings: SettingsSnapshot | null;
   busy: boolean;
   onRefreshSettings(): Promise<void>;
-  onUpdateSettings(patch: JsonObject, scope: ConfigScope): Promise<void>;
+  onUpdateSettings(
+    patch: JsonObject,
+    scope: ConfigScope,
+    riskAcknowledged?: boolean,
+  ): Promise<void>;
   onThreadCreated(thread: Thread): void;
   onOpenThread(threadId: string): void;
 }

@@ -13,6 +13,7 @@ from core.domain.common import (
     require_prefixed_id,
     utc_now,
 )
+from core.domain.execution_security import ExecutionAccessPreset
 
 
 class ThreadMode(StrEnum):
@@ -41,6 +42,7 @@ class Thread:
     model: str | None = None
     connection_id: str | None = None
     reasoning_effort: str | None = None
+    access_preset_override: ExecutionAccessPreset | None = None
     parent_thread_id: str | None = None
     worktree_path: str | None = None
     id: str = field(default_factory=lambda: new_id("thr"))
@@ -61,6 +63,13 @@ class Thread:
             require_non_empty(self.connection_id, "connection_id")
         if self.reasoning_effort is not None:
             require_non_empty(self.reasoning_effort, "reasoning_effort")
+        if self.access_preset_override is not None and not isinstance(
+            self.access_preset_override,
+            ExecutionAccessPreset,
+        ):
+            raise TypeError(
+                "access_preset_override must be an ExecutionAccessPreset or None"
+            )
         require_aware(self.created_at, "created_at")
         require_aware(self.updated_at, "updated_at")
         if self.archived_at is not None:

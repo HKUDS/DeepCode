@@ -30,13 +30,17 @@ import os
 import shutil
 import threading
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterable
 
 from core.config import deepcode_home
 from core.file_lock import FileLease, exclusive_file_lock
+from core.private_storage import (
+    ensure_private_directory,
+    harden_private_tree,
+    open_private_file,
+)
 from core.sessions.deletion import (
     SessionDeletionJournal,
     SessionDeletionTicket,
@@ -63,6 +67,7 @@ class SessionStore:
             if root
             else (deepcode_home() / "sessions").resolve()
         )
+        harden_private_tree(self.root)
         self._lock = threading.RLock()
         self._cache: dict[str, Session] = {}
         self._cache_signatures: dict[str, tuple[int, int, int, int]] = {}
@@ -135,7 +140,7 @@ class SessionStore:
             )
 
     @contextmanager
-    def deletion_guard(self, session_id: str) -> Iterator["SessionDeletionGuard"]:
+    def deletion_guard(self, session_id: str) -> Iterator[SessionDeletionGuard]:
         """Serialize one permanent deletion with every canonical mutation."""
 
         safe_id = self._validated_session_id(session_id)
@@ -219,9 +224,13 @@ class SessionStore:
                 )
                 temporary = self.root / f".{sid}.{uuid.uuid4().hex}.creating"
                 try:
-                    temporary.mkdir(parents=True, mode=0o700)
+                    ensure_private_directory(temporary)
                     metadata_path = temporary / "session.jsonl"
-                    with metadata_path.open("x", encoding="utf-8") as handle:
+                    descriptor = open_private_file(
+                        metadata_path,
+                        os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                    )
+                    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
                         handle.write(session.metadata_line())
                         handle.write("\n")
                         handle.flush()
@@ -504,12 +513,15 @@ class SessionStore:
         with self._lock, exclusive_file_lock(self._session_lock(session_id)):
             current = self.get_settings(session_id)
             current.update(values)
-            self._session_dir(session_id).mkdir(parents=True, exist_ok=True)
+            ensure_private_directory(self._session_dir(session_id))
             path = self._settings_json(session_id)
             temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-            temporary.write_text(
-                json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8"
+            descriptor = open_private_file(
+                temporary,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
             )
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                json.dump(current, handle, ensure_ascii=False, indent=2)
             os.replace(temporary, path)
             return current
 
@@ -730,8 +742,11 @@ class SessionStore:
                 self._disk_signatures[session_id] = signature
 
     def _append_jsonl(self, path: Path, payload: dict) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as fh:
+        descriptor = open_private_file(
+            path,
+            os.O_APPEND | os.O_CREAT | os.O_WRONLY,
+        )
+        with os.fdopen(descriptor, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
 
     @staticmethod
@@ -773,7 +788,7 @@ class SessionStore:
         are rare compared to message appends.
         """
         path = self._session_jsonl(session.session_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        ensure_private_directory(path.parent)
         message_lines: list[str] = []
         if path.exists():
             with path.open("r", encoding="utf-8") as fh:
@@ -789,7 +804,11 @@ class SessionStore:
                         continue
                     message_lines.append(line)
         tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-        with tmp.open("w", encoding="utf-8") as fh:
+        descriptor = open_private_file(
+            tmp,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8") as fh:
             fh.write(session.metadata_line())
             fh.write("\n")
             for line in message_lines:
@@ -799,9 +818,13 @@ class SessionStore:
 
     def _rewrite_tasks(self, session_id: str, tasks: Iterable[SessionTask]) -> None:
         path = self._tasks_jsonl(session_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        ensure_private_directory(path.parent)
         tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-        with tmp.open("w", encoding="utf-8") as fh:
+        descriptor = open_private_file(
+            tmp,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8") as fh:
             for task in tasks:
                 fh.write(json.dumps(task.to_dict(), ensure_ascii=False, default=str))
                 fh.write("\n")

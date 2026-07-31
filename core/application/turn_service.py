@@ -43,6 +43,7 @@ from core.application.execution_coordinator import (
     OrphanedExecution,
 )
 from core.application.execution_registry import ExecutionRegistry
+from core.application.execution_security_policy import ExecutionSecurityPolicy
 from core.application.goal_turn_port import (
     GoalContextProvider,
     GoalSubmissionScope,
@@ -71,6 +72,10 @@ from core.domain.common import utc_now
 from core.domain.event import DomainEvent
 from core.domain.execution_permission import ExecutionPermissionMode
 from core.domain.execution_profile import ExecutionProfile, ExecutionSelection
+from core.domain.execution_security import (
+    ExecutionSecurityProfile,
+    parse_access_preset_override,
+)
 from core.domain.item import Item, ItemKind, ItemStatus
 from core.domain.message_provenance import (
     ClientSurface,
@@ -191,6 +196,7 @@ class TurnService:
         session_factory: AgentSessionFactory | None = None,
         session_store: SessionStore,
         llm_configuration: LLMConfigurationService | None = None,
+        execution_security_policy: ExecutionSecurityPolicy | None = None,
     ) -> None:
         self.database = database
         self.broker = broker
@@ -199,6 +205,9 @@ class TurnService:
         self.session_factory = session_factory or DefaultAgentSessionFactory()
         self.session_store = session_store
         self.llm_configuration = llm_configuration or LLMConfigurationService()
+        self.execution_security_policy = (
+            execution_security_policy or ExecutionSecurityPolicy()
+        )
         self.session_runtimes = SessionRuntimeRegistry(
             session_store,
             self.session_factory,
@@ -315,6 +324,7 @@ class TurnService:
         input_source: TurnInputSource = TurnInputSource.START,
         expected_goal_id: str | None = None,
         execution_class: ExecutionClass | None = None,
+        execution_security_profile: ExecutionSecurityProfile | None = None,
         execution_permission_mode: ExecutionPermissionMode | None = None,
     ) -> TurnSnapshot:
         with self._goal_submission(thread_id) as association:
@@ -333,6 +343,7 @@ class TurnService:
                 input_source=input_source,
                 input_delivery=TurnInputDelivery.CURRENT_TURN,
                 execution_class=(execution_class or _execution_class_for(input_source)),
+                execution_security_profile_override=execution_security_profile,
                 execution_permission_mode_override=execution_permission_mode,
                 goal_id=association.goal_id if association is not None else None,
                 goal_turn_settlement_ids=(
@@ -359,6 +370,7 @@ class TurnService:
         input_source: TurnInputSource = TurnInputSource.START,
         expected_goal_id: str | None = None,
         execution_class: ExecutionClass | None = None,
+        execution_security_profile: ExecutionSecurityProfile | None = None,
         execution_permission_mode: ExecutionPermissionMode | None = None,
     ) -> TurnSubmissionResult[ParticipantResultT]:
         """Start a Turn and atomically persist one owner-provided sidecar.
@@ -386,6 +398,7 @@ class TurnService:
                 input_source=input_source,
                 input_delivery=TurnInputDelivery.CURRENT_TURN,
                 execution_class=(execution_class or _execution_class_for(input_source)),
+                execution_security_profile_override=execution_security_profile,
                 execution_permission_mode_override=execution_permission_mode,
                 goal_id=association.goal_id if association is not None else None,
                 goal_turn_settlement_ids=(
@@ -456,6 +469,7 @@ class TurnService:
         queue_if_busy: bool,
         event_observer: Callable[[Event], None] | None,
         execution_profile_override: ExecutionProfile | None = None,
+        execution_security_profile_override: ExecutionSecurityProfile | None = None,
         execution_permission_mode_override: ExecutionPermissionMode | None = None,
         goal_id: str | None = None,
         goal_turn_settlement_ids: frozenset[str] = frozenset(),
@@ -494,6 +508,27 @@ class TurnService:
             thread = threads.get(thread_id)
             if thread is None:
                 raise ThreadNotFoundError(f"thread not found: {thread_id}")
+            # JSONL Session metadata is canonical. A prior metadata update may
+            # have committed before its disposable SQLite projection failed,
+            # so admission revalidates the security override and repairs the
+            # projection inside the same transaction that creates the Turn.
+            canonical_session = self.session_store.get_session(thread_id)
+            if canonical_session is not None:
+                try:
+                    canonical_access = parse_access_preset_override(
+                        canonical_session.metadata or {}
+                    )
+                except ValueError as exc:
+                    raise ConflictError(
+                        "canonical Session contains an invalid access preset override"
+                    ) from exc
+                if canonical_access is not thread.access_preset_override:
+                    thread = replace(
+                        thread,
+                        access_preset_override=canonical_access,
+                        updated_at=utc_now(),
+                    )
+                    threads.update(thread)
             if thread.status is ThreadStatus.ARCHIVED:
                 raise ConflictError("cannot start a turn in an archived thread")
             project = ProjectRepository(connection).get(thread.project_id)
@@ -576,18 +611,16 @@ class TurnService:
                         ),
                     ),
                 )
-            execution_permission_mode = execution_permission_mode_override
-            if execution_permission_mode is None and goal_id is not None:
-                execution_permission_mode = next(
-                    (
-                        previous.execution_permission_mode
-                        for previous in reversed(
-                            turns.list_for_goal(thread_id, goal_id)
-                        )
-                        if previous.execution_permission_mode is not None
-                    ),
-                    None,
-                )
+            goal_turns = (
+                turns.list_for_goal(thread_id, goal_id) if goal_id is not None else ()
+            )
+            execution_security_profile = self.execution_security_policy.resolve(
+                thread,
+                explicit_profile=execution_security_profile_override,
+                explicit_permission_mode=execution_permission_mode_override,
+                goal_turns=goal_turns,
+            )
+            execution_permission_mode = execution_security_profile.permission_mode
             turn = Turn(
                 thread_id=thread_id,
                 ordinal=turns.next_ordinal(thread_id),
@@ -595,6 +628,7 @@ class TurnService:
                 skill_ids=clean_skill_ids,
                 execution_profile=execution_profile,
                 execution_permission_mode=execution_permission_mode,
+                execution_security_profile=execution_security_profile,
                 goal_id=goal_id,
                 execution_class=execution_class,
                 home_worker_id=self._submitting_worker_id(),
@@ -623,6 +657,7 @@ class TurnService:
                     "skillIds": list(clean_skill_ids),
                     "skills": [],
                     "executionProfile": execution_profile.to_dict(),
+                    "executionSecurityProfile": (execution_security_profile.to_dict()),
                     **input_metadata,
                     "goal": ({"id": goal_id} if goal_id is not None else None),
                 },
@@ -725,7 +760,13 @@ class TurnService:
                 execution_profile_override=(
                     None if use_current_selection else original.execution_profile
                 ),
-                execution_permission_mode_override=(original.execution_permission_mode),
+                # A retry is a new Turn. Model selection may be replayed for
+                # reproducibility, but an old Full Access grant must never be
+                # replayed after the Session has been downgraded. The admission
+                # policy resolves current Session access; Automation-owned Goals
+                # still inherit their authoritative owner policy there.
+                execution_security_profile_override=None,
+                execution_permission_mode_override=None,
                 goal_id=association.goal_id if association is not None else None,
                 goal_turn_settlement_ids=(
                     association.turn_settlement_ids
@@ -968,6 +1009,15 @@ class TurnService:
                 raise ThreadNotFoundError(f"thread not found: {thread_id}")
             return TurnRepository(connection).executing_for_thread(thread_id)
 
+    def list_for_thread(self, thread_id: str) -> tuple[Turn, ...]:
+        """Return the durable Turn queue in ordinal order for client status UI."""
+
+        with self.database.read() as connection:
+            if ThreadRepository(connection).get(thread_id) is None:
+                raise ThreadNotFoundError(f"thread not found: {thread_id}")
+            turns = TurnRepository(connection).list_for_thread(thread_id)
+        return tuple(turns)
+
     def list_for_goal(self, thread_id: str, goal_id: str) -> tuple[Turn, ...]:
         with self.database.read() as connection:
             if ThreadRepository(connection).get(thread_id) is None:
@@ -1183,6 +1233,7 @@ class TurnService:
                 workspace=workspace,
                 model=execution_profile.model_id,
                 execution_profile=execution_profile,
+                execution_security_profile=turn.execution_security_profile,
                 permission_mode_override=turn.execution_permission_mode,
                 approval_callback=approve,
             )
@@ -1193,7 +1244,10 @@ class TurnService:
             skill_invocations: dict[str, SkillInvocation] = {}
             stored_user = False
             inputs_active = False
-            goal_metadata = {"goalId": turn.goal_id} if turn.goal_id is not None else {}
+            turn_identity_metadata = {
+                "executionClass": turn.execution_class.value,
+                **({"goalId": turn.goal_id} if turn.goal_id is not None else {}),
+            }
             initial_item = next(
                 (
                     item
@@ -1234,7 +1288,12 @@ class TurnService:
                                 "turnId": turn.id,
                                 **initial_input_metadata,
                                 "executionProfile": execution_profile.to_dict(),
-                                **goal_metadata,
+                                "executionSecurityProfile": (
+                                    turn.execution_security_profile.to_dict()
+                                    if turn.execution_security_profile is not None
+                                    else None
+                                ),
+                                **turn_identity_metadata,
                                 "skillInvocations": [
                                     invocation.to_metadata()
                                     for invocation in skill_invocations.values()
@@ -1284,8 +1343,13 @@ class TurnService:
                             "client": turn_client,
                             "turnId": turn.id,
                             "executionProfile": execution_profile.to_dict(),
+                            "executionSecurityProfile": (
+                                turn.execution_security_profile.to_dict()
+                                if turn.execution_security_profile is not None
+                                else None
+                            ),
                             **continuation_metadata,
-                            **goal_metadata,
+                            **turn_identity_metadata,
                             "skillInvocations": [
                                 invocation.to_metadata()
                                 for invocation in skill_invocations.values()

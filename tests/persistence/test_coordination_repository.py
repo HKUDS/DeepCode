@@ -198,9 +198,12 @@ def test_worker_register_heartbeat_liveness_and_stop_are_monotonic(
         assert stopped is not None
         assert stopped.heartbeat_at == stopped_at
         assert stopped.stopped_at == stopped_at
-        assert coordination.list_liveness_candidates(
-            heartbeat_before=stopped_at + timedelta(days=1),
-        ) == []
+        assert (
+            coordination.list_liveness_candidates(
+                heartbeat_before=stopped_at + timedelta(days=1),
+            )
+            == []
+        )
 
 
 def test_non_agent_turn_requires_explicit_worker_affinity_before_admission(
@@ -448,15 +451,11 @@ def test_recovery_query_returns_only_stale_or_stopped_resource_owners(
         cutoff = now - timedelta(minutes=2)
         assert [
             worker.id
-            for worker in coordination.list_liveness_candidates(
-                heartbeat_before=cutoff
-            )
+            for worker in coordination.list_liveness_candidates(heartbeat_before=cutoff)
         ] == [stale.id]
         assert {
             worker.id
-            for worker in coordination.list_recovery_candidates(
-                heartbeat_before=cutoff
-            )
+            for worker in coordination.list_recovery_candidates(heartbeat_before=cutoff)
         } == {stale.id, stopped.id}
         assert [
             lease.resource_key

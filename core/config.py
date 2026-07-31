@@ -48,7 +48,6 @@ from core.providers.registry import (
     find_by_name,
 )
 
-
 _DEFAULT_CONFIG_FILENAME = "deepcode_config.json"
 # Env var that relocates the user-level config base (cf. Codex's CODEX_HOME).
 DEEPCODE_HOME_ENV = "DEEPCODE_HOME"
@@ -229,17 +228,21 @@ class SkillsConfig(_Base):
 class SecurityConfig(_Base):
     """Permission + sandbox policy (P1 security base).
 
-    - ``permission_mode``: ``full_auto`` (legacy CLI default) / ``default`` /
-      ``plan``. Product clients may choose a safer default only when the user
-      did not explicitly configure this field.
-    - ``permissions``: nested ``{tool: {pattern: action}}`` ruleset consumed
-      by :func:`core.harness.permissions.rules_from_config`. Rules can only
-      tighten or relax *within* the non-overridable sensitive-path denylist,
-      never past it.
-    - ``sandbox``: turn command sandboxing on/off (mirrors the
-      ``DEEPCODE_SANDBOX`` env gate; env wins when set).
+    - ``access_preset``: product-level default for new Turns: ``ask`` /
+      ``read_only`` / ``full_access``.  ``None`` preserves legacy configs
+      without pretending that ``full_auto`` also disables the sandbox.
+    - ``permission_mode``: legacy low-level approval policy kept for existing
+      configs and automation definitions.
+    - ``permissions``: nested ``{tool: {pattern: action}}`` ruleset normalized
+      and frozen into each admitted Turn. Ask and legacy profiles retain the
+      protected-path guard; Read only is a hard non-mutating upper bound;
+      explicitly confirmed Full access removes the filesystem guard and
+      command sandbox while still honoring the frozen rules.
+    - ``sandbox``: legacy command-sandbox switch. Product presets resolve the
+      sandbox atomically; the environment gate remains for legacy callers.
     """
 
+    access_preset: Literal["ask", "read_only", "full_access"] | None = None
     permission_mode: str = "full_auto"
     permissions: dict[str, Any] = Field(default_factory=dict)
     sandbox: bool = True
@@ -795,9 +798,12 @@ def make_llm_provider(
 
 
 __all__ = [
+    "DEEPCODE_HOME_ENV",
     "AgentDefaults",
     "AgentPhase",
     "AgentsConfig",
+    "ConfigError",
+    "ConnectionProfileConfig",
     "DeepCodeConfig",
     "DocumentSegmentationConfig",
     "LLMLoggerConfig",
@@ -811,9 +817,6 @@ __all__ = [
     "ProvidersConfig",
     "ResolvedAgentSettings",
     "ToolsConfig",
-    "ConfigError",
-    "ConnectionProfileConfig",
-    "DEEPCODE_HOME_ENV",
     "WorkspaceConfig",
     "deepcode_home",
     "default_config_path",

@@ -36,7 +36,7 @@ fi
 
 if [ ! -x "$python_path" ]; then
   echo "deepcode-desktop: repository virtualenv is missing." >&2
-  echo "Create $repository_root/.venv and install requirements.txt first." >&2
+  echo "Create it with 'uv venv --python 3.12 && uv pip install -e .' first." >&2
   exit 1
 fi
 

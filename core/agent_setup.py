@@ -16,6 +16,7 @@ about.
 
 from __future__ import annotations
 
+import inspect
 import os
 from typing import Any
 
@@ -23,9 +24,13 @@ from loguru import logger
 
 from core.compat import DeepCodeRuntime, get_runtime
 from core.domain.execution_profile import ExecutionProfile
+from core.domain.execution_security import ExecutionSecurityProfile
 from core.events import AgentSession
 from core.harness.permissions import PermissionMode
-from core.harness.policy import build_permission_engine
+from core.harness.policy import (
+    build_permission_engine,
+    resolve_execution_security_profile,
+)
 from core.harness.tools import default_coding_tools
 from core.llm_runtime import get_workflow_provider
 from core.providers.catalog import resolve_model_info
@@ -53,13 +58,19 @@ _CODE_MODE_TOOLS = frozenset(
 
 
 def _wire_code_mode(
-    tool_registry: Any, workspace: str, engine: Any, hooks_engine: Any
+    tool_registry: Any,
+    workspace: str,
+    engine: Any,
+    hooks_engine: Any,
+    execution_security_profile: ExecutionSecurityProfile | None = None,
+    approval_callback: Any | None = None,
 ) -> None:
     """Register the ``code`` tool (C5b): a Python program that orchestrates the
     file/shell/search tools in one turn. Each tool call the code makes is run in
     the parent and governed exactly like a normal tool call — PreToolUse hook →
     permission → execute → PostToolUse hook — so code mode never bypasses policy.
-    An ``ask`` decision has no human in the code loop, so it fails closed (deny).
+    An ``ask`` decision is resolved by the same frontend approval callback as a
+    direct tool call; missing, rejected, or failed approval is fail-closed.
     """
     from core.harness.code_mode import CodeModeTool, api_from_definitions
 
@@ -76,8 +87,28 @@ def _wire_code_mode(
             if pre.updated_input:
                 args = pre.updated_input
         decision, reason = engine.evaluate(tool_name, args)
-        if getattr(decision, "value", decision) != "allow":
+        decision_value = getattr(decision, "value", decision)
+        if decision_value == "deny":
             return f"Error: permission denied: {reason}"
+        if decision_value == "ask":
+            if approval_callback is None:
+                return (
+                    f"Error: permission denied: {reason} — no approver attached "
+                    "(non-interactive run)"
+                )
+            try:
+                approved = approval_callback(tool_name, args, reason)
+                if inspect.isawaitable(approved):
+                    approved = await approved
+            except Exception:
+                logger.exception("code-mode approval_callback failed for {}", tool_name)
+                return (
+                    "Error: permission denied: approval request errored (fail-closed)"
+                )
+            if not approved:
+                return f"Error: permission denied: user rejected: {reason}"
+        elif decision_value != "allow":
+            return "Error: permission denied: unknown permission decision (fail-closed)"
         result = await tool_registry.execute(tool_name, args)
         if hooks_engine is not None and hooks_engine.has_event("PostToolUse"):
             post = await hooks_engine.run_post_tool_use(tool_name, args, result)
@@ -86,7 +117,18 @@ def _wire_code_mode(
                 result = f"{result}\n\n{joined}"
         return result
 
-    tool_registry.register(CodeModeTool(workspace, _execute, api))
+    tool_registry.register(
+        CodeModeTool(
+            workspace,
+            _execute,
+            api,
+            sandbox_enabled=(
+                execution_security_profile.command_sandbox
+                if execution_security_profile is not None
+                else None
+            ),
+        )
+    )
 
 
 def _wire_tool_permissions(tool_registry: Any, engine: Any) -> None:
@@ -187,17 +229,21 @@ def build_agent_session(
     streaming_transport: bool = True,
     default_permission_mode: PermissionMode = PermissionMode.FULL_AUTO,
     permission_mode_override: PermissionMode | None = None,
+    execution_security_profile: ExecutionSecurityProfile | None = None,
     runtime: DeepCodeRuntime | None = None,
 ) -> tuple[AgentSession, str, Any]:
     """Build an :class:`AgentSession` over ``workspace``.
 
     Returns ``(session, resolved_model, permission_engine)``. The workspace is
-    created if missing; the permission engine is fenced to it. Pass
+    created if missing; Ask and Read only stay workspace-scoped while an
+    explicit Full Access profile is unrestricted. Pass
     ``ask_user_callback`` from an interactive frontend to give the agent the
     ``request_user_input`` tool; headless callers omit it. ``allow_spawn`` gives
     the agent the ``spawn_agent`` delegation tool (a spawned sub-agent is built
     with it False so delegation cannot recurse). ``default_permission_mode`` is
-    a client default only; environment and explicit config still win.
+    a legacy client default only; environment and explicit config still win
+    unless an immutable ``execution_security_profile`` was captured for this
+    Turn.
     """
     workspace = os.path.abspath(workspace)
     os.makedirs(workspace, exist_ok=True)
@@ -244,11 +290,18 @@ def build_agent_session(
     resolved_model = resolved_execution.model_id
 
     security_cfg = getattr(active_runtime.config, "security", None)
+    resolved_security_profile = resolve_execution_security_profile(
+        security_cfg,
+        default_mode=default_permission_mode,
+        mode_override=permission_mode_override,
+        profile_override=execution_security_profile,
+    )
     engine = build_permission_engine(
         security_cfg,
         cwd=workspace,
         default_mode=default_permission_mode,
         mode_override=permission_mode_override,
+        execution_security_profile=resolved_security_profile,
     )
 
     # Stable system context is assembled once here. Skills are intentionally
@@ -281,6 +334,7 @@ def build_agent_session(
             resolved_model,
             execution_profile=resolved_execution,
             permission_mode=engine.mode,
+            execution_security_profile=resolved_security_profile,
             approval_callback=approval_callback,
             runtime=active_runtime,
             active_turn_id_provider=active_turn_id_provider,
@@ -309,8 +363,16 @@ def build_agent_session(
         ask_user=ask_user_callback,
         agent_control=control,
         goal_runtime=goal_runtime,
+        execution_security_profile=resolved_security_profile,
     )
-    _wire_code_mode(tool_registry, workspace, engine, hooks_engine)
+    _wire_code_mode(
+        tool_registry,
+        workspace,
+        engine,
+        hooks_engine,
+        resolved_security_profile,
+        approval_callback,
+    )
     _wire_tool_permissions(tool_registry, engine)
 
     session = AgentSession(

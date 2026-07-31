@@ -4,6 +4,7 @@ import type {
   ApprovalDecision,
   ConfigScope,
   Event,
+  ExecutionAccessPreset,
   GoalSetParams,
   JsonObject,
   Project,
@@ -12,6 +13,7 @@ import type {
   TurnStartParams,
   WorkflowStartParams,
 } from "../generated/app-server";
+import { confirmAction } from "../platform/confirmAction";
 import type {
   AnyRpcNotification,
   BridgeError,
@@ -63,8 +65,6 @@ function titleFromPrompt(prompt: string): string {
   return (prompt.trim().split(/\r?\n/, 1)[0] ?? "").trim().slice(0, 60);
 }
 
-export type DesktopPermissionMode = "default" | "plan" | "full_auto";
-
 export interface GoalDefinitionInput {
   objective: string;
   tokenBudget: number | null;
@@ -92,9 +92,13 @@ export interface WorkspaceController {
     model: string | null,
     reasoningEffort: string | null,
   ): Promise<void>;
-  setPermissionMode(mode: DesktopPermissionMode): Promise<void>;
+  setAccessPreset(preset: ExecutionAccessPreset | null): Promise<boolean>;
   refreshSettings(): Promise<void>;
-  updateSettings(patch: JsonObject, scope?: ConfigScope): Promise<void>;
+  updateSettings(
+    patch: JsonObject,
+    scope?: ConfigScope,
+    riskAcknowledged?: boolean,
+  ): Promise<void>;
   setGoal(input: GoalDefinitionInput): Promise<void>;
   pauseGoal(): Promise<void>;
   resumeGoal(): Promise<void>;
@@ -516,23 +520,54 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
   );
 
   const applySettings = useCallback(
-    async (patch: JsonObject, scope: ConfigScope = "user") => {
+    async (
+      patch: JsonObject,
+      scope: ConfigScope = "user",
+      riskAcknowledged = false,
+    ) => {
       const result = await runtime.request("settings/update", {
         patch,
         scope,
         ...(selectedProject ? { projectId: selectedProject.id } : {}),
+        ...(riskAcknowledged ? { riskAcknowledged: true } : {}),
       });
       dispatch({ type: "settings", settings: result.settings });
     },
     [runtime, selectedProject],
   );
 
-  const setPermissionMode = useCallback(
-    (mode: DesktopPermissionMode) =>
-      withBusy(() =>
-        applySettings({ security: { permissionMode: mode } }, "user"),
-      ),
-    [applySettings, withBusy],
+  const setAccessPreset = useCallback(
+    async (preset: ExecutionAccessPreset | null): Promise<boolean> => {
+      if (!selectedThread) return false;
+      if (selectedThread.accessPresetOverride === preset) return true;
+      if (
+        preset === "full_access" &&
+        !(await confirmAction(
+          "Full access lets tools run without approval and outside the workspace " +
+            "sandbox for this Session. DeepCode may read, modify, or execute " +
+            "files anywhere your account can access.",
+          {
+            title: "Enable Full access?",
+            kind: "warning",
+            confirmLabel: "Enable Full access",
+            cancelLabel: "Keep current access",
+          },
+        ))
+      ) {
+        return false;
+      }
+      const applied = await withBusy(async () => {
+        const result = await runtime.request("thread/permission/update", {
+          threadId: selectedThread.id,
+          accessPreset: preset,
+          ...(preset === "full_access" ? { riskAcknowledged: true } : {}),
+        });
+        dispatch({ type: "thread-upsert", thread: result.thread });
+        return true;
+      });
+      return applied === true;
+    },
+    [runtime, selectedThread, withBusy],
   );
 
   const refreshSettings = useCallback(
@@ -541,8 +576,11 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
   );
 
   const updateSettings = useCallback(
-    (patch: JsonObject, scope: ConfigScope = "user") =>
-      withBusy(() => applySettings(patch, scope)),
+    (
+      patch: JsonObject,
+      scope: ConfigScope = "user",
+      riskAcknowledged = false,
+    ) => withBusy(() => applySettings(patch, scope, riskAcknowledged)),
     [applySettings, withBusy],
   );
 
@@ -879,7 +917,7 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
       registerThread,
       setThreadModel,
       setThreadExecution,
-      setPermissionMode,
+      setAccessPreset,
       refreshSettings,
       updateSettings,
       setGoal,
@@ -924,7 +962,7 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
       resumeGoal,
       continueGoal,
       setGoal,
-      setPermissionMode,
+      setAccessPreset,
       setThreadExecution,
       setThreadModel,
       updateSettings,

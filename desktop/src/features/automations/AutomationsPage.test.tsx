@@ -50,6 +50,7 @@ function goalThread(id = "thread-automation"): Thread {
     model: null,
     connectionId: null,
     reasoningEffort: null,
+    accessPresetOverride: null,
     workspacePath: project.canonicalPath,
     worktreePath: null,
     createdAt: timestamp,

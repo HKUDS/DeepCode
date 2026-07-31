@@ -34,6 +34,7 @@ from core.harness.permissions import PermissionMode
 if TYPE_CHECKING:
     from core.compat.runtime import DeepCodeRuntime
     from core.domain.execution_profile import ExecutionProfile
+    from core.domain.execution_security import ExecutionSecurityProfile
 
 # Max sub-agents running at once. A small fan-out (3-5 independent subtasks) is
 # the common case, so the default fits it without forcing a wait-and-retry,
@@ -98,11 +99,12 @@ class AgentControl:
         workspace: str,
         model: str | None = None,
         *,
-        execution_profile: "ExecutionProfile | None" = None,
+        execution_profile: ExecutionProfile | None = None,
         max_threads: int = MAX_CONCURRENT_SUBAGENTS,
         permission_mode: PermissionMode = PermissionMode.FULL_AUTO,
+        execution_security_profile: ExecutionSecurityProfile | None = None,
         approval_callback: Any | None = None,
-        runtime: "DeepCodeRuntime | None" = None,
+        runtime: DeepCodeRuntime | None = None,
         active_turn_id_provider: Any | None = None,
         runtime_input_sink: TurnInputSink | None = None,
     ) -> None:
@@ -111,6 +113,7 @@ class AgentControl:
         self._execution_profile = execution_profile
         self._max_threads = max(1, max_threads)
         self._permission_mode = permission_mode
+        self._execution_security_profile = execution_security_profile
         self._approval_callback = approval_callback
         self._runtime = runtime
         self._active_turn_id_provider = active_turn_id_provider
@@ -352,7 +355,12 @@ class AgentControl:
             injection_callback=inbox_drainer,  # receives parent's send_message
             agent_context=(agent_id, "subagent"),  # fires SubagentStart/Stop hooks
             approval_callback=self._approval_callback,
-            permission_mode_override=self._permission_mode,
+            permission_mode_override=(
+                self._permission_mode
+                if self._execution_security_profile is None
+                else None
+            ),
+            execution_security_profile=self._execution_security_profile,
             runtime=self._runtime,
         )
         if seed_history:
@@ -409,7 +417,7 @@ class AgentControl:
             return "One or more sub-agents have results waiting."
         try:
             await asyncio.wait_for(self._activity.wait(), timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return "Wait timed out; sub-agents are still running."
         return "One or more sub-agents finished."
 

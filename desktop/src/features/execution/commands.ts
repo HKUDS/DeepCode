@@ -1,4 +1,4 @@
-import type { DesktopPermissionMode } from "../../app/useWorkspaceController";
+import type { ExecutionAccessPreset } from "../../generated/app-server";
 
 export type ComposerCommand =
   | { type: "new" }
@@ -7,7 +7,7 @@ export type ComposerCommand =
   | { type: "fork" }
   | { type: "rename"; title: string }
   | { type: "model"; model: string | null }
-  | { type: "permission"; mode: DesktopPermissionMode };
+  | { type: "permission"; accessPreset: ExecutionAccessPreset | null };
 
 export interface CommandDefinition {
   name: string;
@@ -23,9 +23,9 @@ export const commandDefinitions: CommandDefinition[] = [
   { name: "rename", usage: "/rename ", description: "Rename this Session" },
   { name: "model", usage: "/model ", description: "Set a model or use default" },
   {
-    name: "permission",
-    usage: "/permission ",
-    description: "Set approval, plan, or full-auto mode",
+    name: "permissions",
+    usage: "/permissions ",
+    description: "Set this Session's tool access",
   },
 ];
 
@@ -70,20 +70,29 @@ export function parseComposerCommand(value: string): CommandParseResult | null {
             },
           }
         : { ok: false, message: "Usage: /model <model id | default>" };
-    case "permission": {
-      const aliases: Record<string, DesktopPermissionMode> = {
-        approval: "default",
-        default: "default",
-        plan: "plan",
-        "full-auto": "full_auto",
-        full_auto: "full_auto",
+    case "permission":
+    case "permissions": {
+      const aliases: Record<string, ExecutionAccessPreset | null> = {
+        ask: "ask",
+        approval: "ask",
+        "read-only": "read_only",
+        read_only: "read_only",
+        plan: "read_only",
+        "full-access": "full_access",
+        full_access: "full_access",
+        inherit: null,
+        default: null,
       };
-      const mode = aliases[argument.toLocaleLowerCase()];
-      return mode
-        ? { ok: true, command: { type: "permission", mode } }
+      const key = argument.toLocaleLowerCase();
+      return Object.hasOwn(aliases, key)
+        ? {
+            ok: true,
+            command: { type: "permission", accessPreset: aliases[key] ?? null },
+          }
         : {
             ok: false,
-            message: "Usage: /permission <approval | plan | full-auto>",
+            message:
+              "Usage: /permissions <ask | read-only | full-access | inherit>",
           };
     }
     default:

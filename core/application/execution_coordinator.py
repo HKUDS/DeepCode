@@ -136,9 +136,7 @@ class ExecutionCoordinator:
         self.heartbeat_interval = heartbeat_interval
         self.stale_worker_after = stale_worker_after
         self._clock = clock
-        self._admission_policy = (
-            admission_policy or SharedCapacityWorkspacePolicy()
-        )
+        self._admission_policy = admission_policy or SharedCapacityWorkspacePolicy()
         self._on_start_failure = on_start_failure
         self._on_orphaned_execution = on_orphaned_execution
         self._on_cancel_requested = on_cancel_requested

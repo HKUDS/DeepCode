@@ -21,9 +21,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import cli.loop_cli as loop_cli  # noqa: E402
-import core.agent_setup as agent_setup  # noqa: E402
-from core.providers.base import LLMResponse, ToolCallRequest  # noqa: E402
+from cli import loop_cli
+from core import agent_setup
+from core.providers.base import LLMResponse, ToolCallRequest
 
 
 class _Provider:
@@ -176,6 +176,7 @@ def test_loop_cli_completes_through_the_model_goal_tool(monkeypatch, tmp_path, c
             "keep calc.add working",
             "-w",
             str(ws),
+            "--trust",
             "-t",
             "python -m pytest -q",
         ]
@@ -213,9 +214,30 @@ def test_loop_cli_returns_failure_for_a_model_reported_blocker(
     )
     provider = _Provider("blocked")
     _configure(monkeypatch, tmp_path, provider)
-    rc = loop_cli.main(["fix it", "-w", str(ws), "-t", "python -m pytest -q"])
+    rc = loop_cli.main(
+        ["fix it", "-w", str(ws), "--trust", "-t", "python -m pytest -q"]
+    )
     assert rc == 1
     assert "Goal blocked" in capsys.readouterr().out
+
+
+def test_loop_cli_refuses_untrusted_workspace_without_creating_a_session(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    from core.sessions import SessionStore
+
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    provider = _Provider("complete")
+    _configure(monkeypatch, tmp_path, provider)
+
+    assert loop_cli.main(["finish it", "-w", str(workspace)]) == 1
+
+    assert provider.calls == 0
+    assert SessionStore(tmp_path / "sessions").list_sessions() == []
+    assert "--trust" in capsys.readouterr().out
 
 
 def test_loop_resume_complete_goal_is_read_only(monkeypatch, tmp_path, capsys):
@@ -226,7 +248,7 @@ def test_loop_resume_complete_goal_is_read_only(monkeypatch, tmp_path, capsys):
     provider = _Provider("complete")
     _configure(monkeypatch, tmp_path, provider)
 
-    assert loop_cli.main(["ship it", "-w", str(workspace)]) == 0
+    assert loop_cli.main(["ship it", "-w", str(workspace), "--trust"]) == 0
     sessions = SessionStore(tmp_path / "sessions")
     session_id = sessions.list_sessions()[0].session_id
     goal_before = ThreadGoalStore(sessions).read(session_id)
@@ -292,7 +314,7 @@ def test_loop_resume_blocked_goal_retries_without_new_session(
     workspace.mkdir()
     provider = _Provider("blocked")
     _configure(monkeypatch, tmp_path, provider)
-    assert loop_cli.main(["fix it", "-w", str(workspace)]) == 1
+    assert loop_cli.main(["fix it", "-w", str(workspace), "--trust"]) == 1
     sessions = SessionStore(tmp_path / "sessions")
     session_id = sessions.list_sessions()[0].session_id
     blocked = ThreadGoalStore(sessions).read(session_id)
@@ -367,7 +389,7 @@ def test_loop_resume_active_running_goal_attaches_without_duplicate_turn(
     with ThreadPoolExecutor(max_workers=2) as executor:
         initial = executor.submit(
             loop_cli.main,
-            ["finish once", "-w", str(workspace)],
+            ["finish once", "-w", str(workspace), "--trust"],
         )
         assert provider.entered.wait(timeout=5)
         sessions = SessionStore(tmp_path / "sessions")
@@ -395,7 +417,7 @@ def test_loop_waits_for_the_deciding_turn_to_finish(monkeypatch, tmp_path):
     with ThreadPoolExecutor(max_workers=1) as executor:
         running = executor.submit(
             loop_cli.main,
-            ["finish cleanly", "-w", str(workspace)],
+            ["finish cleanly", "-w", str(workspace), "--trust"],
         )
         assert provider.final_started.wait(timeout=5)
         assert not running.done()
@@ -506,6 +528,7 @@ def test_loop_resume_execution_override_is_one_turn_only(
                 session_id,
                 "--workspace",
                 str(workspace_override),
+                "--trust",
                 "--connection",
                 "openrouter",
                 "--model",

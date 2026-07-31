@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Iterator, TypeVar
+from typing import Any, TypeVar
 
 from core.domain.thread_goal import (
     GOAL_OUTCOME_REASON_MAX_CHARS,
@@ -17,12 +18,12 @@ from core.domain.thread_goal import (
     ThreadGoal,
     ThreadGoalStatus,
 )
+from core.private_storage import open_private_file
 from core.sessions.legacy_goal_decoder import (
     LegacyGoalDecodeError,
     decode_legacy_goal,
 )
 from core.sessions.store import SessionStore
-
 
 GOAL_LEDGER_FILENAME = "goal.jsonl"
 THREAD_GOAL_SCHEMA_VERSION = 2
@@ -717,13 +718,15 @@ class ThreadGoalStore:
     @classmethod
     def _append_entry(cls, directory: Path, entry: dict[str, Any]) -> None:
         path = cls._ledger_path(directory)
-        path.parent.mkdir(parents=True, exist_ok=True)
         cls._discard_uncommitted_tail(path)
         encoded = (
             json.dumps(entry, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
             + b"\n"
         )
-        descriptor = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
+        descriptor = open_private_file(
+            path,
+            os.O_APPEND | os.O_CREAT | os.O_WRONLY,
+        )
         try:
             view = memoryview(encoded)
             while view:

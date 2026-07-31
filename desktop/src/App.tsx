@@ -60,10 +60,13 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
   const transcript = useTranscriptMode();
   const runComposerCommand = useComposerCommands(controller, ui);
   const { state, selectedProject, selectedThread } = controller;
-  const activeTurn = latestExecutingTurn(
-    state.turns,
-    selectedThread?.id,
-  );
+  const activeTurn = latestExecutingTurn(state.turns, selectedThread?.id);
+  const queuedTurns = state.turns
+    .filter(
+      (turn) =>
+        turn.threadId === selectedThread?.id && turn.status === "queued",
+    )
+    .sort((left, right) => left.ordinal - right.ordinal);
   const hasPendingTurn = state.turns.some(
     (turn) =>
       turn.threadId === selectedThread?.id &&
@@ -307,7 +310,8 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
                 editable={composerEditable}
                 canExecute={agentExecutionEnabled}
                 busy={state.busy}
-                active={Boolean(activeTurn)}
+                executingTurn={activeTurn}
+                queuedTurns={queuedTurns}
                 runtime={runtime}
                 project={selectedProject}
                 thread={selectedThread}
@@ -331,9 +335,7 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
                     reasoningEffort,
                   )
                 }
-                onPermissionModeChange={(mode) =>
-                  void controller.setPermissionMode(mode)
-                }
+                onAccessPresetChange={controller.setAccessPreset}
                 onSetGoal={controller.setGoal}
                 onPauseGoal={controller.pauseGoal}
                 onResumeGoal={controller.resumeGoal}

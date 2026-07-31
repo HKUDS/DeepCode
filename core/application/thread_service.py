@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from core.application.errors import (
@@ -19,8 +19,14 @@ from core.application.views import item_view, thread_view, turn_view, workflow_v
 from core.domain.common import new_id, utc_now
 from core.domain.event import DomainEvent
 from core.domain.execution_profile import ExecutionProfile
+from core.domain.execution_security import (
+    ExecutionAccessPreset,
+    ExecutionSecurityProfile,
+    parse_access_preset_override,
+)
 from core.domain.item import Item, ItemKind, ItemStatus
 from core.domain.project import Project, TrustState
+from core.domain.runtime_coordination import ExecutionClass
 from core.domain.thread import Thread, ThreadMode, ThreadStatus
 from core.domain.turn import Turn, TurnExecutor, TurnStatus
 from core.domain.workflow import WorkflowRun, WorkflowStatus
@@ -32,9 +38,8 @@ from core.persistence.legacy_import_repository import LegacyImportRepository
 from core.persistence.project_repository import ProjectRepository
 from core.persistence.thread_repository import ThreadRepository
 from core.persistence.workflow_repository import WorkflowRepository
-from core.sessions import Session, SessionMessage, SessionStore
 from core.providers.reasoning import normalize_reasoning_effort
-
+from core.sessions import Session, SessionMessage, SessionStore
 
 _DESKTOP_KIND = "desktop"
 _AUTOMATION_KIND = "automation"
@@ -45,9 +50,9 @@ _UNSET = object()
 class ThreadService:
     """Expose canonical SessionStore records through Desktop Thread projections.
 
-    JSONL sessions own identity, title, transcript, workspace origin, model, and
-    archive metadata. SQLite owns only rebuildable UI/runtime state such as
-    Turns, Items, approvals, worktrees, and event replay.
+    JSONL sessions own identity, title, transcript, workspace origin, model,
+    access preset, and archive metadata. SQLite owns only rebuildable UI/runtime
+    state such as Turns, Items, approvals, worktrees, and event replay.
     """
 
     def __init__(
@@ -88,6 +93,7 @@ class ThreadService:
         model: str | None = None,
         connection_id: str | None = None,
         reasoning_effort: str | None = None,
+        access_preset_override: ExecutionAccessPreset | None = None,
         workspace_path: str | None = None,
         parent_thread_id: str | None = None,
     ) -> Thread:
@@ -123,6 +129,13 @@ class ThreadService:
             else None
         )
         resolved_reasoning = normalize_reasoning_effort(reasoning_effort)
+        if access_preset_override is not None and not isinstance(
+            access_preset_override,
+            ExecutionAccessPreset,
+        ):
+            raise TypeError(
+                "access_preset_override must be an ExecutionAccessPreset or None"
+            )
         metadata = {
             "kind": clean_session_kind,
             "workspace": str(workspace),
@@ -131,6 +144,11 @@ class ThreadService:
             "model": resolved_model,
             "connection_id": resolved_connection,
             "reasoning_effort": resolved_reasoning,
+            "access_preset_override": (
+                access_preset_override.value
+                if access_preset_override is not None
+                else None
+            ),
             "archived": False,
         }
         if parent_thread_id is not None:
@@ -385,6 +403,32 @@ class ThreadService:
             raise ThreadNotFoundError(f"thread not found: {thread_id}")
         return self._project_updated_session(thread_id, "thread.model_changed")
 
+    def set_access_preset(
+        self,
+        thread_id: str,
+        access_preset: ExecutionAccessPreset | None,
+    ) -> Thread:
+        """Change the access preset inherited by future Turns in one Session."""
+
+        if access_preset is not None and not isinstance(
+            access_preset,
+            ExecutionAccessPreset,
+        ):
+            raise TypeError("access_preset must be an ExecutionAccessPreset or None")
+        if not self.session_store.update_metadata(
+            thread_id,
+            {
+                "access_preset_override": (
+                    access_preset.value if access_preset is not None else None
+                )
+            },
+        ):
+            raise ThreadNotFoundError(f"thread not found: {thread_id}")
+        return self._project_updated_session(
+            thread_id,
+            "thread.permission_changed",
+        )
+
     def archive(self, thread_id: str) -> Thread:
         now = utc_now()
         if not self.session_store.update_metadata(
@@ -424,6 +468,9 @@ class ThreadService:
             "branched_at_message": len(source.messages),
             "archived": False,
             "archived_at": None,
+            # A fork is a new Session. Never carry an access grant, especially
+            # Full Access, into it without a fresh explicit user selection.
+            "access_preset_override": None,
         }
         self.session_store.update_metadata(forked.session_id, metadata)
         forked = self.session_store.get_session(forked.session_id)
@@ -461,6 +508,7 @@ class ThreadService:
         model = self._model_for(metadata)
         connection_id = self._connection_for(metadata)
         reasoning_effort = self._reasoning_for(metadata)
+        access_preset_override = self._access_preset_for(metadata)
         archived = bool(metadata.get("archived"))
         archived_at = (
             self._parse_time(str(metadata.get("archived_at"))) if archived else None
@@ -491,6 +539,7 @@ class ThreadService:
                     model=model,
                     connection_id=connection_id,
                     reasoning_effort=reasoning_effort,
+                    access_preset_override=access_preset_override,
                     workspace_path=str(workspace),
                     created_at=canonical_created,
                     updated_at=canonical_updated,
@@ -528,6 +577,7 @@ class ThreadService:
                     model=model,
                     connection_id=connection_id,
                     reasoning_effort=reasoning_effort,
+                    access_preset_override=access_preset_override,
                     workspace_path=str(workspace),
                     updated_at=updated_at,
                     archived_at=archived_at,
@@ -623,6 +673,7 @@ class ThreadService:
         events: list[DomainEvent] = []
         for messages in groups:
             timestamps = [self._parse_time(message.timestamp) for message in messages]
+            execution_security_profile = self._execution_security_for(messages)
             first_user = next(
                 (message for message in messages if message.role == "user"),
                 None,
@@ -648,6 +699,14 @@ class ThreadService:
                     ),
                     None,
                 ),
+                execution_permission_mode=(
+                    execution_security_profile.permission_mode
+                    if execution_security_profile is not None
+                    else None
+                ),
+                execution_security_profile=execution_security_profile,
+                goal_id=self._goal_id_for(messages),
+                execution_class=self._execution_class_for(messages),
                 status=TurnStatus.COMPLETED,
                 stop_reason="session_projection",
                 started_at=min(timestamps),
@@ -979,6 +1038,11 @@ class ThreadService:
             "model": thread.model,
             "connection_id": thread.connection_id,
             "reasoning_effort": thread.reasoning_effort,
+            "access_preset_override": (
+                thread.access_preset_override.value
+                if thread.access_preset_override is not None
+                else None
+            ),
             "archived": thread.status is ThreadStatus.ARCHIVED,
             "archived_at": (
                 thread.archived_at.isoformat()
@@ -1011,6 +1075,7 @@ class ThreadService:
             thread.model,
             thread.connection_id,
             thread.reasoning_effort,
+            thread.access_preset_override,
             thread.status is ThreadStatus.ARCHIVED,
             thread.archived_at,
             project_path,
@@ -1230,12 +1295,90 @@ class ThreadService:
         return normalize_reasoning_effort(str(raw)) if raw is not None else None
 
     @staticmethod
+    def _access_preset_for(metadata: dict) -> ExecutionAccessPreset | None:
+        try:
+            return parse_access_preset_override(metadata)
+        except ValueError:
+            # Keep the application recoverable while never interpreting
+            # damaged metadata as inheritance (which could resolve to Full
+            # access). Admission still rejects the corrupt canonical value
+            # until the user saves a valid Session selection.
+            return ExecutionAccessPreset.ASK
+
+    @staticmethod
+    def _execution_security_for(
+        messages: list[SessionMessage],
+    ) -> ExecutionSecurityProfile | None:
+        """Recover one canonical Turn snapshot without guessing on damage."""
+
+        selected: ExecutionSecurityProfile | None = None
+        for message in messages:
+            metadata = message.metadata or {}
+            if "executionSecurityProfile" not in metadata:
+                continue
+            raw = metadata["executionSecurityProfile"]
+            if raw is None:
+                # Explicit null is the canonical representation of an older
+                # Turn that predates complete security snapshots.
+                continue
+            parsed = ExecutionSecurityProfile.from_dict(raw)
+            if parsed is None:
+                raise ConflictError(
+                    "canonical Session contains an invalid execution security "
+                    "profile; projection rebuild stopped fail-closed"
+                )
+            if selected is not None and parsed != selected:
+                raise ConflictError(
+                    "canonical Session contains conflicting execution security "
+                    "profiles for one Turn"
+                )
+            selected = parsed
+        return selected
+
+    @staticmethod
+    def _goal_id_for(messages: list[SessionMessage]) -> str | None:
+        selected: str | None = None
+        for message in messages:
+            raw = (message.metadata or {}).get("goalId")
+            if raw is None:
+                continue
+            candidate = str(raw).strip()
+            if not candidate.startswith("goal_"):
+                raise ConflictError("canonical Session contains an invalid goalId")
+            if selected is not None and candidate != selected:
+                raise ConflictError(
+                    "canonical Session contains conflicting goalId values"
+                )
+            selected = candidate
+        return selected
+
+    @staticmethod
+    def _execution_class_for(messages: list[SessionMessage]) -> ExecutionClass:
+        selected: ExecutionClass | None = None
+        for message in messages:
+            raw = (message.metadata or {}).get("executionClass")
+            if raw is None:
+                continue
+            try:
+                candidate = ExecutionClass(str(raw))
+            except ValueError as exc:
+                raise ConflictError(
+                    "canonical Session contains an invalid executionClass"
+                ) from exc
+            if selected is not None and candidate is not selected:
+                raise ConflictError(
+                    "canonical Session contains conflicting executionClass values"
+                )
+            selected = candidate
+        return selected or ExecutionClass.INTERACTIVE
+
+    @staticmethod
     def _parse_time(raw: str) -> datetime:
         try:
             parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
             if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=timezone.utc)
-            return parsed.astimezone(timezone.utc)
+                parsed = parsed.replace(tzinfo=UTC)
+            return parsed.astimezone(UTC)
         except (TypeError, ValueError):
             return utc_now()
 

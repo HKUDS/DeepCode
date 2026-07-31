@@ -36,7 +36,7 @@
 <p>
   <a href="https://github.com/HKUDS/DeepCode/stargazers"><img src='https://img.shields.io/github/stars/HKUDS/DeepCode?color=00d9ff&style=for-the-badge&logo=star&logoColor=white&labelColor=1a1a2e' /></a>
   <a href='https://arxiv.org/abs/2512.07921'><img src="https://img.shields.io/badge/Paper-arXiv-orange?style=for-the-badge&logo=arxiv&logoColor=white&labelColor=1a1a2e"></a>
-  <img src="https://img.shields.io/badge/🐍Python-3.13-4ecdc4?style=for-the-badge&logo=python&logoColor=white&labelColor=1a1a2e">
+  <img src="https://img.shields.io/badge/🐍Python-3.12%2B-4ecdc4?style=for-the-badge&logo=python&logoColor=white&labelColor=1a1a2e">
   <!-- <a href="https://pypi.org/project/deepcode-hku/"><img src="https://img.shields.io/pypi/v/deepcode-hku.svg?style=for-the-badge&logo=pypi&logoColor=white&labelColor=1a1a2e&color=ff6b6b"></a> -->
 </p>
 <p>
@@ -80,11 +80,11 @@
 *Professional terminal interface for advanced users and CI/CD integration*
 </div>
 
-The legacy browser UI has been removed. The Tauri 2 workbench can be run from
-source today; packaged Desktop releases are still under active development.
-See the
-[`P1 architecture`](docs/P1_APP_SERVER_ARCHITECTURE.md) and
-[`Desktop source guide`](desktop/README.md).
+DeepCode has one Agent runtime and two interfaces: an interactive CLI for
+terminal workflows and a Tauri Desktop workbench for visual Sessions, review,
+and settings. Both open the same local Projects, Session history, models,
+Skills, permissions, Goals, and Automations. See the
+[`Desktop source guide`](desktop/README.md) to run the application locally.
 
 ---
 
@@ -146,6 +146,15 @@ See the
 
 ## News
 
+**2026-07-31 · One execution model across CLI and Desktop**
+
+- Interactive, headless, Goal, Automation, and Desktop work all use the same
+  durable Project, Session, Thread, and Turn lifecycle.
+- Workspace trust is explicit and independent from the Session access preset:
+  **Ask**, **Read only**, or **Full access**.
+- Model-aware Thinking controls and typed reasoning presentation remain
+  separate, so changing display detail never changes the model request.
+
 **2026-07-21 · Durable Goals and safe Session lifecycle**
 
 - Run long tasks as resumable, evidence-driven Goals shared by CLI and Desktop.
@@ -173,8 +182,8 @@ See the
 
 **2026-07-10 · Loop Engineering and parallel agents**
 
-- Give DeepCode a mutable goal; it can inspect, implement, verify where
-  appropriate, and repair through bounded rounds while remaining steerable.
+- Give DeepCode a mutable Goal; it can inspect, implement, verify where
+  appropriate, and repair across ordinary Turns while remaining steerable.
 - Delegate focused work to agents in isolated worktrees, then surface conflicts
   explicitly before integration.
 
@@ -255,9 +264,10 @@ contract.
 
 - tool activity is streamed as progress rather than hidden behind a spinner;
 - permission decisions are explicit: `allow`, `ask`, or `deny`;
-- sensitive credential paths remain denied even in permissive modes;
-- shell work is fenced to the workspace through the available macOS or Linux
-  sandbox;
+- **Ask** and **Read only** retain protected-path rules and the available
+  platform sandbox; **Full access** is an explicit unrestricted grant;
+- each admitted Turn freezes its resolved execution profile, so later setting
+  changes cannot alter work that is already running or queued;
 - interrupted or crashed work is settled without silently replaying side
   effects.
 
@@ -270,12 +280,10 @@ decide whether to continue, complete, or report a genuine blocker.
 
 Users can revise the Goal or steer the active Turn without discarding useful
 work. Tests, builds, lint checks, and other explicit verifiers remain strong
-evidence when they apply, while stable Goal identity, permissions, and bounded
-budgets keep the loop safe and honest. Session history and project memory keep
-the work continuous across restarts and model changes.
-
-The implementation sequence and invariants are defined in the
-[Loop Engineering implementation plan](docs/LOOP_ENGINEERING_IMPLEMENTATION_PLAN.md).
+evidence when they apply. Stable Goal identity, frozen Turn permissions, and
+optional user-defined budgets keep long work attributable without imposing a
+fixed task limit. Session history and project memory keep the work continuous
+across restarts and model changes.
 
 ### Context Engineering
 
@@ -339,12 +347,15 @@ model, permission, and recovery rules as a manual Turn.
 ### 1. Install and initialize
 
 ```bash
-pip install deepcode-hku
+uv tool install deepcode-hku
 deepcode init
 ```
 
-`deepcode init` creates the user-level configuration under `~/.deepcode/`.
-After that, `deepcode` can be launched from any project directory.
+`deepcode init` creates a minimal user configuration under `~/.deepcode/`
+without copying project settings or credentials. After that, `deepcode` can be
+launched from any project directory. `pipx install deepcode-hku` and
+`pip install deepcode-hku` are also supported in an appropriate Python 3.12+
+environment.
 
 ### 2. Connect a model provider
 
@@ -359,42 +370,55 @@ deepcode provider models personal-openrouter --refresh
 ```
 
 `--api-key` uses a non-echoing prompt. Saved keys live in
-`~/.deepcode/credentials.json` with user-only permissions; they are never
-exposed to a client or written into Session history.
+`~/.deepcode/credentials.json` in user-private storage; they are never returned
+to a client or written into Session history. Use the model-list command above
+instead of relying on a model name copied from an older example.
 
 ### 3. Start coding
 
 ```bash
-deepcode -c personal-openrouter -m moonshotai/kimi-k3 --effort low
+cd /path/to/your/repository
+deepcode -c personal-openrouter -m <model-id> --effort auto
 ```
+
+On first use, review the canonical workspace path and confirm trust. DeepCode
+remembers that decision for the Project; trust does not grant unrestricted tool
+access.
 
 Or run one headless task:
 
 ```bash
 deepcode exec "Fix the failing tests and explain the root cause" \
   --connection personal-openrouter \
-  --model moonshotai/kimi-k3 \
-  --effort low \
+  --model <model-id> \
+  --effort auto \
+  --trust \
+  --access full-access \
   --json
 ```
 
+`--trust` records the workspace decision. `--access full-access` is an explicit
+unrestricted grant suitable only for an isolated repository or CI runner. Omit
+it in an interactive terminal to approve sensitive tools as they are requested,
+or use `--access read-only` for inspection.
+
 Choose whichever interface fits your workflow. `deepcode` opens the interactive
-CLI; the same Sessions can also be opened in Desktop. To run Desktop from
-source, install Node.js 22+, Rust stable, and the platform dependencies required
-by Tauri, then run:
+CLI; the same Sessions can also be opened in Desktop. To run Desktop from a
+source checkout, install Node.js 22+, Rust stable, and the platform dependencies
+required by Tauri, then prepare the repository environment and use its launcher:
 
 ```bash
-cd desktop
-npm ci
-npm run tauri -- dev
+uv venv --python 3.12
+uv pip install -e .
+cd desktop && npm ci && cd ..
+./scripts/deepcode-desktop
 ```
 
 Open **Settings → Connections** to configure a provider, then select a
 connection and model from the Session composer.
 
 > The interface changes how the work is presented, not the Agent, policy,
-> configuration, or Session history behind it. Packaged Desktop releases are
-> still in development.
+> configuration, or Session history behind it.
 
 ## Using DeepCode
 
@@ -407,6 +431,7 @@ connection and model from the Session composer.
 /resume <id>             restore one Session
 /model [connection] [id] show or change the model for future Turns
 /effort [auto|off|level] show or change Thinking for future Turns
+/permissions [preset]   show or change access for future Turns
 /transcript [mode]       choose normal, verbose, or summary detail
 /clear                   clear the current in-memory context
 @src/main.py             attach a file to the next prompt
@@ -424,7 +449,7 @@ are unavailable.
 Start or resume directly:
 
 ```bash
-deepcode -w ./my-project
+deepcode -w ./my-project --trust
 deepcode --resume <session-id>
 ```
 
@@ -487,8 +512,8 @@ To make one connection/model the shared default, edit the user-level
   "agents": {
     "defaults": {
       "connection": "personal-openrouter",
-      "model": "moonshotai/kimi-k3",
-      "reasoningEffort": "low"
+      "model": "<model-id>",
+      "reasoningEffort": "auto"
     }
   }
 }
@@ -538,7 +563,9 @@ Headless tasks accept repeatable `--skill` flags:
 ```bash
 deepcode exec "Review this change for security regressions" \
   --skill security-review \
-  --skill test-strategy
+  --skill test-strategy \
+  --trust \
+  --access read-only
 ```
 
 A Skill supplies workflow instructions. It cannot grant permissions or bypass
@@ -549,10 +576,17 @@ project trust, sandbox, approval, or tool policy.
 DeepCode treats execution as a product boundary rather than a client-side
 confirmation:
 
-- Projects require explicit trust before interactive Agent execution.
+- Projects require explicit trust before Agent execution on every interface.
 - Permission decisions are `allow`, `ask`, or `deny`.
 - An approval resumes the exact suspended tool call.
-- Sensitive credential paths remain denied in every permission mode.
+- **Ask** keeps the workspace command sandbox and protected-path checks;
+  **Read only** denies mutating tools; **Full access** is an explicit,
+  confirmed Session grant that removes approval and filesystem sandbox
+  boundaries. Explicit deny rules still win.
+- CLI and Desktop edit the same Session override. Each admitted Turn freezes
+  the complete resolved security profile: changes apply to new submissions,
+  while active and already queued Turns keep their recorded access after
+  resume or worker handoff.
 - Shell and code processes are terminated as owned process trees on timeout,
   interruption, or shutdown.
 - Crash recovery settles incomplete Turns without automatically replaying side
@@ -563,6 +597,11 @@ confirmation:
 In the interactive CLI, attach a durable Goal to the current Session:
 
 ```text
+/permissions
+/permissions ask
+/permissions read-only
+/permissions full-access
+/permissions inherit
 /goal Implement and verify the requested feature
 /goal show
 /goal edit Implement the feature and preserve the public API
@@ -599,7 +638,9 @@ adds the requested command to the model-visible completion evidence:
 
 ```bash
 deepcode loop "Implement the requested feature" \
-  --test-cmd pytest
+  --test-cmd pytest \
+  --trust \
+  --access full-access
 ```
 
 Resume the same Goal and canonical Session after leaving the process:
@@ -771,8 +812,7 @@ cd DeepCode
 curl -LsSf https://astral.sh/uv/install.sh | sh
 uv venv --python=3.13
 source .venv/bin/activate
-uv pip install -r requirements.txt
-pip install -e .
+uv pip install -e .
 ```
 
 On Windows, activate with `.venv\Scripts\activate`.

@@ -158,15 +158,11 @@ def test_v8_migrates_legacy_execution_facts_and_round_trips_to_v7(
             "legacy:arun_legacy_second",
         ]
         runs = connection.execute(
-            "SELECT id, status, completed_at, goal_id "
-            "FROM automation_runs ORDER BY id"
+            "SELECT id, status, completed_at, goal_id FROM automation_runs ORDER BY id"
         ).fetchall()
         assert [row["status"] for row in runs].count("queued") == 1
         assert [row["status"] for row in runs].count("interrupted") == 1
-        assert {
-            row["id"]: row["goal_id"]
-            for row in runs
-        } == {
+        assert {row["id"]: row["goal_id"] for row in runs} == {
             "arun_legacy_first": legacy_turn.goal_id,
             "arun_legacy_second": None,
         }

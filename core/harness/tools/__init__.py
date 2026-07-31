@@ -13,6 +13,7 @@ These are pure mechanism: file I/O + the permission/sandbox seams from P1.
 :class:`~core.events.session.AgentSession` can consume.
 """
 
+from core.domain.execution_security import ExecutionSecurityProfile, FilesystemScope
 from core.harness.tools.files import EditTool, ReadTool, WriteTool
 from core.harness.tools.patch import ApplyPatchTool, PatchError, parse_patch
 from core.harness.tools.replace import (
@@ -25,20 +26,20 @@ from core.harness.tools.search import GlobTool, GrepTool
 from core.harness.tools.shell import BashTool
 
 __all__ = [
-    "ReadTool",
-    "WriteTool",
-    "EditTool",
     "ApplyPatchTool",
     "BashTool",
-    "GrepTool",
-    "GlobTool",
-    "replace",
-    "parse_patch",
-    "PatchError",
-    "NotFoundError",
-    "MultipleMatchesError",
     "DisproportionateMatchError",
+    "EditTool",
+    "GlobTool",
+    "GrepTool",
+    "MultipleMatchesError",
+    "NotFoundError",
+    "PatchError",
+    "ReadTool",
+    "WriteTool",
     "default_coding_tools",
+    "parse_patch",
+    "replace",
 ]
 
 
@@ -50,13 +51,15 @@ def default_coding_tools(
     ask_user=None,
     agent_control=None,
     goal_runtime=None,
+    execution_security_profile: ExecutionSecurityProfile | None = None,
 ):
     """Build a :class:`ToolRegistry` with the native coding tool set.
 
     read / write / edit / apply_patch / bash / grep / glob / memory / update_plan
     over ``workspace``. ``workspace`` is the root the tools resolve relative
-    paths against and, for write / edit / apply_patch / bash, the boundary they
-    are fenced to. ``memory`` persists notes under ``.deepcode/memory/``;
+    paths against and, unless an explicit Full Access profile is supplied, the
+    boundary write / edit / apply_patch / bash are fenced to. ``memory``
+    persists notes under ``.deepcode/memory/``;
     ``update_plan`` is the agent's self-driven TODO plan.
 
     ``skill_runtime`` is the preferred shared, live catalog. ``skills`` remains
@@ -74,8 +77,8 @@ def default_coding_tools(
     from core.agent_runtime.tools.registry import ToolRegistry
     from core.harness.memory import MemoryTool
     from core.harness.skills import SkillTool, discover_skills
-    from core.harness.tools.plan import UpdatePlanTool
     from core.harness.tools.goal import GetGoalTool, UpdateGoalTool
+    from core.harness.tools.plan import UpdatePlanTool
     from core.harness.tools.spawn_agent import (
         InterruptAgentTool,
         ListAgentsTool,
@@ -86,12 +89,30 @@ def default_coding_tools(
     from core.harness.tools.user_input import RequestUserInputTool
 
     registry = ToolRegistry()
+    allow_outside_workspace = bool(
+        execution_security_profile is not None
+        and execution_security_profile.filesystem_scope is FilesystemScope.UNRESTRICTED
+    )
+    command_sandbox = (
+        execution_security_profile.command_sandbox
+        if execution_security_profile is not None
+        else None
+    )
     tools = [
         ReadTool(workspace),
-        WriteTool(workspace),
-        EditTool(workspace),
-        ApplyPatchTool(workspace),
-        BashTool(workspace),
+        WriteTool(
+            workspace,
+            allow_outside_workspace=allow_outside_workspace,
+        ),
+        EditTool(
+            workspace,
+            allow_outside_workspace=allow_outside_workspace,
+        ),
+        ApplyPatchTool(
+            workspace,
+            allow_outside_workspace=allow_outside_workspace,
+        ),
+        BashTool(workspace, sandbox_enabled=command_sandbox),
         GrepTool(workspace),
         GlobTool(workspace),
         MemoryTool(workspace),

@@ -64,8 +64,9 @@ def _preflight(command: str) -> str | None:
 class BashTool(Tool):
     """Run a bash command in the sandboxed workspace and return its output."""
 
-    def __init__(self, workspace: str):
+    def __init__(self, workspace: str, *, sandbox_enabled: bool | None = None):
         self._workspace = str(workspace)
+        self._sandbox_enabled = sandbox_enabled
 
     @property
     def name(self) -> str:
@@ -73,6 +74,12 @@ class BashTool(Tool):
 
     @property
     def description(self) -> str:
+        if self._sandbox_enabled is False:
+            return (
+                "Run a bash command with the command sandbox disabled by the "
+                "current Full Access profile. Prefer non-interactive flags; "
+                "large output is truncated with the full output saved to a file."
+            )
         return (
             "Run a bash command in the workspace (sandboxed: writes are fenced "
             "to the workspace). Prefer non-interactive flags; large output is "
@@ -89,7 +96,11 @@ class BashTool(Tool):
         if refusal:
             return f"Error: {refusal}"
 
-        wrapped = build_exec_command(command=command, workspace=self._workspace)
+        wrapped = build_exec_command(
+            command=command,
+            workspace=self._workspace,
+            enabled=self._sandbox_enabled,
+        )
         try:
             proc = await asyncio.create_subprocess_exec(
                 *wrapped.argv,
@@ -100,7 +111,7 @@ class BashTool(Tool):
             )
             try:
                 out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 await terminate_process_tree(proc)
                 return f"Error: command timed out after {timeout}s: {command}"
             except asyncio.CancelledError:

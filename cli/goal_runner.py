@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
+from cli.project_trust import (
+    open_workspace_project,
+    require_project_trusted,
+    set_project_trusted,
+)
 from core.application.agent_adapter import ConfiguredAgentSessionFactory
 from core.application.application import DeepCodeApplication
 from core.application.errors import (
@@ -14,8 +19,8 @@ from core.application.errors import (
     InvalidArgumentError,
     TurnNotFoundError,
 )
+from core.domain.execution_security import ExecutionAccessPreset
 from core.domain.message_provenance import ClientSurface
-from core.domain.project import TrustState
 from core.domain.thread_goal import GoalOutcome, ThreadGoal, ThreadGoalStatus
 from core.events import Event
 from core.harness.permissions import PermissionMode
@@ -32,6 +37,8 @@ class GoalRunOptions:
     completion_evidence_command: str = ""
     token_budget: int | None = None
     max_iterations: int | None = None
+    trust_workspace: bool = False
+    access_preset: ExecutionAccessPreset | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +50,8 @@ class GoalResumeOptions:
     reasoning_effort: str | None = None
     token_budget: int | None = None
     max_iterations: int | None = None
+    trust_workspace: bool = False
+    access_preset: ExecutionAccessPreset | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,7 +81,7 @@ async def run_goal(
         options.completion_evidence_command,
     )
     factory = ConfiguredAgentSessionFactory(
-        default_permission_mode=PermissionMode.FULL_AUTO,
+        default_permission_mode=PermissionMode.DEFAULT,
         streaming=False,
         max_iterations=options.max_iterations,
     )
@@ -83,20 +92,19 @@ async def run_goal(
     )
     event_token: str | None = None
     try:
-        project = application.projects.add(
+        project = open_workspace_project(
+            application,
             str(workspace),
-            trust_state=TrustState.TRUSTED,
+            grant_trust=options.trust_workspace,
         )
-        if project.trust_state is not TrustState.TRUSTED:
-            raise InvalidArgumentError(
-                "the project is untrusted; trust it before execution"
-            )
+        require_project_trusted(project)
         thread = application.threads.start(
             project.id,
             title=objective.splitlines()[0][:60],
             connection_id=options.connection_id,
             model=options.model,
             reasoning_effort=options.reasoning_effort,
+            access_preset_override=options.access_preset,
         )
         if on_event is not None:
             event_token = application.turns.subscribe_thread_events(
@@ -141,7 +149,7 @@ async def resume_goal(
         else None
     )
     factory = ConfiguredAgentSessionFactory(
-        default_permission_mode=PermissionMode.FULL_AUTO,
+        default_permission_mode=PermissionMode.DEFAULT,
         streaming=False,
         max_iterations=options.max_iterations,
     )
@@ -152,20 +160,19 @@ async def resume_goal(
     )
     event_token: str | None = None
     try:
-        if workspace_override is not None:
-            override_project = application.projects.add(
-                workspace_override,
-                trust_state=TrustState.TRUSTED,
-            )
-            if override_project.trust_state is not TrustState.TRUSTED:
-                application.projects.update(
-                    override_project.id,
-                    trust_state=TrustState.TRUSTED,
-                )
         thread = application.threads.resume(
             session_id,
             workspace_path=workspace_override,
         )
+        project = application.projects.read(thread.project_id)
+        if options.trust_workspace:
+            project = set_project_trusted(application, project)
+        require_project_trusted(project)
+        if options.access_preset is not None:
+            thread = application.threads.set_access_preset(
+                thread.id,
+                options.access_preset,
+            )
         goal = application.goals.read(thread.id)
         if goal is None:
             raise GoalNotFoundError(f"no Goal is attached to Session {thread.id}")
@@ -335,10 +342,10 @@ def _objective_with_completion_evidence(objective: str, command: str) -> str:
 
 
 __all__ = [
+    "EventHook",
+    "GoalResumeOptions",
     "GoalRunOptions",
     "GoalRunResult",
-    "GoalResumeOptions",
-    "EventHook",
     "ProgressHook",
     "resume_goal",
     "run_goal",

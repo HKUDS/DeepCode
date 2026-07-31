@@ -24,7 +24,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from rich.console import Console
 from rich.panel import Panel
 
-from cli.execution_options import add_reasoning_effort_argument
+from cli.execution_options import (
+    add_access_preset_argument,
+    add_reasoning_effort_argument,
+    add_workspace_trust_argument,
+    parse_access_preset,
+)
 from cli.goal_runner import (
     GoalResumeOptions,
     GoalRunOptions,
@@ -92,6 +97,8 @@ def _run(args: argparse.Namespace) -> int:
                         reasoning_effort=args.reasoning_effort,
                         token_budget=args.token_budget,
                         max_iterations=args.max_iterations,
+                        trust_workspace=args.trust,
+                        access_preset=parse_access_preset(args.access),
                     ),
                     on_progress=on_progress,
                     on_event=renderer.on_event,
@@ -113,12 +120,17 @@ def _run(args: argparse.Namespace) -> int:
                         skill_ids=skill_ids,
                         token_budget=args.token_budget,
                         max_iterations=args.max_iterations,
+                        trust_workspace=args.trust,
+                        access_preset=parse_access_preset(args.access),
                     ),
                     on_progress=on_progress,
                     on_event=renderer.on_event,
                 )
             )
-    except (ApplicationError, ConfigError, OSError, ValueError) as exc:
+    except ApplicationError as exc:
+        console.print(f"[bold red]· Goal failed to start[/] — {exc.user_message}")
+        return 1
+    except (ConfigError, OSError, ValueError) as exc:
         console.print(f"[bold red]· Goal failed to start[/] — {exc}")
         return 1
     status = result.goal.status.value
@@ -191,6 +203,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Connection for a new Goal or the next resumed Turn.",
     )
     add_reasoning_effort_argument(parser)
+    add_access_preset_argument(parser)
+    add_workspace_trust_argument(parser)
     parser.add_argument(
         "--skill",
         action="append",

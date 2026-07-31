@@ -1219,6 +1219,70 @@ _DROP_TURN_EXECUTION_PERMISSION_V13 = r"""
 ALTER TABLE turns DROP COLUMN execution_permission_mode;
 """
 
+_SESSION_EXECUTION_SECURITY_V14 = r"""
+ALTER TABLE threads
+    ADD COLUMN access_preset_override TEXT
+    CHECK (
+        access_preset_override IS NULL OR
+        access_preset_override IN ('ask', 'read_only', 'full_access')
+    );
+
+ALTER TABLE turns
+    ADD COLUMN execution_security_profile_json TEXT
+    CHECK (
+        execution_security_profile_json IS NULL OR
+        length(trim(execution_security_profile_json)) > 0
+    );
+
+-- A worker may resume non-terminal Turns immediately after the schema upgrade.
+-- Freeze a least-privilege profile instead of letting the resumed worker
+-- reinterpret mutable config.  v13 did not persist sandbox or custom rules,
+-- so its permission mode is not enough to reconstruct the original grant.
+-- A final wildcard deny preserves the v13 mode for reversible data decoding
+-- while preventing any tool from running under guessed rules. Users can retry
+-- under an explicit current Session preset when appropriate.
+UPDATE turns
+SET execution_security_profile_json = CASE execution_permission_mode
+    WHEN 'plan' THEN
+        '{"accessPreset":null,"permissionMode":"plan","commandSandbox":true,"filesystemScope":"workspace","approvalPolicy":"on_request","permissionRules":[{"permission":"*","pattern":"*","action":"deny"}]}'
+    WHEN 'full_auto' THEN
+        '{"accessPreset":null,"permissionMode":"full_auto","commandSandbox":true,"filesystemScope":"workspace","approvalPolicy":"on_request","permissionRules":[{"permission":"*","pattern":"*","action":"deny"}]}'
+    WHEN 'default' THEN
+        '{"accessPreset":null,"permissionMode":"default","commandSandbox":true,"filesystemScope":"workspace","approvalPolicy":"on_request","permissionRules":[{"permission":"*","pattern":"*","action":"deny"}]}'
+    ELSE
+        '{"accessPreset":"read_only","permissionMode":"plan","commandSandbox":true,"filesystemScope":"workspace","approvalPolicy":"never","permissionRules":[]}'
+END
+WHERE status IN ('queued', 'running', 'waiting_approval')
+  AND execution_security_profile_json IS NULL;
+
+-- v10 introduced execution_class with an interactive default but could not
+-- identify Automation owner Turns that already existed. Backfill the
+-- authoritative automation_runs.turn_id now so Goal continuations inherit
+-- the owner policy instead of a mutable Session selection.
+UPDATE turns
+SET execution_class = CASE
+    WHEN (
+        SELECT automation_runs.trigger
+        FROM automation_runs
+        WHERE automation_runs.turn_id = turns.id
+        LIMIT 1
+    ) = 'scheduled'
+    THEN 'scheduled_automation'
+    ELSE 'manual_automation'
+END
+WHERE execution_class = 'interactive'
+  AND EXISTS (
+      SELECT 1
+      FROM automation_runs
+      WHERE automation_runs.turn_id = turns.id
+  );
+"""
+
+_DROP_SESSION_EXECUTION_SECURITY_V14 = r"""
+ALTER TABLE turns DROP COLUMN execution_security_profile_json;
+ALTER TABLE threads DROP COLUMN access_preset_override;
+"""
+
 MIGRATIONS = (
     Migration(1, "initial_domain", _INITIAL_SCHEMA, _DROP_INITIAL_SCHEMA),
     Migration(
@@ -1292,6 +1356,12 @@ MIGRATIONS = (
         "turn_execution_permission",
         _TURN_EXECUTION_PERMISSION_V13,
         _DROP_TURN_EXECUTION_PERMISSION_V13,
+    ),
+    Migration(
+        14,
+        "session_execution_security",
+        _SESSION_EXECUTION_SECURITY_V14,
+        _DROP_SESSION_EXECUTION_SECURITY_V14,
     ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

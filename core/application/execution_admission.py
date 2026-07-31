@@ -52,10 +52,7 @@ class SharedCapacityWorkspacePolicy:
         *,
         max_concurrent_turns: int,
     ) -> tuple[tuple[str, ...], ...]:
-        if (
-            isinstance(max_concurrent_turns, bool)
-            or max_concurrent_turns < 1
-        ):
+        if isinstance(max_concurrent_turns, bool) or max_concurrent_turns < 1:
             raise ValueError("max_concurrent_turns must be positive")
         workspace_key = (
             f"workspace:worktree:{scope.thread_id}"

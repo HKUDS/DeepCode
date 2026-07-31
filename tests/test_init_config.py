@@ -1,8 +1,4 @@
-"""Tests for ``deepcode init`` — seeding the user-level config base.
-
-Exercises the real ``cli.init_config.run`` against isolated home/project dirs
-(the user's real ``~/.deepcode`` is never touched — DEEPCODE_HOME is redirected).
-"""
+"""Tests for safe, workspace-independent ``deepcode init``."""
 
 from __future__ import annotations
 
@@ -17,8 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from cli.init_config import run  # noqa: E402
-from core.config import _DEFAULT_CONFIG_FILENAME, home_config_path  # noqa: E402
+from cli.init_config import run
+from core.config import _DEFAULT_CONFIG_FILENAME, home_config_path
 
 _KEYED = {"providers": {"openai": {"apiKey": "sk-real"}}}
 
@@ -40,52 +36,54 @@ def _write(directory: Path, data: dict) -> Path:
     return p
 
 
-def test_seeds_home_from_current_project_config(isolated, capsys):
-    home, project = isolated
-    _write(project, _KEYED)  # a configured checkout
+def test_default_init_never_copies_workspace_config(isolated, capsys):
+    _home, project = isolated
+    _write(project, _KEYED)
     rc = run([])
     assert rc == 0
     dest = home_config_path()
     assert dest.is_file()
-    assert json.loads(dest.read_text())["providers"]["openai"]["apiKey"] == "sk-real"
+    assert json.loads(dest.read_text()) == {"security": {"accessPreset": "ask"}}
     out = capsys.readouterr().out
-    assert "run `deepcode` from ANY directory" in out  # key detected
+    assert "sk-real" not in out
+    assert "deepcode provider set" in out
 
 
 def test_posix_config_is_user_only(isolated):
     if os.name != "posix":
         pytest.skip("permission bits are posix-only")
-    _write(isolated[1], _KEYED)
     run([])
+    assert (isolated[0].stat().st_mode & 0o777) == 0o700
     assert (home_config_path().stat().st_mode & 0o777) == 0o600
 
 
 def test_idempotent_second_run_does_not_clobber(isolated, capsys):
-    home, project = isolated
-    _write(project, _KEYED)
     run([])
-    # change the project config; a plain re-run must NOT overwrite the home base
-    _write(project, {"providers": {"openai": {"apiKey": "sk-changed"}}})
+    destination = home_config_path()
+    destination.write_text('{"custom": "keep"}\n', encoding="utf-8")
     rc = run([])
     assert rc == 0
-    assert "Already configured" in capsys.readouterr().out
-    assert (
-        json.loads(home_config_path().read_text())["providers"]["openai"]["apiKey"]
-        == "sk-real"
-    )
+    assert "Already initialized" in capsys.readouterr().out
+    assert json.loads(destination.read_text()) == {"custom": "keep"}
 
 
-def test_force_backs_up_then_reseeds(isolated):
-    home, project = isolated
-    _write(project, _KEYED)
-    run([])
-    _write(project, {"providers": {"openai": {"apiKey": "sk-v2"}}})
-    rc = run(["--force"])
+def test_force_backs_up_then_reseeds_from_explicit_source(isolated, tmp_path):
+    first = tmp_path / "first.json"
+    first.write_text(json.dumps(_KEYED), encoding="utf-8")
+    second_payload = {"agents": {"defaults": {"model": "example/new"}}}
+    second = tmp_path / "second.json"
+    second.write_text(json.dumps(second_payload), encoding="utf-8")
+    run(["--from", str(first)])
+
+    rc = run(["--force", "--from", str(second)])
+
     assert rc == 0
     dest = home_config_path()
-    assert json.loads(dest.read_text())["providers"]["openai"]["apiKey"] == "sk-v2"
+    assert json.loads(dest.read_text()) == second_payload
     backup = dest.with_suffix(dest.suffix + ".bak")
     assert json.loads(backup.read_text())["providers"]["openai"]["apiKey"] == "sk-real"
+    if os.name == "posix":
+        assert (backup.stat().st_mode & 0o777) == 0o600
 
 
 def test_from_explicit_path(isolated, tmp_path):
@@ -106,10 +104,23 @@ def test_from_missing_path_errors(isolated, capsys):
     assert "does not exist" in capsys.readouterr().out
 
 
-def test_falls_back_to_template_when_no_project_config(isolated, capsys):
-    # No project config next to the cwd -> seed from the shipped template.
+def test_default_init_does_not_depend_on_repository_template(isolated, capsys):
     rc = run([])
     assert rc == 0
     assert home_config_path().is_file()
     out = capsys.readouterr().out
-    assert "template" in out.lower()
+    assert "safe defaults" in out
+
+
+def test_invalid_explicit_json_is_rejected_without_partial_file(
+    isolated,
+    tmp_path,
+    capsys,
+):
+    source = tmp_path / "broken.json"
+    source.write_text("{", encoding="utf-8")
+
+    assert run(["--from", str(source)]) == 1
+
+    assert not home_config_path().exists()
+    assert "invalid JSON" in capsys.readouterr().out

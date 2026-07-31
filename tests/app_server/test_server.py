@@ -591,6 +591,127 @@ def test_settings_and_thread_model_are_real_shared_configuration(
     assert canonical.metadata["model"] == "gpt-5-mini"
 
 
+def test_session_access_rpc_requires_full_access_acknowledgement_and_persists(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    project = application.projects.add(str(workspace))
+    thread = application.threads.start(project.id, title="Session access")
+    source = io.BytesIO(
+        _request(
+            1,
+            "initialize",
+            {
+                "protocolVersion": "1.0",
+                "clientInfo": {"name": "permission-test", "version": "1.0"},
+            },
+        )
+        + _request(
+            2,
+            "thread/permission/update",
+            {"threadId": thread.id, "accessPreset": "read_only"},
+        )
+        + _request(
+            3,
+            "thread/permission/update",
+            {"threadId": thread.id, "accessPreset": "full_access"},
+        )
+        + _request(
+            4,
+            "thread/permission/update",
+            {
+                "threadId": thread.id,
+                "accessPreset": "full_access",
+                "riskAcknowledged": True,
+            },
+        )
+        + _request(
+            5,
+            "thread/permission/update",
+            {"threadId": thread.id, "accessPreset": None},
+        )
+        + _request(
+            6,
+            "thread/permission/update",
+            {"threadId": thread.id, "accessPreset": "unsafe"},
+        )
+        + _request(7, "shutdown", {})
+    )
+    sink = io.BytesIO()
+
+    try:
+        assert AppServer(application).serve(source, sink) == 0
+        responses = {
+            message["id"]: message for message in _messages(sink) if "id" in message
+        }
+        assert responses[2]["result"]["thread"]["accessPresetOverride"] == ("read_only")
+        assert responses[3]["error"]["code"] == -32602
+        assert "riskAcknowledged must be true" in responses[3]["error"]["message"]
+        assert responses[4]["result"]["thread"]["accessPresetOverride"] == (
+            "full_access"
+        )
+        assert responses[5]["result"]["thread"]["accessPresetOverride"] is None
+        assert responses[6]["error"]["code"] == -32602
+        assert "accessPreset must be ask" in responses[6]["error"]["message"]
+
+        persisted = application.threads.read(thread.id)
+        assert persisted.access_preset_override is None
+        canonical = application.session_store.get_session(thread.id)
+        assert canonical is not None
+        assert canonical.metadata["access_preset_override"] is None
+    finally:
+        application.close()
+
+
+def test_settings_full_access_default_requires_acknowledgement(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "deepcode-home"
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    source = io.BytesIO(
+        _request(
+            1,
+            "initialize",
+            {
+                "protocolVersion": "1.0",
+                "clientInfo": {"name": "permission-test", "version": "1.0"},
+            },
+        )
+        + _request(
+            2,
+            "settings/update",
+            {"patch": {"security": {"accessPreset": "full_access"}}},
+        )
+        + _request(
+            3,
+            "settings/update",
+            {
+                "patch": {"security": {"accessPreset": "full_access"}},
+                "riskAcknowledged": True,
+            },
+        )
+        + _request(4, "shutdown", {})
+    )
+    sink = io.BytesIO()
+
+    try:
+        assert AppServer(application).serve(source, sink) == 0
+        responses = {
+            message["id"]: message for message in _messages(sink) if "id" in message
+        }
+        assert responses[2]["error"]["code"] == -32602
+        assert "riskAcknowledged must be true" in responses[2]["error"]["message"]
+        assert responses[3]["result"]["settings"]["userAccessPreset"] == "full_access"
+        persisted = json.loads((home / "deepcode_config.json").read_text())
+        assert persisted["security"]["accessPreset"] == "full_access"
+    finally:
+        application.close()
+
+
 def test_connection_and_model_protocol_is_shared_secret_safe_state(
     tmp_path: Path,
     monkeypatch,

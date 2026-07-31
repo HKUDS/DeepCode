@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.harness.sandbox import build_exec_command  # noqa: E402
+from core.harness.sandbox import build_exec_command
 
 _seatbelt = platform.system() == "Darwin" and os.path.exists("/usr/bin/sandbox-exec")
 
@@ -49,6 +49,25 @@ def test_enabled_by_default(monkeypatch, tmp_path):
     # backend is seatbelt/bwrap on supported platforms, else "none" — never
     # "disabled" (which only happens when explicitly turned off).
     assert w.backend in ("seatbelt", "bwrap", "none")
+
+
+def test_explicit_frozen_sandbox_value_beats_environment(monkeypatch, tmp_path):
+    monkeypatch.setenv("DEEPCODE_SANDBOX", "1")
+    disabled = build_exec_command(
+        command="echo hi",
+        workspace=tmp_path,
+        enabled=False,
+    )
+    assert disabled.backend == "disabled"
+
+    monkeypatch.setenv("DEEPCODE_SANDBOX", "0")
+    enabled = build_exec_command(
+        command="echo hi",
+        workspace=tmp_path,
+        enabled=True,
+    )
+    assert enabled.backend in ("seatbelt", "bwrap", "none")
+    assert enabled.backend != "disabled"
 
 
 # ---- real seatbelt enforcement through the MCP server ----------------------

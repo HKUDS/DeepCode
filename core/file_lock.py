@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Self
 
 from core.platform_file_lock import acquire_file_lock, release_file_lock
+from core.private_storage import ensure_private_directory, open_private_file
 
 
 class FileLease:
@@ -33,8 +34,8 @@ class FileLease:
         shared: bool,
         blocking: bool = True,
     ) -> FileLease | None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+        ensure_private_directory(path.parent)
+        descriptor = open_private_file(path, os.O_RDWR | os.O_CREAT)
         try:
             try:
                 os.chmod(path, 0o600)
@@ -77,8 +78,8 @@ class FileLease:
 def exclusive_file_lock(path: Path) -> Iterator[None]:
     """Serialize a bounded mutation across DeepCode processes."""
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    ensure_private_directory(path.parent)
+    descriptor = open_private_file(path, os.O_RDWR | os.O_CREAT)
     try:
         try:
             os.chmod(path, 0o600)

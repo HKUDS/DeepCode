@@ -90,8 +90,7 @@ def _wait_for_status(
             return snapshot
         time.sleep(0.01)
     raise AssertionError(
-        f"Turn did not reach {status.value}: "
-        f"{application.turns.read(turn_id).turn}"
+        f"Turn did not reach {status.value}: {application.turns.read(turn_id).turn}"
     )
 
 
@@ -107,8 +106,7 @@ def _wait_for_approvals(
             return snapshot
         time.sleep(0.01)
     raise AssertionError(
-        f"Turn did not create {count} approvals: "
-        f"{application.turns.read(turn_id)}"
+        f"Turn did not create {count} approvals: {application.turns.read(turn_id)}"
     )
 
 
@@ -417,9 +415,7 @@ def test_approved_session_grant_and_resolution_roll_back_together(
         assert rolled_back.approvals[0].status is ApprovalStatus.PENDING
         assert rolled_back.items[-1].status.value == "pending"
         with owner.database.read() as connection:
-            assert (
-                ApprovalGrantRepository(connection).list_for_thread(thread_id) == []
-            )
+            assert ApprovalGrantRepository(connection).list_for_thread(thread_id) == []
 
         monkeypatch.setattr(
             ApprovalGrantRepository,

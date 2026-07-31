@@ -13,10 +13,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.agent_runtime.tools.base import ToolResult  # noqa: E402
-from core.harness.tools.search import GlobTool, GrepTool  # noqa: E402
-from core.harness.tools.shell import BashTool, _preflight  # noqa: E402
-
+from core.agent_runtime.tools.base import ToolResult
+from core.harness.tools.search import GlobTool, GrepTool
+from core.harness.tools.shell import BashTool, _preflight
 
 # --- bash -------------------------------------------------------------------
 
@@ -56,6 +55,13 @@ def test_preflight_allows_non_interactive():
     assert _preflight("npm init -y") is None
     assert _preflight("npx create-next-app my-app --yes") is None
     assert _preflight("pytest -q") is None
+
+
+def test_full_access_bash_description_discloses_disabled_sandbox(tmp_path):
+    tool = BashTool(str(tmp_path), sandbox_enabled=False)
+
+    assert "sandbox disabled" in tool.description
+    assert "sandboxed: writes are fenced" not in tool.description
 
 
 @pytest.mark.asyncio

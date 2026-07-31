@@ -35,7 +35,7 @@
 </p> -->
 <p>
   <a href="https://github.com/HKUDS/DeepCode/stargazers"><img src='https://img.shields.io/github/stars/HKUDS/DeepCode?color=00d9ff&style=for-the-badge&logo=star&logoColor=white&labelColor=1a1a2e' /></a>
-  <img src="https://img.shields.io/badge/🐍Python-3.13-4ecdc4?style=for-the-badge&logo=python&logoColor=white&labelColor=1a1a2e">
+  <img src="https://img.shields.io/badge/🐍Python-3.12%2B-4ecdc4?style=for-the-badge&logo=python&logoColor=white&labelColor=1a1a2e">
   <a href="https://pypi.org/project/deepcode-hku/"><img src="https://img.shields.io/pypi/v/deepcode-hku.svg?style=for-the-badge&logo=pypi&logoColor=white&labelColor=1a1a2e&color=ff6b6b"></a>
 </p>
 <p>
@@ -79,10 +79,11 @@
 *专业终端界面，适合高级用户和CI/CD集成*
 </div>
 
-旧浏览器界面已经移除。目前可以从源码运行新的 Tauri 2 桌面工作台；
-正式打包发布仍在开发中。详见
-[`P1 架构`](docs/P1_APP_SERVER_ARCHITECTURE.md)与
-[`Desktop 源码运行指南`](desktop/README.md)。
+DeepCode 只有一套 Agent 运行时，同时提供两种使用界面：面向终端
+工作流的交互式 CLI，以及用于 Session、审查和设置的 Tauri Desktop。
+两端打开同一份本地 Project、Session 历史、模型、Skills、权限、Goals 与
+Automations。从源码启动请参考
+[`Desktop 运行指南`](desktop/README.md)。
 
 ---
 
@@ -144,6 +145,21 @@
 
 ## 新闻
 
+**2026-07-31 · CLI 与 Desktop 共用统一执行模型**
+
+- 交互式对话、无头任务、Goal、Automation 与 Desktop 全部进入同一套持久化
+  Project、Session、Thread 和 Turn 生命周期。
+- Workspace trust 与 Session 工具权限相互独立；权限可选 **Ask**、
+  **Read only** 或 **Full access**。
+- 模型 Thinking 强度与推理展示详细度分开控制，改变界面展示不会改变模型请求。
+
+**2026-07-21 · 持久化 Goals 与安全的 Session 生命周期**
+
+- 长任务可以作为 CLI 与 Desktop 共享的可恢复、证据驱动 Goal 运行。
+- Archive 保留历史；永久删除通过统一的 Session 生命周期清理记录，
+  不会删除仓库文件。
+- 中断的删除会从持久化 tombstone 恢复，不会让旧 Session 记录重新出现。
+
 **2026-07-20 · Session 级模型控制与共享 Skills**
 
 - 命名 LLM 连接只需配置一次，即可在整个 DeepCode 中使用。
@@ -158,8 +174,8 @@
 
 **2026-07-10 · Loop Engineering 与并行 Agent**
 
-- 给出一个可修改的目标，DeepCode 可以在有边界且随时可纠正的轮次中持续
-  理解、实现、按需验证与修复。
+- 给出一个可修改的 Goal，DeepCode 可以在普通 Turn 之间持续理解、
+  实现、按需验证与修复，并且始终可被纠正。
 - 将聚焦任务委派给隔离 worktree 中的 Agent，并在集成前明确暴露冲突。
 
 <details>
@@ -230,8 +246,10 @@ Harness 是 DeepCode 将模型回答转化为“用户可以监督的真实工�
 
 - 工具活动以明确进度展示，而不是藏在一个持续旋转的等待状态后面；
 - 权限判断只有清晰的三种结果：`allow`、`ask` 或 `deny`；
-- 即使处于宽松模式，敏感凭证路径也始终不可访问；
-- Shell 工作通过当前平台可用的 macOS 或 Linux Sandbox 限制写入范围；
+- **Ask** 与 **Read only** 保留受保护路径规则和当前平台可用的
+  Sandbox；**Full access** 是一次明确的无限制授权；
+- 每个被接收的 Turn 都会冻结已解析的执行配置，之后修改设置不会
+  改变已经运行或排队的工作；
 - 中断或崩溃后的任务会被安全收束，不会静默重放带有副作用的操作。
 
 ### Loop Engineering
@@ -241,12 +259,9 @@ DeepCode 围绕一段可修改的自然语言 Goal 跨 Turn 持续工作。工�
 完整对话、当前代码和工具结果，判断应该继续、完成，还是报告真实阻碍。
 
 用户可以在运行中修订 Goal 或纠正当前 Turn，而不用丢弃仍然有效的工作。
-测试、Build、Lint 和其他显式验证在适用时继续提供强证据；稳定的 Goal 身份、
-权限和有界预算则保证 Loop 安全且诚实。Session 历史与项目记忆让任务在重启
-或切换模型后仍能连续。
-
-具体实施顺序与系统不变量见
-[Loop Engineering 实施方案](docs/LOOP_ENGINEERING_IMPLEMENTATION_PLAN.md)。
+测试、Build、Lint 和其他显式验证在适用时继续提供强证据。稳定的 Goal 身份、
+冻结的 Turn 权限以及用户可选的预算让长任务可归因，同时不强加固定任务上限。
+Session 历史与项目记忆让任务在重启或切换模型后仍能连续。
 
 ### Context Engineering
 
@@ -302,12 +317,14 @@ Turn 相同的 Session、模型、权限和恢复规则提交周期性工作。
 ### 1. 安装与初始化
 
 ```bash
-pip install deepcode-hku
+uv tool install deepcode-hku
 deepcode init
 ```
 
-`deepcode init` 会在 `~/.deepcode/` 下创建用户级配置。完成后，可以从任意
-项目目录直接启动 `deepcode`。
+`deepcode init` 会在 `~/.deepcode/` 下创建最小用户配置，不会复制项目
+配置或凭证。完成后，可以从任意项目目录直接启动 `deepcode`。
+也可以在合适的 Python 3.12+ 环境中使用 `pipx install deepcode-hku` 或
+`pip install deepcode-hku`。
 
 ### 2. 连接模型服务
 
@@ -321,40 +338,53 @@ deepcode provider test personal-openrouter
 deepcode provider models personal-openrouter --refresh
 ```
 
-`--api-key` 使用不回显的安全输入。已保存的密钥进入仅当前用户可读的
-`~/.deepcode/credentials.json`，不会暴露给客户端，也不会写入 Session 历史。
+`--api-key` 使用不回显的安全输入。已保存的密钥进入用户私有的
+`~/.deepcode/credentials.json`，不会返回给客户端，也不会写入 Session 历史。
+建议使用上面的模型列表命令选择模型，不要依赖旧示例中的模型名称。
 
 ### 3. 开始编码
 
 ```bash
-deepcode -c personal-openrouter -m moonshotai/kimi-k3 --effort low
+cd /path/to/your/repository
+deepcode -c personal-openrouter -m <model-id> --effort auto
 ```
+
+首次使用时，请检查规范化后的 workspace 路径并确认 trust。DeepCode 会为
+该 Project 记住这个选择；trust 不等于授予无限制工具权限。
 
 也可以无头执行单个任务：
 
 ```bash
 deepcode exec "修复失败的测试，并解释根本原因" \
   --connection personal-openrouter \
-  --model moonshotai/kimi-k3 \
-  --effort low \
+  --model <model-id> \
+  --effort auto \
+  --trust \
+  --access full-access \
   --json
 ```
 
+`--trust` 记录 workspace 信任决定。`--access full-access` 是明确的无限制
+授权，只适合隔离的仓库或 CI runner。在交互式终端中可以省略它，
+按需批准敏感工具；纯检查任务可使用 `--access read-only`。
+
 用户可以选择适合自己的使用界面。`deepcode` 会打开交互式 CLI；同一份
 Sessions 也可以在 Desktop 中打开。若要从源码运行 Desktop，请先安装
-Node.js 22+、Rust stable 和 Tauri 对应平台所需的系统依赖，然后运行：
+Node.js 22+、Rust stable 和 Tauri 对应平台所需的系统依赖，再准备
+仓库环境并使用项目启动器：
 
 ```bash
-cd desktop
-npm ci
-npm run tauri -- dev
+uv venv --python 3.12
+uv pip install -e .
+cd desktop && npm ci && cd ..
+./scripts/deepcode-desktop
 ```
 
 打开 **Settings → Connections** 配置模型服务，然后在 Session 输入框中
 选择连接与模型。
 
 > 使用界面只改变工作的呈现方式，不改变背后的 Agent、策略、配置和 Session
-> 历史。Desktop 正式安装包仍在开发中。
+> 历史。
 
 ## 使用 DeepCode
 
@@ -367,20 +397,41 @@ npm run tauri -- dev
 /resume <id>            恢复一个 Session
 /model [连接] [模型ID]    查看或修改后续 Turn 的模型
 /effort [auto|off|档位]  查看或修改后续 Turn 的 Thinking 强度
+/permissions [预设]      查看或修改后续 Turn 的工具权限
+/transcript [模式]       选择 normal、verbose 或 summary 展示
 /clear                  清空当前内存上下文
 @src/main.py            将文件附加到下一条提示
 ```
 
+Thinking 档位决定向模型请求的推理强度；transcript 模式只决定 DeepCode
+如何展示返回的内容。交互式 CLI 可按 `Ctrl+O` 在
+`normal → verbose → summary` 之间切换。无头任务使用
+`deepcode exec --transcript <模式>`。推理内容是独立的时间线项，不会被混入
+助手最终答案。如果 provider 只返回不可见的续接状态，界面会如实提示详情
+不可用。
+
 直接启动或恢复：
 
 ```bash
-deepcode -w ./my-project
+deepcode -w ./my-project --trust
 deepcode --resume <session-id>
 ```
 
 无论由哪个客户端打开，Session 文件始终保存在
 `~/.deepcode/sessions/`。显式跨目录恢复只改变当前执行上下文，不会改写
 Session 中记录的原始工作目录。
+
+Archive 保留 canonical 历史，只将 Session 从 Desktop 的普通列表中移除。
+永久删除会删除对话历史及其派生运行记录，但不会删除仓库文件。
+Desktop 在 Session 菜单中提供这两项操作；脚本可调用：
+
+```bash
+deepcode session delete <session-id> --yes
+```
+
+如果 Session 正被另一个 CLI 打开、存在运行中工作、占用托管 worktree，
+或属于 Automation，DeepCode 会拒绝永久删除。删除不会强制终止工作，
+也不会静默移除 workspace 状态。
 
 ### Connections 与模型
 
@@ -423,8 +474,8 @@ deepcode provider set company-proxy \
   "agents": {
     "defaults": {
       "connection": "personal-openrouter",
-      "model": "moonshotai/kimi-k3",
-      "reasoningEffort": "low"
+      "model": "<model-id>",
+      "reasoningEffort": "auto"
     }
   }
 }
@@ -473,7 +524,9 @@ deepcode skill disable <skill-id> --scope project
 ```bash
 deepcode exec "检查本次变更是否引入安全问题" \
   --skill security-review \
-  --skill test-strategy
+  --skill test-strategy \
+  --trust \
+  --access read-only
 ```
 
 Skill 只能提供工作流指导，不能授予权限，也不能绕过 Project trust、
@@ -483,10 +536,15 @@ Sandbox、批准或工具策略。
 
 DeepCode 将执行安全视为产品边界，而不是客户端确认框：
 
-- Project 在交互式 Agent 执行前需要明确的 trust。
+- 所有界面在执行 Agent 之前都需要明确的 Project trust。
 - 权限决策分为 `allow`、`ask` 和 `deny`。
 - Approval 会恢复被暂停的同一次工具调用。
-- 所有权限模式都不能访问受保护的敏感凭证路径。
+- **Ask** 保留工作区命令沙箱和受保护路径检查；**Read only** 拒绝修改型
+  工具；**Full access** 是经过明确二次确认的 Session 授权，会移除审批与
+  文件系统沙箱边界，但显式 deny 规则仍然优先。
+- CLI 与 Desktop 修改同一个 Session 权限覆盖。每个 Turn 在进入队列时都会
+  冻结完整安全快照，因此切换只影响新提交；正在运行和已经排队的 Turn 会在
+  恢复或 worker 交接后继续使用各自记录的权限。
 - Shell 与代码进程在超时、中断或关闭时会按 DeepCode 所有的进程树终止。
 - 崩溃恢复会收敛未完成的 Turn，但不会自动重放副作用。
 
@@ -495,6 +553,11 @@ DeepCode 将执行安全视为产品边界，而不是客户端确认框：
 在交互式 CLI 中，可以把可持久化的 Goal 绑定到当前 Session：
 
 ```text
+/permissions
+/permissions ask
+/permissions read-only
+/permissions full-access
+/permissions inherit
 /goal 实现并验证指定功能
 /goal show
 /goal edit 实现功能并保持公共 API 兼容
@@ -532,7 +595,9 @@ Session。
 
 ```bash
 deepcode loop "实现指定功能" \
-  --test-cmd "python -m pytest -q"
+  --test-cmd "python -m pytest -q" \
+  --trust \
+  --access full-access
 ```
 
 退出进程后，可以继续同一个 Goal 与规范 Session：
@@ -691,8 +756,7 @@ cd DeepCode
 curl -LsSf https://astral.sh/uv/install.sh | sh
 uv venv --python=3.13
 source .venv/bin/activate
-uv pip install -r requirements.txt
-pip install -e .
+uv pip install -e .
 ```
 
 Windows 请使用 `.venv\Scripts\activate` 激活环境。

@@ -15,11 +15,20 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from core.domain.execution_permission import ExecutionPermissionMode
+from core.domain.execution_security import (
+    ApprovalPolicy,
+    ExecutionAccessPreset,
+    ExecutionSecurityProfile,
+    FilesystemScope,
+    normalize_permission_rules,
+)
 from core.harness.permissions import (
     PermissionEngine,
     PermissionMode,
-    rules_from_config,
+    rules_from_snapshots,
 )
+from core.harness.sandbox import sandbox_enabled
 
 
 def resolve_permission_mode(
@@ -63,12 +72,63 @@ def _explicit_config_mode(security_config: Any | None) -> str | None:
     return str(value) if value is not None else None
 
 
+def _explicit_config_sandbox(security_config: Any | None) -> bool | None:
+    """Return an explicitly configured sandbox flag when one exists."""
+
+    if security_config is None:
+        return None
+    fields_set = getattr(security_config, "model_fields_set", None)
+    if fields_set is None:
+        fields_set = getattr(security_config, "__fields_set__", None)
+    if fields_set is not None and "sandbox" not in fields_set:
+        return None
+    value = getattr(security_config, "sandbox", None)
+    return value if isinstance(value, bool) else None
+
+
+def resolve_execution_security_profile(
+    security_config: Any | None,
+    *,
+    default_mode: str | PermissionMode = PermissionMode.FULL_AUTO,
+    mode_override: str | PermissionMode | None = None,
+    profile_override: ExecutionSecurityProfile | None = None,
+) -> ExecutionSecurityProfile:
+    """Freeze every runtime security fact into one immutable profile.
+
+    Product clients pass ``profile_override`` for atomic Ask / Read only / Full
+    access semantics.  Older callers still resolve the established
+    ``permission_mode`` and sandbox env/config knobs, but receive a
+    ``access_preset=None`` snapshot so legacy ``full_auto`` is never mislabeled
+    as true Full Access.
+    """
+
+    if profile_override is not None:
+        return profile_override
+
+    config_mode = _explicit_config_mode(security_config)
+    mode = (
+        PermissionMode(_mode_value(mode_override))
+        if mode_override is not None
+        else resolve_permission_mode(config_mode, default_mode=default_mode)
+    )
+    return ExecutionSecurityProfile.from_legacy(
+        ExecutionPermissionMode(mode.value),
+        command_sandbox=sandbox_enabled(_explicit_config_sandbox(security_config)),
+        filesystem_scope=FilesystemScope.WORKSPACE,
+        approval_policy=ApprovalPolicy.ON_REQUEST,
+        permission_rules=normalize_permission_rules(
+            getattr(security_config, "permissions", None)
+        ),
+    )
+
+
 def build_permission_engine(
     security_config: Any | None,
     *,
     cwd: str | None = None,
     default_mode: str | PermissionMode = PermissionMode.FULL_AUTO,
     mode_override: str | PermissionMode | None = None,
+    execution_security_profile: ExecutionSecurityProfile | None = None,
 ) -> PermissionEngine:
     """Construct a :class:`PermissionEngine` from a ``SecurityConfig``.
 
@@ -78,15 +138,19 @@ def build_permission_engine(
     policy exactly.
     """
 
-    config_mode = _explicit_config_mode(security_config)
-    rules_cfg = getattr(security_config, "permissions", None)
-    mode = (
-        PermissionMode(_mode_value(mode_override))
-        if mode_override is not None
-        else resolve_permission_mode(config_mode, default_mode=default_mode)
+    profile = resolve_execution_security_profile(
+        security_config,
+        default_mode=default_mode,
+        mode_override=mode_override,
+        profile_override=execution_security_profile,
     )
     return PermissionEngine(
-        mode=mode,
-        rules=rules_from_config(rules_cfg),
+        mode=PermissionMode(profile.permission_mode.value),
+        rules=rules_from_snapshots(profile.permission_rules),
         cwd=cwd,
+        approval_policy=profile.approval_policy,
+        protect_sensitive_paths=(
+            profile.access_preset is not ExecutionAccessPreset.FULL_ACCESS
+        ),
+        enforce_read_only=(profile.access_preset is ExecutionAccessPreset.READ_ONLY),
     )

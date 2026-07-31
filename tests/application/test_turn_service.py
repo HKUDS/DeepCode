@@ -3,20 +3,22 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from core.application import DeepCodeApplication
+from core.application.errors import ConflictError
 from core.application.turn_service import (
     TurnTransactionContext,
     TurnTransactionContribution,
 )
 from core.domain import TrustState
-from core.domain.approval import ApprovalStatus
-from core.domain.approval import Approval, ApprovalCategory
+from core.domain.approval import Approval, ApprovalCategory, ApprovalStatus
+from core.domain.execution_permission import ExecutionPermissionMode
+from core.domain.execution_security import ExecutionAccessPreset
 from core.domain.item import Item, ItemKind, ItemStatus
 from core.domain.message_provenance import ClientSurface, TurnInputSource
 from core.domain.thread import ThreadStatus
@@ -41,12 +43,12 @@ from core.events import (
     ToolStarted,
     TurnStarted,
 )
+from core.persistence.event_repository import EventRepository
 from core.persistence.execution_repository import (
     ApprovalRepository,
     ItemRepository,
     TurnRepository,
 )
-from core.persistence.event_repository import EventRepository
 from core.persistence.thread_repository import ThreadRepository
 from core.reasoning import ReasoningAvailability, ReasoningChannel, ReasoningPayload
 
@@ -119,6 +121,28 @@ class PermissionCaptureFactory(ScriptedFactory):
         permission_mode_override,
     ):
         self.permission_modes.append(permission_mode_override)
+        return super().create(
+            workspace=workspace,
+            model=model,
+            approval_callback=approval_callback,
+        )
+
+
+class SecurityCaptureFactory(ScriptedFactory):
+    def __init__(self) -> None:
+        super().__init__()
+        self.security_profiles = []
+
+    def create(
+        self,
+        *,
+        workspace,
+        model,
+        approval_callback,
+        execution_security_profile,
+        permission_mode_override,
+    ):
+        self.security_profiles.append(execution_security_profile)
         return super().create(
             workspace=workspace,
             model=model,
@@ -687,7 +711,7 @@ def test_turn_preserves_typed_client_surface_for_user_and_assistant(
     "surface",
     (ClientSurface.CLI, ClientSurface.DESKTOP),
 )
-def test_ordinary_cli_and_desktop_turns_keep_host_permission_default(
+def test_ordinary_cli_and_desktop_turns_freeze_the_same_safe_permission_default(
     tmp_path: Path,
     surface: ClientSurface,
 ) -> None:
@@ -705,8 +729,145 @@ def test_ordinary_cli_and_desktop_turns_keep_host_permission_default(
             TurnStatus.COMPLETED,
         )
 
-        assert completed.turn.execution_permission_mode is None
-        assert factory.permission_modes == [None]
+        assert (
+            completed.turn.execution_permission_mode is ExecutionPermissionMode.DEFAULT
+        )
+        assert completed.turn.execution_security_profile is not None
+        assert (
+            completed.turn.execution_security_profile.access_preset
+            is ExecutionAccessPreset.ASK
+        )
+        assert factory.permission_modes == [ExecutionPermissionMode.DEFAULT]
+    finally:
+        application.close()
+
+
+def test_session_access_change_applies_only_to_future_turns(tmp_path: Path) -> None:
+    factory = SecurityCaptureFactory()
+    application, thread_id = _application(tmp_path, factory)
+    try:
+        first = application.turns.start(thread_id, prompt="Use the default")
+        first_completed = _wait_for(
+            application,
+            first.turn.id,
+            TurnStatus.COMPLETED,
+        )
+        application.threads.set_access_preset(
+            thread_id,
+            ExecutionAccessPreset.FULL_ACCESS,
+        )
+        second = application.turns.start(thread_id, prompt="Use full access")
+        second_completed = _wait_for(
+            application,
+            second.turn.id,
+            TurnStatus.COMPLETED,
+        )
+
+        assert (
+            first_completed.turn.execution_security_profile.access_preset
+            is ExecutionAccessPreset.ASK
+        )
+        assert (
+            second_completed.turn.execution_security_profile.access_preset
+            is ExecutionAccessPreset.FULL_ACCESS
+        )
+        assert [profile.access_preset for profile in factory.security_profiles] == [
+            ExecutionAccessPreset.ASK,
+            ExecutionAccessPreset.FULL_ACCESS,
+        ]
+    finally:
+        application.close()
+
+
+def test_turn_admission_repairs_stale_projection_from_canonical_session(
+    tmp_path: Path,
+) -> None:
+    factory = SecurityCaptureFactory()
+    application, thread_id = _application(tmp_path, factory)
+    try:
+        application.threads.set_access_preset(
+            thread_id,
+            ExecutionAccessPreset.FULL_ACCESS,
+        )
+        # Simulate a process failure after the canonical JSONL update but
+        # before ThreadService refreshed the disposable SQLite projection.
+        assert application.session_store.update_metadata(
+            thread_id,
+            {"access_preset_override": "read_only"},
+        )
+
+        started = application.turns.start(thread_id, prompt="Use canonical access")
+        completed = _wait_for(
+            application,
+            started.turn.id,
+            TurnStatus.COMPLETED,
+        )
+
+        assert (
+            completed.turn.execution_security_profile.access_preset
+            is ExecutionAccessPreset.READ_ONLY
+        )
+        with application.database.read() as connection:
+            assert (
+                ThreadRepository(connection).get(thread_id).access_preset_override
+                is ExecutionAccessPreset.READ_ONLY
+            )
+    finally:
+        application.close()
+
+
+def test_turn_admission_rejects_corrupt_canonical_access_override(
+    tmp_path: Path,
+) -> None:
+    application, thread_id = _application(tmp_path, SecurityCaptureFactory())
+    try:
+        assert application.session_store.update_metadata(
+            thread_id,
+            {"access_preset_override": "not-a-preset"},
+        )
+
+        with pytest.raises(ConflictError, match="invalid access preset override"):
+            application.turns.start(thread_id, prompt="Must not inherit")
+    finally:
+        application.close()
+
+
+def test_retry_re_resolves_current_session_access_after_downgrade(
+    tmp_path: Path,
+) -> None:
+    factory = SecurityCaptureFactory()
+    application, thread_id = _application(tmp_path, factory)
+    try:
+        application.threads.set_access_preset(
+            thread_id,
+            ExecutionAccessPreset.FULL_ACCESS,
+        )
+        original = application.turns.start(thread_id, prompt="Original task")
+        original = _wait_for(
+            application,
+            original.turn.id,
+            TurnStatus.COMPLETED,
+        )
+        application.threads.set_access_preset(
+            thread_id,
+            ExecutionAccessPreset.READ_ONLY,
+        )
+
+        retried = application.turns.retry(original.turn.id)
+        retried = _wait_for(
+            application,
+            retried.turn.id,
+            TurnStatus.COMPLETED,
+        )
+
+        assert (
+            original.turn.execution_security_profile.access_preset
+            is ExecutionAccessPreset.FULL_ACCESS
+        )
+        assert (
+            retried.turn.execution_security_profile.access_preset
+            is ExecutionAccessPreset.READ_ONLY
+        )
     finally:
         application.close()
 
@@ -1157,7 +1318,7 @@ def test_open_recovers_incomplete_turn_and_pending_approval(tmp_path: Path) -> N
         start=False,
     )
     first.close()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     with first.database.transaction() as connection:
         threads = ThreadRepository(connection)
         thread = threads.get(thread_id)

@@ -13,7 +13,7 @@ import io
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 from rich.console import Console
@@ -22,12 +22,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import core.agent_setup as agent_setup  # noqa: E402
-import cli.tui.app as tui_app  # noqa: E402
-from cli.transcript import TranscriptMode  # noqa: E402
-from cli.tui.input import InputInterrupted, InputReader, expand_file_refs  # noqa: E402
-from cli.tui.renderer import EventRenderer  # noqa: E402
-from core.events import (  # noqa: E402
+import cli.tui.app as tui_app
+from cli.transcript import TranscriptMode
+from cli.tui.input import InputInterrupted, InputReader, expand_file_refs
+from cli.tui.renderer import EventRenderer
+from core import agent_setup
+from core.events import (
     AgentMessage,
     AgentMessageCompleted,
     AgentMessageDelta,
@@ -37,8 +37,8 @@ from core.events import (  # noqa: E402
     Event,
     ToolCompleted,
 )
-from core.providers.base import LLMResponse, ToolCallRequest  # noqa: E402
-from core.reasoning import ReasoningAvailability, ReasoningChannel  # noqa: E402
+from core.providers.base import LLMResponse, ToolCallRequest
+from core.reasoning import ReasoningAvailability, ReasoningChannel
 
 
 class _ScriptedProvider:
@@ -102,7 +102,7 @@ def _run_tui(
 
     monkeypatch.setattr(store_mod, "_DEFAULT_STORE", None)
     monkeypatch.setattr("sys.stdin", io.StringIO(stdin_text))
-    rc = tui_app.main(["--workspace", str(tmp_path / workspace)])
+    rc = tui_app.main(["--workspace", str(tmp_path / workspace), "--trust"])
     return rc, provider
 
 
@@ -119,6 +119,25 @@ def test_multi_turn_conversation(monkeypatch, tmp_path, capsys):
     assert "reply one" in out and "reply two" in out
 
 
+def test_noninteractive_tui_requires_trust_without_creating_a_session(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    from core.sessions import SessionStore
+
+    workspace = tmp_path / "untrusted"
+    workspace.mkdir()
+    monkeypatch.setenv("DEEPCODE_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("DEEPCODE_SESSIONS_DIR", str(tmp_path / "sessions"))
+    monkeypatch.setattr("sys.stdin", io.StringIO("/exit\n"))
+
+    assert tui_app.main(["--workspace", str(workspace)]) == 1
+
+    assert SessionStore(tmp_path / "sessions").list_sessions() == []
+    assert "--trust" in capsys.readouterr().err
+
+
 def test_slash_help_lists_registry(monkeypatch, tmp_path, capsys):
     rc, _ = _run_tui(monkeypatch, tmp_path, "/help\n/exit\n", ["unused"])
     assert rc == 0
@@ -128,6 +147,7 @@ def test_slash_help_lists_registry(monkeypatch, tmp_path, capsys):
         "/resume",
         "/model",
         "/effort",
+        "/permissions",
         "/transcript",
         "/skills",
         "/skill",
@@ -142,6 +162,40 @@ def test_unknown_command_hints(monkeypatch, tmp_path, capsys):
     rc, _ = _run_tui(monkeypatch, tmp_path, "/nope\n/exit\n", ["unused"])
     assert rc == 0
     assert "unknown command" in capsys.readouterr().out
+
+
+def test_cli_permissions_are_session_scoped_and_full_access_is_confirmed(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    rc, _ = _run_tui(
+        monkeypatch,
+        tmp_path,
+        (
+            "/permissions\n"
+            "/permissions read-only\n"
+            "/permissions full-access\n"
+            "no\n"
+            "/permissions\n"
+            "/permissions full-access\n"
+            "yes\n"
+            "/permissions\n"
+            "/permissions inherit\n"
+            "/permissions unsafe\n"
+            "/exit\n"
+        ),
+        ["unused"],
+    )
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "New Turns: inherit · effective: default (ask)" in out
+    assert "New Turns: read only" in out
+    assert "Full access was not enabled." in out
+    assert "New Turns: full access" in out
+    assert "New submissions use this access" in out
+    assert "usage: /permissions [ask|read-only|full-access|inherit]" in out
 
 
 def test_cli_renderer_marks_a_nonzero_command_as_failed():
@@ -537,7 +591,7 @@ def test_goal_edit_uses_stable_identity_without_a_revision_retry_loop():
 
     class GoalExtension:
         goal = original
-        edit_calls = []
+        edit_calls: ClassVar[list[dict[str, Any]]] = []
 
         def read(self, requested_thread_id):
             assert requested_thread_id == thread_id
@@ -630,7 +684,7 @@ def test_goal_continue_command_uses_the_shared_goal_extension():
 
 
 def test_new_resets_history_and_model_switch_keeps_it(monkeypatch, tmp_path, capsys):
-    rc, provider = _run_tui(
+    rc, _provider = _run_tui(
         monkeypatch,
         tmp_path,
         "hello\n/new\n/model other-model\n/exit\n",
@@ -703,7 +757,7 @@ def test_session_persisted_and_resumable(monkeypatch, tmp_path, capsys):
     assert "remember the number" in sessions[0].title
 
     # Conversation 2: /resume restores the transcript into the live agent.
-    rc2, provider2 = _run_tui(
+    rc2, _provider2 = _run_tui(
         monkeypatch,
         tmp_path,
         f"/resume {sid}\nwhat number?\n/exit\n",

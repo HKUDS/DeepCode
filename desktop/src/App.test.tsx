@@ -6,7 +6,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
   Approval,
@@ -14,6 +14,7 @@ import type {
   AutomationRun,
   DiagnosticsSnapshot,
   Event,
+  ExecutionSecurityProfile,
   Goal,
   GoalOutcome,
   Item,
@@ -53,6 +54,33 @@ const readyStatus: SidecarStatus = {
   },
 };
 
+const askSecurityProfile: ExecutionSecurityProfile = {
+  accessPreset: "ask",
+  permissionMode: "default",
+  commandSandbox: true,
+  filesystemScope: "workspace",
+  approvalPolicy: "on_request",
+  permissionRules: [],
+};
+
+const fullAccessSecurityProfile: ExecutionSecurityProfile = {
+  accessPreset: "full_access",
+  permissionMode: "full_auto",
+  commandSandbox: false,
+  filesystemScope: "unrestricted",
+  approvalPolicy: "never",
+  permissionRules: [],
+};
+
+const readOnlySecurityProfile: ExecutionSecurityProfile = {
+  accessPreset: "read_only",
+  permissionMode: "plan",
+  commandSandbox: true,
+  filesystemScope: "workspace",
+  approvalPolicy: "never",
+  permissionRules: [],
+};
+
 const desktopSettings: SettingsSnapshot = {
   configPath: "/tmp/deepcode_config.json",
   agents: {
@@ -66,6 +94,10 @@ const desktopSettings: SettingsSnapshot = {
     sandbox: true,
   },
   permissionModeExplicit: false,
+  userAccessPreset: null,
+  projectAccessPreset: null,
+  resolvedDefaultSecurityProfile: askSecurityProfile,
+  resolvedDefaultSecuritySource: "built_in",
   providers: [
     {
       name: "openai",
@@ -338,6 +370,18 @@ class TestRuntime implements DesktopRuntime {
       case "settings/update": {
         const request = params as MethodParams["settings/update"];
         const security = request.patch.security;
+        const accessPreset =
+          typeof security === "object" &&
+          security !== null &&
+          !Array.isArray(security) &&
+          Object.hasOwn(security, "accessPreset")
+            ? security.accessPreset
+            : undefined;
+        const updatesPermissionMode =
+          typeof security === "object" &&
+          security !== null &&
+          !Array.isArray(security) &&
+          Object.hasOwn(security, "permissionMode");
         this.settingsState = {
           ...this.settingsState,
           security:
@@ -346,7 +390,28 @@ class TestRuntime implements DesktopRuntime {
             !Array.isArray(security)
               ? { ...this.settingsState.security, ...security }
               : this.settingsState.security,
-          permissionModeExplicit: true,
+          permissionModeExplicit:
+            this.settingsState.permissionModeExplicit || updatesPermissionMode,
+          ...(accessPreset !== undefined
+            ? {
+                [request.scope === "project"
+                  ? "projectAccessPreset"
+                  : "userAccessPreset"]:
+                  accessPreset === "ask" ||
+                  accessPreset === "read_only" ||
+                  accessPreset === "full_access"
+                    ? accessPreset
+                    : null,
+                resolvedDefaultSecurityProfile:
+                  accessPreset === "full_access"
+                    ? fullAccessSecurityProfile
+                    : accessPreset === "read_only"
+                      ? readOnlySecurityProfile
+                      : askSecurityProfile,
+                resolvedDefaultSecuritySource:
+                  request.scope === "project" ? "project" : "user",
+              }
+            : {}),
         };
         return { settings: this.settingsState } as MethodResults[M];
       }
@@ -488,6 +553,18 @@ class TestRuntime implements DesktopRuntime {
           connectionId: request.connectionId,
           model: request.model,
           reasoningEffort: request.reasoningEffort,
+        };
+        return { thread: this.threadState[index] } as MethodResults[M];
+      }
+      case "thread/permission/update": {
+        const request = params as MethodParams["thread/permission/update"];
+        const index = this.threadState.findIndex(
+          (candidate) => candidate.id === request.threadId,
+        );
+        if (index === -1) throw new Error(`Missing test thread: ${request.threadId}`);
+        this.threadState[index] = {
+          ...this.threadState[index],
+          accessPresetOverride: request.accessPreset,
         };
         return { thread: this.threadState[index] } as MethodResults[M];
       }
@@ -853,6 +930,7 @@ const thread: Thread = {
   model: null,
   connectionId: null,
   reasoningEffort: null,
+  accessPresetOverride: null,
   workspacePath: project.canonicalPath,
   worktreePath: null,
   createdAt: "2026-07-16T00:00:00Z",
@@ -1225,7 +1303,10 @@ const workflowEvents: Event[] = [
 
 describe("desktop command center", () => {
   beforeEach(() => localStorage.clear());
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   it("renders an honest empty state backed by the ready runtime", async () => {
     render(<App runtime={new TestRuntime()} />);
@@ -1572,6 +1653,124 @@ describe("desktop command center", () => {
       ),
     ).toBeTruthy();
     expect(runtime.diagnosticsExports).toEqual([diagnostics]);
+  });
+
+  it("saves one coherent product access default without rewriting sandbox compatibility", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const access = await screen.findByRole("combobox", {
+      name: "Default Session access",
+    });
+    expect((access as HTMLSelectElement).value).toBe("");
+    expect(
+      screen.getByRole("option", { name: "Use resolved fallback · Ask" }),
+    ).toBeTruthy();
+    expect(screen.queryByLabelText("Enable command sandbox")).toBeNull();
+
+    fireEvent.change(access, { target: { value: "read_only" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save safety settings" }));
+
+    await waitFor(() =>
+      expect(
+        runtime.requests.find(
+          (request) =>
+            request.method === "settings/update" &&
+            (request.params as MethodParams["settings/update"]).patch.security !==
+              undefined,
+        )?.params,
+      ).toMatchObject({
+        patch: { security: { accessPreset: "read_only" } },
+      }),
+    );
+    const securityPatch = (
+      runtime.requests.find(
+        (request) =>
+          request.method === "settings/update" &&
+          (request.params as MethodParams["settings/update"]).patch.security !==
+            undefined,
+      )?.params as MethodParams["settings/update"]
+    ).patch.security;
+    expect(securityPatch).toEqual({ accessPreset: "read_only" });
+  });
+
+  it("requires acknowledgement for a Full access Settings default", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const access = await screen.findByRole("combobox", {
+      name: "Default Session access",
+    });
+    fireEvent.change(access, { target: { value: "full_access" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save safety settings" }));
+    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1));
+    expect(
+      runtime.requests.some(
+        (request) =>
+          request.method === "settings/update" &&
+          (request.params as MethodParams["settings/update"]).patch.security !==
+            undefined,
+      ),
+    ).toBe(false);
+
+    confirm.mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Save safety settings" }));
+    await waitFor(() =>
+      expect(
+        runtime.requests.find(
+          (request) =>
+            request.method === "settings/update" &&
+            (request.params as MethodParams["settings/update"]).patch.security !==
+              undefined,
+        )?.params,
+      ).toMatchObject({
+        patch: { security: { accessPreset: "full_access" } },
+        scope: "user",
+        riskAcknowledged: true,
+      }),
+    );
+  });
+
+  it("edits the selected Settings scope and can restore project inheritance", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const scope = await screen.findByRole("combobox", {
+      name: "Write changes to",
+    });
+    fireEvent.change(scope, { target: { value: "project" } });
+    const access = screen.getByRole("combobox", {
+      name: "Default Session access",
+    });
+    expect((access as HTMLSelectElement).value).toBe("");
+    expect(
+      screen.getByRole("option", { name: "Inherit user default" }),
+    ).toBeTruthy();
+
+    fireEvent.change(access, { target: { value: "read_only" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save safety settings" }));
+    await waitFor(() =>
+      expect((access as HTMLSelectElement).value).toBe("read_only"),
+    );
+
+    fireEvent.change(access, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save safety settings" }));
+    await waitFor(() => {
+      const updates = runtime.requests.filter(
+        (request) => request.method === "settings/update",
+      );
+      expect(updates.at(-1)?.params).toMatchObject({
+        patch: { security: { accessPreset: null } },
+        scope: "project",
+      });
+    });
   });
 
   it("configures one shared credential-safe LLM connection from Settings", async () => {
@@ -2056,15 +2255,16 @@ describe("desktop command center", () => {
     expect(runtime.calls).toContain("thread/rename");
   });
 
-  it("applies real per-Session model and shared permission settings", async () => {
+  it("applies real per-Session model and access settings", async () => {
     const runtime = new TestRuntime([project], [thread], []);
     render(<App runtime={runtime} />);
 
     const model = await screen.findByRole("button", { name: "Session model" });
     const permissions = screen.getByRole("combobox", {
-      name: "Permission mode",
+      name: "New submissions access",
     });
-    expect((permissions as HTMLSelectElement).value).toBe("default");
+    expect((permissions as HTMLSelectElement).value).toBe("");
+    expect(screen.getByRole("option", { name: "Default · Ask" })).toBeTruthy();
 
     fireEvent.click(model);
     const option = await screen.findByRole("option", { name: /gpt-5-mini/ });
@@ -2088,11 +2288,115 @@ describe("desktop command center", () => {
       reasoningEffort: "high",
     });
 
-    fireEvent.change(permissions, { target: { value: "plan" } });
+    fireEvent.change(permissions, { target: { value: "read_only" } });
     await waitFor(() => {
-      expect((permissions as HTMLSelectElement).value).toBe("plan");
-      expect(runtime.calls).toContain("settings/update");
+      expect((permissions as HTMLSelectElement).value).toBe("read_only");
+      expect(runtime.calls).toContain("thread/permission/update");
     });
+    expect(
+      runtime.requests.find(
+        (request) => request.method === "thread/permission/update",
+      )?.params,
+    ).toEqual({
+      threadId: thread.id,
+      accessPreset: "read_only",
+    });
+  });
+
+  it("requires confirmation before enabling persistent Full access", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    const permissions = await screen.findByRole("combobox", {
+      name: "New submissions access",
+    });
+    fireEvent.change(permissions, { target: { value: "full_access" } });
+    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1));
+    expect((permissions as HTMLSelectElement).value).toBe("");
+    expect(permissions.closest("label")?.getAttribute("data-access")).toBe(
+      "ask",
+    );
+    expect(runtime.calls).not.toContain("thread/permission/update");
+
+    confirm.mockReturnValue(true);
+    fireEvent.change(permissions, { target: { value: "full_access" } });
+    await waitFor(() => {
+      expect((permissions as HTMLSelectElement).value).toBe("full_access");
+      expect(runtime.calls).toContain("thread/permission/update");
+    });
+    expect(permissions.closest("label")?.getAttribute("data-access")).toBe(
+      "full_access",
+    );
+    expect(
+      runtime.requests.find(
+        (request) => request.method === "thread/permission/update",
+      )?.params,
+    ).toEqual({
+      threadId: thread.id,
+      accessPreset: "full_access",
+      riskAcknowledged: true,
+    });
+  });
+
+  it("keeps frozen Current and Queued access separate from new submissions", async () => {
+    const executingTurn: Turn = {
+      ...runningTurn,
+      executionSecurityProfile: fullAccessSecurityProfile,
+    };
+    const queuedTurn: Turn = {
+      ...turn,
+      id: "turn-frozen-queued",
+      ordinal: 2,
+      prompt: "Run the queued verification",
+      status: "queued",
+      executionSecurityProfile: askSecurityProfile,
+      startedAt: null,
+      completedAt: null,
+    };
+    const events: Event[] = [executingTurn, queuedTurn].map(
+      (candidate, index) => ({
+        eventId: `event-frozen-access-${candidate.id}`,
+        sequence: index + 1,
+        type: "turn.updated",
+        threadId: thread.id,
+        turnId: candidate.id,
+        itemId: null,
+        timestamp: "2026-07-16T00:00:02Z",
+        payload: { turn: candidate as unknown as JsonValue },
+      }),
+    );
+    const runtime = new TestRuntime(
+      [project],
+      [{ ...thread, status: "running" }],
+      events,
+    );
+    render(<App runtime={runtime} />);
+
+    const currentAccess = await screen.findByLabelText(
+      "Current Turn access: Full access",
+    );
+    const queuedAccess = screen.getByLabelText("Queued Turn access: Ask");
+    expect(currentAccess.getAttribute("data-access")).toBe("full_access");
+    expect(queuedAccess.getAttribute("data-access")).toBe("ask");
+    expect(
+      screen.getByText(
+        "Active and queued Turns keep their frozen model and access.",
+      ),
+    ).toBeTruthy();
+
+    const newSubmissions = screen.getByRole("combobox", {
+      name: "New submissions access",
+    });
+    fireEvent.change(newSubmissions, { target: { value: "read_only" } });
+    await waitFor(() =>
+      expect((newSubmissions as HTMLSelectElement).value).toBe("read_only"),
+    );
+
+    expect(currentAccess.getAttribute("data-access")).toBe("full_access");
+    expect(currentAccess.textContent).toContain("Current Turn\u00b7Full access");
+    expect(queuedAccess.textContent).toContain("Queued (1)\u00b7Ask");
+    expect(screen.queryByText("Model & access apply next Turn")).toBeNull();
   });
 
   it("attaches only workspace files and sends relative context references", async () => {

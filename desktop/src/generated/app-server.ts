@@ -35,13 +35,17 @@ export type AutomationScheduleKind = "manual" | "interval";
  */
 export type AutomationActivationStatus = "enabled" | "paused";
 export type ThreadMode = "code" | "paper" | "brief" | "review" | "goal";
+/**
+ * User-facing tool access preset shared by Desktop and CLI.
+ */
+export type ExecutionAccessPreset = "ask" | "read_only" | "full_access";
 export type ApprovalDecision = "approved_once" | "approved_session" | "denied";
+export type ExecutionPermissionMode = "default" | "plan" | "full_auto";
 export type AutomationStatus = "enabled" | "paused" | "retired";
 export type AutomationTrigger = "manual" | "scheduled";
 export type AutomationRunStatus =
   "queued" | "running" | "waiting" | "blocked" | "completed" | "failed" | "interrupted" | "skipped";
 export type ThreadStatus = "idle" | "running" | "waiting" | "failed" | "archived";
-export type ExecutionPermissionMode = "default" | "plan" | "full_auto";
 export type TurnStatus = "queued" | "running" | "waiting_approval" | "completed" | "failed" | "interrupted";
 export type GoalStatus = "active" | "paused" | "blocked" | "budget_limited" | "complete";
 export type ItemKind =
@@ -116,6 +120,7 @@ export interface MethodParams {
   "thread/rename": ThreadRenameParams;
   "thread/model": ThreadModelParams;
   "thread/execution/update": ThreadExecutionParams;
+  "thread/permission/update": ThreadPermissionUpdateParams;
   "thread/archive": ThreadReadParams;
   "thread/delete": ThreadReadParams;
   "thread/fork": ThreadForkParams;
@@ -195,6 +200,7 @@ export interface SettingsUpdateParams {
   patch: JsonObject;
   scope?: ConfigScope;
   projectId?: string;
+  riskAcknowledged?: boolean;
 }
 export interface ProviderUpsertParams {
   connection: {
@@ -320,6 +326,17 @@ export interface ThreadExecutionParams {
   connectionId: string | null;
   model: string | null;
   reasoningEffort: string | null;
+}
+export interface ThreadPermissionUpdateParams {
+  threadId: string;
+  /**
+   * Null clears the Session override and inherits Settings.
+   */
+  accessPreset: ExecutionAccessPreset | null;
+  /**
+   * Required true when selecting full_access.
+   */
+  riskAcknowledged?: boolean;
 }
 export interface ThreadForkParams {
   threadId: string;
@@ -581,6 +598,9 @@ export interface MethodResults {
   "thread/execution/update": {
     thread: Thread;
   };
+  "thread/permission/update": {
+    thread: Thread;
+  };
   "thread/archive": {
     thread: Thread;
   };
@@ -778,8 +798,34 @@ export interface SettingsSnapshot {
   agents: JsonObject;
   security: JsonObject;
   permissionModeExplicit: boolean;
+  userAccessPreset: ExecutionAccessPreset | null;
+  projectAccessPreset: ExecutionAccessPreset | null;
+  resolvedDefaultSecurityProfile: ExecutionSecurityProfile;
+  resolvedDefaultSecuritySource: "user" | "project" | "environment" | "user_legacy" | "project_legacy" | "built_in";
   providers: SettingsProvider[];
   models: SettingsModel[];
+}
+/**
+ * Immutable, resolved tool-security snapshot used by one Turn.
+ */
+export interface ExecutionSecurityProfile {
+  accessPreset: ExecutionAccessPreset | null;
+  permissionMode: ExecutionPermissionMode;
+  commandSandbox: boolean;
+  filesystemScope: "workspace" | "unrestricted";
+  approvalPolicy: "on_request" | "never";
+  /**
+   * Ordered, immutable rules evaluated within the preset safety boundary.
+   */
+  permissionRules: ExecutionPermissionRule[];
+}
+/**
+ * One immutable tool-permission rule captured for a Turn.
+ */
+export interface ExecutionPermissionRule {
+  permission: string;
+  pattern: string;
+  action: "allow" | "ask" | "deny";
 }
 export interface SettingsProvider {
   name: string;
@@ -937,6 +983,10 @@ export interface Thread {
   model: string | null;
   connectionId: string | null;
   reasoningEffort: string | null;
+  /**
+   * Session override. Null inherits the effective Settings default.
+   */
+  accessPresetOverride: ExecutionAccessPreset | null;
   workspacePath: string;
   worktreePath: string | null;
   createdAt: string;
@@ -963,6 +1013,7 @@ export interface Turn {
     | [string, string, string, string, string, string, string, string];
   executionProfile?: ExecutionProfile | null;
   executionPermissionMode?: ExecutionPermissionMode | null;
+  executionSecurityProfile?: ExecutionSecurityProfile | null;
   goalId?: string | null;
   status: TurnStatus;
   stopReason: string | null;

@@ -24,9 +24,15 @@ from prompt_toolkit.patch_stdout import patch_stdout
 
 from cli.tui import theme
 from cli.tui.commands import REGISTRY
+from core.config import deepcode_home
+from core.private_storage import (
+    ensure_private_directory,
+    ensure_private_file,
+    open_private_file,
+)
 from core.skills.management import LocalSkillManager
 
-_HISTORY_PATH = Path.home() / ".deepcode" / "tui_history"
+_HISTORY_PATH: Path | None = None
 _SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv"}
 _MAX_COMPLETIONS = 30
 
@@ -110,7 +116,15 @@ class InputReader:
         self.interactive = sys.stdin.isatty()
         self._prompt_session: PromptSession | None = None
         if self.interactive:
-            _HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+            history_path = _HISTORY_PATH or deepcode_home() / "tui_history"
+            ensure_private_directory(history_path.parent)
+            if not history_path.exists():
+                descriptor = open_private_file(
+                    history_path,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                )
+                os.close(descriptor)
+            ensure_private_file(history_path)
             bindings = KeyBindings()
 
             @bindings.add("escape")
@@ -124,7 +138,7 @@ class InputReader:
                 event.app.invalidate()
 
             self._prompt_session = PromptSession(
-                history=FileHistory(str(_HISTORY_PATH)),
+                history=FileHistory(str(history_path)),
                 completer=TuiCompleter(workspace),
                 complete_while_typing=True,
                 key_bindings=bindings,

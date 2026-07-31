@@ -18,6 +18,11 @@ from core.persistence.migrations import (
     current_version,
     migrate,
 )
+from core.private_storage import (
+    ensure_private_directory,
+    ensure_private_file,
+    open_private_file,
+)
 
 
 def default_database_path() -> Path:
@@ -33,7 +38,7 @@ class Database:
         )
 
     def initialize(self, *, target_version: int = LATEST_SCHEMA_VERSION) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        ensure_private_directory(self.path.parent)
         with exclusive_file_lock(self._migration_lock_path()):
             had_existing_database = self._has_existing_database()
             connection = self._connect()
@@ -49,6 +54,7 @@ class Database:
                 migrate(connection, target_version)
             finally:
                 connection.close()
+                self._harden_files()
 
     def schema_version(self) -> int:
         """Read the installed schema without creating or migrating it."""
@@ -71,6 +77,9 @@ class Database:
                 time.sleep(0.01)
 
     def _connect(self) -> sqlite3.Connection:
+        ensure_private_directory(self.path.parent)
+        descriptor = open_private_file(self.path, os.O_RDWR | os.O_CREAT)
+        os.close(descriptor)
         connection = sqlite3.connect(
             self.path,
             timeout=10.0,
@@ -80,7 +89,12 @@ class Database:
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA busy_timeout = 10000")
         connection.execute("PRAGMA synchronous = NORMAL")
+        self._harden_files()
         return connection
+
+    def _harden_files(self) -> None:
+        for suffix in ("", "-wal", "-shm", "-journal"):
+            ensure_private_file(Path(f"{self.path}{suffix}"))
 
     def _migration_lock_path(self) -> Path:
         return self.path.with_name(f"{self.path.name}.migration.lock")
@@ -99,11 +113,7 @@ class Database:
         target_version: int,
     ) -> Path:
         backup_directory = self.path.parent / "backups"
-        backup_directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-        try:
-            os.chmod(backup_directory, 0o700)
-        except OSError:
-            pass
+        ensure_private_directory(backup_directory)
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
         suffix = self.path.suffix or ".sqlite3"
         filename = (
@@ -134,6 +144,7 @@ class Database:
             yield connection
         finally:
             connection.close()
+            self._harden_files()
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
@@ -149,3 +160,4 @@ class Database:
             connection.commit()
         finally:
             connection.close()
+            self._harden_files()

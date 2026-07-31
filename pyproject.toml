@@ -4,6 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 
 [tool.ruff]
 target-version = "py312"
@@ -11,3 +12,19 @@ line-length = 88
 
 [tool.ruff.lint]
 ignore = ["E402"]
+
+[tool.check-manifest]
+# The Python sdist contains the shared Agent runtime and CLI. Desktop, tests,
+# CI/development material, and README artwork are distributed from the source
+# repository and Desktop release bundles instead of the PyPI source archive.
+ignore = [
+    ".dockerignore",
+    ".pre-commit-config.yaml",
+    "assets/**",
+    "desktop/**",
+    "docs/**",
+    "rust-toolchain.toml",
+    "scripts/**",
+    "tests/**",
+    "uv.lock",
+]

@@ -6,6 +6,11 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from cli.project_trust import (
+    open_workspace_project,
+    require_project_trusted,
+    set_project_trusted,
+)
 from cli.tui.domain_events import DurableThreadEventCursor
 from core.application.agent_adapter import ConfiguredAgentSessionFactory
 from core.application.application import DeepCodeApplication
@@ -14,18 +19,20 @@ from core.application.interactive_turn_router import (
     InteractiveTurnResult,
     InteractiveTurnRouter,
 )
-from core.config import load_config_for_workspace
 from core.domain.approval import Approval, ApprovalStatus
 from core.domain.common import new_id
 from core.domain.event import DomainEvent
 from core.domain.execution_profile import ExecutionProfile, ExecutionSelection
+from core.domain.execution_security import (
+    ExecutionAccessPreset,
+    ExecutionSecurityProfile,
+)
 from core.domain.message_provenance import ClientSurface
 from core.domain.project import TrustState
 from core.domain.thread import Thread
-from core.domain.turn import Turn
+from core.domain.turn import Turn, TurnStatus
 from core.events import Event
 from core.harness.permissions import PermissionMode
-from core.harness.policy import build_permission_engine
 from core.sessions import SessionStore, get_default_store
 
 
@@ -47,6 +54,7 @@ class TuiThreadClient:
         reasoning_effort: str | None,
         max_iterations: int | None,
         streaming: bool,
+        trust_workspace: bool = False,
         resume_id: str | None = None,
         store: SessionStore | None = None,
         event_sink: Callable[[Event], None] | None = None,
@@ -60,7 +68,7 @@ class TuiThreadClient:
         self._domain_task: asyncio.Task[None] | None = None
         self._domain_cursor: DurableThreadEventCursor | None = None
         self._factory = ConfiguredAgentSessionFactory(
-            default_permission_mode=PermissionMode.FULL_AUTO,
+            default_permission_mode=PermissionMode.DEFAULT,
             streaming=streaming,
             max_iterations=max_iterations,
         )
@@ -71,31 +79,30 @@ class TuiThreadClient:
             run_automation_scheduler=False,
         )
         try:
-            project = self.application.projects.add(
-                workspace,
-                trust_state=TrustState.TRUSTED,
-            )
-            if project.trust_state is not TrustState.TRUSTED:
-                project = self.application.projects.update(
-                    project.id,
-                    trust_state=TrustState.TRUSTED,
+            if resume_id is None:
+                project = open_workspace_project(
+                    self.application,
+                    workspace,
+                    grant_trust=trust_workspace,
                 )
+            else:
+                existing = self.application.threads.read(resume_id)
+                project = self.application.projects.read(existing.project_id)
+                if trust_workspace:
+                    project = set_project_trusted(self.application, project)
+            require_project_trusted(project)
             self.project = project
             self.router = InteractiveTurnRouter(
                 self.application.turns,
                 client_surface=ClientSurface.CLI,
             )
-            self.permission_mode = build_permission_engine(
-                load_config_for_workspace(workspace).security,
-                cwd=workspace,
-                default_mode=PermissionMode.FULL_AUTO,
-            ).mode
             self._requested = ExecutionSelection(
                 connection_id=connection_id,
                 model_id=model,
                 reasoning_effort=reasoning_effort,
             )
             self.thread = self._open_thread(resume_id)
+            self.project = self.application.projects.read(self.thread.project_id)
             self._subscribe_thread_events()
             self.execution_profile = self._resolve_selection(self.thread)
         except BaseException:
@@ -109,6 +116,41 @@ class TuiThreadClient:
     @property
     def model(self) -> str:
         return self.execution_profile.model_id
+
+    @property
+    def access_preset_override(self) -> ExecutionAccessPreset | None:
+        return self.thread.access_preset_override
+
+    @property
+    def project_trusted(self) -> bool:
+        return self.project.trust_state is TrustState.TRUSTED
+
+    def access_summary(self) -> str:
+        override = self.thread.access_preset_override
+        if override is not None:
+            return override.value.replace("_", " ")
+        profile = self.application.turns.execution_security_policy.resolve(self.thread)
+        if profile.access_preset is not None:
+            return f"default ({profile.access_preset.value.replace('_', ' ')})"
+        return f"legacy ({profile.permission_mode.value})"
+
+    def frozen_access_summaries(self) -> tuple[str | None, tuple[str, ...]]:
+        """Describe immutable executing/queued profiles separately from Session state."""
+
+        turns = self.application.turns.list_for_thread(self.thread.id)
+        current = next(
+            (
+                turn
+                for turn in turns
+                if turn.status in {TurnStatus.RUNNING, TurnStatus.WAITING_APPROVAL}
+            ),
+            None,
+        )
+        queued = tuple(turn for turn in turns if turn.status is TurnStatus.QUEUED)
+        return (
+            _turn_access_summary(current) if current is not None else None,
+            tuple(_turn_access_summary(turn) for turn in queued),
+        )
 
     def set_event_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         self._event_loop = loop
@@ -237,11 +279,15 @@ class TuiThreadClient:
 
     def resume(self, session_id: str) -> Thread:
         self._require_idle()
+        existing = self.application.threads.read(session_id)
+        project = self.application.projects.read(existing.project_id)
+        require_project_trusted(project)
         thread = self.application.threads.resume(
             session_id,
             workspace_path=self.workspace,
         )
         self._replace_thread(thread)
+        self.project = project
         self.execution_profile = self._resolve_selection(self.thread)
         return self.thread
 
@@ -267,6 +313,16 @@ class TuiThreadClient:
         self._requested = selection
         self.execution_profile = profile
         return profile
+
+    def set_access_preset(
+        self,
+        access_preset: ExecutionAccessPreset | None,
+    ) -> Thread:
+        self.thread = self.application.threads.set_access_preset(
+            self.thread.id,
+            access_preset,
+        )
+        return self.thread
 
     def refresh_thread(self) -> Thread:
         self.thread = self.application.threads.read(self.thread.id)
@@ -386,6 +442,18 @@ class TuiThreadClient:
             raise RuntimeError(
                 "the current Turn is still active; stop it before changing Session"
             )
+
+
+def _turn_access_summary(turn: Turn) -> str:
+    profile: ExecutionSecurityProfile | None = turn.execution_security_profile
+    if profile is not None:
+        if profile.access_preset is not None:
+            return profile.access_preset.value.replace("_", " ")
+        sandbox = "sandboxed" if profile.command_sandbox else "unsandboxed"
+        return f"legacy {profile.permission_mode.value.replace('_', ' ')} · {sandbox}"
+    if turn.execution_permission_mode is not None:
+        return f"legacy {turn.execution_permission_mode.value.replace('_', ' ')}"
+    return "legacy unknown"
 
 
 __all__ = ["TuiDelivery", "TuiThreadClient"]

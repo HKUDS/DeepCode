@@ -38,8 +38,7 @@ export function useComposerCommands(
           await controller.setThreadModel(command.model);
           return true;
         case "permission":
-          await controller.setPermissionMode(command.mode);
-          return true;
+          return controller.setAccessPreset(command.accessPreset);
       }
     },
     [controller, ui],

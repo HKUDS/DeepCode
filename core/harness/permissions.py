@@ -9,10 +9,11 @@ a real prompt in interactive ones).
 Design distilled from the reference harnesses (see
 DEEPCODE_V2_MASTER_PLAN.md §4.3), adapted rather than copied:
 
-* **Non-overridable sensitive-path denylist** (OpenHarness): credential
-  stores (``.ssh``, ``.aws/credentials``, ``.env`` …) can never be read or
-  written, regardless of rules or mode. This is the last line of defense
-  against prompt injection and cannot be turned off by config.
+* **Central sensitive-path protection** (OpenHarness): credential stores
+  (``.ssh``, ``.aws/credentials``, ``.env`` …) are blocked ahead of rules in
+  legacy, Ask, and Read-only profiles. The explicit Full Access preset disables
+  this boundary together with the command sandbox, matching its honest
+  unrestricted-filesystem promise.
 * **Two-dimensional wildcard rules, last-match-wins** (opencode): a rule
   matches on both the permission name (usually the tool name) and an
   argument pattern (e.g. the bash command string or the target path), so
@@ -23,19 +24,26 @@ DEEPCODE_V2_MASTER_PLAN.md §4.3), adapted rather than copied:
   implicit ask; used by non-interactive workflows).
 
 Evaluation precedence (first decisive wins):
-  1. sensitive-path denylist            → DENY   (never overridable)
-  2. explicit rule match (last-wins)    → its action
-  3. mode default for read-only vs mutating tools
+  1. sensitive-path protection          → DENY   (when enabled)
+  2. canonical Read only upper bound    → DENY   (mutating tools)
+  3. explicit rule match (last-wins)    → its action
+  4. mode default for read-only vs mutating tools
 """
 
 from __future__ import annotations
 
 import fnmatch
 import os
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Iterable, Mapping
+
+from core.domain.execution_security import (
+    ApprovalPolicy,
+    ExecutionPermissionRuleSnapshot,
+    normalize_permission_rules,
+)
 
 
 class PermissionDecision(str, Enum):
@@ -50,8 +58,9 @@ class PermissionMode(str, Enum):
     FULL_AUTO = "full_auto"
 
 
-# Credential / secret locations that may never be read or written, no matter
-# what the rules or mode say. Patterns are matched against normalized absolute
+# Credential / secret locations protected by every profile except the explicit
+# Full Access preset. Rules cannot override this boundary while it is enabled.
+# Patterns are matched against normalized absolute
 # paths with fnmatch (``*`` spans path separators here, which is what we want:
 # ``*/.ssh/*`` should catch any depth). Kept deliberately small and auditable.
 SENSITIVE_PATH_PATTERNS: tuple[str, ...] = (
@@ -81,6 +90,12 @@ SENSITIVE_PATH_PATTERNS: tuple[str, ...] = (
 
 # Argument keys inspected to find the "path" a tool touches.
 _PATH_ARG_KEYS = ("file_path", "path", "root", "workspace_path", "target", "filename")
+_PATCH_PATH_PREFIXES = (
+    "*** Add File: ",
+    "*** Update File: ",
+    "*** Delete File: ",
+    "*** Move to: ",
+)
 
 # Tool names that read state, or are otherwise side-effect-free w.r.t. the
 # workspace and security posture; safe to auto-allow in default mode and never
@@ -143,13 +158,6 @@ def _is_shell_tool(tool_name: str) -> bool:
     )
 
 
-def _pattern_specificity(pattern: str) -> int:
-    """Higher = more specific. Bare ``*`` is least specific (0)."""
-    if pattern == "*":
-        return 0
-    return sum(1 for ch in pattern if ch not in "*?")
-
-
 @dataclass
 class PermissionEngine:
     """Evaluate tool calls to allow / ask / deny.
@@ -164,12 +172,23 @@ class PermissionEngine:
         Extra tool names to treat as read-only (merged with the built-ins).
     cwd:
         Base directory used to resolve relative paths before denylist checks.
+    approval_policy:
+        Controls whether an ``ask`` decision can be surfaced to an approver.
+    protect_sensitive_paths:
+        Enables the central credential-path boundary.
+    enforce_read_only:
+        Makes mutating-tool denial an upper bound that rules cannot broaden.
+        This is enabled only by the canonical Read only product preset; the
+        default remains false for legacy rule compatibility.
     """
 
     mode: PermissionMode = PermissionMode.DEFAULT
     rules: list[PermissionRule] = field(default_factory=list)
     read_only_tools: frozenset[str] = field(default_factory=frozenset)
     cwd: str | None = None
+    approval_policy: ApprovalPolicy = ApprovalPolicy.ON_REQUEST
+    protect_sensitive_paths: bool = True
+    enforce_read_only: bool = False
 
     def is_read_only(self, tool_name: str) -> bool:
         known = _READ_ONLY_TOOLS | self.read_only_tools
@@ -192,6 +211,18 @@ class PermissionEngine:
                 paths.append(value)
             elif isinstance(value, (list, tuple)):
                 paths.extend(v for v in value if isinstance(v, str) and v.strip())
+        # apply_patch carries paths in a structured patch envelope rather than
+        # separate JSON fields. Extract only its declarative path directives so
+        # the same central protection applies without a tool-name special case.
+        patch = arguments.get("patch")
+        if isinstance(patch, str):
+            for line in patch.splitlines():
+                for prefix in _PATCH_PATH_PREFIXES:
+                    if line.startswith(prefix):
+                        candidate = line[len(prefix) :].strip()
+                        if candidate:
+                            paths.append(candidate)
+                        break
         return paths
 
     def hits_sensitive_path(self, arguments: Mapping[str, object]) -> str | None:
@@ -237,15 +268,26 @@ class PermissionEngine:
         """
         arguments = arguments or {}
 
-        offending = self.hits_sensitive_path(arguments)
+        offending = (
+            self.hits_sensitive_path(arguments)
+            if self.protect_sensitive_paths
+            else None
+        )
         if offending is not None:
             return (
                 PermissionDecision.DENY,
                 (
                     f"Access to '{offending}' is blocked: it matches the "
                     "non-overridable sensitive-path denylist (credentials / "
-                    "secrets). This cannot be enabled by configuration."
+                    "secrets). Permission rules cannot override this boundary."
                 ),
+            )
+
+        read_only = self.is_read_only(tool_name)
+        if self.enforce_read_only and not read_only:
+            return (
+                PermissionDecision.DENY,
+                "read-only access preset: mutating tools cannot be enabled by rules",
             )
 
         argument = self._argument_string(tool_name, arguments)
@@ -254,12 +296,14 @@ class PermissionEngine:
             if rule.matches(tool_name, argument):
                 matched = rule
         if matched is not None:
-            return matched.action, (
-                f"matched rule {matched.permission!r} pattern {matched.pattern!r} "
-                f"→ {matched.action.value}"
+            return self._apply_approval_policy(
+                matched.action,
+                (
+                    f"matched rule {matched.permission!r} pattern {matched.pattern!r} "
+                    f"→ {matched.action.value}"
+                ),
             )
 
-        read_only = self.is_read_only(tool_name)
         if self.mode is PermissionMode.PLAN:
             if read_only:
                 return PermissionDecision.ALLOW, "plan mode: read-only tool allowed"
@@ -273,10 +317,32 @@ class PermissionEngine:
         # DEFAULT
         if read_only:
             return PermissionDecision.ALLOW, "default mode: read-only tool allowed"
-        return (
+        return self._apply_approval_policy(
             PermissionDecision.ASK,
             "default mode: mutating tool requires confirmation",
         )
+
+    def _apply_approval_policy(
+        self,
+        decision: PermissionDecision,
+        reason: str,
+    ) -> tuple[PermissionDecision, str]:
+        """Make ``never`` fail closed instead of silently auto-approving ASK.
+
+        Full Access uses ``FULL_AUTO`` so ordinary calls do not ask.  An
+        explicit user rule may still resolve to ASK, however, and a headless or
+        otherwise non-interactive profile must not turn that into permission.
+        """
+
+        if (
+            decision is PermissionDecision.ASK
+            and self.approval_policy is ApprovalPolicy.NEVER
+        ):
+            return (
+                PermissionDecision.DENY,
+                f"{reason}; approval policy is never, so the request is denied",
+            )
+        return decision, reason
 
 
 def rules_from_config(
@@ -287,36 +353,22 @@ def rules_from_config(
     Also accepts the shorthand ``{perm: "allow"}`` (pattern ``*``). Unknown
     action strings raise ``ValueError`` so typos fail loudly.
     """
-    rules: list[PermissionRule] = []
-    if not config:
-        return rules
-    for permission, spec in config.items():
-        if isinstance(spec, str):
-            rules.append(
-                PermissionRule(permission, "*", PermissionDecision(spec.lower()))
-            )
-            continue
-        if isinstance(spec, Mapping):
-            # Emit least-specific patterns first so that, under last-match-wins,
-            # a specific pattern beats a broad one regardless of dict order.
-            # This makes the natural authoring ``{"git push *": "ask", "*":
-            # "allow"}`` do the intuitive thing (specific wins).
-            for pattern, action in sorted(
-                spec.items(), key=lambda kv: _pattern_specificity(str(kv[0]))
-            ):
-                rules.append(
-                    PermissionRule(
-                        permission,
-                        str(pattern),
-                        PermissionDecision(str(action).lower()),
-                    )
-                )
-            continue
-        raise ValueError(
-            f"Permission spec for {permission!r} must be a string or mapping, "
-            f"got {type(spec).__name__}"
+    return rules_from_snapshots(normalize_permission_rules(config))
+
+
+def rules_from_snapshots(
+    rules: Iterable[ExecutionPermissionRuleSnapshot],
+) -> list[PermissionRule]:
+    """Adapt immutable domain snapshots to the harness evaluator type."""
+
+    return [
+        PermissionRule(
+            permission=rule.permission,
+            pattern=rule.pattern,
+            action=PermissionDecision(rule.action.value),
         )
-    return rules
+        for rule in rules
+    ]
 
 
 def make_engine(
@@ -325,6 +377,9 @@ def make_engine(
     rules_config: Mapping[str, object] | None = None,
     extra_read_only: Iterable[str] | None = None,
     cwd: str | None = None,
+    approval_policy: ApprovalPolicy = ApprovalPolicy.ON_REQUEST,
+    protect_sensitive_paths: bool = True,
+    enforce_read_only: bool = False,
 ) -> PermissionEngine:
     """Convenience constructor from loosely-typed inputs (config/CLI)."""
     resolved_mode = mode if isinstance(mode, PermissionMode) else PermissionMode(mode)
@@ -333,4 +388,7 @@ def make_engine(
         rules=rules_from_config(rules_config),
         read_only_tools=frozenset(extra_read_only or ()),
         cwd=cwd,
+        approval_policy=approval_policy,
+        protect_sensitive_paths=protect_sensitive_paths,
+        enforce_read_only=enforce_read_only,
     )

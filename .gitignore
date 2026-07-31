@@ -29,7 +29,13 @@ desktop/build/sidecar/
 *.log
 *.log.*
 *.logfire
+.coverage
 *.coverage/
+coverage.xml
+coverage/
+htmlcov/
+test-results/
+playwright-report/
 log/
 logs/
 
@@ -49,6 +55,7 @@ temp/
 .idea/
 .vscode/
 .vscode/settings.json
+.claude/settings.local.json
 
 # Framework-specific files
 local_neo4jWorkDir/

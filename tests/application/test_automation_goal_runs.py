@@ -717,10 +717,7 @@ def test_interrupted_turn_keeps_run_open_for_explicit_goal_continue(
         assert "interrupted" in blocked.detail
         application.automations.reconcile_runs()
         application.automations.reconcile_runs()
-        assert (
-            application.automations.list_runs(automation.id)[0]
-            == blocked
-        )
+        assert application.automations.list_runs(automation.id)[0] == blocked
         application.goals.continue_goal(
             automation.thread_id,
             expected_goal_id=blocked.goal_id,

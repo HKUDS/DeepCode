@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from core.private_storage import ensure_private_directory, open_private_file
 
 DELETION_SCHEMA_VERSION = 1
 
@@ -76,8 +77,8 @@ class SessionDeletionJournal:
         if not (session_directory / "session.jsonl").is_file():
             raise FileNotFoundError(f"session not found: {session_id}")
 
-        self.tombstone_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self.trash_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        ensure_private_directory(self.tombstone_root)
+        ensure_private_directory(self.trash_root)
         ticket = SessionDeletionTicket(
             session_id=session_id,
             trash_name=f"{session_id}.{uuid.uuid4().hex}.deleting",
@@ -92,12 +93,15 @@ class SessionDeletionJournal:
             "requestedAt": ticket.requested_at,
         }
         try:
-            with temporary.open("x", encoding="utf-8") as handle:
+            descriptor = open_private_file(
+                temporary,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            )
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
                 json.dump(payload, handle, sort_keys=True, separators=(",", ":"))
                 handle.write("\n")
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.chmod(temporary, 0o600)
             os.replace(temporary, tombstone)
             self._fsync_directory(self.tombstone_root)
             self.ensure_quarantined(ticket, session_directory)
@@ -118,7 +122,7 @@ class SessionDeletionJournal:
             return
         if not session_directory.exists():
             return
-        self.trash_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        ensure_private_directory(self.trash_root)
         os.replace(session_directory, trash)
         self._fsync_directory(session_directory.parent)
         self._fsync_directory(self.trash_root)

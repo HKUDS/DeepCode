@@ -7,7 +7,6 @@ import platform
 import shutil
 import sqlite3
 import sys
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +19,7 @@ from core.config import (
 from core.persistence.database import Database
 from core.persistence.migrations import current_version
 from core.sessions import SessionStore
+from core.version import __version__
 
 
 class DiagnosticsService:
@@ -103,7 +103,7 @@ class DiagnosticsService:
             schema_version = current_version(connection)
 
         return {
-            "appVersion": _package_version(),
+            "appVersion": __version__,
             "pythonVersion": platform.python_version(),
             "pythonExecutable": sys.executable,
             "platform": platform.platform(),
@@ -151,10 +151,3 @@ def _file_size(path: Path) -> int:
         return path.stat().st_size
     except OSError:
         return 0
-
-
-def _package_version() -> str:
-    try:
-        return version("deepcode-hku")
-    except PackageNotFoundError:
-        return "1.2.0"

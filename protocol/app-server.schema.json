@@ -102,6 +102,95 @@
         "full_auto"
       ]
     },
+    "ExecutionAccessPreset": {
+      "type": "string",
+      "description": "User-facing tool access preset shared by Desktop and CLI.",
+      "enum": [
+        "ask",
+        "read_only",
+        "full_access"
+      ]
+    },
+    "ExecutionPermissionRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One immutable tool-permission rule captured for a Turn.",
+      "properties": {
+        "permission": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pattern": {
+          "type": "string",
+          "minLength": 1
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "allow",
+            "ask",
+            "deny"
+          ]
+        }
+      },
+      "required": [
+        "permission",
+        "pattern",
+        "action"
+      ]
+    },
+    "ExecutionSecurityProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Immutable, resolved tool-security snapshot used by one Turn.",
+      "properties": {
+        "accessPreset": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ExecutionAccessPreset"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "permissionMode": {
+          "$ref": "#/$defs/ExecutionPermissionMode"
+        },
+        "commandSandbox": {
+          "type": "boolean"
+        },
+        "filesystemScope": {
+          "type": "string",
+          "enum": [
+            "workspace",
+            "unrestricted"
+          ]
+        },
+        "approvalPolicy": {
+          "type": "string",
+          "enum": [
+            "on_request",
+            "never"
+          ]
+        },
+        "permissionRules": {
+          "type": "array",
+          "description": "Ordered, immutable rules evaluated within the preset safety boundary.",
+          "items": {
+            "$ref": "#/$defs/ExecutionPermissionRule"
+          }
+        }
+      },
+      "required": [
+        "accessPreset",
+        "permissionMode",
+        "commandSandbox",
+        "filesystemScope",
+        "approvalPolicy",
+        "permissionRules"
+      ]
+    },
     "GoalStatus": {
       "type": "string",
       "enum": [
@@ -446,6 +535,17 @@
             "null"
           ]
         },
+        "accessPresetOverride": {
+          "description": "Session override. Null inherits the effective Settings default.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ExecutionAccessPreset"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "workspacePath": {
           "type": "string"
         },
@@ -481,6 +581,7 @@
         "model",
         "connectionId",
         "reasoningEffort",
+        "accessPresetOverride",
         "workspacePath",
         "worktreePath",
         "createdAt",
@@ -531,6 +632,16 @@
           "oneOf": [
             {
               "$ref": "#/$defs/ExecutionPermissionMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "executionSecurityProfile": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ExecutionSecurityProfile"
             },
             {
               "type": "null"
@@ -1130,6 +1241,39 @@
         "permissionModeExplicit": {
           "type": "boolean"
         },
+        "userAccessPreset": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ExecutionAccessPreset"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "projectAccessPreset": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ExecutionAccessPreset"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resolvedDefaultSecurityProfile": {
+          "$ref": "#/$defs/ExecutionSecurityProfile"
+        },
+        "resolvedDefaultSecuritySource": {
+          "enum": [
+            "user",
+            "project",
+            "environment",
+            "user_legacy",
+            "project_legacy",
+            "built_in"
+          ]
+        },
         "providers": {
           "type": "array",
           "items": {
@@ -1148,6 +1292,10 @@
         "agents",
         "security",
         "permissionModeExplicit",
+        "userAccessPreset",
+        "projectAccessPreset",
+        "resolvedDefaultSecurityProfile",
+        "resolvedDefaultSecuritySource",
         "providers",
         "models"
       ]
@@ -1165,6 +1313,9 @@
         "projectId": {
           "type": "string",
           "pattern": "^proj_"
+        },
+        "riskAcknowledged": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -2907,6 +3058,36 @@
         "reasoningEffort"
       ]
     },
+    "ThreadPermissionUpdateParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "accessPreset": {
+          "description": "Null clears the Session override and inherits Settings.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ExecutionAccessPreset"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "riskAcknowledged": {
+          "type": "boolean",
+          "description": "Required true when selecting full_access."
+        }
+      },
+      "required": [
+        "threadId",
+        "accessPreset"
+      ]
+    },
     "ThreadForkParams": {
       "type": "object",
       "additionalProperties": false,
@@ -4333,6 +4514,9 @@
         "thread/execution/update": {
           "$ref": "#/$defs/ThreadExecutionParams"
         },
+        "thread/permission/update": {
+          "$ref": "#/$defs/ThreadPermissionUpdateParams"
+        },
         "thread/archive": {
           "$ref": "#/$defs/ThreadReadParams"
         },
@@ -4493,6 +4677,7 @@
         "thread/rename",
         "thread/model",
         "thread/execution/update",
+        "thread/permission/update",
         "thread/archive",
         "thread/delete",
         "thread/fork",
@@ -4943,6 +5128,18 @@
           ]
         },
         "thread/execution/update": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "thread": {
+              "$ref": "#/$defs/Thread"
+            }
+          },
+          "required": [
+            "thread"
+          ]
+        },
+        "thread/permission/update": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
@@ -5430,6 +5627,7 @@
         "thread/rename",
         "thread/model",
         "thread/execution/update",
+        "thread/permission/update",
         "thread/archive",
         "thread/delete",
         "thread/fork",

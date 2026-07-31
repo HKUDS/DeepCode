@@ -88,12 +88,17 @@ transitions.
 
 ## Approval state machine
 
-Permission defaults belong to the client adapter rather than the shared
-kernel. The App Server/Desktop adapter is approval-first when the user has not
-configured a mode; the legacy CLI and batch adapters retain their P0
-`full_auto` default. An explicit config value or
-`DEEPCODE_PERMISSION_MODE` applies to both. The existing immutable
-sensitive-path denylist remains in force in every mode.
+CLI and Desktop now share a product-level Session access selection: `ask`,
+`read_only`, or `full_access`. The canonical Session stores an optional
+override; Turn admission resolves it with the configured default and persists
+one immutable `ExecutionSecurityProfile`. Workers consume that snapshot rather
+than choosing a client-specific default. Legacy `permissionMode`, sandbox, and
+environment settings remain supported for older direct/batch integrations and
+are never relabelled as product Full Access.
+
+Ask and Read-only profiles retain the sensitive-path guard. Explicitly
+confirmed Full Access disables that guard together with the command sandbox
+and workspace write fence; explicit deny rules still take precedence.
 
 When the permission engine returns `ask`, the AgentRunner awaits the callback
 provided by TurnService. ApprovalService atomically:
@@ -113,6 +118,10 @@ settles.
 
 The frontend never authorizes a tool directly. It only submits a decision; the
 Python backend remains the enforcement boundary.
+
+Access changes govern newly admitted Turns. Executing and queued Turns keep
+their immutable snapshots; both clients present those frozen states separately
+from the Session selection used by new submissions.
 
 ## Cancellation and process cleanup
 

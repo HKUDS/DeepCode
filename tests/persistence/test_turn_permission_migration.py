@@ -13,6 +13,7 @@ from core.domain import (
     AutomationRunStatus,
     AutomationScheduleKind,
     AutomationTrigger,
+    ExecutionClass,
     ExecutionPermissionMode,
     Project,
     Thread,
@@ -119,6 +120,11 @@ def test_v13_backfills_automation_only_and_persists_typed_permission(
             turns.get(automatic.id).execution_permission_mode
             is ExecutionPermissionMode.DEFAULT
         )
+        migrate(connection, 14)
+        assert turns.get(ordinary.id).execution_class is ExecutionClass.INTERACTIVE
+        assert (
+            turns.get(automatic.id).execution_class is ExecutionClass.MANUAL_AUTOMATION
+        )
 
     explicit = Turn(
         thread_id=ordinary.thread_id,
@@ -132,8 +138,7 @@ def test_v13_backfills_automation_only_and_persists_typed_permission(
         assert TurnRepository(connection).get(explicit.id) == explicit
         with pytest.raises(sqlite3.IntegrityError):
             connection.execute(
-                "UPDATE turns SET execution_permission_mode = 'unknown' "
-                "WHERE id = ?",
+                "UPDATE turns SET execution_permission_mode = 'unknown' WHERE id = ?",
                 (explicit.id,),
             )
 

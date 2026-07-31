@@ -31,18 +31,32 @@ from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
 
-from cli.execution_options import add_reasoning_effort_argument
 from cli.config_errors import format_config_error
-from core.config import ConfigError
-from core.file_lock import FileLease
+from cli.execution_options import (
+    add_access_preset_argument,
+    add_reasoning_effort_argument,
+    add_workspace_trust_argument,
+    parse_access_preset,
+)
+from cli.project_trust import (
+    open_workspace_project,
+    require_project_trusted,
+    set_project_trusted,
+)
 from cli.tui import commands, theme
-from cli.tui.input import InputInterrupted, InputReader, expand_file_refs
 from cli.tui.goal_controller import TuiGoalController
+from cli.tui.input import InputInterrupted, InputReader, expand_file_refs
 from cli.tui.renderer import EventRenderer
 from cli.tui.session_bridge import SessionBridge
 from cli.tui.thread_client import TuiThreadClient
+from core.application.application import DeepCodeApplication
+from core.application.errors import ApplicationError
+from core.config import ConfigError
 from core.domain.approval import ApprovalStatus
 from core.domain.event import DomainEvent
+from core.domain.execution_security import ExecutionAccessPreset
+from core.domain.project import TrustState
+from core.file_lock import FileLease
 from core.providers.reasoning import normalize_reasoning_effort
 from core.skills.management import LocalSkillManager
 
@@ -58,6 +72,8 @@ class TuiApp:
         connection_id: str | None = None,
         reasoning_effort: str | None = None,
         max_iterations: int | None,
+        trust_workspace: bool = False,
+        access_preset: ExecutionAccessPreset | None = None,
         resume_id: str | None = None,
     ) -> None:
         self.workspace = os.path.abspath(workspace)
@@ -87,9 +103,12 @@ class TuiApp:
             reasoning_effort=self._requested_reasoning_effort,
             max_iterations=self.max_iterations,
             streaming=self.reader.interactive,
+            trust_workspace=trust_workspace,
             resume_id=resume_id,
             event_sink=self.renderer.on_event,
         )
+        if access_preset is not None:
+            self.thread_client.set_access_preset(access_preset)
         self._sync_thread_state()
         self.skill_manager = LocalSkillManager(self.workspace)
         self.goal_controller = TuiGoalController(self)
@@ -166,6 +185,45 @@ class TuiApp:
         )
         self.model = profile.model_id
         self._requested_reasoning_effort = requested
+
+    def access_status(self) -> str:
+        override = self.thread_client.access_preset_override
+        if override is None:
+            future = (
+                f"New Turns: inherit · effective: {self.thread_client.access_summary()}"
+            )
+        else:
+            future = f"New Turns: {override.value.replace('_', ' ')}"
+        current, queued = self.thread_client.frozen_access_summaries()
+        lines = [future]
+        if current is not None:
+            lines.append(f"Current Turn (frozen): {current}")
+        if queued:
+            distinct = tuple(dict.fromkeys(queued))
+            summary = distinct[0] if len(distinct) == 1 else ", ".join(distinct)
+            lines.append(f"Queued Turns (frozen): {len(queued)} · {summary}")
+        return "\n".join(lines)
+
+    async def set_access_preset(self, raw_preset: str | None) -> str:
+        preset = ExecutionAccessPreset(raw_preset) if raw_preset is not None else None
+        if self.thread_client.access_preset_override is preset:
+            return self.access_status()
+        if preset is ExecutionAccessPreset.FULL_ACCESS:
+            self.console.print(
+                f"[bold {theme.APPROVAL_STYLE}]Enable Full access for this Session?[/]\n"
+                "Tools may run without approval and outside the workspace sandbox. "
+                "They can read, modify, and execute files anywhere your account can "
+                f"access. [{theme.META_STYLE}]Type yes to continue.[/]"
+            )
+            answer = await self.reader.read()
+            if answer is None or answer.strip().casefold() != "yes":
+                return "Full access was not enabled."
+        self.thread_client.set_access_preset(preset)
+        return (
+            f"{self.access_status()}\n"
+            "New submissions use this access. Active and queued Turns keep "
+            "their frozen access."
+        )
 
     def set_transcript_mode(self, mode: str) -> str:
         selected = self.renderer.set_transcript_mode(mode)
@@ -326,8 +384,8 @@ class TuiApp:
                 f"[bold {theme.ACCENT}]{theme.BRAND}[/]\n"
                 f"[{theme.META_STYLE}]model[/] {self.model}"
                 f"  [{theme.META_STYLE}]workspace[/] {self.workspace}\n"
-                f"[{theme.META_STYLE}]permission[/] "
-                f"{self.thread_client.permission_mode.value}"
+                f"[{theme.META_STYLE}]access[/] "
+                f"{self.thread_client.access_summary()}"
                 f"  [{theme.META_STYLE}]effort[/] {self.requested_reasoning_effort}"
                 f"  [{theme.META_STYLE}]session[/] {self.bridge.session_id}"
                 f"  [{theme.META_STYLE}]transcript[/] "
@@ -408,6 +466,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", "-m", default=None)
     parser.add_argument("--connection", "-c", default=None)
     add_reasoning_effort_argument(parser)
+    add_access_preset_argument(parser)
+    add_workspace_trust_argument(parser)
     parser.add_argument("--resume", "-r", default=None, help="Session id to resume.")
     parser.add_argument(
         "--max-iterations",
@@ -417,6 +477,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    if not _prepare_workspace_trust(args.workspace, grant=args.trust):
+        return 1
+
     try:
         app = TuiApp(
             workspace=args.workspace,
@@ -424,12 +487,56 @@ def main(argv: list[str] | None = None) -> int:
             connection_id=args.connection,
             reasoning_effort=args.reasoning_effort,
             max_iterations=args.max_iterations,
+            trust_workspace=args.trust,
+            access_preset=parse_access_preset(args.access),
             resume_id=args.resume,
         )
     except ConfigError as exc:
         print(format_config_error(exc), file=sys.stderr)
         return 1
+    except ApplicationError as exc:
+        print(exc.user_message, file=sys.stderr)
+        return 1
     return asyncio.run(app.repl())
+
+
+def _prepare_workspace_trust(workspace: str, *, grant: bool) -> bool:
+    """Persist trust before creating a Session, avoiding empty denied threads."""
+
+    application = DeepCodeApplication.open(
+        host_surface="cli-trust",
+        run_automation_scheduler=False,
+    )
+    try:
+        project = open_workspace_project(
+            application,
+            workspace,
+            grant_trust=grant,
+        )
+        if project.trust_state is TrustState.TRUSTED:
+            return True
+        if not sys.stdin.isatty():
+            try:
+                require_project_trusted(project)
+            except ApplicationError as exc:
+                print(exc.user_message, file=sys.stderr)
+            return False
+        print(
+            "DeepCode can read files and run tools in this workspace:\n"
+            f"  {project.canonical_path}\n"
+            "Trust this folder? Type yes to continue: ",
+            end="",
+            file=sys.stderr,
+            flush=True,
+        )
+        answer = sys.stdin.readline()
+        if answer.strip().casefold() != "yes":
+            print("Workspace was not trusted; no Session was created.", file=sys.stderr)
+            return False
+        set_project_trusted(application, project)
+        return True
+    finally:
+        application.close()
 
 
 if __name__ == "__main__":

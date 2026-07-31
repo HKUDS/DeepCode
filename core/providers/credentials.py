@@ -12,6 +12,7 @@ from typing import Any
 
 from core.config import deepcode_home
 from core.file_lock import exclusive_file_lock
+from core.private_storage import ensure_private_directory, open_private_file
 
 
 def default_credentials_path() -> Path:
@@ -83,11 +84,11 @@ class CredentialStore:
         except json.JSONDecodeError as exc:
             raise ValueError(f"invalid DeepCode credentials JSON: {exc}") from exc
         if not isinstance(value, dict):
-            raise ValueError("DeepCode credentials must contain a JSON object")
+            raise TypeError("DeepCode credentials must contain a JSON object")
         if value.get("version", 1) != 1:
             raise ValueError("unsupported DeepCode credentials version")
         if not isinstance(value.get("connections", {}), dict):
-            raise ValueError("credentials.connections must be an object")
+            raise TypeError("credentials.connections must be an object")
         return value
 
     def _mutate(self, transform) -> None:
@@ -96,16 +97,11 @@ class CredentialStore:
             self._replace(updated)
 
     def _replace(self, value: dict[str, Any]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        try:
-            os.chmod(self.path.parent, 0o700)
-        except OSError:
-            pass
+        ensure_private_directory(self.path.parent)
         temporary = self.path.with_name(f".{self.path.name}.{uuid.uuid4().hex}.tmp")
-        descriptor = os.open(
+        descriptor = open_private_file(
             temporary,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-            0o600,
         )
         try:
             payload = (json.dumps(value, indent=2, ensure_ascii=False) + "\n").encode()

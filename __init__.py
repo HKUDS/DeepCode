@@ -1,21 +1,16 @@
-"""
-DeepCode - AI Research Engine
+# ruff: noqa: N999
+"""DeepCode — an open agentic coding system."""
 
-🧬 Next-Generation AI Research Automation Platform
-⚡ Transform research papers into working code automatically
-"""
+from .core.version import __version__
+from .utils import FileProcessor
 
-__version__ = "1.2.0"
 __author__ = "DeepCode Team"
 __url__ = "https://github.com/HKUDS/DeepCode"
-__repo__ = "https://github.com/Jany-M/DeepCode/"
-
-# Import main components for easy access
-from utils import FileProcessor
+__repo__ = __url__
 
 __all__ = [
     "FileProcessor",
-    "__version__",
     "__author__",
     "__url__",
+    "__version__",
 ]

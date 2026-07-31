@@ -55,10 +55,9 @@
   },
 
   "security": {
-    "$comment": "Security base. permissionMode: full_auto (legacy CLI default) | default (mutating tools prompt for approval) | plan (mutating tools denied). Desktop uses approval-first when this field is omitted; an explicit value applies to both CLI and Desktop. The DEEPCODE_PERMISSION_MODE env var overrides this. permissions is a {tool: {argPattern: allow|ask|deny}} ruleset (specific patterns win); it can never override the built-in credential denylist. sandbox toggles command sandboxing (DEEPCODE_SANDBOX env wins).",
-    "permissionMode": "full_auto",
-    "permissions": {},
-    "sandbox": true
+    "$comment": "Product default shared by CLI and Desktop. accessPreset is ask | read_only | full_access; a Session may override it and every Turn freezes the resolved profile. permissions remains a {tool: {argPattern: allow|ask|deny}} ruleset. Legacy permissionMode and sandbox fields are still accepted for existing configurations but do not represent atomic Full access.",
+    "accessPreset": "ask",
+    "permissions": {}
   },
 
   "tools": {

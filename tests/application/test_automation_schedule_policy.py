@@ -94,14 +94,8 @@ def test_v1_policy_explicitly_coalesces_misfires_and_skips_overlap() -> None:
 
     assert policy.misfire_strategy is AutomationMisfireStrategy.COALESCE
     assert policy.overlap_strategy is AutomationOverlapStrategy.SKIP
-    assert (
-        policy.decide_overlap(has_open_run=False)
-        is AutomationOverlapDecision.RUN
-    )
-    assert (
-        policy.decide_overlap(has_open_run=True)
-        is AutomationOverlapDecision.SKIP
-    )
+    assert policy.decide_overlap(has_open_run=False) is AutomationOverlapDecision.RUN
+    assert policy.decide_overlap(has_open_run=True) is AutomationOverlapDecision.SKIP
 
 
 @pytest.mark.parametrize("interval_seconds", [True, False, 0, -1, 1.5, "60"])

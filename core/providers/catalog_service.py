@@ -14,6 +14,7 @@ import httpx
 
 from core.config import deepcode_home
 from core.file_lock import exclusive_file_lock
+from core.private_storage import ensure_private_directory, open_private_file
 from core.providers.catalog import known_model_ids, resolve_model_info
 from core.providers.profiles import ConnectionResolver, ResolvedConnection
 from core.providers.reasoning import (
@@ -42,7 +43,7 @@ class CatalogModel:
         }
 
     @classmethod
-    def from_dict(cls, value: Any) -> "CatalogModel | None":
+    def from_dict(cls, value: Any) -> CatalogModel | None:
         if not isinstance(value, dict) or not value.get("id"):
             return None
         model_id = str(value["id"])
@@ -201,7 +202,7 @@ class ModelCatalogService:
             payload = response.json()
         rows = payload.get("data", payload.get("models", payload))
         if not isinstance(rows, list):
-            raise ValueError("provider model response has no data array")
+            raise TypeError("provider model response has no data array")
         parsed = tuple(
             model
             for row in rows
@@ -277,12 +278,11 @@ class ModelCatalogService:
         return value if isinstance(value, dict) else {"version": 1, "connections": {}}
 
     def _replace(self, value: dict[str, Any]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        ensure_private_directory(self.path.parent)
         temporary = self.path.with_name(f".{self.path.name}.{uuid.uuid4().hex}.tmp")
-        descriptor = os.open(
+        descriptor = open_private_file(
             temporary,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-            0o600,
         )
         try:
             with os.fdopen(descriptor, "w", encoding="utf-8") as handle:

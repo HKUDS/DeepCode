@@ -73,10 +73,7 @@ def test_v11_backfills_typed_executors_and_round_trips_to_v10(
         ]
         turns = TurnRepository(connection)
         assert turns.get(agent_turn.id).executor is TurnExecutor.AGENT
-        assert (
-            turns.get(legacy_workflow_turn.id).executor
-            is TurnExecutor.WORKFLOW
-        )
+        assert turns.get(legacy_workflow_turn.id).executor is TurnExecutor.WORKFLOW
 
         with pytest.raises(sqlite3.IntegrityError):
             connection.execute(

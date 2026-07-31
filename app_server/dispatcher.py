@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from app_server.connection import ConnectionState
@@ -37,8 +36,8 @@ from core.application.views import (
     skill_info_view,
     terminal_info_view,
     test_command_view,
-    thread_view,
     thread_goal_view,
+    thread_view,
     turn_view,
     workflow_view,
     worktree_result_view,
@@ -49,16 +48,15 @@ from core.domain.automation import (
     AutomationScheduleKind,
 )
 from core.domain.execution_profile import ExecutionSelection
+from core.domain.execution_security import ExecutionAccessPreset
 from core.domain.message_provenance import ClientSurface
 from core.domain.project import TrustState
 from core.domain.thread import ThreadMode
 from core.skills.models import MAX_SELECTED_SKILLS, SkillScope
+from core.version import __version__
 
 PROTOCOL_VERSION = "1.0"
-try:
-    SERVER_VERSION = version("deepcode-hku")
-except PackageNotFoundError:  # source checkout without an editable install
-    SERVER_VERSION = "1.2.0"
+SERVER_VERSION = __version__
 
 
 class Params:
@@ -214,6 +212,7 @@ class Dispatcher:
             rpc_methods.THREAD_RENAME: self._thread_rename,
             rpc_methods.THREAD_MODEL: self._thread_model,
             rpc_methods.THREAD_EXECUTION_UPDATE: self._thread_execution_update,
+            rpc_methods.THREAD_PERMISSION_UPDATE: self._thread_permission_update,
             rpc_methods.THREAD_ARCHIVE: self._thread_archive,
             rpc_methods.THREAD_DELETE: self._thread_delete,
             rpc_methods.THREAD_FORK: self._thread_fork,
@@ -373,9 +372,19 @@ class Dispatcher:
         }
 
     def _settings_update(self, params: Params) -> dict[str, Any]:
-        params.only("patch", "scope", "projectId")
+        params.only("patch", "scope", "projectId", "riskAcknowledged")
+        patch = dict(params.object("patch") or {})
+        security = patch.get("security")
+        if (
+            isinstance(security, dict)
+            and security.get("accessPreset") == "full_access"
+            and not params.boolean("riskAcknowledged")
+        ):
+            raise InvalidParams(
+                "riskAcknowledged must be true when selecting full_access"
+            )
         settings = self.application.settings.update(
-            dict(params.object("patch") or {}),
+            patch,
             scope=params.string("scope", required=False) or "user",
             project_id=params.string("projectId", required=False),
         )
@@ -778,6 +787,30 @@ class Dispatcher:
             connection_id=connection_id,
             model=model,
             reasoning_effort=reasoning_effort,
+        )
+        return {"thread": thread_view(thread)}
+
+    def _thread_permission_update(self, params: Params) -> dict[str, Any]:
+        """Set or clear the current Session's product-level access override."""
+
+        params.only("threadId", "accessPreset", "riskAcknowledged")
+        raw_preset = params.nullable_string("accessPreset")
+        try:
+            access_preset = (
+                ExecutionAccessPreset(raw_preset) if raw_preset is not None else None
+            )
+        except ValueError as exc:
+            raise InvalidParams(
+                "accessPreset must be ask, read_only, full_access, or null"
+            ) from exc
+        risk_acknowledged = params.boolean("riskAcknowledged")
+        if access_preset is ExecutionAccessPreset.FULL_ACCESS and not risk_acknowledged:
+            raise InvalidParams(
+                "riskAcknowledged must be true when selecting full_access"
+            )
+        thread = self.application.threads.set_access_preset(
+            str(params.string("threadId")),
+            access_preset,
         )
         return {"thread": thread_view(thread)}
 

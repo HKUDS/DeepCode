@@ -12,9 +12,17 @@ describe("Composer commands", () => {
       ok: true,
       command: { type: "model", model: null },
     });
-    expect(parseComposerCommand("/permission full-auto")).toEqual({
+    expect(parseComposerCommand("/permissions full-access")).toEqual({
       ok: true,
-      command: { type: "permission", mode: "full_auto" },
+      command: { type: "permission", accessPreset: "full_access" },
+    });
+    expect(parseComposerCommand("/permissions inherit")).toEqual({
+      ok: true,
+      command: { type: "permission", accessPreset: null },
+    });
+    expect(parseComposerCommand("/permission plan")).toEqual({
+      ok: true,
+      command: { type: "permission", accessPreset: "read_only" },
     });
     expect(parseComposerCommand("/rename Architecture review")).toEqual({
       ok: true,
@@ -23,9 +31,10 @@ describe("Composer commands", () => {
   });
 
   it("returns actionable errors and filtered suggestions", () => {
-    expect(parseComposerCommand("/permission unsafe")).toEqual({
+    expect(parseComposerCommand("/permissions unsafe")).toEqual({
       ok: false,
-      message: "Usage: /permission <approval | plan | full-auto>",
+      message:
+        "Usage: /permissions <ask | read-only | full-access | inherit>",
     });
     expect(matchingCommands("/re").map((command) => command.name)).toEqual([
       "review",

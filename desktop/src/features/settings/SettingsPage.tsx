@@ -3,10 +3,16 @@ import { useId, useState } from "react";
 
 import type {
   ConfigScope,
+  ExecutionAccessPreset,
   JsonObject,
   Project,
   SettingsSnapshot,
 } from "../../generated/app-server";
+import {
+  ACCESS_PRESET_OPTIONS,
+  settingsDefaultAccessLabel,
+} from "../../app/accessPreset";
+import { confirmAction } from "../../platform/confirmAction";
 import type { DesktopRuntime } from "../../rpc/contracts";
 import type {
   DesktopUpdateInfo,
@@ -23,7 +29,11 @@ interface SettingsPageProps {
   settings: SettingsSnapshot | null;
   busy: boolean;
   onRefresh(): Promise<void>;
-  onUpdate(patch: JsonObject, scope: ConfigScope): Promise<void>;
+  onUpdate(
+    patch: JsonObject,
+    scope: ConfigScope,
+    riskAcknowledged?: boolean,
+  ): Promise<void>;
 }
 
 interface AgentDraft {
@@ -81,11 +91,9 @@ export function SettingsPage({
 }: SettingsPageProps) {
   const [scope, setScope] = useState<ConfigScope>("user");
   const [agentOverrides, setAgentOverrides] = useState<Partial<AgentDraft>>({});
-  const security = record(settings?.security);
-  const [permissionModeOverride, setPermissionModeOverride] = useState<
-    string | null
-  >(null);
-  const [sandboxOverride, setSandboxOverride] = useState<boolean | null>(null);
+  const [accessPresetDraft, setAccessPresetDraft] = useState<
+    ExecutionAccessPreset | null | undefined
+  >(undefined);
   const [exportingDiagnostics, setExportingDiagnostics] = useState(false);
   const [diagnosticsExportPath, setDiagnosticsExportPath] = useState<
     string | null
@@ -106,11 +114,14 @@ export function SettingsPage({
   const effectiveScope =
     scope === "project" && canWriteProject ? "project" : "user";
   const agents = { ...agentDraft(settings), ...agentOverrides };
-  const permissionMode =
-    permissionModeOverride ?? text(security.permissionMode, "full_auto");
-  const sandbox =
-    sandboxOverride ??
-    (typeof security.sandbox === "boolean" ? security.sandbox : true);
+  const configuredAccessPreset =
+    effectiveScope === "project"
+      ? settings?.projectAccessPreset ?? null
+      : settings?.userAccessPreset ?? null;
+  const accessPreset =
+    accessPresetDraft === undefined
+      ? configuredAccessPreset
+      : accessPresetDraft;
   const maxTokens = Number(agents.maxTokens);
   const maxTokensValid =
     /^\d+$/.test(agents.maxTokens.trim()) &&
@@ -147,24 +158,37 @@ export function SettingsPage({
   };
 
   const saveSecurity = async () => {
+    if (
+      accessPreset === "full_access" &&
+      !(await confirmAction(
+        "Full access becomes the default for Sessions without an override. " +
+          "Tools may run without approval and outside the workspace sandbox.",
+        {
+          title: "Use Full access by default?",
+          kind: "warning",
+          confirmLabel: "Save Full access default",
+          cancelLabel: "Cancel",
+        },
+      ))
+    ) {
+      return;
+    }
     await onUpdate(
       {
         security: {
-          permissionMode,
-          sandbox,
+          accessPreset,
         },
       },
       effectiveScope,
+      accessPreset === "full_access",
     );
-    setPermissionModeOverride(null);
-    setSandboxOverride(null);
+    setAccessPresetDraft(undefined);
   };
 
   const refresh = async () => {
     await onRefresh();
     setAgentOverrides({});
-    setPermissionModeOverride(null);
-    setSandboxOverride(null);
+    setAccessPresetDraft(undefined);
   };
 
   const exportDiagnostics = async () => {
@@ -238,7 +262,10 @@ export function SettingsPage({
           Write changes to
           <select
             value={effectiveScope}
-            onChange={(event) => setScope(event.target.value as ConfigScope)}
+            onChange={(event) => {
+              setScope(event.target.value as ConfigScope);
+              setAccessPresetDraft(undefined);
+            }}
           >
             <option value="user">User config</option>
             <option value="project" disabled={!project || !canWriteProject}>
@@ -391,41 +418,48 @@ export function SettingsPage({
           </header>
           <div className={styles.formGrid}>
             <label>
-              Permission mode
+              Default Session access
               <select
-                value={permissionMode}
-                onChange={(event) =>
-                  setPermissionModeOverride(event.target.value)
-                }
+                value={accessPreset ?? ""}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setAccessPresetDraft(
+                    value ? (value as ExecutionAccessPreset) : null,
+                  );
+                }}
               >
-                <option value="default">Ask before sensitive tools</option>
-                <option value="plan">Plan / read-only</option>
-                <option value="full_auto">Full auto</option>
+                <option value="">
+                  {effectiveScope === "project"
+                    ? "Inherit user default"
+                    : `Use resolved fallback · ${settingsDefaultAccessLabel(settings)}`}
+                </option>
+                {ACCESS_PRESET_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
-            </label>
-            <label className={styles.checkboxField}>
-              <input
-                type="checkbox"
-                checked={sandbox}
-                onChange={(event) => setSandboxOverride(event.target.checked)}
-              />
-              Enable command sandbox
             </label>
           </div>
           <p className={styles.note}>
-            Sensitive-path denials remain non-overridable. Project changes require
-            a trusted folder.
+            Effective default: {settingsDefaultAccessLabel(settings)} · source: {" "}
+            {settings?.resolvedDefaultSecuritySource.replaceAll("_", " ") ??
+              "loading"}
+            . {" "}
+            Ask and Read only retain the workspace sandbox and protected-path
+            guards. Full access removes those execution boundaries after
+            confirmation. Low-level compatibility settings are available only
+            through advanced configuration.
           </p>
           <footer className={styles.formActions}>
             <span>
-              {settings?.permissionModeExplicit
-                ? "An explicit permission mode is configured."
-                : "Desktop currently applies its approval-first client default."}
+              Sessions with their own access selection keep that override. New and
+              inherited Sessions use this default.
             </span>
             <button
               className={styles.primaryButton}
               type="button"
-              disabled={busy}
+              disabled={busy || accessPresetDraft === undefined}
               onClick={() => void saveSecurity()}
             >
               Save safety settings

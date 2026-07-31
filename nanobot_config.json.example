@@ -22,7 +22,7 @@
   },
   "providers": {
     "openrouter": {
-      "apiKey": "sk-or-v1-your_openrouter_key"
+      "apiKey": "your_openrouter_api_key"
     }
   },
   "agents": {

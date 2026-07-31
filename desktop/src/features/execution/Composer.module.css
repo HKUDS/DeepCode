@@ -40,7 +40,7 @@
   transform: translateY(-1px);
 }
 
-.composer label {
+.promptLabel {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -326,6 +326,88 @@
   color: var(--text-primary);
 }
 
+.accessStatusRail {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 13px 2px;
+  padding: 8px 1px 6px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.accessStatuses {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.accessStatus {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 25px;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--surface-code);
+  color: var(--text-secondary);
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accessStatus strong {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+
+.accessStatus i {
+  color: var(--text-tertiary);
+  font-style: normal;
+}
+
+.accessStatus[data-access="full_access"] {
+  border-color: color-mix(in srgb, var(--danger) 32%, var(--border-subtle));
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.accessStatus[data-access="full_access"] strong,
+.accessStatus[data-access="full_access"] i {
+  color: inherit;
+}
+
+.accessStatus[data-access="legacy"],
+.accessStatus[data-access="mixed"] {
+  border-color: color-mix(in srgb, var(--attention) 26%, var(--border-subtle));
+  background: color-mix(
+    in srgb,
+    var(--attention-soft) 56%,
+    var(--surface-raised)
+  );
+  color: var(--attention);
+}
+
+.accessStatus[data-access="unknown"] {
+  border-style: dashed;
+  color: var(--text-tertiary);
+}
+
+.accessFrozenNote {
+  flex: 0 1 auto;
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: 8.5px;
+  line-height: 1.35;
+  text-align: right;
+}
+
 .context {
   display: flex;
   min-width: 0;
@@ -404,6 +486,17 @@
   color: var(--text-secondary);
 }
 
+.selector[data-access="full_access"] {
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.selector[data-access="full_access"]:hover {
+  background: color-mix(in srgb, var(--danger-soft) 82%, var(--surface-hover));
+  color: var(--danger);
+}
+
 .selector select {
   max-width: 180px;
   border: 0;
@@ -415,10 +508,11 @@
   text-overflow: ellipsis;
 }
 
-.context > .nextTurnNotice {
+.selectorCaption {
   color: var(--text-tertiary);
-  font-size: 8.5px;
-  font-style: italic;
+  font: 7.5px var(--font-mono);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
 .sendButton,
@@ -506,5 +600,15 @@
 
   .context > :nth-child(n + 3) {
     display: none;
+  }
+
+  .accessStatusRail {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .accessFrozenNote {
+    text-align: left;
   }
 }

@@ -13,6 +13,7 @@ from cli.tui.app import TuiApp
 from cli.tui.thread_client import TuiThreadClient
 from core import agent_setup
 from core.application.application import DeepCodeApplication
+from core.domain.execution_security import ExecutionAccessPreset
 from core.domain.turn import TurnStatus
 from core.events import Event
 from core.providers.base import LLMResponse, ToolCallRequest
@@ -110,6 +111,7 @@ def _make_client(
         streaming=False,
         store=SessionStore(tmp_path / "sessions"),
         event_sink=event_sink,
+        trust_workspace=True,
     )
     client.set_event_loop(asyncio.get_running_loop())
     return client
@@ -126,6 +128,54 @@ async def test_tui_client_does_not_start_resident_automation_scheduler(
         assert client.application.run_automation_scheduler is False
         assert client.application.automation_scheduler.active is False
     finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_session_access_override_survives_cli_session_switches(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    provider = _BlockingProvider()
+    client = _make_client(monkeypatch, tmp_path, provider)
+    session_id = client.session_id
+    try:
+        updated = client.set_access_preset(ExecutionAccessPreset.READ_ONLY)
+        assert updated.access_preset_override is ExecutionAccessPreset.READ_ONLY
+        assert client.access_summary() == "read only"
+
+        client.new_thread()
+        assert client.access_preset_override is None
+        assert client.access_summary() == "default (ask)"
+
+        client.resume(session_id)
+        assert client.access_preset_override is ExecutionAccessPreset.READ_ONLY
+        assert client.access_summary() == "read only"
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_cli_reports_frozen_current_and_queued_access_separately(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    provider = _BlockingProvider()
+    client = _make_client(monkeypatch, tmp_path, provider)
+    try:
+        client.set_access_preset(ExecutionAccessPreset.FULL_ACCESS)
+        client.send("run under full access")
+        await _wait_for_first_call(provider)
+        client.queue("queued under full access")
+        client.set_access_preset(ExecutionAccessPreset.READ_ONLY)
+
+        current, queued = client.frozen_access_summaries()
+        assert current == "full access"
+        assert queued == ("full access",)
+        assert client.access_summary() == "read only"
+    finally:
+        provider.release_first_call.set()
+        await asyncio.wait_for(client.wait_until_idle(), timeout=5)
         await client.close()
 
 
@@ -233,6 +283,10 @@ async def test_cli_steers_while_a_tool_is_running(
     provider = _ToolProvider()
     client = _make_client(monkeypatch, tmp_path, provider)
     try:
+        # The test exercises steering during execution, not the approval UI.
+        # Select the same Session-level preset a user confirms via
+        # ``/permissions full-access`` so the shell call can start immediately.
+        client.set_access_preset(ExecutionAccessPreset.FULL_ACCESS)
         current = client.send("run the slow verification")
         await _wait_for_path(Path(client.workspace) / "tool-running")
 
@@ -406,6 +460,7 @@ async def test_cli_and_desktop_share_one_goal_in_both_directions(
         streaming=False,
         resume_id=session_id,
         store=SessionStore(session_root),
+        trust_workspace=True,
     )
     try:
         observed = resumed_cli.application.goals.read(session_id)
@@ -462,6 +517,7 @@ async def test_goal_commands_reuse_the_cli_application(
         workspace=str(workspace),
         model=None,
         max_iterations=20,
+        trust_workspace=True,
     )
     try:
         assert opened == 1

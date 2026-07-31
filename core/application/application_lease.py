@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from core.platform_file_lock import acquire_file_lock, release_file_lock
+from core.private_storage import ensure_private_directory, open_private_file
 
 _ACQUIRE_RETRY_INTERVAL = 0.01
 
@@ -45,8 +46,8 @@ class ApplicationLease:
         transition_path = database_path.with_name(
             f"{database_path.name}.application-transition.lock"
         )
-        path.parent.mkdir(parents=True, exist_ok=True)
-        descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+        ensure_private_directory(path.parent)
+        descriptor = open_private_file(path, os.O_RDWR | os.O_CREAT)
         try:
             try:
                 os.chmod(path, 0o600)
@@ -113,8 +114,8 @@ class ApplicationLease:
 
 @contextmanager
 def _transition_gate(path: Path) -> Iterator[None]:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    ensure_private_directory(path.parent)
+    descriptor = open_private_file(path, os.O_RDWR | os.O_CREAT)
     try:
         try:
             os.chmod(path, 0o600)

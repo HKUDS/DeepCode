@@ -18,13 +18,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.harness.agents.control import (  # noqa: E402
+from core.agent_runtime.injections import SubagentMessage
+from core.harness.agents.control import (
     AgentControl,
     AgentLimitError,
     DuplicateAgentError,
 )
-from core.agent_runtime.injections import SubagentMessage  # noqa: E402
-from core.harness.tools.spawn_agent import (  # noqa: E402
+from core.harness.tools.spawn_agent import (
     InterruptAgentTool,
     ListAgentsTool,
     SendMessageTool,
@@ -371,7 +371,7 @@ def test_build_wires_callable_history_provider(tmp_path, monkeypatch):
     # Regression: session.history is a @property (a list), so build_agent_session
     # must wrap it in a callable. Passing the value made fork_turns call a list
     # → "TypeError: 'list' object is not callable" on every forked spawn.
-    import core.agent_setup as agent_setup
+    from core import agent_setup
 
     profile = type("Profile", (), {"model": "test-model"})()
     monkeypatch.setattr(
@@ -393,6 +393,47 @@ def test_build_wires_callable_history_provider(tmp_path, monkeypatch):
     assert callable(ctrl._history_provider)
     assert ctrl._history_provider() == session.history
     assert isinstance(ctrl._fork_history("all"), list)  # would raise before the fix
+
+
+def test_build_wires_one_atomic_profile_into_engine_tools_and_control(
+    tmp_path, monkeypatch
+):
+    from core import agent_setup
+    from core.domain.execution_security import (
+        ApprovalPolicy,
+        ExecutionAccessPreset,
+        ExecutionSecurityProfile,
+    )
+    from core.harness.permissions import PermissionMode
+
+    llm_profile = type("Profile", (), {"model": "test-model"})()
+    monkeypatch.setattr(
+        agent_setup,
+        "get_workflow_provider",
+        lambda **_kwargs: (object(), llm_profile),
+    )
+    monkeypatch.setattr(
+        agent_setup,
+        "get_runtime",
+        lambda: type("Runtime", (), {"config": object()})(),
+    )
+    monkeypatch.setenv("DEEPCODE_SANDBOX", "1")
+    security = ExecutionSecurityProfile.for_preset(ExecutionAccessPreset.FULL_ACCESS)
+
+    session, _model, engine = agent_setup.build_agent_session(
+        workspace=str(tmp_path),
+        allow_spawn=True,
+        execution_security_profile=security,
+    )
+
+    assert engine.mode is PermissionMode.FULL_AUTO
+    assert engine.approval_policy is ApprovalPolicy.NEVER
+    assert session._tools.get("bash")._sandbox_enabled is False
+    assert session._tools.get("write")._allow_outside_workspace is True
+    assert session._tools.get("edit")._allow_outside_workspace is True
+    assert session._tools.get("apply_patch")._allow_outside_workspace is True
+    assert session._tools.get("code")._sandbox_enabled is False
+    assert session._agent_control._execution_security_profile is security
 
 
 def test_subagent_inherits_parent_permission_and_approval(tmp_path, monkeypatch):
@@ -424,6 +465,43 @@ def test_subagent_inherits_parent_permission_and_approval(tmp_path, monkeypatch)
 
     assert result == "done"
     assert captured["permission_mode_override"] is PermissionMode.DEFAULT
+    assert captured["approval_callback"] is approval
+
+
+def test_subagent_inherits_atomic_execution_security_profile(tmp_path, monkeypatch):
+    from core.domain.execution_security import (
+        ExecutionAccessPreset,
+        ExecutionSecurityProfile,
+    )
+    from core.events import Event, TaskComplete
+
+    captured = {}
+
+    class Session:
+        def load_history(self, _messages):
+            return None
+
+        async def run_stream(self, _op):
+            yield Event("1", TaskComplete("done", "completed"))
+
+    def build(**kwargs):
+        captured.update(kwargs)
+        return Session(), "model", object()
+
+    monkeypatch.setattr("core.agent_setup.build_agent_session", build)
+    profile = ExecutionSecurityProfile.for_preset(ExecutionAccessPreset.FULL_ACCESS)
+    approval = object()
+    control = AgentControl(
+        str(tmp_path),
+        execution_security_profile=profile,
+        approval_callback=approval,
+    )
+
+    result = asyncio.run(control._run_subagent("task", str(tmp_path), agent_id="child"))
+
+    assert result == "done"
+    assert captured["execution_security_profile"] is profile
+    assert captured["permission_mode_override"] is None
     assert captured["approval_callback"] is approval
 
 

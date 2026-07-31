@@ -26,6 +26,7 @@ from core.application.agent_adapter import (
 from core.application.errors import ConflictError, ThreadNotFoundError
 from core.domain.execution_permission import ExecutionPermissionMode
 from core.domain.execution_profile import ExecutionProfile
+from core.domain.execution_security import ExecutionSecurityProfile
 from core.sessions import Session, SessionStore
 from core.sessions.continuation import session_message_history_entry
 
@@ -57,6 +58,7 @@ class LiveSessionRuntime:
     workspace: str
     model: str | None
     execution_profile: ExecutionProfile | None
+    execution_security_profile: ExecutionSecurityProfile | None
     permission_mode_override: ExecutionPermissionMode | None
     agent: AgentSessionPort
     approvals: ApprovalRouter
@@ -105,6 +107,7 @@ class SessionRuntimeRegistry:
         workspace: str,
         model: str | None,
         execution_profile: ExecutionProfile | None = None,
+        execution_security_profile: ExecutionSecurityProfile | None = None,
         permission_mode_override: ExecutionPermissionMode | None = None,
         approval_callback: ApprovalCallback,
     ) -> AgentSessionPort:
@@ -116,6 +119,7 @@ class SessionRuntimeRegistry:
             workspace=workspace,
             model=model,
             execution_profile=execution_profile,
+            execution_security_profile=execution_security_profile,
             permission_mode_override=permission_mode_override,
         )
         runtime = self._runtimes.pop(session_id, None)
@@ -131,6 +135,7 @@ class SessionRuntimeRegistry:
                 workspace=workspace,
                 model=model,
                 execution_profile=execution_profile,
+                execution_security_profile=execution_security_profile,
                 permission_mode_override=permission_mode_override,
                 runtime_key=runtime_key,
             )
@@ -291,6 +296,7 @@ class SessionRuntimeRegistry:
         workspace: str,
         model: str | None,
         execution_profile: ExecutionProfile | None,
+        execution_security_profile: ExecutionSecurityProfile | None,
         permission_mode_override: ExecutionPermissionMode | None,
         runtime_key: object,
     ) -> LiveSessionRuntime:
@@ -305,6 +311,8 @@ class SessionRuntimeRegistry:
         }
         if _accepts_keyword(create, "execution_profile"):
             create_kwargs["execution_profile"] = execution_profile
+        if _accepts_keyword(create, "execution_security_profile"):
+            create_kwargs["execution_security_profile"] = execution_security_profile
         if _accepts_keyword(create, "permission_mode_override"):
             create_kwargs["permission_mode_override"] = permission_mode_override
         inputs_enabled = _accepts_keyword(create, "injection_callback")
@@ -324,6 +332,7 @@ class SessionRuntimeRegistry:
             workspace=workspace,
             model=model,
             execution_profile=execution_profile,
+            execution_security_profile=execution_security_profile,
             permission_mode_override=permission_mode_override,
             agent=agent,
             approvals=approvals,
@@ -359,6 +368,7 @@ class SessionRuntimeRegistry:
         workspace: str,
         model: str | None,
         execution_profile: ExecutionProfile | None,
+        execution_security_profile: ExecutionSecurityProfile | None,
         permission_mode_override: ExecutionPermissionMode | None,
     ) -> object:
         resolver = getattr(self.factory, "runtime_key", None)
@@ -366,6 +376,8 @@ class SessionRuntimeRegistry:
             kwargs = {"workspace": workspace, "model": model}
             if _accepts_keyword(resolver, "execution_profile"):
                 kwargs["execution_profile"] = execution_profile
+            if _accepts_keyword(resolver, "execution_security_profile"):
+                kwargs["execution_security_profile"] = execution_security_profile
             if _accepts_keyword(resolver, "permission_mode_override"):
                 kwargs["permission_mode_override"] = permission_mode_override
             factory_key = resolver(**kwargs)
@@ -390,6 +402,11 @@ class SessionRuntimeRegistry:
             (
                 permission_mode_override.value
                 if permission_mode_override is not None
+                else None
+            ),
+            (
+                execution_security_profile.to_dict()
+                if execution_security_profile is not None
                 else None
             ),
         )

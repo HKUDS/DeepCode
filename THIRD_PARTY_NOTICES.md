@@ -22,3 +22,18 @@ Operating-system WebViews and other system libraries retain the notices and
 license terms supplied by their platform vendors. This file is informational;
 the license text and source URL published by each dependency remain
 authoritative.
+
+## Flaticon interface accents
+
+DeepCode Desktop includes adapted outline interface accents from the **Zeir
+minimal user interface** pack by **The Icon Tree** on Flaticon. Attribution:
+Icons designed by The Icon Tree from Flaticon.
+
+- Pack: https://www.flaticon.com/packs/zeir-minimal-user-interface-14615833
+- Poll: https://www.flaticon.com/free-icon/poll_15780511
+- Terminal: https://www.flaticon.com/free-icon/terminal_15780766
+- Settings: https://www.flaticon.com/free-icon/settings_15780826
+- Time: https://www.flaticon.com/free-icon/time_15780852
+
+These image assets are presentation-only and do not participate in Agent,
+Session, protocol, or execution behavior.
