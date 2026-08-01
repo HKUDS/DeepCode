@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -112,7 +113,8 @@ async def test_glob_matches_recursively(tmp_path):
     (tmp_path / "note.txt").write_text("z")
     g = GlobTool(str(tmp_path))
     out = await g.execute(pattern="**/*.py")
-    assert "src/m.py" in out and "top.py" in out and "note.txt" not in out
+    # 路径分隔符跨平台：Windows 输出 src\m.py，POSIX 输出 src/m.py
+    assert f"src{os.sep}m.py" in out and "top.py" in out and "note.txt" not in out
 
 
 @pytest.mark.asyncio

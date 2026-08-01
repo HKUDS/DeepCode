@@ -45,8 +45,11 @@ def test_seatbelt_profile_is_deny_default_and_grants_workspace_writes(tmp_path):
     assert "(deny default)" in profile
     assert "(allow default)" not in profile
     assert "(allow file-read*)" in profile  # reads still broad
+    # seatbelt profile 是 LISP 字符串，Windows 路径反斜杠会被转义为 \\，
+    # 所以断言侧同样转义后再比对。
+    escaped = os.path.abspath(str(tmp_path)).replace("\\", "\\\\")
     assert (
-        f'(allow file-write* (subpath "{os.path.abspath(str(tmp_path))}"))' in profile
+        f'(allow file-write* (subpath "{escaped}"))' in profile
     )
     # Under deny-default, no network allows means network is denied.
     assert "network-outbound" not in profile

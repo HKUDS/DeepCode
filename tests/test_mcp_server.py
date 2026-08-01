@@ -73,9 +73,9 @@ def test_list_tools_exposes_both():
     assert server.name == "deepcode"
 
 
-def test_deepcode_runs_stores_session_and_returns_id(fake_build):
+def test_deepcode_runs_stores_session_and_returns_id(fake_build, tmp_path):
     content, structured = asyncio.run(
-        mcp_server._handle_deepcode({"prompt": "build X", "workspace": "/tmp/x"})
+        mcp_server._handle_deepcode({"prompt": "build X", "workspace": str(tmp_path)})
     )
     assert content[0].text == "did: build X"
     sid = structured["session_id"]
@@ -83,7 +83,8 @@ def test_deepcode_runs_stores_session_and_returns_id(fake_build):
     assert sid in mcp_server._SESSIONS  # kept for follow-ups
     # the workspace reached build_agent_session
     _session, kwargs = fake_build[0]
-    assert kwargs["workspace"].endswith("/tmp/x") or kwargs["workspace"] == "/tmp/x"
+    # 用真实临时目录（POSIX 风格的 /tmp/x 在 Windows 上会解析为 F:\tmp\x）
+    assert Path(kwargs["workspace"]).resolve() == Path(str(tmp_path)).resolve()
 
 
 def test_reply_continues_same_session(fake_build):
