@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -51,11 +52,16 @@ class HandlerDecision:
 
 
 def _default_shell() -> list[str]:
-    if os.name == "nt":  # pragma: no cover - posix CI
+    # Claude Code hooks 协议约定命令为 POSIX shell 语法（单引号/重定向等）。
+    # Windows 上优先用 git-bash 执行，避免 cmd.exe 不消费单引号导致
+    # JSON payload 解析失败；无 bash 时才回退 cmd.exe。
+    bash = shutil.which("bash") or os.environ.get("SHELL")
+    if bash:
+        return [bash, "-lc"]
+    if os.name == "nt":  # pragma: no cover - 无 bash 的 Windows 兜底
         comspec = os.environ.get("COMSPEC", "cmd.exe")
         return [comspec, "/C"]
-    shell = os.environ.get("SHELL", "/bin/sh")
-    return [shell, "-lc"]
+    return ["/bin/sh", "-lc"]
 
 
 async def run_command(handler: Handler, payload_json: str, cwd: str) -> CommandResult:

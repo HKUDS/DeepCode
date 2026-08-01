@@ -37,7 +37,10 @@ def test_disabled_via_env_returns_bare(monkeypatch, tmp_path):
     monkeypatch.setenv("DEEPCODE_SANDBOX", "0")
     w = build_exec_command(command="echo hi", workspace=tmp_path)
     assert w.backend == "disabled"
-    assert w.argv == ["/bin/bash", "-c", "echo hi"]
+    # shell 由 shutil.which("bash") 解析：Windows 下是 git-bash 绝对路径，
+    # POSIX 下是 /bin/bash —— 只断言文件名与剩余 argv。
+    assert Path(w.argv[0]).name.lower() in ("bash", "bash.exe")
+    assert w.argv[1:] == ["-c", "echo hi"]
     wa = build_exec_command(argv=["python", "x.py"], workspace=tmp_path)
     assert wa.backend == "disabled"
     assert wa.argv == ["python", "x.py"]
