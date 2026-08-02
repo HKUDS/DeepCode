@@ -123,13 +123,19 @@ class Database:
         backup_path = backup_directory / filename
         temporary = backup_path.with_name(f".{backup_path.name}.tmp")
         try:
-            with sqlite3.connect(temporary) as destination:
-                connection.backup(destination)
-                result = destination.execute("PRAGMA quick_check").fetchone()
-                if not result or result[0] != "ok":
-                    raise sqlite3.DatabaseError(
-                        "migration backup failed SQLite quick_check"
-                    )
+            destination = sqlite3.connect(temporary)
+            try:
+                with destination:
+                    connection.backup(destination)
+                    result = destination.execute("PRAGMA quick_check").fetchone()
+                    if not result or result[0] != "ok":
+                        raise sqlite3.DatabaseError(
+                            "migration backup failed SQLite quick_check"
+                        )
+            finally:
+                # A sqlite3 connection context commits or rolls back but does not
+                # close the handle. Windows requires it closed before os.replace.
+                destination.close()
             os.chmod(temporary, 0o600)
             os.replace(temporary, backup_path)
             return backup_path
