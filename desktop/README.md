@@ -12,28 +12,103 @@ converting or copying its Session.
 
 ## Run from source
 
-Prerequisites:
+### Requirements
 
 | Requirement | Version | Used for |
 |-------------|---------|----------|
 | Python | 3.12+ | App Server and Agent runtime |
+| uv | Current | Python environment management |
 | Node.js | 22+ | React frontend and build scripts |
-| Rust | stable | Tauri application shell |
+| Rust | Stable | Tauri application shell |
 
-Install the platform toolchain required by
-[Tauri 2](https://v2.tauri.app/start/prerequisites/), then prepare the Python
-runtime and frontend dependencies from the repository root:
+Install the platform dependencies from the
+[Tauri 2 prerequisite guide](https://v2.tauri.app/start/prerequisites/) before
+preparing the repository.
+
+### Windows PowerShell
+
+#### 1. Install the Windows toolchains
+
+Tauri development on Windows requires Microsoft Edge WebView2 and the Visual
+Studio 2022 Build Tools workload **Desktop development with C++**. Rust must use
+the MSVC host toolchain; Rustup alone does not install Microsoft's `link.exe`.
+
+Run the following commands in PowerShell. Accept the UAC prompt raised by the
+Build Tools installer:
+
+```powershell
+winget install --id astral-sh.uv --exact
+winget install --id OpenJS.NodeJS.LTS --exact
+winget install --id Rustlang.Rustup --exact
+winget install --id Microsoft.VisualStudio.2022.BuildTools --exact `
+  --override "--wait --passive --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+```
+
+WebView2 is normally already installed on supported Windows 10 and Windows 11
+systems. If it is missing, install the Evergreen Runtime from the Microsoft
+download page linked by the Tauri prerequisite guide.
+
+#### 2. Restart PowerShell and verify the tools
+
+Close all existing PowerShell windows after the installers finish. Open a new
+PowerShell window so the updated user `PATH` is loaded, then run:
+
+```powershell
+uv --version
+node --version
+rustup default stable-msvc
+rustc --version
+cargo --version
+```
+
+#### 3. Prepare the repository
+
+Run these commands from the repository root:
+
+```powershell
+uv venv --python 3.12
+uv pip install --python .venv\Scripts\python.exe -e .
+Set-Location desktop
+npm ci
+$env:DEEPCODE_PYTHON = (Resolve-Path ..\.venv\Scripts\python.exe)
+npm run setup:sidecar
+npm run build:sidecar
+```
+
+The explicit interpreter path prevents an active Conda or other environment
+from receiving the editable DeepCode installation.
+
+#### 4. Start DeepCode Desktop
+
+From the same `desktop` directory and PowerShell window:
+
+```powershell
+npm run tauri -- dev
+```
+
+Keep the terminal open while Desktop is running. Press `Ctrl+C` in that terminal
+to stop the development application. On later launches, set `DEEPCODE_PYTHON`
+again if using a new PowerShell window:
+
+```powershell
+Set-Location desktop
+$env:DEEPCODE_PYTHON = (Resolve-Path ..\.venv\Scripts\python.exe)
+npm run tauri -- dev
+```
+
+### macOS and Linux
+
+After installing the platform dependencies from the Tauri prerequisite guide,
+run the following commands from the repository root:
 
 ```bash
 uv venv --python 3.12
-uv pip install -e .
-cd desktop && npm ci && cd ..
-```
-
-On macOS or Linux, start the development application with the repository
-launcher:
-
-```bash
+uv pip install --python .venv/bin/python -e .
+cd desktop
+npm ci
+npm run setup:sidecar
+npm run build:sidecar
+cd ..
 ./scripts/deepcode-desktop
 ```
 
@@ -45,17 +120,23 @@ mkdir -p ~/.local/bin
 ln -sf "$(pwd)/scripts/deepcode-desktop" ~/.local/bin/deepcode-desktop
 ```
 
-On Windows, run the same Tauri development command from PowerShell after the
-setup above:
+### Development sidecar
 
-```powershell
-cd desktop
-$env:DEEPCODE_PYTHON = (Resolve-Path ..\.venv\Scripts\python.exe)
-npm run tauri -- dev
-```
+The first `build:sidecar` creates the resource directory declared in
+`tauri.conf.json`, which Tauri validates during development as well as release
+builds. Debug runtime launch still prefers the repository `.venv`, so ordinary
+Python and React edits do not require rebuilding the PyInstaller sidecar.
+Rebuild it only after removing `desktop/build/sidecar` or changing packaged
+runtime dependencies.
 
-Debug builds prefer the repository `.venv`, so normal Python and React edits do
-not require rebuilding the packaged PyInstaller sidecar.
+### Windows troubleshooting
+
+| Symptom | Likely cause | Resolution |
+|---------|--------------|------------|
+| `rustup`, `cargo`, or `npm` is not recognized | The terminal has the old `PATH` | Close all PowerShell windows and open a new one. |
+| `linker 'link.exe' not found` | The Visual C++ workload is missing | Open Visual Studio Installer, modify Build Tools 2022, and select **Desktop development with C++**. |
+| `uv pip` reports a Conda path instead of `.venv` | Another Python environment is active | Keep the explicit `--python .venv\Scripts\python.exe` argument. |
+| `build/sidecar/dist/deepcode-app-server` does not exist | The first sidecar build has not run | From `desktop`, run `npm run setup:sidecar` and then `npm run build:sidecar`. |
 
 ### Configure the first LLM connection
 

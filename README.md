@@ -348,7 +348,15 @@ model, permission, and recovery rules as a manual Turn.
 
 ### 1. Install and initialize
 
-```bash
+Install `uv` first if it is not already available. On Windows PowerShell:
+
+```powershell
+winget install --id astral-sh.uv --exact
+```
+
+Open a new terminal after the first `uv` installation, then run:
+
+```console
 uv tool install deepcode-hku
 deepcode init
 ```
@@ -361,11 +369,8 @@ environment.
 
 ### 2. Connect a model provider
 
-```bash
-deepcode provider set personal-openrouter \
-  --template openrouter \
-  --label "OpenRouter · Personal" \
-  --api-key
+```console
+deepcode provider set personal-openrouter --template openrouter --label "OpenRouter · Personal" --api-key
 
 deepcode provider test personal-openrouter
 deepcode provider models personal-openrouter --refresh
@@ -378,8 +383,9 @@ instead of relying on a model name copied from an older example.
 
 ### 3. Start coding
 
-```bash
-cd /path/to/your/repository
+From the repository you want DeepCode to work in:
+
+```console
 deepcode -c personal-openrouter -m <model-id> --effort auto
 ```
 
@@ -389,14 +395,8 @@ access.
 
 Or run one headless task:
 
-```bash
-deepcode exec "Fix the failing tests and explain the root cause" \
-  --connection personal-openrouter \
-  --model <model-id> \
-  --effort auto \
-  --trust \
-  --access full-access \
-  --json
+```console
+deepcode exec "Fix the failing tests and explain the root cause" --connection personal-openrouter --model <model-id> --effort auto --trust --access full-access --json
 ```
 
 `--trust` records the workspace decision. `--access full-access` is an explicit
@@ -405,16 +405,70 @@ it in an interactive terminal to approve sensitive tools as they are requested,
 or use `--access read-only` for inspection.
 
 Choose whichever interface fits your workflow. `deepcode` opens the interactive
-CLI; the same Sessions can also be opened in Desktop. To run Desktop from a
-source checkout, install Node.js 22+, Rust stable, and the platform dependencies
-required by Tauri, then prepare the repository environment and use its launcher:
+CLI; the same Sessions can also be opened in Desktop.
+
+#### Run Desktop from source
+
+##### macOS and Linux
+
+From the repository root:
 
 ```bash
 uv venv --python 3.12
-uv pip install -e .
-cd desktop && npm ci && cd ..
+uv pip install --python .venv/bin/python -e .
+cd desktop
+npm ci
+npm run setup:sidecar
+npm run build:sidecar
+cd ..
 ./scripts/deepcode-desktop
 ```
+
+##### Windows PowerShell
+
+Windows requires Microsoft Edge WebView2 and the Visual Studio 2022 Build Tools
+workload **Desktop development with C++**. These are the system dependencies
+required by [Tauri on Windows](https://v2.tauri.app/start/prerequisites/#windows).
+
+**1. Install the toolchains.** Accept the UAC prompt raised by Build Tools.
+
+```powershell
+winget install --id astral-sh.uv --exact
+winget install --id OpenJS.NodeJS.LTS --exact
+winget install --id Rustlang.Rustup --exact
+winget install --id Microsoft.VisualStudio.2022.BuildTools --exact `
+  --override "--wait --passive --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+```
+
+**2. Close PowerShell, open a new PowerShell window, and verify the tools.**
+
+```powershell
+uv --version
+node --version
+rustup default stable-msvc
+rustc --version
+cargo --version
+```
+
+**3. Prepare and start DeepCode.** Run these commands from the repository root.
+
+```powershell
+uv venv --python 3.12
+uv pip install --python .venv\Scripts\python.exe -e .
+Set-Location desktop
+npm ci
+$env:DEEPCODE_PYTHON = (Resolve-Path ..\.venv\Scripts\python.exe)
+npm run setup:sidecar
+npm run build:sidecar
+npm run tauri -- dev
+```
+
+The explicit `--python` path prevents an active Conda environment from receiving
+the editable install. The first sidecar build creates the resource directory
+that Tauri validates during development; later source-only Python changes still
+run from the repository `.venv`. See the
+[Desktop source guide](desktop/README.md#windows-powershell) for troubleshooting
+and subsequent-launch details.
 
 Open **Settings → Connections** to configure a provider, then select a
 connection and model from the Session composer.
@@ -892,7 +946,7 @@ source .venv/bin/activate
 uv pip install -e .
 ```
 
-On Windows, activate with `.venv\Scripts\activate`.
+On Windows PowerShell, activate with `.\.venv\Scripts\Activate.ps1`.
 
 ### Verification
 

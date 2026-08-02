@@ -318,7 +318,15 @@ Turn 相同的 Session、模型、权限和恢复规则提交周期性工作。
 
 ### 1. 安装与初始化
 
-```bash
+如果尚未安装 `uv`，请先安装。Windows PowerShell 使用：
+
+```powershell
+winget install --id astral-sh.uv --exact
+```
+
+首次安装 `uv` 后重新打开终端，再执行：
+
+```console
 uv tool install deepcode-hku
 deepcode init
 ```
@@ -330,11 +338,8 @@ deepcode init
 
 ### 2. 连接模型服务
 
-```bash
-deepcode provider set personal-openrouter \
-  --template openrouter \
-  --label "OpenRouter · Personal" \
-  --api-key
+```console
+deepcode provider set personal-openrouter --template openrouter --label "OpenRouter · Personal" --api-key
 
 deepcode provider test personal-openrouter
 deepcode provider models personal-openrouter --refresh
@@ -346,8 +351,9 @@ deepcode provider models personal-openrouter --refresh
 
 ### 3. 开始编码
 
-```bash
-cd /path/to/your/repository
+进入希望 DeepCode 操作的仓库目录，然后执行：
+
+```console
 deepcode -c personal-openrouter -m <model-id> --effort auto
 ```
 
@@ -356,14 +362,8 @@ deepcode -c personal-openrouter -m <model-id> --effort auto
 
 也可以无头执行单个任务：
 
-```bash
-deepcode exec "修复失败的测试，并解释根本原因" \
-  --connection personal-openrouter \
-  --model <model-id> \
-  --effort auto \
-  --trust \
-  --access full-access \
-  --json
+```console
+deepcode exec "修复失败的测试，并解释根本原因" --connection personal-openrouter --model <model-id> --effort auto --trust --access full-access --json
 ```
 
 `--trust` 记录 workspace 信任决定。`--access full-access` 是明确的无限制
@@ -371,16 +371,68 @@ deepcode exec "修复失败的测试，并解释根本原因" \
 按需批准敏感工具；纯检查任务可使用 `--access read-only`。
 
 用户可以选择适合自己的使用界面。`deepcode` 会打开交互式 CLI；同一份
-Sessions 也可以在 Desktop 中打开。若要从源码运行 Desktop，请先安装
-Node.js 22+、Rust stable 和 Tauri 对应平台所需的系统依赖，再准备
-仓库环境并使用项目启动器：
+Sessions 也可以在 Desktop 中打开。
+
+#### 从源码运行 Desktop
+
+##### macOS 与 Linux
+
+在仓库根目录执行：
 
 ```bash
 uv venv --python 3.12
-uv pip install -e .
-cd desktop && npm ci && cd ..
+uv pip install --python .venv/bin/python -e .
+cd desktop
+npm ci
+npm run setup:sidecar
+npm run build:sidecar
+cd ..
 ./scripts/deepcode-desktop
 ```
+
+##### Windows PowerShell
+
+Windows 必须安装 Microsoft Edge WebView2，以及 Visual Studio 2022 Build
+Tools 的 **Desktop development with C++** 工作负载。这些是
+[Tauri 在 Windows 上的系统依赖](https://v2.tauri.app/start/prerequisites/#windows)。
+
+**1. 安装工具链。** Build Tools 弹出 UAC 提示时请选择“是”。
+
+```powershell
+winget install --id astral-sh.uv --exact
+winget install --id OpenJS.NodeJS.LTS --exact
+winget install --id Rustlang.Rustup --exact
+winget install --id Microsoft.VisualStudio.2022.BuildTools --exact `
+  --override "--wait --passive --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+```
+
+**2. 关闭 PowerShell，重新打开一个 PowerShell 窗口并验证工具链。**
+
+```powershell
+uv --version
+node --version
+rustup default stable-msvc
+rustc --version
+cargo --version
+```
+
+**3. 准备并启动 DeepCode。** 在仓库根目录执行：
+
+```powershell
+uv venv --python 3.12
+uv pip install --python .venv\Scripts\python.exe -e .
+Set-Location desktop
+npm ci
+$env:DEEPCODE_PYTHON = (Resolve-Path ..\.venv\Scripts\python.exe)
+npm run setup:sidecar
+npm run build:sidecar
+npm run tauri -- dev
+```
+
+显式指定 `--python` 可以避免在已激活 Conda 的终端中误把可编辑安装写入
+Conda 环境。首次构建 sidecar 会创建 Tauri 在开发模式下仍会校验的资源目录；
+之后仅修改源码 Python 时，运行时仍优先使用仓库 `.venv`。故障排查和后续启动
+说明请参阅 [Desktop 源码运行指南](desktop/README.md#windows-powershell)。
 
 打开 **Settings → Connections** 配置模型服务，然后在 Session 输入框中
 选择连接与模型。
@@ -835,7 +887,7 @@ source .venv/bin/activate
 uv pip install -e .
 ```
 
-Windows 请使用 `.venv\Scripts\activate` 激活环境。
+Windows PowerShell 请使用 `.\.venv\Scripts\Activate.ps1` 激活环境。
 
 ### 验证
 
