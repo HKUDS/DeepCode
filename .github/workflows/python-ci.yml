@@ -30,8 +30,7 @@ jobs:
       - name: Install package and test tools
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e .
-          python -m pip install pytest
+          python -m pip install -e ".[test]"
 
       - name: Run tests
         run: |
@@ -55,8 +54,7 @@ jobs:
       - name: Install package and test tools
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e .
-          python -m pip install pytest
+          python -m pip install -e ".[test]"
 
       - name: Verify shared leases, startup recovery, and scheduler leadership
         run: >-
@@ -92,6 +90,7 @@ jobs:
           WHEEL_SMOKE="$PWD/wheel-smoke/bin"
           cd "$(mktemp -d)"
           "$WHEEL_SMOKE/python" -c "from importlib.resources import files; assert files('core.application.goal_prompts').joinpath('continuation.md').read_text(encoding='utf-8').strip()"
+          "$WHEEL_SMOKE/python" -c "from cli.mcp_server import build_server; build_server()"
           "$WHEEL_SMOKE/deepcode" --help
           "$WHEEL_SMOKE/deepcode-app-server" --verify-runtime
 

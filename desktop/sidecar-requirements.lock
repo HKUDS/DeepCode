@@ -91,7 +91,7 @@ loguru==0.7.3
     # via -r sidecar-requirements.in
 macholib==1.16.4 ; sys_platform == 'darwin'
     # via pyinstaller
-mcp==1.26.0
+mcp==1.29.0
     # via -r sidecar-requirements.in
 multidict==6.7.1
     # via

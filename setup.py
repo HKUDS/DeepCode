@@ -70,6 +70,10 @@ setuptools.setup(
     install_requires=requirements,
     extras_require={
         "advanced-documents": ["docling>=2.113.0"],
+        "test": [
+            "pytest>=8,<10",
+            "pytest-asyncio>=1,<2",
+        ],
     },
     include_package_data=True,
     package_data={

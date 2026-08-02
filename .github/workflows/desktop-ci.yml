@@ -63,6 +63,10 @@ jobs:
           npm test
           npm run build
 
+      - name: Prepare Tauri resources for Rust-only checks
+        working-directory: desktop
+        run: mkdir -p build/sidecar/dist/deepcode-app-server
+
       - name: Verify Tauri crate
         working-directory: desktop/src-tauri
         run: |
