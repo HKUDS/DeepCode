@@ -19,10 +19,15 @@ import asyncio
 import json
 import os
 import sys
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any
 
+from core.agent_runtime.processes import (
+    subprocess_group_kwargs,
+    terminate_process_tree,
+)
 from core.agent_runtime.tools.base import Tool, tool_parameters
 from core.harness.sandbox import build_exec_command
 
@@ -99,12 +104,14 @@ class CodeModeTool(Tool):
         api: list[ToolAPISpec],
         *,
         timeout_s: float = _DEFAULT_TIMEOUT_S,
+        sandbox_enabled: bool | None = None,
     ) -> None:
         self._workspace = os.path.abspath(workspace)
         self._execute_tool = execute_tool
         self._api = list(api)
         self._api_by_name = {spec.name: spec for spec in api}
         self._timeout_s = timeout_s
+        self._sandbox_enabled = sandbox_enabled
 
     @property
     def name(self) -> str:
@@ -117,12 +124,17 @@ class CodeModeTool(Tool):
             for spec in self._api
         ]
         api_block = "\n".join(lines) if lines else "(no tools exposed)"
+        isolation = (
+            "with the command sandbox disabled by the current Full Access profile"
+            if self._sandbox_enabled is False
+            else "in the sandboxed workspace"
+        )
         return (
             "Code mode: write a Python program that calls the tools below as "
             "functions to do many operations in one step — loops, conditionals, "
             "and batching — instead of one tool call at a time. Prefer this when a "
-            "task needs several dependent or repeated tool calls. The program runs "
-            "in the sandboxed workspace; each function call runs the real tool with "
+            f"task needs several dependent or repeated tool calls. The program runs {isolation}; "
+            "each function call runs the real tool with "
             "the usual permission checks. print() what you want to see, or set a "
             "top-level `result` variable to return structured data. Available tools:\n"
             f"{api_block}"
@@ -142,6 +154,7 @@ class CodeModeTool(Tool):
             argv=[sys.executable, _RUNNER],
             workspace=self._workspace,
             allow_network=False,
+            enabled=self._sandbox_enabled,
         )
         try:
             return await self._run(wrapped.argv, init)
@@ -158,6 +171,7 @@ class CodeModeTool(Tool):
                 cwd=self._workspace,
                 env={**os.environ},
                 limit=_STREAM_LIMIT,
+                **subprocess_group_kwargs(),
             )
         except OSError as exc:
             return f"Error: could not start code-mode runtime: {exc}"
@@ -167,10 +181,14 @@ class CodeModeTool(Tool):
 
         try:
             done = await asyncio.wait_for(self._rpc_loop(proc), timeout=self._timeout_s)
-        except asyncio.TimeoutError:
-            proc.kill()
+        except TimeoutError:
+            await terminate_process_tree(proc)
             await self._reap(proc)
             return f"Error: code timed out after {self._timeout_s:g}s (a tool call or loop hung)."
+        except asyncio.CancelledError:
+            await terminate_process_tree(proc)
+            await self._reap(proc)
+            raise
 
         stderr = (await self._reap(proc)).strip()
         if done is None:

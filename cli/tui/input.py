@@ -13,19 +13,32 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.history import FileHistory
+from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.patch_stdout import patch_stdout
 
 from cli.tui import theme
 from cli.tui.commands import REGISTRY
+from core.config import deepcode_home
+from core.private_storage import (
+    ensure_private_directory,
+    ensure_private_file,
+    open_private_file,
+)
+from core.skills.management import LocalSkillManager
 
-_HISTORY_PATH = Path.home() / ".deepcode" / "tui_history"
+_HISTORY_PATH: Path | None = None
 _SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv"}
 _MAX_COMPLETIONS = 30
+
+
+class InputInterrupted(Exception):
+    """The user requested that the active Turn stop, not that the CLI exit."""
 
 
 class TuiCompleter(Completer):
@@ -33,6 +46,7 @@ class TuiCompleter(Completer):
 
     def __init__(self, workspace: str) -> None:
         self.workspace = Path(workspace)
+        self._skill_manager: LocalSkillManager | None = None
 
     def get_completions(self, document, complete_event):
         text = document.text_before_cursor
@@ -41,6 +55,25 @@ class TuiCompleter(Completer):
             for name in REGISTRY:
                 if name.startswith(prefix):
                     yield Completion(name, start_position=-len(prefix))
+            return
+        dollar = text.rfind("$")
+        if dollar >= 0 and (dollar == 0 or text[dollar - 1].isspace()):
+            fragment = text[dollar + 1 :]
+            if fragment and any(character.isspace() for character in fragment):
+                return
+            try:
+                if self._skill_manager is None:
+                    self._skill_manager = LocalSkillManager(self.workspace)
+                records = self._skill_manager.catalog().active()
+            except (OSError, ValueError):
+                records = ()
+            for record in records:
+                if record.name.casefold().startswith(fragment.casefold()):
+                    yield Completion(
+                        record.name,
+                        start_position=-len(fragment),
+                        display=f"${record.name} — {record.description}",
+                    )
             return
         at = text.rfind("@")
         if at == -1:
@@ -73,15 +106,44 @@ class TuiCompleter(Completer):
 class InputReader:
     """One awaitable ``read()`` for both interactive and piped stdin."""
 
-    def __init__(self, workspace: str) -> None:
+    def __init__(
+        self,
+        workspace: str,
+        *,
+        status_provider: Callable[[], str] | None = None,
+        toggle_transcript: Callable[[], str] | None = None,
+    ) -> None:
         self.interactive = sys.stdin.isatty()
         self._prompt_session: PromptSession | None = None
         if self.interactive:
-            _HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+            history_path = _HISTORY_PATH or deepcode_home() / "tui_history"
+            ensure_private_directory(history_path.parent)
+            if not history_path.exists():
+                descriptor = open_private_file(
+                    history_path,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                )
+                os.close(descriptor)
+            ensure_private_file(history_path)
+            bindings = KeyBindings()
+
+            @bindings.add("escape")
+            def _interrupt(event) -> None:
+                event.app.exit(exception=InputInterrupted())
+
+            @bindings.add("c-o")
+            def _toggle_transcript(event) -> None:
+                if toggle_transcript is not None:
+                    toggle_transcript()
+                event.app.invalidate()
+
             self._prompt_session = PromptSession(
-                history=FileHistory(str(_HISTORY_PATH)),
+                history=FileHistory(str(history_path)),
                 completer=TuiCompleter(workspace),
                 complete_while_typing=True,
+                key_bindings=bindings,
+                bottom_toolbar=status_provider,
+                refresh_interval=0.5 if status_provider is not None else None,
             )
 
     async def read(self) -> str | None:
@@ -90,6 +152,8 @@ class InputReader:
             try:
                 with patch_stdout():
                     return await self._prompt_session.prompt_async(theme.PROMPT)
+            except KeyboardInterrupt as exc:
+                raise InputInterrupted() from exc
             except EOFError:
                 return None
         loop = asyncio.get_running_loop()

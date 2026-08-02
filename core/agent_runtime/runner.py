@@ -12,13 +12,14 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import os
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
+from core.agent_runtime.injections import runtime_input_to_provider_message
 from core.agent_runtime.helpers import (
     build_assistant_message,
     estimate_message_tokens,
@@ -36,8 +37,14 @@ from core.agent_runtime.runtime import (
     is_blank_text,
     repeated_external_lookup_error,
 )
+from core.agent_runtime.tools.base import ToolResult
 from core.agent_runtime.tools.registry import ToolRegistry
 from core.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from core.providers.timeouts import (
+    resolve_request_timeout_s,
+    resolve_stream_max_runtime_s,
+)
+from core.reasoning import ReasoningChannel
 
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
 _PERSISTED_MODEL_ERROR_PLACEHOLDER = "[Assistant reply unavailable due to model error.]"
@@ -47,8 +54,6 @@ _DEFAULT_MAX_ITERATIONS_MESSAGE = (
 )
 _MAX_EMPTY_RETRIES = 2
 _MAX_LENGTH_RECOVERIES = 3
-_MAX_INJECTIONS_PER_TURN = 3
-_MAX_INJECTION_CYCLES = 5
 _SNIP_SAFETY_BUFFER = 1024
 _MICROCOMPACT_KEEP_RECENT = 10
 _MICROCOMPACT_MIN_CHARS = 500
@@ -99,7 +104,7 @@ class AgentRunSpec:
     initial_messages: list[dict[str, Any]]
     tools: ToolRegistry
     model: str
-    max_iterations: int
+    max_iterations: int | None
     max_tool_result_chars: int
     temperature: float | None = None
     max_tokens: int | None = None
@@ -120,7 +125,10 @@ class AgentRunSpec:
     injection_callback: Any | None = None
     llm_timeout_s: float | None = None
     should_stop_callback: Any | None = None
-    max_injection_cycles: int | None = None
+    # Optional dynamic restriction applied after the registry and before model
+    # exposure/execution. It may narrow the existing registry but can never add
+    # a tool or bypass the normal permission checker.
+    tool_filter: Any | None = None
     # Permission seam (P1 security base). A callable
     # ``(tool_name, arguments) -> (decision, reason)`` where ``decision`` is
     # one of "allow"/"ask"/"deny" (str or enum with a ``.value``). Called
@@ -156,6 +164,55 @@ class AgentRunSpec:
     # follow-up prompt and the loop keeps going. ``stop_hook_active`` is passed
     # so a well-behaved hook stops blocking after its first continuation.
     stop_hook: Any | None = None
+
+    def allowed_tool_names(self) -> frozenset[str] | None:
+        if self.tool_filter is None:
+            return None
+        value = self.tool_filter()
+        if value is None:
+            return None
+        return frozenset(str(name) for name in value)
+
+    def tool_definitions(self) -> list[dict[str, Any]]:
+        definitions = self.tools.get_definitions()
+        allowed = self.allowed_tool_names()
+        if allowed is None:
+            return definitions
+        return [
+            schema
+            for schema in definitions
+            if ToolRegistry._schema_name(schema) in allowed
+        ]
+
+
+@dataclass(slots=True)
+class _SamplingLimit:
+    """Optional caller-selected sampling limit.
+
+    Normal agent turns are unbounded and stop on model completion,
+    cancellation, or runtime failure. Tests and explicit CLI overrides may
+    still set a positive limit without spreading ``None`` checks throughout
+    the execution loop.
+    """
+
+    maximum: int | None
+    remaining: int | None = field(init=False)
+
+    def __post_init__(self) -> None:
+        if self.maximum is not None and self.maximum < 1:
+            raise ValueError("max_iterations must be positive when provided")
+        self.remaining = self.maximum
+
+    @property
+    def exhausted(self) -> bool:
+        return self.remaining == 0
+
+    def consume(self) -> None:
+        if self.remaining is not None:
+            self.remaining -= 1
+
+    def reset(self) -> None:
+        self.remaining = self.maximum
 
 
 @dataclass(slots=True)
@@ -223,22 +280,17 @@ class AgentRunner:
         spec: AgentRunSpec,
         messages: list[dict[str, Any]],
         assistant_message: dict[str, Any] | None,
-        injection_cycles: int,
         *,
         phase: str = "after error",
         iteration: int | None = None,
-    ) -> tuple[bool, int]:
-        max_cycles = (
-            spec.max_injection_cycles
-            if spec.max_injection_cycles is not None
-            else _MAX_INJECTION_CYCLES
+        close_if_empty: bool = False,
+    ) -> bool:
+        injections = await self._drain_injections(
+            spec,
+            close_if_empty=close_if_empty,
         )
-        if injection_cycles >= max_cycles:
-            return False, injection_cycles
-        injections = await self._drain_injections(spec)
         if not injections:
-            return False, injection_cycles
-        injection_cycles += 1
+            return False
         if assistant_message is not None:
             messages.append(assistant_message)
             if iteration is not None:
@@ -255,53 +307,42 @@ class AgentRunner:
                 )
         self._append_injected_messages(messages, injections)
         logger.info(
-            "Injected {} follow-up message(s) {} ({}/{})",
+            "Injected {} follow-up message(s) {}",
             len(injections),
             phase,
-            injection_cycles,
-            max_cycles,
         )
-        return True, injection_cycles
+        return True
 
-    async def _drain_injections(self, spec: AgentRunSpec) -> list[dict[str, Any]]:
+    async def _drain_injections(
+        self,
+        spec: AgentRunSpec,
+        *,
+        close_if_empty: bool = False,
+    ) -> list[dict[str, Any]]:
         if spec.injection_callback is None:
             return []
-        try:
-            signature = inspect.signature(spec.injection_callback)
-            accepts_limit = "limit" in signature.parameters or any(
-                parameter.kind is inspect.Parameter.VAR_KEYWORD
-                for parameter in signature.parameters.values()
-            )
-            if accepts_limit:
-                items = await spec.injection_callback(limit=_MAX_INJECTIONS_PER_TURN)
-            else:
-                items = await spec.injection_callback()
-        except Exception:
-            logger.exception("injection_callback failed")
-            return []
+        signature = inspect.signature(spec.injection_callback)
+        parameters = signature.parameters.values()
+        accepts_kwargs = any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters
+        )
+        kwargs: dict[str, Any] = {}
+        if accepts_kwargs or "limit" in signature.parameters:
+            kwargs["limit"] = None
+        if accepts_kwargs or "close_if_empty" in signature.parameters:
+            kwargs["close_if_empty"] = close_if_empty
+        items = await spec.injection_callback(**kwargs)
         if not items:
             return []
         injected_messages: list[dict[str, Any]] = []
         for item in items:
-            if (
-                isinstance(item, dict)
-                and item.get("role") == "user"
-                and "content" in item
-            ):
-                injected_messages.append(item)
+            message = runtime_input_to_provider_message(item)
+            if message.get("role") == "user" and "content" in message:
+                injected_messages.append(message)
                 continue
-            text = getattr(item, "content", str(item))
+            text = str(message.get("content", ""))
             if text.strip():
                 injected_messages.append({"role": "user", "content": text})
-        if len(injected_messages) > _MAX_INJECTIONS_PER_TURN:
-            dropped = len(injected_messages) - _MAX_INJECTIONS_PER_TURN
-            logger.warning(
-                "Injection callback returned {} messages, capping to {} ({} dropped)",
-                len(injected_messages),
-                _MAX_INJECTIONS_PER_TURN,
-                dropped,
-            )
-            injected_messages = injected_messages[:_MAX_INJECTIONS_PER_TURN]
         return injected_messages
 
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
@@ -317,11 +358,66 @@ class AgentRunner:
         empty_content_retries = 0
         length_recovery_count = 0
         had_injections = False
-        injection_cycles = 0
         stop_hook_active = False  # C3.1: set once a Stop hook has forced a continuation
+        skip_stop_check_once = False
+        response_ordinal = 0
 
-        for iteration in range(spec.max_iterations):
-            if spec.should_stop_callback is not None:
+        async def record_response(
+            response: LLMResponse,
+            context: AgentHookContext,
+        ) -> dict[str, int]:
+            """Account a provider response before any cancellable tool work."""
+
+            nonlocal response_ordinal
+            response_ordinal += 1
+            raw_usage = self._usage_dict(response.usage)
+            self._accumulate_usage(usage, raw_usage)
+            context.response_ordinal = response_ordinal
+            context.response = response
+            context.usage = dict(raw_usage)
+            context.tool_calls = list(response.tool_calls)
+            await hook.on_model_response(context)
+            return raw_usage
+
+        initial_drained = await self._try_drain_injections(
+            spec,
+            messages,
+            None,
+            phase="before the first model call",
+        )
+        if initial_drained:
+            had_injections = True
+
+        iteration = 0
+        sampling_limit = _SamplingLimit(spec.max_iterations)
+        while True:
+            if sampling_limit.exhausted:
+                resumed = await self._try_drain_injections(
+                    spec,
+                    messages,
+                    None,
+                    phase="at the iteration boundary",
+                    close_if_empty=True,
+                )
+                if resumed:
+                    had_injections = True
+                    sampling_limit.reset()
+                else:
+                    stop_reason = "max_iterations"
+                    template = (
+                        spec.max_iterations_message or _DEFAULT_MAX_ITERATIONS_MESSAGE
+                    )
+                    final_content = template.format(max_iterations=spec.max_iterations)
+                    self._append_final_message(messages, final_content)
+                    break
+
+            current_iteration = iteration
+            iteration += 1
+            sampling_limit.consume()
+
+            check_stop = not skip_stop_check_once
+            skip_stop_check_once = False
+            if spec.should_stop_callback is not None and check_stop:
                 try:
                     stop_requested = await spec.should_stop_callback()
                 except Exception:
@@ -337,12 +433,37 @@ class AgentRunner:
                         spec.session_key or "default",
                         stop_requested,
                     )
+                    resumed = await self._try_drain_injections(
+                        spec,
+                        messages,
+                        None,
+                        phase="before callback stop",
+                        close_if_empty=True,
+                    )
+                    if resumed:
+                        had_injections = True
+                        sampling_limit.reset()
+                        skip_stop_check_once = True
+                        continue
                     break
 
             # Summarization-based compaction (C4a): when the running history
             # nears the budget, replace old turns with a model summary. Persisted
             # in `messages` so later iterations (and turns) reuse it.
-            messages = await self._maybe_compact(spec, messages)
+            async def record_compaction_response(response: LLMResponse) -> None:
+                await record_response(
+                    response,
+                    AgentHookContext(
+                        iteration=current_iteration,
+                        messages=messages,
+                    ),
+                )
+
+            messages = await self._maybe_compact(
+                spec,
+                messages,
+                response_observer=record_compaction_response,
+            )
 
             try:
                 messages_for_model = self._drop_orphan_tool_results(messages)
@@ -361,7 +482,7 @@ class AgentRunner:
             except Exception as exc:
                 logger.warning(
                     "Context governance failed on turn {} for {}: {}; applying minimal repair",
-                    iteration,
+                    current_iteration,
                     spec.session_key or "default",
                     exc,
                 )
@@ -372,16 +493,16 @@ class AgentRunner:
                     )
                 except Exception:
                     messages_for_model = messages
-            context = AgentHookContext(iteration=iteration, messages=messages)
+            context = AgentHookContext(
+                iteration=current_iteration,
+                messages=messages,
+            )
             await hook.before_iteration(context)
+            await hook.before_model_request(context)
             response = await self._request_model(
                 spec, messages_for_model, hook, context
             )
-            raw_usage = self._usage_dict(response.usage)
-            context.response = response
-            context.usage = dict(raw_usage)
-            context.tool_calls = list(response.tool_calls)
-            self._accumulate_usage(usage, raw_usage)
+            raw_usage = await record_response(response, context)
 
             if response.should_execute_tools:
                 if hook.wants_streaming():
@@ -391,6 +512,8 @@ class AgentRunner:
                     response.content or "",
                     tool_calls=[tc.to_openai_tool_call() for tc in response.tool_calls],
                     reasoning_content=response.reasoning_content,
+                    reasoning_summary=response.reasoning_summary,
+                    provider_state=response.provider_state,
                     thinking_blocks=response.thinking_blocks,
                 )
                 messages.append(assistant_message)
@@ -399,7 +522,7 @@ class AgentRunner:
                     spec,
                     {
                         "phase": "awaiting_tools",
-                        "iteration": iteration,
+                        "iteration": current_iteration,
                         "model": spec.model,
                         "assistant_message": assistant_message,
                         "completed_tool_results": [],
@@ -443,25 +566,25 @@ class AgentRunner:
                     context.error = error
                     context.stop_reason = stop_reason
                     await hook.after_iteration(context)
-                    (
-                        should_continue,
-                        injection_cycles,
-                    ) = await self._try_drain_injections(
+                    should_continue = await self._try_drain_injections(
                         spec,
                         messages,
                         None,
-                        injection_cycles,
                         phase="after tool error",
+                        close_if_empty=True,
                     )
                     if should_continue:
                         had_injections = True
+                        sampling_limit.reset()
+                        stop_reason = "completed"
+                        error = None
                         continue
                     break
                 await self._emit_checkpoint(
                     spec,
                     {
                         "phase": "tools_completed",
-                        "iteration": iteration,
+                        "iteration": current_iteration,
                         "model": spec.model,
                         "assistant_message": assistant_message,
                         "completed_tool_results": completed_tool_results,
@@ -470,15 +593,15 @@ class AgentRunner:
                 )
                 empty_content_retries = 0
                 length_recovery_count = 0
-                _drained, injection_cycles = await self._try_drain_injections(
+                drained = await self._try_drain_injections(
                     spec,
                     messages,
                     None,
-                    injection_cycles,
                     phase="after tool execution",
                 )
-                if _drained:
+                if drained:
                     had_injections = True
+                    sampling_limit.reset()
                 await hook.after_iteration(context)
                 continue
 
@@ -495,7 +618,7 @@ class AgentRunner:
                 if empty_content_retries < _MAX_EMPTY_RETRIES:
                     logger.warning(
                         "Empty response on turn {} for {} ({}/{}); retrying",
-                        iteration,
+                        current_iteration,
                         spec.session_key or "default",
                         empty_content_retries,
                         _MAX_EMPTY_RETRIES,
@@ -506,21 +629,19 @@ class AgentRunner:
                     continue
                 logger.warning(
                     "Empty response on turn {} for {} after {} retries; attempting finalization",
-                    iteration,
+                    current_iteration,
                     spec.session_key or "default",
                     empty_content_retries,
                 )
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=False)
+                await hook.before_model_request(context)
                 response = await self._request_finalization_retry(
                     spec, messages_for_model
                 )
-                retry_usage = self._usage_dict(response.usage)
-                self._accumulate_usage(usage, retry_usage)
+                retry_usage = await record_response(response, context)
                 raw_usage = self._merge_usage(raw_usage, retry_usage)
-                context.response = response
                 context.usage = dict(raw_usage)
-                context.tool_calls = list(response.tool_calls)
                 clean = hook.finalize_content(context, response.content)
 
             if response.finish_reason == "length" and not is_blank_text(clean):
@@ -528,7 +649,7 @@ class AgentRunner:
                 if length_recovery_count <= _MAX_LENGTH_RECOVERIES:
                     logger.info(
                         "Output truncated on turn {} for {} ({}/{}); continuing",
-                        iteration,
+                        current_iteration,
                         spec.session_key or "default",
                         length_recovery_count,
                         _MAX_LENGTH_RECOVERIES,
@@ -539,6 +660,8 @@ class AgentRunner:
                         build_assistant_message(
                             clean,
                             reasoning_content=response.reasoning_content,
+                            reasoning_summary=response.reasoning_summary,
+                            provider_state=response.provider_state,
                             thinking_blocks=response.thinking_blocks,
                         )
                     )
@@ -551,16 +674,17 @@ class AgentRunner:
                 assistant_message = build_assistant_message(
                     clean,
                     reasoning_content=response.reasoning_content,
+                    reasoning_summary=response.reasoning_summary,
+                    provider_state=response.provider_state,
                     thinking_blocks=response.thinking_blocks,
                 )
 
-            should_continue, injection_cycles = await self._try_drain_injections(
+            should_continue = await self._try_drain_injections(
                 spec,
                 messages,
                 assistant_message,
-                injection_cycles,
                 phase="after final response",
-                iteration=iteration,
+                iteration=current_iteration,
             )
             if should_continue:
                 had_injections = True
@@ -569,6 +693,7 @@ class AgentRunner:
                 await hook.on_stream_end(context, resuming=should_continue)
 
             if should_continue:
+                sampling_limit.reset()
                 await hook.after_iteration(context)
                 continue
 
@@ -581,15 +706,18 @@ class AgentRunner:
                 context.error = error
                 context.stop_reason = stop_reason
                 await hook.after_iteration(context)
-                should_continue, injection_cycles = await self._try_drain_injections(
+                should_continue = await self._try_drain_injections(
                     spec,
                     messages,
                     None,
-                    injection_cycles,
                     phase="after LLM error",
+                    close_if_empty=True,
                 )
                 if should_continue:
                     had_injections = True
+                    sampling_limit.reset()
+                    stop_reason = "completed"
+                    error = None
                     continue
                 break
             if is_blank_text(clean):
@@ -601,15 +729,18 @@ class AgentRunner:
                 context.error = error
                 context.stop_reason = stop_reason
                 await hook.after_iteration(context)
-                should_continue, injection_cycles = await self._try_drain_injections(
+                should_continue = await self._try_drain_injections(
                     spec,
                     messages,
                     None,
-                    injection_cycles,
                     phase="after empty response",
+                    close_if_empty=True,
                 )
                 if should_continue:
                     had_injections = True
+                    sampling_limit.reset()
+                    stop_reason = "completed"
+                    error = None
                     continue
                 break
 
@@ -618,6 +749,8 @@ class AgentRunner:
                 or build_assistant_message(
                     clean,
                     reasoning_content=response.reasoning_content,
+                    reasoning_summary=response.reasoning_summary,
+                    provider_state=response.provider_state,
                     thinking_blocks=response.thinking_blocks,
                 )
             )
@@ -625,7 +758,7 @@ class AgentRunner:
                 spec,
                 {
                     "phase": "final_response",
-                    "iteration": iteration,
+                    "iteration": current_iteration,
                     "model": spec.model,
                     "assistant_message": messages[-1],
                     "completed_tool_results": [],
@@ -638,8 +771,8 @@ class AgentRunner:
             await hook.after_iteration(context)
             # Stop hook (C3.1): a last chance to keep the turn going. If it asks
             # to continue, inject its reason as a follow-up and loop again. The
-            # `stop_hook_active` flag lets a well-behaved hook stand down after
-            # one continuation; max_iterations remains the hard backstop.
+            # `stop_hook_active` lets a well-behaved hook stand down after one
+            # continuation so a closure check cannot loop on itself.
             continuation = await self._run_stop_hook(spec, stop_hook_active)
             if continuation is not None:
                 stop_hook_active = True
@@ -649,24 +782,19 @@ class AgentRunner:
                 )
                 await hook.after_iteration(context)
                 continue
-            break
-        else:
-            stop_reason = "max_iterations"
-            template = spec.max_iterations_message or _DEFAULT_MAX_ITERATIONS_MESSAGE
-            final_content = template.format(max_iterations=spec.max_iterations)
-            self._append_final_message(messages, final_content)
-            (
-                drained_after_max_iterations,
-                injection_cycles,
-            ) = await self._try_drain_injections(
+
+            resumed = await self._try_drain_injections(
                 spec,
                 messages,
                 None,
-                injection_cycles,
-                phase="after max_iterations",
+                phase="at final close",
+                close_if_empty=True,
             )
-            if drained_after_max_iterations:
+            if resumed:
                 had_injections = True
+                sampling_limit.reset()
+                continue
+            break
 
         return AgentRunResult(
             final_content=final_content,
@@ -708,44 +836,71 @@ class AgentRunner:
         hook: AgentHook,
         context: AgentHookContext,
     ):
-        timeout_s: float | None = spec.llm_timeout_s
-        if timeout_s is None:
-            raw = (
-                os.environ.get("DEEPCODE_LLM_TIMEOUT_S")
-                or os.environ.get("NANOBOT_LLM_TIMEOUT_S")
-                or "300"
-            ).strip()
-            try:
-                timeout_s = float(raw)
-            except (TypeError, ValueError):
-                timeout_s = 300.0
-        if timeout_s is not None and timeout_s <= 0:
-            timeout_s = None
-
         kwargs = self._build_request_kwargs(
             spec,
             messages,
-            tools=spec.tools.get_definitions(),
+            tools=spec.tool_definitions(),
         )
-        if hook.wants_streaming():
+        requested_streaming = hook.wants_streaming()
+        stream_request = getattr(self.provider, "chat_stream_with_retry", None)
+        streaming = requested_streaming and callable(stream_request)
+        if requested_streaming and not streaming:
+            logger.debug(
+                "Provider {} has no streaming transport; using non-streaming request",
+                type(self.provider).__name__,
+            )
+        if streaming:
 
             async def _stream(delta: str) -> None:
                 await hook.on_stream(context, delta)
 
-            coro = self.provider.chat_stream_with_retry(
+            async def _reasoning_stream(
+                delta: str,
+                channel: ReasoningChannel,
+            ) -> None:
+                await hook.on_reasoning_stream(context, delta, channel)
+
+            coro = stream_request(
                 **kwargs,
                 on_content_delta=_stream,
+                on_reasoning_delta=_reasoning_stream,
             )
         else:
             coro = self.provider.chat_with_retry(**kwargs)
 
+        timeout_s = (
+            resolve_stream_max_runtime_s(spec.llm_timeout_s)
+            if streaming
+            else resolve_request_timeout_s(spec.llm_timeout_s)
+        )
+        return await self._await_provider_response(
+            coro,
+            timeout_s=timeout_s,
+            streaming=streaming,
+        )
+
+    @staticmethod
+    async def _await_provider_response(
+        request: Awaitable[LLMResponse],
+        *,
+        timeout_s: float | None,
+        streaming: bool,
+    ) -> LLMResponse:
+        """Apply the correct deadline without conflating activity and runtime."""
+
         if timeout_s is None:
-            return await coro
+            return await request
         try:
-            return await asyncio.wait_for(coro, timeout=timeout_s)
-        except asyncio.TimeoutError:
+            return await asyncio.wait_for(request, timeout=timeout_s)
+        except TimeoutError:
+            message = (
+                "Error calling LLM: stream exceeded the configured maximum "
+                f"runtime of {timeout_s:g}s"
+                if streaming
+                else f"Error calling LLM: timed out after {timeout_s:g}s"
+            )
             return LLMResponse(
-                content=f"Error calling LLM: timed out after {timeout_s:g}s",
+                content=message,
                 finish_reason="error",
                 error_kind="timeout",
             )
@@ -758,7 +913,11 @@ class AgentRunner:
         retry_messages = list(messages)
         retry_messages.append(build_finalization_retry_message())
         kwargs = self._build_request_kwargs(spec, retry_messages, tools=None)
-        return await self.provider.chat_with_retry(**kwargs)
+        return await self._await_provider_response(
+            self.provider.chat_with_retry(**kwargs),
+            timeout_s=resolve_request_timeout_s(spec.llm_timeout_s),
+            streaming=False,
+        )
 
     @staticmethod
     def _usage_dict(usage: dict[str, Any] | None) -> dict[str, int]:
@@ -825,6 +984,21 @@ class AgentRunner:
         external_lookup_counts: dict[str, int],
     ) -> tuple[Any, dict[str, str], BaseException | None]:
         _HINT = "\n\n[Analyze the error above and try a different approach.]"
+        allowed = spec.allowed_tool_names()
+        if allowed is not None and tool_call.name not in allowed:
+            message = (
+                f"Error: tool {tool_call.name!r} is not allowed by the active "
+                "Skill policy"
+            )
+            return (
+                message + _HINT,
+                {
+                    "name": tool_call.name,
+                    "status": "denied",
+                    "detail": "blocked by active Skill policy",
+                },
+                None,
+            )
         lookup_error = repeated_external_lookup_error(
             tool_call.name,
             tool_call.arguments,
@@ -940,6 +1114,22 @@ class AgentRunner:
                 pre_contexts,
             )
 
+        if isinstance(result, ToolResult) and result.is_error:
+            detail = str(result).replace("\n", " ").strip()[:120]
+            event = {
+                "name": tool_call.name,
+                "status": "error",
+                "detail": detail,
+            }
+            return await self._finish_tool(
+                spec,
+                tool_call,
+                result,
+                event,
+                RuntimeError(str(result)) if spec.fail_on_tool_error else None,
+                pre_contexts,
+            )
+
         detail = "" if result is None else str(result)
         detail = detail.replace("\n", " ").strip()
         if not detail:
@@ -994,6 +1184,9 @@ class AgentRunner:
         except Exception:
             logger.exception("stop hook failed")
             return None
+        if isinstance(outcome, str):
+            reason = outcome.strip()
+            return reason or None
         if outcome is not None and getattr(outcome, "block", False):
             reason = getattr(outcome, "block_reason", None)
             if reason and reason.strip():
@@ -1006,7 +1199,10 @@ class AgentRunner:
         if not contexts:
             return result
         joined = "\n\n".join(f"[hook] {c}" for c in contexts)
-        return f"{result}\n\n{joined}"
+        content = f"{result}\n\n{joined}"
+        if isinstance(result, ToolResult):
+            return result.with_content(content)
+        return content
 
     @staticmethod
     def _decision_value(decision: Any) -> str:
@@ -1283,7 +1479,11 @@ class AgentRunner:
         return budget if budget > 0 else None
 
     async def _maybe_compact(
-        self, spec: AgentRunSpec, messages: list[dict[str, Any]]
+        self,
+        spec: AgentRunSpec,
+        messages: list[dict[str, Any]],
+        *,
+        response_observer: Callable[[LLMResponse], Awaitable[None]] | None = None,
     ) -> list[dict[str, Any]]:
         """Summarize the conversation into a handoff summary when it nears the
         context budget (C4a) — semantic compaction that replaces old turns,
@@ -1302,7 +1502,7 @@ class AgentRunner:
             return messages
         try:
             estimate, _ = estimate_prompt_tokens_chain(
-                self.provider, spec.model, messages, spec.tools.get_definitions()
+                self.provider, spec.model, messages, spec.tool_definitions()
             )
         except Exception:
             return messages
@@ -1314,7 +1514,11 @@ class AgentRunner:
             if pre is not None and getattr(pre, "block", False):
                 return messages  # a PreCompact hook aborted compaction this turn
 
-        summary = await self._summarize(spec, messages)
+        summary = await self._summarize(
+            spec,
+            messages,
+            response_observer=response_observer,
+        )
         if not summary:
             return messages  # summarization failed → leave it to _snip_history
 
@@ -1333,7 +1537,11 @@ class AgentRunner:
         return compacted
 
     async def _summarize(
-        self, spec: AgentRunSpec, messages: list[dict[str, Any]]
+        self,
+        spec: AgentRunSpec,
+        messages: list[dict[str, Any]],
+        *,
+        response_observer: Callable[[LLMResponse], Awaitable[None]] | None = None,
     ) -> str | None:
         """Ask the model for a handoff summary of ``messages`` (no tools)."""
         request = list(messages) + [{"role": "user", "content": _SUMMARIZATION_PROMPT}]
@@ -1343,10 +1551,16 @@ class AgentRunner:
         request = self._backfill_missing_tool_results(request)
         kwargs = self._build_request_kwargs(spec, request, tools=None)
         try:
-            response = await self.provider.chat_with_retry(**kwargs)
+            response = await self._await_provider_response(
+                self.provider.chat_with_retry(**kwargs),
+                timeout_s=resolve_request_timeout_s(spec.llm_timeout_s),
+                streaming=False,
+            )
         except Exception:
             logger.exception("compaction summarization call failed")
             return None
+        if response_observer is not None:
+            await response_observer(response)
         if getattr(response, "finish_reason", None) == "error":
             return None
         content = getattr(response, "content", None)
@@ -1395,7 +1609,7 @@ class AgentRunner:
             self.provider,
             spec.model,
             messages,
-            spec.tools.get_definitions(),
+            spec.tool_definitions(),
         )
         if estimate <= budget:
             return messages

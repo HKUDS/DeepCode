@@ -13,6 +13,7 @@ These are pure mechanism: file I/O + the permission/sandbox seams from P1.
 :class:`~core.events.session.AgentSession` can consume.
 """
 
+from core.domain.execution_security import ExecutionSecurityProfile, FilesystemScope
 from core.harness.tools.files import EditTool, ReadTool, WriteTool
 from core.harness.tools.patch import ApplyPatchTool, PatchError, parse_patch
 from core.harness.tools.replace import (
@@ -25,36 +26,44 @@ from core.harness.tools.search import GlobTool, GrepTool
 from core.harness.tools.shell import BashTool
 
 __all__ = [
-    "ReadTool",
-    "WriteTool",
-    "EditTool",
     "ApplyPatchTool",
     "BashTool",
-    "GrepTool",
-    "GlobTool",
-    "replace",
-    "parse_patch",
-    "PatchError",
-    "NotFoundError",
-    "MultipleMatchesError",
     "DisproportionateMatchError",
+    "EditTool",
+    "GlobTool",
+    "GrepTool",
+    "MultipleMatchesError",
+    "NotFoundError",
+    "PatchError",
+    "ReadTool",
+    "WriteTool",
     "default_coding_tools",
+    "parse_patch",
+    "replace",
 ]
 
 
-def default_coding_tools(workspace, *, skills=None, ask_user=None, agent_control=None):
+def default_coding_tools(
+    workspace,
+    *,
+    skills=None,
+    skill_runtime=None,
+    ask_user=None,
+    agent_control=None,
+    goal_runtime=None,
+    execution_security_profile: ExecutionSecurityProfile | None = None,
+):
     """Build a :class:`ToolRegistry` with the native coding tool set.
 
     read / write / edit / apply_patch / bash / grep / glob / memory / update_plan
     over ``workspace``. ``workspace`` is the root the tools resolve relative
-    paths against and, for write / edit / apply_patch / bash, the boundary they
-    are fenced to. ``memory`` persists notes under ``.deepcode/memory/``;
+    paths against and, unless an explicit Full Access profile is supplied, the
+    boundary write / edit / apply_patch / bash are fenced to. ``memory``
+    persists notes under ``.deepcode/memory/``;
     ``update_plan`` is the agent's self-driven TODO plan.
 
-    ``skills``: an optional pre-discovered :class:`~core.harness.skills.
-    SkillRegistry`. When omitted it is discovered from the workspace. The
-    ``skill`` tool is added only when at least one skill exists, so a workspace
-    with no skills keeps the exact base tool set.
+    ``skill_runtime`` is the preferred shared, live catalog. ``skills`` remains
+    as a compatibility input for callers with a static ``SkillRegistry``.
 
     ``ask_user``: an optional callback that prompts a human. When provided (an
     interactive frontend), the ``request_user_input`` tool is registered so the
@@ -68,6 +77,7 @@ def default_coding_tools(workspace, *, skills=None, ask_user=None, agent_control
     from core.agent_runtime.tools.registry import ToolRegistry
     from core.harness.memory import MemoryTool
     from core.harness.skills import SkillTool, discover_skills
+    from core.harness.tools.goal import GetGoalTool, UpdateGoalTool
     from core.harness.tools.plan import UpdatePlanTool
     from core.harness.tools.spawn_agent import (
         InterruptAgentTool,
@@ -79,12 +89,30 @@ def default_coding_tools(workspace, *, skills=None, ask_user=None, agent_control
     from core.harness.tools.user_input import RequestUserInputTool
 
     registry = ToolRegistry()
+    allow_outside_workspace = bool(
+        execution_security_profile is not None
+        and execution_security_profile.filesystem_scope is FilesystemScope.UNRESTRICTED
+    )
+    command_sandbox = (
+        execution_security_profile.command_sandbox
+        if execution_security_profile is not None
+        else None
+    )
     tools = [
         ReadTool(workspace),
-        WriteTool(workspace),
-        EditTool(workspace),
-        ApplyPatchTool(workspace),
-        BashTool(workspace),
+        WriteTool(
+            workspace,
+            allow_outside_workspace=allow_outside_workspace,
+        ),
+        EditTool(
+            workspace,
+            allow_outside_workspace=allow_outside_workspace,
+        ),
+        ApplyPatchTool(
+            workspace,
+            allow_outside_workspace=allow_outside_workspace,
+        ),
+        BashTool(workspace, sandbox_enabled=command_sandbox),
         GrepTool(workspace),
         GlobTool(workspace),
         MemoryTool(workspace),
@@ -92,11 +120,16 @@ def default_coding_tools(workspace, *, skills=None, ask_user=None, agent_control
     ]
     # Standalone fallback is workspace-hermetic (no ambient ~/.claude scan);
     # build_agent_session passes the full project+user set via `skills`.
-    skill_registry = (
-        discover_skills(workspace, include_user=False) if skills is None else skills
-    )
-    if skill_registry:
-        tools.append(SkillTool(skill_registry))
+    if skill_runtime is not None:
+        # Always register the dynamic tool: a Skill added after Session startup
+        # must become available on the next Turn without rebuilding the Agent.
+        tools.append(SkillTool(skill_runtime))
+    else:
+        skill_registry = (
+            discover_skills(workspace, include_user=False) if skills is None else skills
+        )
+        if skill_registry:
+            tools.append(SkillTool(skill_registry))
     if ask_user is not None:
         tools.append(RequestUserInputTool(ask_user))
     if agent_control is not None:
@@ -105,6 +138,9 @@ def default_coding_tools(workspace, *, skills=None, ask_user=None, agent_control
         tools.append(ListAgentsTool(agent_control))
         tools.append(InterruptAgentTool(agent_control))
         tools.append(SendMessageTool(agent_control))
+    if goal_runtime is not None:
+        tools.append(GetGoalTool(goal_runtime))
+        tools.append(UpdateGoalTool(goal_runtime))
     for tool in tools:
         registry.register(tool)
     return registry

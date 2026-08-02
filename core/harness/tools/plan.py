@@ -16,9 +16,14 @@ from __future__ import annotations
 from typing import Any
 
 from core.agent_runtime.tools.base import Tool, tool_parameters
+from core.events.protocol import PlanStepStatus, parse_plan_update
 
-_STATUSES = ("pending", "in_progress", "completed")
-_GLYPH = {"pending": "☐", "in_progress": "▶", "completed": "☑"}
+_STATUSES = tuple(status.value for status in PlanStepStatus)
+_GLYPH = {
+    PlanStepStatus.PENDING.value: "☐",
+    PlanStepStatus.IN_PROGRESS.value: "▶",
+    PlanStepStatus.COMPLETED.value: "☑",
+}
 
 
 @tool_parameters(
@@ -80,32 +85,15 @@ class UpdatePlanTool(Tool):
         return list(self._plan)
 
     async def execute(self, **kwargs: Any) -> Any:
-        raw = kwargs.get("plan")
-        if not isinstance(raw, list) or not raw:
-            return "Error: 'plan' must be a non-empty list of {step, status} items."
+        try:
+            update = parse_plan_update(kwargs)
+        except ValueError as exc:
+            return f"Error: {exc}"
 
-        steps: list[dict[str, str]] = []
-        in_progress = 0
-        for i, item in enumerate(raw):
-            if not isinstance(item, dict):
-                return f"Error: plan[{i}] must be an object with 'step' and 'status'."
-            step = str(item.get("step", "")).strip()
-            status = str(item.get("status", "")).strip()
-            if not step:
-                return f"Error: plan[{i}].step is required."
-            if status not in _STATUSES:
-                return (
-                    f"Error: plan[{i}].status must be one of "
-                    f"{', '.join(_STATUSES)} (got {status!r})."
-                )
-            if status == "in_progress":
-                in_progress += 1
-            steps.append({"step": step, "status": status})
-        if in_progress > 1:
-            return "Error: at most one step may be in_progress at a time."
-
-        self._plan = steps
-        return self._render(str(kwargs.get("explanation") or "").strip())
+        self._plan = [
+            {"step": item.step, "status": item.status.value} for item in update.plan
+        ]
+        return self._render(update.explanation or "")
 
     def _render(self, explanation: str) -> str:
         done = sum(1 for s in self._plan if s["status"] == "completed")

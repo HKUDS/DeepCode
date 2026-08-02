@@ -13,7 +13,7 @@
 
 ## 权限引擎(提炼自参考项目,非照抄)
 
-- **不可覆盖的敏感路径黑名单**(源自 OpenHarness):`.ssh / .aws/credentials / .env / deepcode_config.json / *.pem / id_rsa*` 等——**任何规则、任何模式都无法解除**,这是防提示注入的最后防线。评估优先级第一位。
+- **集中式敏感路径保护**(源自 OpenHarness):`.ssh / .aws/credentials / .env / deepcode_config.json / *.pem / id_rsa*` 等在 legacy、Ask 与 Read only 执行中优先于规则。产品级、经二次确认的 Full Access 会原子地关闭这条保护、命令沙箱与 workspace 写围栏；普通配置规则不能单独绕过保护。
 - **二维通配符规则,特异性优先 + last-match-wins**(源自 opencode + 改进):规则同时匹配工具名 × 参数(命令行/路径),`{"execute_bash": {"git push *": "ask", "*": "allow"}}` 按作者直觉工作(具体压过通配)。直接构造的 `PermissionRule` 列表保持纯 last-match-wins。
 - **三模式**:`default`(改动型工具 ask)/ `plan`(改动型 deny,只读探索)/ `full_auto`(仅规则,无隐式 ask,供无人值守工作流)。
 
@@ -48,7 +48,9 @@ fail-closed:checker 或 approver 抛异常 → 一律拒绝。
 - `TerminalApprover`:把 `ask` 变成终端 y/n/always 提示,`always` 按工具名记忆本会话;非交互 stdin → 拒绝(fail-closed);`as_async()` 用线程包裹避免阻塞事件循环。
 - **altitude 决策**:自主实现阶段逐工具确认是糟糕 UX,故**默认仍 FULL_AUTO**;`DEEPCODE_PERMISSION_MODE=default|plan` 可主动切换,此时自动挂上审批器。真正"交互式默认"属于 P2 通用 agent 循环。
 
-## 仍待接线(后续)
+## 后续接线状态
 
-- 从 `deepcode_config.json` 读 `permissions` 规则块(`rules_from_config` 已就绪,尚未接入配置加载);
-- 通用 agent 循环(P2)默认 `default` 模式 + 审批。
+- `deepcode_config.json` 的 `permissions` 规则已在 Turn admission 时规范化并
+  冻结进 `ExecutionSecurityProfile`，worker 不再动态重读可变配置。
+- 通用 Agent 循环、CLI 与 Desktop 已共享 Ask / Read only / Full access 预设
+  及同一 Approval 状态机；legacy mode 只保留给兼容调用。

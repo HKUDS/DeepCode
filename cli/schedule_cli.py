@@ -7,7 +7,7 @@ open (clean exit ∧ not done ∧ under the run cap). Two jobs:
     # tidy this workspace's memory now, then every hour, up to 5 times
     python -m cli.schedule_cli autodream -w ./proj --every 3600 --max-runs 5
 
-    # drive a goal to green, re-attempting on a schedule until it passes
+    # run a durable Goal with an explicit evidence command
     python -m cli.schedule_cli loop "fix the failing tests" \\
         -w ./proj -t "python -m pytest -q" --every 60 --max-runs 10
 
@@ -25,17 +25,29 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rich.console import Console
 
+from cli.goal_runner import GoalRunOptions, run_goal
+from cli.execution_options import add_reasoning_effort_argument
+from core.domain.thread_goal import ThreadGoalStatus
 from core.loop.autodream import consolidate_memory
-from core.loop.task import LoopTask
 from core.schedule.keepalive import Continuation
 from core.schedule.scheduler import RunOutcome, run_scheduled
 
 _console = Console()
 
 
-def _autodream_task(workspace: str, model: str | None):
+def _autodream_task(
+    workspace: str,
+    model: str | None,
+    connection_id: str | None,
+    reasoning_effort: str | None,
+):
     async def task(run_index: int) -> RunOutcome:
-        result = await consolidate_memory(workspace, model=model)
+        result = await consolidate_memory(
+            workspace,
+            model=model,
+            connection_id=connection_id,
+            reasoning_effort=reasoning_effort,
+        )
         detail = (
             f"{result.notes_before}->{result.notes_after} notes"
             if result.ran
@@ -51,15 +63,23 @@ def _autodream_task(workspace: str, model: str | None):
 
 def _loop_task(args) -> "callable":
     async def task(run_index: int) -> RunOutcome:
-        loop = LoopTask(
-            goal=args.goal,
-            workspace=os.path.abspath(args.workspace),
-            test_command=args.test_cmd,
-            model=args.model,
-            max_rounds=args.max_rounds,
+        workspace = os.path.abspath(args.workspace)
+        result = await run_goal(
+            GoalRunOptions(
+                objective=args.goal,
+                workspace=workspace,
+                completion_evidence_command=args.test_cmd,
+                model=args.model,
+                connection_id=args.connection,
+                reasoning_effort=args.reasoning_effort,
+                token_budget=args.token_budget,
+                max_iterations=args.max_iterations,
+            )
         )
-        result = await loop.run()
-        return RunOutcome(goal_reached=result.succeeded, detail=result.state.status)
+        return RunOutcome(
+            goal_reached=result.goal.status is ThreadGoalStatus.COMPLETE,
+            detail=result.goal.status.value,
+        )
 
     return task
 
@@ -71,7 +91,12 @@ def _run(args: argparse.Namespace) -> int:
     max_runs = 1 if args.once else args.max_runs
 
     if args.job == "autodream":
-        task = _autodream_task(workspace, args.model)
+        task = _autodream_task(
+            workspace,
+            args.model,
+            args.connection,
+            args.reasoning_effort,
+        )
     else:
         task = _loop_task(args)
 
@@ -114,12 +139,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workspace", "-w", default=os.getcwd())
     parser.add_argument("--test-cmd", "-t", default="")
     parser.add_argument("--model", "-m", default=None)
+    parser.add_argument("--connection", "-c", default=None)
+    add_reasoning_effort_argument(parser)
     parser.add_argument(
         "--every", type=float, default=0, help="Interval seconds (0 = once)."
     )
     parser.add_argument("--max-runs", type=int, default=5)
+    parser.add_argument("--token-budget", type=int, default=None)
     parser.add_argument(
-        "--max-rounds", type=int, default=6, help="Loop rounds per run."
+        "--max-iterations",
+        type=int,
+        default=None,
+        help="Optional model-sampling limit for diagnostics (unlimited by default).",
     )
     parser.add_argument("--once", action="store_true", help="Run a single pass.")
     args = parser.parse_args(argv)

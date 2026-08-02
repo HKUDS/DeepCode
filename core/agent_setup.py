@@ -16,23 +16,24 @@ about.
 
 from __future__ import annotations
 
+import inspect
 import os
 from typing import Any
 
 from loguru import logger
 
-from core.compat import get_runtime
+from core.compat import DeepCodeRuntime, get_runtime
+from core.domain.execution_profile import ExecutionProfile
+from core.domain.execution_security import ExecutionSecurityProfile
 from core.events import AgentSession
-from core.harness.policy import build_permission_engine
+from core.harness.permissions import PermissionMode
+from core.harness.policy import (
+    build_permission_engine,
+    resolve_execution_security_profile,
+)
 from core.harness.tools import default_coding_tools
 from core.llm_runtime import get_workflow_provider
-
-# A general coding task can legitimately need many tool-call turns. This is a
-# runaway backstop, not a task budget — the reference agents run effectively
-# unbounded, relying on the model to stop and on context compaction to stay in
-# window; DeepCode's per-turn history snipping already prevents overflow, so we
-# set a high ceiling instead of cutting real work off early.
-DEFAULT_MAX_ITERATIONS = 200
+from core.providers.catalog import resolve_model_info
 
 SYSTEM_PROMPT = (
     "You are a coding agent working in a workspace directory. You have tools: "
@@ -57,13 +58,19 @@ _CODE_MODE_TOOLS = frozenset(
 
 
 def _wire_code_mode(
-    tool_registry: Any, workspace: str, engine: Any, hooks_engine: Any
+    tool_registry: Any,
+    workspace: str,
+    engine: Any,
+    hooks_engine: Any,
+    execution_security_profile: ExecutionSecurityProfile | None = None,
+    approval_callback: Any | None = None,
 ) -> None:
     """Register the ``code`` tool (C5b): a Python program that orchestrates the
     file/shell/search tools in one turn. Each tool call the code makes is run in
     the parent and governed exactly like a normal tool call — PreToolUse hook →
     permission → execute → PostToolUse hook — so code mode never bypasses policy.
-    An ``ask`` decision has no human in the code loop, so it fails closed (deny).
+    An ``ask`` decision is resolved by the same frontend approval callback as a
+    direct tool call; missing, rejected, or failed approval is fail-closed.
     """
     from core.harness.code_mode import CodeModeTool, api_from_definitions
 
@@ -80,8 +87,28 @@ def _wire_code_mode(
             if pre.updated_input:
                 args = pre.updated_input
         decision, reason = engine.evaluate(tool_name, args)
-        if getattr(decision, "value", decision) != "allow":
+        decision_value = getattr(decision, "value", decision)
+        if decision_value == "deny":
             return f"Error: permission denied: {reason}"
+        if decision_value == "ask":
+            if approval_callback is None:
+                return (
+                    f"Error: permission denied: {reason} — no approver attached "
+                    "(non-interactive run)"
+                )
+            try:
+                approved = approval_callback(tool_name, args, reason)
+                if inspect.isawaitable(approved):
+                    approved = await approved
+            except Exception:
+                logger.exception("code-mode approval_callback failed for {}", tool_name)
+                return (
+                    "Error: permission denied: approval request errored (fail-closed)"
+                )
+            if not approved:
+                return f"Error: permission denied: user rejected: {reason}"
+        elif decision_value != "allow":
+            return "Error: permission denied: unknown permission decision (fail-closed)"
         result = await tool_registry.execute(tool_name, args)
         if hooks_engine is not None and hooks_engine.has_event("PostToolUse"):
             post = await hooks_engine.run_post_tool_use(tool_name, args, result)
@@ -90,54 +117,206 @@ def _wire_code_mode(
                 result = f"{result}\n\n{joined}"
         return result
 
-    tool_registry.register(CodeModeTool(workspace, _execute, api))
+    tool_registry.register(
+        CodeModeTool(
+            workspace,
+            _execute,
+            api,
+            sandbox_enabled=(
+                execution_security_profile.command_sandbox
+                if execution_security_profile is not None
+                else None
+            ),
+        )
+    )
+
+
+def _wire_tool_permissions(tool_registry: Any, engine: Any) -> None:
+    """Make tool-declared read-only metadata authoritative for this session."""
+    engine.read_only_tools = engine.read_only_tools.union(
+        tool_registry.read_only_tool_names
+    )
+
+
+def _legacy_execution_profile(
+    *,
+    runtime: Any,
+    provider: Any,
+    profile: Any,
+    connection_id: str | None,
+    requested_model: str | None,
+) -> ExecutionProfile:
+    """Adapt an old runtime/profile pair to the immutable execution contract.
+
+    ``build_agent_session`` has long been a public integration seam. A number
+    of embedders and offline tests provide a deliberately tiny runtime object
+    and replace ``get_workflow_provider``. Requiring those callers to grow the
+    new resolver API would break the stable CLI assembly contract, so this
+    adapter derives a complete, secret-free snapshot from the already-resolved
+    provider without changing how that provider was selected.
+    """
+
+    resolved_model = str(
+        requested_model
+        or getattr(profile, "model", None)
+        or provider.get_default_model()
+    )
+    model_info = resolve_model_info(resolved_model)
+    runtime_config = getattr(runtime, "config", None)
+
+    provider_name = getattr(profile, "provider_name", None)
+    if not provider_name and runtime_config is not None:
+        get_provider_name = getattr(runtime_config, "get_provider_name", None)
+        if callable(get_provider_name):
+            provider_name = get_provider_name(resolved_model)
+        provider_name = provider_name or getattr(runtime_config, "llm_provider", None)
+    provider_name = str(provider_name or "legacy")
+
+    generation = getattr(provider, "generation", None)
+    max_tokens = int(
+        getattr(profile, "max_tokens", None)
+        or getattr(generation, "max_tokens", None)
+        or model_info.max_output_tokens
+    )
+    context_window = int(
+        getattr(profile, "context_window", None) or model_info.context_window
+    )
+    max_output_tokens = max(max_tokens, int(model_info.max_output_tokens))
+
+    temperature = getattr(profile, "temperature", None)
+    if temperature is None:
+        temperature = getattr(generation, "temperature", None)
+    if temperature is None:
+        temperature = 0.7
+
+    return ExecutionProfile(
+        connection_id=str(
+            getattr(profile, "connection_id", None) or connection_id or provider_name
+        ),
+        provider_name=provider_name,
+        adapter=provider_name,
+        model_id=resolved_model,
+        context_window=context_window,
+        max_output_tokens=max_output_tokens,
+        max_tokens=min(max_tokens, max_output_tokens),
+        temperature=float(temperature),
+        reasoning_effort=(
+            getattr(profile, "reasoning_effort", None)
+            or getattr(generation, "reasoning_effort", None)
+        ),
+        config_revision="legacy-runtime",
+    )
 
 
 def build_agent_session(
     *,
     workspace: str,
     model: str | None = None,
-    max_iterations: int = DEFAULT_MAX_ITERATIONS,
+    connection_id: str | None = None,
+    reasoning_effort: str | None = None,
+    execution_profile: ExecutionProfile | None = None,
+    max_iterations: int | None = None,
     system_prompt: str = SYSTEM_PROMPT,
     approval_callback: Any | None = None,
     ask_user_callback: Any | None = None,
     allow_spawn: bool = True,
     injection_callback: Any | None = None,
+    active_turn_id_provider: Any | None = None,
+    runtime_input_sink: Any | None = None,
+    goal_runtime: Any | None = None,
     agent_context: tuple[str, str] | None = None,
     streaming: bool = False,
+    streaming_transport: bool = True,
+    default_permission_mode: PermissionMode = PermissionMode.FULL_AUTO,
+    permission_mode_override: PermissionMode | None = None,
+    execution_security_profile: ExecutionSecurityProfile | None = None,
+    runtime: DeepCodeRuntime | None = None,
 ) -> tuple[AgentSession, str, Any]:
     """Build an :class:`AgentSession` over ``workspace``.
 
     Returns ``(session, resolved_model, permission_engine)``. The workspace is
-    created if missing; the permission engine is fenced to it. Pass
+    created if missing; Ask and Read only stay workspace-scoped while an
+    explicit Full Access profile is unrestricted. Pass
     ``ask_user_callback`` from an interactive frontend to give the agent the
     ``request_user_input`` tool; headless callers omit it. ``allow_spawn`` gives
     the agent the ``spawn_agent`` delegation tool (a spawned sub-agent is built
-    with it False so delegation cannot recurse).
+    with it False so delegation cannot recurse). ``default_permission_mode`` is
+    a legacy client default only; environment and explicit config still win
+    unless an immutable ``execution_security_profile`` was captured for this
+    Turn.
     """
     workspace = os.path.abspath(workspace)
     os.makedirs(workspace, exist_ok=True)
 
-    provider, profile = get_workflow_provider(phase="implementation", model=model)
-    resolved_model = model or profile.model
+    active_runtime = runtime or get_runtime()
+    resolver = getattr(active_runtime, "resolve_execution_profile", None)
+    if execution_profile is not None:
+        resolved_execution = execution_profile
+        provider, profile = get_workflow_provider(
+            phase="implementation",
+            connection_id=resolved_execution.connection_id,
+            model=resolved_execution.model_id,
+            execution_profile=resolved_execution,
+            runtime=active_runtime,
+        )
+    elif callable(resolver):
+        resolved_execution = resolver(
+            connection_id=connection_id,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            phase="implementation",
+        )
+        provider, profile = get_workflow_provider(
+            phase="implementation",
+            connection_id=resolved_execution.connection_id,
+            model=resolved_execution.model_id,
+            execution_profile=resolved_execution,
+            runtime=active_runtime,
+        )
+    else:
+        provider, profile = get_workflow_provider(
+            phase="implementation",
+            connection_id=connection_id,
+            model=model,
+            runtime=active_runtime,
+        )
+        resolved_execution = _legacy_execution_profile(
+            runtime=active_runtime,
+            provider=provider,
+            profile=profile,
+            connection_id=connection_id,
+            requested_model=model,
+        )
+    resolved_model = resolved_execution.model_id
 
-    security_cfg = getattr(get_runtime().config, "security", None)
-    engine = build_permission_engine(security_cfg, cwd=workspace)
+    security_cfg = getattr(active_runtime.config, "security", None)
+    resolved_security_profile = resolve_execution_security_profile(
+        security_cfg,
+        default_mode=default_permission_mode,
+        mode_override=permission_mode_override,
+        profile_override=execution_security_profile,
+    )
+    engine = build_permission_engine(
+        security_cfg,
+        cwd=workspace,
+        default_mode=default_permission_mode,
+        mode_override=permission_mode_override,
+        execution_security_profile=resolved_security_profile,
+    )
 
-    # The system prompt is assembled once, here, so every frontend gets the
-    # same behavior: working-style (collaboration mode, keyed off the resolved
-    # permission mode) + memory (AGENTS.md + persistent index) + skills (SKILL.md
-    # playbooks). Skills are discovered once and shared by the preamble and the
-    # `skill` tool so the two never drift.
+    # Stable system context is assembled once here. Skills are intentionally
+    # not flattened into this prompt: AgentSession resolves a fresh immutable
+    # Skill snapshot at each turn, giving every frontend hot reload without
+    # allowing files to change halfway through one model execution.
+    from core.agent_runtime.injections import compose_injection_callbacks
     from core.harness.collaboration import collaboration_preamble
     from core.harness.memory import system_preamble
-    from core.harness.skills import discover_skills, skills_preamble
+    from core.skills.runtime import SkillRuntime
 
-    skills = discover_skills(workspace)
+    skill_runtime = SkillRuntime(workspace)
     addenda = [
         collaboration_preamble(engine.mode),
         system_preamble(workspace),
-        skills_preamble(skills),
     ]
     addendum = "\n\n".join(a for a in addenda if a)
     full_system_prompt = f"{system_prompt}\n\n{addendum}" if addendum else system_prompt
@@ -150,7 +329,17 @@ def build_agent_session(
     if allow_spawn:
         from core.harness.agents import AgentControl
 
-        control = AgentControl(workspace, resolved_model)
+        control = AgentControl(
+            workspace,
+            resolved_model,
+            execution_profile=resolved_execution,
+            permission_mode=engine.mode,
+            execution_security_profile=resolved_security_profile,
+            approval_callback=approval_callback,
+            runtime=active_runtime,
+            active_turn_id_provider=active_turn_id_provider,
+            runtime_input_sink=runtime_input_sink,
+        )
 
     # External-command hooks (C3): discover Claude-Code-compatible hooks.json in
     # the workspace. None when no hooks are configured (the common case), so the
@@ -170,11 +359,21 @@ def build_agent_session(
 
     tool_registry = default_coding_tools(
         workspace,
-        skills=skills,
+        skill_runtime=skill_runtime,
         ask_user=ask_user_callback,
         agent_control=control,
+        goal_runtime=goal_runtime,
+        execution_security_profile=resolved_security_profile,
     )
-    _wire_code_mode(tool_registry, workspace, engine, hooks_engine)
+    _wire_code_mode(
+        tool_registry,
+        workspace,
+        engine,
+        hooks_engine,
+        resolved_security_profile,
+        approval_callback,
+    )
+    _wire_tool_permissions(tool_registry, engine)
 
     session = AgentSession(
         provider,
@@ -184,12 +383,30 @@ def build_agent_session(
         max_iterations=max_iterations,
         permission_checker=engine.evaluate,
         approval_callback=approval_callback,
-        # Top-level session: results from its own sub-agents. Sub-agent session
-        # (no control of its own): an explicit inbox drainer for send_message.
-        injection_callback=control.drain_injections if control else injection_callback,
+        # Application-backed sessions send sub-agent results directly into the
+        # same atomic Turn mailbox as user steering. Direct CLI sessions retain
+        # the local drain adapter because they do not own application Turn IDs.
+        injection_callback=compose_injection_callbacks(
+            injection_callback,
+            (
+                control.drain_injections
+                if control is not None and runtime_input_sink is None
+                else None
+            ),
+        ),
         hooks_engine=hooks_engine,
         agent_context=agent_context,
         streaming=streaming,
+        streaming_transport=streaming_transport,
+        skill_runtime=skill_runtime,
+        context_window_tokens=resolved_execution.context_window,
+        execution_profile=resolved_execution,
+        tool_filter=(
+            goal_runtime.visible_tool_names if goal_runtime is not None else None
+        ),
+        closure_callback=(
+            goal_runtime.closure_prompt if goal_runtime is not None else None
+        ),
     )
     if control is not None:
         # `session.history` is a @property (a list), so it must be wrapped in a

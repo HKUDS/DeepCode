@@ -19,6 +19,7 @@ from core.events.llm_events import (  # noqa: E402
     serialize_llm_event,
 )
 from core.providers.base import LLMResponse, ToolCallRequest  # noqa: E402
+from core.reasoning import ReasoningChannel  # noqa: E402
 
 
 def test_text_only_response():
@@ -32,12 +33,30 @@ def test_reasoning_precedes_text():
     events = llm_response_to_events(
         LLMResponse(
             content="answer",
-            reasoning_content="thinking...",
+            reasoning_content="private raw chain of thought",
+            reasoning_summary="safe summary",
             finish_reason="stop",
         )
     )
     assert isinstance(events[0], ReasoningDelta)
-    assert isinstance(events[1], TextDelta)
+    assert events[0].channel is ReasoningChannel.SUMMARY
+    assert isinstance(events[1], ReasoningDelta)
+    assert events[1].channel is ReasoningChannel.PROVIDER_TRACE
+    assert isinstance(events[2], TextDelta)
+
+
+def test_provider_trace_stays_separate_from_visible_answer_text() -> None:
+    events = llm_response_to_events(
+        LLMResponse(content="answer", reasoning_content="provider trace")
+    )
+
+    assert events == [
+        ReasoningDelta(
+            text="provider trace",
+            channel=ReasoningChannel.PROVIDER_TRACE,
+        ),
+        TextDelta(text="answer"),
+    ]
 
 
 def test_tool_calls_become_tool_call_end():

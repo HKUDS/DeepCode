@@ -10,6 +10,8 @@ first):
 - ``python -m cli.exec_cli`` — headless one-shot: run a task, stream NDJSON
   events, exit. The CI / harness / scripting entry.
 
-Shared session assembly lives in :mod:`core.agent_setup` (frontend-neutral,
-also used by the web backend) so the entries cannot drift.
+CLI agent assembly lives in :mod:`core.agent_setup`; the TUI persists through
+the canonical :mod:`core.sessions` JSONL store. Desktop uses the same agent
+kernel and SessionStore through its own stdio App Server adapter, without
+routing CLI command lifecycles through Desktop application services.
 """

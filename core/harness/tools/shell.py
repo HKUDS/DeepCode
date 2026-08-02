@@ -14,7 +14,11 @@ import os
 import tempfile
 from typing import Any
 
-from core.agent_runtime.tools.base import Tool, tool_parameters
+from core.agent_runtime.processes import (
+    subprocess_group_kwargs,
+    terminate_process_tree,
+)
+from core.agent_runtime.tools.base import Tool, ToolResult, tool_parameters
 from core.harness.sandbox import build_exec_command
 
 _MAX_OUTPUT_CHARS = 30_000
@@ -60,8 +64,9 @@ def _preflight(command: str) -> str | None:
 class BashTool(Tool):
     """Run a bash command in the sandboxed workspace and return its output."""
 
-    def __init__(self, workspace: str):
+    def __init__(self, workspace: str, *, sandbox_enabled: bool | None = None):
         self._workspace = str(workspace)
+        self._sandbox_enabled = sandbox_enabled
 
     @property
     def name(self) -> str:
@@ -69,6 +74,12 @@ class BashTool(Tool):
 
     @property
     def description(self) -> str:
+        if self._sandbox_enabled is False:
+            return (
+                "Run a bash command with the command sandbox disabled by the "
+                "current Full Access profile. Prefer non-interactive flags; "
+                "large output is truncated with the full output saved to a file."
+            )
         return (
             "Run a bash command in the workspace (sandboxed: writes are fenced "
             "to the workspace). Prefer non-interactive flags; large output is "
@@ -85,20 +96,27 @@ class BashTool(Tool):
         if refusal:
             return f"Error: {refusal}"
 
-        wrapped = build_exec_command(command=command, workspace=self._workspace)
+        wrapped = build_exec_command(
+            command=command,
+            workspace=self._workspace,
+            enabled=self._sandbox_enabled,
+        )
         try:
             proc = await asyncio.create_subprocess_exec(
                 *wrapped.argv,
                 cwd=self._workspace,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
+                **subprocess_group_kwargs(),
             )
             try:
                 out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
+            except TimeoutError:
+                await terminate_process_tree(proc)
                 return f"Error: command timed out after {timeout}s: {command}"
+            except asyncio.CancelledError:
+                await terminate_process_tree(proc)
+                raise
         except OSError as exc:
             return f"Error: could not run command: {exc}"
         finally:
@@ -106,16 +124,27 @@ class BashTool(Tool):
 
         text = out.decode("utf-8", errors="replace")
         rc = proc.returncode
+        assert rc is not None
         header = f"[exit {rc}]" if rc else ""
         if len(text) <= _MAX_OUTPUT_CHARS:
-            return f"{header}\n{text}".strip() if header else text
+            content = f"{header}\n{text}".strip() if header else text
+            return ToolResult(
+                content,
+                is_error=rc != 0,
+                metadata={"exit_code": rc},
+            )
 
         # Spill full output to a file; return a bounded preview + the path.
         fd, path = tempfile.mkstemp(prefix="deepcode-bash-", suffix=".txt")
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
         preview = text[-_MAX_OUTPUT_CHARS:]
-        return (
+        content = (
             f"{header}\n...output truncated ({len(text)} chars). "
             f"Full output saved to: {path}\n\n{preview}"
         ).strip()
+        return ToolResult(
+            content,
+            is_error=rc != 0,
+            metadata={"exit_code": rc},
+        )

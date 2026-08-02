@@ -11,8 +11,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.harness.tools import default_coding_tools  # noqa: E402
-from core.harness.tools.files import EditTool, ReadTool, WriteTool  # noqa: E402
+from core.domain.execution_security import (
+    ExecutionAccessPreset,
+    ExecutionSecurityProfile,
+)
+from core.harness.tools import default_coding_tools
+from core.harness.tools.files import EditTool, ReadTool, WriteTool
 
 
 @pytest.mark.asyncio
@@ -99,6 +103,36 @@ async def test_edit_outside_workspace_refused(tmp_path):
     )
     assert out.startswith("Error: refusing to edit outside")
     assert (tmp_path / "outside.py").read_text() == "secret = 1\n"
+
+
+@pytest.mark.asyncio
+async def test_full_access_profile_allows_write_and_edit_outside_workspace(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside.txt"
+    registry = default_coding_tools(
+        workspace,
+        execution_security_profile=ExecutionSecurityProfile.for_preset(
+            ExecutionAccessPreset.FULL_ACCESS
+        ),
+    )
+
+    wrote = await registry.execute(
+        "write",
+        {"file_path": str(outside), "content": "before\n"},
+    )
+    edited = await registry.execute(
+        "edit",
+        {
+            "file_path": str(outside),
+            "old_string": "before",
+            "new_string": "after",
+        },
+    )
+
+    assert "Wrote" in wrote
+    assert "Edited" in edited
+    assert outside.read_text() == "after\n"
 
 
 def test_default_coding_tools_registry(tmp_path):

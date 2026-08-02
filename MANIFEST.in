@@ -1,17 +1,22 @@
 include README.md
+include README_ZH.md
 include LICENSE
+include THIRD_PARTY_NOTICES.md
 include requirements.txt
 include __init__.py
-include *.png
-include *.yaml
-recursive-include config *.yaml
 recursive-include prompts *
 recursive-include schema *
-recursive-include ui *.py
 recursive-include cli *.py
+recursive-include core *.py
+recursive-include core/application/goal_prompts *.md
+recursive-include app_server *.py
+recursive-include protocol *.json
 recursive-include utils *.py
 recursive-include tools *.py
+recursive-include tools *.yaml
 recursive-include workflows *.py
+recursive-include workflows *.md
+recursive-include eval *.md
 global-exclude *.pyc
 global-exclude .git*
 global-exclude .history*

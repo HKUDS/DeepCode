@@ -32,6 +32,7 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from core.agent_runtime.hook import AgentHook, AgentHookContext
@@ -41,6 +42,7 @@ from core.agent_runtime.tools.registry import ToolRegistry
 from core.harness.approval import TerminalApprover
 from core.harness.permissions import PermissionMode
 from core.harness.policy import build_permission_engine
+from core.verification import discover_verification_commands, run_verification
 
 # DeepCode-native compat layer (owns the MCP server lifecycle)
 from core.compat import Agent, get_runtime
@@ -411,8 +413,14 @@ class CodeImplementationWorkflow:
       write_file/search_code_references surface, indexed system prompt).
     """
 
-    def __init__(self, enable_indexing: bool = False) -> None:
+    def __init__(
+        self,
+        enable_indexing: bool = False,
+        *,
+        require_verification: bool = False,
+    ) -> None:
         self.enable_indexing = enable_indexing
+        self.require_verification = require_verification
         self.default_models = get_default_models()
         self.logger = self._create_logger()
         self.mcp_agent = None
@@ -507,14 +515,44 @@ class CodeImplementationWorkflow:
                 )
 
             run_state = dict(self._last_run_state)
-            inner_status = run_state.get("status", "unknown")
-            done = inner_status == "completed"
-            if done:
-                self.logger.info(
-                    "Workflow execution successful (all files implemented)"
-                )
-                top_status = "success"
+            generation_status = run_state.get("status", "unknown")
+            verification: list[dict[str, Any]] = []
+            if generation_status == "completed":
+                if self.require_verification:
+                    verification = await self._verify_generated_code(
+                        Path(code_directory)
+                    )
+                    tests_passed = bool(verification) and all(
+                        result["passed"] for result in verification
+                    )
+                    if tests_passed:
+                        self.logger.info(
+                            "Workflow execution verified (all discovered tests passed)"
+                        )
+                        inner_status = "completed"
+                        abort_reason = None
+                        top_status = "success"
+                    else:
+                        inner_status = (
+                            "unverified" if not verification else "test_failed"
+                        )
+                        abort_reason = (
+                            "no_tests_discovered"
+                            if not verification
+                            else "generated_tests_failed"
+                        )
+                        self.logger.warning(
+                            "Implementation generated but not verified: %s",
+                            abort_reason,
+                        )
+                        top_status = "incomplete"
+                else:
+                    inner_status = "completed"
+                    abort_reason = run_state.get("reason")
+                    top_status = "success"
             else:
+                inner_status = generation_status
+                abort_reason = run_state.get("reason")
                 pending = run_state.get("unimplemented_files", []) or []
                 self.logger.warning(
                     "Workflow execution finished EARLY: status=%s reason=%s "
@@ -534,7 +572,8 @@ class CodeImplementationWorkflow:
             return {
                 "status": top_status,
                 "inner_status": inner_status,
-                "abort_reason": run_state.get("reason"),
+                "generation_status": generation_status,
+                "abort_reason": abort_reason,
                 "files_completed": run_state.get("files_completed", 0),
                 "total_files": run_state.get("total_files", 0),
                 "unimplemented_files": run_state.get("unimplemented_files", []),
@@ -544,6 +583,7 @@ class CodeImplementationWorkflow:
                 "target_directory": target_directory,
                 "code_directory": os.path.join(target_directory, "generate_code"),
                 "results": results,
+                "verification": verification,
                 "mcp_architecture": self._mcp_architecture,
             }
 
@@ -571,6 +611,45 @@ class CodeImplementationWorkflow:
             }
         finally:
             await self._cleanup_mcp_agent()
+
+    async def _verify_generated_code(
+        self, code_directory: Path
+    ) -> list[dict[str, Any]]:
+        """Run only mechanically discovered test commands, with bounded output."""
+
+        commands = discover_verification_commands(code_directory)
+        results: list[dict[str, Any]] = []
+        for command in commands:
+            try:
+                result = await asyncio.to_thread(
+                    run_verification,
+                    code_directory,
+                    command,
+                    timeout_seconds=300,
+                )
+                results.append(
+                    {
+                        "command_id": command.id,
+                        "command": list(command.argv),
+                        "passed": result.passed,
+                        "exit_code": result.exit_code,
+                        "timed_out": result.timed_out,
+                        "duration_ms": result.duration_ms,
+                        "stdout": result.stdout,
+                        "stderr": result.stderr,
+                        "output_truncated": result.output_truncated,
+                    }
+                )
+            except OSError as exc:
+                results.append(
+                    {
+                        "command_id": command.id,
+                        "command": list(command.argv),
+                        "passed": False,
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+                )
+        return results
 
     async def create_file_structure(
         self, plan_content: str, target_directory: str
@@ -815,15 +894,15 @@ Requirements:
             self.logger.warning("Implementation LLM retry: %s", message)
             state.emit_progress(f"Retrying implementation LLM call: {message}")
 
-        # Security base (P1). The implementation phase is autonomous, so it
-        # defaults to FULL_AUTO — no per-tool prompts — while the
-        # non-overridable sensitive-path denylist always applies (the agent
-        # can never read/write credential stores even if a plan asks).
+        # Security base. Legacy CLI/batch runs default to FULL_AUTO; an
+        # explicit ``default`` or ``plan`` setting tightens that behavior.
+        # The non-overridable sensitive-path denylist always applies (the
+        # agent can never read/write credential stores even if a plan asks).
         #
         # Mode + rules come from the ``security`` config block, overridable by
         # DEEPCODE_PERMISSION_MODE. Any non-full_auto mode attaches a terminal
-        # approver so an `ask` becomes an interactive confirmation. Unknown
-        # values fall back to full_auto so a typo never blocks an unattended run.
+        # approver so an `ask` becomes an interactive confirmation. An unknown
+        # value falls back to this legacy client's FULL_AUTO default.
         security_cfg = getattr(get_runtime().config, "security", None)
         permission_engine = build_permission_engine(security_cfg, cwd=code_directory)
         mode = permission_engine.mode
@@ -853,7 +932,6 @@ Requirements:
             # The implementation phase owns its own budgets (wall clock +
             # iteration caps); no per-call timeout, like the legacy loop.
             llm_timeout_s=0,
-            max_injection_cycles=_MAX_ITERATIONS,
         )
 
         runner = AgentRunner(provider)
@@ -1038,8 +1116,11 @@ Requirements:
 class CodeImplementationWorkflowWithIndex(CodeImplementationWorkflow):
     """Back-compat alias: the indexed mode of the unified workflow."""
 
-    def __init__(self) -> None:
-        super().__init__(enable_indexing=True)
+    def __init__(self, *, require_verification: bool = False) -> None:
+        super().__init__(
+            enable_indexing=True,
+            require_verification=require_verification,
+        )
 
 
 async def main():

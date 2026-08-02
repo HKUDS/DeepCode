@@ -5,10 +5,9 @@ Faithful to the reference agent's multi-agent design, adapted to DeepCode:
 - **spawn is non-blocking** — it starts a sub-agent as a background task and
   returns its id immediately; several run *concurrently*, bounded by a per-session
   limit (``max_threads``);
-- **results flow through a mailbox** — when a sub-agent finishes it posts a
-  result message to the parent's mailbox and fires an activity event; the parent
-  drains the mailbox into its next turn via :meth:`drain_injections` (wired as
-  the run's ``injection_callback``);
+- **results flow through the active Turn inbox** — application-backed sessions
+  use the same atomic input boundary as user steering; direct CLI sessions use
+  a local compatibility mailbox owned by that Agent runtime;
 - **wait_agent parks on mailbox activity** (:meth:`wait_for_activity`) rather
   than joining a future — so the parent can keep working and collect results as
   they arrive.
@@ -25,7 +24,17 @@ from __future__ import annotations
 
 import asyncio
 import re
+import uuid
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
+
+from core.agent_runtime.injections import SubagentMessage, TurnInputSink
+from core.harness.permissions import PermissionMode
+
+if TYPE_CHECKING:
+    from core.compat.runtime import DeepCodeRuntime
+    from core.domain.execution_profile import ExecutionProfile
+    from core.domain.execution_security import ExecutionSecurityProfile
 
 # Max sub-agents running at once. A small fan-out (3-5 independent subtasks) is
 # the common case, so the default fits it without forcing a wait-and-retry,
@@ -59,7 +68,11 @@ class SubAgent:
     status: str = _RUNNING
     result: str = ""
     seed_history: list = field(default_factory=list, repr=False)
-    inbox: list = field(default_factory=list, repr=False)  # send_message queue
+    inbox: list[tuple[str, str]] = field(
+        default_factory=list,
+        repr=False,
+    )  # (message id, parent payload)
+    inbox_sequence: int = 0
     dedup_key: str = ""  # stable key so a re-worded re-spawn is caught
     handle: asyncio.Task | None = field(default=None, repr=False)
 
@@ -86,14 +99,30 @@ class AgentControl:
         workspace: str,
         model: str | None = None,
         *,
+        execution_profile: ExecutionProfile | None = None,
         max_threads: int = MAX_CONCURRENT_SUBAGENTS,
+        permission_mode: PermissionMode = PermissionMode.FULL_AUTO,
+        execution_security_profile: ExecutionSecurityProfile | None = None,
+        approval_callback: Any | None = None,
+        runtime: DeepCodeRuntime | None = None,
+        active_turn_id_provider: Any | None = None,
+        runtime_input_sink: TurnInputSink | None = None,
     ) -> None:
         self._workspace = workspace
         self._model = model
+        self._execution_profile = execution_profile
         self._max_threads = max(1, max_threads)
+        self._permission_mode = permission_mode
+        self._execution_security_profile = execution_security_profile
+        self._approval_callback = approval_callback
+        self._runtime = runtime
+        self._active_turn_id_provider = active_turn_id_provider
+        self._runtime_input_sink = runtime_input_sink
+        self._local_runtime_id = f"local-agent-runtime-{uuid.uuid4().hex}"
         self._agents: dict[str, SubAgent] = {}
         self._seq = 0
-        self._mailbox: list[str] = []
+        self._mailbox: list[tuple[str, str, str]] = []
+        self._mailbox_sequence = 0
         self._activity = asyncio.Event()
         self._git_lock = asyncio.Lock()
         self._history_provider = None  # set to the parent session's history()
@@ -137,19 +166,33 @@ class AgentControl:
             return f"{agent_id} already finished ({sub.status}); cannot deliver"
         if not message.strip():
             return "Error: message is empty."
-        sub.inbox.append(f"Message Type: MESSAGE\nFrom: parent\nPayload:\n{message}")
+        sub.inbox_sequence += 1
+        sub.inbox.append(
+            (
+                f"parent:{sub.id}:{sub.inbox_sequence}",
+                message.strip(),
+            )
+        )
         return f"delivered to {agent_id}"
 
     def _make_inbox_drainer(self, sub: SubAgent):
         """The injection_callback for a sub-agent: drains its send_message inbox
         into its own turn (mirrors the parent's drain_injections)."""
 
-        async def drain(limit: int | None = None) -> list[dict[str, str]]:
+        async def drain(limit: int | None = None) -> list[SubagentMessage]:
             if not sub.inbox:
                 return []
             take = sub.inbox if limit is None else sub.inbox[:limit]
             sub.inbox = sub.inbox[len(take) :]
-            return [{"role": "user", "content": m} for m in take]
+            return [
+                SubagentMessage(
+                    message_id=message_id,
+                    target_turn_id=sub.id,
+                    agent_id="parent",
+                    payload=payload,
+                )
+                for message_id, payload in take
+            ]
 
         return drain
 
@@ -254,7 +297,7 @@ class AgentControl:
             sub.result = f"error: {exc}"
         finally:
             if sub.status != _RUNNING:
-                self._post(_format_result_message(sub))
+                self._post(sub.id, _format_result_message(sub))
 
     async def _run_isolated(self, sub: SubAgent) -> str:
         from core.team.worktree import WorktreeManager
@@ -307,9 +350,18 @@ class AgentControl:
         session, _model, _engine = build_agent_session(
             workspace=workspace,
             model=self._model,
+            execution_profile=self._execution_profile,
             allow_spawn=False,  # depth cap: sub-agents cannot spawn again
             injection_callback=inbox_drainer,  # receives parent's send_message
             agent_context=(agent_id, "subagent"),  # fires SubagentStart/Stop hooks
+            approval_callback=self._approval_callback,
+            permission_mode_override=(
+                self._permission_mode
+                if self._execution_security_profile is None
+                else None
+            ),
+            execution_security_profile=self._execution_security_profile,
+            runtime=self._runtime,
         )
         if seed_history:
             session.load_history(seed_history)  # fork_turns: inherit parent context
@@ -321,8 +373,34 @@ class AgentControl:
 
     # -- mailbox ---------------------------------------------------------------
 
-    def _post(self, message: str) -> None:
-        self._mailbox.append(message)
+    def _post(self, agent_id: str, message: str) -> None:
+        self._mailbox_sequence += 1
+        message_id = f"subagent:{agent_id}:{self._mailbox_sequence}"
+        target_turn_id = (
+            self._active_turn_id_provider()
+            if self._active_turn_id_provider is not None
+            else None
+        )
+        if self._runtime_input_sink is not None:
+            if target_turn_id:
+                self._runtime_input_sink(
+                    SubagentMessage(
+                        message_id=message_id,
+                        target_turn_id=target_turn_id,
+                        agent_id=agent_id,
+                        payload=message,
+                    )
+                )
+            # A result that loses the active-Turn close race remains inspectable
+            # on SubAgent.result, but is never carried into a future Turn.
+        else:
+            self._mailbox.append(
+                (
+                    message_id,
+                    agent_id,
+                    message,
+                )
+            )
         self._activity.set()
 
     async def wait_for_activity(self, timeout: float | None) -> str:
@@ -339,20 +417,38 @@ class AgentControl:
             return "One or more sub-agents have results waiting."
         try:
             await asyncio.wait_for(self._activity.wait(), timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return "Wait timed out; sub-agents are still running."
         return "One or more sub-agents finished."
 
-    async def drain_injections(self, limit: int | None = None) -> list[dict[str, str]]:
+    async def drain_injections(
+        self,
+        limit: int | None = None,
+    ) -> list[SubagentMessage]:
         """Pop pending mailbox messages as user-role injections for the parent's
         next turn. Wired as the run's ``injection_callback``."""
         if not self._mailbox:
+            return []
+        target_turn_id = (
+            self._active_turn_id_provider()
+            if self._active_turn_id_provider is not None
+            else self._local_runtime_id
+        )
+        if not target_turn_id:
             return []
         take = self._mailbox if limit is None else self._mailbox[:limit]
         self._mailbox = self._mailbox[len(take) :]
         if not self._mailbox:
             self._activity.clear()
-        return [{"role": "user", "content": msg} for msg in take]
+        return [
+            SubagentMessage(
+                message_id=message_id,
+                target_turn_id=target_turn_id,
+                agent_id=agent_id,
+                payload=payload,
+            )
+            for message_id, agent_id, payload in take
+        ]
 
     async def close(self) -> None:
         """Cancel any still-running sub-agents (best-effort session teardown)."""

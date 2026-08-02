@@ -23,6 +23,10 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from core.agent_runtime.processes import (
+    subprocess_group_kwargs,
+    terminate_process_tree,
+)
 from core.harness.hooks.discovery import Handler
 
 
@@ -71,6 +75,7 @@ async def run_command(handler: Handler, payload_json: str, cwd: str) -> CommandR
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
             env=env,
+            **subprocess_group_kwargs(),
         )
     except OSError as exc:
         return CommandResult(None, "", "", f"failed to spawn hook: {exc}", 0)
@@ -80,7 +85,7 @@ async def run_command(handler: Handler, payload_json: str, cwd: str) -> CommandR
             proc.communicate(payload_json.encode()), timeout=handler.timeout_sec
         )
     except asyncio.TimeoutError:
-        proc.kill()
+        await terminate_process_tree(proc)
         try:
             await proc.communicate()
         except Exception:  # noqa: BLE001 - best-effort reap after kill
@@ -89,6 +94,9 @@ async def run_command(handler: Handler, payload_json: str, cwd: str) -> CommandR
         return CommandResult(
             None, "", "", f"hook timed out after {handler.timeout_sec}s", elapsed
         )
+    except asyncio.CancelledError:
+        await terminate_process_tree(proc)
+        raise
 
     elapsed = int((time.monotonic() - started) * 1000)
     return CommandResult(

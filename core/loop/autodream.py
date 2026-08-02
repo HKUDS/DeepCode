@@ -16,6 +16,7 @@ before/after note-count check is the only mechanical signal we keep.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from core.agent_setup import build_agent_session
@@ -49,7 +50,13 @@ def _note_count(workspace: str) -> int:
 
 
 async def consolidate_memory(
-    workspace: str, *, model: str | None = None, max_iterations: int = 20
+    workspace: str,
+    *,
+    model: str | None = None,
+    connection_id: str | None = None,
+    reasoning_effort: str | None = None,
+    max_iterations: int = 20,
+    prompt_runner: Callable[[str], Awaitable[tuple[str, str]]] | None = None,
 ) -> AutodreamResult:
     """Run one memory-consolidation pass over ``workspace``.
 
@@ -59,14 +66,26 @@ async def consolidate_memory(
     if before == 0:
         return AutodreamResult(False, 0, 0, "no memory to consolidate")
 
-    session, _model, _engine = build_agent_session(
-        workspace=workspace, model=model, max_iterations=max_iterations
-    )
-    summary = ""
-    async for event in session.run_stream(UserInput(text=_CONSOLIDATE_PROMPT)):
-        if event.msg.type == "task_complete":
-            summary = (event.msg.final_text or "").strip().splitlines()[:1]
-            summary = summary[0] if summary else ""
+    if prompt_runner is not None:
+        _stop_reason, final_text = await prompt_runner(_CONSOLIDATE_PROMPT)
+        summary = final_text
+    else:
+        session, _model, _engine = build_agent_session(
+            workspace=workspace,
+            model=model,
+            connection_id=connection_id,
+            reasoning_effort=reasoning_effort,
+            max_iterations=max_iterations,
+        )
+        summary = ""
+        try:
+            async for event in session.run_stream(UserInput(text=_CONSOLIDATE_PROMPT)):
+                if event.msg.type == "task_complete":
+                    summary = event.msg.final_text or ""
+        finally:
+            await session.aclose()
+    first_line = summary.strip().splitlines()[:1]
+    summary = first_line[0] if first_line else ""
 
     return AutodreamResult(
         ran=True,

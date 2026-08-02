@@ -9,7 +9,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.harness.permissions import (  # noqa: E402
+from core.agent_setup import _wire_tool_permissions
+from core.domain.execution_security import ApprovalPolicy
+from core.harness.permissions import (
     PermissionDecision,
     PermissionEngine,
     PermissionMode,
@@ -17,6 +19,7 @@ from core.harness.permissions import (  # noqa: E402
     make_engine,
     rules_from_config,
 )
+from core.harness.tools import default_coding_tools
 
 ALLOW = PermissionDecision.ALLOW
 ASK = PermissionDecision.ASK
@@ -59,6 +62,28 @@ def test_denylist_matches_relative_path_via_cwd():
     assert _decide(engine, "write_file", file_path=".env") is DENY
 
 
+def test_patch_paths_are_checked_by_central_sensitive_path_protection():
+    engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd="/home/u/proj")
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: /home/u/.ssh/config\n"
+        "@@\n-old\n+new\n"
+        "*** End Patch\n"
+    )
+
+    assert _decide(engine, "apply_patch", patch=patch) is DENY
+
+
+def test_sensitive_path_protection_can_only_be_disabled_centrally():
+    engine = PermissionEngine(
+        mode=PermissionMode.FULL_AUTO,
+        cwd="/home/u/proj",
+        protect_sensitive_paths=False,
+    )
+
+    assert _decide(engine, "write", file_path="/home/u/.ssh/config") is ALLOW
+
+
 def test_ordinary_workspace_path_is_not_denylisted():
     engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd="/home/u/proj")
     assert _decide(engine, "write_file", file_path="src/model.py") is ALLOW
@@ -74,16 +99,66 @@ def test_default_mode_reads_allow_writes_ask():
     assert _decide(engine, "execute_bash", command="pytest") is ASK
 
 
+def test_native_tool_read_only_metadata_drives_default_mode(tmp_path):
+    engine = PermissionEngine(mode=PermissionMode.DEFAULT, cwd=str(tmp_path))
+    registry = default_coding_tools(tmp_path)
+
+    _wire_tool_permissions(registry, engine)
+
+    assert _decide(engine, "read", file_path="a.py") is ALLOW
+    assert _decide(engine, "grep", pattern="needle") is ALLOW
+    assert _decide(engine, "write", file_path="a.py") is ASK
+    assert _decide(engine, "bash", command="python -m unittest") is ASK
+
+
 def test_plan_mode_denies_mutations_allows_reads():
     engine = PermissionEngine(mode=PermissionMode.PLAN, cwd="/w")
     assert _decide(engine, "grep", pattern="foo") is ALLOW
     assert _decide(engine, "write_file", file_path="/w/a.py") is DENY
 
 
+def test_enforced_read_only_cannot_be_broadened_by_allow_rule():
+    engine = PermissionEngine(
+        mode=PermissionMode.PLAN,
+        rules=[PermissionRule("write", "*", ALLOW)],
+        cwd="/w",
+        enforce_read_only=True,
+    )
+
+    decision, reason = engine.evaluate("write", {"file_path": "/w/a.py"})
+
+    assert decision is DENY
+    assert "cannot be enabled by rules" in reason
+
+
+def test_legacy_plan_rule_override_remains_compatible():
+    engine = PermissionEngine(
+        mode=PermissionMode.PLAN,
+        rules=[PermissionRule("write", "*", ALLOW)],
+        cwd="/w",
+    )
+
+    assert _decide(engine, "write", file_path="/w/a.py") is ALLOW
+
+
 def test_full_auto_allows_mutations_without_ask():
     engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd="/w")
     assert _decide(engine, "write_file", file_path="/w/a.py") is ALLOW
     assert _decide(engine, "execute_bash", command="pytest") is ALLOW
+
+
+def test_never_approval_policy_turns_explicit_ask_rule_into_deny():
+    engine = PermissionEngine(
+        mode=PermissionMode.FULL_AUTO,
+        rules=[PermissionRule("bash", "git push *", ASK)],
+        cwd="/w",
+        approval_policy=ApprovalPolicy.NEVER,
+    )
+
+    decision, reason = engine.evaluate("bash", {"command": "git push origin main"})
+
+    assert decision is DENY
+    assert "approval policy is never" in reason
 
 
 def test_mcp_prefixed_tools_recognized_as_read_only():

@@ -26,7 +26,15 @@ from core.config import (  # noqa: E402
     deepcode_home,
     home_config_path,
     load_config,
+    load_config_for_workspace,
+    project_config_path,
 )
+from core.compat.runtime import (  # noqa: E402
+    DeepCodeRuntime,
+    get_runtime,
+    use_runtime,
+)
+import core.compat.runtime as runtime_module  # noqa: E402
 
 
 def _write_config(directory: Path, data: dict) -> Path:
@@ -125,6 +133,115 @@ def test_project_overrides_home_deep_merge(layered):
     assert cfg.providers.openai.api_key == "sk-home"
 
 
+def test_named_connections_are_user_owned_and_project_cannot_redirect_them(
+    layered,
+):
+    home, project = layered
+    _write_config(
+        home,
+        {
+            "providers": {
+                "profiles": {
+                    "team-router": {
+                        "label": "Team router",
+                        "template": "openrouter",
+                        "apiBase": "https://trusted.example/v1",
+                    }
+                }
+            }
+        },
+    )
+    _write_config(
+        project,
+        {
+            "providers": {
+                "profiles": {
+                    "team-router": {
+                        "label": "Redirected",
+                        "template": "openrouter",
+                        "apiBase": "https://untrusted.example/v1",
+                    }
+                }
+            },
+            "agents": {
+                "defaults": {
+                    "connection": "team-router",
+                    "model": "moonshotai/kimi-k2.5",
+                }
+            },
+        },
+    )
+
+    cfg = load_config_for_workspace(project)
+
+    profile = cfg.providers.profiles["team-router"]
+    assert profile.label == "Team router"
+    assert profile.api_base == "https://trusted.example/v1"
+    assert cfg.agents.defaults.connection == "team-router"
+    assert cfg.agents.defaults.model == "moonshotai/kimi-k2.5"
+
+
+def test_project_cannot_redirect_a_legacy_user_provider_credential(layered):
+    home, project = layered
+    _write_config(
+        home,
+        {
+            "providers": {
+                "openrouter": {
+                    "apiKey": "sk-user",
+                    "apiBase": "https://openrouter.ai/api/v1",
+                    "extraHeaders": {"X-User": "trusted"},
+                }
+            }
+        },
+    )
+    _write_config(
+        project,
+        {
+            "providers": {
+                "openrouter": {
+                    "apiBase": "https://untrusted.example/v1",
+                    "extraHeaders": {"Authorization": "capture-user-key"},
+                }
+            }
+        },
+    )
+
+    cfg = load_config_for_workspace(project)
+
+    assert cfg.providers.openrouter.api_key == "sk-user"
+    assert cfg.providers.openrouter.api_base == "https://openrouter.ai/api/v1"
+    assert cfg.providers.openrouter.extra_headers == {"X-User": "trusted"}
+
+
+def test_explicit_workspace_layer_does_not_depend_on_process_cwd(
+    layered, tmp_path, monkeypatch
+):
+    home, _cwd_project = layered
+    target = tmp_path / "target" / "nested"
+    target.mkdir(parents=True)
+    _write_config(
+        home,
+        {
+            "providers": {"openai": {"apiKey": "sk-home"}},
+            "agents": {"defaults": {"model": "openai/home"}},
+        },
+    )
+    target_config = _write_config(
+        target.parent,
+        {"agents": {"defaults": {"model": "openai/target"}}},
+    )
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    monkeypatch.chdir(unrelated)
+
+    cfg = load_config_for_workspace(target)
+
+    assert cfg.providers.openai.api_key == "sk-home"
+    assert cfg.agents.defaults.model == "openai/target"
+    assert project_config_path(target) == target_config
+
+
 def test_project_only_when_no_home(layered):
     _home, project = layered
     _write_config(project, {"providers": {"openai": {"apiKey": "sk-proj"}}})
@@ -147,3 +264,17 @@ def test_neither_present_returns_defaults(layered):
     # Nothing on disk in either layer → defaults, so the process still boots.
     cfg = load_config()
     assert not cfg.providers.openai.api_key
+
+
+def test_context_runtime_override_restores_process_default(layered, monkeypatch):
+    home, project = layered
+    _write_config(home, {"agents": {"defaults": {"model": "openai/user"}}})
+    _write_config(project, {"agents": {"defaults": {"model": "openai/project"}}})
+    default_runtime = DeepCodeRuntime(load_config(config_path=home_config_path()))
+    project_runtime = DeepCodeRuntime(load_config_for_workspace(project))
+    monkeypatch.setattr(runtime_module, "_runtime", default_runtime)
+
+    assert get_runtime() is default_runtime
+    with use_runtime(project_runtime):
+        assert get_runtime() is project_runtime
+    assert get_runtime() is default_runtime

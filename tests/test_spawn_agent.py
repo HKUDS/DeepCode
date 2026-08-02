@@ -18,12 +18,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.harness.agents.control import (  # noqa: E402
+from core.agent_runtime.injections import SubagentMessage
+from core.harness.agents.control import (
     AgentControl,
     AgentLimitError,
     DuplicateAgentError,
 )
-from core.harness.tools.spawn_agent import (  # noqa: E402
+from core.harness.tools.spawn_agent import (
     InterruptAgentTool,
     ListAgentsTool,
     SendMessageTool,
@@ -88,8 +89,47 @@ def test_spawn_is_non_blocking_and_concurrent(tmp_path):
         assert "result" in outcome.lower() or "finished" in outcome.lower()
         injections = await ctrl.drain_injections()
         assert len(injections) == 2
-        assert all(i["role"] == "user" for i in injections)
-        assert all("Message Type: RESULT" in i["content"] for i in injections)
+        assert all(isinstance(item, SubagentMessage) for item in injections)
+        assert all(
+            item.target_turn_id.startswith("local-agent-runtime-")
+            for item in injections
+        )
+        assert all("Message Type: RESULT" in item.payload for item in injections)
+
+    asyncio.run(scenario())
+
+
+def test_application_backed_result_uses_the_active_turn_sink(tmp_path):
+    async def scenario():
+        active_turn_id: str | None = "turn-parent"
+        delivered: list[SubagentMessage] = []
+
+        def target() -> str | None:
+            return active_turn_id
+
+        def sink(message: SubagentMessage) -> bool:
+            delivered.append(message)
+            return True
+
+        ctrl = _HeldControl(
+            str(tmp_path),
+            active_turn_id_provider=target,
+            runtime_input_sink=sink,
+        )
+        ctrl.spawn("t1", isolate=False)
+        await asyncio.sleep(0)
+        ctrl.release.set()
+        await ctrl.wait_for_activity(5.0)
+
+        assert len(delivered) == 1
+        assert delivered[0].target_turn_id == "turn-parent"
+        assert await ctrl.drain_injections() == []
+
+        active_turn_id = None
+        second_id = ctrl.spawn("t2", isolate=False)
+        await ctrl.get(second_id).handle
+        assert len(delivered) == 1
+        assert await ctrl.drain_injections() == []
 
     asyncio.run(scenario())
 
@@ -308,8 +348,15 @@ def test_send_message_to_running_and_finished(tmp_path):
 
     out, inbox, injected, finished = asyncio.run(scenario())
     assert "delivered" in out
-    assert inbox and "use value 42" in inbox[0] and "Message Type: MESSAGE" in inbox[0]
-    assert injected == [{"role": "user", "content": inbox[0]}]
+    assert inbox == [("parent:agent-1:1", "use value 42")]
+    assert injected == [
+        SubagentMessage(
+            message_id="parent:agent-1:1",
+            target_turn_id="agent-1",
+            agent_id="parent",
+            payload="use value 42",
+        )
+    ]
     assert "already finished" in finished
 
 
@@ -320,17 +367,142 @@ def test_send_message_unknown_and_empty(tmp_path):
     )
 
 
-def test_build_wires_callable_history_provider(tmp_path):
+def test_build_wires_callable_history_provider(tmp_path, monkeypatch):
     # Regression: session.history is a @property (a list), so build_agent_session
     # must wrap it in a callable. Passing the value made fork_turns call a list
     # → "TypeError: 'list' object is not callable" on every forked spawn.
-    from core.agent_setup import build_agent_session
+    from core import agent_setup
 
-    session, _m, _e = build_agent_session(workspace=str(tmp_path), allow_spawn=True)
+    profile = type("Profile", (), {"model": "test-model"})()
+    monkeypatch.setattr(
+        agent_setup,
+        "get_workflow_provider",
+        lambda **_kwargs: (object(), profile),
+    )
+    monkeypatch.setattr(
+        agent_setup,
+        "get_runtime",
+        lambda: type("Runtime", (), {"config": object()})(),
+    )
+
+    session, _m, _e = agent_setup.build_agent_session(
+        workspace=str(tmp_path),
+        allow_spawn=True,
+    )
     ctrl = session._agent_control
     assert callable(ctrl._history_provider)
     assert ctrl._history_provider() == session.history
     assert isinstance(ctrl._fork_history("all"), list)  # would raise before the fix
+
+
+def test_build_wires_one_atomic_profile_into_engine_tools_and_control(
+    tmp_path, monkeypatch
+):
+    from core import agent_setup
+    from core.domain.execution_security import (
+        ApprovalPolicy,
+        ExecutionAccessPreset,
+        ExecutionSecurityProfile,
+    )
+    from core.harness.permissions import PermissionMode
+
+    llm_profile = type("Profile", (), {"model": "test-model"})()
+    monkeypatch.setattr(
+        agent_setup,
+        "get_workflow_provider",
+        lambda **_kwargs: (object(), llm_profile),
+    )
+    monkeypatch.setattr(
+        agent_setup,
+        "get_runtime",
+        lambda: type("Runtime", (), {"config": object()})(),
+    )
+    monkeypatch.setenv("DEEPCODE_SANDBOX", "1")
+    security = ExecutionSecurityProfile.for_preset(ExecutionAccessPreset.FULL_ACCESS)
+
+    session, _model, engine = agent_setup.build_agent_session(
+        workspace=str(tmp_path),
+        allow_spawn=True,
+        execution_security_profile=security,
+    )
+
+    assert engine.mode is PermissionMode.FULL_AUTO
+    assert engine.approval_policy is ApprovalPolicy.NEVER
+    assert session._tools.get("bash")._sandbox_enabled is False
+    assert session._tools.get("write")._allow_outside_workspace is True
+    assert session._tools.get("edit")._allow_outside_workspace is True
+    assert session._tools.get("apply_patch")._allow_outside_workspace is True
+    assert session._tools.get("code")._sandbox_enabled is False
+    assert session._agent_control._execution_security_profile is security
+
+
+def test_subagent_inherits_parent_permission_and_approval(tmp_path, monkeypatch):
+    from core.events import Event, TaskComplete
+    from core.harness.permissions import PermissionMode
+
+    captured = {}
+
+    class Session:
+        def load_history(self, _messages):
+            return None
+
+        async def run_stream(self, _op):
+            yield Event("1", TaskComplete("done", "completed"))
+
+    def build(**kwargs):
+        captured.update(kwargs)
+        return Session(), "model", object()
+
+    monkeypatch.setattr("core.agent_setup.build_agent_session", build)
+    approval = object()
+    control = AgentControl(
+        str(tmp_path),
+        permission_mode=PermissionMode.DEFAULT,
+        approval_callback=approval,
+    )
+
+    result = asyncio.run(control._run_subagent("task", str(tmp_path), agent_id="child"))
+
+    assert result == "done"
+    assert captured["permission_mode_override"] is PermissionMode.DEFAULT
+    assert captured["approval_callback"] is approval
+
+
+def test_subagent_inherits_atomic_execution_security_profile(tmp_path, monkeypatch):
+    from core.domain.execution_security import (
+        ExecutionAccessPreset,
+        ExecutionSecurityProfile,
+    )
+    from core.events import Event, TaskComplete
+
+    captured = {}
+
+    class Session:
+        def load_history(self, _messages):
+            return None
+
+        async def run_stream(self, _op):
+            yield Event("1", TaskComplete("done", "completed"))
+
+    def build(**kwargs):
+        captured.update(kwargs)
+        return Session(), "model", object()
+
+    monkeypatch.setattr("core.agent_setup.build_agent_session", build)
+    profile = ExecutionSecurityProfile.for_preset(ExecutionAccessPreset.FULL_ACCESS)
+    approval = object()
+    control = AgentControl(
+        str(tmp_path),
+        execution_security_profile=profile,
+        approval_callback=approval,
+    )
+
+    result = asyncio.run(control._run_subagent("task", str(tmp_path), agent_id="child"))
+
+    assert result == "done"
+    assert captured["execution_security_profile"] is profile
+    assert captured["permission_mode_override"] is None
+    assert captured["approval_callback"] is approval
 
 
 def test_wiring_and_depth_cap():

@@ -11,8 +11,9 @@ state (switch sessions, rebuild the agent) through the app's public methods.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 Handler = Callable[[Any, str], Awaitable[str | None]]
 
@@ -35,7 +36,10 @@ async def _cmd_help(app, args: str) -> str | None:
 
 
 async def _cmd_new(app, args: str) -> str | None:
-    app.new_conversation(title=args.strip())
+    try:
+        app.new_conversation(title=args.strip())
+    except (RuntimeError, ValueError) as exc:
+        return str(exc)
     return "started a new conversation"
 
 
@@ -65,7 +69,7 @@ async def _cmd_resume(app, args: str) -> str | None:
         return "\n".join(lines)
     try:
         turns = app.resume_conversation(target)
-    except ValueError as exc:
+    except (RuntimeError, ValueError) as exc:
         return str(exc)
     status = f"resumed {target} ({turns} messages restored)"
     origin = app.bridge.stored_workspace()
@@ -77,14 +81,116 @@ async def _cmd_resume(app, args: str) -> str | None:
 async def _cmd_model(app, args: str) -> str | None:
     wanted = args.strip()
     if not wanted:
-        return f"model: {app.model}"
-    app.switch_model(wanted)
-    return f"model switched to {app.model} (history preserved)"
+        profile = app.thread_client.execution_profile
+        return (
+            f"connection: {profile.connection_id} · model: {app.model} · "
+            f"effort: {app.requested_reasoning_effort}"
+        )
+    connection, separator, model = wanted.partition(" ")
+    if not separator:
+        model = connection
+        connection = ""
+    try:
+        await app.switch_model(
+            model.strip(),
+            connection_id=connection.strip() or None,
+        )
+    except (OSError, ValueError) as exc:
+        return f"model switch failed: {exc}"
+    return (
+        f"model switched to {app.model} on connection "
+        f"{app.thread_client.execution_profile.connection_id} · effort "
+        f"{app.requested_reasoning_effort} (history preserved)"
+    )
+
+
+async def _cmd_effort(app, args: str) -> str | None:
+    wanted = args.strip()
+    if not wanted:
+        profile = app.thread_client.execution_profile
+        effective = profile.reasoning_effort or "provider default"
+        return f"effort: {app.requested_reasoning_effort} · effective: {effective}"
+    try:
+        await app.switch_reasoning_effort(wanted)
+    except (OSError, ValueError) as exc:
+        return f"effort switch failed: {exc}"
+    profile = app.thread_client.execution_profile
+    effective = profile.reasoning_effort or "provider default"
+    return (
+        f"effort switched to {app.requested_reasoning_effort} "
+        f"(effective: {effective}; history preserved)"
+    )
+
+
+async def _cmd_permissions(app, args: str) -> str | None:
+    wanted = args.strip().casefold()
+    if not wanted:
+        return app.access_status()
+    aliases = {
+        "ask": "ask",
+        "read-only": "read_only",
+        "read_only": "read_only",
+        "full-access": "full_access",
+        "full_access": "full_access",
+        "inherit": None,
+        "default": None,
+    }
+    if wanted not in aliases:
+        return "usage: /permissions [ask|read-only|full-access|inherit]"
+    try:
+        return await app.set_access_preset(aliases[wanted])
+    except (OSError, RuntimeError, ValueError) as exc:
+        return f"Session access update failed: {exc}"
+
+
+async def _cmd_transcript(app, args: str) -> str | None:
+    wanted = args.strip()
+    if not wanted:
+        return f"transcript mode: {app.renderer.transcript_mode.value}"
+    try:
+        return app.set_transcript_mode(wanted)
+    except ValueError as exc:
+        return str(exc)
 
 
 async def _cmd_clear(app, args: str) -> str | None:
-    app.clear_conversation()
+    try:
+        app.clear_conversation()
+    except (RuntimeError, ValueError) as exc:
+        return str(exc)
     return "context cleared"
+
+
+async def _cmd_skills(app, args: str) -> str | None:
+    return app.list_skills()
+
+
+async def _cmd_skill(app, args: str) -> str | None:
+    action, _, target = args.strip().partition(" ")
+    if not action:
+        return "usage: /skill <id|name> | remove <id|name> | clear"
+    if action.lower() == "clear":
+        return app.clear_skills()
+    if action.lower() == "remove":
+        if not target.strip():
+            return "usage: /skill remove <id|name>"
+        return app.remove_skill(target.strip())
+    return app.select_skill(args.strip())
+
+
+async def _cmd_goal(app, args: str) -> str | None:
+    return await app.run_goal_command(args)
+
+
+async def _cmd_queue(app, args: str) -> str | None:
+    prompt = args.strip()
+    if not prompt:
+        return "usage: /queue <instruction>"
+    return app.queue_turn(prompt)
+
+
+async def _cmd_stop(app, args: str) -> str | None:
+    return app.stop_turn()
 
 
 async def _cmd_exit(app, args: str) -> str | None:
@@ -103,7 +209,50 @@ REGISTRY: dict[str, Command] = {
             "list this directory's sessions / resume one",
             _cmd_resume,
         ),
-        Command("model", "/model [id]", "show or switch the model", _cmd_model),
+        Command(
+            "model",
+            "/model [connection] [id]",
+            "show or switch connection/model",
+            _cmd_model,
+        ),
+        Command(
+            "effort",
+            "/effort [auto|off|level]",
+            "show or switch reasoning effort",
+            _cmd_effort,
+        ),
+        Command(
+            "permissions",
+            "/permissions [preset]",
+            "show or set this Session's tool access",
+            _cmd_permissions,
+        ),
+        Command(
+            "transcript",
+            "/transcript [normal|verbose|summary]",
+            "show or switch transcript detail (ctrl-o cycles)",
+            _cmd_transcript,
+        ),
+        Command("skills", "/skills", "list discovered Skills", _cmd_skills),
+        Command(
+            "skill",
+            "/skill <id|name>",
+            "select a Skill for the next turn",
+            _cmd_skill,
+        ),
+        Command(
+            "goal",
+            "/goal <text> | show | edit <text> | pause | resume | continue | wait | reopen [text] | clear",
+            "run or manage this Session's durable, steerable Goal",
+            _cmd_goal,
+        ),
+        Command(
+            "queue",
+            "/queue <instruction>",
+            "send an instruction as the next durable Turn",
+            _cmd_queue,
+        ),
+        Command("stop", "/stop", "interrupt the active Turn", _cmd_stop),
         Command("clear", "/clear", "clear the conversation context", _cmd_clear),
         Command("exit", "/exit", "quit (ctrl-d also works)", _cmd_exit),
     )

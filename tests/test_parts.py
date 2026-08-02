@@ -107,10 +107,31 @@ def test_unfulfilled_tool_call_is_pending():
 
 
 def test_reasoning_part_precedes_text():
-    msgs = [{"role": "assistant", "content": "answer", "reasoning_content": "think"}]
+    msgs = [
+        {
+            "role": "assistant",
+            "content": "answer",
+            "reasoning_content": "private raw chain",
+            "reasoning_summary": "safe summary",
+        }
+    ]
     parts = messages_to_parts(msgs)[0].parts
     assert isinstance(parts[0], ReasoningPart)
     assert isinstance(parts[1], TextPart)
+
+
+def test_raw_reasoning_does_not_become_a_visible_part():
+    msgs = [
+        {
+            "role": "assistant",
+            "content": "answer",
+            "reasoning_content": "private raw chain",
+        }
+    ]
+
+    parts = messages_to_parts(msgs)[0].parts
+    assert len(parts) == 1
+    assert isinstance(parts[0], TextPart)
 
 
 def test_malformed_tool_arguments_preserved_raw():

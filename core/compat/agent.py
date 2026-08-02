@@ -529,6 +529,7 @@ class Agent:
         *,
         phase: str = "default",
         provider_name: str | None = None,
+        connection_id: str | None = None,
         model: str | None = None,
     ) -> AugmentedLLM:
         """Return an :class:`AugmentedLLM` for the configured provider.
@@ -548,18 +549,40 @@ class Agent:
         ):
             resolved_provider_name = llm_class.PROVIDER_NAME
 
-        provider = runtime.provider_for(
-            provider_name=resolved_provider_name,
-            phase=phase,
-            model=model,
-        )
+        execution_profile = None
+        resolver = getattr(runtime, "resolve_execution_profile", None)
+        if resolved_provider_name is None and callable(resolver):
+            execution_profile = resolver(
+                connection_id=connection_id,
+                model=model,
+                phase=phase,
+            )
+        provider_kwargs = {
+            "provider_name": resolved_provider_name,
+            "phase": phase,
+            "model": model,
+        }
+        if execution_profile is not None:
+            provider_kwargs.update(
+                {
+                    "connection_id": execution_profile.connection_id,
+                    "execution_profile": execution_profile,
+                }
+            )
+        elif connection_id is not None:
+            provider_kwargs["connection_id"] = connection_id
+        provider = runtime.provider_for(**provider_kwargs)
         cls = (
             llm_class
             if isinstance(llm_class, type) and issubclass(llm_class, AugmentedLLM)
             else AugmentedLLM
         )
         effective_provider = (
-            resolved_provider_name
+            (
+                execution_profile.provider_name
+                if execution_profile is not None
+                else resolved_provider_name
+            )
             or runtime.config.get_provider_name(model)
             or runtime.config.llm_provider
             or "auto"

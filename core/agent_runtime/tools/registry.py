@@ -119,6 +119,11 @@ class ToolRegistry:
     def tool_names(self) -> list[str]:
         return list(self._tools.keys())
 
+    @property
+    def read_only_tool_names(self) -> frozenset[str]:
+        """Names whose tool implementation declares itself side-effect free."""
+        return frozenset(name for name, tool in self._tools.items() if tool.read_only)
+
     def __len__(self) -> int:
         return len(self._tools)
 

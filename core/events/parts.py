@@ -129,7 +129,9 @@ def messages_to_parts(messages: list[dict[str, Any]]) -> list[Message]:
             continue
         if role == "assistant":
             parts: list[Part] = []
-            reasoning = msg.get("reasoning_content")
+            # Raw provider reasoning is intentionally never projected into a
+            # user-visible Part.  Only a provider-designated safe summary is.
+            reasoning = msg.get("reasoning_summary")
             if isinstance(reasoning, str) and reasoning.strip():
                 parts.append(ReasoningPart(text=reasoning))
             content = msg.get("content")

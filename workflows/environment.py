@@ -66,6 +66,7 @@ async def prepare_workflow_environment(
     task_id: str | None = None,
     progress_cb: ProgressCallback | None = None,
     logger: Any | None = None,
+    workspace_root: Path | str | None = None,
 ) -> WorkflowContext:
     """Run all non-LLM workspace + input housekeeping in one place.
 
@@ -85,13 +86,19 @@ async def prepare_workflow_environment(
     _maybe_progress(progress_cb, 1, "🔧 Resolving workspace and validating input...")
 
     yaml_root, max_input_mb = _load_workspace_config()
-    workspace_root = resolve_workspace_root(yaml_root)
+    resolved_workspace_root = (
+        Path(workspace_root).expanduser().resolve()
+        if workspace_root is not None
+        else resolve_workspace_root(yaml_root)
+    )
 
     normalized, kind = _normalize_input(raw_input)
     _validate_input(normalized, kind, max_input_mb, log)
 
     prefix = TASK_KIND_PREFIX[task_kind]
-    existing_dir, detected_kind, is_resume = _detect_resume(normalized, workspace_root)
+    existing_dir, detected_kind, is_resume = _detect_resume(
+        normalized, resolved_workspace_root
+    )
 
     if is_resume and existing_dir is not None:
         # Resume preserves the existing directory name (and therefore its
@@ -115,10 +122,12 @@ async def prepare_workflow_environment(
         chosen_id = (task_id or uuid.uuid4().hex[:8]).strip()
         if not chosen_id:
             chosen_id = uuid.uuid4().hex[:8]
-        task_dir = workspace_root / TASKS_DIRNAME / f"{prefix}_{chosen_id}"
+        task_dir = resolved_workspace_root / TASKS_DIRNAME / f"{prefix}_{chosen_id}"
 
-    _ensure_workspace(workspace_root, task_dir, allow_existing=is_resume, logger=log)
-    _register_workspace_for_filesystem_mcp(workspace_root, log)
+    _ensure_workspace(
+        resolved_workspace_root, task_dir, allow_existing=is_resume, logger=log
+    )
+    _register_workspace_for_filesystem_mcp(resolved_workspace_root, log)
 
     paper_path: Path | None = None
     if is_resume and kind != "url":
@@ -128,7 +137,7 @@ async def prepare_workflow_environment(
 
     log.info(
         "🗂️  Workspace={} task_kind={} task_dir={} kind={} resume={}",
-        workspace_root,
+        resolved_workspace_root,
         task_kind,
         task_dir.name,
         kind,
@@ -169,7 +178,7 @@ async def prepare_workflow_environment(
         task_id=chosen_id,
         input_source=normalized,
         input_kind=kind,
-        workspace_root=workspace_root,
+        workspace_root=resolved_workspace_root,
         task_dir=task_dir,
         enable_indexing=enable_indexing,
         task_kind=task_kind,
@@ -408,7 +417,7 @@ def _register_workspace_for_filesystem_mcp(workspace_root: Path, log: Any) -> No
     trailing positional ``args``. We keep the entries that already point
     at the project tree (``.``) and append the resolved workspace + cwd
     if either is missing. This is the single owner of that wiring;
-    entry-points (CLI / UI / new_ui) used to do it inline.
+    legacy entry points used to do it inline.
     """
     try:
         runtime = get_runtime()

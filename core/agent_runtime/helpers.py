@@ -200,6 +200,8 @@ def build_assistant_message(
     content: str | None,
     tool_calls: list[dict[str, Any]] | None = None,
     reasoning_content: str | None = None,
+    reasoning_summary: str | None = None,
+    provider_state: dict[str, Any] | None = None,
     thinking_blocks: list[dict] | None = None,
 ) -> dict[str, Any]:
     """Build a provider-safe assistant message with optional reasoning fields."""
@@ -212,6 +214,10 @@ def build_assistant_message(
         )
     if thinking_blocks:
         msg["thinking_blocks"] = thinking_blocks
+    if reasoning_summary:
+        msg["reasoning_summary"] = reasoning_summary
+    if provider_state:
+        msg["provider_state"] = provider_state
     return msg
 
 
@@ -219,42 +225,46 @@ def estimate_prompt_tokens(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
 ) -> int:
+    parts: list[str] = []
+    for msg in messages:
+        content = msg.get("content")
+        if isinstance(content, str):
+            parts.append(content)
+        elif isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    txt = part.get("text", "")
+                    if txt:
+                        parts.append(txt)
+
+        tc = msg.get("tool_calls")
+        if tc:
+            parts.append(json.dumps(tc, ensure_ascii=False))
+
+        rc = msg.get("reasoning_content")
+        if isinstance(rc, str) and rc:
+            parts.append(rc)
+
+        for key in ("name", "tool_call_id"):
+            value = msg.get(key)
+            if isinstance(value, str) and value:
+                parts.append(value)
+
+    if tools:
+        parts.append(json.dumps(tools, ensure_ascii=False))
+
+    payload = "\n".join(parts)
+    per_message_overhead = len(messages) * 4
     try:
         if tiktoken is None:
             raise RuntimeError("tiktoken unavailable")
         enc = tiktoken.get_encoding("cl100k_base")
-        parts: list[str] = []
-        for msg in messages:
-            content = msg.get("content")
-            if isinstance(content, str):
-                parts.append(content)
-            elif isinstance(content, list):
-                for part in content:
-                    if isinstance(part, dict) and part.get("type") == "text":
-                        txt = part.get("text", "")
-                        if txt:
-                            parts.append(txt)
-
-            tc = msg.get("tool_calls")
-            if tc:
-                parts.append(json.dumps(tc, ensure_ascii=False))
-
-            rc = msg.get("reasoning_content")
-            if isinstance(rc, str) and rc:
-                parts.append(rc)
-
-            for key in ("name", "tool_call_id"):
-                value = msg.get(key)
-                if isinstance(value, str) and value:
-                    parts.append(value)
-
-        if tools:
-            parts.append(json.dumps(tools, ensure_ascii=False))
-
-        per_message_overhead = len(messages) * 4
-        return len(enc.encode("\n".join(parts))) + per_message_overhead
+        return len(enc.encode(payload)) + per_message_overhead
     except Exception:
-        return 0
+        # Context governance must remain active in minimal/offline installs
+        # where the optional tokenizer is unavailable. Four characters per
+        # token is deliberately conservative for typical source-code prompts.
+        return max(per_message_overhead, len(payload) // 4 + per_message_overhead)
 
 
 def estimate_message_tokens(message: dict[str, Any]) -> int:
@@ -313,5 +323,5 @@ def estimate_prompt_tokens_chain(
 
     estimated = estimate_prompt_tokens(messages, tools)
     if estimated > 0:
-        return int(estimated), "tiktoken"
+        return int(estimated), "estimated"
     return 0, "none"

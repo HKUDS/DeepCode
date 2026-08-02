@@ -556,7 +556,9 @@ async def acquire_input_artifact(ctx: WorkflowContext, logger) -> None:
     """
 
     paper_dir = str(ctx.task_dir)
-    target_pdf_name = "paper.pdf"
+    # The downloader preserves a known source extension, while still giving
+    # extensionless PDF URLs a deterministic name.
+    target_name = "paper.pdf"
 
     logger.info(f"📋 Paper ID: {ctx.task_id}")
     logger.info(f"📂 Paper directory: {paper_dir}")
@@ -566,13 +568,13 @@ async def acquire_input_artifact(ctx: WorkflowContext, logger) -> None:
         operation_result = await download_file_to(
             url=ctx.input_source,
             destination=paper_dir,
-            filename=target_pdf_name,
+            filename=target_name,
         )
     else:
         operation_result = await move_file_to(
             source=ctx.input_source,
             destination=paper_dir,
-            filename=target_pdf_name,
+            filename=target_name,
         )
 
     if "[SUCCESS]" not in operation_result or "[ERROR]" in operation_result:
@@ -582,11 +584,39 @@ async def acquire_input_artifact(ctx: WorkflowContext, logger) -> None:
             f"{operation_result}"
         )
 
+    _record_acquired_artifacts(ctx)
     logger.info(f"✅ Input acquired:\n{operation_result}")
 
 
+def _record_acquired_artifacts(ctx: WorkflowContext) -> None:
+    """Enforce Phase 2's contract and record the original + Markdown paths."""
+
+    markdown_candidates = sorted(ctx.task_dir.glob("*.md"))
+    if not markdown_candidates:
+        raise RuntimeError(
+            "Input was copied, but conversion did not produce the required Markdown "
+            f"artifact for format '{ctx.input_kind}'."
+        )
+    preferred_markdown = ctx.task_dir / "paper.md"
+    ctx.paper_md_path = (
+        preferred_markdown
+        if preferred_markdown in markdown_candidates
+        else markdown_candidates[0]
+    )
+    source_candidates = sorted(
+        path
+        for path in ctx.task_dir.glob("paper.*")
+        if path.is_file() and path != ctx.paper_md_path
+    )
+    ctx.paper_path = source_candidates[0] if source_candidates else ctx.paper_md_path
+
+
 async def run_code_analyzer(
-    paper_dir: str, logger, use_segmentation: bool = True
+    paper_dir: str,
+    logger,
+    use_segmentation: bool = True,
+    *,
+    strict_plan_validation: bool = False,
 ) -> str:
     """
     Run code planning through a single authoritative planner.
@@ -833,39 +863,42 @@ async def run_code_analyzer(
                 final_planning_error = f"{type(e).__name__}: {e}"
                 break
 
-    fallback_source = best_invalid_result
-    if len(fallback_source.strip()) < 500:
-        fallback_source = (
-            segmented_context or paper_content[:6000] or fallback_source
-        ).strip()
-
-    if fallback_source:
-        coerced_plan = coerce_text_to_minimal_plan(fallback_source, paper_dir=paper_dir)
-        coerced_validation = validate_plan_text(coerced_plan)
-        if coerced_validation.get("valid", False):
-            logger.warning(
-                "Code planning fell back to minimal schema wrapper after "
-                f"{max_retries} invalid attempts; previous validation={best_invalid_validation}; "
-                f"final_error={final_planning_error}"
+    if not strict_plan_validation:
+        fallback_source = best_invalid_result
+        if len(fallback_source.strip()) < 500:
+            fallback_source = (
+                segmented_context or paper_content[:6000] or fallback_source
+            ).strip()
+        if fallback_source:
+            coerced_plan = coerce_text_to_minimal_plan(
+                fallback_source,
+                paper_dir=paper_dir,
             )
-            write_planning_meta(
-                paper_dir,
-                {
-                    "status": "success",
-                    "source": "coerced_from_freeform",
-                    "mode": planning_mode,
-                    "attempts": max_retries,
-                    "completeness_score": best_invalid_score,
-                    "plan_validation": coerced_validation,
-                    "original_plan_validation": best_invalid_validation,
-                    "final_error": final_planning_error,
-                    "plan_chars": len(coerced_plan),
-                },
-            )
-            clear_planning_checkpoint(paper_dir)
-            return coerced_plan
+            coerced_validation = validate_plan_text(coerced_plan)
+            if coerced_validation.get("valid", False):
+                logger.warning(
+                    "Code planning used the legacy minimal-plan compatibility "
+                    "fallback after %d invalid attempts",
+                    max_retries,
+                )
+                write_planning_meta(
+                    paper_dir,
+                    {
+                        "status": "success",
+                        "source": "coerced_from_freeform",
+                        "mode": planning_mode,
+                        "attempts": max_retries,
+                        "completeness_score": best_invalid_score,
+                        "plan_validation": coerced_validation,
+                        "original_plan_validation": best_invalid_validation,
+                        "final_error": final_planning_error,
+                        "plan_chars": len(coerced_plan),
+                    },
+                )
+                clear_planning_checkpoint(paper_dir)
+                return coerced_plan
 
-    print(f"??? Returning potentially incomplete result after {max_retries} attempts")
+    print(f"??? Planning failed validation after {max_retries} attempts")
     write_planning_meta(
         paper_dir,
         {
@@ -874,6 +907,8 @@ async def run_code_analyzer(
             "mode": planning_mode,
             "attempts": max_retries,
             "error": final_planning_error or "exhausted retries without usable plan",
+            "best_invalid_score": best_invalid_score,
+            "best_invalid_validation": best_invalid_validation,
         },
     )
     raise RuntimeError(
@@ -1203,7 +1238,11 @@ async def orchestrate_document_preprocessing_agent(
 
 
 async def orchestrate_code_planning_agent(
-    dir_info: Dict[str, str], logger, progress_callback: Optional[Callable] = None
+    dir_info: Dict[str, str],
+    logger,
+    progress_callback: Optional[Callable] = None,
+    *,
+    strict_plan_validation: bool = False,
 ):
     """
     Orchestrate intelligent code planning with automated design analysis.
@@ -1279,7 +1318,10 @@ async def orchestrate_code_planning_agent(
         print(f"📄 Found markdown file for analysis: {os.path.basename(md_files[0])}")
 
         initial_plan_result = await run_code_analyzer(
-            dir_info["paper_dir"], logger, use_segmentation=use_segmentation
+            dir_info["paper_dir"],
+            logger,
+            use_segmentation=use_segmentation,
+            strict_plan_validation=strict_plan_validation,
         )
 
         # Check if plan is empty or invalid
@@ -1521,6 +1563,8 @@ async def synthesize_code_implementation_agent(
     logger,
     progress_callback: Optional[Callable] = None,
     enable_indexing: bool = True,
+    *,
+    require_verification: bool = False,
 ) -> Dict:
     """
     Synthesize intelligent code implementation with automated development.
@@ -1553,7 +1597,10 @@ async def synthesize_code_implementation_agent(
             )
         else:
             print("⚡ Using standard code implementation workflow (fast mode)...")
-        code_workflow = CodeImplementationWorkflow(enable_indexing=enable_indexing)
+        code_workflow = CodeImplementationWorkflow(
+            enable_indexing=enable_indexing,
+            require_verification=require_verification,
+        )
 
         # Check if initial plan file exists
         if os.path.exists(dir_info["initial_plan_path"]):
@@ -1739,7 +1786,9 @@ async def execute_multi_agent_research_pipeline(
     enable_indexing: bool = True,
     task_id: Optional[str] = None,
     plan_review_callback: Optional[PlanReviewCallback] = None,
-) -> str:
+    workflow_root: Path | str | None = None,
+    strict_outcomes: bool = False,
+) -> Dict[str, Any]:
     """
     Execute the complete intelligent multi-agent research orchestration pipeline.
 
@@ -1782,6 +1831,7 @@ async def execute_multi_agent_research_pipeline(
             task_id=task_id,
             progress_cb=progress_callback,
             logger=logger,
+            workspace_root=workflow_root,
         )
 
         # Bind the resolved task_id into the async context so every loguru
@@ -1877,7 +1927,12 @@ async def execute_multi_agent_research_pipeline(
             )
         print("📊 Progress: 65% - Code Planning")
 
-        await orchestrate_code_planning_agent(dir_info, logger, progress_callback)
+        await orchestrate_code_planning_agent(
+            dir_info,
+            logger,
+            progress_callback,
+            strict_plan_validation=strict_outcomes,
+        )
         if not os.path.exists(dir_info["initial_plan_path"]):
             raise RuntimeError(
                 "Code planning did not produce initial_plan.txt; aborting the pipeline before any subsequent phase"
@@ -1966,7 +2021,11 @@ async def execute_multi_agent_research_pipeline(
         print("📊 Progress: 85% - Code Implementation")
 
         implementation_result = await synthesize_code_implementation_agent(
-            dir_info, logger, progress_callback, enable_indexing
+            dir_info,
+            logger,
+            progress_callback,
+            enable_indexing,
+            require_verification=strict_outcomes,
         )
 
         # Phase 10: Finalization (100%)
@@ -2003,12 +2062,14 @@ async def execute_multi_agent_research_pipeline(
         implementation_metadata = {
             "status": impl_status,
             "inner_status": impl_inner,
+            "generation_status": implementation_result.get("generation_status"),
             "abort_reason": implementation_result.get("abort_reason"),
             "files_completed": implementation_result.get("files_completed", 0),
             "total_files": implementation_result.get("total_files", 0),
             "unimplemented_files": implementation_result.get("unimplemented_files", [])
             or [],
             "code_directory": implementation_result.get("code_directory"),
+            "verification": implementation_result.get("verification", []),
         }
         if impl_inner == "completed":
             pipeline_summary += "\n🎉 Code implementation completed successfully!"
@@ -2030,7 +2091,9 @@ async def execute_multi_agent_research_pipeline(
             pipeline_status = "incomplete"
         elif impl_status == "warning":
             pipeline_summary += f"\n⚠️ Code implementation: {implementation_result.get('message', 'see logs')}"
-            pipeline_status = "completed_with_warnings"
+            pipeline_status = (
+                "incomplete" if strict_outcomes else "completed_with_warnings"
+            )
         else:
             pipeline_summary += f"\n❌ Code implementation failed: {implementation_result.get('message', 'see logs')}"
             pipeline_status = "error"
@@ -2121,7 +2184,10 @@ async def execute_chat_based_planning_pipeline(
     enable_indexing: bool = True,
     task_id: Optional[str] = None,
     plan_review_callback: Optional[PlanReviewCallback] = None,
-) -> str:
+    workflow_root: Path | str | None = None,
+    return_details: bool = False,
+    strict_outcomes: bool = False,
+) -> str | Dict[str, Any]:
     """
     Execute the chat-based planning and implementation pipeline.
 
@@ -2152,8 +2218,13 @@ async def execute_chat_based_planning_pipeline(
             progress_callback(5, "🔄 Setting up workspace for file processing...")
 
         # Setup local workspace directory
-        workspace_dir = os.path.join(os.getcwd(), "deepcode_lab")
-        os.makedirs(workspace_dir, exist_ok=True)
+        workspace_path = (
+            Path(workflow_root).expanduser().resolve()
+            if workflow_root is not None
+            else (Path.cwd() / "deepcode_lab").resolve()
+        )
+        workspace_path.mkdir(parents=True, exist_ok=True)
+        workspace_dir = str(workspace_path)
 
         print("📁 Working environment: local")
         print(f"📂 Workspace directory: {workspace_dir}")
@@ -2237,7 +2308,6 @@ The following implementation plan was generated by the AI chat planning agent:
             paper_md_path=Path(markdown_file_path),
         )
         dir_info = await synthesize_workspace_infrastructure_agent(chat_ctx, logger)
-        await asyncio.sleep(10)  # Brief pause for file system operations
 
         # Phase 3: Save Planning Result
         if progress_callback:
@@ -2266,7 +2336,11 @@ The following implementation plan was generated by the AI chat planning agent:
             progress_callback(85, "🔬 Synthesizing intelligent code implementation...")
 
         implementation_result = await synthesize_code_implementation_agent(
-            dir_info, logger, progress_callback, enable_indexing
+            dir_info,
+            logger,
+            progress_callback,
+            enable_indexing,
+            require_verification=strict_outcomes,
         )
 
         # Final Status Report
@@ -2284,6 +2358,7 @@ The following implementation plan was generated by the AI chat planning agent:
             pipeline_summary += (
                 "\n💬 Generated from user requirements via chat interface"
             )
+            pipeline_status = "completed"
         elif impl_status == "incomplete":
             files_done = implementation_result.get("files_completed", 0)
             unimpl = implementation_result.get("unimplemented_files", []) or []
@@ -2295,10 +2370,34 @@ The following implementation plan was generated by the AI chat planning agent:
             pipeline_summary += (
                 f"\n📁 Partial code in: {implementation_result['code_directory']}"
             )
+            pipeline_status = "incomplete"
         elif impl_status == "warning":
             pipeline_summary += f"\n⚠️ Code implementation: {implementation_result.get('message', 'see logs')}"
+            pipeline_status = "incomplete"
         else:
             pipeline_summary += f"\n❌ Code implementation failed: {implementation_result.get('message', 'see logs')}"
+            pipeline_status = "error"
+        if return_details:
+            return {
+                "status": pipeline_status,
+                "summary": pipeline_summary,
+                "implementation": {
+                    "status": impl_status,
+                    "inner_status": impl_inner,
+                    "generation_status": implementation_result.get("generation_status"),
+                    "abort_reason": implementation_result.get("abort_reason"),
+                    "files_completed": implementation_result.get("files_completed", 0),
+                    "total_files": implementation_result.get("total_files", 0),
+                    "unimplemented_files": implementation_result.get(
+                        "unimplemented_files", []
+                    )
+                    or [],
+                    "verification": implementation_result.get("verification", []),
+                    "code_directory": implementation_result.get("code_directory"),
+                },
+                "paper_dir": dir_info["paper_dir"],
+                "code_directory": implementation_result.get("code_directory"),
+            }
         return pipeline_summary
 
     except PlanReviewCancelled:

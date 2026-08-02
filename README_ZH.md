@@ -35,7 +35,7 @@
 </p> -->
 <p>
   <a href="https://github.com/HKUDS/DeepCode/stargazers"><img src='https://img.shields.io/github/stars/HKUDS/DeepCode?color=00d9ff&style=for-the-badge&logo=star&logoColor=white&labelColor=1a1a2e' /></a>
-  <img src="https://img.shields.io/badge/🐍Python-3.13-4ecdc4?style=for-the-badge&logo=python&logoColor=white&labelColor=1a1a2e">
+  <img src="https://img.shields.io/badge/🐍Python-3.12%2B-4ecdc4?style=for-the-badge&logo=python&logoColor=white&labelColor=1a1a2e">
   <a href="https://pypi.org/project/deepcode-hku/"><img src="https://img.shields.io/pypi/v/deepcode-hku.svg?style=for-the-badge&logo=pypi&logoColor=white&labelColor=1a1a2e&color=ff6b6b"></a>
 </p>
 <p>
@@ -47,7 +47,7 @@
 </div>
 
 <div align="center">
-  <a href="#-快速开始" style="text-decoration: none;">
+  <a href="#快速开始" style="text-decoration: none;">
     <img src="https://img.shields.io/badge/快速开始-立即开始-00d9ff?style=for-the-badge&logo=rocket&logoColor=white&labelColor=1a1a2e">
   </a>
 </div>
@@ -63,11 +63,8 @@
 
 ### 🖥️ **界面展示**
 
-<table align="center" width="100%" style="border: none; border-collapse: collapse; margin: 30px 0;">
-<tr>
-<td width="50%" align="center" style="vertical-align: top; padding: 20px;">
-
 #### 🖥️ **命令行界面**
+
 **基于终端的开发环境**
 
 <div align="center">
@@ -79,30 +76,14 @@
     <small>⚡ 快速命令行工作流<br/>🔧 开发者友好界面<br/>📊 实时进度跟踪</small>
   </div>
 
-  *专业终端界面，适合高级用户和CI/CD集成*
+*专业终端界面，适合高级用户和CI/CD集成*
 </div>
 
-</td>
-<td width="50%" align="center" style="vertical-align: top; padding: 20px;">
-
-#### 🌐 **Web界面**
-**可视化交互体验**
-
-<div align="center">
-
-  <img src="https://github.com/Zongwei9888/Experiment_Images/raw/8882a7313c504ca97ead6e7b36c51aa761b6a4f3/DeepCode_images/UI.gif" alt="Web Interface Demo" width="100%" style="border-radius: 10px; box-shadow: 0 8px 20px rgba(14,165,233,0.3); margin: 15px 0;"/>
-
-  <div style="background: linear-gradient(135deg, #0EA5E9 0%, #00D4FF 100%); border-radius: 12px; padding: 15px; margin: 15px 0; color: white;">
-    <strong>🎨 现代化Web仪表板</strong><br/>
-    <small>🖱️ 直观的拖拽操作<br/>📱 响应式设计<br/>🎯 可视化进度跟踪</small>
-  </div>
-
-  *美观的Web界面，为所有技能水平用户提供流畅的工作流程*
-</div>
-
-</td>
-</tr>
-</table>
+DeepCode 只有一套 Agent 运行时，同时提供两种使用界面：面向终端
+工作流的交互式 CLI，以及用于 Session、审查和设置的 Tauri Desktop。
+两端打开同一份本地 Project、Session 历史、模型、Skills、权限、Goals 与
+Automations。从源码启动请参考
+[`Desktop 运行指南`](desktop/README.md)。
 
 ---
 
@@ -131,9 +112,6 @@
 
 ---
 
-
-
-
 > *"AI智能体将创意转化为生产就绪代码的地方"*
 
 </div>
@@ -142,1114 +120,766 @@
 
 ## 📑 目录
 
-- [📰 新闻](#-新闻)
-- [🚀 核心特性](#-核心特性)
-- [🏗️ 架构](#️-架构)
-- [📊 实验结果](#-实验结果)
-- [🚀 快速开始](#-快速开始)
-- [🤖 nanobot 集成（飞书聊天机器人）](#-nanobot-集成飞书聊天机器人)
-- [💡 示例](#-示例)
-  - [🎬 实时演示](#-实时演示)
-- [⭐ 星标历史](#-星标历史)
-- [📄 许可证](#-许可证)
+- [📰 新闻](#新闻)
+- [🧠 DeepCode 中的 Deep](#deepcode-中的-deep)
+- [🚀 核心能力](#核心能力)
+  - [Agent Harness](#agent-harness)
+  - [Loop Engineering](#loop-engineering)
+  - [Context Engineering](#context-engineering)
+  - [以证据判断完成](#以证据判断完成)
+  - [持久化本地工作](#持久化本地工作)
+  - [由用户控制的模型与 Skills](#由用户控制的模型与-skills)
+  - [并行且可重复的工作](#并行且可重复的工作)
+- [⚡ 快速开始](#快速开始)
+- [🧭 使用 DeepCode](#使用-deepcode)
+- [🔬 Paper2Code](#paper2code)
+  - [原始架构](#原始架构)
+  - [研究结果](#研究结果)
+- [🎬 实时演示](#live-demonstrations)
+- [🛠️ 开发](#开发)
+- [⭐ 星标历史](#star-history)
+- [📖 引用](#citation)
+- [📄 许可证](#license)
 
----
+<p align="center">
+  <img src="assets/readme/deepcode-overview.png" alt="DeepCode 完成并验证一个真实任务" width="1080" />
+</p>
 
-## 📰 新闻
+## 新闻
 
-**[2026-07-17] 可扩展 Agent：可复用 Skills、生命周期 Hooks 与模型驱动委派**
+**2026-07-31 · CLI 与 Desktop 共用统一执行模型**
 
-- **由 Agent 自己选择工作方式。** DeepCode 可以维护执行计划，在确实受阻时提出一个聚焦问题，并按需加载可复用的 `SKILL.md` 工作流。项目和用户目录中的 `.deepcode/skills/`，以及现有 `.claude/skills/` 技能包，都能在 CLI、Web 对话和无头运行中复用。
-- **复杂任务由模型动态委派。** 模型可以创建带边界的 subagent，让它们在聚焦的上下文中工作、跟踪其进度，并把结果带回主任务——不再依赖专用 team 命令或固定流程。
-- **接入自己的安全策略与自动化。** 外部命令 Hooks 覆盖 Session 启动、用户提交 Prompt、工具调用、权限决策、停止以及 subagent 生命周期。DeepCode 同时读取原生 Hooks 配置和兼容的 `.claude/settings.json`，并通过超时和输出校验避免异常 Hook 卡住 Agent。
-- **在任意目录直接运行 DeepCode。** `deepcode init` 会在 `~/.deepcode` 创建用户级配置基础；用户配置、长期指令和记忆会与项目覆盖配置分层合并，让凭证全局复用、仓库专属行为随工作目录生效。配置错误现在会显示明确的初始化提示，而不是输出 traceback。
+- 交互式对话、无头任务、Goal、Automation 与 Desktop 全部进入同一套持久化
+  Project、Session、Thread 和 Turn 生命周期。
+- Workspace trust 与 Session 工具权限相互独立；权限可选 **Ask**、
+  **Read only** 或 **Full access**。
+- 模型 Thinking 强度与推理展示详细度分开控制，改变界面展示不会改变模型请求。
 
----
+**2026-07-21 · 持久化 Goals 与安全的 Session 生命周期**
 
-**[2026-07-10] 循环工程:给它一个目标,它自己跑到测试通过**
+- 长任务可以作为 CLI 与 Desktop 共享的可恢复、证据驱动 Goal 运行。
+- Archive 保留历史；永久删除通过统一的 Session 生命周期清理记录，
+  不会删除仓库文件。
+- 中断的删除会从持久化 tombstone 恢复，不会让旧 Session 记录重新出现。
 
-- **自主编码循环。** 给 DeepCode 一个目标和一条测试命令,它就自己干活、跑测试、反复修改,直到测试通过。
-- **会自我整理的记忆。** agent 会定期清理自己的笔记,让记忆在多会话中保持清晰。
-- **可定时运行。** 按间隔启动一个循环或一次记忆整理,带合理的停止条件,绝不失控。
+**2026-07-20 · Session 级模型控制与共享 Skills**
 
----
+- 命名 LLM 连接只需配置一次，即可在整个 DeepCode 中使用。
+- 为后续 Turn 切换连接或模型时，不会丢失之前的完整对话。
+- 无论任务从哪里启动，都能发现、导入、启用和选择同一套项目级或用户级 Skills。
 
-**[2026-07-08] Agent Chat 产品化打磨:记忆、目录选择器、会话管理**
+**2026-07-17 · 持久化 Session 导航与回放**
 
-- **agent 跨会话有记忆。** 在项目根放一个 `AGENTS.md`(或 `DEEPCODE.md`)写长期指令,agent 还会把自己的持久笔记存在 `.deepcode/memory/`——昨天学到的事实今天还在。CLI、Web 对话、无头运行三端行为一致。
-- **让它在真实项目目录上干活。** 新建对话时有了目录选择器——浏览并选择 agent 的工作目录(限制在你的 home 内),不用再盲填路径。
-- **管理你的对话。** 侧栏可重命名/删除任意对话;New chat 在你发出第一条消息前只是草稿,列表不再堆满空会话。每个对话的工作目录会显示并在重启后保留。
-- **能读的回复。** 助手消息以 markdown 渲染(代码块/列表/表格);每次工具调用是可展开的卡片,显示它做了什么(如 "Wrote 163 bytes to plan.md");错误以错误样式呈现,不再伪装成回答。
+- 每个 Project 管理自己的可折叠 Session 列表，同时仍可跨目录发现更早的记录。
+- 长对话采用增量回放，不再因为把全部历史作为一条超大消息传输而失败。
+- 批准、变更审查、测试与 Artifacts 始终保留在产生它们的任务中。
 
----
+**2026-07-10 · Loop Engineering 与并行 Agent**
 
-**[2026-07-08] 通用编码 agent:交互式 CLI、Web Agent Chat 与原生工具**
-
-- **在终端里直接和 DeepCode 对话。** `python -m cli.tui`(Docker 内 `deepcode --cli`)进入自由多轮编码对话——用自然语言描述任意任务,实时看到流式回复、文件修改与命令执行进度卡。`/new`、`/resume`、`/model`、`/clear`、`/help` 随时掌控,`@路径` 直接附加文件。(替代原菜单式 CLI。)
-- **在浏览器里持续对话。** 全新 "Agent Chat" 页面:历史会话侧栏、一键新建对话、流式回复与工具进度、运行中随时中断。每个对话都持久保存、随时续聊,并拥有独立工作目录(`deepcode_lab/chats/`)。
-- **改代码一次到位。** 内置 `read` / `write` / `edit` / `apply_patch` / `bash` / `grep` / `glob` 工具:模糊匹配容忍空白缩进漂移、多文件补丁原子落盘、写入后自动诊断并当场修复。
-- **一条命令跑任务。** `python -m cli.exec_cli "任务" --json` 端到端执行并输出机器可读事件流,可直接接入 CI 与自动化脚本。
-- **聊多久都稳。** 上下文窗口按模型自动解析、历史自动压缩,长对话不崩;会话经 SQLite 索引,列表与恢复即时响应。
-
----
+- 给出一个可修改的 Goal，DeepCode 可以在普通 Turn 之间持续理解、
+  实现、按需验证与修复，并且始终可被纠正。
+- 将聚焦任务委派给隔离 worktree 中的 Agent，并在集成前明确暴露冲突。
 
 <details>
-<summary><strong>更早的更新</strong></summary>
+<summary><strong>更早的里程碑</strong></summary>
 
-🧭 **[2026-05-01] OpenRouter 模型选择器、session 清理与工作流体验增强**
-
-- 🧠 **Settings 中新增 OpenRouter 模型目录。** 新版 UI 可以从 `https://openrouter.ai/api/v1/models` 获取 OpenRouter 模型元数据，本地缓存后提供可搜索的 Default、Planning、Implementation 三阶段模型下拉框。用户可以直接选择 `z-ai/glm-5.1` 这类 OpenRouter 精确模型 id，无需手动编辑 JSON。
-- 🔄 **运行时模型切换。** 在 Settings 保存模型选择后，会更新 `deepcode_config.json` 并刷新进程内 LLM runtime；之后新启动的 workflow 会立即使用新的 provider/model 组合。
-- 🗑️ **Session 删除改为安全级联清理。** 在 UI 中删除 session 时，会删除持久化 session 记录和对应的 `deepcode_lab/tasks/<task_id>/` 工作目录，但保留可被多个 session 共享的 `uploads/` 原始文件。若 session 下仍有 `pending`、`running` 或 `waiting_for_input` task，后端会返回明确的 `409 Conflict`。
-- 📊 **Paper2Code 进度显示更准确。** 前端现在会展示后端阶段消息，并避免在长时间 LLM 阶段尚未完成时，把中间步骤误标记为完全 Done。
-- 🛡️ **工作流稳定性修复。** 上传阶段会拒绝 Git LFS pointer 文件；取消任务会及时中断后端工作；浏览器中的过期 session id 会自动恢复；planner 在模型输出错误的工具调用/延迟执行文本时会回退到最小合法 plan；文档分割阶段跳过额外质量验证 LLM 调用，减少卡在 50% 的概率。
-
----
-
-🗂️ **[2026-04-28] 持久化 session 与双层结构化日志**
-
-- 🆕 **Session 现在会持久化。** 每次 CLI / UI 运行都会自动挂到一个 session，默认保存在 `~/.deepcode/sessions/<id>/`（可用 `DEEPCODE_SESSIONS_DIR` 覆盖）。session 使用 JSONL 存储，支持 `python cli/main_cli.py session list|show <id>|new|resume <id>|delete <id>`，后端也提供 `GET /api/v1/sessions`。
-- 🔄 **恢复历史任务。** CLI 可以用 `--session <id>` 把新任务挂到旧 session；UI / API 可以在 `POST /api/v1/workflows/paper-to-code` 或 `chat-planning` 中传 `session_id`。后端重启后会从磁盘恢复历史 task，崩溃前仍在运行的 task 会标记为 `interrupted`。
-- 💻 **CLI 交互增强。** 进入 `python cli/main_cli.py` 后，可以在主菜单输入 `/resume` 打开历史 session 选择器，`/new [title]` 新建并切换 session，`/session` 查看当前 session，`/help` 查看命令。也支持 Cursor/Codex 风格的内联输入：`@/path/to/paper.pdf`、`@"C:\path with spaces\paper.pdf"`、`@https://...`。
-- 📜 **双层结构化日志。** 全局日志写入 `logs/server-YYYYMMDD.jsonl`；每个任务的日志写入 `deepcode_lab/tasks/<task_id>/logs/{system,llm,mcp}.jsonl`。所有 `loguru.logger` 调用都会通过 contextvar 自动带上 `task_id` / `session_id`，LLM/MCP 调用还会记录耗时、token、请求/响应摘要。
-- 📡 **WebSocket 日志流。** 单 task 日志流：`/ws/tasks/{task_id}/logs?channel=llm`；按 session 聚合多个 task：`/ws/sessions/{session_id}/logs`。旧的假 `/ws/logs/{session_id}` 已移除。
-- 🧹 **清理旧实现。** 删除 `utils/simple_llm_logger.py`、`utils/dialogue_logger.py`，原内存版 `services/session_service.py` 改为 `core.sessions.SessionStore` 的 thin facade。
-
----
-
-🎉 **[2026-02] DeepCode + nanobot 集成 — 通过飞书聊天使用 DeepCode！**
-
-<div align="center">
-<table><tr>
-<td align="center"><a href="https://github.com/HKUDS/DeepCode"><img src="./assets/logo.png" alt="DeepCode" height="60"/></a></td>
-<td align="center"><h2>✦</h2></td>
-<td align="center"><a href="https://github.com/HKUDS/nanobot"><img src="./assets/nanobot.png" alt="nanobot" height="60"/></a></td>
-</tr></table>
-</div>
-
-- [nanobot](https://github.com/HKUDS/nanobot) 现已连接到 DeepCode — 在**飞书**中发送消息即可自动生成代码
-- 支持**论文转代码**和**对话转代码**，以及实时任务跟踪，全部在聊天应用中完成
-- 一键部署：`./nanobot/run_nanobot.sh` → **[设置指南 →](#-nanobot-集成飞书聊天机器人)**
-
-<div align="center">
-<table width="100%"><tr>
-<td width="50%" align="center">
-  <img src="./assets/IMG_8098.jpeg" alt="飞书聊天示例 1" width="95%" style="border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.2);"/>
-</td>
-<td width="50%" align="center">
-  <img src="./assets/IMG_8099.jpeg" alt="飞书聊天示例 2" width="95%" style="border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.2);"/>
-</td>
-</tr></table>
-<sub><em>飞书机器人实战 — 自然语言 → 完整代码生成，带设置说明</em></sub>
-</div>
-
----
-
-🎉 **[2026-02] 全新 Web UI 体验升级！**
-
-- 🔄 **用户交互循环 (User-in-Loop)**: 支持工作流程中的实时用户交互，AI 会在对话中向您提问以澄清需求
-- 💬 **内联交互设计**: 交互问题直接显示在对话框中，体验更自然流畅
-- 🚀 **一键启动**: 运行 `deepcode` 即可启动新版 UI（跨平台支持：Windows/macOS/Linux）
-- 🔧 **优化的进程管理**: 改进了服务启停机制，自动清理端口占用
-- 📡 **WebSocket 实时通信**: 修复了消息丢失问题，确保交互状态正确同步
-
-<div align="center">
-  <img src="./assets/NewUI.png" alt="DeepCode 全新 UI" width="85%" style="border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15);" />
-  <br/>
-  <sub><em>DeepCode 全新 Web UI - 基于 React 的现代界面</em></sub>
-</div>
-
----
-
-🎉 **[2025-10-28] DeepCode在PaperBench上达到最先进水平！**
-
-DeepCode在OpenAI的PaperBench Code-Dev所有类别中创造新基准：
-
-- 🏆 **超越人类专家**: **75.9%** (DeepCode) vs 顶级机器学习博士 72.4% (+3.5%)。
-- 🥇 **超越最先进商业代码智能体**: **84.8%** (DeepCode) vs 领先商业代码智能体 (+26.1%) (Cursor, Claude Code, 和 Codex)。
-- 🔬 **推进科学编程**: **73.5%** (DeepCode) vs PaperCoder 51.1% (+22.4%)。
-- 🚀 **击败LLM智能体**: **73.5%** (DeepCode) vs 最佳LLM框架 43.3% (+30.2%)。
+- **2026-07-08 · 持久化 Sessions 与记忆。** Session 历史可以跨重启恢复；
+  项目长期指令可以写入 `AGENTS.md` 或 `DEEPCODE.md`，持久笔记跟随工作区保存。
+- **2026-07-08 · 通用 Coding Agent。** 自由对话式 TUI、原生文件与 Shell 工具、
+  无头执行、上下文压缩和跨目录恢复，建立了当前产品基础。
+- **2026-07-04 · Agent Harness 基础。** 统一执行约束、三值权限、
+  敏感路径保护、平台 Sandbox 与标准化事件，使本地执行真正可监督。
+- 重构前的完整更新记录保存在
+  [旧版中文 README](docs/archive/README_ZH_LEGACY_2026-07-20.md)。
 
 </details>
 
----
+## DeepCode 中的 Deep
 
-## 🚀 核心特性
+这个名字表达的是产品行为，而不是为了复杂而复杂。DeepCode 不会停在一段
+看似合理的回答或一个孤立 Patch。它会沿着任务深入仓库关系、真实执行、
+验证失败，以及未来继续工作所需要的上下文。
 
-<br/>
+| 深度                  | 它代表什么                                                          |
+| --------------------- | ------------------------------------------------------------------- |
+| **Deep Context**      | 将文件与跨文件关系、项目指令、已选 Skills、历史和记忆放在一起理解。 |
+| **Deep Execution**    | 通过带权限、批准和工作区边界的 Agent Harness 操作真实文件与命令。   |
+| **Deep Verification** | 把测试、诊断和失败重新送回任务，而不是停在一段看起来可信的回答。    |
+| **Deep Continuity**   | 跨时间、目录和模型切换保留 Session、关键决策、证据与恢复状态。      |
 
-<table align="center" width="100%" style="border: none; table-layout: fixed;">
-<tr>
-<td width="30%" align="center" style="vertical-align: top; padding: 20px;">
-
-<div style="height: 80px; display: flex; align-items: center; justify-content: center;">
-<h3 style="margin: 0; padding: 0;">🚀 <strong>论文转代码</strong></h3>
-</div>
-
-<div align="center" style="margin: 15px 0;">
-  <img src="https://img.shields.io/badge/算法-实现-ff6b6b?style=for-the-badge&logo=algorithm&logoColor=white" alt="Algorithm Badge" />
-</div>
-
-<div style="height: 80px; display: flex; align-items: center; justify-content: center;">
-<p align="center"><strong>复杂算法的自动化实现</strong></p>
-</div>
-
-<div style="height: 60px; display: flex; align-items: center; justify-content: center;">
-<p align="center">轻松将研究论文中的复杂算法转换为<strong>高质量</strong>、<strong>生产就绪</strong>的代码，加速算法复现。</p>
-</div>
-
-
-
-</td>
-<td width="30%" align="center" style="vertical-align: top; padding: 20px;">
-
-<div style="height: 80px; display: flex; align-items: center; justify-content: center;">
-<h3 style="margin: 0; padding: 0;">🎨 <strong>文本转Web</strong></h3>
-</div>
-
-<div align="center" style="margin: 15px 0;">
-  <img src="https://img.shields.io/badge/前端-开发-4ecdc4?style=for-the-badge&logo=react&logoColor=white" alt="Frontend Badge" />
-</div>
-
-<div style="height: 80px; display: flex; align-items: center; justify-content: center;">
-<p align="center"><strong>自动化前端Web开发</strong></p>
-</div>
-
-<div style="height: 60px; display: flex; align-items: center; justify-content: center;">
-<p align="center">将纯文本描述转换为<strong>功能完整</strong>、<strong>视觉美观</strong>的前端Web代码，快速创建界面。</p>
-</div>
-
-
-
-</td>
-<td width="30%" align="center" style="vertical-align: top; padding: 20px;">
-
-<div style="height: 80px; display: flex; align-items: center; justify-content: center;">
-<h3 style="margin: 0; padding: 0;">⚙️ <strong>文本转后端</strong></h3>
-</div>
-
-<div align="center" style="margin: 15px 0;">
-  <img src="https://img.shields.io/badge/后端-开发-9b59b6?style=for-the-badge&logo=server&logoColor=white" alt="Backend Badge" />
-</div>
-
-<div style="height: 80px; display: flex; align-items: center; justify-content: center;">
-<p align="center"><strong>自动化后端开发</strong></p>
-</div>
-
-<div style="height: 60px; display: flex; align-items: center; justify-content: center;">
-<p align="center">从简单的文本输入生成<strong>高效</strong>、<strong>可扩展</strong>和<strong>功能丰富</strong>的后端代码，简化服务器端开发。</p>
-</div>
-
-
-
-</td>
-</tr>
-</table>
-
-<br/>
-
----
-
-## 📊 实验结果
-
-<div align="center">
-    <img src='./assets/result_main02.jpg' /><br>
-</div>
-<br/>
-
-我们在[*PaperBench*](https://openai.com/index/paperbench/)基准测试（由OpenAI发布）上评估**DeepCode**，这是一个严格的测试平台，要求AI智能体从头独立复现20篇ICML 2024论文。该基准包含8,316个可评分组件，使用带有分层权重的SimpleJudge进行评估。
-
-我们的实验将DeepCode与四个基线类别进行比较：**(1) 人类专家**，**(2) 最先进商业代码智能体**，**(3) 科学代码智能体**，以及 **(4) 基于LLM的智能体**。
-
-### ① 🧠 人类专家表现（顶级机器学习博士）
-
-**DeepCode: 75.9% vs. 顶级机器学习博士: 72.4% (+3.5%)**
-
-DeepCode在3篇论文的人类评估子集上达到**75.9%**，**超越3次人类专家基线（72.4%）+3.5个百分点**。这表明我们的框架不仅匹配而且超越了专家级代码复现能力，代表了自主科学软件工程的重要里程碑。
-
-### ② 💼 最先进商业代码智能体
-
-**DeepCode: 84.8% vs. 最佳商业智能体: 58.7% (+26.1%)**
-
-在5篇论文的子集上，DeepCode大幅超越领先的商业编码工具：
-- Cursor: 58.4%
-- Claude Code: 58.7%
-- Codex: 40.0%
-- **DeepCode: 84.8%**
-
-这代表了相对于领先商业代码智能体的**+26.1%改进**。所有商业智能体都使用Claude Sonnet 4.5或GPT-5 Codex-high，突出了**DeepCode的卓越架构**——而非基础模型能力——推动了这一性能差距。
-
-### ③ 🔬 科学代码智能体
-
-**DeepCode: 73.5% vs. PaperCoder: 51.1% (+22.4%)**
-
-与最先进的科学代码复现框架PaperCoder（**51.1%**）相比，DeepCode达到**73.5%**，展示了**+22.4%的相对改进**。这一显著差距验证了我们结合规划、分层任务分解、代码生成和迭代调试的多模块架构优于简单的管道式方法。
-
-### ④ 🤖 基于LLM的智能体
-
-**DeepCode: 73.5% vs. 最佳LLM智能体: 43.3% (+30.2%)**
-
-DeepCode显著超越所有测试的LLM智能体：
-- Claude 3.5 Sonnet + IterativeAgent: 27.5%
-- o1 + IterativeAgent (36小时): 42.4%
-- o1 BasicAgent: 43.3%
-- **DeepCode: 73.5%**
-
-相对于表现最佳的LLM智能体的**+30.2%改进**表明，复杂的智能体框架，而非延长的推理时间或更大的模型，对于复杂的代码复现任务至关重要。
-
----
-
-### 🎯 **自主多智能体工作流**
-
-**面临的挑战**:
-
-- 📄 **实现复杂性**: 将学术论文和复杂算法转换为可运行代码需要大量技术投入和领域专业知识
-
-- 🔬 **研究瓶颈**: 研究人员将宝贵时间花在算法实现上，而不是专注于核心研究和发现工作
-
-- ⏱️ **开发延迟**: 产品团队在概念和可测试原型之间经历长时间等待，减慢创新周期
-
-- 🔄 **重复编码**: 开发者重复实现相似的模式和功能，而不是基于现有解决方案构建
-
-**DeepCode** 通过为常见开发任务提供可靠的自动化来解决这些工作流程低效问题，简化从概念到代码的开发工作流程。
-
-<div align="center">
+Paper2Code 最早确立了这种深度：从论文理解开始，经过参考挖掘、代码实现，
+一直走到真实验证。现在的通用 Coding Agent 将同一思路扩展到了日常仓库工作。
 
 ```mermaid
 flowchart LR
-    A["📄 研究论文<br/>💬 文本提示<br/>🌐 URL和文档<br/>📎 文件: PDF, DOC, PPTX, TXT, HTML"] --> B["🧠 DeepCode<br/>多智能体引擎"]
-    B --> C["🚀 算法实现 <br/>🎨 前端开发 <br/>⚙️ 后端开发"]
+    INTENT["目标 · 约束 · 完成标准"]
 
-    style A fill:#ff6b6b,stroke:#c0392b,stroke-width:2px,color:#000
-    style B fill:#00d4ff,stroke:#0984e3,stroke-width:3px,color:#000
-    style C fill:#00b894,stroke:#00a085,stroke-width:2px,color:#000
+    subgraph CONTINUITY["Deep Continuity · 持久化 Session 与记忆"]
+        CONTEXT["Deep Context · 仓库关系 · 项目指令 · Skills"]
+        EXECUTION["Deep Execution · Agent Harness · 工具 · 权限"]
+        VERIFY["Deep Verification · 观察 · 测试 · 修复"]
+        EVIDENCE["结果证据 · Diff · 命令 · 测试 · Artifacts"]
+
+        CONTEXT --> EXECUTION
+        EXECUTION --> VERIFY
+        VERIFY --> EVIDENCE
+        EVIDENCE -->|尚未证明| CONTEXT
+    end
+
+    INTENT --> CONTEXT
+    EVIDENCE -->|验证通过| RESULT["可审查的结果"]
 ```
 
-</div>
+这才是产品的工作模型。使用界面只决定用户如何进入和观察它。
 
----
+## 核心能力
 
-## 🏗️ 架构
+四种“深度”通过下面这些产品能力落到实际工作中。
 
-### 📊 **系统概述**
+<p align="center">
+  <img src="assets/readme/verification-loop.png" alt="DeepCode Agent Harness 与验证循环" width="1080" />
+</p>
 
-**DeepCode** 是一个AI驱动的开发平台，自动化代码生成和实现任务。我们的多智能体系统处理将需求转换为功能性、结构良好代码的复杂性，让您专注于创新而非实现细节。
+### Agent Harness
 
-🎯 **技术能力**:
+Harness 是 DeepCode 将模型回答转化为“用户可以监督的真实工作”的部分。
+它为 Agent 提供原生读取、搜索、编辑、补丁、Shell、测试与委派能力，同时
+让每次动作都经过同一套执行约束。
 
-🧬 **研究到生产流水线**<br>
-多模态文档分析引擎，从学术论文中提取算法逻辑和数学模型。生成优化的实现，使用适当的数据结构，同时保持计算复杂度特征。
+- 工具活动以明确进度展示，而不是藏在一个持续旋转的等待状态后面；
+- 权限判断只有清晰的三种结果：`allow`、`ask` 或 `deny`；
+- **Ask** 与 **Read only** 保留受保护路径规则和当前平台可用的
+  Sandbox；**Full access** 是一次明确的无限制授权；
+- 每个被接收的 Turn 都会冻结已解析的执行配置，之后修改设置不会
+  改变已经运行或排队的工作；
+- 中断或崩溃后的任务会被安全收束，不会静默重放带有副作用的操作。
 
-🪄 **自然语言代码合成**<br>
-使用在精选代码库上训练的微调语言模型进行上下文感知代码生成。在支持多种编程语言和框架的同时保持模块间架构一致性。
+### Loop Engineering
 
-⚡ **自动化原型引擎**<br>
-智能脚手架系统，生成包括数据库模式、API端点和前端组件的完整应用程序结构。使用依赖分析确保从初始生成开始的可扩展架构。
+一次看起来不错的回答，并不等于真正完成了修改。Loop Engineering 让
+DeepCode 围绕一段可修改的自然语言 Goal 跨 Turn 持续工作。工作 Agent 结合
+完整对话、当前代码和工具结果，判断应该继续、完成，还是报告真实阻碍。
 
-💎 **质量保证自动化**<br>
-集成静态分析与自动化单元测试生成和文档合成。采用AST分析进行代码正确性检查和基于属性的测试进行全面覆盖。
+用户可以在运行中修订 Goal 或纠正当前 Turn，而不用丢弃仍然有效的工作。
+测试、Build、Lint 和其他显式验证在适用时继续提供强证据。稳定的 Goal 身份、
+冻结的 Turn 权限以及用户可选的预算让长任务可归因，同时不强加固定任务上限。
+Session 历史与项目记忆让任务在重启或切换模型后仍能连续。
 
-🔮 **CodeRAG集成系统**<br>
-高级检索增强生成，结合语义向量嵌入和基于图的依赖分析。从大规模代码语料库中自动发现最优库和实现模式。
+### Context Engineering
 
----
+DeepCode 从仓库构建上下文，而不是依赖一条巨大的 Prompt。它把文件与搜索
+结果、项目长期指令、已选择的 Skills、Session 历史和持久化工作区笔记组合
+起来。长历史会根据当前模型的上下文窗口进行压缩，使最新证据保持有效，同时
+不切断任务连续性。
 
-### 🔧 **核心技术**
+当仓库发生变化、命令产生新证据时，上下文也会随之更新，让规划、实现与验证
+始终对应最新的可观察状态。
 
-- 🧠 **智能编排智能体**: 协调工作流阶段和分析需求的中央决策系统。采用动态规划算法，根据不断发展的项目复杂性实时调整执行策略。为每个实现步骤动态选择最优处理策略。 <br>
+### 以证据判断完成
 
-- 💾 **高效内存机制**: 高效管理大规模代码上下文的高级上下文工程系统。实现分层内存结构，具有智能压缩功能，用于处理复杂代码库。该组件实现实现模式的即时检索，并在扩展开发会话中保持语义一致性。 <br>
+DeepCode 不会把一段流畅回答当作任务已经完成的证明。完成结论应当由任务
+真正可以产生的结果支撑：
 
-- 🔍 **高级CodeRAG系统**: 分析跨存储库复杂相互依赖关系的全局代码理解引擎。执行跨代码库关系映射，从整体角度理解架构模式。该模块利用依赖图和语义分析在实现过程中提供全局感知的代码建议。
+- 可以审查的 Diff 或生成文件；
+- 命令输出、诊断信息或测试结果；
+- 当输出不适合直接放进对话时保存的 Artifact；
+- 将用户目标与结果证据连接起来的简洁说明。
 
----
+如果验证失败，失败结果会成为下一轮输入。如果某个边界阻止继续完成，该边界
+会保持可见，而不会被错误报告为成功。
 
-### 🤖 **DeepCode的多智能体架构**:
+### 持久化本地工作
 
-- **🎯 中央编排智能体**: 编排整个工作流程执行并做出战略决策。基于输入复杂性分析协调专门智能体。实现动态任务规划和资源分配算法。 <br>
+可以从任意仓库启动 DeepCode。Sessions 统一保存在
+`~/.deepcode/sessions/`，按原始工作区建立索引，并可跨目录发现。用户可以
+在重启后恢复，或明确选择另一个工作目录继续，而不会改写 Session 记录的
+原始来源。
 
-- **📝 意图理解智能体**: 对用户需求进行深度语义分析以解码复杂意图。通过高级NLP处理提取功能规范和技术约束。通过结构化任务分解将模糊的人类描述转换为精确、可操作的开发规范。 <br>
+Session 是完整对话，Turn 是其中一次已接收的工作单元。切换模型只影响后续
+Turn，因此之前的工作保持可读，每次重试也能明确对应产生它的执行配置。
 
-- **📄 文档解析智能体**: 使用高级解析能力处理复杂的技术文档和研究论文。使用文档理解模型提取算法和方法。通过智能内容分析将学术概念转换为实用的实现规范。 <br>
+### 由用户控制的模型与 Skills
 
-- **🏗️ 代码规划智能体**: 执行架构设计和技术栈优化。动态规划适应性开发路线图。通过自动化设计模式选择执行编码标准并生成模块化结构。<br>
+DeepCode 不绑定单一托管模型。命名连接可以指向 OpenRouter、OpenAI、
+Anthropic、已支持的 Provider、OpenAI-compatible 网关或本地 endpoint。
+凭证留在用户级存储中；项目可以选择连接，但不会取得密钥所有权。
 
-- **🔍 代码参考挖掘智能体**: 通过智能搜索算法发现相关存储库和框架。分析代码库的兼容性和集成潜力。基于相似性度量和自动化依赖分析提供建议。 <br>
+Skills 是可以复用的工作流指令。它们既可以随项目保存，也可以进入用户库；
+用户可以从本地目录导入，并只为当前 Turn 选择真正需要的 Skills。所有执行
+方式都会解析同一份目录，而且 Skill 永远不能提高自己的权限。
 
-- **📚 代码索引智能体**: 构建发现代码库的综合知识图谱。维护代码组件之间的语义关系。实现智能检索和交叉引用能力。 <br>
+### 并行且可重复的工作
 
-- **🧬 代码生成智能体**: 将收集的信息合成为可执行的代码实现。创建功能接口并集成发现的组件。生成全面的测试套件和文档以确保可重现性。
+DeepCode 可以把有边界的任务委派给隔离 Git worktree 中的 Agent。不同任务
+不共享同一个可变 checkout，集成时会明确检测冲突。Automations 则通过与手动
+Turn 相同的 Session、模型、权限和恢复规则提交周期性工作。
 
----
+## 快速开始
 
-#### 🛠️ **实现工具矩阵**
-
-**🔧 基于MCP (模型上下文协议) 驱动**
-
-DeepCode利用**模型上下文协议 (MCP)** 标准与各种工具和服务无缝集成。这种标准化方法确保AI智能体和外部系统之间的可靠通信，实现强大的自动化能力。
-
-##### 📡 **MCP服务器和工具**
-
-| 🛠️ **MCP服务器** | 🔧 **主要功能** | 💡 **目的和能力** |
-|-------------------|-------------------------|-------------------------------|
-| **📂 filesystem** | 文件系统操作 | 本地文件和目录管理，读/写操作 |
-| **🌐 fetch** | Web内容检索 | 从URL和Web资源获取和提取内容 |
-| **📥 github-downloader** | 存储库管理 | 克隆和下载GitHub存储库进行分析 |
-| **📋 file-downloader** | 文档处理 | 下载文件(PDF、DOCX等)并转换为Markdown |
-| **⚡ command-executor** | 系统命令 | 执行bash/shell命令进行环境管理 |
-| **🧬 code-implementation** | 代码生成中心 | 具有执行和测试的综合代码复现 |
-| **📚 code-reference-indexer** | 智能代码搜索 | 代码存储库的智能索引和搜索 |
-| **📄 document-segmentation** | 智能文档分析 | 大型论文和技术文档的智能文档分割 |
-
-##### 🔧 **传统工具功能** *(供参考)*
-
-| 🛠️ **功能** | 🎯 **使用上下文** |
-|-----------------|---------------------|
-| **📄 read_code_mem** | 从内存高效检索代码上下文 |
-| **✍️ write_file** | 直接文件内容生成和修改 |
-| **🐍 execute_python** | Python代码测试和验证 |
-| **📁 get_file_structure** | 项目结构分析和组织 |
-| **⚙️ set_workspace** | 动态工作空间和环境配置 |
-| **📊 get_operation_history** | 过程监控和操作跟踪 |
-
-
----
-
-🎛️ **多界面框架**<br>
-具有CLI和Web前端的RESTful API，具有实时代码流、交互式调试和可扩展插件架构，用于CI/CD集成。
-
-**🚀 多智能体智能流水线:**
-
-<div align="center">
-
-### 🌟 **智能处理流程**
-
-<table align="center" width="100%" style="border: none; border-collapse: collapse;">
-<tr>
-<td colspan="3" align="center" style="padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 15px; color: white; font-weight: bold;">
-💡 <strong>输入层</strong><br/>
-📄 研究论文 • 💬 自然语言 • 🌐 URL • 📋 需求
-</td>
-</tr>
-<tr><td colspan="3" height="20"></td></tr>
-<tr>
-<td colspan="3" align="center" style="padding: 15px; background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%); border-radius: 12px; color: white; font-weight: bold;">
-🎯 <strong>中央编排</strong><br/>
-战略决策制定 • 工作流程协调 • 智能体管理
-</td>
-</tr>
-<tr><td colspan="3" height="15"></td></tr>
-<tr>
-<td align="center" style="padding: 12px; background: linear-gradient(135deg, #3742fa 0%, #2f3542 100%); border-radius: 10px; color: white; width: 50%;">
-📝 <strong>文本分析</strong><br/>
-<small>需求处理</small>
-</td>
-<td width="10"></td>
-<td align="center" style="padding: 12px; background: linear-gradient(135deg, #8c7ae6 0%, #9c88ff 100%); border-radius: 10px; color: white; width: 50%;">
-📄 <strong>文档分析</strong><br/>
-<small>论文和规范处理</small>
-</td>
-</tr>
-<tr><td colspan="3" height="15"></td></tr>
-<tr>
-<td colspan="3" align="center" style="padding: 15px; background: linear-gradient(135deg, #00d2d3 0%, #54a0ff 100%); border-radius: 12px; color: white; font-weight: bold;">
-📋 <strong>复现规划</strong><br/>
-深度论文分析 • 代码需求解析 • 复现策略开发
-</td>
-</tr>
-<tr><td colspan="3" height="15"></td></tr>
-<tr>
-<td align="center" style="padding: 12px; background: linear-gradient(135deg, #ffa726 0%, #ff7043 100%); border-radius: 10px; color: white; width: 50%;">
-🔍 <strong>参考分析</strong><br/>
-<small>存储库发现</small>
-</td>
-<td width="10"></td>
-<td align="center" style="padding: 12px; background: linear-gradient(135deg, #e056fd 0%, #f368e0 100%); border-radius: 10px; color: white; width: 50%;">
-📚 <strong>代码索引</strong><br/>
-<small>知识图谱构建</small>
-</td>
-</tr>
-<tr><td colspan="3" height="15"></td></tr>
-<tr>
-<td colspan="3" align="center" style="padding: 15px; background: linear-gradient(135deg, #26de81 0%, #20bf6b 100%); border-radius: 12px; color: white; font-weight: bold;">
-🧬 <strong>代码实现</strong><br/>
-实现生成 • 测试 • 文档
-</td>
-</tr>
-<tr><td colspan="3" height="15"></td></tr>
-<tr>
-<td colspan="3" align="center" style="padding: 20px; background: linear-gradient(135deg, #045de9 0%, #09c6f9 100%); border-radius: 15px; color: white; font-weight: bold;">
-⚡ <strong>输出交付</strong><br/>
-📦 完整代码库 • 🧪 测试套件 • 📚 文档 • 🚀 部署就绪
-</td>
-</tr>
-</table>
-
-</div>
-
-<div align="center">
-<br/>
-
-### 🔄 **流程智能特性**
-
-<table align="center" style="border: none;">
-<tr>
-<td align="center" width="25%" style="padding: 15px;">
-<div style="background: #f8f9fa; border-radius: 10px; padding: 15px; border-left: 4px solid #ff6b6b;">
-<h4>🎯 自适应流程</h4>
-<p><small>基于输入复杂性的动态智能体选择</small></p>
-</div>
-</td>
-<td align="center" width="25%" style="padding: 15px;">
-<div style="background: #f8f9fa; border-radius: 10px; padding: 15px; border-left: 4px solid #4ecdc4;">
-<h4>🧠 智能协调</h4>
-<p><small>智能任务分配和并行处理</small></p>
-</div>
-</td>
-<td align="center" width="25%" style="padding: 15px;">
-<div style="background: #f8f9fa; border-radius: 10px; padding: 15px; border-left: 4px solid #45b7d1;">
-<h4>🔍 上下文感知</h4>
-<p><small>通过CodeRAG集成的深度理解</small></p>
-</div>
-</td>
-<td align="center" width="25%" style="padding: 15px;">
-<div style="background: #f8f9fa; border-radius: 10px; padding: 15px; border-left: 4px solid #96ceb4;">
-<h4>⚡ 质量保证</h4>
-<p><small>全程自动化测试和验证</small></p>
-</div>
-</td>
-</tr>
-</table>
-
-</div>
-
----
-
-## 🚀 快速开始
-
-### 📋 **前置条件**
-
-在安装 DeepCode 之前，请确保您已安装以下软件：
-
-| 要求 | 版本 | 用途 |
-|------|------|------|
-| **Python** | 3.9+ | 核心运行环境 |
-| **Node.js** | 18+ | 新版 UI 前端 |
-| **npm** | 8+ | 包管理工具 |
+### 1. 安装与初始化
 
 ```bash
-# 检查您的版本
-python --version   # 应为 3.9+
-node --version     # 应为 18+
-npm --version      # 应为 8+
+uv tool install deepcode-hku
+deepcode init
 ```
 
-<details>
-<summary><strong>📥 安装 Node.js（如果未安装）</strong></summary>
+`deepcode init` 会在 `~/.deepcode/` 下创建最小用户配置，不会复制项目
+配置或凭证。完成后，可以从任意项目目录直接启动 `deepcode`。
+也可以在合适的 Python 3.12+ 环境中使用 `pipx install deepcode-hku` 或
+`pip install deepcode-hku`。
+
+### 2. 连接模型服务
 
 ```bash
-# macOS (使用 Homebrew)
-brew install node
+deepcode provider set personal-openrouter \
+  --template openrouter \
+  --label "OpenRouter · Personal" \
+  --api-key
 
-# Ubuntu/Debian
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt-get install -y nodejs
-
-# Windows
-# 从 https://nodejs.org/ 下载安装
+deepcode provider test personal-openrouter
+deepcode provider models personal-openrouter --refresh
 ```
 
-</details>
+`--api-key` 使用不回显的安全输入。已保存的密钥进入用户私有的
+`~/.deepcode/credentials.json`，不会返回给客户端，也不会写入 Session 历史。
+建议使用上面的模型列表命令选择模型，不要依赖旧示例中的模型名称。
 
-### 📦 **步骤1: 安装**
-
-选择以下任一安装方式：
-
-#### ⚡ **直接安装 (推荐)**
+### 3. 开始编码
 
 ```bash
-# 🚀 直接安装 DeepCode 包
-pip install deepcode-hku
-
-# 🔑 下载统一配置模板
-curl -O https://raw.githubusercontent.com/HKUDS/DeepCode/main/deepcode_config.json.example
-cp deepcode_config.json.example deepcode_config.json
+cd /path/to/your/repository
+deepcode -c personal-openrouter -m <model-id> --effort auto
 ```
 
-#### 🔧 **开发安装 (从源码)**
+首次使用时，请检查规范化后的 workspace 路径并确认 trust。DeepCode 会为
+该 Project 记住这个选择；trust 不等于授予无限制工具权限。
 
-<details>
-<summary><strong>📂 点击展开开发安装选项</strong></summary>
-
-##### 🔥 **使用 UV (开发推荐)**
+也可以无头执行单个任务：
 
 ```bash
-git clone https://github.com/HKUDS/DeepCode.git
-cd DeepCode/
-
-curl -LsSf https://astral.sh/uv/install.sh | sh
-uv venv --python=3.13
-source .venv/bin/activate  # Windows下: .venv\Scripts\activate
-uv pip install -r requirements.txt
-
-# 安装前端依赖
-npm install --prefix new_ui/frontend
+deepcode exec "修复失败的测试，并解释根本原因" \
+  --connection personal-openrouter \
+  --model <model-id> \
+  --effort auto \
+  --trust \
+  --access full-access \
+  --json
 ```
 
-##### 🐍 **使用传统 pip**
+`--trust` 记录 workspace 信任决定。`--access full-access` 是明确的无限制
+授权，只适合隔离的仓库或 CI runner。在交互式终端中可以省略它，
+按需批准敏感工具；纯检查任务可使用 `--access read-only`。
+
+用户可以选择适合自己的使用界面。`deepcode` 会打开交互式 CLI；同一份
+Sessions 也可以在 Desktop 中打开。若要从源码运行 Desktop，请先安装
+Node.js 22+、Rust stable 和 Tauri 对应平台所需的系统依赖，再准备
+仓库环境并使用项目启动器：
 
 ```bash
-git clone https://github.com/HKUDS/DeepCode.git
-cd DeepCode/
-
-pip install -r requirements.txt
-
-# 安装前端依赖
-npm install --prefix new_ui/frontend
+uv venv --python 3.12
+uv pip install -e .
+cd desktop && npm ci && cd ..
+./scripts/deepcode-desktop
 ```
 
-</details>
+打开 **Settings → Connections** 配置模型服务，然后在 Session 输入框中
+选择连接与模型。
 
-### 🔧 **步骤2: 配置**
+> 使用界面只改变工作的呈现方式，不改变背后的 Agent、策略、配置和 Session
+> 历史。
 
-> 以下配置适用于**所有安装方式**（pip、UV、源码安装和 Docker 均通用）。所有设置统一收敛在一个文件中：`deepcode_config.json`（参考 nanobot 设计）。
+## 使用 DeepCode
 
-#### 🔑 API 密钥 *（必需）*
+### Sessions
 
-编辑 `deepcode_config.json`，至少填入一个 provider 的 `apiKey`。可以直接写入字符串，也可以使用 `${ENV_VAR}` 引用环境变量，加载时自动解析。
-
-```json
-{
-  "providers": {
-    "openai":    { "apiKey": "your_openai_api_key" },
-    "anthropic": { "apiKey": "${ANTHROPIC_API_KEY}" },
-    "gemini":    { "apiKey": "" }
-  }
-}
+```text
+/new [标题]              创建新 Session
+/resume                 列出当前目录的 Sessions
+/resume all             列出所有已记录目录的 Sessions
+/resume <id>            恢复一个 Session
+/model [连接] [模型ID]    查看或修改后续 Turn 的模型
+/effort [auto|off|档位]  查看或修改后续 Turn 的 Thinking 强度
+/permissions [预设]      查看或修改后续 Turn 的工具权限
+/transcript [模式]       选择 normal、verbose 或 summary 展示
+/clear                  清空当前内存上下文
+@src/main.py            将文件附加到下一条提示
 ```
 
-#### 🤖 LLM 提供商 *（可选）*
+Thinking 档位决定向模型请求的推理强度；transcript 模式只决定 DeepCode
+如何展示返回的内容。交互式 CLI 可按 `Ctrl+O` 在
+`normal → verbose → summary` 之间切换。无头任务使用
+`deepcode exec --transcript <模式>`。推理内容是独立的时间线项，不会被混入
+助手最终答案。如果 provider 只返回不可见的续接状态，界面会如实提示详情
+不可用。
 
-DeepCode 会根据 `model` 前缀（例如 `openai/...`、`anthropic/...`、`gemini/...`）自动识别后端。如需强制指定：
+直接启动或恢复：
+
+```bash
+deepcode -w ./my-project --trust
+deepcode --resume <session-id>
+```
+
+无论由哪个客户端打开，Session 文件始终保存在
+`~/.deepcode/sessions/`。显式跨目录恢复只改变当前执行上下文，不会改写
+Session 中记录的原始工作目录。
+
+Archive 保留 canonical 历史，只将 Session 从 Desktop 的普通列表中移除。
+永久删除会删除对话历史及其派生运行记录，但不会删除仓库文件。
+Desktop 在 Session 菜单中提供这两项操作；脚本可调用：
+
+```bash
+deepcode session delete <session-id> --yes
+```
+
+如果 Session 正被另一个 CLI 打开、存在运行中工作、占用托管 worktree，
+或属于 Automation，DeepCode 会拒绝永久删除。删除不会强制终止工作，
+也不会静默移除 workspace 状态。
+
+### Connections 与模型
+
+常用命令：
+
+```bash
+deepcode provider list
+deepcode provider test <连接ID>
+deepcode provider models <连接ID> --refresh
+deepcode provider remove <连接ID>
+```
+
+使用环境变量而不是凭证文件：
+
+```bash
+deepcode provider set work-openrouter \
+  --template openrouter \
+  --api-key-env OPENROUTER_API_KEY
+```
+
+接入任意 OpenAI-compatible endpoint：
+
+```bash
+deepcode provider set company-proxy \
+  --template custom \
+  --adapter openai_compat \
+  --api-base https://llm.example.com/v1 \
+  --catalog openai \
+  --api-key
+```
+
+内置模板包括 `openrouter`、`openai`、`anthropic`、`deepseek`、`gemini`、
+`zhipu`、`dashscope`、`ollama`、`vllm` 和 `custom`。
+
+若要为 DeepCode 设置统一默认值，请修改用户级
+`~/.deepcode/deepcode_config.json`：
 
 ```json
 {
   "agents": {
-    "defaults": { "provider": "openai" }
-  }
-}
-```
-
-不同阶段可以单独覆盖模型：
-
-```json
-{
-  "agents": {
-    "defaults":       { "provider": "openrouter", "model": "z-ai/glm-5.1" },
-    "planning":       { "provider": "openrouter", "model": "z-ai/glm-5.1" },
-    "implementation": { "provider": "openrouter", "model": "z-ai/glm-5.1" }
-  },
-  "providers": {
-    "openrouter": { "apiKey": "your_openrouter_key", "apiBase": "https://openrouter.ai/api/v1" }
-  }
-}
-```
-
-OpenRouter 模型必须使用 OpenRouter 官方模型目录返回的精确 `id`，例如
-`z-ai/glm-5.1`、`anthropic/claude-sonnet-4.5` 或
-`google/gemini-2.5-pro`。在新版 UI 中，可以打开 **Settings → OpenRouter
-Models** 搜索实时模型目录，并分别更新 Default、Planning、Implementation
-模型。保存后会刷新 runtime，之后新启动的 workflow 会使用新的模型配置。
-
-#### 📄 文档分割 *（可选）*
-
-```json
-{
-  "documentSegmentation": {
-    "enabled": true,
-    "sizeThresholdChars": 50000
-  }
-}
-```
-
-<details>
-<summary><strong>🪟 Windows 用户: 额外的 MCP 服务器配置</strong></summary>
-
-如果您使用 Windows，可能需要在 `deepcode_config.json` 的 `tools.mcpServers` 中手动配置 MCP 服务器:
-
-```bash
-# 1. 全局安装 MCP 服务器
-npm i -g @modelcontextprotocol/server-filesystem
-
-# 2. 找到您的全局 node_modules 路径
-npm -g root
-```
-
-```json
-{
-  "tools": {
-    "mcpServers": {
-      "filesystem": {
-        "type": "stdio",
-        "command": "node",
-        "args": ["C:/Program Files/nodejs/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js", "."]
-      }
+    "defaults": {
+      "connection": "personal-openrouter",
+      "model": "<model-id>",
+      "reasoningEffort": "auto"
     }
   }
 }
 ```
 
-> **注意**: 将路径替换为步骤 2 中您实际的全局 node_modules 路径。
+项目配置可以选择用户已有的连接，但不能替换它的 endpoint、adapter、
+headers 或凭证。
 
-</details>
+Thinking 档位来自所选模型的 catalog，而不是 DeepCode 内的一份全局硬编码
+列表。`auto` 使用 provider/model 默认值；只有模型允许关闭时才提供 `off`。
+Session 内的切换只影响后续 Turn，不会改写已有历史。DeepCode 不会把原始
+chain-of-thought 渲染成助手正文；界面最多显示 provider 明确提供的安全摘要，
+签名或加密的续接状态只会私下保存在 canonical Session 中。
 
-<details>
-<summary><strong>🔍 网页搜索配置</strong></summary>
+### Skills
 
-DeepCode 通过内置的 `fetch` MCP 服务器（无需 API key）抓取网页内容，并通过 `filesystem` 读取本地文件。辅助搜索服务器默认使用 `filesystem`：
-
-```json
-{
-  "tools": { "defaultSearchServer": "filesystem" }
-}
-```
-
-> **💡 提示**: 若要接入其他搜索后端，在 `deepcode_config.json` 的 `tools.mcpServers` 下新增条目，并把 `tools.defaultSearchServer` 改成对应名称即可。
-
-</details>
-
-### ⚡ **步骤3: 启动应用程序**
-
-选择您偏好的启动方式：
-
-<table width="100%">
-<tr>
-<th width="33%">🐳 Docker (推荐)</th>
-<th width="33%">🚀 本地 — 不使用 Docker</th>
-<th width="33%">🛠️ 其他方式</th>
-</tr>
-<tr><td>
-
-无需 Python/Node — 一切在容器内。
-
-```bash
-git clone https://github.com/HKUDS/DeepCode.git
-cd DeepCode/
-cp deepcode_config.json.example \
-   deepcode_config.json
-# 编辑 deepcode_config.json 填入 API Key
-
-./deepcode_docker/run_docker.sh
-# 访问 → http://localhost:8000
-```
-
-</td><td>
-
-直接在宿主机运行新版 UI（前端 + 后端，不使用容器）。
-
-```bash
-deepcode --local
-# 前端 → http://localhost:5173
-# 后端 → http://localhost:8000
-# Ctrl+C 停止
-```
-
-特性：用户交互循环、实时进度、内联对话。
-
-> 注意：不带参数的 `deepcode` 会走 Docker 启动路径。如果 Docker Desktop
-> 没有运行，请使用上面的 `deepcode --local`。
-
-</td><td>
-
-```bash
-# macOS / Linux
-./run.sh
-# 或: python deepcode.py --local
-
-# Windows
-run.bat
-# 或: python deepcode.py --local
-
-# 经典 Streamlit UI
-deepcode --classic
-
-# 交互式 CLI(Docker 内)
-deepcode --cli
-# 或本地: python -m cli.tui
-```
-
-</td></tr>
-</table>
-
-#### 💻 **交互式 CLI(多轮编码 agent)**
-
-`python -m cli.tui` 会在终端里打开一个 Claude Code 风格的对话:用自然语言
-描述任意编码任务,实时看到 agent 的流式回复与工具执行进度,并可连续多轮对话。
-
-```bash
-python -m cli.tui                          # 在当前目录开始对话
-python -m cli.tui -w ./my-project          # 指定工作目录
-python -m cli.tui -m gpt-5.4               # 指定模型
-python -m cli.tui --resume <session_id>    # 恢复历史对话
-```
-
-对话中可用命令:
+DeepCode 会同时发现 DeepCode 与 Claude-compatible Skill 目录：
 
 ```text
-/help                   # 列出所有命令
-/new [标题]              # 新开一个对话
-/resume                 # 列出「当前目录」的会话;/resume <id> 恢复指定会话
-/resume all             # 列出所有目录的会话(标注来源目录)
-/model [id]             # 查看或切换模型(保留对话历史)
-/clear                  # 清空当前对话上下文
-@src/main.py            # 把文件内容附加到消息里
+.deepcode/skills/        项目级 DeepCode Skills
+.claude/skills/          项目级 Claude-compatible Skills
+~/.deepcode/skills/      用户级 DeepCode Skills
+~/.claude/skills/        用户级 Claude-compatible Skills
 ```
 
-对话保存在 `~/.deepcode/sessions/<id>/`(JSONL 存储 + SQLite 索引),并根据
-首条消息自动命名。
-
-脚本 / CI 场景可用无头一次性入口:
+通过 CLI 管理：
 
 ```bash
-python -m cli.exec_cli "修复 mathlib.py 里失败的测试" --json
+deepcode skill list
+deepcode skill show <ID或名称>
+deepcode skill import ./my-skill --scope project
+deepcode skill disable <skill-id> --scope project
 ```
 
-以 NDJSON 输出机器可读事件流,完成后以退出码 0 结束。
+为下一次交互式 Turn 选择 Skills：
 
-在 Web UI 中，可以通过顶部 **Sessions** 菜单恢复或删除 session。删除
-session 会移除 JSONL session 记录和对应的 `deepcode_lab/tasks/` 工作目录，
-但不会删除 `uploads/` 中的原始上传文件。如果该 session 仍有 `pending`、
-`running` 或 `waiting_for_input` task，后端会拒绝删除，直到任务被取消或完成。
+```text
+/skills
+/skill <ID或名称>
+/skill remove <ID或名称>
+/skill clear
+```
 
-<details>
-<summary><strong>🐳 Docker 管理命令</strong></summary>
+无头任务可以重复使用 `--skill`：
 
 ```bash
-./deepcode_docker/run_docker.sh stop      # 停止
-./deepcode_docker/run_docker.sh restart   # 重启（配置更改无需重建）
-./deepcode_docker/run_docker.sh --build   # 强制重建
-./deepcode_docker/run_docker.sh logs      # 实时日志
-./deepcode_docker/run_docker.sh status    # 健康检查
-./deepcode_docker/run_docker.sh clean     # 删除容器和镜像
+deepcode exec "检查本次变更是否引入安全问题" \
+  --skill security-review \
+  --skill test-strategy \
+  --trust \
+  --access read-only
 ```
 
-或直接使用 Docker Compose：
+Skill 只能提供工作流指导，不能授予权限，也不能绕过 Project trust、
+Sandbox、批准或工具策略。
+
+### 安全与执行
+
+DeepCode 将执行安全视为产品边界，而不是客户端确认框：
+
+- 所有界面在执行 Agent 之前都需要明确的 Project trust。
+- 权限决策分为 `allow`、`ask` 和 `deny`。
+- Approval 会恢复被暂停的同一次工具调用。
+- **Ask** 保留工作区命令沙箱和受保护路径检查；**Read only** 拒绝修改型
+  工具；**Full access** 是经过明确二次确认的 Session 授权，会移除审批与
+  文件系统沙箱边界，但显式 deny 规则仍然优先。
+- CLI 与 Desktop 修改同一个 Session 权限覆盖。每个 Turn 在进入队列时都会
+  冻结完整安全快照，因此切换只影响新提交；正在运行和已经排队的 Turn 会在
+  恢复或 worker 交接后继续使用各自记录的权限。
+- Shell 与代码进程在超时、中断或关闭时会按 DeepCode 所有的进程树终止。
+- 崩溃恢复会收敛未完成的 Turn，但不会自动重放副作用。
+
+### 长期任务
+
+在交互式 CLI 中，可以把可持久化的 Goal 绑定到当前 Session：
+
+```text
+/permissions
+/permissions ask
+/permissions read-only
+/permissions full-access
+/permissions inherit
+/goal 实现并验证指定功能
+/goal show
+/goal edit 实现功能并保持公共 API 兼容
+/goal pause
+/goal resume
+/goal wait
+/goal reopen 根据新要求调整已完成结果
+/goal clear
+/queue 把这条指令安排为下一个 Turn
+/stop
+```
+
+Goal 与规范 Session transcript 一起保存，并会同步出现在 Desktop。Goal 在
+后台工作时，CLI 仍然可以继续输入：消息会优先纠正当前 Turn；如果当前 Turn
+已经结束，同一条消息会在相同 Session 中启动下一个 Turn。Queue 只能通过
+`/queue` 或 Desktop 的 **Queue next** 显式选择，失败的 Steer 不会偷偷改变
+投递语义。`/stop` 只中断当前 Turn，CLI 仍可继续接收下一条输入。编辑 Goal
+会更新同一个持久 Goal，并在条件允许时把新目标注入当前 Turn。所有工作单元
+都是普通 Turn，因此 model、Skills、权限、审批、恢复和历史在两端保持一致。
+切换 provider、model 或 thinking 档位只影响后续 Turn，不会替换 Goal 或
+Session。
+
+工作 Agent 根据完整上下文显式请求 `complete` 或 `blocked`。DeepCode 强制
+检查归属、生命周期、权限和预算边界，但不会用一条宿主规则冒充对所有 coding
+任务的验证。普通语义完成显示为 **Completed**；测试、Build、诊断、Diff 或
+独立复核继续作为可见证据。Goal 引擎不会硬编码 provider、模型、任务类型或
+测试命令。
+
+普通 Session 本身也支持一个 Turn 内的完整长工具循环；Goal 是需要跨 Turn、
+重启或无人持续输入时才使用的可选持久运行契约。
+
+兼容的脚本/CI 入口会把指定命令加入 Agent 可见的完成证据要求：
+
+让 Agent 运行并检查指定命令后再判断是否完成：
+
 ```bash
-docker compose -f deepcode_docker/docker-compose.yml up --build   # 构建并启动
-docker compose -f deepcode_docker/docker-compose.yml down         # 停止
-docker compose -f deepcode_docker/docker-compose.yml logs -f      # 查看日志
+deepcode loop "实现指定功能" \
+  --test-cmd "python -m pytest -q" \
+  --trust \
+  --access full-access
 ```
 
-> **💡** 配置文件以卷方式挂载 — 编辑后重启即可，无需重建。
-> **💡** Windows 用户：如果脚本不可用，可直接运行 `docker compose` 命令。
+退出进程后，可以继续同一个 Goal 与规范 Session：
 
-</details>
+```bash
+deepcode loop --resume <session-id>
+```
 
-### 🎯 **步骤4: 生成代码**
+Resume 会保留 Session ID、Goal ID、完整 transcript 和原始 workspace。只有显式
+传入 `--workspace` 才使用本次进程的临时 workspace override，且不会改写
+Session 来源。`--connection`、`--model` 和 `--effort` 只影响本命令启动的
+下一个 Turn。达到 token 上限的 Goal 必须提供更大的 `--token-budget`；
+已经完成的 Goal 只读取并报告结果，不会重新启动或改写任务。
 
-1. **📄 输入** — 上传研究论文、输入需求，或粘贴 URL
-2. **🤖 处理** — 多智能体系统分析、规划并生成
-3. **⚡ 输出** — 接收带测试和文档的生产就绪代码
+当前仓库在 DeepCode 中打开并完成信任后，可以创建持久化 Automation：
 
----
+```bash
+deepcode automation create "Repository caretaker" \
+  --prompt "修复失败的测试并验证结果。" \
+  --schedule interval \
+  --interval-seconds 3600
 
-### 🔧 **常见问题排查**
+deepcode automation list --limit 100 --offset 0
+deepcode automation run <automation-id>
+deepcode automation runs <automation-id> --limit 100 --offset 0
+```
 
-<details>
-<summary><strong>❓ 常见问题与解决方案</strong></summary>
+Automation 通过正常 Turn 路径提交工作，因此手动和定时执行都遵守同一套
+Session、权限、模型、审批和恢复规则。每个 Run 使用的不可变指令 revision
+会保留；Automation 后续被编辑或退役也不会改写历史。Interval schedule 需要
+一个启用了 scheduler 的 Desktop 或 App Server runtime 保持运行。
+暂停/启用只控制 interval schedule；manual 定义始终为 enabled，而且 interval
+被暂停后仍可使用 **Run now** 手动执行。
+Automation 定义和 Run 历史使用显式分页。JSON 响应会返回 `hasMore` 与
+`nextOffset`；人类可读输出在仍有后续结果时会明确打印下一页 offset。
 
-| 问题 | 原因 | 解决方案 |
-|---|---|---|
-| Docker 构建失败 `tsc: not found` | 构建缓存损坏 | `docker builder prune -f` 然后用 `--no-cache` 重建 |
-| `error during connect` / `cannot find the file` | Docker Desktop 未运行 | 启动 Docker Desktop，等待就绪后重试 |
-| 前端空白页面 | `node_modules` 损坏 | `cd new_ui/frontend && rm -rf node_modules && npm install` |
-| `ERR_CONNECTION_REFUSED` | 端口错误/后端未运行 | Docker: `http://localhost:8000`。本地: `http://localhost:5173` |
-| `npm install` → `Could not read package.json` | 目录错误 | 使用 `npm install --prefix new_ui/frontend` |
-| Windows: MCP 服务器无法工作 | 需要绝对路径 | 参见上方 [Windows MCP 配置](#-步骤2-配置) |
+## Paper2Code
 
-</details>
+Paper2Code 是 DeepCode 的研究起点，也是当前面向科研代码复现的专业工作流。
+通用 Coding Agent 扩展了产品边界，但没有替代或简化 Paper2Code 的原始设计。
 
----
+它的核心思路始终不变：论文复现不是一次性代码生成任务。一个中央编排智能体
+负责协调多个边界清晰的专业角色，依次完成来源理解、复现规划、参考发现与索引、
+代码实现以及结果验证。
 
-## 🤖 nanobot 集成（飞书聊天机器人）
-
-**直接在飞书中使用 DeepCode — 发送消息，获取代码！**
-
-[nanobot](https://github.com/HKUDS/nanobot) 是一个超轻量级 AI 助手，现已与 DeepCode 深度集成。通过飞书聊天，您可以：
-- 🚀 提交**论文转代码**任务（`paper2code`）— 粘贴 arXiv 链接即可
-- 💬 启动**对话转代码**（`chat2code`）— 用自然语言描述需求
-- 📊 实时查询任务状态（`deepcode_status`）— 获取进度和结果
-- ✅ 响应 DeepCode 交互提示 — 当 AI 需要澄清需求时直接在聊天中回答
-
-### 🏗️ 架构概览
+### 原始架构
 
 ```mermaid
 flowchart TB
-    subgraph ChatPlatforms[💬 聊天平台]
-        Feishu[<b>飞书</b><br/>📱 当前支持]
-        Telegram[Telegram<br/>🔜 即将支持]
-        Discord[Discord<br/>🔜 即将支持]
-    end
+    INPUT["研究论文 · 文本 · URL · 文档 · 代码仓库"] --> ORCH["中央编排智能体"]
 
-    subgraph NanobotCore[🤖 Nanobot 核心]
-        LLM[LLM 推理引擎<br/>Claude / GPT / Minimax]
-        Tools[工具层<br/>web_fetch / code_executor / deepcode]
-    end
+    ORCH --> INTENT["意图理解智能体"]
+    ORCH --> DOC["文档解析智能体"]
+    INTENT --> PLAN["代码规划智能体"]
+    DOC --> PLAN
 
-    subgraph DeepCodeEngine[⚡ DeepCode 引擎]
-        API[HTTP API<br/>任务提交 & 查询]
-        Agents[多智能体系统<br/>规划 / 分析 / 生成]
-        Output[代码输出<br/>测试 + 文档]
-    end
+    PLAN --> MINE["代码参考挖掘智能体"]
+    PLAN --> INDEX["代码索引智能体"]
+    MINE --> INDEX
+    INDEX --> BUILD["代码生成智能体"]
 
-    Feishu -->|WebSocket| NanobotCore
-    Telegram -.->|未来集成| NanobotCore
-    Discord -.->|未来集成| NanobotCore
-
-    NanobotCore -->|调用 deepcode_* 工具| DeepCodeEngine
-    DeepCodeEngine -->|返回结果 & 进度| NanobotCore
-    NanobotCore -->|推送消息| Feishu
-
-    style Feishu fill:#0EA5E9,stroke:#0284c7,stroke-width:3px,color:#fff
-    style NanobotCore fill:#8b5cf6,stroke:#7c3aed,stroke-width:2px,color:#fff
-    style DeepCodeEngine fill:#10b981,stroke:#059669,stroke-width:2px,color:#fff
-    style Telegram fill:#d1d5db,stroke:#9ca3af,stroke-width:1px,color:#4b5563,stroke-dasharray: 5 5
-    style Discord fill:#d1d5db,stroke:#9ca3af,stroke-width:1px,color:#4b5563,stroke-dasharray: 5 5
+    BUILD --> VERIFY["执行 · 测试 · 验证"]
+    VERIFY -->|证据表明仍需处理| ORCH
+    VERIFY -->|验证通过| OUTPUT["代码库 · 结果 · 测试 · 文档"]
 ```
 
-> 🎯 **当前支持**: 飞书（Feishu / Lark）
-> 🔮 **架构预留**: Telegram 和 Discord 节点为未来扩展保留
+各专业角色继续保持原系统中清晰的职责分离：
 
----
+| 角色                   | 职责                                                                                 |
+| ---------------------- | ------------------------------------------------------------------------------------ |
+| **中央编排智能体**     | 判断整体进度、选择下一阶段、协调专业角色，并在新证据出现时调整计划。                 |
+| **意图理解智能体**     | 将用户目标转化为明确的功能需求、技术约束与可执行的任务分解。                         |
+| **文档解析智能体**     | 处理论文与技术文档，提取算法、公式、方法、假设和实现要求。                           |
+| **代码规划智能体**     | 把已理解的方法转换为实现路线、模块边界、依赖、接口与验证目标。                       |
+| **代码参考挖掘智能体** | 发现相关仓库、库与实现模式，并判断它们的相关性、兼容性和集成价值。                   |
+| **代码索引智能体**     | 将检索到的代码组织为可搜索的语义索引与知识图谱，使生成阶段可以恢复关键组件及其关系。 |
+| **代码生成智能体**     | 综合计划与证据形成可执行实现，并生成可复现结果所需的接口、测试和文档。               |
 
-### 📋 前置条件
+四个核心思想把这些角色连接为一个整体：
 
-- ✅ DeepCode 后端正在运行（见上方 [快速开始](#-快速开始)）
-- ✅ 飞书企业应用（或租用应用）— 免费创建
-- ✅ LLM API 密钥（OpenRouter / Claude / Minimax）
+- **智能编排。** 中央 Agent 根据任务状态选择并回访不同阶段，而不是把论文复现
+  当作固定的一次性 Prompt 链。
+- **文档与意图对齐。** 论文、规格、URL 与附件会先转化为明确实现要求，再进入
+  编码阶段。
+- **记忆与 CodeRAG。** 长文档与参考仓库经过分段、索引和按需检索，以有边界的
+  上下文进入模型，而不是反复塞入整个窗口。
+- **迭代验证。** 执行、测试与真实失败会回流到规划和实现阶段，直到交付结果
+  拥有可以检查的证据。
 
----
+配套工具层同样延续这一职责划分：
 
-### 🚀 三步完成设置
+| 层次         | 作用                                                      |
+| ------------ | --------------------------------------------------------- |
+| 文档导入     | 获取并规范化论文、URL、PDF、DOCX、演示文稿、文本与 HTML。 |
+| 文档分段     | 将大型技术材料切分为语义连贯、可恢复的分析单元。          |
+| 参考发现     | 搜索候选仓库与支持性实现。                                |
+| 代码参考索引 | 为外部与本地代码建立可搜索上下文，并保留跨文件关系。      |
+| 实现执行     | 读写文件、运行 Shell 或 Python、检查项目结构并记录过程。  |
+| 验证与交付   | 运行测试、保存结果，并交付代码库、文档与 Artifacts。      |
 
-#### **Step 1 · 创建飞书机器人**
+新版产品围绕这套流程增加了持久化计划、显式计划审查、检查点、有边界重试与
+交互式检查能力。这些变化增强了恢复和监督，但没有改变 Paper2Code 的架构
+职责与推理顺序。
 
-<details>
-<summary><strong>📱 点击展开飞书应用创建步骤</strong></summary>
+<!--
+README 图片占位 — PAPER2CODE WORKFLOW
 
-1. 登录 [飞书开放平台](https://open.feishu.cn/app)
-2. 点击 **创建企业自建应用**
-3. 填写应用名称和描述，上传图标
-4. 进入 **凭证与基础信息** 页面，复制：
-   - `App ID`
-   - `App Secret`
-5. 进入 **事件订阅** 页面：
-   - **请求地址 URL**: `http://your-server-ip:8081/feishu/event`（公网可访问）
-   - **消息加密**: 复制 `Encrypt Key` 和 `Verification Token`
-6. 进入 **权限管理**，开通以下权限：
-   - `im:message`（接收消息）
-   - `im:message:send_as_bot`（发送消息）
-   - `im:chat`（获取群信息）
-7. **发布版本** → 等待管理员审核通过
+请在以下路径加入新版 Paper2Code 工作流截图：
+  assets/readme/paper2code-workflow.png
 
-> 💡 **开发环境**: 可使用 [ngrok](https://ngrok.com/) 或 [localhost.run](https://localhost.run/) 将本地 8081 端口映射到公网。
+截图应包含：
+- Workflow 计划或检查点状态；
+- 一项真实验证结果；
+- Artifact 或 Inspector 界面。
 
-</details>
+不要继续使用旧浏览器 UI 截图。
+-->
 
----
+### 研究结果
 
-#### **Step 2 · 配置**
+DeepCode 原始研究使用
+[PaperBench](https://openai.com/index/paperbench/) 评估科研代码复现能力。
+该基准要求 Agent 复现 20 篇 ICML 2024 论文，共包含 8,316 个可评分组件。
 
-编辑项目根目录的 `nanobot_config.json`:
+<table align="center" width="100%">
+<tr>
+<td width="25%" align="center">
+  <strong>75.9%</strong><br/>
+  <sub>人类专家子集<br/>领先 3.5 个百分点</sub>
+</td>
+<td width="25%" align="center">
+  <strong>84.8%</strong><br/>
+  <sub>商业 Agent 子集<br/>领先 26.1 个百分点</sub>
+</td>
+<td width="25%" align="center">
+  <strong>73.5%</strong><br/>
+  <sub>科研编程<br/>领先 22.4 个百分点</sub>
+</td>
+<td width="25%" align="center">
+  <strong>73.5%</strong><br/>
+  <sub>LLM Agent 基线<br/>领先 30.2 个百分点</sub>
+</td>
+</tr>
+</table>
 
-```json
-{
-  "channels": [
-    {
-      "type": "feishu",
-      "app_id": "cli_xxxxxxxxxxxxx",
-      "app_secret": "your_app_secret",
-      "encrypt_key": "your_encrypt_key",
-      "verification_token": "your_verification_token"
-    }
-  ],
-  "llm": {
-    "provider": "openai",  // 或 "anthropic" / "minimax"
-    "model": "openai/gpt-4o",  // 推荐英文模型
-    "api_key": "your_api_key",
-    "base_url": "https://openrouter.ai/api/v1"  // 可选
-  },
-  "deepcode": {
-    "api_url": "http://localhost:8000"  // DeepCode 后端地址
-  }
-}
-```
+<p align="center">
+  <img src="assets/result_main02.jpg" alt="DeepCode PaperBench 结果" width="920" />
+</p>
 
-> 💡 **提示**: 使用 `nanobot_config.json.example` 作为模板。
+| 评估子集        | DeepCode | 论文中报告的对比结果        | 差值           |
+| --------------- | -------- | --------------------------- | -------------- |
+| 人类专家子集    | 75.9%    | 论文中最佳人类基线：72.4%   | +3.5 个百分点  |
+| 商业 Agent 子集 | 84.8%    | 论文中最佳商业 Agent：58.7% | +26.1 个百分点 |
+| 科研编程        | 73.5%    | PaperCoder：51.1%           | +22.4 个百分点 |
+| LLM Agent 基线  | 73.5%    | 论文中最佳 LLM Agent：43.3% | +30.2 个百分点 |
 
----
+以上是原论文报告的 PaperBench 专项结果，不代表通用编程基准，也不代表对
+持续更新中的商业产品进行实时比较。
 
-#### **Step 3 · 启动**
+评估方法、范围、模型和基线详情请阅读
+[论文](https://arxiv.org/abs/2512.07921)。
 
-确保 DeepCode 后端已运行，然后启动 nanobot:
+<a id="live-demonstrations"></a>
 
-```bash
-cd DeepCode/
-./nanobot/run_nanobot.sh
-```
+## 🎬 实时演示
 
-**Docker Compose 模式** (同时启动 DeepCode + nanobot):
+下面的录像展示了早期 DeepCode 工作流生成的项目结果。它们是输出案例，
+不是当前 Desktop 界面的截图。
 
-```bash
-docker compose -f deepcode_docker/docker-compose.yml up -d
-```
-
-访问飞书，找到你的机器人，发送消息测试：
-
-```
-hi
-```
-
-如果收到回复，说明配置成功！🎉
-
----
-
-### 💡 使用示例
-
-| 操作 | 命令示例 |
-|---|---|
-| **论文转代码** | `paper2code https://arxiv.org/abs/2104.09864` |
-| **对话转代码** | `chat2code 实现一个计算斐波那契数列的 Python 函数` |
-| **查询任务状态** | `deepcode_status task_abc123` |
-| **响应交互** | 当 AI 询问"需要测试用例吗？"时直接回复 `是` 或 `否` |
-
----
-
-<details>
-<summary><strong>🛠️ nanobot 管理命令</strong></summary>
-
-```bash
-# 查看日志（Docker 模式）
-docker compose -f deepcode_docker/docker-compose.yml logs -f nanobot
-
-# 重启 nanobot（Docker 模式）
-docker compose -f deepcode_docker/docker-compose.yml restart nanobot
-
-# 停止所有服务（Docker 模式）
-docker compose -f deepcode_docker/docker-compose.yml down
-```
-
-</details>
-
----
-
-<details>
-<summary><strong>🔧 常见问题（nanobot）</strong></summary>
-
-| 问题 | 解决方案 |
-|---|---|
-| nanobot 响应为中文 | 修改 `nanobot_config.json` 中 `llm.model` 为英文模型（如 `gpt-4o`） |
-| 飞书收不到消息 | 检查事件订阅 URL 是否可公网访问，端口 8081 是否开放 |
-| DeepCode 任务提交失败 | 确认 `deepcode.api_url` 正确，后端正在运行 |
-| nanobot 容器无法启动 | 检查 `nanobot_config.json` 格式是否正确（使用 JSON 验证器） |
-
-</details>
-
----
-
-  ---
-
-## 💡 示例
-
-
-
-### 🎬 **实时演示**
-
-
-
-<table align="center">
+<table align="center" width="100%">
 <tr>
 <td width="33%" align="center">
 
-#### 📄 **论文转代码演示**
-**研究到实现**
+#### 📄 Paper2Code
 
-<div align="center">
-  <a href="https://www.youtube.com/watch?v=MQZYpLkzsbw">
-    <img src="https://img.youtube.com/vi/MQZYpLkzsbw/maxresdefault.jpg" alt="Paper2Code Demo" width="100%" style="border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);"/>
-  </a>
+**从研究到实现**
 
-  **[▶️ 观看演示](https://www.youtube.com/watch?v=MQZYpLkzsbw)**
+<a href="https://www.youtube.com/watch?v=MQZYpLkzsbw">
+  <img src="https://img.youtube.com/vi/MQZYpLkzsbw/maxresdefault.jpg" alt="Paper2Code 演示" width="100%" />
+</a>
 
-  *自动将学术论文转换为生产就绪代码*
-</div>
+**[▶ 观看演示](https://www.youtube.com/watch?v=MQZYpLkzsbw)**
 
-</td>
-<td width="33%" align="center">
-
-#### 🖼️ **图像处理演示**
-**AI驱动的图像工具**
-
-<div align="center">
-  <a href="https://www.youtube.com/watch?v=nFt5mLaMEac">
-    <img src="https://img.youtube.com/vi/nFt5mLaMEac/maxresdefault.jpg" alt="Image Processing Demo" width="100%" style="border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);"/>
-  </a>
-
-  **[▶️ 观看演示](https://www.youtube.com/watch?v=nFt5mLaMEac)**
-
-  *智能图像处理，具有背景移除和增强功能*
-</div>
+<sub>将研究论文复现为可以执行的工程项目。</sub>
 
 </td>
 <td width="33%" align="center">
 
-#### 🌐 **前端实现**
-**完整Web应用程序**
+#### 🖼️ 生成式视觉项目
 
-<div align="center">
-  <a href="https://www.youtube.com/watch?v=78wx3dkTaAU">
-    <img src="https://img.youtube.com/vi/78wx3dkTaAU/maxresdefault.jpg" alt="Frontend Demo" width="100%" style="border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);"/>
-  </a>
+**图像工作流案例**
 
-  **[▶️ 观看演示](https://www.youtube.com/watch?v=78wx3dkTaAU)**
+<a href="https://www.youtube.com/watch?v=nFt5mLaMEac">
+  <img src="https://img.youtube.com/vi/nFt5mLaMEac/maxresdefault.jpg" alt="生成的图像处理项目" width="100%" />
+</a>
 
-  *从概念到部署的全栈Web开发*
-</div>
+**[▶ 观看演示](https://www.youtube.com/watch?v=nFt5mLaMEac)**
+
+<sub>查看早期 DeepCode 生成的图像处理工作流。</sub>
+
+</td>
+<td width="33%" align="center">
+
+#### 🌐 生成式 Web 项目
+
+**前端实现案例**
+
+<a href="https://www.youtube.com/watch?v=78wx3dkTaAU">
+  <img src="https://img.youtube.com/vi/78wx3dkTaAU/maxresdefault.jpg" alt="生成的前端项目" width="100%" />
+</a>
+
+**[▶ 观看演示](https://www.youtube.com/watch?v=78wx3dkTaAU)**
+
+<sub>从想法开始，查看完整前端项目的实现结果。</sub>
 
 </td>
 </tr>
 </table>
 
+[项目介绍视频](https://youtu.be/PRgmP8pOI08)继续提供更完整的产品说明。
 
+## 开发
 
-### 🆕 **最新更新**
+### 源码安装
 
-#### 📄 **智能文档分割 (v1.2.0)**
-- **智能处理**: 自动处理超出LLM令牌限制的大型研究论文和技术文档
-- **可配置控制**: 通过配置切换分割功能，具有基于大小的阈值
-- **语义分析**: 高级内容理解，保留算法、概念和公式
-- **向后兼容**: 对较小文档无缝回退到传统处理
+```bash
+git clone https://github.com/HKUDS/DeepCode.git
+cd DeepCode
 
-### 🚀 **即将推出**
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv venv --python=3.13
+source .venv/bin/activate
+uv pip install -e .
+```
 
-我们正在不断增强DeepCode的令人兴奋的新功能:
+Windows 请使用 `.venv\Scripts\activate` 激活环境。
 
-#### 🔧 **增强的代码可靠性和验证**
-- **自动化测试**: 具有执行验证和错误检测的全面功能测试。
-- **代码质量保证**: 通过静态分析、动态测试和性能基准测试进行多级验证。
-- **智能调试**: AI驱动的错误检测，具有自动纠正建议
+### 验证
 
-#### 📊 **PaperBench性能展示**
-- **基准仪表板**: PaperBench评估套件的综合性能指标。
-- **准确性指标**: 与最先进的论文复现系统的详细比较。
-- **成功分析**: 跨论文类别和复杂度水平的统计分析。
+```bash
+uvx pre-commit run --all-files
+python -m compileall -q app_server cli core tools workflows
+deepcode --version
+deepcode-app-server --verify-runtime
 
-#### ⚡ **系统级优化**
-- **性能提升**: 多线程处理和优化智能体协调，实现更快的生成。
-- **增强推理**: 具有改进上下文理解的高级推理能力。
-- **扩展支持**: 扩展与其他编程语言和框架的兼容性。
+cd desktop
+npm run lint
+npm test -- --run
+npm run build
+```
+
+Desktop 打包、Rust 检查、签名和发布流程请参考
+[`desktop/README.md`](desktop/README.md) 与
+[Desktop 发布手册](docs/DESKTOP_RELEASE_RUNBOOK.md)。
+
+<details>
+<summary><strong>贡献者架构资料</strong></summary>
+
+| 主题                       | 文档                                                          |
+| -------------------------- | ------------------------------------------------------------- |
+| Agent 执行与批准           | [P2 Agent execution](docs/P2_AGENT_EXECUTION_ARCHITECTURE.md) |
+| Desktop Sidecar 与生命周期 | [P3 Desktop runtime](docs/P3_DESKTOP_RUNTIME_ARCHITECTURE.md) |
+| Git 审查、文件、终端与测试 | [P4 Code workbench](docs/P4_CODE_WORKBENCH_ARCHITECTURE.md)   |
+| 持久化 Paper2Code 工作流   | [P5 Paper2Code](docs/P5_PAPER2CODE_ARCHITECTURE.md)           |
+| 中央 Session 与跨目录恢复  | [P6 Session alignment](docs/P6_SESSION_ALIGNMENT_REVIEW.md)   |
+| Skills 身份、安全与持久化  | [Skills architecture](docs/SKILLS_PRODUCT_ARCHITECTURE.md)    |
+| Automation 调度与执行      | [Automation architecture](docs/AUTOMATION_ARCHITECTURE.md)    |
+| Desktop 产品与交互模型     | [Desktop UI specification](docs/DESKTOP_PRODUCT_UI_SPEC.md)   |
+| 隐私与诊断                 | [Privacy contract](docs/PRIVACY_AND_DIAGNOSTICS.md)           |
+
+</details>
+
+重构前的中文 README 保存在
+[`docs/archive/README_ZH_LEGACY_2026-07-20.md`](docs/archive/README_ZH_LEGACY_2026-07-20.md)。
+新版产品图片占位使用同一份
+[截图要求](assets/readme/README.md)。
 
 ---
+
+<a id="star-history"></a>
 
 ## ⭐ 星标历史
 
@@ -1257,40 +887,61 @@ docker compose -f deepcode_docker/docker-compose.yml down
 
 *社区增长轨迹*
 
-<a href="https://star-history.com/#HKUDS/DeepCode&Date">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=HKUDS/DeepCode&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=HKUDS/DeepCode&type=Date" />
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=HKUDS/DeepCode&type=Date" style="border-radius: 15px; box-shadow: 0 0 30px rgba(0, 217, 255, 0.3);" />
-  </picture>
-</a>
+  <a href="https://star-history.com/#HKUDS/DeepCode&Date">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=HKUDS/DeepCode&type=Date&theme=dark" />
+      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=HKUDS/DeepCode&type=Date" />
+      <img src="https://api.star-history.com/svg?repos=HKUDS/DeepCode&type=Date" alt="DeepCode 星标历史图" width="900" />
+    </picture>
+  </a>
 
 </div>
 
 ---
 
-### 🚀 **准备好变革开发方式了吗？**
+### 🚀 准备好使用 DeepCode 了吗？
 
 <div align="center">
 
 <p>
-  <a href="#-快速开始"><img src="https://img.shields.io/badge/🚀_立即开始-00d4ff?style=for-the-badge&logo=rocket&logoColor=white" alt="Get Started"></a>
-  <a href="https://github.com/HKUDS"><img src="https://img.shields.io/badge/🏛️_在GitHub上查看-00d4ff?style=for-the-badge&logo=github&logoColor=white" alt="View on GitHub"></a>
-  <a href="https://github.com/HKUDS/deepcode-agent"><img src="https://img.shields.io/badge/⭐_星标项目-00d4ff?style=for-the-badge&logo=star&logoColor=white" alt="Star Project"></a>
+  <a href="#快速开始"><img src="https://img.shields.io/badge/🚀_立即开始-00d4ff?style=for-the-badge&logo=rocket&logoColor=white" alt="立即开始" /></a>
+  <a href="https://github.com/HKUDS/DeepCode"><img src="https://img.shields.io/badge/🏛️_在_GitHub_查看-00d4ff?style=for-the-badge&logo=github&logoColor=white" alt="在 GitHub 查看 DeepCode" /></a>
+  <a href="https://github.com/HKUDS/DeepCode/stargazers"><img src="https://img.shields.io/badge/⭐_Star_项目-00d4ff?style=for-the-badge&logo=star&logoColor=white" alt="Star DeepCode" /></a>
 </p>
 
----
-
-### 📄 **许可证**
-
-<img src="https://img.shields.io/badge/License-MIT-4ecdc4?style=for-the-badge&logo=opensourceinitiative&logoColor=white" alt="MIT License">
-
-**MIT许可证** - 版权所有 (c) 2025 香港大学数据智能实验室
+</div>
 
 ---
 
+<a id="citation"></a>
 
+## 📖 引用
 
-<img src="https://visitor-badge.laobi.icu/badge?page_id=deepcode.readme&style=for-the-badge&color=00d4ff" alt="Visitors">
+如果 DeepCode 对您的研究有所帮助，请引用：
+
+```bibtex
+@misc{li2025deepcodeopenagenticcoding,
+  title         = {DeepCode: Open Agentic Coding},
+  author        = {Zongwei Li and Zhonghang Li and Zirui Guo and Xubin Ren and Chao Huang},
+  year          = {2025},
+  eprint        = {2512.07921},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.SE},
+  url           = {https://arxiv.org/abs/2512.07921}
+}
+```
+
+---
+
+<a id="license"></a>
+
+## 📄 许可证
+
+<div align="center">
+
+<a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-4ecdc4?style=for-the-badge&logo=opensourceinitiative&logoColor=white" alt="MIT License" /></a>
+
+DeepCode 采用 [MIT License](LICENSE)。<br/>
+版权所有 © 2025 香港大学数据智能实验室。
 
 </div>

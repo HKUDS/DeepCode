@@ -1,0 +1,22 @@
+# Runtime dependencies imported by the Desktop App Server and its shared Agent
+# and Paper2Code kernels. Keep this list narrower than the CLI development
+# environment so packaging is reproducible and does not inherit local tools.
+aiofiles==25.1.0
+aiohttp==3.14.1
+anthropic==0.116.0
+httpx==0.28.1
+json-repair==0.61.4
+loguru==0.7.3
+mcp==1.29.0
+openai==2.29.0
+prompt-toolkit==3.0.52
+pydantic==2.12.5
+pydantic-settings==2.14.2
+pypdf==6.14.2
+PyYAML==6.0.3
+tiktoken==0.12.0
+
+# Packaging toolchain.
+pip==26.1.2
+pyinstaller==6.21.0
+pyinstaller-hooks-contrib==2026.6

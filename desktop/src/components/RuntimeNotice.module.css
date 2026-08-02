@@ -1,0 +1,81 @@
+.notice {
+  position: absolute;
+  z-index: 40;
+  top: 16px;
+  right: 16px;
+  display: grid;
+  width: min(440px, calc(100vw - 28px));
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  padding: 14px 15px;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border-subtle));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-raised) 92%, var(--danger-soft));
+  box-shadow: var(--shadow-menu);
+  color: var(--danger);
+}
+
+.copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.copy strong {
+  color: var(--text-primary);
+  font: 9.5px var(--font-mono);
+}
+
+.copy span {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.actions button {
+  display: inline-flex;
+  min-height: 35px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 24%, var(--border-subtle));
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--danger);
+  font-size: 10.5px;
+  font-weight: 610;
+}
+
+.actions button:hover:not(:disabled) {
+  border-color: var(--danger);
+}
+
+.actions .dismiss {
+  width: 30px;
+  padding: 0;
+  justify-content: center;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-tertiary);
+}
+
+@media (max-width: 720px) {
+  .notice {
+    right: 8px;
+    width: calc(100vw - 16px);
+  }
+
+  .copy span {
+    white-space: normal;
+  }
+}

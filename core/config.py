@@ -48,7 +48,6 @@ from core.providers.registry import (
     find_by_name,
 )
 
-
 _DEFAULT_CONFIG_FILENAME = "deepcode_config.json"
 # Env var that relocates the user-level config base (cf. Codex's CODEX_HOME).
 DEEPCODE_HOME_ENV = "DEEPCODE_HOME"
@@ -78,6 +77,7 @@ class _Base(BaseModel):
 class AgentDefaults(_Base):
     """Default LLM generation settings shared by all phases."""
 
+    connection: str | None = None
     provider: str = "auto"  # "auto" or registry name (e.g. "openai", "anthropic")
     model: str = "openai/gpt-4o-mini"
     max_tokens: int = 8192
@@ -96,6 +96,7 @@ class AgentDefaults(_Base):
 class AgentPhase(_Base):
     """Per-phase overrides. Unset fields fall back to :class:`AgentDefaults`."""
 
+    connection: str | None = None
     provider: str | None = None
     model: str | None = None
     max_tokens: int | None = None
@@ -113,6 +114,7 @@ class AgentsConfig(_Base):
 class ResolvedAgentSettings:
     """Phase + defaults merged into one immutable view."""
 
+    connection: str | None
     provider: str
     model: str
     max_tokens: int
@@ -140,6 +142,26 @@ class ProviderConfig(_Base):
     extra_headers: dict[str, str] | None = None
 
 
+class ConnectionProfileConfig(_Base):
+    """One named connection instance backed by a registry provider template.
+
+    API keys are intentionally absent. They live in the credential store or
+    an environment variable named by ``apiKeyEnv``.
+    """
+
+    label: str = ""
+    template: str = "custom"
+    adapter: Literal["openai_compat", "anthropic"] | None = None
+    api_base: str | None = None
+    api_key_env: str | None = None
+    extra_headers: dict[str, str] = Field(default_factory=dict)
+    model_catalog: Literal["auto", "openrouter", "openai", "anthropic", "manual"] = (
+        "auto"
+    )
+    manual_models: list[str] = Field(default_factory=list)
+    enabled: bool = True
+
+
 class ProvidersConfig(_Base):
     """Per-provider connection blocks. Add new providers by extending here
     and adding the matching :class:`~core.providers.registry.ProviderSpec`.
@@ -155,6 +177,7 @@ class ProvidersConfig(_Base):
     dashscope: ProviderConfig = Field(default_factory=ProviderConfig)
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     ollama: ProviderConfig = Field(default_factory=ProviderConfig)
+    profiles: dict[str, ConnectionProfileConfig] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +205,22 @@ class ToolsConfig(_Base):
 
 
 # ---------------------------------------------------------------------------
+# skills
+# ---------------------------------------------------------------------------
+
+
+class SkillsConfig(_Base):
+    """User/project Skill policy.
+
+    Skill IDs are opaque identifiers issued by the shared Skill catalog.  The
+    effective disabled set is the union of the user and project layers; callers
+    must not rely on the generic config deep-merge for this list.
+    """
+
+    disabled: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
 # DeepCode-specific
 # ---------------------------------------------------------------------------
 
@@ -189,15 +228,21 @@ class ToolsConfig(_Base):
 class SecurityConfig(_Base):
     """Permission + sandbox policy (P1 security base).
 
-    - ``permission_mode``: ``full_auto`` (default) / ``default`` / ``plan``.
-    - ``permissions``: nested ``{tool: {pattern: action}}`` ruleset consumed
-      by :func:`core.harness.permissions.rules_from_config`. Rules can only
-      tighten or relax *within* the non-overridable sensitive-path denylist,
-      never past it.
-    - ``sandbox``: turn command sandboxing on/off (mirrors the
-      ``DEEPCODE_SANDBOX`` env gate; env wins when set).
+    - ``access_preset``: product-level default for new Turns: ``ask`` /
+      ``read_only`` / ``full_access``.  ``None`` preserves legacy configs
+      without pretending that ``full_auto`` also disables the sandbox.
+    - ``permission_mode``: legacy low-level approval policy kept for existing
+      configs and automation definitions.
+    - ``permissions``: nested ``{tool: {pattern: action}}`` ruleset normalized
+      and frozen into each admitted Turn. Ask and legacy profiles retain the
+      protected-path guard; Read only is a hard non-mutating upper bound;
+      explicitly confirmed Full access removes the filesystem guard and
+      command sandbox while still honoring the frozen rules.
+    - ``sandbox``: legacy command-sandbox switch. Product presets resolve the
+      sandbox atomically; the environment gate remains for legacy callers.
     """
 
+    access_preset: Literal["ask", "read_only", "full_access"] | None = None
     permission_mode: str = "full_auto"
     permissions: dict[str, Any] = Field(default_factory=dict)
     sandbox: bool = True
@@ -289,6 +334,7 @@ class DeepCodeConfig(BaseSettings):
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    skills: SkillsConfig = Field(default_factory=SkillsConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     workspace: WorkspaceConfig = Field(default_factory=WorkspaceConfig)
     document_segmentation: DocumentSegmentationConfig = Field(
@@ -360,6 +406,7 @@ class DeepCodeConfig(BaseSettings):
             return getattr(defaults, name)
 
         return ResolvedAgentSettings(
+            connection=_pick("connection"),
             provider=_pick("provider"),
             model=_pick("model"),
             max_tokens=_pick("max_tokens"),
@@ -491,7 +538,21 @@ def _resolve_workspace_path(start: Path | None = None) -> Path:
 
 def default_config_path() -> Path:
     """The project-level ``deepcode_config.json`` (walked up from the cwd)."""
-    return _resolve_workspace_path() / _DEFAULT_CONFIG_FILENAME
+    return project_config_path()
+
+
+def project_config_path(workspace: str | Path | None = None) -> Path:
+    """Return the project config found by walking up from ``workspace``.
+
+    ``load_config()`` intentionally follows the process cwd for CLI
+    compatibility. Long-lived desktop processes host Sessions from many
+    directories, so they use this explicit variant instead of changing the
+    process cwd or accidentally applying the App Server launch directory's
+    configuration to every Session.
+    """
+
+    start = Path(workspace) if workspace is not None else None
+    return _resolve_workspace_path(start) / _DEFAULT_CONFIG_FILENAME
 
 
 def deepcode_home() -> Path:
@@ -540,6 +601,37 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     return merged
 
 
+def _project_runtime_layer(raw: dict[str, Any]) -> dict[str, Any]:
+    """Return project settings without user-owned provider routing.
+
+    Projects may select a user connection through ``agents.*.connection``.
+    Named profiles, API bases, and headers are always user-owned: otherwise a
+    repository could redirect a credential inherited from the user config or
+    environment. For legacy compatibility a project-level literal ``apiKey``
+    remains readable against the registry provider's trusted default endpoint;
+    all routing fields are discarded.
+    """
+
+    providers = raw.get("providers")
+    if not isinstance(providers, dict):
+        return raw
+    sanitized = dict(raw)
+    sanitized_providers: dict[str, Any] = {}
+    for name, value in providers.items():
+        if name == "profiles" or not isinstance(value, dict):
+            continue
+        if "apiKey" in value:
+            sanitized_providers[name] = {"apiKey": value["apiKey"]}
+        elif "api_key" in value:
+            sanitized_providers[name] = {"api_key": value["api_key"]}
+    if sanitized_providers:
+        sanitized["providers"] = sanitized_providers
+    else:
+        sanitized.pop("providers", None)
+    logger.trace("Ignoring project provider routing; LLM connections are user-scoped")
+    return sanitized
+
+
 def _resolve_env_refs(value: Any, *, path: str = "") -> Any:
     if isinstance(value, str):
 
@@ -580,10 +672,26 @@ def load_config(config_path: str | Path | None = None) -> DeepCodeConfig:
         raw = _load_raw(Path(config_path).expanduser().resolve())
     else:
         base = _load_raw(home_config_path())  # user-level, cwd-independent
-        project = _load_raw(default_config_path())  # cwd-scoped override
+        project = _project_runtime_layer(
+            _load_raw(default_config_path())
+        )  # cwd-scoped override
         raw = _deep_merge(base, project)
 
     raw = _resolve_env_refs(raw)
+    return DeepCodeConfig.model_validate(raw)
+
+
+def load_config_for_workspace(workspace: str | Path) -> DeepCodeConfig:
+    """Load the user base plus the project layer for an explicit workspace.
+
+    This is the desktop-safe counterpart to :func:`load_config`: it preserves
+    the CLI's cwd-based behavior while allowing one App Server process to host
+    Sessions from unrelated directories without global ``os.chdir()`` calls.
+    """
+
+    base = _load_raw(home_config_path())
+    project = _project_runtime_layer(_load_raw(project_config_path(workspace)))
+    raw = _resolve_env_refs(_deep_merge(base, project))
     return DeepCodeConfig.model_validate(raw)
 
 
@@ -690,9 +798,12 @@ def make_llm_provider(
 
 
 __all__ = [
+    "DEEPCODE_HOME_ENV",
     "AgentDefaults",
     "AgentPhase",
     "AgentsConfig",
+    "ConfigError",
+    "ConnectionProfileConfig",
     "DeepCodeConfig",
     "DocumentSegmentationConfig",
     "LLMLoggerConfig",
@@ -706,8 +817,6 @@ __all__ = [
     "ProvidersConfig",
     "ResolvedAgentSettings",
     "ToolsConfig",
-    "ConfigError",
-    "DEEPCODE_HOME_ENV",
     "WorkspaceConfig",
     "deepcode_home",
     "default_config_path",

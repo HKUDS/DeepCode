@@ -1,9 +1,9 @@
 """Small cross-platform runtime helpers.
 
-DeepCode starts several Python and Node subprocesses from different entry
-points. On Windows, default console encoding may be GBK/cp936, while Python
-tool servers and model logs freely emit UTF-8 text. Keep the policy in one
-place so launchers, FastAPI, and MCP stdio clients inherit the same behavior.
+DeepCode starts Python, tool, and MCP subprocesses from different entry
+points. On Windows, default console encoding may be GBK/cp936, while tool
+servers and model logs freely emit UTF-8 text. Keep the policy in one place
+so CLI, App Server, and MCP stdio clients inherit the same behavior.
 """
 
 from __future__ import annotations

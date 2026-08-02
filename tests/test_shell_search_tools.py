@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -11,9 +13,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.harness.tools.search import GlobTool, GrepTool  # noqa: E402
-from core.harness.tools.shell import BashTool, _preflight  # noqa: E402
-
+from core.agent_runtime.tools.base import ToolResult
+from core.harness.tools.search import GlobTool, GrepTool
+from core.harness.tools.shell import BashTool, _preflight
 
 # --- bash -------------------------------------------------------------------
 
@@ -22,6 +24,9 @@ from core.harness.tools.shell import BashTool, _preflight  # noqa: E402
 async def test_bash_runs_and_captures_output(tmp_path):
     b = BashTool(str(tmp_path))
     out = await b.execute(command="echo hello-deepcode")
+    assert isinstance(out, ToolResult)
+    assert out.is_error is False
+    assert out.metadata["exit_code"] == 0
     assert "hello-deepcode" in out
 
 
@@ -29,6 +34,9 @@ async def test_bash_runs_and_captures_output(tmp_path):
 async def test_bash_nonzero_exit_reported(tmp_path):
     b = BashTool(str(tmp_path))
     out = await b.execute(command="exit 3")
+    assert isinstance(out, ToolResult)
+    assert out.is_error is True
+    assert out.metadata["exit_code"] == 3
     assert "exit 3" in out
 
 
@@ -49,6 +57,13 @@ def test_preflight_allows_non_interactive():
     assert _preflight("pytest -q") is None
 
 
+def test_full_access_bash_description_discloses_disabled_sandbox(tmp_path):
+    tool = BashTool(str(tmp_path), sandbox_enabled=False)
+
+    assert "sandbox disabled" in tool.description
+    assert "sandboxed: writes are fenced" not in tool.description
+
+
 @pytest.mark.asyncio
 async def test_bash_preflight_refuses(tmp_path):
     b = BashTool(str(tmp_path))
@@ -62,6 +77,36 @@ async def test_bash_large_output_spilled(tmp_path):
     # produce > 30k chars
     out = await b.execute(command="python -c \"print('x' * 40000)\"")
     assert "output truncated" in out and "saved to:" in out
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group assertion")
+@pytest.mark.asyncio
+async def test_bash_cancellation_terminates_child_process_tree(tmp_path, monkeypatch):
+    monkeypatch.setenv("DEEPCODE_SANDBOX", "0")
+    tool = BashTool(str(tmp_path))
+    pid_file = tmp_path / "child.pid"
+    task = asyncio.create_task(
+        tool.execute(command="sleep 30 & echo $! > child.pid; wait")
+    )
+    for _ in range(100):
+        if pid_file.exists():
+            break
+        await asyncio.sleep(0.01)
+    assert pid_file.exists()
+    child_pid = int(pid_file.read_text().strip())
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    for _ in range(100):
+        try:
+            os.kill(child_pid, 0)
+        except ProcessLookupError:
+            break
+        await asyncio.sleep(0.01)
+    else:
+        pytest.fail("child process survived cancellation")
 
 
 # --- grep -------------------------------------------------------------------

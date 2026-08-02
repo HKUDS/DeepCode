@@ -1,0 +1,196 @@
+:root {
+  color: #202321;
+  background: #edf0ee;
+  color-scheme: light dark;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable",
+    "Segoe UI", Inter, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+
+  --font-display:
+    ui-rounded, "SF Pro Rounded", "Avenir Next", "Segoe UI Variable Display",
+    -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono:
+    "SFMono-Regular", ui-monospace, "Cascadia Code", Consolas, monospace;
+
+  --surface-shell: #edf0ee;
+  --surface-canvas: #f7f8f7;
+  --surface-sidebar: #eef1ef;
+  --surface-sidebar-strong: #e7ebe8;
+  --surface-raised: #ffffff;
+  --surface-overlay: rgb(255 255 255 / 88%);
+  --surface-hover: #e5e9e6;
+  --surface-selected: #dde3e0;
+  --surface-user: #edf0ef;
+  --surface-code: #f0f2f1;
+  --surface-inset: #e8ece9;
+
+  --text-primary: #202321;
+  --text-secondary: #626864;
+  --text-tertiary: #8a918c;
+  --text-inverse: #f8faf9;
+  --text-on-accent: #ffffff;
+
+  --border-subtle: #dfe4e1;
+  --border-strong: #cfd6d2;
+  --border-emphasis: #aab4ae;
+
+  --signal: #5b68d8;
+  --signal-strong: #4c59c3;
+  --signal-soft: rgb(91 104 216 / 13%);
+  --signal-faint: rgb(91 104 216 / 7%);
+  --success: #3f7d67;
+  --success-soft: #e7f1ed;
+  --attention: #a46634;
+  --attention-soft: #f8eee6;
+  --danger: #b55058;
+  --danger-soft: #f8e9eb;
+
+  --radius-xs: 7px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --radius-pill: 999px;
+
+  --shadow-soft: 0 1px 2px rgb(27 34 30 / 4%);
+  --shadow-float:
+    0 18px 48px rgb(27 34 30 / 10%), 0 3px 10px rgb(27 34 30 / 5%);
+  --shadow-menu:
+    0 18px 42px rgb(27 34 30 / 14%), 0 3px 10px rgb(27 34 30 / 7%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color: #f1f4f2;
+    background: #101211;
+
+    --surface-shell: #101211;
+    --surface-canvas: #181b19;
+    --surface-sidebar: #151816;
+    --surface-sidebar-strong: #1b1f1c;
+    --surface-raised: #222624;
+    --surface-overlay: rgb(29 33 30 / 88%);
+    --surface-hover: #292e2b;
+    --surface-selected: #303632;
+    --surface-user: #282d2a;
+    --surface-code: #151816;
+    --surface-inset: #121513;
+
+    --text-primary: #f1f4f2;
+    --text-secondary: #b3bab5;
+    --text-tertiary: #808982;
+    --text-inverse: #151816;
+    --text-on-accent: #ffffff;
+
+    --border-subtle: #2b302d;
+    --border-strong: #3a413d;
+    --border-emphasis: #59625d;
+
+    --signal: #929cff;
+    --signal-strong: #aab2ff;
+    --signal-soft: rgb(146 156 255 / 16%);
+    --signal-faint: rgb(146 156 255 / 8%);
+    --success: #6abb9c;
+    --success-soft: rgb(63 125 103 / 17%);
+    --attention: #d79058;
+    --attention-soft: rgb(178 100 43 / 14%);
+    --danger: #e4777e;
+    --danger-soft: rgb(179 64 73 / 14%);
+
+    --shadow-soft: 0 1px 2px rgb(0 0 0 / 16%);
+    --shadow-float:
+      0 20px 52px rgb(0 0 0 / 32%), 0 3px 10px rgb(0 0 0 / 22%);
+    --shadow-menu:
+      0 20px 46px rgb(0 0 0 / 42%), 0 3px 10px rgb(0 0 0 / 26%);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 320px;
+  height: 100%;
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  background: var(--surface-shell);
+  color: var(--text-primary);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+  outline: 3px solid var(--signal-soft);
+  outline-offset: 1px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--signal) 28%, transparent);
+}
+
+* {
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 99px;
+  background: var(--border-strong);
+  background-clip: padding-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

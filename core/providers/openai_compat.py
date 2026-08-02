@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import hashlib
 import importlib.util
@@ -31,13 +30,25 @@ else:
         )
     from openai import AsyncOpenAI
 
-from core.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from core.providers.base import (
+    LLMProvider,
+    LLMResponse,
+    ReasoningDeltaCallback,
+    ToolCallRequest,
+)
 from core.providers.model_compat import resolve_model_compat
 from core.providers.openai_responses import (
     consume_sdk_stream,
     convert_messages,
     convert_tools,
     parse_response_output,
+)
+from core.providers.reasoning import OPENROUTER_REASONING_DETAILS
+from core.reasoning import ReasoningChannel
+from core.providers.timeouts import (
+    StreamIdleTimeoutError,
+    iter_with_stream_idle_timeout,
+    resolve_stream_idle_timeout_s,
 )
 
 if TYPE_CHECKING:
@@ -51,6 +62,7 @@ _ALLOWED_MSG_KEYS = frozenset(
         "tool_call_id",
         "name",
         "reasoning_content",
+        "reasoning_details",
         "extra_content",
     }
 )
@@ -321,10 +333,18 @@ class OpenAICompatProvider(LLMProvider):
         return "{}"
 
     def _sanitize_messages(
-        self, messages: list[dict[str, Any]]
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        preserve_provider_state: bool = False,
     ) -> list[dict[str, Any]]:
         """Strip non-standard keys, normalize tool_call IDs."""
-        sanitized = LLMProvider._sanitize_request_messages(messages, _ALLOWED_MSG_KEYS)
+        allowed_keys = (
+            _ALLOWED_MSG_KEYS | {"provider_state"}
+            if preserve_provider_state
+            else _ALLOWED_MSG_KEYS
+        )
+        sanitized = LLMProvider._sanitize_request_messages(messages, allowed_keys)
         id_map: dict[str, str] = {}
 
         def map_id(value: Any) -> Any:
@@ -363,6 +383,27 @@ class OpenAICompatProvider(LLMProvider):
                 clean["tool_call_id"] = map_id(clean["tool_call_id"])
         return self._enforce_role_alternation(sanitized)
 
+    def _rehydrate_provider_state(
+        self, messages: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Translate internal continuation state into provider wire fields."""
+
+        if not self._spec or self._spec.name != "openrouter":
+            return messages
+        prepared: list[dict[str, Any]] = []
+        for message in messages:
+            state = message.get("provider_state")
+            details = (
+                state.get(OPENROUTER_REASONING_DETAILS)
+                if isinstance(state, dict)
+                else None
+            )
+            if message.get("role") == "assistant" and isinstance(details, list):
+                prepared.append({**message, "reasoning_details": details})
+            else:
+                prepared.append(message)
+        return prepared
+
     # ------------------------------------------------------------------
     # Build kwargs
     # ------------------------------------------------------------------
@@ -397,7 +438,9 @@ class OpenAICompatProvider(LLMProvider):
 
         kwargs: dict[str, Any] = {
             "model": compat.model_name,
-            "messages": self._sanitize_messages(self._sanitize_empty_content(messages)),
+            "messages": self._sanitize_messages(
+                self._sanitize_empty_content(self._rehydrate_provider_state(messages))
+            ),
         }
 
         if compat.include_temperature:
@@ -410,6 +453,20 @@ class OpenAICompatProvider(LLMProvider):
 
         if compat.reasoning_effort_wire:
             kwargs["reasoning_effort"] = compat.reasoning_effort_wire
+
+        if spec and spec.name == "openrouter":
+            # OpenRouter's unified reasoning object is the stable gateway
+            # contract.  Do not send the legacy top-level field as well.
+            kwargs.pop("reasoning_effort", None)
+            effort = (
+                reasoning_effort.strip().lower()
+                if isinstance(reasoning_effort, str)
+                else None
+            )
+            if effort == "none":
+                kwargs.setdefault("extra_body", {})["reasoning"] = {"enabled": False}
+            elif effort and effort != "auto":
+                kwargs.setdefault("extra_body", {})["reasoning"] = {"effort": effort}
 
         if compat.thinking_extra_body:
             kwargs.setdefault("extra_body", {}).update(compat.thinking_extra_body)
@@ -517,7 +574,7 @@ class OpenAICompatProvider(LLMProvider):
         """Build a Responses API body for direct OpenAI requests."""
         model_name = model or self.default_model
         sanitized_messages = self._sanitize_messages(
-            self._sanitize_empty_content(messages)
+            self._sanitize_empty_content(messages), preserve_provider_state=True
         )
         instructions, input_items = convert_messages(sanitized_messages)
 
@@ -539,8 +596,10 @@ class OpenAICompatProvider(LLMProvider):
         if compat.include_temperature:
             body["temperature"] = temperature
 
-        if reasoning_effort and reasoning_effort.lower() != "none":
-            body["reasoning"] = {"effort": reasoning_effort}
+        if self._should_use_responses_api(model, reasoning_effort):
+            body["reasoning"] = {"summary": "auto"}
+            if reasoning_effort:
+                body["reasoning"]["effort"] = reasoning_effort.lower()
             body["include"] = ["reasoning.encrypted_content"]
 
         if tools:
@@ -587,6 +646,65 @@ class OpenAICompatProvider(LLMProvider):
                     parts.append(item)
             return "".join(parts) or None
         return str(value)
+
+    @classmethod
+    def _reasoning_details(cls, value: Any) -> list[dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        result: list[dict[str, Any]] = []
+        for item in value:
+            item_map = cls._maybe_mapping(item)
+            if item_map:
+                result.append(item_map)
+        return result
+
+    @staticmethod
+    def _reasoning_details_summary(details: list[dict[str, Any]]) -> str | None:
+        parts: list[str] = []
+        for item in details:
+            if "summary" not in str(item.get("type") or "").lower():
+                continue
+            # OpenRouter's canonical ``reasoning.summary`` shape uses the
+            # ``summary`` field.  ``text`` remains accepted for older gateway
+            # implementations that emitted the pre-standard shape.
+            value = item.get("summary", item.get("text"))
+            if isinstance(value, str) and value:
+                parts.append(value)
+        return "".join(parts).strip() or None
+
+    @classmethod
+    async def _emit_stream_reasoning(
+        cls,
+        delta: Any,
+        callback: ReasoningDeltaCallback | None,
+    ) -> None:
+        """Normalize one reasoning delta without model-name conditionals."""
+
+        if callback is None:
+            return
+        delta_map = cls._maybe_mapping(delta) or {}
+        details = cls._reasoning_details(delta_map.get("reasoning_details"))
+        emitted_detail = False
+        for detail in details:
+            detail_type = str(detail.get("type") or "").lower()
+            if "summary" in detail_type:
+                value = detail.get("summary", detail.get("text"))
+                channel = ReasoningChannel.SUMMARY
+            elif detail_type.endswith(".text") or detail_type == "text":
+                value = detail.get("text")
+                channel = ReasoningChannel.PROVIDER_TRACE
+            else:
+                continue
+            if isinstance(value, str) and value:
+                emitted_detail = True
+                await callback(value, channel)
+        if emitted_detail:
+            return
+        text = cls._extract_text_content(delta_map.get("reasoning_content"))
+        if not text:
+            text = cls._extract_text_content(delta_map.get("reasoning"))
+        if text:
+            await callback(text, ReasoningChannel.PROVIDER_TRACE)
 
     @classmethod
     def _extract_usage(cls, response: Any) -> dict[str, int]:
@@ -688,12 +806,10 @@ class OpenAICompatProvider(LLMProvider):
             finish_reason = str(choice0.get("finish_reason") or "stop")
 
             raw_tool_calls: list[Any] = []
-            # StepFun Plan: fallback to reasoning field when content is empty
-            if not content and msg0.get("reasoning"):
-                content = self._extract_text_content(msg0.get("reasoning"))
             reasoning_content = msg0.get("reasoning_content")
             if not reasoning_content and msg0.get("reasoning"):
                 reasoning_content = self._extract_text_content(msg0.get("reasoning"))
+            reasoning_details = self._reasoning_details(msg0.get("reasoning_details"))
             for ch in choices:
                 ch_map = self._maybe_mapping(ch) or {}
                 m = self._maybe_mapping(ch_map.get("message")) or {}
@@ -706,6 +822,10 @@ class OpenAICompatProvider(LLMProvider):
                     content = self._extract_text_content(m.get("content"))
                 if not reasoning_content:
                     reasoning_content = m.get("reasoning_content")
+                if not reasoning_details:
+                    reasoning_details = self._reasoning_details(
+                        m.get("reasoning_details")
+                    )
 
             parsed_tool_calls = []
             for tc in raw_tool_calls:
@@ -734,6 +854,14 @@ class OpenAICompatProvider(LLMProvider):
                 reasoning_content=reasoning_content
                 if isinstance(reasoning_content, str)
                 else None,
+                reasoning_summary=self._reasoning_details_summary(reasoning_details),
+                provider_state=(
+                    {OPENROUTER_REASONING_DETAILS: reasoning_details}
+                    if self._spec
+                    and self._spec.name == "openrouter"
+                    and reasoning_details
+                    else None
+                ),
             )
 
         if not response.choices:
@@ -755,8 +883,6 @@ class OpenAICompatProvider(LLMProvider):
                     finish_reason = ch.finish_reason
             if not content and m.content:
                 content = m.content
-            if not content and getattr(m, "reasoning", None):
-                content = m.reasoning
 
         tool_calls = []
         for tc in raw_tool_calls:
@@ -778,6 +904,8 @@ class OpenAICompatProvider(LLMProvider):
         reasoning_content = getattr(msg, "reasoning_content", None) or None
         if not reasoning_content and getattr(msg, "reasoning", None):
             reasoning_content = msg.reasoning
+        msg_map = self._maybe_mapping(msg) or {}
+        reasoning_details = self._reasoning_details(msg_map.get("reasoning_details"))
 
         return LLMResponse(
             content=content,
@@ -785,15 +913,21 @@ class OpenAICompatProvider(LLMProvider):
             finish_reason=finish_reason or "stop",
             usage=self._extract_usage(response),
             reasoning_content=reasoning_content,
+            reasoning_summary=self._reasoning_details_summary(reasoning_details),
+            provider_state=(
+                {OPENROUTER_REASONING_DETAILS: reasoning_details}
+                if self._spec and self._spec.name == "openrouter" and reasoning_details
+                else None
+            ),
         )
 
-    @classmethod
-    def _parse_chunks(cls, chunks: list[Any]) -> LLMResponse:
+    def _parse_chunks(self, chunks: list[Any]) -> LLMResponse:
         content_parts: list[str] = []
         reasoning_parts: list[str] = []
         tc_bufs: dict[int, dict[str, Any]] = {}
         finish_reason = "stop"
         usage: dict[str, int] = {}
+        reasoning_details: list[dict[str, Any]] = []
 
         def _accum_tc(tc: Any, idx_hint: int) -> None:
             """Accumulate one streaming tool-call delta into *tc_bufs*."""
@@ -835,36 +969,39 @@ class OpenAICompatProvider(LLMProvider):
                 content_parts.append(chunk)
                 continue
 
-            chunk_map = cls._maybe_mapping(chunk)
+            chunk_map = self._maybe_mapping(chunk)
             if chunk_map is not None:
                 choices = chunk_map.get("choices") or []
                 if not choices:
-                    usage = cls._extract_usage(chunk_map) or usage
-                    text = cls._extract_text_content(
+                    usage = self._extract_usage(chunk_map) or usage
+                    text = self._extract_text_content(
                         chunk_map.get("content") or chunk_map.get("output_text")
                     )
                     if text:
                         content_parts.append(text)
                     continue
-                choice = cls._maybe_mapping(choices[0]) or {}
+                choice = self._maybe_mapping(choices[0]) or {}
                 if choice.get("finish_reason"):
                     finish_reason = str(choice["finish_reason"])
-                delta = cls._maybe_mapping(choice.get("delta")) or {}
-                text = cls._extract_text_content(delta.get("content"))
+                delta = self._maybe_mapping(choice.get("delta")) or {}
+                text = self._extract_text_content(delta.get("content"))
                 if text:
                     content_parts.append(text)
-                text = cls._extract_text_content(delta.get("reasoning_content"))
+                text = self._extract_text_content(delta.get("reasoning_content"))
                 if not text:
-                    text = cls._extract_text_content(delta.get("reasoning"))
+                    text = self._extract_text_content(delta.get("reasoning"))
                 if text:
                     reasoning_parts.append(text)
+                reasoning_details.extend(
+                    self._reasoning_details(delta.get("reasoning_details"))
+                )
                 for idx, tc in enumerate(delta.get("tool_calls") or []):
                     _accum_tc(tc, idx)
-                usage = cls._extract_usage(chunk_map) or usage
+                usage = self._extract_usage(chunk_map) or usage
                 continue
 
             if not chunk.choices:
-                usage = cls._extract_usage(chunk) or usage
+                usage = self._extract_usage(chunk) or usage
                 continue
             choice = chunk.choices[0]
             if choice.finish_reason:
@@ -878,6 +1015,10 @@ class OpenAICompatProvider(LLMProvider):
                     reasoning = getattr(delta, "reasoning", None)
                 if reasoning:
                     reasoning_parts.append(reasoning)
+                delta_map = self._maybe_mapping(delta) or {}
+                reasoning_details.extend(
+                    self._reasoning_details(delta_map.get("reasoning_details"))
+                )
             for tc in (delta.tool_calls or []) if delta else []:
                 _accum_tc(tc, getattr(tc, "index", 0))
 
@@ -899,6 +1040,12 @@ class OpenAICompatProvider(LLMProvider):
             finish_reason=finish_reason,
             usage=usage,
             reasoning_content="".join(reasoning_parts) or None,
+            reasoning_summary=self._reasoning_details_summary(reasoning_details),
+            provider_state=(
+                {OPENROUTER_REASONING_DETAILS: reasoning_details}
+                if self._spec and self._spec.name == "openrouter" and reasoning_details
+                else None
+            ),
         )
 
     @classmethod
@@ -1067,12 +1214,9 @@ class OpenAICompatProvider(LLMProvider):
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_reasoning_delta: ReasoningDeltaCallback | None = None,
     ) -> LLMResponse:
-        idle_timeout_s = int(
-            os.environ.get("DEEPCODE_STREAM_IDLE_TIMEOUT_S")
-            or os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S")
-            or "90"
-        )
+        idle_timeout_s = resolve_stream_idle_timeout_s()
         started = time.monotonic()
         response: LLMResponse | None = None
         try:
@@ -1091,15 +1235,10 @@ class OpenAICompatProvider(LLMProvider):
                     stream = await self._client.responses.create(**body)
 
                     async def _timed_stream():
-                        stream_iter = stream.__aiter__()
-                        while True:
-                            try:
-                                yield await asyncio.wait_for(
-                                    stream_iter.__anext__(),
-                                    timeout=idle_timeout_s,
-                                )
-                            except StopAsyncIteration:
-                                break
+                        async for event in iter_with_stream_idle_timeout(
+                            stream, timeout_s=idle_timeout_s
+                        ):
+                            yield event
 
                     (
                         content,
@@ -1107,9 +1246,11 @@ class OpenAICompatProvider(LLMProvider):
                         finish_reason,
                         usage,
                         reasoning_content,
+                        provider_state,
                     ) = await consume_sdk_stream(
                         _timed_stream(),
                         on_content_delta,
+                        on_reasoning_delta,
                     )
                     self._record_responses_success(model, reasoning_effort)
                     response = LLMResponse(
@@ -1117,7 +1258,8 @@ class OpenAICompatProvider(LLMProvider):
                         tool_calls=tool_calls,
                         finish_reason=finish_reason,
                         usage=usage,
-                        reasoning_content=reasoning_content,
+                        reasoning_summary=reasoning_content,
+                        provider_state=provider_state,
                     )
                     return response
                 except Exception as responses_error:
@@ -1138,23 +1280,22 @@ class OpenAICompatProvider(LLMProvider):
             kwargs["stream_options"] = {"include_usage": True}
             stream = await self._client.chat.completions.create(**kwargs)
             chunks: list[Any] = []
-            stream_iter = stream.__aiter__()
-            while True:
-                try:
-                    chunk = await asyncio.wait_for(
-                        stream_iter.__anext__(),
-                        timeout=idle_timeout_s,
-                    )
-                except StopAsyncIteration:
-                    break
+            async for chunk in iter_with_stream_idle_timeout(
+                stream, timeout_s=idle_timeout_s
+            ):
                 chunks.append(chunk)
                 if on_content_delta and chunk.choices:
                     text = getattr(chunk.choices[0].delta, "content", None)
                     if text:
                         await on_content_delta(text)
+                if chunk.choices:
+                    await self._emit_stream_reasoning(
+                        chunk.choices[0].delta,
+                        on_reasoning_delta,
+                    )
             response = self._parse_chunks(chunks)
             return response
-        except asyncio.TimeoutError:
+        except StreamIdleTimeoutError:
             response = LLMResponse(
                 content=(
                     f"Error calling LLM: stream stalled for more than "

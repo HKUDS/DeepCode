@@ -10,7 +10,16 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.harness.tools.patch import ApplyPatchTool, PatchError, parse_patch  # noqa: E402
+from core.domain.execution_security import (
+    ExecutionAccessPreset,
+    ExecutionSecurityProfile,
+)
+from core.harness.tools import default_coding_tools
+from core.harness.tools.patch import (
+    ApplyPatchTool,
+    PatchError,
+    parse_patch,
+)
 
 
 def _apply(tool: ApplyPatchTool, patch: str) -> str:
@@ -154,6 +163,34 @@ def test_refuses_escape_workspace(tmp_path):
     patch = "*** Begin Patch\n*** Delete File: ../evil.py\n*** End Patch\n"
     out = _apply(_tool(tmp_path), patch)
     assert out.startswith("Error") and "outside the workspace" in out
+
+
+def test_full_access_profile_allows_patch_outside_workspace(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("before\n")
+    registry = default_coding_tools(
+        workspace,
+        execution_security_profile=ExecutionSecurityProfile.for_preset(
+            ExecutionAccessPreset.FULL_ACCESS
+        ),
+    )
+    tool = registry.get("apply_patch")
+    assert isinstance(tool, ApplyPatchTool)
+    patch = (
+        "*** Begin Patch\n"
+        f"*** Update File: {outside}\n"
+        "@@\n"
+        "-before\n"
+        "+after\n"
+        "*** End Patch\n"
+    )
+
+    out = _apply(tool, patch)
+
+    assert out.startswith("Applied patch")
+    assert outside.read_text() == "after\n"
 
 
 def test_diagnostics_surface(tmp_path):

@@ -1,0 +1,103 @@
+.card {
+  margin-top: 13px;
+  padding: 13px 14px;
+  border: 1px solid color-mix(in srgb, var(--attention) 26%, var(--border-subtle));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--attention-soft) 58%, var(--surface-raised));
+}
+
+.operation {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: var(--attention);
+}
+
+.operation > span {
+  display: grid;
+  gap: 1px;
+}
+
+.operation strong {
+  color: var(--text-primary);
+  font: 11.5px var(--font-mono);
+}
+
+.operation small {
+  color: var(--text-tertiary);
+  font-size: 9.5px;
+  text-transform: capitalize;
+}
+
+.card p,
+.resolution {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  line-height: 1.62;
+}
+
+.arguments {
+  margin-top: 11px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--attention) 20%, var(--border-subtle));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface-raised) 55%, transparent);
+}
+
+.arguments summary {
+  padding: 8px 10px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 10.5px;
+  font-weight: 580;
+}
+
+.arguments pre {
+  max-height: 220px;
+  margin: 0;
+  padding: 9px 10px;
+  overflow: auto;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface-code);
+  color: var(--text-secondary);
+  font: 10.5px/1.62 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.actions button {
+  min-height: 36px;
+  padding: 0 13px;
+  border: 1px solid color-mix(in srgb, var(--attention) 32%, var(--border-subtle));
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--attention);
+  font-size: 10.5px;
+  font-weight: 620;
+}
+
+.actions button:hover:not(:disabled) {
+  border-color: var(--attention);
+  background: var(--surface-raised);
+}
+
+.actions .danger {
+  border-color: color-mix(in srgb, var(--danger) 25%, var(--border-subtle));
+  color: var(--danger);
+}
+
+.resolution {
+  margin-top: 10px;
+  color: var(--text-tertiary);
+  font: 9px var(--font-mono);
+  text-transform: capitalize;
+}

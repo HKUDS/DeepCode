@@ -244,9 +244,16 @@ class _PlannedDelete:
 class ApplyPatchTool(Tool):
     """Apply a multi-file patch atomically, with fuzzy hunk matching."""
 
-    def __init__(self, workspace: str, diagnostics=run_diagnostics):
+    def __init__(
+        self,
+        workspace: str,
+        diagnostics=run_diagnostics,
+        *,
+        allow_outside_workspace: bool = False,
+    ):
         self._workspace = str(workspace)
         self._diagnostics = diagnostics
+        self._allow_outside_workspace = allow_outside_workspace
 
     @property
     def name(self) -> str:
@@ -254,11 +261,16 @@ class ApplyPatchTool(Tool):
 
     @property
     def description(self) -> str:
+        scope = (
+            " Absolute paths outside the workspace are allowed by Full Access."
+            if self._allow_outside_workspace
+            else ""
+        )
         return (
             "Apply a multi-file patch (Add/Update/Delete/Move) atomically. "
             "Hunks locate their span by surrounding context, so they tolerate "
             "small drift. Prefer this over several edit calls when a change "
-            "spans files or must land all-or-nothing."
+            f"spans files or must land all-or-nothing.{scope}"
         )
 
     async def execute(self, **kwargs: Any) -> Any:
@@ -276,7 +288,9 @@ class ApplyPatchTool(Tool):
         planned_paths: set[Path] = set()
         for op in ops:
             target = _resolve(self._workspace, op.path)
-            if not _within(self._workspace, target):
+            if not self._allow_outside_workspace and not _within(
+                self._workspace, target
+            ):
                 return (
                     f"Error: refusing to touch a path outside the workspace: {op.path}."
                 )
@@ -316,7 +330,9 @@ class ApplyPatchTool(Tool):
                     return f"Error: in {op.path}: {exc}"
             if op.move_to:
                 dest = _resolve(self._workspace, op.move_to)
-                if not _within(self._workspace, dest):
+                if not self._allow_outside_workspace and not _within(
+                    self._workspace, dest
+                ):
                     return (
                         f"Error: refusing to move {op.path} outside the "
                         f"workspace: {op.move_to}."

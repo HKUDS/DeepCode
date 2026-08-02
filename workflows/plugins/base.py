@@ -198,7 +198,7 @@ class PluginRegistry:
     - Register plugins at specific hook points
     - Enable/disable plugins dynamically
     - Execute all plugins at a hook point in priority order
-    - Handle interaction callbacks to frontend
+    - Handle interaction callbacks to the application layer
 
     Usage:
         # Create registry
@@ -208,7 +208,7 @@ class PluginRegistry:
         registry.register(RequirementAnalysisPlugin())
         registry.register(PlanReviewPlugin(enabled=False))
 
-        # Set interaction callback (connects to WebSocket/API)
+        # Set interaction callback (connects to an application event sink)
         registry.set_interaction_callback(my_callback)
 
         # Run hooks in workflow

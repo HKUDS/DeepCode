@@ -16,11 +16,19 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.harness.code_mode import (  # noqa: E402
+from core.agent_runtime.tools import ToolRegistry
+from core.agent_setup import _wire_code_mode
+from core.domain.execution_security import (
+    ExecutionAccessPreset,
+    ExecutionSecurityProfile,
+)
+from core.harness.code_mode import (
     CodeModeTool,
     ToolAPISpec,
     api_from_definitions,
 )
+from core.harness.permissions import PermissionEngine, PermissionMode
+from core.harness.tools.files import WriteTool
 
 _API = [
     ToolAPISpec(
@@ -174,3 +182,176 @@ def test_tool_definition_shape():
     assert "code" in tool.parameters["properties"]
     assert "write(file_path, content)" in tool.description
     assert "read(file_path)" in tool.description
+
+
+def test_code_mode_forwards_frozen_sandbox_choice(monkeypatch):
+    import core.harness.code_mode.tool as code_mode_module
+
+    workspace = tempfile.mkdtemp()
+    captured = []
+    real_build = code_mode_module.build_exec_command
+
+    def capture_build(**kwargs):
+        captured.append(kwargs["enabled"])
+        return real_build(**kwargs)
+
+    monkeypatch.setenv("DEEPCODE_SANDBOX", "1")
+    monkeypatch.setattr(code_mode_module, "build_exec_command", capture_build)
+    tool = CodeModeTool(
+        workspace,
+        lambda *_args: None,
+        _API,
+        sandbox_enabled=False,
+    )
+
+    out = asyncio.run(tool.execute(code="print('ok')\n"))
+
+    assert captured == [False]
+    assert "ok" in out
+    assert "sandbox disabled" in tool.description
+
+
+def _wired_write_code_tool(
+    workspace: str,
+    *,
+    engine: PermissionEngine,
+    profile: ExecutionSecurityProfile,
+    approval_callback=None,
+):
+    registry = ToolRegistry()
+    registry.register(
+        WriteTool(
+            workspace,
+            diagnostics=lambda _path: [],
+            allow_outside_workspace=(
+                profile.access_preset is ExecutionAccessPreset.FULL_ACCESS
+            ),
+        )
+    )
+    _wire_code_mode(
+        registry,
+        workspace,
+        engine,
+        None,
+        profile,
+        approval_callback,
+    )
+    tool = registry.get("code")
+    assert tool is not None
+    return tool
+
+
+def test_code_mode_ask_uses_shared_approver(tmp_path):
+    calls = []
+
+    async def approve(tool_name, arguments, reason):
+        calls.append((tool_name, arguments, reason))
+        return True
+
+    profile = ExecutionSecurityProfile.for_preset(ExecutionAccessPreset.ASK)
+    tool = _wired_write_code_tool(
+        str(tmp_path),
+        engine=PermissionEngine(
+            mode=PermissionMode.DEFAULT,
+            approval_policy=profile.approval_policy,
+            cwd=str(tmp_path),
+        ),
+        profile=profile,
+        approval_callback=approve,
+    )
+
+    out = asyncio.run(tool.execute(code="write('approved.txt', 'ok')\n"))
+
+    assert (tmp_path / "approved.txt").read_text() == "ok"
+    assert len(calls) == 1
+    assert calls[0][0] == "write"
+    assert calls[0][1] == {"file_path": "approved.txt", "content": "ok"}
+    assert "requires confirmation" in calls[0][2]
+    assert "permission denied" not in out
+
+
+def test_code_mode_ask_rejection_is_fail_closed(tmp_path):
+    profile = ExecutionSecurityProfile.for_preset(ExecutionAccessPreset.ASK)
+    tool = _wired_write_code_tool(
+        str(tmp_path),
+        engine=PermissionEngine(
+            mode=PermissionMode.DEFAULT,
+            approval_policy=profile.approval_policy,
+            cwd=str(tmp_path),
+        ),
+        profile=profile,
+        approval_callback=lambda *_args: False,
+    )
+
+    out = asyncio.run(tool.execute(code="print(write('rejected.txt', 'no'))\n"))
+
+    assert not (tmp_path / "rejected.txt").exists()
+    assert "permission denied" in out
+    assert "user rejected" in out
+
+
+def test_code_mode_ask_approval_error_is_fail_closed(tmp_path):
+    def broken_approver(*_args):
+        raise RuntimeError("approval transport failed")
+
+    profile = ExecutionSecurityProfile.for_preset(ExecutionAccessPreset.ASK)
+    tool = _wired_write_code_tool(
+        str(tmp_path),
+        engine=PermissionEngine(
+            mode=PermissionMode.DEFAULT,
+            approval_policy=profile.approval_policy,
+            cwd=str(tmp_path),
+        ),
+        profile=profile,
+        approval_callback=broken_approver,
+    )
+
+    out = asyncio.run(tool.execute(code="print(write('errored.txt', 'no'))\n"))
+
+    assert not (tmp_path / "errored.txt").exists()
+    assert "approval request errored" in out
+    assert "fail-closed" in out
+
+
+def test_code_mode_read_only_denies_without_approval(tmp_path):
+    approvals = []
+    profile = ExecutionSecurityProfile.for_preset(ExecutionAccessPreset.READ_ONLY)
+    tool = _wired_write_code_tool(
+        str(tmp_path),
+        engine=PermissionEngine(
+            mode=PermissionMode.PLAN,
+            approval_policy=profile.approval_policy,
+            enforce_read_only=True,
+            cwd=str(tmp_path),
+        ),
+        profile=profile,
+        approval_callback=lambda *_args: approvals.append(True) or True,
+    )
+
+    out = asyncio.run(tool.execute(code="print(write('blocked.txt', 'no'))\n"))
+
+    assert not (tmp_path / "blocked.txt").exists()
+    assert approvals == []
+    assert "permission denied" in out
+
+
+def test_code_mode_full_access_does_not_request_approval(tmp_path):
+    approvals = []
+    profile = ExecutionSecurityProfile.for_preset(ExecutionAccessPreset.FULL_ACCESS)
+    tool = _wired_write_code_tool(
+        str(tmp_path),
+        engine=PermissionEngine(
+            mode=PermissionMode.FULL_AUTO,
+            approval_policy=profile.approval_policy,
+            protect_sensitive_paths=False,
+            cwd=str(tmp_path),
+        ),
+        profile=profile,
+        approval_callback=lambda *_args: approvals.append(True) or False,
+    )
+
+    out = asyncio.run(tool.execute(code="write('allowed.txt', 'yes')\n"))
+
+    assert (tmp_path / "allowed.txt").read_text() == "yes"
+    assert approvals == []
+    assert "permission denied" not in out

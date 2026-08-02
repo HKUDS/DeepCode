@@ -55,7 +55,7 @@ class SandboxPolicy:
     @classmethod
     def for_workspace(
         cls, workspace: str | os.PathLike[str], *, allow_network: bool = False
-    ) -> "SandboxPolicy":
+    ) -> SandboxPolicy:
         root = os.path.abspath(str(workspace))
         return cls(writable_roots=(root,), allow_network=allow_network)
 
@@ -326,16 +326,23 @@ def sandbox_available() -> bool:
     return sandbox_backend() != "none"
 
 
-def sandbox_enabled() -> bool:
-    """Whether command sandboxing is turned on (env-gated, default ON).
+def sandbox_enabled(configured: bool | None = None) -> bool:
+    """Resolve whether command sandboxing is enabled.
 
     ``DEEPCODE_SANDBOX`` accepts ``0``/``false``/``off``/``no`` to disable;
-    anything else (incl. unset) means enabled. Disabling is an escape hatch
-    for environments where the sandbox misbehaves — it does not affect the
-    permission engine's file-tool denylist, which is always active.
+    any other *non-empty* value enables it.  When the variable is absent,
+    ``configured`` is used, falling back to the legacy default (enabled).
+    Keeping environment resolution here preserves the public escape hatch
+    while allowing a frozen execution profile to pass an explicit decision to
+    :func:`build_exec_command`.
+
+    The explicit Full Access profile also disables the permission engine's
+    sensitive-path protection; legacy sandbox toggles do not.
     """
     raw = os.environ.get("DEEPCODE_SANDBOX", "").strip().lower()
-    return raw not in ("0", "false", "off", "no")
+    if raw:
+        return raw not in ("0", "false", "off", "no")
+    return True if configured is None else configured
 
 
 def build_exec_command(
@@ -345,6 +352,7 @@ def build_exec_command(
     workspace: str | os.PathLike[str],
     allow_network: bool = True,
     shell: str = "/bin/bash",
+    enabled: bool | None = None,
 ) -> WrappedCommand:
     """Build the (possibly sandboxed) command a tool executor should run.
 
@@ -361,7 +369,11 @@ def build_exec_command(
     if (command is None) == (argv is None):
         raise ValueError("provide exactly one of command= or argv=")
 
-    if not sandbox_enabled():
+    # ``enabled`` is the immutable per-execution value used by product access
+    # presets.  ``None`` intentionally retains the legacy env/default behavior
+    # for direct embedders that have not adopted ExecutionSecurityProfile yet.
+    effective_enabled = sandbox_enabled() if enabled is None else enabled
+    if not effective_enabled:
         bare = [shell, "-c", command] if command is not None else list(argv or [])
         return WrappedCommand(argv=bare, backend="disabled")
 

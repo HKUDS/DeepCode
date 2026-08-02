@@ -17,16 +17,24 @@ incrementally on each store mutation and can be rebuilt from disk at any time
 Reliability stance (mechanism, DEEPCODE_V2_MASTER_PLAN.md §3.4): the index is
 an *optimisation*, never a correctness dependency. Every store method that
 uses it falls back to the JSONL scan if SQLite is unavailable or errors, and
-reconciles itself when it notices the on-disk session count has drifted (e.g.
-sessions written by an older build that had no index).
+reconciles itself against canonical file signatures so a long-lived process
+observes sessions and task/message updates written by another CLI or Desktop
+process.
 """
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from core.private_storage import (
+    ensure_private_directory,
+    ensure_private_file,
+    open_private_file,
+)
 
 if TYPE_CHECKING:
     from core.sessions.models import SessionSummary, SessionTask
@@ -62,13 +70,17 @@ class SessionIndex:
     def __init__(self, db_path: Path | str) -> None:
         self._lock = threading.RLock()
         self._conn: sqlite3.Connection | None = None
+        path = Path(db_path)
         try:
-            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+            ensure_private_directory(path.parent)
+            descriptor = open_private_file(path, os.O_RDWR | os.O_CREAT)
+            os.close(descriptor)
             # check_same_thread=False + our own RLock: the store touches this
             # from whatever thread services a request; we serialise ourselves.
-            conn = sqlite3.connect(str(db_path), check_same_thread=False)
+            conn = sqlite3.connect(str(path), check_same_thread=False)
             conn.executescript(_SCHEMA)
             conn.commit()
+            ensure_private_file(path)
             self._conn = conn
         except (sqlite3.Error, OSError):
             self._conn = None

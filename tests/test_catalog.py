@@ -52,6 +52,13 @@ def test_none_model_is_default():
     assert catalog.resolve_model_info(None).source == "default"
 
 
+def test_kimi_k3_has_a_conservative_offline_one_million_token_window():
+    info = catalog.resolve_model_info("moonshotai/kimi-k3")
+
+    assert info.context_window == 1_048_576
+    assert info.max_output_tokens == 128_000
+
+
 def test_convenience_helpers():
     assert catalog.context_window_for("gemini-2.5-pro") == 1_048_576
     assert catalog.max_output_tokens_for("claude-sonnet-5") == 64_000

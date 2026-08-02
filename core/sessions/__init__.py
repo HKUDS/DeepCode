@@ -32,6 +32,7 @@ from core.sessions.models import (
     SessionTask,
 )
 from core.sessions.store import SessionStore, get_default_store
+from core.sessions.thread_goal_store import ThreadGoalRecord, ThreadGoalStore
 
 __all__ = [
     "Session",
@@ -40,5 +41,7 @@ __all__ = [
     "SessionStore",
     "SessionSummary",
     "SessionTask",
+    "ThreadGoalStore",
+    "ThreadGoalRecord",
     "get_default_store",
 ]

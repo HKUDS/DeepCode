@@ -1,3 +1,6 @@
 # Force LF line endings for shell scripts (prevents CRLF issues in Docker)
 *.sh text eol=lf
 docker-entrypoint.sh text eol=lf
+
+# Generated protocol sources are byte-compared on every supported platform.
+desktop/src/generated/*.ts text eol=lf

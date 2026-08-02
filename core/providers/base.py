@@ -12,6 +12,11 @@ from typing import Any
 
 from loguru import logger
 
+from core.reasoning import ReasoningChannel
+
+
+ReasoningDeltaCallback = Callable[[str, ReasoningChannel], Awaitable[None]]
+
 
 def image_placeholder_text(path: str | None, *, empty: str = "[image]") -> str:
     """Return a textual placeholder for an image block.
@@ -65,7 +70,13 @@ class LLMResponse:
     finish_reason: str = "stop"
     usage: dict[str, int] = field(default_factory=dict)
     retry_after: float | None = None
+    # ``reasoning_content`` is provider-designated reasoning text. It is kept
+    # distinct from a provider-safe summary and from opaque ``provider_state``;
+    # product surfaces label it as a provider trace, never as a complete or
+    # private chain of thought.
     reasoning_content: str | None = None
+    reasoning_summary: str | None = None
+    provider_state: dict[str, Any] | None = None
     thinking_blocks: list[dict] | None = None
     error_status_code: int | None = None
     error_kind: str | None = None
@@ -493,6 +504,7 @@ class LLMProvider(ABC):
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_reasoning_delta: ReasoningDeltaCallback | None = None,
     ) -> LLMResponse:
         response = await self.chat(
             messages=messages,
@@ -503,6 +515,20 @@ class LLMProvider(ABC):
             reasoning_effort=reasoning_effort,
             tool_choice=tool_choice,
         )
+        if on_reasoning_delta and response.reasoning_summary:
+            await on_reasoning_delta(
+                response.reasoning_summary,
+                ReasoningChannel.SUMMARY,
+            )
+        if (
+            on_reasoning_delta
+            and response.reasoning_content
+            and response.reasoning_content != response.reasoning_summary
+        ):
+            await on_reasoning_delta(
+                response.reasoning_content,
+                ReasoningChannel.PROVIDER_TRACE,
+            )
         if on_content_delta and response.content:
             await on_content_delta(response.content)
         return response
@@ -527,6 +553,7 @@ class LLMProvider(ABC):
         reasoning_effort: object = _SENTINEL,
         tool_choice: str | dict[str, Any] | None = None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_reasoning_delta: ReasoningDeltaCallback | None = None,
         retry_mode: str = "standard",
         on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
     ) -> LLMResponse:
@@ -546,6 +573,7 @@ class LLMProvider(ABC):
             reasoning_effort=reasoning_effort,
             tool_choice=tool_choice,
             on_content_delta=on_content_delta,
+            on_reasoning_delta=on_reasoning_delta,
         )
         return await self._run_with_retry(
             self._safe_chat_stream,

@@ -19,12 +19,23 @@ venv/
 dist/
 build/
 site/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+desktop/src-tauri/binaries/*
+!desktop/src-tauri/binaries/.gitkeep
+desktop/build/sidecar/
 
 # Logs / Reports
 *.log
 *.log.*
 *.logfire
+.coverage
 *.coverage/
+coverage.xml
+coverage/
+htmlcov/
+test-results/
+playwright-report/
 log/
 logs/
 
@@ -44,6 +55,7 @@ temp/
 .idea/
 .vscode/
 .vscode/settings.json
+.claude/settings.local.json
 
 # Framework-specific files
 local_neo4jWorkDir/
@@ -62,9 +74,8 @@ TODO.md
 ignore_this.txt
 *.ignore.*
 
-# scratch test files (but real suites under tests/ ARE tracked)
-test_*
-!tests/test_*
+# scratch test files at the repository root only
+/test_*
 run_indexer_with_filtering.py
 
 # Cline files
@@ -74,10 +85,10 @@ memory-bank/
 deepcode_lab/
 uploads/
 
-# secrets (use .env or environment variables instead)
-# NEVER commit real API keys; use the *.example files as templates.
+# Secrets belong in DeepCode's credential store or environment variables.
+# NEVER commit real API keys or local user configuration.
 deepcode_config.json
-nanobot_config.json
+deepcode_config.json.lock
 *.secrets.yaml
 *.secrets.yml
 secrets.json
