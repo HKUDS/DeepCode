@@ -300,7 +300,8 @@ def test_loop_resume_active_idle_goal_reuses_identity_and_stored_workspace(
     assert session_after is not None
     assert session_after.metadata["workspace"] == str(workspace.resolve())
     assert session_after.metadata["workspace"] == session_before.metadata["workspace"]
-    assert workspace.name in capsys.readouterr().out
+    rendered_output = "".join(capsys.readouterr().out.splitlines())
+    assert workspace.name in rendered_output
 
 
 def test_loop_resume_blocked_goal_retries_without_new_session(
@@ -551,7 +552,8 @@ def test_loop_resume_execution_override_is_one_turn_only(
     assert provider_options[-1]["connection_id"] == "openrouter"
     assert provider_options[-1]["model"] == "next-model"
     assert provider_options[-1]["execution_profile"].reasoning_effort == "high"
-    assert workspace_override.name in capsys.readouterr().out
+    rendered_output = "".join(capsys.readouterr().out.splitlines())
+    assert workspace_override.name in rendered_output
 
 
 def test_loop_resume_rejects_missing_goal_and_mutating_creation_options(

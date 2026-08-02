@@ -19,11 +19,14 @@ if os.name == "nt":
     _LOCKFILE_FAIL_IMMEDIATELY = 0x00000001
     _LOCKFILE_EXCLUSIVE_LOCK = 0x00000002
     _ERROR_LOCK_VIOLATION = 33
+    # ``ctypes.wintypes`` does not expose ULONG_PTR on every supported Python
+    # release.  The Windows type is an unsigned integer with pointer width.
+    _ULONG_PTR = ctypes.c_size_t
 
     class _Overlapped(ctypes.Structure):
         _fields_ = [
-            ("Internal", wintypes.ULONG_PTR),
-            ("InternalHigh", wintypes.ULONG_PTR),
+            ("Internal", _ULONG_PTR),
+            ("InternalHigh", _ULONG_PTR),
             ("Offset", wintypes.DWORD),
             ("OffsetHigh", wintypes.DWORD),
             ("hEvent", wintypes.HANDLE),

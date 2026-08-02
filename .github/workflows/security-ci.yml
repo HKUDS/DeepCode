@@ -77,6 +77,7 @@ jobs:
           python -m pip install --upgrade pip pip-audit==2.10.1
           mkdir -p desktop/build/security
           python -m venv desktop/build/python-audit-env
+          desktop/build/python-audit-env/bin/python -m pip install --upgrade pip
           desktop/build/python-audit-env/bin/python -m pip install -e .
           desktop/build/python-audit-env/bin/python -m pip check
           python desktop/scripts/audit-python-environment.py \
