@@ -262,6 +262,11 @@ class TuiThreadClient:
     async def wait_until_idle(self) -> None:
         while self.application.turns.active_for_thread(self.thread.id) is not None:
             await asyncio.sleep(0.02)
+        # Live SQ/EQ events originate on the execution worker and are forwarded
+        # with call_soon_threadsafe. They are enqueued before the Turn becomes
+        # terminal, so one event-loop checkpoint deterministically renders the
+        # settled Turn before callers print their next prompt or close the TUI.
+        await asyncio.sleep(0)
 
     def new_thread(self, *, title: str = "") -> Thread:
         self._require_idle()

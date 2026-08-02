@@ -197,6 +197,10 @@ class TuiGoalController:
                     loop.remove_signal_handler(signal.SIGINT)
                 except (NotImplementedError, RuntimeError, ValueError):
                     pass
+        if not stop_waiting.is_set() and current.status is not ThreadGoalStatus.ACTIVE:
+            # Goal completion can be persisted by a tool before its deciding
+            # Turn has emitted and rendered the final tool/result events.
+            await self.owner.thread_client.wait_until_idle()
         suffix = (
             "\nStopped waiting; the Goal remains active."
             if stop_waiting.is_set() and current.status is ThreadGoalStatus.ACTIVE
