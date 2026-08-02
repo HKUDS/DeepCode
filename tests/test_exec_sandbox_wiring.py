@@ -46,9 +46,9 @@ def test_disabled_via_env_returns_bare(monkeypatch, tmp_path):
 def test_enabled_by_default(monkeypatch, tmp_path):
     monkeypatch.delenv("DEEPCODE_SANDBOX", raising=False)
     w = build_exec_command(command="echo hi", workspace=tmp_path)
-    # backend is seatbelt/bwrap on supported platforms, else "none" — never
+    # backend is seatbelt/bwrap/job on supported platforms, else "none" — never
     # "disabled" (which only happens when explicitly turned off).
-    assert w.backend in ("seatbelt", "bwrap", "none")
+    assert w.backend in ("seatbelt", "bwrap", "job", "none")
 
 
 def test_explicit_frozen_sandbox_value_beats_environment(monkeypatch, tmp_path):
@@ -66,7 +66,7 @@ def test_explicit_frozen_sandbox_value_beats_environment(monkeypatch, tmp_path):
         workspace=tmp_path,
         enabled=True,
     )
-    assert enabled.backend in ("seatbelt", "bwrap", "none")
+    assert enabled.backend in ("seatbelt", "bwrap", "job", "none")
     assert enabled.backend != "disabled"
 
 
