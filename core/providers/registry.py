@@ -45,6 +45,7 @@ class ProviderSpec:
     detect_by_key_prefix: str = ""
     detect_by_base_keyword: str = ""
     default_api_base: str = ""
+    requires_api_base: bool = False
     strip_model_prefix: bool = False
     supports_max_completion_tokens: bool = False
     model_overrides: tuple[tuple[str, dict[str, Any]], ...] = field(
@@ -68,6 +69,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="Custom",
         backend="openai_compat",
         is_direct=True,
+        requires_api_base=True,
     ),
     ProviderSpec(
         name="openrouter",
@@ -139,6 +141,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="vLLM/Local",
         backend="openai_compat",
         is_local=True,
+        requires_api_base=True,
     ),
     ProviderSpec(
         name="ollama",

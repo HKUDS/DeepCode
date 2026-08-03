@@ -64,20 +64,13 @@
 
 ### 🖥️ **Interface Showcase**
 
-#### 🖥️ **CLI Interface**
-
-**Terminal-Based Development**
+#### 🖥️ **DeepCode Desktop**
 
 <div align="center">
 
-  <img src="https://github.com/Zongwei9888/Experiment_Images/blob/8882a7313c504ca97ead6e7b36c51aa761b6a4f3/DeepCode_images/CLI.gif" alt="CLI Interface Demo" width="100%" style="border-radius: 10px; box-shadow: 0 8px 20px rgba(45,55,72,0.3); margin: 15px 0;"/>
+  <img src="https://github.com/Zongwei9888/Experiment_Images/raw/e389750e733ec2c1b94986cb990036899dcaec52/DeepCode_images/Area.gif" alt="DeepCode Desktop coding agent demo" width="100%" style="border-radius: 10px; box-shadow: 0 8px 20px rgba(45,55,72,0.3); margin: 15px 0;"/>
 
-  <div style="background: linear-gradient(135deg, #2D3748 0%, #4A5568 100%); border-radius: 12px; padding: 15px; margin: 15px 0; color: white;">
-    <strong>🚀 Advanced Terminal Experience</strong><br/>
-    <small>⚡ Fast command-line workflow<br/>🔧 Developer-friendly interface<br/>📊 Real-time progress tracking</small>
-  </div>
-
-*Professional terminal interface for advanced users and CI/CD integration*
+*Work with DeepCode in a visual workspace for Sessions, goals, tool activity, code changes, and verification.*
 </div>
 
 DeepCode has one Agent runtime and two interfaces: an interactive CLI for
@@ -133,6 +126,7 @@ Skills, permissions, Goals, and Automations. See the
   - [Parallel and repeatable work](#parallel-and-repeatable-work)
 - [⚡ Quick start](#quick-start)
 - [🧭 Using DeepCode](#using-deepcode)
+- [⚙️ Headless and automation](docs/HEADLESS_AND_AUTOMATION.md)
 - [🔬 Paper2Code](#paper2code)
   - [The original architecture](#the-original-architecture)
   - [Research results](#research-results)
@@ -147,6 +141,35 @@ Skills, permissions, Goals, and Automations. See the
 </p>
 
 ## News
+
+**2026-08-03 · 🎉 DeepCode v2.0 is here**
+
+DeepCode v2.0 introduces a new general-purpose Coding Agent framework for
+building, fixing, understanding, and improving real software projects.
+
+- **Take on real repository work.** DeepCode can explore a codebase, edit
+  files, run commands and tests, review changes, and carry a task through to a
+  working result.
+- **Keep complex goals moving with Loop Engineering.** Give DeepCode a goal and
+  it can continue through understanding, implementation, verification, and
+  repair instead of stopping after one plausible answer.
+- **Stay in control while the Agent works.** Add requirements, correct its
+  direction, switch models, stop, resume, or revise the goal without throwing
+  away the work already completed.
+- **See what you are getting.** Plans, tool activity, code changes, test results,
+  and verification evidence stay visible so the result is easier to review and
+  trust.
+- **Build Automations around the way you work.** Turn any natural-language
+  instruction into a project-specific task: run it on demand or on a recurring
+  interval, then edit, pause, resume, and review every result. Use it for the
+  work you want DeepCode to keep taking care of, from regression checks and
+  test repair to documentation upkeep and repository maintenance.
+- **Work your way.** Use Desktop or CLI, bring your own models and Skills, and
+  delegate focused work without changing the underlying Agent workflow.
+
+DeepCode v2.0 is built to help you spend less time supervising every step and
+more time shipping software you are proud of. We cannot wait to see what you
+build! 🚀
 
 **2026-07-31 · One execution model across CLI and Desktop**
 
@@ -208,145 +231,184 @@ Skills, permissions, Goals, and Automations. See the
 
 ## What Deep means in DeepCode
 
-The name is a product promise, not complexity for its own sake. DeepCode goes
-beyond a plausible answer or an isolated patch. It follows the task through
-repository relationships, real execution, verification failures, and the
-context required to continue the work later.
+Most Coding Agents can generate code. The hard part is understanding a real
+project, making changes within the right boundaries, continuously correcting
+course from runtime results, and making it clear why the outcome can be
+trusted.
 
-| Depth                 | What it means                                                                                                   |
-| --------------------- | --------------------------------------------------------------------------------------------------------------- |
-| **Deep Context**      | Understand files together with their relationships, project instructions, selected Skills, history, and memory. |
-| **Deep Execution**    | Work on real files and commands through an Agent Harness with permissions, approvals, and workspace boundaries. |
-| **Deep Verification** | Feed tests, diagnostics, and failures back into the task instead of stopping at a convincing-looking response.  |
-| **Deep Continuity**   | Preserve the Session, decisions, evidence, and recovery state across time, directories, and model changes.      |
+DeepCode is an open-source Coding Agent for real software engineering. Give it
+a simple change or a goal that takes dozens of steps. It can understand the
+project, work on the code, run tools, verify results, and continue after an
+interruption, restart, or model switch.
 
-Paper2Code established this pattern by following a research paper from
-document understanding through reference mining, implementation, and
-verification. The current general coding Agent applies the same depth to
-everyday repository work.
+“Deep” represents four kinds of depth that remain with the task from start to
+finish:
 
-```mermaid
-flowchart LR
-    INTENT["Goal · constraints · definition of done"]
+| Depth                 | What it means for you                                                                                                  |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| **Deep Context**      | Understand the task through project structure, engineering rules, Skills, Session history, and long-term memory.       |
+| **Deep Execution**    | Search, edit, run commands, and execute tests instead of stopping at suggestions—and show the work as it happens.       |
+| **Deep Verification** | Check results with tests, builds, diagnostics, Diffs, and task Artifacts rather than treating a plausible answer as done. |
+| **Deep Continuity**   | Preserve conversations, decisions, tool records, and evidence across time, directories, clients, and model changes.    |
 
-    subgraph CONTINUITY["Deep Continuity · durable Session and memory"]
-        CONTEXT["Deep Context · repository relationships · instructions · Skills"]
-        EXECUTION["Deep Execution · Agent Harness · tools · permissions"]
-        VERIFY["Deep Verification · observe · test · repair"]
-        EVIDENCE["Evidence · diff · commands · tests · Artifacts"]
+DeepCode stands out in three ways:
 
-        CONTEXT --> EXECUTION
-        EXECUTION --> VERIFY
-        VERIFY --> EVIDENCE
-        EVIDENCE -->|not yet proved| CONTEXT
-    end
+- **Turn complex knowledge into a working system.** DeepCode is not limited to
+  Issues and code snippets. Paper2Code can start from papers, documents,
+  reference repositories, and experiment goals, then carry the work through
+  understanding, implementation, and verification.
+- **Keep long tasks moving while staying in control.** A Goal is not a one-shot
+  prompt. Add requirements, revise the Goal, pause, stop, or continue while the
+  task is running without losing completed work.
+- **Take code changes through verification and review.** DeepCode goes beyond
+  generating a patch. It runs the commands and tests the task requires,
+  inspects build results and file changes, and links the Goal outcome to
+  relevant execution records for review.
 
-    INTENT --> CONTEXT
-    EVIDENCE -->|verified| RESULT["Reviewable result"]
-```
-
-This is the product's operating model. The interface only determines how the
-user enters and observes it.
+DeepCode is not designed to make an Agent look busier. It is designed to help
+you finish real software engineering work more reliably.
 
 ## Core capabilities
 
-The four kinds of depth become concrete through the following product
-capabilities.
+DeepCode provides a complete local Coding Agent workflow. CLI and Desktop are
+two ways to use the same Agent, Sessions, models, Skills, permissions, and task
+state.
 
 <p align="center">
   <img src="assets/readme/verification-loop.png" alt="DeepCode Agent Harness and verification loop" width="1080" />
 </p>
 
-### Agent Harness
+### Work directly in your repository
 
-The Harness is the part of DeepCode that turns a model response into work you
-can supervise. It gives the Agent native read, search, edit, patch, shell, test,
-and delegation capabilities while keeping every action inside one execution
-contract.
+DeepCode can read and search code, edit files, apply patches, run commands and
+tests, and continue working from the results. Tool calls, execution progress,
+and file changes stay visible, so you can see what the Agent did and what
+changed in the project.
 
-- tool activity is streamed as progress rather than hidden behind a spinner;
-- permission decisions are explicit: `allow`, `ask`, or `deny`;
-- **Ask** and **Read only** retain protected-path rules and the available
-  platform sandbox; **Full access** is an explicit unrestricted grant;
-- each admitted Turn freezes its resolved execution profile, so later setting
-  changes cannot alter work that is already running or queued;
-- interrupted or crashed work is settled without silently replaying side
-  effects.
+Use it to explain code, fix bugs, and add tests—or for cross-file refactors,
+feature development, and longer repository-level tasks.
 
-### Loop Engineering
+When you provide a public HTTP or HTTPS URL, the shared `web_fetch` tool can
+read the page without a search provider or an additional API key.
 
-One good response is not the same as a finished change. Loop Engineering lets
-DeepCode keep working across Turns against a mutable natural-language Goal.
-The working Agent uses the conversation, current code, and tool results to
-decide whether to continue, complete, or report a genuine blocker.
+### Goal-driven Loop Engineering
 
-Users can revise the Goal or steer the active Turn without discarding useful
-work. Tests, builds, lint checks, and other explicit verifiers remain strong
-evidence when they apply. Stable Goal identity, frozen Turn permissions, and
-optional user-defined budgets keep long work attributable without imposing a
-fixed task limit. Session history and project memory keep the work continuous
-across restarts and model changes.
+For work that cannot be completed in one response, give DeepCode a natural-
+language Goal. The Agent keeps analyzing, implementing, verifying, and fixing
+around that Goal without requiring you to push every step manually.
 
-### Context Engineering
+While it runs, you can still:
 
-DeepCode builds context from the repository rather than relying on a single
-large prompt. It combines files and search results with project instructions,
-selected Skills, Session history, and persistent workspace notes. Long
-histories are compacted against the active model's context window so current
-evidence remains useful without discarding the task's continuity.
+- add information to the current task;
+- revise the Goal or its acceptance criteria;
+- queue the next instruction;
+- pause, stop, or continue the task;
+- resume the same Goal after leaving the application.
 
-Context is refreshed as the repository changes and as commands produce new
-evidence. This keeps planning, implementation, and verification tied to the
-latest observable state.
+Automatic execution does not take away your control. You can always change
+what should happen next.
 
 ### Evidence-driven completion
 
-DeepCode does not treat a fluent answer as proof that the task is finished.
-Completion should be supported by the artifacts the task can actually
-produce:
+DeepCode does not use one hard-coded rule to judge every Coding task. It
+selects evidence that fits the task, such as test results, build output, static
+checks, diagnostics, file changes, Diffs, or generated Artifacts.
 
-- a reviewable diff or generated file;
-- command output, diagnostics, or test results;
-- a recorded Artifact when the output is too large for the conversation;
-- a concise explanation connecting the requested outcome to the evidence.
+A failed verification is not presented as success. It becomes input to the
+next repair. When a task is complete—or genuinely blocked—the result, reason,
+and related evidence remain in the Session for review and reproduction.
 
-If verification fails, the failure becomes input to the next round. If a
-boundary prevents completion, the boundary remains visible instead of being
-reported as success.
+### Durable Sessions and project context
 
-### Durable local work
+Every Session is stored locally and linked to its original project. Start
+DeepCode from any directory, find earlier projects and Sessions, and continue
+the same work in CLI or Desktop.
 
-Start DeepCode from any repository. Sessions are stored under
-`~/.deepcode/sessions/`, indexed by their original workspace, and remain
-discoverable across directories. Resume after a restart or explicitly continue
-the task in another working directory without rewriting its recorded origin.
+A Session stores more than chat text: it keeps tool calls, permission
+decisions, Goals, model configuration, and verification records. Project rules,
+persistent memory, Skills, and long-conversation compaction help the Agent keep
+context throughout complex work.
 
-A Session is the complete conversation. A Turn is one accepted unit of work.
-Changing models affects future Turns only, so earlier work remains readable and
-retries remain attributable to the configuration that produced them.
+### Your models, your reasoning settings
 
-### Models and Skills under your control
+DeepCode is not tied to one model provider. Connect OpenRouter, OpenAI,
+Anthropic, DeepSeek, Gemini, an OpenAI-compatible gateway, Ollama, vLLM, or
+another compatible endpoint with your own API Key.
 
-DeepCode is not tied to one hosted model. Named connections can target
-OpenRouter, OpenAI, Anthropic, supported providers, OpenAI-compatible gateways,
-or local endpoints. Credentials stay in the user store; projects may select a
-connection without taking ownership of its secret.
+Before use, a connection can check credentials, the model catalog, and a real
+inference request. Each Session can choose a model and Thinking Level. Changing
+models mid-Session affects future Turns only; it does not delete history or
+confuse where earlier work came from. When supported, DeepCode can also show a
+reasoning summary returned by the Provider.
 
-Skills are reusable workflow instructions. Keep them with a project or in your
-user library, import them from a local directory, and select only the Skills a
-Turn needs. Every execution path resolves the same catalog, and a Skill can
-never raise its own permissions.
+### Reusable Skills
 
-### Parallel and repeatable work
+Skills turn team conventions, domain knowledge, review methods, and repeated
+workflows into reusable Agent capabilities. Store Skills with a project or
+install them in your user directory, then select them when a task needs them.
 
-DeepCode can delegate bounded tasks to agents in isolated Git worktrees. Their
-changes are integrated with conflict detection instead of sharing one mutable
-checkout. Automations can submit recurring work through the same Session,
-model, permission, and recovery rules as a manual Turn.
+DeepCode supports both DeepCode and Claude-style Skill directories. A Skill
+can guide how the Agent works, but it cannot bypass project trust, tool
+permissions, or safety boundaries.
+
+### Permissions you can understand
+
+Every project must be explicitly trusted before execution. Each Session can
+use one of three modes:
+
+- **Ask**: confirm sensitive operations before they run;
+- **Read only**: allow analysis and reading only;
+- **Full access**: allow complete work in a trusted project.
+
+Individual tools also support `allow`, `ask`, and `deny`. CLI and Desktop share
+the same permission state, and DeepCode does not silently replay operations
+with side effects after a task is stopped or interrupted.
+
+### Parallel agents without file collisions
+
+Complex work can be split across focused Agents—for example, separate Agents
+for code investigation, test analysis, and implementation review.
+
+Parallel changes can run in isolated Git worktrees so Agents do not edit the
+same working directory at once. Results return to the main task for review and
+integration. Conflicts are shown explicitly instead of being silently
+overwritten, and the main Agent remains responsible for the final Goal.
+
+### Automate repeatable engineering work
+
+Once a workflow is stable, save it as an Automation and run it manually or on
+a schedule. For example:
+
+- check tests and builds regularly;
+- scan for regressions;
+- organize pending work;
+- run repository maintenance or periodic reviews.
+
+Automation does not launch a separate, reduced Agent. It uses the same
+Sessions, models, Skills, permissions, approvals, and recovery behavior, and
+keeps the history of every run.
+
+### Paper2Code
+
+Paper2Code was DeepCode's original research direction and remains its dedicated
+workflow for research reproduction.
+
+It can start from a paper, technical document, URL, or reference repository;
+understand the research goal; find related implementations; organize a
+development plan; generate code; and verify the result through experiments and
+Artifacts. It reflects DeepCode's core idea: the goal is not to generate code
+that merely looks correct, but to turn complex knowledge into a system that can
+run, be inspected, and keep improving.
 
 ## Quick start
 
-### 1. Install and initialize
+DeepCode has two interfaces with separate installation paths. Choose one to get
+started; both use the same Agent runtime and canonical Session history.
+
+> `uv tool install deepcode-hku` installs the CLI and shared Python runtime. It
+> does **not** install the Tauri Desktop application.
+
+### Option A — Install the CLI
 
 Install `uv` first if it is not already available. On Windows PowerShell:
 
@@ -361,78 +423,71 @@ uv tool install deepcode-hku
 deepcode init
 ```
 
-`deepcode init` creates a minimal user configuration under `~/.deepcode/`
-without copying project settings or credentials. After that, `deepcode` can be
-launched from any project directory. `pipx install deepcode-hku` and
-`pip install deepcode-hku` are also supported in an appropriate Python 3.12+
-environment.
-
-### 2. Connect a model provider
+Create a model connection once. `--api-key` opens a non-echoing prompt:
 
 ```console
 deepcode provider set personal-openrouter --template openrouter --label "OpenRouter · Personal" --api-key
-
-deepcode provider test personal-openrouter
 deepcode provider models personal-openrouter --refresh
+deepcode provider test personal-openrouter --model <model-id>
 ```
 
-`--api-key` uses a non-echoing prompt. Saved keys live in
-`~/.deepcode/credentials.json` in user-private storage; they are never returned
-to a client or written into Session history. Use the model-list command above
-instead of relying on a model name copied from an older example.
-
-### 3. Start coding
-
-From the repository you want DeepCode to work in:
+Enter the repository you want DeepCode to work in and start the interactive
+Agent:
 
 ```console
-deepcode -c personal-openrouter -m <model-id> --effort auto
+cd <your-project>
+deepcode
 ```
 
-On first use, review the canonical workspace path and confirm trust. DeepCode
-remembers that decision for the Project; trust does not grant unrestricted tool
-access.
+`deepcode init` creates minimal user configuration under `~/.deepcode/`.
+Credentials are stored separately in user-private storage and are never written
+to Session history. `pipx install deepcode-hku` and `pip install deepcode-hku`
+are also supported in an appropriate Python 3.12+ environment.
 
-Or run one headless task:
+### Option B — Install Desktop
 
-```console
-deepcode exec "Fix the failing tests and explain the root cause" --connection personal-openrouter --model <model-id> --effort auto --trust --access full-access --json
-```
+Desktop release bundles are distributed separately from the Python package.
+Check [GitHub Releases](https://github.com/HKUDS/DeepCode/releases) for a signed
+installer for your platform. If no installer is attached, use the source setup
+below.
 
-`--trust` records the workspace decision. `--access full-access` is an explicit
-unrestricted grant suitable only for an isolated repository or CI runner. Omit
-it in an interactive terminal to approve sensitive tools as they are requested,
-or use `--access read-only` for inspection.
+#### macOS and Linux from source
 
-Choose whichever interface fits your workflow. `deepcode` opens the interactive
-CLI; the same Sessions can also be opened in Desktop.
-
-#### Run Desktop from source
-
-##### macOS and Linux
-
-From the repository root:
+Install the platform dependencies from the
+[Tauri 2 prerequisite guide](https://v2.tauri.app/start/prerequisites/), plus
+Git, Python 3.12+, `uv`, Node.js 22+, and stable Rust. Then run:
 
 ```bash
+git clone https://github.com/HKUDS/DeepCode.git
+cd DeepCode
 uv venv --python 3.12
 uv pip install --python .venv/bin/python -e .
+.venv/bin/deepcode init
 cd desktop
 npm ci
 npm run setup:sidecar
 npm run build:sidecar
 cd ..
-./scripts/deepcode-desktop
+mkdir -p ~/.local/bin
+ln -sf "$(pwd)/scripts/deepcode-desktop" ~/.local/bin/deepcode-desktop
+export PATH="$HOME/.local/bin:$PATH"
+deepcode-desktop
 ```
 
-##### Windows PowerShell
+The final link is a one-time source launcher installation. Afterwards,
+`deepcode-desktop` starts this checkout from any directory, provided
+`~/.local/bin` is on `PATH`. Add the export to your shell profile if it is not
+already configured. The command launches Desktop; add or select the repository
+you want to work on from the Project sidebar.
+
+#### Windows from source
 
 Windows requires Microsoft Edge WebView2 and the Visual Studio 2022 Build Tools
-workload **Desktop development with C++**. These are the system dependencies
-required by [Tauri on Windows](https://v2.tauri.app/start/prerequisites/#windows).
-
-**1. Install the toolchains.** Accept the UAC prompt raised by Build Tools.
+workload **Desktop development with C++**. Accept the UAC prompt raised by Build
+Tools:
 
 ```powershell
+winget install --id Git.Git --exact
 winget install --id astral-sh.uv --exact
 winget install --id OpenJS.NodeJS.LTS --exact
 winget install --id Rustlang.Rustup --exact
@@ -440,9 +495,10 @@ winget install --id Microsoft.VisualStudio.2022.BuildTools --exact `
   --override "--wait --passive --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
 ```
 
-**2. Close PowerShell, open a new PowerShell window, and verify the tools.**
+Close PowerShell, open a new window, and verify the toolchains:
 
 ```powershell
+git --version
 uv --version
 node --version
 rustup default stable-msvc
@@ -450,11 +506,14 @@ rustc --version
 cargo --version
 ```
 
-**3. Prepare and start DeepCode.** Run these commands from the repository root.
+Clone, prepare, and start Desktop:
 
 ```powershell
+git clone https://github.com/HKUDS/DeepCode.git
+Set-Location DeepCode
 uv venv --python 3.12
 uv pip install --python .venv\Scripts\python.exe -e .
+.venv\Scripts\deepcode.exe init
 Set-Location desktop
 npm ci
 $env:DEEPCODE_PYTHON = (Resolve-Path ..\.venv\Scripts\python.exe)
@@ -463,15 +522,28 @@ npm run build:sidecar
 npm run tauri -- dev
 ```
 
-The explicit `--python` path prevents an active Conda environment from receiving
-the editable install. The first sidecar build creates the resource directory
-that Tauri validates during development; later source-only Python changes still
-run from the repository `.venv`. See the
-[Desktop source guide](desktop/README.md#windows-powershell) for troubleshooting
-and subsequent-launch details.
+Keep that PowerShell window open while Desktop is running. See the
+[Desktop source guide](desktop/README.md#windows-powershell) for subsequent
+launches and troubleshooting.
 
-Open **Settings → Connections** to configure a provider, then select a
-connection and model from the Session composer.
+#### Configure the Desktop model
+
+Open **Settings → AI providers** after Desktop starts.
+
+<div align="center">
+  <img src="assets/setting_model.png" alt="Configure an AI provider and model in DeepCode Desktop" width="100%" style="border-radius: 10px; box-shadow: 0 8px 20px rgba(45,55,72,0.2); margin: 15px 0;"/>
+
+  <sub>Provider credentials, model discovery, and inference verification stay in one Desktop workflow.</sub>
+</div>
+
+1. Select **Add provider**, choose the service, and enter an API key or its
+   environment-variable name.
+2. Select **Save and check** to verify the credential and load the provider's
+   model catalog without sending repository content.
+3. Under **Agent model**, choose an exact model ID and select **Save and verify
+   model**. This final check sends only a minimal inference request.
+4. Add or open a Project, create a Session, choose the model, Thinking effort,
+   and access level, then describe the task in natural language.
 
 > The interface changes how the work is presented, not the Agent, policy,
 > configuration, or Session history behind it.
@@ -480,152 +552,54 @@ connection and model from the Session composer.
 
 ### Sessions
 
-```text
-/new [title]             start a new Session
-/resume                  list Sessions from the current directory
-/resume all              list Sessions from every recorded directory
-/resume <id>             restore one Session
-/model [connection] [id] show or change the model for future Turns
-/effort [auto|off|level] show or change Thinking for future Turns
-/permissions [preset]   show or change access for future Turns
-/transcript [mode]       choose normal, verbose, or summary detail
-/clear                   clear the current in-memory context
-@src/main.py             attach a file to the next prompt
-```
+Every task lives in a durable Session attached to its original Project. Open a
+Project in Desktop or start `deepcode` from its directory, then create a new
+Session or resume an existing one. The same history can move between Desktop
+and CLI without export or conversion.
 
-Thinking effort controls what the model is asked to do; transcript mode controls
-only what DeepCode displays. In the interactive CLI, press `Ctrl+O` to cycle
-`normal → verbose → summary`. Headless runs accept the same choice through
-`deepcode exec --transcript <mode>`. Reasoning remains a typed timeline item and
-is never merged into the assistant's final answer. DeepCode labels and displays
-only provider-returned summaries or provider reasoning details; some providers
-return only opaque continuation state, in which case the UI says that details
-are unavailable.
+| What you want to do | Desktop | Interactive CLI |
+|---|---|---|
+| Start a Session | **New thread** | `/new [title]` |
+| Resume local history | Select it under the Project | `/resume` |
+| Find history from every Project | Browse the project list | `/resume all` |
+| Attach a file | Use the composer attachment | `@path/to/file` |
+| Change the next Turn's model | Composer model picker | `/model` |
+| Adjust Thinking effort | Composer effort picker | `/effort` |
+| Choose tool access | Composer access picker | `/permissions` |
+| Load Skills for the next Turn | Composer Skills control | `/skill <name>` |
+| Set or revise a durable Goal | Goal panel | `/goal` |
+| Stop the active Turn | Use the stop control | `/stop` |
 
-Start or resume directly:
-
-```bash
-deepcode -w ./my-project --trust
-deepcode --resume <session-id>
-```
-
-Session files remain under `~/.deepcode/sessions/` no matter which client opens
-them. An explicit cross-directory resume changes the current execution context
-without rewriting the Session's recorded origin.
-
-Archive keeps canonical history and only removes a Session from the normal
-Desktop list. Permanent deletion removes that history and its derived runtime
-records while leaving repository files untouched. Desktop exposes both actions
-in the Session menu; scripts can use the same application service through:
-
-```bash
-deepcode session delete <session-id> --yes
-```
-
-DeepCode refuses permanent deletion while the Session is open in another CLI,
-has active work, owns a managed worktree, or belongs to an Automation. Resolve
-the reported blocker first; deletion never force-kills work or silently removes
-workspace state.
+Session history, tool activity, approvals, Goal state, and verification evidence
+remain together. Archiving hides a Session without deleting its history;
+permanent deletion removes the Session records but never repository files.
 
 ### Connections and models
 
-Common commands:
+Desktop provides connection setup and verification under **Settings → AI
+providers**. In the CLI, `/model` changes the connection and model for future
+Turns, while `/effort` selects a Thinking level supported by that model.
 
-```bash
-deepcode provider list
-deepcode provider test <connection-id>
-deepcode provider models <connection-id> --refresh
-deepcode provider remove <connection-id>
-```
+Model changes never rewrite earlier history or alter an active Turn. Thinking
+effort controls the request sent to the provider; transcript detail controls
+only presentation. DeepCode shows provider-designated reasoning summaries when
+available and never merges raw chain-of-thought into the assistant answer.
 
-Use an environment variable instead of the credential store:
-
-```bash
-deepcode provider set work-openrouter \
-  --template openrouter \
-  --api-key-env OPENROUTER_API_KEY
-```
-
-Connect an arbitrary OpenAI-compatible endpoint:
-
-```bash
-deepcode provider set company-proxy \
-  --template custom \
-  --adapter openai_compat \
-  --api-base https://llm.example.com/v1 \
-  --catalog openai \
-  --api-key
-```
-
-Built-in templates include `openrouter`, `openai`, `anthropic`, `deepseek`,
-`gemini`, `zhipu`, `dashscope`, `ollama`, `vllm`, and `custom`.
-
-To make one connection/model the shared default, edit the user-level
-`~/.deepcode/deepcode_config.json`:
-
-```json
-{
-  "agents": {
-    "defaults": {
-      "connection": "personal-openrouter",
-      "model": "<model-id>",
-      "reasoningEffort": "auto"
-    }
-  }
-}
-```
-
-Project configuration may select a user-owned connection, but cannot replace
-its endpoint, adapter, headers, or credential.
-
-Thinking levels come from the selected model's catalog rather than a global
-hard-coded list. `auto` follows the provider/model default; `off` is offered
-only when the model permits it. A Session switch affects future Turns without
-rewriting earlier history. DeepCode never renders raw chain-of-thought as
-assistant text; only a provider-designated summary may appear, while signed or
-encrypted continuation state remains private in the canonical Session.
+Provider administration, environment-variable credentials, custom gateways,
+model discovery, and machine-readable checks are documented in the
+[Headless and Automation guide](docs/HEADLESS_AND_AUTOMATION.md#connection-and-model-management).
 
 ### Skills
 
-DeepCode discovers Skills from both DeepCode and Claude-compatible locations:
+Skills turn reusable engineering knowledge into instructions the Agent can load
+for a task. Desktop provides a Skills workspace; the interactive CLI uses
+`/skills` to discover them and `/skill <name>` to select one for the next Turn.
 
-```text
-.deepcode/skills/        project DeepCode Skills
-.claude/skills/          project Claude-compatible Skills
-~/.deepcode/skills/      user DeepCode Skills
-~/.claude/skills/        user Claude-compatible Skills
-```
-
-Manage them from the CLI:
-
-```bash
-deepcode skill list
-deepcode skill show <id-or-name>
-deepcode skill import ./my-skill --scope project
-deepcode skill disable <skill-id> --scope project
-```
-
-Select Skills for the next interactive Turn:
-
-```text
-/skills
-/skill <id-or-name>
-/skill remove <id-or-name>
-/skill clear
-```
-
-Headless tasks accept repeatable `--skill` flags:
-
-```bash
-deepcode exec "Review this change for security regressions" \
-  --skill security-review \
-  --skill test-strategy \
-  --trust \
-  --access read-only
-```
-
-A Skill supplies workflow instructions. It cannot grant permissions or bypass
-project trust, sandbox, approval, or tool policy.
+Project Skills can travel with a repository, while user Skills remain available
+across Projects. DeepCode also recognizes Claude-compatible Skill directories.
+A Skill can guide the Agent, but it cannot grant permissions or bypass Project
+trust, approvals, or tool policy. Import, enable, disable, and catalog commands
+live in the [advanced guide](docs/HEADLESS_AND_AUTOMATION.md#skill-management).
 
 ### Safety and execution
 
@@ -650,37 +624,14 @@ confirmation:
 
 ### Long-running work
 
-In the interactive CLI, attach a durable Goal to the current Session:
+Ordinary prompts can run a full multi-tool coding Turn. When work must continue
+across several Turns or process restarts, attach a durable Goal to the Session.
+Use the Goal panel in Desktop or `/goal <objective>` in the CLI.
 
-```text
-/permissions
-/permissions ask
-/permissions read-only
-/permissions full-access
-/permissions inherit
-/goal Implement and verify the requested feature
-/goal show
-/goal edit Implement the feature and preserve the public API
-/goal pause
-/goal resume
-/goal wait
-/goal reopen Rework the completed result for the new requirement
-/goal clear
-/queue Run this instruction as the next Turn
-/stop
-```
-
-The Goal is stored beside the canonical Session transcript and appears in
-Desktop. Goal work runs beside the CLI prompt: ordinary input steers the active
-Turn; when the Turn has already ended, the same input starts the next Turn in
-the same Session. Queueing is always explicit through `/queue` or **Queue
-next**—a failed Steer never silently changes delivery semantics. `/stop`
-interrupts only the current Turn and leaves the CLI ready for the next input.
-Editing updates the same durable Goal identity and injects the new objective
-into its active Turn when possible. Every unit of work is an ordinary Turn, so
-model selection, Skills, permissions, approvals, recovery, and history stay
-aligned across clients. Switching a provider, model, or reasoning effort
-affects future Turns without replacing the Goal or Session.
+While DeepCode works, new input can steer the active Turn. You can edit the
+Goal, stop the current Turn, queue a follow-up, pause the Goal, or resume it
+later. These actions preserve the same Session, history, permissions, Skills,
+and evidence instead of starting an isolated execution.
 
 The working Agent requests `complete` or `blocked` from its full context.
 DeepCode enforces ownership, lifecycle, permission, and budget boundaries, but
@@ -689,53 +640,19 @@ normal semantic result is labelled **Completed**; tests, builds, diagnostics,
 diffs, or independent review remain visible evidence. No provider, model, task
 type, or test command is fixed by the Goal engine.
 
-For scripts and CI, the compatibility command uses the same Goal engine and
-adds the requested command to the model-visible completion evidence:
+### Automations and headless workflows
 
-```bash
-deepcode loop "Implement the requested feature" \
-  --test-cmd pytest \
-  --trust \
-  --access full-access
-```
+The Desktop Automation workspace turns a trusted Project instruction into a
+manual or interval run while keeping the normal Agent, Session, Goal,
+permissions, recovery, and Run history. Use it for repeatable work such as
+repository health checks, regression review, or scheduled maintenance.
 
-Resume the same Goal and canonical Session after leaving the process:
-
-```bash
-deepcode loop --resume <session-id>
-```
-
-Resume keeps the Session ID, Goal ID, transcript, and stored workspace. An
-explicit `--workspace` is a process-local override and does not rewrite the
-Session origin. `--connection`, `--model`, and `--effort` apply only to the
-next Turn started by this command. A Goal that reached its token limit requires
-a larger `--token-budget`; a completed Goal is reported without starting or
-rewriting work.
-
-After the current repository has been opened and trusted in DeepCode, create a
-durable Automation:
-
-```bash
-deepcode automation create "Repository caretaker" \
-  --prompt "Repair failing tests and verify the result." \
-  --schedule interval \
-  --interval-seconds 3600
-
-deepcode automation list --limit 100 --offset 0
-deepcode automation run <automation-id>
-deepcode automation runs <automation-id> --limit 100 --offset 0
-```
-
-Automations submit work through the normal Turn path, so scheduled and manual
-runs retain the same Session, permission, model, approval, and recovery rules.
-The immutable instruction revision used by each Run remains auditable after the
-Automation is edited or retired. Interval schedules run while a
-scheduler-enabled Desktop or App Server runtime is active.
-Paused/enabled controls only an interval schedule: manual definitions are
-always enabled, and **Run now** remains available while an interval is paused.
-Definition and Run-history queries are explicitly paged. JSON responses expose
-`hasMore` and `nextOffset`; human-readable output prints the next offset
-whenever additional results exist.
+Shell scripts and CI systems can use the same runtime without opening an
+interface. The separate
+[Headless and Automation guide](docs/HEADLESS_AND_AUTOMATION.md) contains the
+`exec`, `loop`, Automation, Provider, Skill, and Session administration
+commands. They are advanced integration surfaces—not a second way ordinary
+Desktop or CLI users must learn to talk to DeepCode.
 
 ## Paper2Code
 
@@ -750,24 +667,9 @@ useful references, implementing the system, and verifying the result.
 
 ### The original architecture
 
-```mermaid
-flowchart TB
-    INPUT["Research paper · text · URL · document · repository"] --> ORCH["Central Orchestrating Agent"]
-
-    ORCH --> INTENT["Intent Understanding Agent"]
-    ORCH --> DOC["Document Parsing Agent"]
-    INTENT --> PLAN["Code Planning Agent"]
-    DOC --> PLAN
-
-    PLAN --> MINE["Code Reference Mining Agent"]
-    PLAN --> INDEX["Code Indexing Agent"]
-    MINE --> INDEX
-    INDEX --> BUILD["Code Generation Agent"]
-
-    BUILD --> VERIFY["Execution · tests · verification"]
-    VERIFY -->|evidence requires another pass| ORCH
-    VERIFY -->|verified| OUTPUT["Codebase · results · tests · documentation"]
-```
+<p align="center">
+  <img src="assets/readme/framework2.png" alt="Paper2Code framework from source documents through code generation, verification, and refinement" width="1080" />
+</p>
 
 The specialist roles preserve the separation of concerns that made the
 original system effective:

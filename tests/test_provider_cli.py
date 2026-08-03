@@ -18,6 +18,55 @@ def test_json_output_flag_is_accepted_before_or_after_subcommand() -> None:
     )
 
 
+def test_provider_cli_can_verify_one_model_and_print_typed_stages(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls = []
+
+    def fake_test(_service, connection_id, *, project_id=None, model_id=None):
+        calls.append((connection_id, project_id, model_id))
+        return {
+            "connectionId": connection_id,
+            "status": "ready",
+            "ok": True,
+            "latencyMs": 21,
+            "modelCount": 3,
+            "error": None,
+            "stages": [
+                {
+                    "id": "credential",
+                    "status": "passed",
+                    "detail": "Credential found",
+                },
+                {
+                    "id": "catalog",
+                    "status": "passed",
+                    "detail": "Discovered 3 models",
+                },
+                {
+                    "id": "model",
+                    "status": "passed",
+                    "detail": "Model accepted the request",
+                },
+            ],
+        }
+
+    monkeypatch.setattr(provider_cli.LLMConfigurationService, "test", fake_test)
+
+    assert (
+        provider_cli.run(["test", "router-cli", "--model", "example/verified-model"])
+        == 0
+    )
+
+    output = capsys.readouterr()
+    assert calls == [("router-cli", None, "example/verified-model")]
+    assert "ready: router-cli" in output.out
+    assert "credential passed" in output.out
+    assert "model      passed" in output.out
+    assert output.err == ""
+
+
 def test_provider_cli_writes_shared_connection_without_echoing_key(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

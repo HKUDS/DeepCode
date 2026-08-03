@@ -19,6 +19,10 @@ PRIVATE_DIRECTORY_MODE = 0o700
 PRIVATE_FILE_MODE = 0o600
 
 
+class UnsafePrivateFileError(OSError):
+    """A private-state path is not a regular file owned by this path entry."""
+
+
 def ensure_private_directory(path: Path | str) -> Path:
     """Create ``path`` and make every newly created component user-private."""
 
@@ -39,12 +43,58 @@ def ensure_private_directory(path: Path | str) -> Path:
 
 
 def open_private_file(path: Path | str, flags: int) -> int:
-    """Open a private regular file and return its owned file descriptor."""
+    """Open a private regular file without following a final symlink."""
 
     target = Path(path)
     ensure_private_directory(target.parent)
-    descriptor = os.open(target, flags, PRIVATE_FILE_MODE)
+    descriptor = os.open(
+        target,
+        flags | getattr(os, "O_NOFOLLOW", 0),
+        PRIVATE_FILE_MODE,
+    )
     try:
+        metadata = target.lstat()
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode) or not stat.S_ISREG(opened.st_mode):
+            raise UnsafePrivateFileError("private storage path must be a regular file")
+        if not os.path.samestat(metadata, opened):
+            raise UnsafePrivateFileError(
+                "private storage path changed while it was being opened"
+            )
+        if os.name != "nt":
+            os.fchmod(descriptor, PRIVATE_FILE_MODE)
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def open_existing_private_file(
+    path: Path | str,
+    flags: int = os.O_RDONLY,
+) -> int:
+    """Open one existing regular file without following symbolic links.
+
+    The pre-open ``lstat`` gives callers a clear fail-closed result for links
+    and other special files. ``O_NOFOLLOW`` closes the common replacement
+    race where the platform supports it, while the descriptor identity check
+    covers platforms that do not expose that flag. Historical POSIX modes are
+    repaired on the already-open descriptor before any bytes are read.
+    """
+
+    target = Path(path)
+    metadata = target.lstat()
+    if not stat.S_ISREG(metadata.st_mode):
+        raise UnsafePrivateFileError("private storage path must be a regular file")
+
+    open_flags = flags | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(target, open_flags)
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode) or not os.path.samestat(metadata, opened):
+            raise UnsafePrivateFileError(
+                "private storage path changed while it was being opened"
+            )
         if os.name != "nt":
             os.fchmod(descriptor, PRIVATE_FILE_MODE)
         return descriptor
@@ -99,8 +149,10 @@ def _chmod(path: Path, mode: int) -> None:
 __all__ = [
     "PRIVATE_DIRECTORY_MODE",
     "PRIVATE_FILE_MODE",
+    "UnsafePrivateFileError",
     "ensure_private_directory",
     "ensure_private_file",
     "harden_private_tree",
+    "open_existing_private_file",
     "open_private_file",
 ]

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +37,11 @@ _PROFILE_FIELDS = {
     "manualModels",
     "enabled",
 }
+
+_MODEL_PROBE_PROMPT = (
+    "Reply with exactly OK. This is a DeepCode connection verification request."
+)
+_MODEL_PROBE_TIMEOUT_SECONDS = 30.0
 
 
 class LLMConfigurationService:
@@ -75,6 +82,8 @@ class LLMConfigurationService:
                     "label": spec.label,
                     "adapter": spec.backend,
                     "defaultApiBase": spec.default_api_base or None,
+                    "apiKeyEnv": spec.env_key or None,
+                    "requiresApiBase": spec.requires_api_base,
                     "local": spec.is_local,
                 }
                 for spec in PROVIDERS
@@ -170,20 +179,210 @@ class LLMConfigurationService:
             raise InvalidArgumentError(str(exc)) from exc
         return self.catalog.list_models(connection, refresh=refresh).to_dict()
 
-    def test(self, connection_id: str) -> dict[str, Any]:
+    def test(
+        self,
+        connection_id: str,
+        *,
+        project_id: str | None = None,
+        model_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Check one connection and optionally run a minimal real model request.
+
+        Catalog discovery and inference are deliberately separate stages. Some
+        OpenAI-compatible endpoints do not expose ``/models`` while still
+        supporting inference; conversely, a public catalog does not prove that a
+        credential may call a particular model.
+        """
+
         try:
-            connection = self._resolver().resolve_connection(connection_id)
+            resolver = self._resolver(project_id=project_id)
+            connection = resolver.resolve_connection(connection_id)
         except ValueError as exc:
             raise InvalidArgumentError(str(exc)) from exc
         if not connection.is_usable:
-            return {
-                "connectionId": connection.id,
-                "ok": False,
-                "latencyMs": 0,
-                "modelCount": 0,
-                "error": "No API credential is configured",
-            }
-        return self.catalog.test_connection(connection)
+            detail = "No API credential is configured"
+            return _verification_result(
+                connection.id,
+                status="error",
+                ok=False,
+                started=None,
+                model_count=0,
+                error=detail,
+                stages=(
+                    _verification_stage("credential", "failed", detail),
+                    _verification_stage("catalog", "not_run", "Not checked"),
+                    _verification_stage(
+                        "model",
+                        "not_run",
+                        "Not checked",
+                        model_id=_clean_optional(model_id),
+                    ),
+                ),
+            )
+
+        started = time.monotonic()
+        credential = _verification_stage(
+            "credential",
+            "passed",
+            _credential_detail(connection.credential_source),
+        )
+        catalog_started = time.monotonic()
+        catalog = self.catalog.list_models(connection, refresh=True)
+        catalog_latency = round((time.monotonic() - catalog_started) * 1000)
+        if catalog.source == "manual" and not catalog.stale:
+            catalog_stage = _verification_stage(
+                "catalog",
+                "skipped",
+                "Manual model list; no catalog request was sent",
+                latency_ms=catalog_latency,
+                model_count=len(catalog.models),
+            )
+        elif catalog.source == "remote" and not catalog.stale:
+            catalog_stage = _verification_stage(
+                "catalog",
+                "passed",
+                f"Discovered {len(catalog.models)} models",
+                latency_ms=catalog_latency,
+                model_count=len(catalog.models),
+            )
+        else:
+            catalog_stage = _verification_stage(
+                "catalog",
+                "failed",
+                catalog.error or "The provider model catalog could not be verified",
+                latency_ms=catalog_latency,
+                model_count=len(catalog.models),
+            )
+
+        clean_model = _clean_optional(model_id)
+        model_stage = _verification_stage(
+            "model",
+            "not_run",
+            "Choose a model to run a minimal verification request",
+            model_id=clean_model,
+        )
+        if clean_model is not None:
+            model_stage = self._verify_model(
+                resolver,
+                connection_id=connection.id,
+                model_id=clean_model,
+                catalog=catalog,
+            )
+
+        if clean_model is not None:
+            ok = model_stage["status"] == "passed"
+            status = "ready" if ok else "error"
+            error = None if ok else str(model_stage["detail"])
+        elif catalog_stage["status"] == "passed":
+            ok = True
+            status = "connected"
+            error = None
+        elif catalog_stage["status"] == "skipped":
+            ok = True
+            status = "limited"
+            error = None
+        else:
+            ok = False
+            status = "error"
+            error = str(catalog_stage["detail"])
+
+        return _verification_result(
+            connection.id,
+            status=status,
+            ok=ok,
+            started=started,
+            model_count=len(catalog.models),
+            error=error,
+            stages=(credential, catalog_stage, model_stage),
+        )
+
+    def _verify_model(
+        self,
+        resolver: ConnectionResolver,
+        *,
+        connection_id: str,
+        model_id: str,
+        catalog,
+    ) -> dict[str, Any]:
+        catalog_model = next(
+            (candidate for candidate in catalog.models if candidate.id == model_id),
+            None,
+        )
+        try:
+            profile = resolver.execution_profile(
+                ExecutionSelection(
+                    connection_id=connection_id,
+                    model_id=model_id,
+                ),
+                phase="implementation",
+                model_limits=(
+                    (
+                        catalog_model.context_window,
+                        catalog_model.max_output_tokens,
+                    )
+                    if catalog_model is not None
+                    else None
+                ),
+                reasoning_capabilities=(
+                    catalog_model.reasoning if catalog_model is not None else None
+                ),
+            )
+            provider = resolver.build_provider(profile)
+        except (TypeError, ValueError) as exc:
+            return _verification_stage(
+                "model",
+                "failed",
+                _safe_configuration_error(exc),
+                model_id=model_id,
+            )
+
+        started = time.monotonic()
+        try:
+            response = asyncio.run(
+                asyncio.wait_for(
+                    provider.chat(
+                        messages=[{"role": "user", "content": _MODEL_PROBE_PROMPT}],
+                        model=profile.model_id,
+                        max_tokens=min(16, profile.max_output_tokens),
+                        temperature=0,
+                        reasoning_effort=None,
+                    ),
+                    timeout=_MODEL_PROBE_TIMEOUT_SECONDS,
+                )
+            )
+        except TimeoutError:
+            return _verification_stage(
+                "model",
+                "failed",
+                "The model verification request timed out",
+                latency_ms=round((time.monotonic() - started) * 1000),
+                model_id=model_id,
+            )
+        except Exception as exc:  # noqa: BLE001 - sanitized product boundary
+            return _verification_stage(
+                "model",
+                "failed",
+                _safe_configuration_error(exc),
+                latency_ms=round((time.monotonic() - started) * 1000),
+                model_id=model_id,
+            )
+
+        latency = round((time.monotonic() - started) * 1000)
+        if response.finish_reason == "error" or response.error_status_code is not None:
+            return _verification_stage(
+                "model",
+                "failed",
+                _model_error_detail(response),
+                latency_ms=latency,
+                model_id=model_id,
+            )
+        return _verification_stage(
+            "model",
+            "passed",
+            "The provider accepted a real inference request",
+            latency_ms=latency,
+            model_id=model_id,
+        )
 
     def resolve(
         self,
@@ -192,23 +391,46 @@ class LLMConfigurationService:
         *,
         phase: str = "implementation",
     ) -> ExecutionProfile:
+        return self.resolve_phases(
+            workspace,
+            selection,
+            phases=(phase,),
+        )[phase]
+
+    def resolve_phases(
+        self,
+        workspace: str | Path,
+        selection: ExecutionSelection | None,
+        *,
+        phases: tuple[str, ...],
+    ) -> dict[str, ExecutionProfile]:
+        """Resolve several phase profiles from one configuration snapshot."""
+
+        if not phases or len(set(phases)) != len(phases):
+            raise InvalidArgumentError("phases must be a non-empty unique sequence")
         try:
             config = load_config_for_workspace(workspace)
             resolver = ConnectionResolver(config, self.credentials)
-            connection, model = resolver.resolve_selection(selection, phase=phase)
-            cached = self.catalog.cached_model(connection, model)
-            return resolver.execution_profile(
-                selection,
-                phase=phase,
-                model_limits=(
-                    (cached.context_window, cached.max_output_tokens)
-                    if cached is not None
-                    else None
-                ),
-                reasoning_capabilities=(
-                    cached.reasoning if cached is not None else None
-                ),
-            )
+            profiles: dict[str, ExecutionProfile] = {}
+            for phase in phases:
+                connection, model = resolver.resolve_selection(
+                    selection,
+                    phase=phase,
+                )
+                cached = self.catalog.cached_model(connection, model)
+                profiles[phase] = resolver.execution_profile(
+                    selection,
+                    phase=phase,
+                    model_limits=(
+                        (cached.context_window, cached.max_output_tokens)
+                        if cached is not None
+                        else None
+                    ),
+                    reasoning_capabilities=(
+                        cached.reasoning if cached is not None else None
+                    ),
+                )
+            return profiles
         except ValueError as exc:
             raise InvalidArgumentError(str(exc)) from exc
 
@@ -298,6 +520,86 @@ def _clean_optional(value: Any) -> str | None:
         return None
     clean = str(value).strip()
     return clean or None
+
+
+def _verification_stage(
+    stage_id: str,
+    status: str,
+    detail: str,
+    *,
+    latency_ms: int | None = None,
+    model_count: int | None = None,
+    model_id: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": stage_id,
+        "status": status,
+        "detail": detail[:300],
+        "latencyMs": latency_ms,
+        "modelCount": model_count,
+        "modelId": model_id,
+    }
+
+
+def _verification_result(
+    connection_id: str,
+    *,
+    status: str,
+    ok: bool,
+    started: float | None,
+    model_count: int,
+    error: str | None,
+    stages: tuple[dict[str, Any], ...],
+) -> dict[str, Any]:
+    return {
+        "connectionId": connection_id,
+        "status": status,
+        "ok": ok,
+        "latencyMs": (
+            round((time.monotonic() - started) * 1000) if started is not None else 0
+        ),
+        "modelCount": model_count,
+        "error": error,
+        "stages": list(stages),
+    }
+
+
+def _credential_detail(source: str) -> str:
+    return {
+        "environment": "Credential resolved from the configured environment variable",
+        "credential_store": "Credential loaded from DeepCode private storage",
+        "legacy_config": "Credential loaded from legacy DeepCode configuration",
+        "not_required": "This local or direct connection does not require a credential",
+    }.get(source, "Credential is configured")
+
+
+def _safe_configuration_error(exc: Exception) -> str:
+    if isinstance(exc, ValueError):
+        return str(exc)[:300]
+    if isinstance(exc, RuntimeError) and "asyncio.run" in str(exc):
+        return "Model verification is unavailable while another event loop is active"
+    return f"{type(exc).__name__}: model verification could not be completed"
+
+
+def _model_error_detail(response: Any) -> str:
+    status = response.error_status_code
+    if status == 401:
+        return "The provider rejected the API credential"
+    if status == 403:
+        return "The credential does not have access to this model"
+    if status == 404:
+        return "The endpoint or selected model was not found"
+    if status == 408:
+        return "The model verification request timed out"
+    if status == 429:
+        return "The provider reported a rate, quota, or balance limit"
+    if isinstance(status, int) and status >= 500:
+        return "The provider is temporarily unavailable"
+    if response.error_kind == "timeout":
+        return "The model verification request timed out"
+    if response.error_kind == "connection":
+        return "DeepCode could not connect to the model endpoint"
+    return "The provider rejected the model verification request"
 
 
 def _profile_seed(

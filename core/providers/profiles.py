@@ -54,20 +54,26 @@ class ResolvedConnection:
             "apiKeyEnv": None,
             "modelCatalog": self.model_catalog,
             "manualModels": list(self.manual_models),
-            "configured": self.is_usable,
+            "configured": self.is_configured,
             "credentialSource": self.credential_source,
             "local": self.local,
             "enabled": self.enabled,
         }
 
     @property
-    def is_usable(self) -> bool:
-        return (
+    def is_configured(self) -> bool:
+        credential_ready = (
             bool(self.api_key)
             or self.local
             or self.spec.is_direct
             or self.spec.is_oauth
         )
+        endpoint_ready = not self.spec.requires_api_base or bool(self.api_base)
+        return credential_ready and endpoint_ready
+
+    @property
+    def is_usable(self) -> bool:
+        return self.enabled and self.is_configured
 
 
 class ConnectionResolver:

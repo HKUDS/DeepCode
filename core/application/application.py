@@ -46,6 +46,7 @@ from core.domain.turn import TurnExecutor
 from core.persistence.database import Database
 from core.persistence.event_repository import EventRepository
 from core.persistence.migrations import LATEST_SCHEMA_VERSION
+from core.providers.credentials import CredentialStore
 from core.sessions import (
     SessionStore,
     ThreadGoalStore,
@@ -85,7 +86,11 @@ class DeepCodeApplication:
         )
         self.projects = ProjectService(database)
         self.settings = SettingsService(self.projects)
-        self.llm = LLMConfigurationService(self.projects)
+        self.credentials = CredentialStore()
+        self.llm = LLMConfigurationService(
+            self.projects,
+            credential_store=self.credentials,
+        )
         self.skills = SkillService(self.projects)
         self.extensions = ExtensionService(self.projects, self.skills)
         self.mcp = McpService(self.projects)
@@ -126,6 +131,7 @@ class DeepCodeApplication:
             self.executions,
             session_store=self.session_store,
             runner=workflow_runner,
+            llm_configuration=self.llm,
         )
         self.execution_handlers = ExecutionHandlerRegistry()
         self.execution_handlers.register(TurnExecutor.AGENT, self.turns)

@@ -147,6 +147,7 @@ def test_default_coding_tools_registry(tmp_path):
         "glob",
         "memory",
         "update_plan",
+        "web_fetch",
     }
     assert set(reg.tool_names) == expected
     # schemas self-generate from the tool classes (single source of truth)

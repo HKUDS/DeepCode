@@ -10,6 +10,7 @@ from core.application.config_store import ConfigStore
 from core.application.llm_configuration_service import LLMConfigurationService
 from core.config import ConfigError, load_config
 from core.domain.execution_profile import ExecutionSelection
+from core.providers.base import LLMResponse
 from core.providers.catalog_service import CatalogModel, ModelCatalogService
 from core.providers.credentials import CredentialStore
 from core.providers.profiles import ConnectionResolver
@@ -106,6 +107,46 @@ def test_environment_precedence_and_named_local_connection(
     assert remote.credential_source == "environment"
     assert local.is_usable is True
     assert local.credential_source == "not_required"
+
+
+def test_endpoint_required_templates_are_not_usable_until_configured(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+    service, config, credentials = _service(home)
+    resolver = ConnectionResolver(load_config(config_path=config.path), credentials)
+
+    assert resolver.resolve_connection("custom").is_configured is False
+    assert resolver.resolve_connection("vllm").is_configured is False
+    assert all(
+        connection.id not in {"custom", "vllm"}
+        for connection in resolver.list_connections(include_unconfigured=False)
+    )
+
+    service.upsert(
+        {
+            "id": "local-vllm",
+            "template": "vllm",
+            "apiBase": "http://127.0.0.1:8000/v1",
+        }
+    )
+    configured = ConnectionResolver(
+        load_config(config_path=config.path),
+        credentials,
+    ).resolve_connection("local-vllm")
+
+    assert configured.is_configured is True
+    assert configured.is_usable is True
+
+    service.upsert({"id": "local-vllm", "enabled": False})
+    disabled = ConnectionResolver(
+        load_config(config_path=config.path),
+        credentials,
+    ).resolve_connection("local-vllm")
+    assert disabled.is_configured is True
+    assert disabled.is_usable is False
 
 
 def test_partial_update_preserves_profile_and_builtin_legacy_key(
@@ -262,3 +303,141 @@ def test_execution_profile_uses_cached_dynamic_model_limits_without_network(
 
     assert profile.context_window == 1_048_576
     assert profile.max_output_tokens == 128_000
+
+
+def test_connection_verification_distinguishes_manual_catalog_from_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+    service, _config, _credentials = _service(home)
+    service.upsert(
+        {
+            "id": "router-manual",
+            "template": "openrouter",
+            "apiKey": "test-key",
+            "modelCatalog": "manual",
+            "manualModels": ["example/manual-model"],
+        }
+    )
+
+    def unexpected_catalog_request(_connection):
+        raise AssertionError("manual catalogs must not perform network discovery")
+
+    monkeypatch.setattr(service.catalog, "_fetch", unexpected_catalog_request)
+    result = service.test("router-manual")
+
+    assert result["ok"] is True
+    assert result["status"] == "limited"
+    assert [stage["status"] for stage in result["stages"]] == [
+        "passed",
+        "skipped",
+        "not_run",
+    ]
+    assert result["stages"][1]["modelCount"] == 1
+    assert result["error"] is None
+
+
+def test_connection_verification_sends_only_a_minimal_real_model_probe(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+    service, _config, _credentials = _service(home)
+    service.upsert(
+        {
+            "id": "router-probe",
+            "template": "openrouter",
+            "apiKey": "test-key",
+        }
+    )
+    discovered = (
+        CatalogModel(
+            id="example/probe-model",
+            name="Probe model",
+            context_window=32_768,
+            max_output_tokens=4_096,
+        ),
+    )
+    monkeypatch.setattr(service.catalog, "_fetch", lambda _connection: discovered)
+    requests: list[dict] = []
+
+    class ProbeProvider:
+        async def chat(self, **kwargs):
+            requests.append(kwargs)
+            return LLMResponse(content="OK")
+
+    monkeypatch.setattr(
+        ConnectionResolver,
+        "build_provider",
+        lambda _resolver, _profile: ProbeProvider(),
+    )
+
+    result = service.test("router-probe", model_id="example/probe-model")
+
+    assert result["ok"] is True
+    assert result["status"] == "ready"
+    assert [stage["status"] for stage in result["stages"]] == [
+        "passed",
+        "passed",
+        "passed",
+    ]
+    assert requests == [
+        {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": (
+                        "Reply with exactly OK. This is a DeepCode connection "
+                        "verification request."
+                    ),
+                }
+            ],
+            "model": "example/probe-model",
+            "max_tokens": 16,
+            "temperature": 0,
+            "reasoning_effort": None,
+        }
+    ]
+
+
+def test_connection_verification_maps_provider_errors_without_leaking_response(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+    service, _config, _credentials = _service(home)
+    secret = "secret-that-must-not-be-returned"
+    service.upsert(
+        {
+            "id": "router-denied",
+            "template": "openrouter",
+            "apiKey": secret,
+            "modelCatalog": "manual",
+            "manualModels": ["example/denied-model"],
+        }
+    )
+
+    class DeniedProvider:
+        async def chat(self, **_kwargs):
+            return LLMResponse(
+                content=f"provider payload contained {secret}",
+                finish_reason="error",
+                error_status_code=401,
+            )
+
+    monkeypatch.setattr(
+        ConnectionResolver,
+        "build_provider",
+        lambda _resolver, _profile: DeniedProvider(),
+    )
+
+    result = service.test("router-denied", model_id="example/denied-model")
+
+    assert result["ok"] is False
+    assert result["status"] == "error"
+    assert result["stages"][2]["detail"] == "The provider rejected the API credential"
+    assert secret not in repr(result)

@@ -12,7 +12,11 @@ from typing import Any
 
 from core.config import deepcode_home
 from core.file_lock import exclusive_file_lock
-from core.private_storage import ensure_private_directory, open_private_file
+from core.private_storage import (
+    ensure_private_directory,
+    open_existing_private_file,
+    open_private_file,
+)
 
 
 def default_credentials_path() -> Path:
@@ -25,11 +29,13 @@ class CredentialStore:
     _thread_lock = threading.RLock()
 
     def __init__(self, path: Path | str | None = None) -> None:
-        self.path = (
-            Path(path).expanduser().resolve()
-            if path is not None
-            else default_credentials_path()
+        selected = (
+            Path(path).expanduser() if path is not None else default_credentials_path()
         )
+        # ``resolve`` follows a final symlink and erases the identity that the
+        # secure read path must inspect. ``abspath`` keeps that final component
+        # intact while still making lock and temporary paths cwd-independent.
+        self.path = Path(os.path.abspath(os.fspath(selected)))
         self.lock_path = self.path.with_suffix(self.path.suffix + ".lock")
 
     def get(self, connection_id: str) -> str | None:
@@ -70,17 +76,24 @@ class CredentialStore:
         """Return a non-secret fingerprint suitable for runtime invalidation."""
 
         try:
-            stat = self.path.stat()
-        except OSError:
+            descriptor = open_existing_private_file(self.path)
+        except FileNotFoundError:
             return "missing"
-        raw = f"{self.path}:{stat.st_mtime_ns}:{stat.st_size}".encode()
+        try:
+            metadata = os.fstat(descriptor)
+        finally:
+            os.close(descriptor)
+        raw = f"{self.path}:{metadata.st_mtime_ns}:{metadata.st_size}".encode()
         return hashlib.sha256(raw).hexdigest()[:16]
 
     def _read(self) -> dict[str, Any]:
-        if not self.path.is_file():
+        try:
+            descriptor = open_existing_private_file(self.path)
+        except FileNotFoundError:
             return {"version": 1, "connections": {}}
         try:
-            value = json.loads(self.path.read_text(encoding="utf-8"))
+            with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
+                value = json.load(handle)
         except json.JSONDecodeError as exc:
             raise ValueError(f"invalid DeepCode credentials JSON: {exc}") from exc
         if not isinstance(value, dict):
@@ -110,10 +123,6 @@ class CredentialStore:
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temporary, self.path)
-            try:
-                os.chmod(self.path, 0o600)
-            except OSError:
-                pass
             _fsync_directory(self.path.parent)
         finally:
             try:

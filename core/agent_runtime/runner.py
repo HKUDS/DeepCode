@@ -89,7 +89,6 @@ _COMPACTABLE_TOOLS = frozenset(
         "exec",
         "grep",
         "glob",
-        "web_search",
         "web_fetch",
         "list_dir",
     }

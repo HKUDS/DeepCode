@@ -1,11 +1,13 @@
-import { Download, RefreshCw, Rocket } from "lucide-react";
-import { useId, useState } from "react";
+import { Download, FlaskConical, RefreshCw, Rocket } from "lucide-react";
+import { useEffect, useId, useState } from "react";
 
 import type {
   ConfigScope,
   ExecutionAccessPreset,
   JsonObject,
+  ModelCatalogResult,
   Project,
+  ProviderTestResult,
   SettingsSnapshot,
 } from "../../generated/app-server";
 import {
@@ -20,7 +22,11 @@ import type {
 } from "../../rpc/contracts";
 import { useDiagnostics } from "./useDiagnostics";
 import { ConnectionSettings } from "./ConnectionSettings";
-import { useConnectionCatalog } from "./useConnectionCatalog";
+import { ConnectionVerification } from "./ConnectionVerification";
+import {
+  useConnectionCatalog,
+  type ConnectionCatalogController,
+} from "./useConnectionCatalog";
 import styles from "../management/ManagementWorkspace.module.css";
 
 interface SettingsPageProps {
@@ -108,6 +114,9 @@ export function SettingsPage({
   const [updateProgress, setUpdateProgress] =
     useState<DesktopUpdateProgress | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
+  const [verifyingModel, setVerifyingModel] = useState(false);
+  const [modelVerification, setModelVerification] =
+    useState<ProviderTestResult | null>(null);
   const diagnostics = useDiagnostics(runtime, project?.id ?? null);
   const connections = useConnectionCatalog(runtime, project?.id ?? null);
   const canWriteProject = project?.trustState === "trusted";
@@ -116,8 +125,8 @@ export function SettingsPage({
   const agents = { ...agentDraft(settings), ...agentOverrides };
   const configuredAccessPreset =
     effectiveScope === "project"
-      ? settings?.projectAccessPreset ?? null
-      : settings?.userAccessPreset ?? null;
+      ? (settings?.projectAccessPreset ?? null)
+      : (settings?.userAccessPreset ?? null);
   const accessPreset =
     accessPresetDraft === undefined
       ? configuredAccessPreset
@@ -130,9 +139,25 @@ export function SettingsPage({
 
   const models = settings?.models ?? [];
   const connectionOptions = connections.catalog?.connections ?? [];
+  const selectableConnections = connectionOptions.filter(
+    (connection) =>
+      connection.enabled &&
+      (connection.id === agents.defaultConnection ||
+        (connection.configured && (!connection.local || connection.explicit))),
+  );
+  const verificationConnection = resolveConnectionForModel(
+    connectionOptions,
+    agents.defaultConnection,
+    agents.defaultModel,
+  );
 
-  const saveAgents = async () => {
-    if (!maxTokensValid) return;
+  const updateAgents = (patch: Partial<AgentDraft>) => {
+    setAgentOverrides((current) => ({ ...current, ...patch }));
+    setModelVerification(null);
+  };
+
+  const saveAgents = async (): Promise<boolean> => {
+    if (!maxTokensValid) return false;
     await onUpdate(
       {
         agents: {
@@ -155,6 +180,26 @@ export function SettingsPage({
       effectiveScope,
     );
     setAgentOverrides({});
+    return true;
+  };
+
+  const verifyDefaultModel = async () => {
+    if (!verificationConnection || !agents.defaultModel.trim()) return;
+    setVerifyingModel(true);
+    setModelVerification(null);
+    try {
+      if (!(await saveAgents())) return;
+      setModelVerification(
+        await connections.test(
+          verificationConnection.id,
+          agents.defaultModel.trim(),
+        ),
+      );
+    } catch {
+      // The shared connection controller exposes the sanitized product error.
+    } finally {
+      setVerifyingModel(false);
+    }
   };
 
   const saveSecurity = async () => {
@@ -189,6 +234,7 @@ export function SettingsPage({
     await onRefresh();
     setAgentOverrides({});
     setAccessPresetDraft(undefined);
+    setModelVerification(null);
   };
 
   const exportDiagnostics = async () => {
@@ -257,6 +303,8 @@ export function SettingsPage({
         </button>
       </header>
 
+      <ConnectionSettings controller={connections} busy={busy} />
+
       <div className={styles.scopeBar}>
         <label>
           Write changes to
@@ -276,135 +324,174 @@ export function SettingsPage({
         <span>
           {effectiveScope === "project"
             ? project?.canonicalPath
-            : settings?.configPath ?? "DeepCode user config"}
+            : (settings?.configPath ?? "DeepCode user config")}
         </span>
       </div>
 
       <div className={styles.settingsGrid}>
-        <section className={styles.formCard}>
+        <section className={`${styles.formCard} ${styles.fullWidthCard}`}>
           <header>
             <div>
-              <p className={styles.eyebrow}>Agent defaults</p>
-              <h2>Models</h2>
+              <p className={styles.eyebrow}>Step 2 · Choose the default</p>
+              <h2>Agent model</h2>
+              <p className={styles.cardDescription}>
+                New Sessions inherit this model. A Session can switch models
+                later without losing its conversation history.
+              </p>
             </div>
           </header>
+          {!selectableConnections.length ? (
+            <p className={styles.warningBlock}>
+              Connect a provider above before choosing an Agent model.
+            </p>
+          ) : null}
           <div className={styles.formGrid}>
             <label>
-              Default connection
+              Provider connection
               <select
                 value={agents.defaultConnection}
                 onChange={(event) =>
-                  setAgentOverrides((current) => ({
-                    ...current,
+                  updateAgents({
                     defaultConnection: event.target.value,
-                  }))
+                    defaultModel: "",
+                  })
                 }
               >
-                <option value="">Auto-select</option>
-                {connectionOptions.map((connection) => (
+                <option value="">Choose automatically</option>
+                {selectableConnections.map((connection) => (
                   <option value={connection.id} key={connection.id}>
                     {connection.label}
                   </option>
                 ))}
               </select>
             </label>
+            <ModelField
+              label="Model"
+              connectionId={verificationConnection?.id ?? ""}
+              value={agents.defaultModel}
+              fallbackModels={models.map((model) => model.id)}
+              listModels={connections.models}
+              onChange={(defaultModel) => updateAgents({ defaultModel })}
+            />
             <label>
               Max output tokens
               <input
                 inputMode="numeric"
                 value={agents.maxTokens}
                 onChange={(event) =>
-                  setAgentOverrides((current) => ({
-                    ...current,
-                    maxTokens: event.target.value,
-                  }))
+                  updateAgents({ maxTokens: event.target.value })
                 }
                 aria-invalid={!maxTokensValid}
               />
             </label>
-            <ModelField
-              label="Default model"
-              value={agents.defaultModel}
-              models={models.map((model) => model.id)}
-              onChange={(defaultModel) =>
-                setAgentOverrides((current) => ({
-                  ...current,
-                  defaultModel,
-                }))
-              }
-            />
-            <label>
-              Planning connection
-              <select
-                value={agents.planningConnection}
-                onChange={(event) =>
-                  setAgentOverrides((current) => ({
-                    ...current,
-                    planningConnection: event.target.value,
-                  }))
-                }
-              >
-                <option value="">Use default</option>
-                {connectionOptions.map((connection) => (
-                  <option value={connection.id} key={connection.id}>
-                    {connection.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <ModelField
-              label="Planning override"
-              value={agents.planningModel}
-              models={models.map((model) => model.id)}
-              allowEmpty
-              onChange={(planningModel) =>
-                setAgentOverrides((current) => ({
-                  ...current,
-                  planningModel,
-                }))
-              }
-            />
-            <label>
-              Implementation connection
-              <select
-                value={agents.implementationConnection}
-                onChange={(event) =>
-                  setAgentOverrides((current) => ({
-                    ...current,
-                    implementationConnection: event.target.value,
-                  }))
-                }
-              >
-                <option value="">Use default</option>
-                {connectionOptions.map((connection) => (
-                  <option value={connection.id} key={connection.id}>
-                    {connection.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <ModelField
-              label="Implementation override"
-              value={agents.implementationModel}
-              models={models.map((model) => model.id)}
-              allowEmpty
-              onChange={(implementationModel) =>
-                setAgentOverrides((current) => ({
-                  ...current,
-                  implementationModel,
-                }))
-              }
-            />
           </div>
+          <details className={styles.advancedSettings}>
+            <summary>Advanced phase routing</summary>
+            <p>
+              Optional phase models inherit the Agent model when left empty.
+              Paper2Code uses Planning first, then Coding & implementation.
+              Ordinary Code Sessions without a Session override use Coding &
+              implementation.
+            </p>
+            <div className={styles.formGrid}>
+              <label>
+                Planning connection
+                <select
+                  value={agents.planningConnection}
+                  onChange={(event) =>
+                    updateAgents({
+                      planningConnection: event.target.value,
+                      planningModel: "",
+                    })
+                  }
+                >
+                  <option value="">Use Agent default</option>
+                  {selectableConnections.map((connection) => (
+                    <option value={connection.id} key={connection.id}>
+                      {connection.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <ModelField
+                label="Planning model"
+                connectionId={
+                  agents.planningConnection || verificationConnection?.id || ""
+                }
+                value={agents.planningModel}
+                fallbackModels={models.map((model) => model.id)}
+                listModels={connections.models}
+                allowEmpty
+                onChange={(planningModel) => updateAgents({ planningModel })}
+              />
+              <label>
+                Coding & implementation connection
+                <select
+                  value={agents.implementationConnection}
+                  onChange={(event) =>
+                    updateAgents({
+                      implementationConnection: event.target.value,
+                      implementationModel: "",
+                    })
+                  }
+                >
+                  <option value="">Use Agent default</option>
+                  {selectableConnections.map((connection) => (
+                    <option value={connection.id} key={connection.id}>
+                      {connection.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <ModelField
+                label="Coding & implementation model"
+                connectionId={
+                  agents.implementationConnection ||
+                  verificationConnection?.id ||
+                  ""
+                }
+                value={agents.implementationModel}
+                fallbackModels={models.map((model) => model.id)}
+                listModels={connections.models}
+                allowEmpty
+                onChange={(implementationModel) =>
+                  updateAgents({ implementationModel })
+                }
+              />
+            </div>
+          </details>
+          {modelVerification ? (
+            <div className={styles.verificationBlock}>
+              <ConnectionVerification result={modelVerification} />
+            </div>
+          ) : null}
           <footer className={styles.formActions}>
-            <span>Idle Sessions reload this configuration on their next Turn.</span>
+            <span>
+              Verification sends only a tiny “reply OK” request. No repository
+              or Session content is included.
+            </span>
             <button
-              className={styles.primaryButton}
+              className={styles.secondaryButton}
               type="button"
               disabled={busy || !agents.defaultModel || !maxTokensValid}
               onClick={() => void saveAgents()}
             >
-              Save model settings
+              Save defaults
+            </button>
+            <button
+              className={styles.primaryButton}
+              type="button"
+              disabled={
+                busy ||
+                verifyingModel ||
+                !verificationConnection ||
+                !agents.defaultModel ||
+                !maxTokensValid
+              }
+              onClick={() => void verifyDefaultModel()}
+            >
+              <FlaskConical size={13} />
+              {verifyingModel ? "Verifying…" : "Save and verify model"}
             </button>
           </footer>
         </section>
@@ -442,19 +529,18 @@ export function SettingsPage({
             </label>
           </div>
           <p className={styles.note}>
-            Effective default: {settingsDefaultAccessLabel(settings)} · source: {" "}
+            Effective default: {settingsDefaultAccessLabel(settings)} · source:{" "}
             {settings?.resolvedDefaultSecuritySource.replaceAll("_", " ") ??
               "loading"}
-            . {" "}
-            Ask and Read only retain the workspace sandbox and protected-path
+            . Ask and Read only retain the workspace sandbox and protected-path
             guards. Full access removes those execution boundaries after
             confirmation. Low-level compatibility settings are available only
             through advanced configuration.
           </p>
           <footer className={styles.formActions}>
             <span>
-              Sessions with their own access selection keep that override. New and
-              inherited Sessions use this default.
+              Sessions with their own access selection keep that override. New
+              and inherited Sessions use this default.
             </span>
             <button
               className={styles.primaryButton}
@@ -510,8 +596,6 @@ export function SettingsPage({
         {updateInfo?.body ? <p>{updateInfo.body}</p> : null}
       </section>
 
-      <ConnectionSettings controller={connections} busy={busy} />
-
       <section className={styles.section}>
         <header className={styles.sectionHeader}>
           <div>
@@ -564,7 +648,10 @@ export function SettingsPage({
               ))}
             </div>
             <dl className={styles.diagnosticGrid}>
-              <Diagnostic label="App" value={diagnostics.diagnostics.appVersion} />
+              <Diagnostic
+                label="App"
+                value={diagnostics.diagnostics.appVersion}
+              />
               <Diagnostic
                 label="Python"
                 value={`${diagnostics.diagnostics.pythonVersion} · ${diagnostics.diagnostics.architecture}`}
@@ -587,7 +674,10 @@ export function SettingsPage({
               />
               <Diagnostic
                 label="Project config"
-                value={diagnostics.diagnostics.projectConfigPath ?? "No project selected"}
+                value={
+                  diagnostics.diagnostics.projectConfigPath ??
+                  "No project selected"
+                }
               />
             </dl>
           </>
@@ -623,7 +713,8 @@ function updateStatusMessage(
   update: DesktopUpdateInfo | null,
   progress: DesktopUpdateProgress | null,
 ): string {
-  if (state === "checking") return "Checking the configured signed release channel.";
+  if (state === "checking")
+    return "Checking the configured signed release channel.";
   if (state === "current") return "This installation is up to date.";
   if (state === "available" && update) {
     return `DeepCode ${update.version} is available. The package signature is verified before installation.`;
@@ -634,18 +725,56 @@ function updateStatusMessage(
 
 function ModelField({
   label,
+  connectionId,
   value,
-  models,
+  fallbackModels,
+  listModels,
   allowEmpty = false,
   onChange,
 }: {
   label: string;
+  connectionId: string;
   value: string;
-  models: string[];
+  fallbackModels: string[];
+  listModels: ConnectionCatalogController["models"];
   allowEmpty?: boolean;
   onChange(value: string): void;
 }) {
   const listId = useId();
+  const [catalogState, setCatalogState] = useState<{
+    connectionId: string;
+    catalog: ModelCatalogResult | null;
+    failed: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!connectionId) return;
+    let cancelled = false;
+    void listModels(connectionId)
+      .then((result) => {
+        if (!cancelled) {
+          setCatalogState({ connectionId, catalog: result, failed: false });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCatalogState({ connectionId, catalog: null, failed: true });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [connectionId, listModels]);
+
+  const catalog =
+    catalogState?.connectionId === connectionId ? catalogState.catalog : null;
+  const loading = Boolean(
+    connectionId && catalogState?.connectionId !== connectionId,
+  );
+  const models =
+    catalog?.connectionId === connectionId
+      ? catalog.models.map((model) => model.id)
+      : fallbackModels;
   return (
     <label>
       {label}
@@ -660,7 +789,46 @@ function ModelField({
           <option value={model} key={model} />
         ))}
       </datalist>
+      <small>
+        {loading
+          ? "Loading models…"
+          : catalogState?.connectionId === connectionId && catalogState.failed
+            ? "Catalog unavailable · enter an exact model ID"
+          : catalog?.stale
+            ? "Using the last available model list"
+            : connectionId
+              ? `${models.length} models available · exact IDs are also accepted`
+              : "Choose a connection to load its models"}
+      </small>
     </label>
+  );
+}
+
+function resolveConnectionForModel(
+  connections: NonNullable<
+    ConnectionCatalogController["catalog"]
+  >["connections"],
+  selectedId: string,
+  model: string,
+) {
+  if (selectedId) {
+    const selected = connections.find(
+      (connection) => connection.id === selectedId && connection.enabled,
+    );
+    if (selected) return selected;
+  }
+  const prefix = model.split("/", 1)[0]?.toLocaleLowerCase();
+  return (
+    connections.find(
+      (connection) =>
+        connection.enabled &&
+        connection.configured &&
+        (connection.id === prefix || connection.providerName === prefix),
+    ) ??
+    connections.find(
+      (connection) => connection.enabled && connection.configured,
+    ) ??
+    null
   );
 }
 

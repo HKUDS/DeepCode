@@ -51,9 +51,16 @@ def _parser() -> argparse.ArgumentParser:
     command_parsers.append(remove)
     remove.add_argument("id")
 
-    test = commands.add_parser("test", help="Test authentication/model discovery.")
+    test = commands.add_parser(
+        "test",
+        help="Check credentials/model discovery and optionally verify one model.",
+    )
     command_parsers.append(test)
     test.add_argument("id")
+    test.add_argument(
+        "--model",
+        help="Send a minimal real inference request to this model.",
+    )
 
     models = commands.add_parser("models", help="List models for a connection.")
     command_parsers.append(models)
@@ -101,7 +108,7 @@ def run(argv: list[str] | None = None) -> int:
         elif args.command == "remove":
             result = service.remove(args.id)
         elif args.command == "test":
-            result = service.test(args.id)
+            result = service.test(args.id, model_id=args.model)
         else:
             result = service.list_models(args.id, refresh=args.refresh)
     except (ApplicationError, ValueError) as exc:
@@ -120,13 +127,18 @@ def run(argv: list[str] | None = None) -> int:
                 f"{connection['adapter']:<14} {state}"
             )
     elif args.command == "test":
-        if result["ok"]:
+        stream = sys.stdout if result["ok"] else sys.stderr
+        print(
+            f"{result['status']}: {result['connectionId']} · "
+            f"{result['modelCount']} models · {result['latencyMs']} ms",
+            file=stream,
+        )
+        for stage in result["stages"]:
             print(
-                f"ok: {result['connectionId']} · {result['modelCount']} models · "
-                f"{result['latencyMs']} ms"
+                f"  {stage['id']:<10} {stage['status']:<8} {stage['detail']}",
+                file=stream,
             )
-        else:
-            print(f"failed: {result['error']}", file=sys.stderr)
+        if not result["ok"]:
             return 1
     else:
         suffix = " (stale cache)" if result["stale"] else ""

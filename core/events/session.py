@@ -31,7 +31,6 @@ from core.agent_runtime.hook import AgentHook, AgentHookContext
 from core.agent_runtime.runner import AgentRunner, AgentRunSpec
 from core.agent_runtime.tools.base import ToolResult
 from core.agent_runtime.tools.registry import ToolRegistry
-from core.providers.catalog import context_window_for
 from core.events.protocol import (
     AgentMessage,
     AgentMessageCompleted,
@@ -47,9 +46,9 @@ from core.events.protocol import (
     Op,
     Shutdown,
     ShutdownComplete,
-    Submission,
     SkillLoaded,
     SkillLoadFailed,
+    Submission,
     TaskComplete,
     ToolCompleted,
     ToolStarted,
@@ -61,11 +60,21 @@ from core.events.protocol import (
     summarize_result,
 )
 from core.providers.base import LLMProvider
+from core.providers.catalog import context_window_for
 from core.reasoning import ReasoningAvailability, ReasoningChannel
 from core.skills.models import SkillError
 from core.skills.runtime import SkillRuntime, SkillTurnContext
 
 _DEFAULT_MAX_TOOL_RESULT_CHARS = 60_000
+
+
+def _one_line_detail(value: str, *, limit: int = 80) -> str:
+    """Bound a tool-declared presentation value without inspecting its data."""
+
+    if not isinstance(value, str):
+        return ""
+    text = value.strip().splitlines()[0] if value.strip() else ""
+    return text[:limit] + ("…" if len(text) > limit else "")
 
 
 def _is_error_result(result: Any) -> bool:
@@ -97,6 +106,7 @@ class _EventEmittingHook(AgentHook):
         emit_deltas: bool | None = None,
         usage_sink=None,
         reasoning_effort: str | None = None,
+        tools: ToolRegistry | None = None,
     ) -> None:
         super().__init__()
         self._emit = emit
@@ -104,6 +114,7 @@ class _EventEmittingHook(AgentHook):
         self._emit_deltas = streaming if emit_deltas is None else emit_deltas
         self._usage_sink = usage_sink
         self._reasoning_effort = reasoning_effort
+        self._tools = tools
         self._reasoning_context_id: int | None = None
         self._reasoning_id: str | None = None
         self._reasoning_summary = ""
@@ -312,11 +323,27 @@ class _EventEmittingHook(AgentHook):
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         for call in context.tool_calls:
+            detail: str | None = None
+            if self._tools is not None:
+                tool = self._tools.get(call.name)
+                if tool is not None:
+                    try:
+                        detail = tool.presentation_detail(call.arguments)
+                    except Exception as exc:  # noqa: BLE001 - presentation boundary
+                        logger.warning(
+                            "Ignoring unsafe tool presentation detail ({})",
+                            type(exc).__name__,
+                        )
+                        detail = ""
+            if detail is None:
+                detail = summarize_call(call.name, call.arguments)
+            else:
+                detail = _one_line_detail(detail)
             self._emit(
                 ToolStarted(
                     call_id=call.id,
                     name=call.name,
-                    detail=summarize_call(call.name, call.arguments),
+                    detail=detail,
                     activity=describe_tool_activity(call.name, call.arguments),
                 )
             )
@@ -471,7 +498,8 @@ class AgentSession:
             # not keep awaiting a provider/tool submission that the caller has
             # explicitly abandoned; propagate cancellation into the active
             # task and wait only for its cleanup.
-            task.cancel()
+            if task.cancelling() == 0:
+                task.cancel()
             await asyncio.gather(task, return_exceptions=True)
             raise
         else:
@@ -514,7 +542,7 @@ class AgentSession:
             await self._run_user_input(op)
         elif isinstance(op, Interrupt):
             task = self._active_turn_task or self._current_task
-            if task is not None and not task.done():
+            if task is not None and not task.done() and task.cancelling() == 0:
                 task.cancel()
         elif isinstance(op, Shutdown):
             self._emit(ShutdownComplete())
@@ -533,12 +561,35 @@ class AgentSession:
 
         task = self._active_turn_task or self._current_task
         if task is not None and not task.done():
-            task.cancel()
+            if task.cancelling() == 0:
+                task.cancel()
             await asyncio.gather(task, return_exceptions=True)
         control = getattr(self, "_agent_control", None)
         if control is not None:
             await control.close()
         await self._tools.aclose()
+
+    async def _cancel_turn_subagents(self) -> None:
+        """Stop delegated work without letting repeated Stop interrupt teardown."""
+
+        control = getattr(self, "_agent_control", None)
+        if control is not None:
+            cleanup_task = asyncio.create_task(control.cancel_running())
+            while True:
+                try:
+                    await asyncio.shield(cleanup_task)
+                    break
+                except asyncio.CancelledError:
+                    # Stop can race with the short finishing phase. It may
+                    # cancel the parent Turn, but it must not cancel child
+                    # teardown or suppress the terminal event. Further Stop
+                    # requests see the parent task's cancelling state and do
+                    # not inject another cancellation.
+                    if cleanup_task.cancelled():
+                        raise
+                    if cleanup_task.done():
+                        cleanup_task.result()
+                        break
 
     async def _run_start_hook(self):
         """Run SessionStart, or SubagentStart when this is a sub-agent session.
@@ -605,6 +656,7 @@ class AgentSession:
         self._active_turn_task = asyncio.current_task()
         skill_context: SkillTurnContext | None = None
         skill_token = None
+        terminal: TaskComplete | None = None
         try:
             if self._skill_runtime is not None:
                 try:
@@ -624,11 +676,9 @@ class AgentSession:
                         )
                     )
                     self._emit(ErrorEvent(message=str(exc)))
-                    self._emit(
-                        TaskComplete(
-                            final_text=None,
-                            stop_reason="invalid_skill",
-                        )
+                    terminal = TaskComplete(
+                        final_text=None,
+                        stop_reason="invalid_skill",
                     )
                     return
 
@@ -647,19 +697,30 @@ class AgentSession:
                 skill_context.on_failure = lambda message, skill_id: self._emit(
                     SkillLoadFailed(message=message, skill_id=skill_id)
                 )
-            await self._execute_turn(text, skill_context)
+            terminal = await self._execute_turn(text, skill_context)
+        except asyncio.CancelledError:
+            terminal = TaskComplete(final_text=None, stop_reason="interrupted")
         finally:
             if skill_token is not None and self._skill_runtime is not None:
-                self._skill_runtime.end_turn(skill_token)
+                try:
+                    self._skill_runtime.end_turn(skill_token)
+                except Exception as exc:  # noqa: BLE001 - best-effort teardown
+                    logger.warning(
+                        "Skill turn cleanup failed ({})",
+                        type(exc).__name__,
+                    )
+            await self._cancel_turn_subagents()
             self._busy = False
             self._current_task = None
             self._active_turn_task = None
+            if terminal is not None:
+                self._emit(terminal)
 
     async def _execute_turn(
         self,
         text: str,
         skill_context: SkillTurnContext | None,
-    ) -> None:
+    ) -> TaskComplete:
         # External-command hooks (C3): SessionStart (once) + UserPromptSubmit
         # (every prompt). UserPromptSubmit may block the turn outright or inject
         # context; SessionStart injects session context. Injected context rides
@@ -669,14 +730,16 @@ class AgentSession:
             try:
                 blocked = await self._run_prompt_hooks(text, hook_contexts)
             except asyncio.CancelledError:
-                self._emit(TaskComplete(final_text=None, stop_reason="interrupted"))
-                return
+                return TaskComplete(
+                    final_text=None,
+                    stop_reason="interrupted",
+                )
             if blocked is not None:
                 self._history.append({"role": "user", "content": text})
-                self._emit(
-                    TaskComplete(final_text=blocked, stop_reason="blocked_by_hook")
+                return TaskComplete(
+                    final_text=blocked,
+                    stop_reason="blocked_by_hook",
                 )
-                return
 
         self._history.append({"role": "user", "content": text})
 
@@ -752,6 +815,7 @@ class AgentSession:
                 if self.execution_profile is not None
                 else None
             ),
+            tools=self._tools,
         )
 
         def visible_tool_names() -> tuple[str, ...] | None:
@@ -794,16 +858,14 @@ class AgentSession:
             self._current_task = asyncio.ensure_future(self._runner.run(spec))
             result = await self._current_task
         except asyncio.CancelledError:
-            self._emit(TaskComplete(final_text=None, stop_reason="interrupted"))
-            return
+            return TaskComplete(final_text=None, stop_reason="interrupted")
         except Exception as exc:  # noqa: BLE001
             # The runner should return errors as data, but a truly unexpected
             # exception must still terminate the turn — otherwise a consumer
             # blocked on the next event (run_stream) would hang forever. Always
             # close the turn with an error + task_complete.
             self._emit(ErrorEvent(message=f"{type(exc).__name__}: {exc}"))
-            self._emit(TaskComplete(final_text=None, stop_reason="error"))
-            return
+            return TaskComplete(final_text=None, stop_reason="error")
         finally:
             self._current_task = None
 
@@ -821,8 +883,7 @@ class AgentSession:
             )
         if result.error and result.stop_reason in ("error", "empty_final_response"):
             self._emit(ErrorEvent(message=result.error))
-        self._emit(
-            TaskComplete(
-                final_text=result.final_content, stop_reason=result.stop_reason
-            )
+        return TaskComplete(
+            final_text=result.final_content,
+            stop_reason=result.stop_reason,
         )

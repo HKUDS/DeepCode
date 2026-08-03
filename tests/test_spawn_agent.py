@@ -225,6 +225,23 @@ def test_close_cancels_running_subagents(tmp_path):
     assert asyncio.run(scenario()) == 0
 
 
+def test_cancel_running_waits_for_child_cleanup(tmp_path):
+    async def scenario():
+        ctrl = _HeldControl(str(tmp_path))
+        agent_id = ctrl.spawn("t1", isolate=False)
+        await asyncio.sleep(0)
+        handle = ctrl.get(agent_id).handle
+
+        await ctrl.cancel_running()
+
+        assert handle.done()
+        assert ctrl.get(agent_id).status == "failed"
+        assert ctrl.get(agent_id).result == "cancelled"
+        assert ctrl.active_count() == 0
+
+    asyncio.run(scenario())
+
+
 def test_spawn_tool_reports_limit(tmp_path):
     async def scenario():
         ctrl = _HeldControl(str(tmp_path), max_threads=1)
@@ -443,6 +460,9 @@ def test_subagent_inherits_parent_permission_and_approval(tmp_path, monkeypatch)
     captured = {}
 
     class Session:
+        async def aclose(self):
+            captured["closed"] = True
+
         def load_history(self, _messages):
             return None
 
@@ -466,6 +486,7 @@ def test_subagent_inherits_parent_permission_and_approval(tmp_path, monkeypatch)
     assert result == "done"
     assert captured["permission_mode_override"] is PermissionMode.DEFAULT
     assert captured["approval_callback"] is approval
+    assert captured["closed"] is True
 
 
 def test_subagent_inherits_atomic_execution_security_profile(tmp_path, monkeypatch):
@@ -478,6 +499,9 @@ def test_subagent_inherits_atomic_execution_security_profile(tmp_path, monkeypat
     captured = {}
 
     class Session:
+        async def aclose(self):
+            captured["closed"] = True
+
         def load_history(self, _messages):
             return None
 
@@ -503,6 +527,68 @@ def test_subagent_inherits_atomic_execution_security_profile(tmp_path, monkeypat
     assert captured["execution_security_profile"] is profile
     assert captured["permission_mode_override"] is None
     assert captured["approval_callback"] is approval
+    assert captured["closed"] is True
+
+
+def test_subagent_closes_session_when_stream_fails(tmp_path, monkeypatch):
+    class Session:
+        def __init__(self):
+            self.closed = False
+
+        async def run_stream(self, _op):
+            if False:  # pragma: no cover - keeps this an async generator
+                yield
+            raise RuntimeError("stream failed")
+
+        async def aclose(self):
+            self.closed = True
+
+    session = Session()
+    monkeypatch.setattr(
+        "core.agent_setup.build_agent_session",
+        lambda **_kwargs: (session, "model", object()),
+    )
+    control = AgentControl(str(tmp_path))
+
+    with pytest.raises(RuntimeError, match="stream failed"):
+        asyncio.run(control._run_subagent("task", str(tmp_path)))
+
+    assert session.closed is True
+
+
+def test_subagent_closes_session_when_cancelled(tmp_path, monkeypatch):
+    async def scenario():
+        started = asyncio.Event()
+
+        class Session:
+            def __init__(self):
+                self.closed = False
+
+            async def run_stream(self, _op):
+                started.set()
+                await asyncio.Event().wait()
+                if False:  # pragma: no cover - keeps this an async generator
+                    yield
+
+            async def aclose(self):
+                self.closed = True
+
+        session = Session()
+        monkeypatch.setattr(
+            "core.agent_setup.build_agent_session",
+            lambda **_kwargs: (session, "model", object()),
+        )
+        control = AgentControl(str(tmp_path))
+        task = asyncio.create_task(control._run_subagent("task", str(tmp_path)))
+        await started.wait()
+
+        task.cancel()
+        outcome = await asyncio.gather(task, return_exceptions=True)
+
+        assert isinstance(outcome[0], asyncio.CancelledError)
+        assert session.closed is True
+
+    asyncio.run(scenario())
 
 
 def test_wiring_and_depth_cap():

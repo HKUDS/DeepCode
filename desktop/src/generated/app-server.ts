@@ -95,7 +95,7 @@ export interface MethodParams {
   "provider/list": OptionalProjectParams;
   "provider/upsert": ProviderUpsertParams;
   "provider/remove": ConnectionIdentityParams;
-  "provider/test": ConnectionIdentityParams;
+  "provider/test": ProviderTestParams;
   "model/list": ModelListParams;
   "skills/list": SkillListParams;
   "skill/read": SkillReadParams;
@@ -220,6 +220,11 @@ export interface ProviderUpsertParams {
 }
 export interface ConnectionIdentityParams {
   connectionId: string;
+}
+export interface ProviderTestParams {
+  connectionId: string;
+  projectId?: string;
+  model?: string;
 }
 export interface ModelListParams {
   connectionId: string;
@@ -744,6 +749,8 @@ export interface ConnectionTemplate {
   label: string;
   adapter: string;
   defaultApiBase: string | null;
+  apiKeyEnv: string | null;
+  requiresApiBase: boolean;
   local: boolean;
 }
 export interface ConnectionRemoveResult {
@@ -755,10 +762,24 @@ export interface ConnectionRemoveResult {
 }
 export interface ProviderTestResult {
   connectionId: string;
+  status: "connected" | "ready" | "limited" | "error";
   ok: boolean;
   latencyMs: number;
   modelCount: number;
   error: string | null;
+  /**
+   * @minItems 3
+   * @maxItems 3
+   */
+  stages: [ProviderVerificationStage, ProviderVerificationStage, ProviderVerificationStage];
+}
+export interface ProviderVerificationStage {
+  id: "credential" | "catalog" | "model";
+  status: "passed" | "failed" | "skipped" | "not_run";
+  detail: string;
+  latencyMs: number | null;
+  modelCount: number | null;
+  modelId: string | null;
 }
 export interface ModelCatalogResult {
   connectionId: string;

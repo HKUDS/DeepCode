@@ -1,10 +1,11 @@
 import {
-  CheckCircle2,
-  CircleAlert,
+  ChevronLeft,
   FlaskConical,
   KeyRound,
   Plus,
   Save,
+  Server,
+  SlidersHorizontal,
   Trash2,
   X,
 } from "lucide-react";
@@ -17,6 +18,7 @@ import type {
 } from "../../generated/app-server";
 import { confirmAction } from "../../platform/confirmAction";
 import type { ConnectionCatalogController } from "./useConnectionCatalog";
+import { ConnectionVerification } from "./ConnectionVerification";
 import styles from "./ConnectionSettings.module.css";
 
 interface ConnectionSettingsProps {
@@ -32,6 +34,7 @@ interface Draft {
   apiBase: string;
   apiKeyEnv: string;
   apiKey: string;
+  credentialMode: "key" | "environment";
   clearApiKey: boolean;
   modelCatalog: "auto" | "openrouter" | "openai" | "anthropic" | "manual";
   manualModels: string;
@@ -40,11 +43,12 @@ interface Draft {
 const emptyDraft: Draft = {
   id: "",
   label: "",
-  template: "openrouter",
+  template: "",
   adapter: "openai_compat",
   apiBase: "",
   apiKeyEnv: "",
   apiKey: "",
+  credentialMode: "key",
   clearApiKey: false,
   modelCatalog: "auto",
   manualModels: "",
@@ -69,6 +73,18 @@ export function ConnectionSettings({
       ),
     [controller.catalog?.connections],
   );
+  const selectedTemplate = controller.catalog?.templates.find(
+    (template) => template.name === editing?.template,
+  );
+  const editingExisting = Boolean(
+    editing &&
+    connections.some(
+      (connection) =>
+        connection.id === editing.id &&
+        (connection.configured || connection.explicit),
+    ),
+  );
+  const endpointRequired = Boolean(selectedTemplate?.requiresApiBase);
 
   const beginEdit = (connection: ConnectionInfo) => {
     setEditing({
@@ -79,23 +95,49 @@ export function ConnectionSettings({
       apiBase: connection.apiBase ?? "",
       apiKeyEnv: connection.apiKeyEnv ?? "",
       apiKey: "",
+      credentialMode: connection.apiKeyEnv ? "environment" : "key",
       clearApiKey: false,
       modelCatalog: connection.modelCatalog,
       manualModels: connection.manualModels.join("\n"),
     });
   };
 
+  const chooseTemplate = (templateName: string) => {
+    const template = controller.catalog?.templates.find(
+      (candidate) => candidate.name === templateName,
+    );
+    if (!template) return;
+    const builtin = connections.find(
+      (connection) => connection.id === template.name && !connection.configured,
+    );
+    const id = builtin?.id ?? nextConnectionId(template.name, connections);
+    setEditing((current) => ({
+      ...(current ?? emptyDraft),
+      id,
+      label: template.label,
+      template: template.name,
+      adapter: template.adapter === "anthropic" ? "anthropic" : "openai_compat",
+      apiBase: template.defaultApiBase ?? "",
+      modelCatalog: "auto",
+      manualModels: "",
+    }));
+  };
+
   const save = async () => {
     if (!editing?.id.trim()) return;
     setSaving(true);
     try {
+      const connectionId = editing.id.trim().toLocaleLowerCase();
       const connection: ProviderUpsertParams["connection"] = {
-        id: editing.id.trim().toLocaleLowerCase(),
+        id: connectionId,
         label: editing.label.trim() || editing.id.trim(),
         template: editing.template,
         adapter: editing.adapter,
         apiBase: editing.apiBase.trim() || null,
-        apiKeyEnv: editing.apiKeyEnv.trim() || null,
+        apiKeyEnv:
+          editing.credentialMode === "environment"
+            ? editing.apiKeyEnv.trim() || null
+            : null,
         modelCatalog: editing.modelCatalog,
         manualModels: editing.manualModels
           .split(/\r?\n|,/)
@@ -103,10 +145,19 @@ export function ConnectionSettings({
           .filter(Boolean),
         enabled: true,
       };
-      if (editing.apiKey.trim()) connection.apiKey = editing.apiKey.trim();
+      if (editing.credentialMode === "key" && editing.apiKey.trim()) {
+        connection.apiKey = editing.apiKey.trim();
+      }
       if (editing.clearApiKey) connection.clearApiKey = true;
       await controller.upsert(connection);
       setEditing(null);
+      setTestingId(connectionId);
+      try {
+        const result = await controller.test(connectionId);
+        setTestResults((current) => ({ ...current, [connectionId]: result }));
+      } finally {
+        setTestingId(null);
+      }
     } catch {
       // The shared controller owns the sanitized user-facing error.
     } finally {
@@ -150,11 +201,12 @@ export function ConnectionSettings({
     <section className={styles.section} aria-labelledby="connections-title">
       <header className={styles.heading}>
         <div>
-          <p>LLM access</p>
-          <h2 id="connections-title">Connections</h2>
+          <p>Step 1 · Connect a provider</p>
+          <h2 id="connections-title">AI providers</h2>
           <span>
-            One connection can serve many models. Credentials stay in the
-            user-only credential store and are never read back.
+            Add the service that supplies your models. DeepCode keeps API keys
+            in user-private storage and shares the connection with CLI and
+            Desktop.
           </span>
         </div>
         <button
@@ -164,7 +216,7 @@ export function ConnectionSettings({
           disabled={busy || saving}
         >
           <Plus size={14} />
-          Add connection
+          Add provider
         </button>
       </header>
 
@@ -173,13 +225,16 @@ export function ConnectionSettings({
       ) : null}
 
       <div className={styles.connectionRail}>
-        {connections.map((connection) => {
+        {connections.filter(isManagedConnection).map((connection) => {
           const result = testResults[connection.id];
           return (
             <article key={connection.id} className={styles.connection}>
               <span
                 className={styles.statusLight}
-                data-ready={connection.configured}
+                data-status={
+                  result?.status ??
+                  (connection.configured ? "configured" : "error")
+                }
                 aria-hidden="true"
               />
               <div className={styles.connectionBody}>
@@ -188,8 +243,8 @@ export function ConnectionSettings({
                     <strong>{connection.label}</strong>
                     <code>{connection.id}</code>
                   </div>
-                  <span data-ready={connection.configured}>
-                    {connection.configured ? "Ready" : "Needs credential"}
+                  <span data-status={result?.status ?? "configured"}>
+                    {connectionStatus(connection, result)}
                   </span>
                 </header>
                 <p>
@@ -200,16 +255,7 @@ export function ConnectionSettings({
                   </small>
                 </p>
                 {result ? (
-                  <div className={styles.testResult} data-ok={result.ok}>
-                    {result.ok ? (
-                      <CheckCircle2 size={13} />
-                    ) : (
-                      <CircleAlert size={13} />
-                    )}
-                    {result.ok
-                      ? `${result.modelCount} models · ${result.latencyMs} ms`
-                      : result.error}
-                  </div>
+                  <ConnectionVerification result={result} compact />
                 ) : null}
               </div>
               <div className={styles.actions}>
@@ -217,10 +263,10 @@ export function ConnectionSettings({
                   type="button"
                   onClick={() => void test(connection.id)}
                   disabled={busy || testingId === connection.id}
-                  title="Test connection"
+                  title="Check credential and model catalog"
                 >
                   <FlaskConical size={13} />
-                  {testingId === connection.id ? "Testing…" : "Test"}
+                  {testingId === connection.id ? "Checking…" : "Check"}
                 </button>
                 <button
                   type="button"
@@ -244,7 +290,19 @@ export function ConnectionSettings({
             </article>
           );
         })}
-        {controller.loading ? <p className={styles.loading}>Loading connections…</p> : null}
+        {!controller.loading && !connections.some(isManagedConnection) ? (
+          <div className={styles.emptyState}>
+            <Server size={20} />
+            <strong>No provider connected</strong>
+            <span>Add an API provider or a local model service to begin.</span>
+            <button type="button" onClick={() => setEditing({ ...emptyDraft })}>
+              <Plus size={13} /> Add provider
+            </button>
+          </div>
+        ) : null}
+        {controller.loading ? (
+          <p className={styles.loading}>Loading connections…</p>
+        ) : null}
       </div>
 
       {editing ? (
@@ -260,11 +318,9 @@ export function ConnectionSettings({
                 <KeyRound size={16} />
                 <span>
                   <strong id="connection-editor-title">
-                    {connections.some((item) => item.id === editing.id)
-                      ? "Edit connection"
-                      : "New connection"}
+                    {editingExisting ? "Edit provider" : "Connect a provider"}
                   </strong>
-                  <small>Saved for CLI and Desktop</small>
+                  <small>One setup works in CLI and Desktop</small>
                 </span>
               </div>
               <button
@@ -275,165 +331,272 @@ export function ConnectionSettings({
                 <X size={15} />
               </button>
             </header>
-            <div className={styles.form}>
-              {controller.error ? (
-                <p className={`${styles.error} ${styles.wide}`}>
-                  {controller.error}
-                </p>
-              ) : null}
-              <label>
-                Connection ID
-                <input
-                  value={editing.id}
-                  onChange={(event) =>
-                    setEditing({ ...editing, id: event.target.value })
-                  }
-                  placeholder="openrouter-personal"
-                  disabled={connections.some((item) => item.id === editing.id)}
-                />
-              </label>
-              <label>
-                Display name
-                <input
-                  value={editing.label}
-                  onChange={(event) =>
-                    setEditing({ ...editing, label: event.target.value })
-                  }
-                  placeholder="OpenRouter · Personal"
-                />
-              </label>
-              <label>
-                Provider template
-                <select
-                  value={editing.template}
-                  onChange={(event) => {
-                    const template = event.target.value;
-                    const selected = controller.catalog?.templates.find(
-                      (candidate) => candidate.name === template,
-                    );
-                    setEditing({
-                      ...editing,
-                      template,
-                      adapter:
-                        selected?.adapter === "anthropic"
-                          ? "anthropic"
-                          : "openai_compat",
-                      apiBase: editing.apiBase || selected?.defaultApiBase || "",
-                    });
-                  }}
-                >
+            {!editing.template ? (
+              <div className={styles.providerPicker}>
+                <div>
+                  <strong>Choose where your models come from</strong>
+                  <span>
+                    Provider defaults fill in the correct endpoint and protocol.
+                  </span>
+                </div>
+                <div className={styles.providerGrid}>
                   {controller.catalog?.templates.map((template) => (
-                    <option key={template.name} value={template.name}>
-                      {template.label}
-                    </option>
+                    <button
+                      type="button"
+                      key={template.name}
+                      onClick={() => chooseTemplate(template.name)}
+                    >
+                      <Server size={16} />
+                      <span>
+                        <strong>{template.label}</strong>
+                        <small>
+                          {template.local ? "Runs locally" : "Cloud provider"}
+                        </small>
+                      </span>
+                    </button>
                   ))}
-                </select>
-              </label>
-              <label>
-                Adapter
-                <select
-                  value={editing.adapter}
-                  onChange={(event) =>
-                    setEditing({
-                      ...editing,
-                      adapter: event.target.value as Draft["adapter"],
-                    })
-                  }
-                >
-                  <option value="openai_compat">OpenAI compatible</option>
-                  <option value="anthropic">Anthropic native</option>
-                </select>
-              </label>
-              <label className={styles.wide}>
-                API base
-                <input
-                  value={editing.apiBase}
-                  onChange={(event) =>
-                    setEditing({ ...editing, apiBase: event.target.value })
-                  }
-                  placeholder="Use provider default"
-                />
-              </label>
-              <label>
-                API key
-                <input
-                  type="password"
-                  value={editing.apiKey}
-                  onChange={(event) =>
-                    setEditing({
-                      ...editing,
-                      apiKey: event.target.value,
-                      clearApiKey: false,
-                    })
-                  }
-                  placeholder="Leave blank to keep existing"
-                  autoComplete="new-password"
-                  disabled={editing.clearApiKey}
-                />
-              </label>
-              <label>
-                Or environment variable
-                <input
-                  value={editing.apiKeyEnv}
-                  onChange={(event) =>
-                    setEditing({ ...editing, apiKeyEnv: event.target.value })
-                  }
-                  placeholder="OPENROUTER_API_KEY"
-                />
-              </label>
-              <label className={`${styles.credentialAction} ${styles.wide}`}>
-                <input
-                  type="checkbox"
-                  checked={editing.clearApiKey}
-                  aria-label="Remove saved API key"
-                  onChange={(event) =>
-                    setEditing({
-                      ...editing,
-                      apiKey: event.target.checked ? "" : editing.apiKey,
-                      clearApiKey: event.target.checked,
-                    })
-                  }
-                />
-                <span>
-                  <strong>Remove the saved API key</strong>
-                  <small>
-                    Environment variables and legacy configuration are not
-                    changed.
-                  </small>
-                </span>
-              </label>
-              <label>
-                Model catalog
-                <select
-                  value={editing.modelCatalog}
-                  onChange={(event) =>
-                    setEditing({
-                      ...editing,
-                      modelCatalog: event.target.value as Draft["modelCatalog"],
-                    })
-                  }
-                >
-                  <option value="auto">Automatic</option>
-                  <option value="openrouter">OpenRouter</option>
-                  <option value="openai">OpenAI compatible</option>
-                  <option value="anthropic">Anthropic</option>
-                  <option value="manual">Manual list</option>
-                </select>
-              </label>
-              <label className={styles.wide}>
-                Manual models
-                <textarea
-                  value={editing.manualModels}
-                  onChange={(event) =>
-                    setEditing({ ...editing, manualModels: event.target.value })
-                  }
-                  placeholder={"One model ID per line\nmoonshotai/kimi-k2.5"}
-                  rows={3}
-                />
-              </label>
-            </div>
+                </div>
+              </div>
+            ) : (
+              <div className={styles.form}>
+                {controller.error ? (
+                  <p className={`${styles.error} ${styles.wide}`}>
+                    {controller.error}
+                  </p>
+                ) : null}
+                <div className={`${styles.providerSummary} ${styles.wide}`}>
+                  <Server size={17} />
+                  <span>
+                    <strong>{selectedTemplate?.label ?? editing.label}</strong>
+                    <small>
+                      {selectedTemplate?.local
+                        ? "Local model service"
+                        : "API provider"}
+                    </small>
+                  </span>
+                  {!editingExisting ? (
+                    <button
+                      type="button"
+                      onClick={() => setEditing({ ...emptyDraft })}
+                    >
+                      <ChevronLeft size={12} /> Change
+                    </button>
+                  ) : null}
+                </div>
+                <label className={styles.wide}>
+                  Display name
+                  <input
+                    value={editing.label}
+                    onChange={(event) =>
+                      setEditing({ ...editing, label: event.target.value })
+                    }
+                    placeholder={selectedTemplate?.label ?? "My provider"}
+                  />
+                </label>
+                {endpointRequired ? (
+                  <label className={styles.wide}>
+                    API endpoint
+                    <input
+                      value={editing.apiBase}
+                      onChange={(event) =>
+                        setEditing({
+                          ...editing,
+                          apiBase: event.target.value,
+                        })
+                      }
+                      placeholder="https://llm.example.com/v1"
+                      aria-required="true"
+                    />
+                    <small>
+                      This provider has no universal endpoint. Enter the base
+                      URL of your server.
+                    </small>
+                  </label>
+                ) : null}
+                {!selectedTemplate?.local ? (
+                  <fieldset className={`${styles.credentials} ${styles.wide}`}>
+                    <legend>Credential</legend>
+                    <div className={styles.credentialTabs}>
+                      <button
+                        type="button"
+                        data-active={editing.credentialMode === "key"}
+                        onClick={() =>
+                          setEditing({ ...editing, credentialMode: "key" })
+                        }
+                      >
+                        Paste API key
+                      </button>
+                      <button
+                        type="button"
+                        data-active={editing.credentialMode === "environment"}
+                        onClick={() =>
+                          setEditing({
+                            ...editing,
+                            credentialMode: "environment",
+                          })
+                        }
+                      >
+                        Environment variable
+                      </button>
+                    </div>
+                    {editing.credentialMode === "key" ? (
+                      <input
+                        type="password"
+                        value={editing.apiKey}
+                        onChange={(event) =>
+                          setEditing({
+                            ...editing,
+                            apiKey: event.target.value,
+                            clearApiKey: false,
+                          })
+                        }
+                        placeholder={
+                          editingExisting
+                            ? "Leave blank to keep the saved key"
+                            : "Paste API key"
+                        }
+                        autoComplete="new-password"
+                        disabled={editing.clearApiKey}
+                        aria-label="API key"
+                      />
+                    ) : (
+                      <input
+                        value={editing.apiKeyEnv}
+                        onChange={(event) =>
+                          setEditing({
+                            ...editing,
+                            apiKeyEnv: event.target.value,
+                          })
+                        }
+                        placeholder={
+                          selectedTemplate?.apiKeyEnv ?? "PROVIDER_API_KEY"
+                        }
+                        aria-label="API key environment variable"
+                      />
+                    )}
+                    <small>
+                      Stored keys are private and never returned to the app UI.
+                    </small>
+                  </fieldset>
+                ) : null}
+                <details className={`${styles.advanced} ${styles.wide}`}>
+                  <summary>
+                    <SlidersHorizontal size={13} /> Advanced connection settings
+                  </summary>
+                  <div>
+                    <label>
+                      Connection ID
+                      <input
+                        value={editing.id}
+                        onChange={(event) =>
+                          setEditing({ ...editing, id: event.target.value })
+                        }
+                        placeholder="provider-personal"
+                        disabled={editingExisting}
+                      />
+                    </label>
+                    {!endpointRequired ? (
+                      <label>
+                        API base
+                        <input
+                          value={editing.apiBase}
+                          onChange={(event) =>
+                            setEditing({
+                              ...editing,
+                              apiBase: event.target.value,
+                            })
+                          }
+                          placeholder="Use provider default"
+                        />
+                      </label>
+                    ) : null}
+                    <label>
+                      Adapter
+                      <select
+                        value={editing.adapter}
+                        onChange={(event) =>
+                          setEditing({
+                            ...editing,
+                            adapter: event.target.value as Draft["adapter"],
+                          })
+                        }
+                      >
+                        <option value="openai_compat">OpenAI compatible</option>
+                        <option value="anthropic">Anthropic native</option>
+                      </select>
+                    </label>
+                    <label>
+                      Model catalog
+                      <select
+                        value={editing.modelCatalog}
+                        onChange={(event) =>
+                          setEditing({
+                            ...editing,
+                            modelCatalog: event.target
+                              .value as Draft["modelCatalog"],
+                          })
+                        }
+                      >
+                        <option value="auto">Automatic</option>
+                        <option value="openrouter">OpenRouter</option>
+                        <option value="openai">OpenAI compatible</option>
+                        <option value="anthropic">Anthropic</option>
+                        <option value="manual">Manual list</option>
+                      </select>
+                    </label>
+                    {editing.modelCatalog === "manual" ? (
+                      <label className={styles.wide}>
+                        Manual models
+                        <textarea
+                          value={editing.manualModels}
+                          onChange={(event) =>
+                            setEditing({
+                              ...editing,
+                              manualModels: event.target.value,
+                            })
+                          }
+                          placeholder={
+                            "One model ID per line\nmoonshotai/kimi-k2.5"
+                          }
+                          rows={3}
+                        />
+                      </label>
+                    ) : null}
+                    {editingExisting ? (
+                      <label
+                        className={`${styles.credentialAction} ${styles.wide}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={editing.clearApiKey}
+                          aria-label="Remove saved API key"
+                          onChange={(event) =>
+                            setEditing({
+                              ...editing,
+                              apiKey: event.target.checked
+                                ? ""
+                                : editing.apiKey,
+                              clearApiKey: event.target.checked,
+                            })
+                          }
+                        />
+                        <span>
+                          <strong>Remove the saved API key</strong>
+                          <small>
+                            Environment and legacy credentials are unchanged.
+                          </small>
+                        </span>
+                      </label>
+                    ) : null}
+                  </div>
+                </details>
+              </div>
+            )}
             <footer>
-              <span>Changing a connection affects future Turns only.</span>
+              <span>
+                Saving checks credentials and model discovery. It does not send
+                project content.
+              </span>
               <button
                 type="button"
                 onClick={() => setEditing(null)}
@@ -445,10 +608,15 @@ export function ConnectionSettings({
                 type="button"
                 className={styles.saveButton}
                 onClick={() => void save()}
-                disabled={saving || !editing.id.trim()}
+                disabled={
+                  saving ||
+                  !editing.id.trim() ||
+                  !editing.template ||
+                  (endpointRequired && !editing.apiBase.trim())
+                }
               >
                 <Save size={13} />
-                {saving ? "Saving…" : "Save connection"}
+                {saving ? "Saving…" : "Save and check"}
               </button>
             </footer>
           </section>
@@ -471,4 +639,30 @@ function credentialLabel(connection: ConnectionInfo): string {
     default:
       return "no key";
   }
+}
+
+function connectionStatus(
+  connection: ConnectionInfo,
+  result: ProviderTestResult | undefined,
+): string {
+  if (result?.status === "ready") return "Model verified";
+  if (result?.status === "connected") return "Catalog connected";
+  if (result?.status === "limited") return "Model check needed";
+  if (result?.status === "error") return "Needs attention";
+  return connection.configured ? "Credential saved" : "Needs credential";
+}
+
+function isManagedConnection(connection: ConnectionInfo): boolean {
+  return connection.explicit || (connection.configured && !connection.local);
+}
+
+function nextConnectionId(
+  template: string,
+  connections: ConnectionInfo[],
+): string {
+  const existing = new Set(connections.map((connection) => connection.id));
+  if (!existing.has(template)) return template;
+  let suffix = 2;
+  while (existing.has(`${template}-${suffix}`)) suffix += 1;
+  return `${template}-${suffix}`;
 }

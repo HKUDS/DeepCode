@@ -125,6 +125,10 @@
   font-size: 11.5px;
 }
 
+.scopeBar {
+  margin-top: 30px;
+}
+
 .scopeBar select {
   min-height: 34px;
   border: 1px solid var(--border-strong);
@@ -390,6 +394,12 @@
   font-size: 11.5px;
 }
 
+.formGrid label > small {
+  color: var(--text-tertiary);
+  font-size: 9px;
+  line-height: 1.4;
+}
+
 .formGrid input,
 .formGrid select,
 .formGrid textarea,
@@ -459,6 +469,54 @@
 
 .settingsGrid .formCard {
   margin-top: 0;
+}
+
+.fullWidthCard {
+  grid-column: 1 / -1;
+}
+
+.fullWidthCard > .formGrid {
+  grid-template-columns:
+    minmax(180px, 0.8fr) minmax(280px, 1.4fr) minmax(150px, 0.6fr);
+}
+
+.cardDescription {
+  max-width: 620px;
+  margin: 4px 0 0;
+  color: var(--text-tertiary);
+  font-size: 10.5px;
+  line-height: 1.55;
+}
+
+.advancedSettings {
+  margin-top: 16px;
+  padding: 0 2px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.advancedSettings summary {
+  width: fit-content;
+  padding: 14px 0 7px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.advancedSettings > p {
+  max-width: 720px;
+  margin: 0 0 12px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.advancedSettings .formGrid {
+  margin-top: 0;
+}
+
+.verificationBlock {
+  margin-top: 15px;
 }
 
 .section {
@@ -802,6 +860,10 @@
   .settingsGrid,
   .formGrid,
   .diagnosticGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .fullWidthCard > .formGrid {
     grid-template-columns: 1fr;
   }
 

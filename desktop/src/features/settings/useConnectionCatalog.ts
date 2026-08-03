@@ -15,7 +15,7 @@ export interface ConnectionCatalogController {
   reload(): Promise<void>;
   upsert(connection: ProviderUpsertParams["connection"]): Promise<void>;
   remove(connectionId: string): Promise<void>;
-  test(connectionId: string): Promise<ProviderTestResult>;
+  test(connectionId: string, model?: string): Promise<ProviderTestResult>;
   models(connectionId: string, refresh?: boolean): Promise<ModelCatalogResult>;
 }
 
@@ -114,7 +114,9 @@ export function useConnectionCatalog(
   const remove = useCallback(
     async (connectionId: string) => {
       try {
-        const result = await runtime.request("provider/remove", { connectionId });
+        const result = await runtime.request("provider/remove", {
+          connectionId,
+        });
         setState({
           projectId,
           catalog: result,
@@ -130,9 +132,13 @@ export function useConnectionCatalog(
   );
 
   const test = useCallback(
-    async (connectionId: string) => {
+    async (connectionId: string, model?: string) => {
       try {
-        const result = await runtime.request("provider/test", { connectionId });
+        const result = await runtime.request("provider/test", {
+          connectionId,
+          ...(projectId ? { projectId } : {}),
+          ...(model ? { model } : {}),
+        });
         setState((current) => ({ ...current, error: null }));
         return result;
       } catch (cause) {
@@ -140,7 +146,7 @@ export function useConnectionCatalog(
         throw cause;
       }
     },
-    [runtime],
+    [projectId, runtime],
   );
 
   const models = useCallback(

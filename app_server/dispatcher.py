@@ -405,8 +405,12 @@ class Dispatcher:
         return self.application.llm.remove(str(params.string("connectionId")))
 
     def _provider_test(self, params: Params) -> dict[str, Any]:
-        params.only("connectionId")
-        return self.application.llm.test(str(params.string("connectionId")))
+        params.only("connectionId", "projectId", "model")
+        return self.application.llm.test(
+            str(params.string("connectionId")),
+            project_id=params.string("projectId", required=False),
+            model_id=params.string("model", required=False),
+        )
 
     def _model_list(self, params: Params) -> dict[str, Any]:
         params.only("connectionId", "projectId", "refresh")

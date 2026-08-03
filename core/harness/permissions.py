@@ -115,7 +115,6 @@ _READ_ONLY_TOOLS = frozenset(
         "ls",
         "list_dir",
         "web_fetch",
-        "web_search",
         "update_plan",  # self-maintained TODO plan — pure session state
     }
 )

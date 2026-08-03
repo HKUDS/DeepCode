@@ -36,8 +36,10 @@ from core.llm_runtime import get_workflow_provider
 from core.providers.catalog import resolve_model_info
 
 SYSTEM_PROMPT = (
-    "You are a coding agent working in a workspace directory. You have tools: "
-    "read, write, edit, apply_patch, bash, grep, glob, update_plan. Navigate "
+    "You are a coding agent working in a workspace directory. Use the tools "
+    "provided for this turn. Core tools include read, write, edit, apply_patch, "
+    "bash, grep, glob, web_fetch, and update_plan; optional capabilities such "
+    "as Skills, delegation, or goals appear only when enabled. Navigate "
     "with grep/glob, inspect with read, make targeted changes with edit (or "
     "write for new files), and use apply_patch when one change spans several "
     "files or must land all-or-nothing. Run commands/tests with bash. For a "

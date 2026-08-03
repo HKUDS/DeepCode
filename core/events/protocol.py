@@ -352,9 +352,10 @@ def summarize_call(name: str, arguments: dict[str, Any] | None) -> str:
         if isinstance(value, str) and value.strip():
             first_line = value.strip().splitlines()[0]
             return first_line[:80] + ("…" if len(first_line) > 80 else "")
-    value = next(iter(arguments.values()))
-    text = str(value).strip().splitlines()[0] if value is not None else ""
-    return text[:80] + ("…" if len(text) > 80 else "")
+    # Unknown arguments are opaque. Guessing from the first value can persist
+    # credentials, signed URLs, or other tool-private data in the event ledger.
+    # Sensitive tools provide an explicit presentation detail on their Tool.
+    return ""
 
 
 @dataclass(frozen=True)

@@ -140,17 +140,22 @@ runtime dependencies.
 
 ### Configure the first LLM connection
 
-1. Open **Settings → Connections**.
-2. Select **Add connection**.
-3. Choose a provider template, enter the endpoint when needed, and provide
-   either an API key or an environment variable name.
-4. Save the connection, then select **Test**.
-5. Open a Session and choose the connection/model from the picker below the
-   composer.
+1. Open **Settings → AI providers** and select **Add provider**.
+2. Choose a provider. Its normal endpoint and protocol are filled in for you.
+3. Paste an API key, or choose an environment variable. Custom gateways and
+   local servers without a universal endpoint also ask for their base URL;
+   optional endpoint overrides remain under **Advanced connection settings**.
+4. Select **Save and check**. DeepCode checks credential availability and model
+   discovery without sending repository or Session content.
+5. Under **Agent model**, choose an exact model ID and select **Save and verify
+   model**. This final step sends one tiny `reply OK` inference request so a
+   public model catalog cannot be mistaken for usable model access.
+6. Open a Session to inherit the default, or use its composer picker to switch
+   the connection/model for future Turns.
 
 API keys are written to `~/.deepcode/credentials.json` in user-private storage.
 Desktop receives only configured/missing status and never reads a stored key
-back.
+back. The same named connections and defaults are used by CLI and Desktop.
 
 ### Use models inside a Session
 
@@ -178,7 +183,9 @@ it never changes the Session, model request, Goal, tools, or stored evidence.
 
 Every accepted Turn stores an immutable, secret-free execution profile. Later
 changes to defaults or credentials cannot silently change queued or historical
-work.
+work. Paper2Code captures both its planning and implementation profiles at
+admission; an explicit Session connection/model applies to both phases, while
+Sessions without an override inherit the corresponding advanced phase default.
 
 ### Trust and tool access
 
@@ -211,8 +218,8 @@ The equivalent CLI workflow uses the same connection and Session backend:
 ```bash
 deepcode provider list
 deepcode provider set personal-openrouter --template openrouter --api-key
-deepcode provider test personal-openrouter
 deepcode provider models personal-openrouter --refresh
+deepcode provider test personal-openrouter --model <model-id>
 deepcode -c personal-openrouter -m <model-id> --effort auto
 ```
 

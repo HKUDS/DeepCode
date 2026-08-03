@@ -151,7 +151,7 @@ class AgentControl:
             return f"no such agent: {agent_id}"
         if not sub.running:
             return f"{agent_id} already finished ({sub.status})"
-        if sub.handle is not None:
+        if sub.handle is not None and sub.handle.cancelling() == 0:
             sub.handle.cancel()
         return f"interrupt requested for {agent_id}"
 
@@ -363,13 +363,16 @@ class AgentControl:
             execution_security_profile=self._execution_security_profile,
             runtime=self._runtime,
         )
-        if seed_history:
-            session.load_history(seed_history)  # fork_turns: inherit parent context
-        final = ""
-        async for event in session.run_stream(UserInput(text=task)):
-            if event.msg.type == "task_complete":
-                final = event.msg.final_text or ""
-        return final.strip() or "(sub-agent produced no summary)"
+        try:
+            if seed_history:
+                session.load_history(seed_history)  # fork_turns: inherit parent context
+            final = ""
+            async for event in session.run_stream(UserInput(text=task)):
+                if event.msg.type == "task_complete":
+                    final = event.msg.final_text or ""
+            return final.strip() or "(sub-agent produced no summary)"
+        finally:
+            await session.aclose()
 
     # -- mailbox ---------------------------------------------------------------
 
@@ -451,7 +454,29 @@ class AgentControl:
         ]
 
     async def close(self) -> None:
-        """Cancel any still-running sub-agents (best-effort session teardown)."""
-        for sub in self._agents.values():
-            if sub.handle is not None and not sub.handle.done():
-                sub.handle.cancel()
+        """Release all running sub-agents before session teardown returns."""
+
+        await self.cancel_running()
+
+    async def cancel_running(self) -> None:
+        """Cancel and join every child task owned by the active parent Turn.
+
+        Cancellation is not complete when :meth:`asyncio.Task.cancel` returns;
+        child cleanup runs while the resulting ``CancelledError`` unwinds.  The
+        parent therefore joins each task so no sub-agent can keep using tools,
+        network access, or its worktree after the Turn becomes terminal.
+        """
+
+        handles = tuple(
+            sub.handle
+            for sub in self._agents.values()
+            if sub.handle is not None and not sub.handle.done()
+        )
+        for handle in handles:
+            # A second cancel while the child is unwinding would interrupt its
+            # AgentSession.aclose() finally block. One cancellation request is
+            # sufficient; all callers still join the same task below.
+            if handle.cancelling() == 0:
+                handle.cancel()
+        if handles:
+            await asyncio.gather(*handles, return_exceptions=True)

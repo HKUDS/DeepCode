@@ -253,6 +253,17 @@ class TestRuntime implements DesktopRuntime {
               label: "OpenAI",
               adapter: "openai_compat",
               defaultApiBase: "https://api.openai.com/v1",
+              apiKeyEnv: "OPENAI_API_KEY",
+              requiresApiBase: false,
+              local: false,
+            },
+            {
+              name: "openrouter",
+              label: "OpenRouter",
+              adapter: "openai_compat",
+              defaultApiBase: "https://openrouter.ai/api/v1",
+              apiKeyEnv: "OPENROUTER_API_KEY",
+              requiresApiBase: false,
               local: false,
             },
           ],
@@ -334,10 +345,39 @@ class TestRuntime implements DesktopRuntime {
         const request = params as MethodParams["provider/test"];
         return {
           connectionId: request.connectionId,
+          status: request.model ? "ready" : "connected",
           ok: true,
           latencyMs: 42,
           modelCount: 2,
           error: null,
+          stages: [
+            {
+              id: "credential",
+              status: "passed",
+              detail: "Credential loaded from DeepCode private storage",
+              latencyMs: null,
+              modelCount: null,
+              modelId: null,
+            },
+            {
+              id: "catalog",
+              status: "passed",
+              detail: "Discovered 2 models",
+              latencyMs: 12,
+              modelCount: 2,
+              modelId: null,
+            },
+            {
+              id: "model",
+              status: request.model ? "passed" : "not_run",
+              detail: request.model
+                ? "The provider accepted a real inference request"
+                : "Choose a model to run a minimal verification request",
+              latencyMs: request.model ? 30 : null,
+              modelCount: null,
+              modelId: request.model ?? null,
+            },
+          ],
         } as MethodResults[M];
       }
       case "provider/remove":
@@ -422,7 +462,8 @@ class TestRuntime implements DesktopRuntime {
         const skill =
           [reviewSkill, verifySkill].find(
             (candidate) =>
-              candidate.id === request.skillId || candidate.name === request.name,
+              candidate.id === request.skillId ||
+              candidate.name === request.name,
           ) ?? reviewSkill;
         return {
           skill: {
@@ -434,7 +475,8 @@ class TestRuntime implements DesktopRuntime {
                   selectable: false,
                 }
               : {}),
-            instructions: "Inspect the change and report **concrete evidence**.",
+            instructions:
+              "Inspect the change and report **concrete evidence**.",
             truncated: false,
           },
         } as unknown as MethodResults[M];
@@ -459,9 +501,7 @@ class TestRuntime implements DesktopRuntime {
         return { diagnostics } as MethodResults[M];
       case "automation/list":
         return {
-          automations: [
-            { ...automation, status: this.automationStatus },
-          ],
+          automations: [{ ...automation, status: this.automationStatus }],
           latestRuns: [automationRun],
           schedulerActive: true,
           executionMode: "requires_live_runtime",
@@ -506,11 +546,15 @@ class TestRuntime implements DesktopRuntime {
         } as unknown as MethodResults[M];
       case "thread/list":
         return {
-          threads: this.threadState.filter((candidate) => candidate.status !== "archived"),
+          threads: this.threadState.filter(
+            (candidate) => candidate.status !== "archived",
+          ),
         } as MethodResults[M];
       case "thread/resume": {
         const sessionId = (params as MethodParams["thread/resume"]).sessionId;
-        const resumed = this.threadState.find((candidate) => candidate.id === sessionId);
+        const resumed = this.threadState.find(
+          (candidate) => candidate.id === sessionId,
+        );
         if (!resumed) throw new Error(`Missing test thread: ${sessionId}`);
         return { thread: resumed } as MethodResults[M];
       }
@@ -519,7 +563,8 @@ class TestRuntime implements DesktopRuntime {
         const index = this.threadState.findIndex(
           (candidate) => candidate.id === request.threadId,
         );
-        if (index === -1) throw new Error(`Missing test thread: ${request.threadId}`);
+        if (index === -1)
+          throw new Error(`Missing test thread: ${request.threadId}`);
         this.threadState[index] = {
           ...this.threadState[index],
           title: request.title,
@@ -531,7 +576,8 @@ class TestRuntime implements DesktopRuntime {
         const index = this.threadState.findIndex(
           (candidate) => candidate.id === request.threadId,
         );
-        if (index === -1) throw new Error(`Missing test thread: ${request.threadId}`);
+        if (index === -1)
+          throw new Error(`Missing test thread: ${request.threadId}`);
         this.threadState[index] = {
           ...this.threadState[index],
           connectionId:
@@ -547,7 +593,8 @@ class TestRuntime implements DesktopRuntime {
         const index = this.threadState.findIndex(
           (candidate) => candidate.id === request.threadId,
         );
-        if (index === -1) throw new Error(`Missing test thread: ${request.threadId}`);
+        if (index === -1)
+          throw new Error(`Missing test thread: ${request.threadId}`);
         this.threadState[index] = {
           ...this.threadState[index],
           connectionId: request.connectionId,
@@ -561,7 +608,8 @@ class TestRuntime implements DesktopRuntime {
         const index = this.threadState.findIndex(
           (candidate) => candidate.id === request.threadId,
         );
-        if (index === -1) throw new Error(`Missing test thread: ${request.threadId}`);
+        if (index === -1)
+          throw new Error(`Missing test thread: ${request.threadId}`);
         this.threadState[index] = {
           ...this.threadState[index],
           accessPresetOverride: request.accessPreset,
@@ -603,8 +651,7 @@ class TestRuntime implements DesktopRuntime {
         }
         this.goalState = {
           ...this.goalState,
-          status:
-            method === "thread/goal/pause" ? "paused" : "active",
+          status: method === "thread/goal/pause" ? "paused" : "active",
           updatedAt: "2026-07-16T02:01:00Z",
         };
         this.goalOutcomeState = null;
@@ -633,7 +680,8 @@ class TestRuntime implements DesktopRuntime {
         const index = this.threadState.findIndex(
           (candidate) => candidate.id === request.threadId,
         );
-        if (index === -1) throw new Error(`Missing test thread: ${request.threadId}`);
+        if (index === -1)
+          throw new Error(`Missing test thread: ${request.threadId}`);
         this.threadState[index] = {
           ...this.threadState[index],
           status: "archived",
@@ -646,7 +694,8 @@ class TestRuntime implements DesktopRuntime {
         const index = this.threadState.findIndex(
           (candidate) => candidate.id === request.threadId,
         );
-        if (index === -1) throw new Error(`Missing test thread: ${request.threadId}`);
+        if (index === -1)
+          throw new Error(`Missing test thread: ${request.threadId}`);
         this.threadState.splice(index, 1);
         return {
           threadId: request.threadId,
@@ -863,9 +912,7 @@ class TestRuntime implements DesktopRuntime {
     return this.availableUpdate;
   }
 
-  async installUpdate(
-    listener: (progress: DesktopUpdateProgress) => void,
-  ) {
+  async installUpdate(listener: (progress: DesktopUpdateProgress) => void) {
     this.updateInstallCount += 1;
     listener({
       phase: "finished",
@@ -1148,18 +1195,16 @@ const presentationEvents: Event[] = [
     timestamp: "2026-07-16T00:00:03Z",
     payload: { turn: turn as unknown as JsonValue },
   },
-  ...presentationItems.map(
-    (candidate, index): Event => ({
-      eventId: `event-presentation-${candidate.id}`,
-      sequence: index + 2,
-      type: "item.created",
-      threadId: thread.id,
-      turnId: turn.id,
-      itemId: candidate.id,
-      timestamp: candidate.updatedAt,
-      payload: { item: candidate as unknown as JsonValue },
-    }),
-  ),
+  ...presentationItems.map((candidate, index): Event => ({
+    eventId: `event-presentation-${candidate.id}`,
+    sequence: index + 2,
+    type: "item.created",
+    threadId: thread.id,
+    turnId: turn.id,
+    itemId: candidate.id,
+    timestamp: candidate.updatedAt,
+    payload: { item: candidate as unknown as JsonValue },
+  })),
 ];
 
 const failedRecoveryEvents: Event[] = [
@@ -1263,7 +1308,11 @@ const waitingWorkflow: WorkflowRun = {
   turnId: "turn-paper",
   kind: "paper2code",
   status: "waiting",
-  input: { sourceType: "url", source: "https://example.com/paper.pdf", options: {} },
+  input: {
+    sourceType: "url",
+    source: "https://example.com/paper.pdf",
+    options: {},
+  },
   result: {},
   attempt: 1,
   retryOf: null,
@@ -1317,7 +1366,9 @@ describe("desktop command center", () => {
     expect(
       screen.getAllByRole("button", { name: "Open project folder" }),
     ).toHaveLength(2);
-    await waitFor(() => expect(screen.getByText("Local agent ready")).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText("Local agent ready")).toBeTruthy(),
+    );
   });
 
   it("navigates to the shared Skill inventory for the selected project", async () => {
@@ -1341,9 +1392,8 @@ describe("desktop command center", () => {
         runtime.requests.some(
           (candidate) =>
             candidate.method === "skills/set-enabled" &&
-            (
-              candidate.params as MethodParams["skills/set-enabled"]
-            ).skillId === SKILL_ID,
+            (candidate.params as MethodParams["skills/set-enabled"]).skillId ===
+              SKILL_ID,
         ),
       ).toBe(true),
     );
@@ -1419,9 +1469,7 @@ describe("desktop command center", () => {
     render(<App runtime={runtime} />);
 
     await screen.findByRole("heading", { name: "Recovered task" });
-    fireEvent.click(
-      await screen.findByRole("button", { name: /Set a Goal/ }),
-    );
+    fireEvent.click(await screen.findByRole("button", { name: /Set a Goal/ }));
     fireEvent.change(screen.getByLabelText("Outcome"), {
       target: {
         value:
@@ -1464,7 +1512,9 @@ describe("desktop command center", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Edit Goal" }));
-    const revisedOutcome = screen.getByLabelText("Outcome") as HTMLTextAreaElement;
+    const revisedOutcome = screen.getByLabelText(
+      "Outcome",
+    ) as HTMLTextAreaElement;
     expect(revisedOutcome.value).toContain("Ship the implementation");
     fireEvent.change(revisedOutcome, {
       target: { value: "Ship the revised implementation and verify it." },
@@ -1586,8 +1636,9 @@ describe("desktop command center", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Focused tests passed" }),
     );
-    expect(await screen.findByRole("heading", { name: "Focused tests passed" }))
-      .toBeTruthy();
+    expect(
+      await screen.findByRole("heading", { name: "Focused tests passed" }),
+    ).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Edit & reopen" }));
     const outcome = screen.getByLabelText("Outcome") as HTMLTextAreaElement;
@@ -1640,7 +1691,9 @@ describe("desktop command center", () => {
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
 
     await screen.findByRole("heading", { name: "Settings" });
-    expect(await screen.findByText("SQLite integrity check passed")).toBeTruthy();
+    expect(
+      await screen.findByText("SQLite integrity check passed"),
+    ).toBeTruthy();
     expect(
       runtime.requests.find((request) => request.method === "diagnostics/read")
         ?.params,
@@ -1671,15 +1724,17 @@ describe("desktop command center", () => {
     expect(screen.queryByLabelText("Enable command sandbox")).toBeNull();
 
     fireEvent.change(access, { target: { value: "read_only" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save safety settings" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save safety settings" }),
+    );
 
     await waitFor(() =>
       expect(
         runtime.requests.find(
           (request) =>
             request.method === "settings/update" &&
-            (request.params as MethodParams["settings/update"]).patch.security !==
-              undefined,
+            (request.params as MethodParams["settings/update"]).patch
+              .security !== undefined,
         )?.params,
       ).toMatchObject({
         patch: { security: { accessPreset: "read_only" } },
@@ -1707,7 +1762,9 @@ describe("desktop command center", () => {
       name: "Default Session access",
     });
     fireEvent.change(access, { target: { value: "full_access" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save safety settings" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save safety settings" }),
+    );
     await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1));
     expect(
       runtime.requests.some(
@@ -1719,14 +1776,16 @@ describe("desktop command center", () => {
     ).toBe(false);
 
     confirm.mockReturnValue(true);
-    fireEvent.click(screen.getByRole("button", { name: "Save safety settings" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save safety settings" }),
+    );
     await waitFor(() =>
       expect(
         runtime.requests.find(
           (request) =>
             request.method === "settings/update" &&
-            (request.params as MethodParams["settings/update"]).patch.security !==
-              undefined,
+            (request.params as MethodParams["settings/update"]).patch
+              .security !== undefined,
         )?.params,
       ).toMatchObject({
         patch: { security: { accessPreset: "full_access" } },
@@ -1755,13 +1814,17 @@ describe("desktop command center", () => {
     ).toBeTruthy();
 
     fireEvent.change(access, { target: { value: "read_only" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save safety settings" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save safety settings" }),
+    );
     await waitFor(() =>
       expect((access as HTMLSelectElement).value).toBe("read_only"),
     );
 
     fireEvent.change(access, { target: { value: "" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save safety settings" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save safety settings" }),
+    );
     await waitFor(() => {
       const updates = runtime.requests.filter(
         (request) => request.method === "settings/update",
@@ -1779,21 +1842,17 @@ describe("desktop command center", () => {
 
     await screen.findByRole("heading", { name: "Recovered task" });
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-    await screen.findByRole("heading", { name: "Connections" });
-    fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
+    await screen.findByRole("heading", { name: "AI providers" });
+    fireEvent.click(screen.getByRole("button", { name: "Add provider" }));
+    fireEvent.click(screen.getByRole("button", { name: /OpenRouter/ }));
 
-    fireEvent.change(screen.getByLabelText("Connection ID"), {
-      target: { value: "router-desktop" },
-    });
     fireEvent.change(screen.getByLabelText("Display name"), {
       target: { value: "Router Desktop" },
     });
     fireEvent.change(screen.getByLabelText("API key"), {
       target: { value: "desktop-test-secret" },
     });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Save connection" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Save and check" }));
 
     const connectionName = await screen.findByText("Router Desktop", {
       selector: "strong",
@@ -1804,27 +1863,28 @@ describe("desktop command center", () => {
       (candidate) => candidate.method === "provider/upsert",
     )?.params as MethodParams["provider/upsert"];
     expect(request.connection).toMatchObject({
-      id: "router-desktop",
+      id: "openrouter",
       label: "Router Desktop",
       template: "openrouter",
       apiKey: "desktop-test-secret",
     });
 
     fireEvent.click(
-      within(card as HTMLElement).getByRole("button", { name: "Test" }),
+      within(card as HTMLElement).getByRole("button", { name: "Check" }),
     );
     expect(
-      await within(card as HTMLElement).findByText("2 models · 42 ms"),
+      await within(card as HTMLElement).findByText("Credential"),
     ).toBeTruthy();
+    expect(within(card as HTMLElement).getByText("Model catalog")).toBeTruthy();
 
     fireEvent.click(
       within(card as HTMLElement).getByRole("button", { name: "Edit" }),
     );
-    expect((screen.getByLabelText("API key") as HTMLInputElement).value).toBe("");
-    fireEvent.click(screen.getByLabelText("Remove saved API key"));
-    fireEvent.click(
-      screen.getByRole("button", { name: "Save connection" }),
+    expect((screen.getByLabelText("API key") as HTMLInputElement).value).toBe(
+      "",
     );
+    fireEvent.click(screen.getByLabelText("Remove saved API key"));
+    fireEvent.click(screen.getByRole("button", { name: "Save and check" }));
     await waitFor(() => {
       expect(
         runtime.requests.filter(
@@ -1839,6 +1899,44 @@ describe("desktop command center", () => {
     expect(clearRequest.connection.apiKey).toBeUndefined();
   });
 
+  it("saves and verifies the selected Agent model with the project context", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const providersHeading = await screen.findByRole("heading", {
+      name: "AI providers",
+    });
+    const modelHeading = screen.getByRole("heading", { name: "Agent model" });
+    expect(
+      providersHeading.compareDocumentPosition(modelHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    const verifyModel = screen.getByRole("button", {
+      name: "Save and verify model",
+    }) as HTMLButtonElement;
+    await waitFor(() => expect(verifyModel.disabled).toBe(false));
+    fireEvent.click(verifyModel);
+
+    await waitFor(() => {
+      const request = runtime.requests.find(
+        (candidate) => candidate.method === "provider/test",
+      );
+      expect(request?.params).toEqual({
+        connectionId: "openai",
+        projectId: project.id,
+        model: "gpt-5",
+      });
+    });
+    expect(await screen.findByText("Ready for agent work")).toBeTruthy();
+    const methods = runtime.requests.map((request) => request.method);
+    expect(methods.indexOf("settings/update")).toBeLessThan(
+      methods.indexOf("provider/test"),
+    );
+  });
+
   it("checks and installs only a verified desktop update selected by the user", async () => {
     const runtime = new TestRuntime([project], [thread], [], [], {
       currentVersion: "0.1.0",
@@ -1851,13 +1949,9 @@ describe("desktop command center", () => {
     await screen.findByRole("heading", { name: "Recovered task" });
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     await screen.findByRole("heading", { name: "Application updates" });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Check for updates" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
 
-    expect(
-      await screen.findByText(/DeepCode 0.2.0 is available/),
-    ).toBeTruthy();
+    expect(await screen.findByText(/DeepCode 0.2.0 is available/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Install 0.2.0" }));
     await waitFor(() => expect(runtime.updateInstallCount).toBe(1));
   });
@@ -1867,7 +1961,9 @@ describe("desktop command center", () => {
     render(<App runtime={runtime} />);
 
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Recovered task" })).toBeTruthy();
+      expect(
+        screen.getByRole("heading", { name: "Recovered task" }),
+      ).toBeTruthy();
       expect(screen.getByText("Recovered final answer")).toBeTruthy();
     });
     expect(runtime.calls.slice(0, 6)).toEqual([
@@ -1901,11 +1997,7 @@ describe("desktop command center", () => {
       title: "Session 77f8ff1b",
       workspacePath: recoveredProject.canonicalPath,
     };
-    const runtime = new TestRuntime(
-      [recoveredProject],
-      [recoveredThread],
-      [],
-    );
+    const runtime = new TestRuntime([recoveredProject], [recoveredThread], []);
     render(<App runtime={runtime} />);
 
     await screen.findByRole("heading", { name: "Session 77f8ff1b" });
@@ -1918,14 +2010,18 @@ describe("desktop command center", () => {
       ),
     ).toBeTruthy();
     expect(
-      (screen.getByRole("textbox", {
-        name: "Task instruction",
-      }) as HTMLTextAreaElement).disabled,
+      (
+        screen.getByRole("textbox", {
+          name: "Task instruction",
+        }) as HTMLTextAreaElement
+      ).disabled,
     ).toBe(true);
     expect(
-      (screen.getByRole("button", {
-        name: /New thread/,
-      }) as HTMLButtonElement).disabled,
+      (
+        screen.getByRole("button", {
+          name: /New thread/,
+        }) as HTMLButtonElement
+      ).disabled,
     ).toBe(true);
     expect(screen.queryByText("Trusted")).toBeNull();
   });
@@ -1946,11 +2042,7 @@ describe("desktop command center", () => {
       workspacePath: discoveredProject.canonicalPath,
       title: "Existing CLI Session",
     };
-    const runtime = new TestRuntime(
-      [discoveredProject],
-      [restoredThread],
-      [],
-    );
+    const runtime = new TestRuntime([discoveredProject], [restoredThread], []);
     render(<App runtime={runtime} />);
 
     const composer = await screen.findByRole("textbox", {
@@ -2053,7 +2145,9 @@ describe("desktop command center", () => {
     render(<App runtime={runtime} />);
 
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Recovered task" })).toBeTruthy(),
+      expect(
+        screen.getByRole("heading", { name: "Recovered task" }),
+      ).toBeTruthy(),
     );
     fireEvent.change(screen.getByPlaceholderText("Search Sessions"), {
       target: { value: "Cross-project" },
@@ -2063,8 +2157,12 @@ describe("desktop command center", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Cross-project task" })).toBeTruthy();
-      expect(screen.getAllByText("Another repo").length).toBeGreaterThanOrEqual(2);
+      expect(
+        screen.getByRole("heading", { name: "Cross-project task" }),
+      ).toBeTruthy();
+      expect(screen.getAllByText("Another repo").length).toBeGreaterThanOrEqual(
+        2,
+      );
     });
   });
 
@@ -2073,7 +2171,9 @@ describe("desktop command center", () => {
     render(<App runtime={runtime} />);
 
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Recovered task" })).toBeTruthy(),
+      expect(
+        screen.getByRole("heading", { name: "Recovered task" }),
+      ).toBeTruthy(),
     );
     fireEvent.click(
       screen.getByRole("button", {
@@ -2096,9 +2196,7 @@ describe("desktop command center", () => {
       }),
     );
     fireEvent.click(screen.getByRole("menuitem", { name: "Archive" }));
-    fireEvent.click(
-      screen.getByRole("button", { name: "Archive" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
 
     await waitFor(() => {
       expect(
@@ -2133,7 +2231,11 @@ describe("desktop command center", () => {
     const dialog = screen.getByRole("alertdialog", {
       name: "Delete Recovered task",
     });
-    expect(within(dialog).getByText("Workspace files stay untouched.", { exact: false })).toBeTruthy();
+    expect(
+      within(dialog).getByText("Workspace files stay untouched.", {
+        exact: false,
+      }),
+    ).toBeTruthy();
     expect(runtime.calls).not.toContain("thread/delete");
 
     fireEvent.click(
@@ -2145,7 +2247,8 @@ describe("desktop command center", () => {
       screen.queryByRole("button", { name: "Open Session Recovered task" }),
     ).toBeNull();
     expect(
-      runtime.requests.find((request) => request.method === "thread/delete")?.params,
+      runtime.requests.find((request) => request.method === "thread/delete")
+        ?.params,
     ).toEqual({ threadId: thread.id });
   });
 
@@ -2155,13 +2258,16 @@ describe("desktop command center", () => {
 
     const retry = await screen.findByRole("button", { name: "Retry" });
     expect(
-      screen.getByText("The previous process stopped. Retry from the same prompt."),
+      screen.getByText(
+        "The previous process stopped. Retry from the same prompt.",
+      ),
     ).toBeTruthy();
     fireEvent.click(retry);
 
     await waitFor(() => expect(runtime.calls).toContain("turn/retry"));
     expect(
-      runtime.requests.find((request) => request.method === "turn/retry")?.params,
+      runtime.requests.find((request) => request.method === "turn/retry")
+        ?.params,
     ).toEqual({
       turnId: failedTurn.id,
       useCurrentSelection: false,
@@ -2240,7 +2346,8 @@ describe("desktop command center", () => {
     });
     fireEvent.change(composer, {
       target: {
-        value: "Implement durable model selection\nKeep CLI behavior unchanged.",
+        value:
+          "Implement durable model selection\nKeep CLI behavior unchanged.",
       },
     });
     fireEvent.keyDown(composer, { key: "Enter" });
@@ -2376,7 +2483,9 @@ describe("desktop command center", () => {
     const currentAccess = await screen.findByLabelText(
       "Current Turn access: Full access",
     );
-    const queuedAccess = screen.getByLabelText("Queued Turn access: Ask");
+    const queuedAccess = screen.getByLabelText(
+      "Queued Turn access: Ask",
+    );
     expect(currentAccess.getAttribute("data-access")).toBe("full_access");
     expect(queuedAccess.getAttribute("data-access")).toBe("ask");
     expect(
@@ -2394,8 +2503,12 @@ describe("desktop command center", () => {
     );
 
     expect(currentAccess.getAttribute("data-access")).toBe("full_access");
-    expect(currentAccess.textContent).toContain("Current Turn\u00b7Full access");
-    expect(queuedAccess.textContent).toContain("Queued (1)\u00b7Ask");
+    expect(currentAccess.textContent).toContain(
+      "Current Turn\u00b7Full access",
+    );
+    expect(queuedAccess.textContent).toContain(
+      "Queued (1)\u00b7Ask",
+    );
     expect(screen.queryByText("Model & access apply next Turn")).toBeNull();
   });
 
@@ -2414,7 +2527,9 @@ describe("desktop command center", () => {
     );
     await screen.findByText("App.tsx");
     expect(
-      screen.getByText("Only files inside this Session workspace can be attached."),
+      screen.getByText(
+        "Only files inside this Session workspace can be attached.",
+      ),
     ).toBeTruthy();
 
     const composer = screen.getByRole("textbox", { name: "Task instruction" });
@@ -2455,9 +2570,7 @@ describe("desktop command center", () => {
       (candidate) => candidate.method === "turn/start",
     )?.params as MethodParams["turn/start"];
     expect(request.skills).toEqual([VERIFY_SKILL_ID, SKILL_ID]);
-    expect(
-      screen.queryByRole("button", { name: "Remove review" }),
-    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Remove review" })).toBeNull();
     expect(
       (await screen.findByLabelText("Skills used in this turn")).textContent,
     ).toContain("review");
@@ -2484,7 +2597,9 @@ describe("desktop command center", () => {
     fireEvent.change(composer, { target: { value: "/review" } });
     fireEvent.keyDown(composer, { key: "Enter" });
     await waitFor(() =>
-      expect(screen.getByRole("complementary", { name: "Inspector" })).toBeTruthy(),
+      expect(
+        screen.getByRole("complementary", { name: "Inspector" }),
+      ).toBeTruthy(),
     );
     expect(runtime.calls).not.toContain("turn/start");
   });
@@ -2539,13 +2654,17 @@ describe("desktop command center", () => {
 
   it("restores a waiting Paper2Code review without using the agent composer", async () => {
     const view = render(
-      <App runtime={new TestRuntime([project], [paperThread], workflowEvents)} />,
+      <App
+        runtime={new TestRuntime([project], [paperThread], workflowEvents)}
+      />,
     );
 
     await waitFor(() => {
       expect(screen.getByText("Review Implementation Plan")).toBeTruthy();
       expect(screen.getByText("65%")).toBeTruthy();
-      expect(screen.getByRole("button", { name: "Approve & continue" })).toBeTruthy();
+      expect(
+        screen.getByRole("button", { name: "Approve & continue" }),
+      ).toBeTruthy();
     });
     expect(view.container.querySelector("#turn-prompt")).toBeNull();
   });

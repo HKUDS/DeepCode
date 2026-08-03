@@ -140,6 +140,22 @@ def test_protocol_exposes_session_access_and_immutable_security_profile() -> Non
     assert '"thread/permission/update": ThreadPermissionUpdateParams;' in generated
 
 
+def test_provider_verification_params_can_probe_a_project_model() -> None:
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    definitions = schema["$defs"]
+    params = definitions["ProviderTestParams"]
+
+    assert params["required"] == ["connectionId"]
+    assert params["properties"]["projectId"] == {
+        "type": "string",
+        "pattern": "^proj_",
+    }
+    assert params["properties"]["model"] == {
+        "type": "string",
+        "minLength": 1,
+    }
+
+
 def test_automation_transport_contract_exposes_p0_run_identity() -> None:
     schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
     definitions = schema["$defs"]

@@ -1427,6 +1427,15 @@
             "null"
           ]
         },
+        "apiKeyEnv": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requiresApiBase": {
+          "type": "boolean"
+        },
         "local": {
           "type": "boolean"
         }
@@ -1436,6 +1445,8 @@
         "label",
         "adapter",
         "defaultApiBase",
+        "apiKeyEnv",
+        "requiresApiBase",
         "local"
       ]
     },
@@ -1595,6 +1606,27 @@
         "connectionId"
       ]
     },
+    "ProviderTestParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "connectionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "projectId": {
+          "type": "string",
+          "pattern": "^proj_"
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "connectionId"
+      ]
+    },
     "ModelListParams": {
       "type": "object",
       "additionalProperties": false,
@@ -1736,12 +1768,75 @@
         "refreshedAt"
       ]
     },
+    "ProviderVerificationStage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "enum": [
+            "credential",
+            "catalog",
+            "model"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "passed",
+            "failed",
+            "skipped",
+            "not_run"
+          ]
+        },
+        "detail": {
+          "type": "string"
+        },
+        "latencyMs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "modelCount": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "modelId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "detail",
+        "latencyMs",
+        "modelCount",
+        "modelId"
+      ]
+    },
     "ProviderTestResult": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "connectionId": {
           "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "connected",
+            "ready",
+            "limited",
+            "error"
+          ]
         },
         "ok": {
           "type": "boolean"
@@ -1759,14 +1854,24 @@
             "string",
             "null"
           ]
+        },
+        "stages": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "$ref": "#/$defs/ProviderVerificationStage"
+          }
         }
       },
       "required": [
         "connectionId",
+        "status",
         "ok",
         "latencyMs",
         "modelCount",
-        "error"
+        "error",
+        "stages"
       ]
     },
     "OptionalProjectParams": {
@@ -4440,7 +4545,7 @@
           "$ref": "#/$defs/ConnectionIdentityParams"
         },
         "provider/test": {
-          "$ref": "#/$defs/ConnectionIdentityParams"
+          "$ref": "#/$defs/ProviderTestParams"
         },
         "model/list": {
           "$ref": "#/$defs/ModelListParams"

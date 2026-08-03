@@ -107,6 +107,7 @@ def test_native_tool_read_only_metadata_drives_default_mode(tmp_path):
 
     assert _decide(engine, "read", file_path="a.py") is ALLOW
     assert _decide(engine, "grep", pattern="needle") is ALLOW
+    assert _decide(engine, "web_fetch", url="https://example.com") is ALLOW
     assert _decide(engine, "write", file_path="a.py") is ASK
     assert _decide(engine, "bash", command="python -m unittest") is ASK
 

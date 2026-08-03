@@ -73,11 +73,13 @@ class DeepCodeRuntime:
         config: DeepCodeConfig,
         *,
         credential_store: CredentialStore | None = None,
+        phase_execution_profiles: dict[str, ExecutionProfile] | None = None,
     ) -> None:
         self.config = config
         self.credential_store = credential_store or CredentialStore()
         self.connection_resolver = ConnectionResolver(config, self.credential_store)
         self.model_catalog = ModelCatalogService()
+        self.phase_execution_profiles = dict(phase_execution_profiles or {})
         self.logger = logger
         self._provider_cache: dict[tuple[str, ...], LLMProvider] = {}
         # MCP servers materialised on construction so legacy callers can
@@ -102,6 +104,8 @@ class DeepCodeRuntime:
         execution_profile: ExecutionProfile | None = None,
     ) -> LLMProvider:
         """Return a cached :class:`LLMProvider` for the requested combination."""
+        if execution_profile is None and connection_id is None and model is None:
+            execution_profile = self.phase_execution_profiles.get(phase)
         if execution_profile is not None or connection_id is not None:
             profile = execution_profile or self.resolve_execution_profile(
                 connection_id=connection_id,
@@ -152,6 +156,10 @@ class DeepCodeRuntime:
         reasoning_effort: str | None = None,
         phase: str = "implementation",
     ) -> ExecutionProfile:
+        if connection_id is None and model is None and reasoning_effort is None:
+            captured = self.phase_execution_profiles.get(phase)
+            if captured is not None:
+                return captured
         selection = ExecutionSelection(
             connection_id=connection_id,
             model_id=model,

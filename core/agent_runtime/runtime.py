@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 from loguru import logger
@@ -56,17 +57,13 @@ def build_length_recovery_message() -> dict[str, str]:
 
 
 def external_lookup_signature(tool_name: str, arguments: dict[str, Any]) -> str | None:
-    if tool_name == "web_fetch":
-        url = str(arguments.get("url") or "").strip()
-        if url:
-            return f"web_fetch:{url.lower()}"
-    if tool_name == "web_search":
-        query = str(
-            arguments.get("query") or arguments.get("search_term") or ""
-        ).strip()
-        if query:
-            return f"web_search:{query.lower()}"
-    return None
+    if tool_name != "web_fetch":
+        return None
+    url = str(arguments.get("url") or "").strip()
+    if not url:
+        return None
+    digest = hashlib.sha256(url.encode("utf-8", errors="replace")).hexdigest()
+    return f"web_fetch:{digest}"
 
 
 def repeated_external_lookup_error(
@@ -88,5 +85,5 @@ def repeated_external_lookup_error(
     )
     return (
         "Error: repeated external lookup blocked. "
-        "Use the results you already have to answer, or try a meaningfully different source."
+        "Use the result you already have, or try a meaningfully different URL."
     )

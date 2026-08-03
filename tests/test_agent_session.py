@@ -6,8 +6,8 @@ and a fake tool, proving the SQ/EQ protocol + kernel bridge work end to end.
 
 from __future__ import annotations
 
-import sys
 import asyncio
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +41,7 @@ from core.events import (  # noqa: E402
     UserInput,
     serialize_event,
 )
+from core.events.protocol import summarize_call  # noqa: E402
 from core.harness.tools.plan import UpdatePlanTool  # noqa: E402
 from core.harness.tools.shell import BashTool  # noqa: E402
 from core.providers.base import LLMResponse, ToolCallRequest  # noqa: E402
@@ -75,6 +76,29 @@ class BlockingTool(Tool):
 
     async def execute(self, **kwargs: Any) -> Any:
         await asyncio.Event().wait()
+
+
+@tool_parameters(
+    {
+        "type": "object",
+        "properties": {"credential": {"type": "string"}},
+        "required": ["credential"],
+    }
+)
+class SafePresentationTool(Tool):
+    @property
+    def name(self) -> str:
+        return "safe_presentation"
+
+    @property
+    def description(self) -> str:
+        return "Present a safe label without exposing its credential argument."
+
+    def presentation_detail(self, arguments: dict[str, Any]) -> str | None:
+        return "credential configured"
+
+    async def execute(self, **kwargs: Any) -> Any:
+        return "ok"
 
 
 class ScriptedProvider:
@@ -380,6 +404,44 @@ async def test_tool_turn_emits_tool_started_and_completed():
     assert kinds[-1] == "task_complete"
 
 
+def test_generic_tool_summary_does_not_guess_from_opaque_arguments() -> None:
+    assert summarize_call("extension_tool", {"credential": "must-not-leak"}) == ""
+
+
+@pytest.mark.asyncio
+async def test_tool_declares_its_safe_started_presentation() -> None:
+    secret = "must-not-leak"
+    provider = ScriptedProvider(
+        [
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(
+                        id="safe-detail",
+                        name="safe_presentation",
+                        arguments={"credential": secret},
+                    )
+                ],
+                finish_reason="tool_calls",
+            ),
+            LLMResponse(content="done", finish_reason="stop"),
+        ]
+    )
+    tools = ToolRegistry()
+    tools.register(SafePresentationTool())
+    session = AgentSession(provider, tools, model="fake-model")
+
+    await session.submit(UserInput(text="use the tool"))
+
+    started = next(
+        event.msg
+        for event in session.drain_events()
+        if isinstance(event.msg, ToolStarted)
+    )
+    assert started.detail == "credential configured"
+    assert secret not in str(serialize_event(Event(id="1", msg=started)))
+
+
 @pytest.mark.asyncio
 async def test_nonzero_bash_exit_emits_failed_tool_completion(tmp_path):
     provider = ScriptedProvider(
@@ -656,6 +718,107 @@ async def test_interrupt_terminates_the_active_submission_with_original_id():
     assert terminal.submission_id == "turn-submission"
     with pytest.raises(StopAsyncIteration):
         await anext(stream)
+
+
+@pytest.mark.asyncio
+async def test_turn_terminal_waits_for_child_cleanup_and_session_is_reusable():
+    class BlockingCleanup:
+        def __init__(self):
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+            self.calls = 0
+
+        async def cancel_running(self):
+            self.calls += 1
+            if self.calls == 1:
+                self.started.set()
+                await self.release.wait()
+
+    provider = ScriptedProvider(
+        [
+            LLMResponse(content="first", finish_reason="stop"),
+            LLMResponse(content="second", finish_reason="stop"),
+        ]
+    )
+    session = _session(provider)
+    cleanup = BlockingCleanup()
+    session._agent_control = cleanup
+
+    stream = session.run_stream(UserInput(text="first turn"))
+    assert (await anext(stream)).msg.type == "turn_started"
+    assert (await anext(stream)).msg.type == "agent_message"
+    terminal_task = asyncio.create_task(anext(stream))
+    await asyncio.wait_for(cleanup.started.wait(), timeout=1)
+    await session.submit(Interrupt())
+    await asyncio.sleep(0)
+    assert not terminal_task.done()
+
+    cleanup.release.set()
+    terminal = await asyncio.wait_for(terminal_task, timeout=1)
+    assert terminal.msg.type == "task_complete"
+    with pytest.raises(StopAsyncIteration):
+        await anext(stream)
+
+    second_events = [
+        event async for event in session.run_stream(UserInput(text="second turn"))
+    ]
+    assert second_events[-1].msg.final_text == "second"
+    assert cleanup.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_interrupted_turn_waits_for_child_cleanup_before_terminal():
+    class FirstCallBlocksProvider(ScriptedProvider):
+        def __init__(self):
+            super().__init__([])
+            self.started = asyncio.Event()
+
+        async def chat_with_retry(self, **kwargs: Any) -> LLMResponse:
+            self.calls += 1
+            if self.calls == 1:
+                self.started.set()
+                await asyncio.Event().wait()
+            return LLMResponse(content="resumed", finish_reason="stop")
+
+    class BlockingCleanup:
+        def __init__(self):
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+            self.calls = 0
+
+        async def cancel_running(self):
+            self.calls += 1
+            if self.calls == 1:
+                self.started.set()
+                await self.release.wait()
+
+    provider = FirstCallBlocksProvider()
+    session = _session(provider)
+    cleanup = BlockingCleanup()
+    session._agent_control = cleanup
+    stream = session.run_stream_envelope(
+        Submission(id="turn-submission", op=UserInput(text="wait"))
+    )
+    assert (await anext(stream)).msg.type == "turn_started"
+    await asyncio.wait_for(provider.started.wait(), timeout=1)
+
+    await session.submit_envelope(Submission(id="interrupt", op=Interrupt()))
+    await asyncio.wait_for(cleanup.started.wait(), timeout=1)
+    await session.submit_envelope(Submission(id="repeat-interrupt", op=Interrupt()))
+    terminal_task = asyncio.create_task(anext(stream))
+    await asyncio.sleep(0)
+    assert not terminal_task.done()
+
+    cleanup.release.set()
+    terminal = await asyncio.wait_for(terminal_task, timeout=1)
+    assert terminal.msg.stop_reason == "interrupted"
+    assert terminal.submission_id == "turn-submission"
+    with pytest.raises(StopAsyncIteration):
+        await anext(stream)
+
+    resumed = [event async for event in session.run_stream(UserInput(text="continue"))]
+    assert resumed[-1].msg.final_text == "resumed"
+    assert cleanup.calls == 2
 
 
 @pytest.mark.asyncio

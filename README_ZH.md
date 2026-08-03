@@ -63,20 +63,13 @@
 
 ### 🖥️ **界面展示**
 
-#### 🖥️ **命令行界面**
-
-**基于终端的开发环境**
+#### 🖥️ **DeepCode Desktop**
 
 <div align="center">
 
-  <img src="https://github.com/Zongwei9888/Experiment_Images/blob/8882a7313c504ca97ead6e7b36c51aa761b6a4f3/DeepCode_images/CLI.gif" alt="CLI Interface Demo" width="100%" style="border-radius: 10px; box-shadow: 0 8px 20px rgba(45,55,72,0.3); margin: 15px 0;"/>
+  <img src="https://github.com/Zongwei9888/Experiment_Images/raw/e389750e733ec2c1b94986cb990036899dcaec52/DeepCode_images/Area.gif" alt="DeepCode Desktop 编程智能体演示" width="100%" style="border-radius: 10px; box-shadow: 0 8px 20px rgba(45,55,72,0.3); margin: 15px 0;"/>
 
-  <div style="background: linear-gradient(135deg, #2D3748 0%, #4A5568 100%); border-radius: 12px; padding: 15px; margin: 15px 0; color: white;">
-    <strong>🚀 高级终端体验</strong><br/>
-    <small>⚡ 快速命令行工作流<br/>🔧 开发者友好界面<br/>📊 实时进度跟踪</small>
-  </div>
-
-*专业终端界面，适合高级用户和CI/CD集成*
+*在可视化工作台中使用 DeepCode，管理 Session 和目标，并查看工具活动、代码修改与验证过程。*
 </div>
 
 DeepCode 只有一套 Agent 运行时，同时提供两种使用界面：面向终端
@@ -129,9 +122,11 @@ Automations。从源码启动请参考
   - [以证据判断完成](#以证据判断完成)
   - [持久化本地工作](#持久化本地工作)
   - [由用户控制的模型与 Skills](#由用户控制的模型与-skills)
+  - [实时 Web 调研](#live-web-research)
   - [并行且可重复的工作](#并行且可重复的工作)
 - [⚡ 快速开始](#快速开始)
 - [🧭 使用 DeepCode](#使用-deepcode)
+- [⚙️ Headless 与 Automation](docs/HEADLESS_AND_AUTOMATION.md#中文)
 - [🔬 Paper2Code](#paper2code)
   - [原始架构](#原始架构)
   - [研究结果](#研究结果)
@@ -146,6 +141,29 @@ Automations。从源码启动请参考
 </p>
 
 ## 新闻
+
+**2026-08-03 · 🎉 DeepCode v2.0 正式发布**
+
+DeepCode v2.0 带来一套全新的通用型 Coding Agent 框架，面向真实软件项目的
+开发、修复、理解与持续改进。
+
+- **直接完成真实仓库任务。** DeepCode 可以理解代码库、修改文件、运行命令
+  与测试、检查变化，并把需求推进到真正可以工作的结果。
+- **通过 Loop Engineering 持续完成复杂目标。** 给出一个 Goal，DeepCode
+  可以持续理解、实现、验证和修复，而不是生成一段看似合理的回答就停止。
+- **Agent 工作时，你始终掌握方向。** 随时补充要求、纠正方向、切换模型、
+  停止、恢复或修改 Goal，不必丢掉已经完成的工作。
+- **清楚看到交付了什么。** 规划、工具活动、代码变化、测试结果和验证证据
+  都可以查看，让审查结果和放心合并变得更容易。
+- **让 Automation 适应你的工作方式。** 用自然语言把任意要求变成某个项目
+  专属的任务：既可随时手动运行，也可按固定间隔自动执行，还能修改、暂停、
+  恢复并查看每次结果。无论是回归检查、测试修复、文档同步还是仓库维护，
+  都可以交给 DeepCode 持续处理。
+- **按照自己的方式工作。** 自由选择 Desktop 或 CLI，使用自己的模型与
+  Skills，并委派聚焦任务，而不必改变底层 Agent 工作流。
+
+DeepCode v2.0 希望让你少花时间逐步盯着 Agent，多花时间完成真正值得发布的
+软件。期待看到你用它创造出的作品！🚀
 
 **2026-07-31 · CLI 与 Desktop 共用统一执行模型**
 
@@ -194,129 +212,125 @@ Automations。从源码启动请参考
 
 </details>
 
-## DeepCode 中的 Deep
+## What Deep means in DeepCode
 
-这个名字表达的是产品行为，而不是为了复杂而复杂。DeepCode 不会停在一段
-看似合理的回答或一个孤立 Patch。它会沿着任务深入仓库关系、真实执行、
-验证失败，以及未来继续工作所需要的上下文。
+大多数 Coding Agent 都能生成代码。真正困难的是：理解一个真实项目、在正确的边界内完成修改、根据运行结果持续修正，并让用户清楚地知道结果为什么可信。
 
-| 深度                  | 它代表什么                                                          |
-| --------------------- | ------------------------------------------------------------------- |
-| **Deep Context**      | 将文件与跨文件关系、项目指令、已选 Skills、历史和记忆放在一起理解。 |
-| **Deep Execution**    | 通过带权限、批准和工作区边界的 Agent Harness 操作真实文件与命令。   |
-| **Deep Verification** | 把测试、诊断和失败重新送回任务，而不是停在一段看起来可信的回答。    |
-| **Deep Continuity**   | 跨时间、目录和模型切换保留 Session、关键决策、证据与恢复状态。      |
+DeepCode 是一个面向真实软件工程的开源 Coding Agent。你可以把一个简单修改交给它，也可以给它一个需要持续数十个步骤的目标。它能够理解项目、操作代码、运行工具、验证结果，并在中断、重启或模型切换之后继续工作。
 
-Paper2Code 最早确立了这种深度：从论文理解开始，经过参考挖掘、代码实现，
-一直走到真实验证。现在的通用 Coding Agent 将同一思路扩展到了日常仓库工作。
+“Deep”代表四种贯穿任务始终的深度：
 
-```mermaid
-flowchart LR
-    INTENT["目标 · 约束 · 完成标准"]
+| 深度                  | 对用户意味着什么                                                                                         |
+| --------------------- | -------------------------------------------------------------------------------------------------------- |
+| **Deep Context**      | 不只读取当前文件，还结合项目结构、工程规则、Skills、Session 历史和长期记忆理解任务。                     |
+| **Deep Execution**    | 不只提出建议，而是实际搜索、编辑、运行命令、执行测试，并展示正在发生的工作。                             |
+| **Deep Verification** | 不把一段听起来合理的回答当作完成，而是使用测试、构建、诊断、Diff 和任务产物检查结果。                    |
+| **Deep Continuity**   | 保存对话、决策、工具记录和验证证据，让任务可以跨时间、目录、客户端和模型继续。                           |
 
-    subgraph CONTINUITY["Deep Continuity · 持久化 Session 与记忆"]
-        CONTEXT["Deep Context · 仓库关系 · 项目指令 · Skills"]
-        EXECUTION["Deep Execution · Agent Harness · 工具 · 权限"]
-        VERIFY["Deep Verification · 观察 · 测试 · 修复"]
-        EVIDENCE["结果证据 · Diff · 命令 · 测试 · Artifacts"]
+DeepCode 最特别的地方可以归纳为三点：
 
-        CONTEXT --> EXECUTION
-        EXECUTION --> VERIFY
-        VERIFY --> EVIDENCE
-        EVIDENCE -->|尚未证明| CONTEXT
-    end
+- **从复杂知识走向可运行系统。** DeepCode 不只处理 Issue 和代码片段。Paper2Code 可以从论文、文档、参考仓库和实验目标出发，完成理解、实现与验证。
+- **让长任务持续运行，同时始终可控。** Goal 不是一次性的提示词。你可以在运行中补充要求、修订目标、暂停、停止或继续，而不必丢掉已经完成的工作。
+- **从代码修改走到验证与审查。** DeepCode 不会停在生成 Patch。它会根据任务运行命令与测试、检查构建结果和文件变化，并把 Goal 的完成或受阻原因关联到相关执行记录，方便你审查最终修改。
 
-    INTENT --> CONTEXT
-    EVIDENCE -->|验证通过| RESULT["可审查的结果"]
-```
+DeepCode 的目标不是让 Agent 显得更忙，而是帮助你更可靠地完成真正的软件工程工作。
 
-这才是产品的工作模型。使用界面只决定用户如何进入和观察它。
+## Core capabilities
 
-## 核心能力
-
-四种“深度”通过下面这些产品能力落到实际工作中。
+DeepCode 提供完整的本地 Coding Agent 工作流。CLI 和 Desktop 只是两种使用方式，它们共享同一套 Agent、Session、模型、Skills、权限和任务状态。
 
 <p align="center">
   <img src="assets/readme/verification-loop.png" alt="DeepCode Agent Harness 与验证循环" width="1080" />
 </p>
 
-### Agent Harness
+### Work directly in your repository
 
-Harness 是 DeepCode 将模型回答转化为“用户可以监督的真实工作”的部分。
-它为 Agent 提供原生读取、搜索、编辑、补丁、Shell、测试与委派能力，同时
-让每次动作都经过同一套执行约束。
+DeepCode 可以读取和搜索代码、编辑文件、应用 Patch、运行命令与测试，并根据结果继续修改。工具调用、执行进度和文件变化会被持续展示，你可以随时查看 Agent 做了什么以及项目发生了哪些变化。
 
-- 工具活动以明确进度展示，而不是藏在一个持续旋转的等待状态后面；
-- 权限判断只有清晰的三种结果：`allow`、`ask` 或 `deny`；
-- **Ask** 与 **Read only** 保留受保护路径规则和当前平台可用的
-  Sandbox；**Full access** 是一次明确的无限制授权；
-- 每个被接收的 Turn 都会冻结已解析的执行配置，之后修改设置不会
-  改变已经运行或排队的工作；
-- 中断或崩溃后的任务会被安全收束，不会静默重放带有副作用的操作。
+它既适合解释代码、修复 Bug 和补充测试，也能完成跨文件重构、功能开发和较长的仓库级任务。
 
-### Loop Engineering
+当你提供一个公开的 HTTP 或 HTTPS URL 时，共享的 `web_fetch` 工具可以直接读取页面，不需要搜索服务或额外的 API Key。
 
-一次看起来不错的回答，并不等于真正完成了修改。Loop Engineering 让
-DeepCode 围绕一段可修改的自然语言 Goal 跨 Turn 持续工作。工作 Agent 结合
-完整对话、当前代码和工具结果，判断应该继续、完成，还是报告真实阻碍。
+### Goal-driven Loop Engineering
 
-用户可以在运行中修订 Goal 或纠正当前 Turn，而不用丢弃仍然有效的工作。
-测试、Build、Lint 和其他显式验证在适用时继续提供强证据。稳定的 Goal 身份、
-冻结的 Turn 权限以及用户可选的预算让长任务可归因，同时不强加固定任务上限。
-Session 历史与项目记忆让任务在重启或切换模型后仍能连续。
+对于无法在一次回答中完成的任务，你可以直接给 DeepCode 一个自然语言 Goal。Agent 会围绕目标持续进行分析、实现、验证和修复，而不需要用户手动推动每一个步骤。
 
-### Context Engineering
+运行过程中，你仍然可以：
 
-DeepCode 从仓库构建上下文，而不是依赖一条巨大的 Prompt。它把文件与搜索
-结果、项目长期指令、已选择的 Skills、Session 历史和持久化工作区笔记组合
-起来。长历史会根据当前模型的上下文窗口进行压缩，使最新证据保持有效，同时
-不切断任务连续性。
+- 向当前任务补充新的信息；
+- 修订 Goal 或验收要求；
+- 排队下一条指令；
+- 暂停、停止或继续任务；
+- 在退出程序后恢复同一个 Goal。
 
-当仓库发生变化、命令产生新证据时，上下文也会随之更新，让规划、实现与验证
-始终对应最新的可观察状态。
+任务不会因为进入自动执行就失去控制权。你始终可以改变接下来的方向。
 
-### 以证据判断完成
+### Evidence-driven completion
 
-DeepCode 不会把一段流畅回答当作任务已经完成的证明。完成结论应当由任务
-真正可以产生的结果支撑：
+DeepCode 不使用一套硬编码规则判断所有 Coding 任务。它会根据任务本身选择合适的证据，例如测试结果、构建输出、静态检查、诊断信息、文件变化、Diff 或生成的 Artifacts。
 
-- 可以审查的 Diff 或生成文件；
-- 命令输出、诊断信息或测试结果；
-- 当输出不适合直接放进对话时保存的 Artifact；
-- 将用户目标与结果证据连接起来的简洁说明。
+验证失败不会被包装成成功，而会成为下一轮修复的输入。任务完成或真正受阻时，结果、原因以及相关证据会继续保留在 Session 中，方便你检查和复现。
 
-如果验证失败，失败结果会成为下一轮输入。如果某个边界阻止继续完成，该边界
-会保持可见，而不会被错误报告为成功。
+### Durable Sessions and project context
 
-### 持久化本地工作
+每个 Session 都会保存在本地，并关联到它最初所属的项目。你可以从任意目录启动 DeepCode，找到之前的项目和 Session，在 CLI 或 Desktop 中继续同一段工作。
 
-可以从任意仓库启动 DeepCode。Sessions 统一保存在
-`~/.deepcode/sessions/`，按原始工作区建立索引，并可跨目录发现。用户可以
-在重启后恢复，或明确选择另一个工作目录继续，而不会改写 Session 记录的
-原始来源。
+Session 不只保存聊天文本，还保存工具调用、权限决策、Goal、模型配置和验证记录。项目规则、持久记忆、Skills 与长对话压缩共同帮助 Agent 在复杂任务中保持上下文连续。
 
-Session 是完整对话，Turn 是其中一次已接收的工作单元。切换模型只影响后续
-Turn，因此之前的工作保持可读，每次重试也能明确对应产生它的执行配置。
+### Your models, your reasoning settings
 
-### 由用户控制的模型与 Skills
+DeepCode 不绑定单一模型厂商。你可以连接 OpenRouter、OpenAI、Anthropic、DeepSeek、Gemini、OpenAI-compatible Gateway、Ollama、vLLM 或其他兼容端点，并使用自己的 API Key。
 
-DeepCode 不绑定单一托管模型。命名连接可以指向 OpenRouter、OpenAI、
-Anthropic、已支持的 Provider、OpenAI-compatible 网关或本地 endpoint。
-凭证留在用户级存储中；项目可以选择连接，但不会取得密钥所有权。
+连接可以在使用前检查凭据、模型列表和真实推理请求。每个 Session 都可以选择模型与 Thinking Level；中途切换模型只影响后续 Turn，不会删除已有对话或混淆之前的工作来源。模型支持时，DeepCode 也会展示 Provider 返回的推理摘要。
 
-Skills 是可以复用的工作流指令。它们既可以随项目保存，也可以进入用户库；
-用户可以从本地目录导入，并只为当前 Turn 选择真正需要的 Skills。所有执行
-方式都会解析同一份目录，而且 Skill 永远不能提高自己的权限。
+### Reusable Skills
 
-### 并行且可重复的工作
+Skills 可以把团队规范、领域知识、评审方法或重复工作流变成 Agent 可复用的能力。Skills 可以存放在项目中，也可以安装到用户目录，并在具体任务中按需选择。
 
-DeepCode 可以把有边界的任务委派给隔离 Git worktree 中的 Agent。不同任务
-不共享同一个可变 checkout，集成时会明确检测冲突。Automations 则通过与手动
-Turn 相同的 Session、模型、权限和恢复规则提交周期性工作。
+DeepCode 同时兼容 DeepCode 和 Claude 风格的 Skill 目录。Skill 可以指导 Agent 如何工作，但不能绕过项目信任、工具权限或安全边界。
+
+### Permissions you can understand
+
+每个项目在执行前都需要明确信任。每个 Session 可以选择：
+
+- **Ask**：敏感操作执行前询问；
+- **Read only**：只允许分析和读取；
+- **Full access**：对可信项目执行完整工作。
+
+工具级别还支持 `allow`、`ask` 和 `deny`。CLI 与 Desktop 使用相同的权限状态，任务被停止或异常中断时，DeepCode 不会静默重放可能产生副作用的操作。
+
+### Parallel agents without file collisions
+
+复杂任务可以被拆分给多个专门的 Agent，例如让不同 Agent 分别负责代码调查、测试分析和实现审查。
+
+并行修改可以运行在隔离的 Git Worktree 中，避免多个 Agent 同时修改同一个工作目录。结果返回主任务后再进行检查和整合，冲突会被明确展示，而不是被静默覆盖。主 Agent 始终负责最终 Goal，不会因为委派任务而失去方向。
+
+### Automate repeatable engineering work
+
+当一项工作已经足够稳定，可以把它保存为 Automation，手动运行或按时间间隔重复执行。例如：
+
+- 定期检查测试和构建状态；
+- 扫描回归问题；
+- 整理待处理任务；
+- 执行仓库维护或周期性审查。
+
+Automation 不会启动另一套简化版 Agent。它仍然使用正常的 Session、模型、Skills、权限、审批和恢复机制，并保留每一次运行的历史。
+
+### Paper2Code
+
+Paper2Code 是 DeepCode 最初的研究方向，也是当前产品中专门面向科研复现的工作流。
+
+它可以从论文、技术文档、URL 或参考仓库开始，理解研究目标，寻找相关实现，组织开发计划，生成代码，并通过实验与产物验证结果。它体现了 DeepCode 的核心理念：重要的不是生成一段看起来正确的代码，而是把复杂知识转化为可以运行、检查和继续改进的系统。
 
 ## 快速开始
 
-### 1. 安装与初始化
+DeepCode 提供两种界面，并且对应两条独立安装路径。任选一种即可开始；两端
+使用相同的 Agent 运行时和规范 Session 历史。
+
+> `uv tool install deepcode-hku` 安装的是 CLI 和共享 Python 运行时，
+> **不会**安装 Tauri Desktop 应用。
+
+### 方案 A：安装 CLI
 
 如果尚未安装 `uv`，请先安装。Windows PowerShell 使用：
 
@@ -331,74 +345,67 @@ uv tool install deepcode-hku
 deepcode init
 ```
 
-`deepcode init` 会在 `~/.deepcode/` 下创建最小用户配置，不会复制项目
-配置或凭证。完成后，可以从任意项目目录直接启动 `deepcode`。
-也可以在合适的 Python 3.12+ 环境中使用 `pipx install deepcode-hku` 或
-`pip install deepcode-hku`。
-
-### 2. 连接模型服务
+首次创建模型连接。`--api-key` 会打开不回显的安全输入：
 
 ```console
 deepcode provider set personal-openrouter --template openrouter --label "OpenRouter · Personal" --api-key
-
-deepcode provider test personal-openrouter
 deepcode provider models personal-openrouter --refresh
+deepcode provider test personal-openrouter --model <model-id>
 ```
 
-`--api-key` 使用不回显的安全输入。已保存的密钥进入用户私有的
-`~/.deepcode/credentials.json`，不会返回给客户端，也不会写入 Session 历史。
-建议使用上面的模型列表命令选择模型，不要依赖旧示例中的模型名称。
-
-### 3. 开始编码
-
-进入希望 DeepCode 操作的仓库目录，然后执行：
+进入希望 DeepCode 操作的仓库，然后启动交互式 Agent：
 
 ```console
-deepcode -c personal-openrouter -m <model-id> --effort auto
+cd <你的项目>
+deepcode
 ```
 
-首次使用时，请检查规范化后的 workspace 路径并确认 trust。DeepCode 会为
-该 Project 记住这个选择；trust 不等于授予无限制工具权限。
+`deepcode init` 会在 `~/.deepcode/` 下创建最小用户配置。凭证单独保存在
+用户私有存储中，不会进入 Session 历史。也可以在合适的 Python 3.12+
+环境中使用 `pipx install deepcode-hku` 或 `pip install deepcode-hku`。
 
-也可以无头执行单个任务：
+### 方案 B：安装 Desktop
 
-```console
-deepcode exec "修复失败的测试，并解释根本原因" --connection personal-openrouter --model <model-id> --effort auto --trust --access full-access --json
-```
+Desktop 安装包与 Python 包分开发布。先检查
+[GitHub Releases](https://github.com/HKUDS/DeepCode/releases) 是否提供当前
+平台的签名安装包；如果没有，请使用下面的源码安装流程。
 
-`--trust` 记录 workspace 信任决定。`--access full-access` 是明确的无限制
-授权，只适合隔离的仓库或 CI runner。在交互式终端中可以省略它，
-按需批准敏感工具；纯检查任务可使用 `--access read-only`。
+#### macOS 与 Linux 源码安装
 
-用户可以选择适合自己的使用界面。`deepcode` 会打开交互式 CLI；同一份
-Sessions 也可以在 Desktop 中打开。
-
-#### 从源码运行 Desktop
-
-##### macOS 与 Linux
-
-在仓库根目录执行：
+请先根据 [Tauri 2 前置依赖指南](https://v2.tauri.app/start/prerequisites/)
+安装平台依赖，并准备 Git、Python 3.12+、`uv`、Node.js 22+ 和稳定版 Rust。
+然后执行：
 
 ```bash
+git clone https://github.com/HKUDS/DeepCode.git
+cd DeepCode
 uv venv --python 3.12
 uv pip install --python .venv/bin/python -e .
+.venv/bin/deepcode init
 cd desktop
 npm ci
 npm run setup:sidecar
 npm run build:sidecar
 cd ..
-./scripts/deepcode-desktop
+mkdir -p ~/.local/bin
+ln -sf "$(pwd)/scripts/deepcode-desktop" ~/.local/bin/deepcode-desktop
+export PATH="$HOME/.local/bin:$PATH"
+deepcode-desktop
 ```
 
-##### Windows PowerShell
+以上步骤会完成一次性的源码启动器安装。以后只要 `~/.local/bin` 已加入
+`PATH`，就可以从任意目录运行 `deepcode-desktop` 启动这个源码版本。如果
+Shell 尚未配置该路径，请把上述 export 写入 Shell profile。命令只负责启动
+Desktop；需要操作的仓库仍应在 Project 侧边栏中添加或选择。
+
+#### Windows 源码安装
 
 Windows 必须安装 Microsoft Edge WebView2，以及 Visual Studio 2022 Build
-Tools 的 **Desktop development with C++** 工作负载。这些是
-[Tauri 在 Windows 上的系统依赖](https://v2.tauri.app/start/prerequisites/#windows)。
-
-**1. 安装工具链。** Build Tools 弹出 UAC 提示时请选择“是”。
+Tools 的 **Desktop development with C++** 工作负载。Build Tools 弹出 UAC
+提示时请选择“是”：
 
 ```powershell
+winget install --id Git.Git --exact
 winget install --id astral-sh.uv --exact
 winget install --id OpenJS.NodeJS.LTS --exact
 winget install --id Rustlang.Rustup --exact
@@ -406,9 +413,10 @@ winget install --id Microsoft.VisualStudio.2022.BuildTools --exact `
   --override "--wait --passive --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
 ```
 
-**2. 关闭 PowerShell，重新打开一个 PowerShell 窗口并验证工具链。**
+关闭 PowerShell，重新打开一个窗口并验证工具链：
 
 ```powershell
+git --version
 uv --version
 node --version
 rustup default stable-msvc
@@ -416,11 +424,14 @@ rustc --version
 cargo --version
 ```
 
-**3. 准备并启动 DeepCode。** 在仓库根目录执行：
+克隆、准备并启动 Desktop：
 
 ```powershell
+git clone https://github.com/HKUDS/DeepCode.git
+Set-Location DeepCode
 uv venv --python 3.12
 uv pip install --python .venv\Scripts\python.exe -e .
+.venv\Scripts\deepcode.exe init
 Set-Location desktop
 npm ci
 $env:DEEPCODE_PYTHON = (Resolve-Path ..\.venv\Scripts\python.exe)
@@ -429,13 +440,26 @@ npm run build:sidecar
 npm run tauri -- dev
 ```
 
-显式指定 `--python` 可以避免在已激活 Conda 的终端中误把可编辑安装写入
-Conda 环境。首次构建 sidecar 会创建 Tauri 在开发模式下仍会校验的资源目录；
-之后仅修改源码 Python 时，运行时仍优先使用仓库 `.venv`。故障排查和后续启动
-说明请参阅 [Desktop 源码运行指南](desktop/README.md#windows-powershell)。
+Desktop 运行期间请保持这个 PowerShell 窗口开启。后续启动和故障排查请参考
+[Desktop 源码运行指南](desktop/README.md#windows-powershell)。
 
-打开 **Settings → Connections** 配置模型服务，然后在 Session 输入框中
-选择连接与模型。
+#### 配置 Desktop 模型
+
+Desktop 启动后，打开 **Settings → AI providers**。
+
+<div align="center">
+  <img src="assets/setting_model.png" alt="在 DeepCode Desktop 中配置 AI Provider 与模型" width="100%" style="border-radius: 10px; box-shadow: 0 8px 20px rgba(45,55,72,0.2); margin: 15px 0;"/>
+
+  <sub>在同一个 Desktop 流程中完成凭证保存、模型发现和真实推理验证。</sub>
+</div>
+
+1. 点击 **Add provider**，选择模型服务，并输入 API Key 或保存它的环境变量名。
+2. 点击 **Save and check**，检查凭证并读取 Provider 的模型目录；这一阶段不会
+   发送项目内容。
+3. 在 **Agent model** 中选择准确的模型 ID，然后点击 **Save and verify
+   model**；最后一步只会发送一次极小的真实推理请求。
+4. 添加或打开 Project，创建 Session，选择模型、Thinking 档位和权限，然后
+   用自然语言描述任务。
 
 > 使用界面只改变工作的呈现方式，不改变背后的 Agent、策略、配置和 Session
 > 历史。
@@ -444,147 +468,49 @@ Conda 环境。首次构建 sidecar 会创建 Tauri 在开发模式下仍会校�
 
 ### Sessions
 
-```text
-/new [标题]              创建新 Session
-/resume                 列出当前目录的 Sessions
-/resume all             列出所有已记录目录的 Sessions
-/resume <id>            恢复一个 Session
-/model [连接] [模型ID]    查看或修改后续 Turn 的模型
-/effort [auto|off|档位]  查看或修改后续 Turn 的 Thinking 强度
-/permissions [预设]      查看或修改后续 Turn 的工具权限
-/transcript [模式]       选择 normal、verbose 或 summary 展示
-/clear                  清空当前内存上下文
-@src/main.py            将文件附加到下一条提示
-```
+每项工作都保存在与原始 Project 关联的持久 Session 中。在 Desktop 打开
+Project，或者从项目目录启动 `deepcode`，然后创建新 Session 或恢复历史。
+同一份历史可以直接在 Desktop 与 CLI 之间继续，无需导出或转换。
 
-Thinking 档位决定向模型请求的推理强度；transcript 模式只决定 DeepCode
-如何展示返回的内容。交互式 CLI 可按 `Ctrl+O` 在
-`normal → verbose → summary` 之间切换。无头任务使用
-`deepcode exec --transcript <模式>`。推理内容是独立的时间线项，不会被混入
-助手最终答案。如果 provider 只返回不可见的续接状态，界面会如实提示详情
-不可用。
+| 需要完成的操作 | Desktop | 交互式 CLI |
+|---|---|---|
+| 创建 Session | **New thread** | `/new [标题]` |
+| 恢复当前项目历史 | 在 Project 下选择 Session | `/resume` |
+| 查找所有项目历史 | 浏览项目列表 | `/resume all` |
+| 附加文件 | 使用输入框附件 | `@文件路径` |
+| 修改下一个 Turn 的模型 | 输入框模型选择器 | `/model` |
+| 调整 Thinking 档位 | 输入框 Thinking 选择器 | `/effort` |
+| 选择工具权限 | 输入框权限选择器 | `/permissions` |
+| 为下一个 Turn 加载 Skills | 输入框 Skills 控件 | `/skill <名称>` |
+| 设置或修改持久 Goal | Goal 面板 | `/goal` |
+| 停止当前 Turn | 使用停止按钮 | `/stop` |
 
-直接启动或恢复：
-
-```bash
-deepcode -w ./my-project --trust
-deepcode --resume <session-id>
-```
-
-无论由哪个客户端打开，Session 文件始终保存在
-`~/.deepcode/sessions/`。显式跨目录恢复只改变当前执行上下文，不会改写
-Session 中记录的原始工作目录。
-
-Archive 保留 canonical 历史，只将 Session 从 Desktop 的普通列表中移除。
-永久删除会删除对话历史及其派生运行记录，但不会删除仓库文件。
-Desktop 在 Session 菜单中提供这两项操作；脚本可调用：
-
-```bash
-deepcode session delete <session-id> --yes
-```
-
-如果 Session 正被另一个 CLI 打开、存在运行中工作、占用托管 worktree，
-或属于 Automation，DeepCode 会拒绝永久删除。删除不会强制终止工作，
-也不会静默移除 workspace 状态。
+对话、工具活动、审批、Goal 状态和验证证据始终保存在一起。Archive 只隐藏
+Session，不删除历史；永久删除只移除 Session 记录，不会删除项目文件。
 
 ### Connections 与模型
 
-常用命令：
+Desktop 在 **Settings → AI providers** 中提供连接配置与验证。CLI 使用
+`/model` 修改后续 Turn 的连接和模型，使用 `/effort` 选择该模型支持的
+Thinking 档位。
 
-```bash
-deepcode provider list
-deepcode provider test <连接ID>
-deepcode provider models <连接ID> --refresh
-deepcode provider remove <连接ID>
-```
+模型切换不会改写已有历史，也不会改变正在运行的 Turn。Thinking 档位决定
+发送给 Provider 的请求；transcript 详细程度只影响界面展示。DeepCode 只在
+Provider 明确提供时展示推理摘要，不会把原始 chain-of-thought 混入助手回答。
 
-使用环境变量而不是凭证文件：
-
-```bash
-deepcode provider set work-openrouter \
-  --template openrouter \
-  --api-key-env OPENROUTER_API_KEY
-```
-
-接入任意 OpenAI-compatible endpoint：
-
-```bash
-deepcode provider set company-proxy \
-  --template custom \
-  --adapter openai_compat \
-  --api-base https://llm.example.com/v1 \
-  --catalog openai \
-  --api-key
-```
-
-内置模板包括 `openrouter`、`openai`、`anthropic`、`deepseek`、`gemini`、
-`zhipu`、`dashscope`、`ollama`、`vllm` 和 `custom`。
-
-若要为 DeepCode 设置统一默认值，请修改用户级
-`~/.deepcode/deepcode_config.json`：
-
-```json
-{
-  "agents": {
-    "defaults": {
-      "connection": "personal-openrouter",
-      "model": "<model-id>",
-      "reasoningEffort": "auto"
-    }
-  }
-}
-```
-
-项目配置可以选择用户已有的连接，但不能替换它的 endpoint、adapter、
-headers 或凭证。
-
-Thinking 档位来自所选模型的 catalog，而不是 DeepCode 内的一份全局硬编码
-列表。`auto` 使用 provider/model 默认值；只有模型允许关闭时才提供 `off`。
-Session 内的切换只影响后续 Turn，不会改写已有历史。DeepCode 不会把原始
-chain-of-thought 渲染成助手正文；界面最多显示 provider 明确提供的安全摘要，
-签名或加密的续接状态只会私下保存在 canonical Session 中。
+环境变量凭证、自定义网关、模型发现和机器可读检查等管理命令统一收录在
+[Headless 与 Automation 指南](docs/HEADLESS_AND_AUTOMATION.md#连接与模型管理)。
 
 ### Skills
 
-DeepCode 会同时发现 DeepCode 与 Claude-compatible Skill 目录：
+Skills 可以把可复用的工程知识变成 Agent 在任务中加载的指导。Desktop
+提供 Skills 工作区；交互式 CLI 使用 `/skills` 发现可用 Skill，使用
+`/skill <名称>` 为下一个 Turn 选择能力。
 
-```text
-.deepcode/skills/        项目级 DeepCode Skills
-.claude/skills/          项目级 Claude-compatible Skills
-~/.deepcode/skills/      用户级 DeepCode Skills
-~/.claude/skills/        用户级 Claude-compatible Skills
-```
-
-通过 CLI 管理：
-
-```bash
-deepcode skill list
-deepcode skill show <ID或名称>
-deepcode skill import ./my-skill --scope project
-deepcode skill disable <skill-id> --scope project
-```
-
-为下一次交互式 Turn 选择 Skills：
-
-```text
-/skills
-/skill <ID或名称>
-/skill remove <ID或名称>
-/skill clear
-```
-
-无头任务可以重复使用 `--skill`：
-
-```bash
-deepcode exec "检查本次变更是否引入安全问题" \
-  --skill security-review \
-  --skill test-strategy \
-  --trust \
-  --access read-only
-```
-
-Skill 只能提供工作流指导，不能授予权限，也不能绕过 Project trust、
-Sandbox、批准或工具策略。
+项目级 Skills 可以随仓库共享，用户级 Skills 可以跨 Project 使用。DeepCode
+同时兼容 Claude 风格的 Skill 目录。Skill 只能指导 Agent，不能授予权限，
+也不能绕过 Project trust、审批或工具策略。导入、启用、禁用和目录管理命令
+统一放在 [高级指南](docs/HEADLESS_AND_AUTOMATION.md#skills-管理)中。
 
 ### 安全与执行
 
@@ -604,35 +530,13 @@ DeepCode 将执行安全视为产品边界，而不是客户端确认框：
 
 ### 长期任务
 
-在交互式 CLI 中，可以把可持久化的 Goal 绑定到当前 Session：
+普通输入就可以运行包含多个工具调用的完整 Coding Turn。当任务需要跨多个
+Turn 或进程重启继续时，再把持久 Goal 绑定到 Session。Desktop 使用 Goal
+面板，CLI 使用 `/goal <目标>`。
 
-```text
-/permissions
-/permissions ask
-/permissions read-only
-/permissions full-access
-/permissions inherit
-/goal 实现并验证指定功能
-/goal show
-/goal edit 实现功能并保持公共 API 兼容
-/goal pause
-/goal resume
-/goal wait
-/goal reopen 根据新要求调整已完成结果
-/goal clear
-/queue 把这条指令安排为下一个 Turn
-/stop
-```
-
-Goal 与规范 Session transcript 一起保存，并会同步出现在 Desktop。Goal 在
-后台工作时，CLI 仍然可以继续输入：消息会优先纠正当前 Turn；如果当前 Turn
-已经结束，同一条消息会在相同 Session 中启动下一个 Turn。Queue 只能通过
-`/queue` 或 Desktop 的 **Queue next** 显式选择，失败的 Steer 不会偷偷改变
-投递语义。`/stop` 只中断当前 Turn，CLI 仍可继续接收下一条输入。编辑 Goal
-会更新同一个持久 Goal，并在条件允许时把新目标注入当前 Turn。所有工作单元
-都是普通 Turn，因此 model、Skills、权限、审批、恢复和历史在两端保持一致。
-切换 provider、model 或 thinking 档位只影响后续 Turn，不会替换 Goal 或
-Session。
+DeepCode 工作期间，新输入可以纠正当前 Turn。你也可以编辑 Goal、停止当前
+Turn、安排后续指令、暂停 Goal，或者稍后恢复。所有操作都保留相同的 Session、
+历史、权限、Skills 与验证证据，不会变成一次孤立执行。
 
 工作 Agent 根据完整上下文显式请求 `complete` 或 `blocked`。DeepCode 强制
 检查归属、生命周期、权限和预算边界，但不会用一条宿主规则冒充对所有 coding
@@ -640,53 +544,16 @@ Session。
 独立复核继续作为可见证据。Goal 引擎不会硬编码 provider、模型、任务类型或
 测试命令。
 
-普通 Session 本身也支持一个 Turn 内的完整长工具循环；Goal 是需要跨 Turn、
-重启或无人持续输入时才使用的可选持久运行契约。
+### Automation 与无界面工作流
 
-兼容的脚本/CI 入口会把指定命令加入 Agent 可见的完成证据要求：
+Desktop 的 Automation 工作区可以把可信 Project 中的一条指令保存为手动或
+定时任务，同时继续使用正常的 Agent、Session、Goal、权限、恢复和 Run 历史。
+它适合仓库健康检查、回归审查和周期性维护等可重复工作。
 
-让 Agent 运行并检查指定命令后再判断是否完成：
-
-```bash
-deepcode loop "实现指定功能" \
-  --test-cmd "python -m pytest -q" \
-  --trust \
-  --access full-access
-```
-
-退出进程后，可以继续同一个 Goal 与规范 Session：
-
-```bash
-deepcode loop --resume <session-id>
-```
-
-Resume 会保留 Session ID、Goal ID、完整 transcript 和原始 workspace。只有显式
-传入 `--workspace` 才使用本次进程的临时 workspace override，且不会改写
-Session 来源。`--connection`、`--model` 和 `--effort` 只影响本命令启动的
-下一个 Turn。达到 token 上限的 Goal 必须提供更大的 `--token-budget`；
-已经完成的 Goal 只读取并报告结果，不会重新启动或改写任务。
-
-当前仓库在 DeepCode 中打开并完成信任后，可以创建持久化 Automation：
-
-```bash
-deepcode automation create "Repository caretaker" \
-  --prompt "修复失败的测试并验证结果。" \
-  --schedule interval \
-  --interval-seconds 3600
-
-deepcode automation list --limit 100 --offset 0
-deepcode automation run <automation-id>
-deepcode automation runs <automation-id> --limit 100 --offset 0
-```
-
-Automation 通过正常 Turn 路径提交工作，因此手动和定时执行都遵守同一套
-Session、权限、模型、审批和恢复规则。每个 Run 使用的不可变指令 revision
-会保留；Automation 后续被编辑或退役也不会改写历史。Interval schedule 需要
-一个启用了 scheduler 的 Desktop 或 App Server runtime 保持运行。
-暂停/启用只控制 interval schedule；manual 定义始终为 enabled，而且 interval
-被暂停后仍可使用 **Run now** 手动执行。
-Automation 定义和 Run 历史使用显式分页。JSON 响应会返回 `hasMore` 与
-`nextOffset`；人类可读输出在仍有后续结果时会明确打印下一页 offset。
+Shell 脚本和 CI 也可以在不打开界面的情况下调用相同运行时。独立的
+[Headless 与 Automation 指南](docs/HEADLESS_AND_AUTOMATION.md#中文)
+集中说明 `exec`、`loop`、Automation、Provider、Skill 和 Session 管理命令。
+这些是高级集成入口，普通 Desktop 或 CLI 用户无需用它们拼接日常任务。
 
 ## Paper2Code
 
@@ -699,24 +566,9 @@ Paper2Code 是 DeepCode 的研究起点，也是当前面向科研代码复现�
 
 ### 原始架构
 
-```mermaid
-flowchart TB
-    INPUT["研究论文 · 文本 · URL · 文档 · 代码仓库"] --> ORCH["中央编排智能体"]
-
-    ORCH --> INTENT["意图理解智能体"]
-    ORCH --> DOC["文档解析智能体"]
-    INTENT --> PLAN["代码规划智能体"]
-    DOC --> PLAN
-
-    PLAN --> MINE["代码参考挖掘智能体"]
-    PLAN --> INDEX["代码索引智能体"]
-    MINE --> INDEX
-    INDEX --> BUILD["代码生成智能体"]
-
-    BUILD --> VERIFY["执行 · 测试 · 验证"]
-    VERIFY -->|证据表明仍需处理| ORCH
-    VERIFY -->|验证通过| OUTPUT["代码库 · 结果 · 测试 · 文档"]
-```
+<p align="center">
+  <img src="assets/readme/framework2.png" alt="Paper2Code 从来源文档到代码生成、验证与改进的完整框架" width="1080" />
+</p>
 
 各专业角色继续保持原系统中清晰的职责分离：
 

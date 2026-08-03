@@ -27,6 +27,7 @@ from core.application.execution_coordinator import (
     OrphanedExecution,
 )
 from core.application.execution_registry import ExecutionRegistry
+from core.application.llm_configuration_service import LLMConfigurationService
 from core.application.views import (
     artifact_view,
     item_view,
@@ -47,6 +48,7 @@ from core.config import load_config_for_workspace
 from core.domain.artifact import Artifact
 from core.domain.common import JsonObject, new_id, utc_now, validate_json_object
 from core.domain.event import DomainEvent
+from core.domain.execution_profile import ExecutionProfile, ExecutionSelection
 from core.domain.item import Item, ItemKind, ItemStatus
 from core.domain.project import TrustState
 from core.domain.runtime_coordination import ResourceClaim
@@ -110,6 +112,7 @@ class WorkflowService:
         *,
         session_store: SessionStore,
         runner: WorkflowRunner | None = None,
+        llm_configuration: LLMConfigurationService | None = None,
         interaction_poll_seconds: float = DEFAULT_INTERACTION_POLL_SECONDS,
     ) -> None:
         if interaction_poll_seconds <= 0:
@@ -120,6 +123,7 @@ class WorkflowService:
         self.registry = registry
         self.session_store = session_store
         self.runner = runner or DefaultWorkflowRunner()
+        self.llm_configuration = llm_configuration or LLMConfigurationService()
         self.interaction_poll_seconds = interaction_poll_seconds
         self._execution_coordinator: ExecutionCoordinator | None = None
         self._interaction_lock = threading.RLock()
@@ -687,6 +691,16 @@ class WorkflowService:
                 )
             if thread.status is ThreadStatus.ARCHIVED:
                 raise ConflictError("cannot start a workflow in an archived thread")
+            selection = ExecutionSelection(
+                connection_id=thread.connection_id,
+                model_id=thread.model,
+                reasoning_effort=thread.reasoning_effort,
+            )
+            phase_profiles = self.llm_configuration.resolve_phases(
+                context.root,
+                selection,
+                phases=("planning", "implementation"),
+            )
             turns = TurnRepository(connection)
             active = turns.active_for_thread(thread_id)
             if active is not None:
@@ -701,6 +715,7 @@ class WorkflowService:
                 ordinal=turns.next_ordinal(thread_id),
                 prompt=prompt,
                 executor=TurnExecutor.WORKFLOW,
+                execution_profile=phase_profiles["implementation"],
             )
             turns.add(turn)
             runs = WorkflowRepository(connection)
@@ -712,6 +727,10 @@ class WorkflowService:
                     "sourceType": clean_source_type,
                     "source": clean_source,
                     "options": clean_options,
+                    "executionProfiles": {
+                        phase: profile.to_dict()
+                        for phase, profile in phase_profiles.items()
+                    },
                 },
                 attempt=(retry_of.attempt + 1) if retry_of else 1,
                 retry_of=retry_of.id if retry_of else None,
@@ -732,7 +751,14 @@ class WorkflowService:
                 kind=ItemKind.USER_MESSAGE,
                 status=ItemStatus.COMPLETED,
                 summary=prompt[:160],
-                payload={"text": prompt, "workflowRunId": run.id},
+                payload={
+                    "text": prompt,
+                    "workflowRunId": run.id,
+                    "executionProfiles": {
+                        phase: profile.to_dict()
+                        for phase, profile in phase_profiles.items()
+                    },
+                },
                 created_at=now,
                 updated_at=now,
             )
@@ -822,7 +848,11 @@ class WorkflowService:
                 workspace=workspace,
                 checkpoint=run.checkpoint,
             )
-            runtime = DeepCodeRuntime(load_config_for_workspace(workspace))
+            runtime = DeepCodeRuntime(
+                load_config_for_workspace(workspace),
+                credential_store=self.llm_configuration.credentials,
+                phase_execution_profiles=_execution_profiles(run.input),
+            )
             with use_runtime(runtime):
                 outcome = await self.runner.run(
                     request,
@@ -1725,6 +1755,25 @@ class WorkflowService:
     def _wake_interaction_waiter(future: asyncio.Future[None]) -> None:
         if not future.done():
             future.set_result(None)
+
+
+def _execution_profiles(value: JsonObject) -> dict[str, ExecutionProfile]:
+    """Decode profiles captured at admission; legacy runs fall back to config."""
+
+    raw = value.get("executionProfiles")
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise InvalidArgumentError("workflow executionProfiles must be an object")
+    profiles: dict[str, ExecutionProfile] = {}
+    for phase in ("planning", "implementation"):
+        profile = ExecutionProfile.from_dict(raw.get(phase))
+        if profile is None:
+            raise InvalidArgumentError(
+                f"workflow execution profile for {phase} is invalid"
+            )
+        profiles[phase] = profile
+    return profiles
 
 
 def _validate_input(

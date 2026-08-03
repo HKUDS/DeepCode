@@ -1283,6 +1283,33 @@ ALTER TABLE turns DROP COLUMN execution_security_profile_json;
 ALTER TABLE threads DROP COLUMN access_preset_override;
 """
 
+_WEB_ACCESS_POLICY_V15 = r"""
+ALTER TABLE threads
+    ADD COLUMN web_search_mode_override TEXT
+    CHECK (
+        web_search_mode_override IS NULL OR
+        web_search_mode_override IN ('disabled', 'live')
+    );
+ALTER TABLE turns
+    ADD COLUMN web_access_policy_json TEXT
+    CHECK (
+        web_access_policy_json IS NULL OR
+        length(trim(web_access_policy_json)) > 0
+    );
+"""
+
+_DROP_WEB_ACCESS_POLICY_V15 = r"""
+ALTER TABLE turns DROP COLUMN web_access_policy_json;
+ALTER TABLE threads DROP COLUMN web_search_mode_override;
+"""
+
+# v15 briefly persisted a search-provider policy. Keep that historical step so
+# databases already opened by development builds can advance safely, then
+# remove the abandoned columns in v16. Fresh databases end at the same minimal
+# schema; downgrading to v15 recreates empty compatibility columns.
+_REMOVE_WEB_ACCESS_POLICY_V16 = _DROP_WEB_ACCESS_POLICY_V15
+_RESTORE_WEB_ACCESS_POLICY_V16 = _WEB_ACCESS_POLICY_V15
+
 MIGRATIONS = (
     Migration(1, "initial_domain", _INITIAL_SCHEMA, _DROP_INITIAL_SCHEMA),
     Migration(
@@ -1362,6 +1389,18 @@ MIGRATIONS = (
         "session_execution_security",
         _SESSION_EXECUTION_SECURITY_V14,
         _DROP_SESSION_EXECUTION_SECURITY_V14,
+    ),
+    Migration(
+        15,
+        "web_access_policy",
+        _WEB_ACCESS_POLICY_V15,
+        _DROP_WEB_ACCESS_POLICY_V15,
+    ),
+    Migration(
+        16,
+        "remove_web_access_policy",
+        _REMOVE_WEB_ACCESS_POLICY_V16,
+        _RESTORE_WEB_ACCESS_POLICY_V16,
     ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

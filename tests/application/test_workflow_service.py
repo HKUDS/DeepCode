@@ -92,6 +92,20 @@ class RuntimeCapturingRunner(ScriptedWorkflowRunner):
         return await super().run(request, callbacks)
 
 
+class PhaseProfileCapturingRunner(ScriptedWorkflowRunner):
+    def __init__(self) -> None:
+        super().__init__()
+        self.profiles = {}
+
+    async def run(self, request, callbacks) -> WorkflowOutcome:
+        runtime = get_runtime()
+        self.profiles = {
+            phase: runtime.resolve_execution_profile(phase=phase)
+            for phase in ("planning", "implementation")
+        }
+        return await super().run(request, callbacks)
+
+
 class RejectTaskStore(SessionStore):
     def attach_task(self, *args, **kwargs):
         return None
@@ -299,6 +313,78 @@ def test_workflow_uses_selected_workspace_config_not_server_cwd(
         )
         _wait_for(application, started.run.id, WorkflowStatus.COMPLETED)
         assert runner.models == ["openai/project"]
+    finally:
+        application.close()
+
+
+def test_workflow_freezes_session_model_for_every_paper2code_phase(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    home.mkdir()
+    workspace.mkdir()
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+    (home / "deepcode_config.json").write_text(
+        json.dumps(
+            {
+                "providers": {
+                    "profiles": {
+                        "session-provider": {
+                            "label": "Session provider",
+                            "template": "custom",
+                            "apiBase": "https://example.invalid/v1",
+                            "modelCatalog": "manual",
+                            "manualModels": ["openai/gpt-5.2"],
+                        }
+                    }
+                },
+                "agents": {
+                    "defaults": {"model": "fallback/default-model"},
+                    "planning": {"model": "fallback/planning-model"},
+                    "implementation": {"model": "fallback/implementation-model"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    runner = PhaseProfileCapturingRunner()
+    application = DeepCodeApplication.open(
+        tmp_path / "state.sqlite3",
+        workflow_runner=runner,
+    )
+    project = application.projects.add(
+        str(workspace),
+        trust_state=TrustState.TRUSTED,
+    )
+    thread = application.threads.start(
+        project.id,
+        title="Session-selected Paper2Code",
+        connection_id="session-provider",
+        model="openai/gpt-5.2",
+        reasoning_effort="high",
+    )
+    try:
+        started = application.workflows.start(
+            thread.id,
+            kind="paper2code",
+            source_type="requirement",
+            source="Implement a small verified feature",
+            options={"planReview": False},
+        )
+        completed = _wait_for(application, started.run.id, WorkflowStatus.COMPLETED)
+
+        assert set(runner.profiles) == {"planning", "implementation"}
+        for profile in runner.profiles.values():
+            assert profile.connection_id == "session-provider"
+            assert profile.model_id == "openai/gpt-5.2"
+            assert profile.reasoning_effort == "high"
+        captured = completed.run.input["executionProfiles"]
+        assert captured["planning"] == runner.profiles["planning"].to_dict()
+        assert captured["implementation"] == runner.profiles["implementation"].to_dict()
+        assert completed.turn.execution_profile == runner.profiles["implementation"]
+        assert "apiKey" not in repr(captured)
     finally:
         application.close()
 

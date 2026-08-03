@@ -634,6 +634,13 @@ def _project_runtime_layer(raw: dict[str, Any]) -> dict[str, Any]:
 
 def _resolve_env_refs(value: Any, *, path: str = "") -> Any:
     if isinstance(value, str):
+        # ``apiKeyEnv`` stores the *name* of an environment variable. It is
+        # never an interpolation site: expanding ``${NAME}`` here would place
+        # the environment value into Pydantic validation errors and could
+        # reflect credential material through a public configuration surface.
+        field_name = path.rsplit(".", 1)[-1]
+        if field_name in {"apiKeyEnv", "api_key_env"}:
+            return value
 
         def _replace(match: re.Match[str]) -> str:
             name = match.group(1)

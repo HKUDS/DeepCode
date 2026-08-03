@@ -82,6 +82,64 @@ def test_existing_private_tree_permissions_are_repaired(tmp_path: Path) -> None:
     assert _mode(transcript) == 0o600
 
 
+def test_credential_read_repairs_historical_mode_before_returning_value(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "home" / "credentials.json"
+    path.parent.mkdir()
+    path.write_text(
+        '{"version": 1, "connections": {"example": "secret"}}\n',
+        encoding="utf-8",
+    )
+    os.chmod(path, 0o644)
+
+    assert CredentialStore(path).get("example") == "secret"
+    assert _mode(path) == 0o600
+
+
+def test_credential_store_rejects_symlink_and_retains_path_identity(
+    tmp_path: Path,
+) -> None:
+    external = tmp_path / "external.json"
+    external.write_text(
+        '{"version": 1, "connections": {"example": "outside"}}\n',
+        encoding="utf-8",
+    )
+    link = tmp_path / "credentials.json"
+    link.symlink_to(external)
+    store = CredentialStore(link)
+
+    assert store.path == link.absolute()
+    with pytest.raises(OSError):
+        store.get("example")
+    with pytest.raises(OSError):
+        store.set("example", "replacement")
+    assert "outside" in external.read_text(encoding="utf-8")
+    assert "replacement" not in external.read_text(encoding="utf-8")
+
+
+def test_credential_store_rejects_symlinked_mutation_lock(tmp_path: Path) -> None:
+    path = tmp_path / "credentials.json"
+    external_lock = tmp_path / "external.lock"
+    external_lock.write_text("unchanged", encoding="utf-8")
+    lock_link = path.with_suffix(path.suffix + ".lock")
+    lock_link.symlink_to(external_lock)
+
+    with pytest.raises(OSError):
+        CredentialStore(path).set("example", "secret")
+
+    assert external_lock.read_text(encoding="utf-8") == "unchanged"
+    assert not path.exists()
+
+
+def test_credential_store_rejects_non_regular_file(tmp_path: Path) -> None:
+    path = tmp_path / "credentials.json"
+    path.mkdir()
+
+    with pytest.raises(OSError):
+        CredentialStore(path).get("example")
+
+
 def test_private_tree_repair_does_not_follow_symlinks(tmp_path: Path) -> None:
     root = tmp_path / "private"
     root.mkdir()

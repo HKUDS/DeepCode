@@ -185,6 +185,17 @@ class Tool(ABC):
     def exclusive(self) -> bool:
         return False
 
+    def presentation_detail(self, arguments: dict[str, Any]) -> str | None:
+        """Return a safe one-line summary for ``ToolStarted`` presentation.
+
+        ``None`` delegates to the protocol's conservative generic summary.
+        Returning an empty string explicitly suppresses argument presentation.
+        Tools whose arguments may contain credentials or signed URLs should
+        override this method instead of relying on generic inference.
+        """
+
+        return None
+
     @abstractmethod
     async def execute(self, **kwargs: Any) -> Any: ...
 

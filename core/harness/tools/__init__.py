@@ -24,6 +24,7 @@ from core.harness.tools.replace import (
 )
 from core.harness.tools.search import GlobTool, GrepTool
 from core.harness.tools.shell import BashTool
+from core.harness.tools.web import WebFetchTool
 
 __all__ = [
     "ApplyPatchTool",
@@ -37,6 +38,7 @@ __all__ = [
     "PatchError",
     "ReadTool",
     "WriteTool",
+    "WebFetchTool",
     "default_coding_tools",
     "parse_patch",
     "replace",
@@ -117,6 +119,7 @@ def default_coding_tools(
         GlobTool(workspace),
         MemoryTool(workspace),
         UpdatePlanTool(),  # the agent's self-driven TODO plan
+        WebFetchTool(),
     ]
     # Standalone fallback is workspace-hermetic (no ambient ~/.claude scan);
     # build_agent_session passes the full project+user set via `skills`.

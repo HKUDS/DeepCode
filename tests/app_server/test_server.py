@@ -756,6 +756,11 @@ def test_connection_and_model_protocol_is_shared_secret_safe_state(
         )
         + _request(
             5,
+            "provider/test",
+            {"connectionId": "router-rpc", "projectId": project.id},
+        )
+        + _request(
+            6,
             "thread/execution/update",
             {
                 "threadId": thread.id,
@@ -764,8 +769,8 @@ def test_connection_and_model_protocol_is_shared_secret_safe_state(
                 "reasoningEffort": "high",
             },
         )
-        + _request(6, "provider/remove", {"connectionId": "router-rpc"})
-        + _request(7, "shutdown", {})
+        + _request(7, "provider/remove", {"connectionId": "router-rpc"})
+        + _request(8, "shutdown", {})
     )
     sink = io.BytesIO()
 
@@ -798,10 +803,16 @@ def test_connection_and_model_protocol_is_shared_secret_safe_state(
         "max",
     ]
     assert responses[4]["source"] == "manual"
-    assert responses[5]["thread"]["connectionId"] == "router-rpc"
-    assert responses[5]["thread"]["model"] == "moonshotai/kimi-k3"
-    assert responses[5]["thread"]["reasoningEffort"] == "high"
-    assert responses[6]["removed"] is True
+    assert responses[5]["status"] == "limited"
+    assert [stage["status"] for stage in responses[5]["stages"]] == [
+        "passed",
+        "skipped",
+        "not_run",
+    ]
+    assert responses[6]["thread"]["connectionId"] == "router-rpc"
+    assert responses[6]["thread"]["model"] == "moonshotai/kimi-k3"
+    assert responses[6]["thread"]["reasoningEffort"] == "high"
+    assert responses[7]["removed"] is True
 
     persisted = json.loads((home / "deepcode_config.json").read_text())
     assert secret not in json.dumps(persisted)
