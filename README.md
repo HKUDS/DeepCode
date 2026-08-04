@@ -142,6 +142,20 @@ Skills, permissions, Goals, and Automations. See the
 
 ## News
 
+**2026-08-04 · Skills that work wherever you do**
+
+- **Keep reusable expertise close to your work.** DeepCode discovers Skills
+  from the current project as well as your personal collection, while keeping
+  existing DeepCode and Claude-compatible Skill locations working.
+- **Use the same Skill from CLI or Desktop.** Select it for a task and DeepCode
+  carries its identity and version with the Turn, so the Session shows which
+  guidance shaped the result.
+- **Create Skills without leaving DeepCode.** The built-in Skill Creator helps
+  you scaffold and validate focused, reusable workflows from either interface.
+- **Stay focused as your library grows.** Context-aware discovery keeps the
+  Agent prompt concise while the complete Skill catalog remains available to
+  browse and manage.
+
 **2026-08-03 · 🎉 DeepCode v2.0 is here**
 
 DeepCode v2.0 introduces a new general-purpose Coding Agent framework for

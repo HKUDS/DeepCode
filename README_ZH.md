@@ -142,6 +142,18 @@ Automations。从源码启动请参考
 
 ## 新闻
 
+**2026-08-04 · 让 Skills 在每一种工作方式中保持一致**
+
+- **让可复用经验跟随项目。** DeepCode 既能发现当前项目中的 Skills，
+  也能使用个人 Skill 集合，并继续兼容现有 DeepCode 与 Claude 风格目录。
+- **在 CLI 与 Desktop 中使用同一个 Skill。** 为任务选择 Skill 后，
+  DeepCode 会把它的身份和版本保留在 Turn 中，方便在 Session 中追溯
+  哪些指导影响了结果。
+- **不离开 DeepCode 也能创建 Skill。** 内置 Skill Creator 可在两端
+  帮助创建和验证聚焦、可复用的工作流。
+- **Skill 库增长后依然保持专注。** 上下文感知的发现机制会控制
+  Agent 上下文中的信息量，同时保留完整的 Skill 浏览与管理能力。
+
 **2026-08-03 · 🎉 DeepCode v2.0 正式发布**
 
 DeepCode v2.0 带来一套全新的通用型 Coding Agent 框架，面向真实软件项目的
