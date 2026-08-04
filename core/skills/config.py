@@ -81,7 +81,11 @@ class SkillPolicyStore:
         return frozenset(_disabled_from_raw(updated.get("skills")))
 
     def _store(self, scope: SkillScope) -> Any:
-        return self.user_store if scope is SkillScope.USER else self.project_store
+        if scope is SkillScope.USER:
+            return self.user_store
+        if scope is SkillScope.PROJECT:
+            return self.project_store
+        raise ValueError("system Skills do not have mutable policy storage")
 
     @staticmethod
     def _read_disabled(store: Any) -> tuple[str, ...]:

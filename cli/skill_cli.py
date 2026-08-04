@@ -8,7 +8,7 @@ import os
 import sys
 
 from core.skills.management import LocalSkillManager
-from core.skills.models import SkillRecord, SkillScope
+from core.skills.models import MUTABLE_SKILL_SCOPES, SkillRecord, SkillScope
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -43,7 +43,7 @@ def _parser() -> argparse.ArgumentParser:
     import_command.add_argument("path")
     import_command.add_argument(
         "--scope",
-        choices=[scope.value for scope in SkillScope],
+        choices=[scope.value for scope in MUTABLE_SKILL_SCOPES],
         default=SkillScope.PROJECT.value,
     )
 
@@ -52,14 +52,14 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument("skill_id")
         command.add_argument(
             "--scope",
-            choices=[scope.value for scope in SkillScope],
+            choices=[scope.value for scope in MUTABLE_SKILL_SCOPES],
             default=SkillScope.PROJECT.value,
             help="Configuration layer to mutate (project is least-global).",
         )
 
     remove = commands.add_parser(
         "remove",
-        help="Delete a managed .deepcode Skill (never deletes .claude Skills).",
+        help="Delete a managed .agents Skill (legacy and system Skills are read-only).",
     )
     remove.add_argument("skill_id")
     remove.add_argument("--yes", action="store_true", help="Skip confirmation.")
@@ -195,6 +195,11 @@ def _record_view(record: SkillRecord) -> dict:
         "byteSize": record.byte_size,
         "shadowedBy": record.shadowed_by,
         "error": record.error,
+        "displayName": record.metadata.interface.display_name,
+        "shortDescription": record.metadata.interface.short_description,
+        "defaultPrompt": record.metadata.interface.default_prompt,
+        "allowImplicitInvocation": record.metadata.allow_implicit_invocation,
+        "deletable": record.deletable,
     }
 
 

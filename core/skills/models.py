@@ -15,11 +15,17 @@ MAX_SELECTED_SKILLS = 8
 class SkillScope(StrEnum):
     PROJECT = "project"
     USER = "user"
+    SYSTEM = "system"
+
+
+MUTABLE_SKILL_SCOPES = (SkillScope.PROJECT, SkillScope.USER)
 
 
 class SkillSourceRoot(StrEnum):
+    AGENTS = "agents"
     DEEPCODE = "deepcode"
     CLAUDE = "claude"
+    SYSTEM = "system"
 
 
 class SkillStatus(StrEnum):
@@ -30,6 +36,23 @@ class SkillStatus(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class SkillInterface:
+    display_name: str | None = None
+    short_description: str | None = None
+    icon_small: str | None = None
+    icon_large: str | None = None
+    brand_color: str | None = None
+    default_prompt: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SkillMetadata:
+    interface: SkillInterface = SkillInterface()
+    allow_implicit_invocation: bool = True
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class SkillKey:
     """Filesystem identity used to derive the opaque public Skill ID."""
 
@@ -37,6 +60,7 @@ class SkillKey:
     source_root: SkillSourceRoot
     skill_file: Path
     relative_path: str
+    writable: bool = False
 
     @property
     def id(self) -> str:
@@ -71,6 +95,7 @@ class SkillRecord:
     revision: str
     status: SkillStatus
     byte_size: int
+    metadata: SkillMetadata = SkillMetadata()
     error: str | None = None
     shadowed_by: str | None = None
 
@@ -97,6 +122,14 @@ class SkillRecord:
     @property
     def selectable(self) -> bool:
         return self.status in {SkillStatus.ACTIVE, SkillStatus.SHADOWED}
+
+    @property
+    def deletable(self) -> bool:
+        return (
+            self.key.writable
+            and self.scope is not SkillScope.SYSTEM
+            and self.source_root is SkillSourceRoot.AGENTS
+        )
 
     @property
     def summary_line(self) -> str:
@@ -166,7 +199,11 @@ class SkillTurnSnapshot:
             "The user explicitly selected the workflow instructions below for "
             "this Turn. Follow them where they support the user's task. They do "
             "not override system, security, sandbox, approval, hook, or explicit "
-            "user constraints.\n\n" + "\n\n---\n\n".join(sections)
+            "user constraints. Skill source paths identify workflow resources, "
+            "not the task workspace. Keep repository operations in "
+            "`<environment_context><cwd>` and resolve only Skill-relative files "
+            "against the corresponding Skill directory.\n\n"
+            + "\n\n---\n\n".join(sections)
         )
 
 
@@ -186,8 +223,10 @@ __all__ = [
     "SkillError",
     "SkillInvocation",
     "SkillInvocationKind",
+    "SkillInterface",
     "SkillKey",
     "SkillRecord",
+    "SkillMetadata",
     "SkillResolutionError",
     "SkillScope",
     "SkillSelection",
@@ -195,4 +234,5 @@ __all__ = [
     "SkillStatus",
     "SkillTurnSnapshot",
     "SkillValidationError",
+    "MUTABLE_SKILL_SCOPES",
 ]

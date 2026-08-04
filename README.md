@@ -344,12 +344,13 @@ reasoning summary returned by the Provider.
 ### Reusable Skills
 
 Skills turn team conventions, domain knowledge, review methods, and repeated
-workflows into reusable Agent capabilities. Store Skills with a project or
-install them in your user directory, then select them when a task needs them.
+workflows into reusable Agent capabilities. Keep project Skills in
+`.agents/skills`, keep personal Skills in `~/.agents/skills`, or use the bundled
+Skill Creator to build one conversationally.
 
-DeepCode supports both DeepCode and Claude-style Skill directories. A Skill
-can guide how the Agent works, but it cannot bypass project trust, tool
-permissions, or safety boundaries.
+DeepCode also reads existing `.deepcode/skills` and Claude-style directories
+without migrating them. A Skill can guide how the Agent works, but it cannot
+bypass project trust, tool permissions, or safety boundaries.
 
 ### Permissions you can understand
 
@@ -567,6 +568,7 @@ and CLI without export or conversion.
 | Adjust Thinking effort | Composer effort picker | `/effort` |
 | Choose tool access | Composer access picker | `/permissions` |
 | Load Skills for the next Turn | Composer Skills control | `/skill <name>` |
+| Create a reusable Skill | **Skills → Create Skill** | `$skill-creator` |
 | Set or revise a durable Goal | Goal panel | `/goal` |
 | Stop the active Turn | Use the stop control | `/stop` |
 
@@ -594,12 +596,15 @@ model discovery, and machine-readable checks are documented in the
 Skills turn reusable engineering knowledge into instructions the Agent can load
 for a task. Desktop provides a Skills workspace; the interactive CLI uses
 `/skills` to discover them and `/skill <name>` to select one for the next Turn.
+Choose **Skills → Create Skill** in Desktop or invoke `$skill-creator` in CLI to
+create and validate one through a normal Agent Turn.
 
-Project Skills can travel with a repository, while user Skills remain available
-across Projects. DeepCode also recognizes Claude-compatible Skill directories.
-A Skill can guide the Agent, but it cannot grant permissions or bypass Project
-trust, approvals, or tool policy. Import, enable, disable, and catalog commands
-live in the [advanced guide](docs/HEADLESS_AND_AUTOMATION.md#skill-management).
+Project Skills in `.agents/skills` travel with a repository; user Skills in
+`~/.agents/skills` remain available across Projects. Existing DeepCode and
+Claude-compatible directories remain readable. A Skill can guide the Agent,
+but it cannot grant permissions or bypass Project trust, approvals, or tool
+policy. Import, enable, disable, and catalog commands live in the
+[advanced guide](docs/HEADLESS_AND_AUTOMATION.md#skill-management).
 
 ### Safety and execution
 

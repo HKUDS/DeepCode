@@ -126,6 +126,7 @@ const desktopSettings: SettingsSnapshot = {
 
 const SKILL_ID = "sk_0123456789abcdef01234567";
 const VERIFY_SKILL_ID = "sk_89abcdef0123456701234567";
+const CREATOR_SKILL_ID = "sk_111111111111111111111111";
 const SKILL_REVISION = `sha256:${"a".repeat(64)}`;
 const CATALOG_REVISION = `sha256:${"b".repeat(64)}`;
 const reviewSkill = {
@@ -134,9 +135,9 @@ const reviewSkill = {
   description: "Review a change carefully",
   allowedTools: ["read", "grep"],
   scope: "project",
-  sourceRoot: "deepcode",
-  source: "project:deepcode",
-  location: "project/.deepcode/skills/review",
+  sourceRoot: "agents",
+  source: "project:agents",
+  location: "project/.agents/skills/review",
   status: "active",
   enabled: true,
   selectable: true,
@@ -144,6 +145,14 @@ const reviewSkill = {
   byteSize: 137,
   shadowedBy: null,
   error: null,
+  displayName: null,
+  shortDescription: null,
+  iconSmall: null,
+  iconLarge: null,
+  brandColor: null,
+  defaultPrompt: null,
+  allowImplicitInvocation: true,
+  deletable: true,
 } as const;
 const verifySkill = {
   ...reviewSkill,
@@ -153,7 +162,23 @@ const verifySkill = {
   allowedTools: ["bash"],
   revision: `sha256:${"c".repeat(64)}`,
   byteSize: 121,
-  location: "project/.deepcode/skills/verify",
+  location: "project/.agents/skills/verify",
+} as const;
+const creatorSkill = {
+  ...reviewSkill,
+  id: CREATOR_SKILL_ID,
+  name: "skill-creator",
+  displayName: "Skill Creator",
+  description: "Create reusable Agent Skills",
+  shortDescription: "Create and validate reusable Agent Skills",
+  scope: "system",
+  sourceRoot: "system",
+  source: "system:system",
+  location: "system/bundled/skills/skill-creator",
+  revision: `sha256:${"d".repeat(64)}`,
+  defaultPrompt:
+    "Use $skill-creator to create a focused reusable Skill for this project.",
+  deletable: false,
 } as const;
 
 const diagnostics: DiagnosticsSnapshot = {
@@ -460,7 +485,7 @@ class TestRuntime implements DesktopRuntime {
       case "skill/read": {
         const request = params as MethodParams["skill/read"];
         const skill =
-          [reviewSkill, verifySkill].find(
+          [reviewSkill, verifySkill, creatorSkill].find(
             (candidate) =>
               candidate.id === request.skillId ||
               candidate.name === request.name,
@@ -550,6 +575,22 @@ class TestRuntime implements DesktopRuntime {
             (candidate) => candidate.status !== "archived",
           ),
         } as MethodResults[M];
+      case "thread/start": {
+        const request = params as MethodParams["thread/start"];
+        const created = {
+          ...thread,
+          id: `thread-created-${this.threadState.length + 1}`,
+          projectId: request.projectId,
+          workspacePath:
+            this.projects.find(
+              (candidate) => candidate.id === request.projectId,
+            )?.canonicalPath ?? thread.workspacePath,
+          title: request.title,
+          mode: request.mode ?? "code",
+        };
+        this.threadState.push(created);
+        return { thread: created } as MethodResults[M];
+      }
       case "thread/resume": {
         const sessionId = (params as MethodParams["thread/resume"]).sessionId;
         const resumed = this.threadState.find(
@@ -938,7 +979,7 @@ class TestRuntime implements DesktopRuntime {
 
   private skillCatalog() {
     return {
-      skills: [reviewSkill, verifySkill]
+      skills: [reviewSkill, verifySkill, creatorSkill]
         .filter((skill) => !this.deletedSkillIds.has(skill.id))
         .map((skill) =>
           this.disabledSkillIds.has(skill.id)
@@ -1418,6 +1459,34 @@ describe("desktop command center", () => {
       projectId: project.id,
       skillId: SKILL_ID,
     });
+  });
+
+  it("starts Skill creation through the shared skill-creator Turn", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Skills" }));
+    await screen.findByRole("heading", { name: "Skills" });
+    fireEvent.click(await screen.findByRole("button", { name: "Create Skill" }));
+
+    const composer = (await screen.findByRole("textbox", {
+      name: "Task instruction",
+    })) as HTMLTextAreaElement;
+    await waitFor(() =>
+      expect(composer.value).toContain("$skill-creator"),
+    );
+    expect(
+      runtime.requests.find((request) => request.method === "thread/start")
+        ?.params,
+    ).toMatchObject({
+      projectId: project.id,
+      title: "Create a Skill",
+      mode: "code",
+    });
+    expect(
+      screen.getByLabelText("Selected Skills").textContent,
+    ).toContain("Skill Creator");
   });
 
   it("runs and manages a durable automation backed by a Goal Thread", async () => {

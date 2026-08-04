@@ -146,6 +146,7 @@ def test_default_coding_tools_registry(tmp_path):
         "grep",
         "glob",
         "memory",
+        "skill",
         "update_plan",
         "web_fetch",
     }

@@ -194,14 +194,16 @@ machine-readable results.
 
 ### Skill management
 
-DeepCode discovers project and user Skills from both native and
-Claude-compatible locations:
+DeepCode writes new Skills to the canonical Agent Skills locations and keeps
+legacy directories as read-only compatibility inputs:
 
 ```text
-.deepcode/skills/        project DeepCode Skills
-.claude/skills/          project Claude-compatible Skills
-~/.deepcode/skills/      user DeepCode Skills
-~/.claude/skills/        user Claude-compatible Skills
+.agents/skills/          project Skills (canonical)
+~/.agents/skills/        user Skills (canonical)
+.deepcode/skills/        legacy DeepCode compatibility
+.claude/skills/          Claude compatibility
+~/.deepcode/skills/      legacy user compatibility
+~/.claude/skills/        Claude user compatibility
 ```
 
 Inspect and manage the catalog:
@@ -417,13 +419,15 @@ Catalog 检查不会发送仓库内容。为 `provider test` 指定 `--model` �
 
 ### Skills 管理
 
-DeepCode 会从原生和 Claude-compatible 位置发现项目级与用户级 Skills：
+DeepCode 将新 Skill 写入标准 Agent Skills 目录，并把旧目录作为只读兼容来源：
 
 ```text
-.deepcode/skills/        项目级 DeepCode Skills
-.claude/skills/          项目级 Claude-compatible Skills
-~/.deepcode/skills/      用户级 DeepCode Skills
-~/.claude/skills/        用户级 Claude-compatible Skills
+.agents/skills/          项目级 Skills（标准目录）
+~/.agents/skills/        用户级 Skills（标准目录）
+.deepcode/skills/        旧 DeepCode 兼容目录
+.claude/skills/          Claude 兼容目录
+~/.deepcode/skills/      旧用户级 DeepCode 兼容目录
+~/.claude/skills/        用户级 Claude 兼容目录
 ```
 
 检查和管理目录：

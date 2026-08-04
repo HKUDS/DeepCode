@@ -3,11 +3,13 @@ include README_ZH.md
 include LICENSE
 include THIRD_PARTY_NOTICES.md
 include requirements.txt
+include uv.lock
 include __init__.py
 recursive-include prompts *
 recursive-include schema *
 recursive-include cli *.py
 recursive-include core *.py
+recursive-include core/skills/builtin *
 recursive-include core/application/goal_prompts *.md
 recursive-include app_server *.py
 recursive-include protocol *.json

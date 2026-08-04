@@ -77,6 +77,14 @@ interface ComposerProps {
   ): Promise<InteractiveDelivery | null>;
   onQueue(prompt: string, skillIds?: string[]): Promise<boolean>;
   onInterrupt(): void;
+  launchIntent: ComposerLaunchIntent | null;
+  onLaunchIntentConsumed(): void;
+}
+
+export interface ComposerLaunchIntent {
+  threadId: string;
+  prompt: string;
+  skillIds: string[];
 }
 
 export function Composer({
@@ -108,8 +116,12 @@ export function Composer({
   onSend,
   onQueue,
   onInterrupt,
+  launchIntent,
+  onLaunchIntentConsumed,
 }: ComposerProps) {
   const active = executingTurn !== null;
+  const initialLaunch =
+    launchIntent && launchIntent.threadId === thread?.id ? launchIntent : null;
   const {
     prompt,
     setPrompt,
@@ -120,13 +132,18 @@ export function Composer({
     addAttachments,
     removeAttachment,
     clearAttachments,
-  } = usePromptDraft(thread?.id ?? "unselected");
+  } = usePromptDraft(
+    thread?.id ?? "unselected",
+    initialLaunch?.prompt,
+  );
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [contextError, setContextError] = useState<string | null>(null);
   const [commandError, setCommandError] = useState<string | null>(null);
   const [skillPickerOpen, setSkillPickerOpen] = useState(false);
   const [skillQuery, setSkillQuery] = useState("");
-  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
+  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>(() =>
+    initialLaunch?.skillIds ?? [],
+  );
   const [deliveryNotice, setDeliveryNotice] = useState<string | null>(null);
   const skillCatalog = useSkillCatalog(runtime, project?.id ?? null);
   const availableSkills = useMemo(() => {
@@ -135,7 +152,9 @@ export function Composer({
       (skill) =>
         !query ||
         skill.name.toLocaleLowerCase().includes(query) ||
-        skill.description.toLocaleLowerCase().includes(query),
+        skill.description.toLocaleLowerCase().includes(query) ||
+        skill.displayName?.toLocaleLowerCase().includes(query) ||
+        skill.shortDescription?.toLocaleLowerCase().includes(query),
     );
   }, [skillCatalog.activeSkills, skillQuery]);
   const selectedSkills = useMemo(() => {
@@ -172,6 +191,12 @@ export function Composer({
     textarea.style.height = "0px";
     textarea.style.height = `${Math.min(textarea.scrollHeight, 190)}px`;
   }, [prompt]);
+
+  useEffect(() => {
+    if (!initialLaunch) return;
+    textareaRef.current?.focus();
+    onLaunchIntentConsumed();
+  }, [initialLaunch, onLaunchIntentConsumed]);
 
   const submit = async () => {
     const value = prompt.trim();
@@ -392,8 +417,10 @@ export function Composer({
                         {selected ? <Check size={11} /> : null}
                       </span>
                       <span>
-                        <strong>{skill.name}</strong>
-                        <small>{skill.description}</small>
+                        <strong>{skill.displayName ?? skill.name}</strong>
+                        <small>
+                          {skill.shortDescription ?? skill.description}
+                        </small>
                       </span>
                       <em>{skill.source.replace(":", " · ")}</em>
                     </button>
@@ -412,9 +439,12 @@ export function Composer({
         {selectedSkills.length ? (
           <div className={styles.skills} aria-label="Selected Skills">
             {selectedSkills.map((skill) => (
-              <span key={skill.id} title={skill.description}>
+              <span
+                key={skill.id}
+                title={skill.shortDescription ?? skill.description}
+              >
                 <Sparkles size={11} />
-                {skill.name}
+                {skill.displayName ?? skill.name}
                 <button
                   type="button"
                   onClick={() =>

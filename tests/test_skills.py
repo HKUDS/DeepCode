@@ -100,15 +100,32 @@ def test_discover_from_deepcode_and_claude(tmp_path):
     ws = tmp_path / "ws"
     _write_skill(ws / ".deepcode/skills", "alpha")
     _write_skill(ws / ".claude/skills", "beta")
-    reg = discover_skills(ws, include_user=False)
+    reg = discover_skills(ws, include_user=False, include_system=False)
     assert set(reg.names()) == {"alpha", "beta"}
+
+
+def test_discover_from_canonical_agents_roots_and_legacy_roots(tmp_path):
+    ws, home = tmp_path / "ws", tmp_path / "home"
+    _write_skill(ws / ".agents/skills", "project-canonical")
+    _write_skill(home / ".agents/skills", "user-canonical")
+    _write_skill(ws / ".deepcode/skills", "legacy-deepcode")
+    _write_skill(home / ".claude/skills", "legacy-claude")
+
+    reg = discover_skills(ws, home=home, include_system=False)
+
+    assert set(reg.names()) == {
+        "project-canonical",
+        "user-canonical",
+        "legacy-deepcode",
+        "legacy-claude",
+    }
 
 
 def test_project_overrides_user(tmp_path):
     ws, home = tmp_path / "ws", tmp_path / "home"
     _write_skill(ws / ".deepcode/skills", "dup", description="PROJECT")
     _write_skill(home / ".deepcode/skills", "dup", description="USER")
-    reg = discover_skills(ws, home=home)
+    reg = discover_skills(ws, home=home, include_system=False)
     assert reg.get("dup").description == "PROJECT"
 
 
@@ -123,8 +140,28 @@ def test_deepcode_beats_claude_same_name(tmp_path):
 def test_include_user_false_is_hermetic(tmp_path):
     ws, home = tmp_path / "ws", tmp_path / "home"
     _write_skill(home / ".claude/skills", "userskill")
-    assert len(discover_skills(ws, home=home, include_user=False)) == 0
-    assert len(discover_skills(ws, home=home, include_user=True)) == 1
+    assert (
+        len(
+            discover_skills(
+                ws,
+                home=home,
+                include_user=False,
+                include_system=False,
+            )
+        )
+        == 0
+    )
+    assert (
+        len(
+            discover_skills(
+                ws,
+                home=home,
+                include_user=True,
+                include_system=False,
+            )
+        )
+        == 1
+    )
 
 
 def test_malformed_skill_recorded_not_fatal(tmp_path):
@@ -133,7 +170,7 @@ def test_malformed_skill_recorded_not_fatal(tmp_path):
     bad = ws / ".deepcode/skills" / "bad"
     bad.mkdir(parents=True)
     (bad / "SKILL.md").write_text("garbage, no frontmatter")
-    reg = discover_skills(ws, include_user=False)
+    reg = discover_skills(ws, include_user=False, include_system=False)
     assert reg.names() == ["good"]  # the good one still loads
     assert reg.errors and "bad" in reg.errors[0]  # the bad one is surfaced
 
@@ -173,8 +210,9 @@ def test_skills_preamble(tmp_path):
 def test_wired_into_default_coding_tools(tmp_path):
     from core.harness.tools import default_coding_tools
 
-    # No skills in the workspace → the base tool set, no `skill` tool.
-    assert "skill" not in set(default_coding_tools(str(tmp_path)).tool_names)
+    # The bundled skill-creator keeps progressive disclosure available even in
+    # a workspace with no project Skills.
+    assert "skill" in set(default_coding_tools(str(tmp_path)).tool_names)
 
     # A project skill → the `skill` tool appears (hermetic: project-only scan).
     _write_skill(tmp_path / ".deepcode/skills", "y")

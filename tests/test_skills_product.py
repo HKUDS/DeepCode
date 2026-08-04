@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 import core.skills.catalog as skill_catalog
-import core.skills.runtime as skill_runtime_module
 from core.events import AgentSession, UserInput
 from core.harness.tools import default_coding_tools
 from core.providers.base import LLMResponse, ToolCallRequest
@@ -14,9 +15,11 @@ from core.skills.catalog import discover_skill_catalog
 from core.skills.management import LocalSkillManager
 from core.skills.models import (
     SkillInvocationKind,
+    SkillKey,
     SkillResolutionError,
     SkillScope,
     SkillSelection,
+    SkillSourceRoot,
     SkillStatus,
     SkillValidationError,
 )
@@ -75,7 +78,7 @@ async def test_explicit_skill_is_injected_and_narrows_tools(tmp_path: Path) -> N
         body="PRODUCT-SKILL-MARKER: inspect evidence first.",
         allowed_tools="Read, grep",
     )
-    runtime = SkillRuntime(workspace, include_user=False)
+    runtime = SkillRuntime(workspace, include_user=False, include_system=False)
     record = runtime.catalog().get_active("review")
     assert record is not None
     provider = CapturingProvider()
@@ -84,7 +87,9 @@ async def test_explicit_skill_is_injected_and_narrows_tools(tmp_path: Path) -> N
         provider,
         tools,
         model="fake-model",
+        system_prompt="BASE-SYSTEM-MARKER",
         skill_runtime=runtime,
+        workspace=workspace,
     )
 
     events = [
@@ -106,14 +111,37 @@ async def test_explicit_skill_is_injected_and_narrows_tools(tmp_path: Path) -> N
     loaded = events[1].msg.invocation
     assert loaded.kind is SkillInvocationKind.EXPLICIT
     assert loaded.revision == record.revision
-    system_text = "\n".join(
-        message["content"]
-        for message in provider.calls[0]["messages"]
-        if message["role"] == "system"
-    )
-    assert "PRODUCT-SKILL-MARKER" in system_text
+    request_messages = provider.calls[0]["messages"]
+    system_messages = [
+        message for message in request_messages if message["role"] == "system"
+    ]
+    assert len(system_messages) == 1
+    system_text = system_messages[0]["content"]
+    user_messages = [
+        message for message in request_messages if message["role"] == "user"
+    ]
+    user_text = "\n".join(message["content"] for message in user_messages)
+
+    assert "BASE-SYSTEM-MARKER" in system_text
+    assert "<skills_instructions>" in system_text
+    assert "PRODUCT-SKILL-MARKER" not in system_text
+    assert "PRODUCT-SKILL-MARKER" in user_text
+    assert request_messages[-3]["content"].startswith("<environment_context>")
+    assert f"<cwd>{workspace.resolve()}</cwd>" in request_messages[-3]["content"]
+    assert request_messages[-2]["content"].startswith("<skill>")
+    assert request_messages[-1] == {"role": "user", "content": "Review this change"}
+    assert all(message["role"] != "developer" for message in request_messages)
     assert _tool_names(provider.calls[0]) == {"read", "grep", "skill"}
     assert all(message["role"] != "system" for message in session.history)
+    assert all(
+        marker not in str(message.get("content", ""))
+        for message in session.history
+        for marker in (
+            "PRODUCT-SKILL-MARKER",
+            "<environment_context>",
+            "<skills_instructions>",
+        )
+    )
 
 
 def test_structured_and_text_selection_share_snapshot_and_preserve_order(
@@ -288,18 +316,18 @@ async def test_catalog_hot_reload_applies_on_next_turn(tmp_path: Path) -> None:
     ):
         pass
 
-    first_system = "\n".join(
+    first_user = "\n".join(
         message["content"]
         for message in provider.calls[0]["messages"]
-        if message["role"] == "system"
+        if message["role"] == "user"
     )
-    second_system = "\n".join(
+    second_user = "\n".join(
         message["content"]
         for message in provider.calls[1]["messages"]
-        if message["role"] == "system"
+        if message["role"] == "user"
     )
-    assert "REVISION-ONE" in first_system
-    assert "REVISION-TWO-CHANGED" in second_system
+    assert "REVISION-ONE" in first_user
+    assert "REVISION-TWO-CHANGED" in second_user
 
 
 @pytest.mark.asyncio
@@ -308,7 +336,7 @@ async def test_empty_catalog_keeps_base_tool_surface_until_next_turn(
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    runtime = SkillRuntime(workspace, include_user=False)
+    runtime = SkillRuntime(workspace, include_user=False, include_system=False)
     provider = CapturingProvider(
         [
             LLMResponse(content="first", finish_reason="stop"),
@@ -424,6 +452,211 @@ def test_catalog_retains_duplicate_and_invalid_entries(tmp_path: Path) -> None:
         catalog.select_name("duplicate")
 
 
+def test_agents_roots_are_layered_inside_the_workspace(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    nested = workspace / "services" / "api"
+    nested.mkdir(parents=True)
+    _write_skill(workspace / ".agents" / "skills", "repository")
+    _write_skill(
+        workspace / "services" / ".agents" / "skills",
+        "service",
+    )
+    _write_skill(nested / ".agents" / "skills", "module")
+
+    catalog = discover_skill_catalog(
+        workspace,
+        working_directory=nested,
+        include_user=False,
+        include_system=False,
+    )
+
+    assert {record.name for record in catalog.active()} == {
+        "repository",
+        "service",
+        "module",
+    }
+
+    with pytest.raises(ValueError, match="inside workspace"):
+        discover_skill_catalog(
+            workspace,
+            working_directory=tmp_path / "outside",
+            include_user=False,
+        )
+
+
+def test_legacy_skill_identity_is_preserved(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    directory = _write_skill(workspace / ".deepcode" / "skills", "legacy")
+    catalog = discover_skill_catalog(
+        workspace,
+        include_user=False,
+        include_system=False,
+    )
+    record = catalog.get_active("legacy")
+    expected = SkillKey(
+        scope=SkillScope.PROJECT,
+        source_root=SkillSourceRoot.DEEPCODE,
+        skill_file=directory / "SKILL.md",
+        relative_path="legacy",
+    )
+
+    assert record is not None
+    assert record.id == expected.id
+
+
+def test_openai_metadata_is_optional_fail_open_and_controls_implicit_use(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    directory = _write_skill(
+        workspace / ".agents" / "skills",
+        "review",
+        description="Long routing description",
+    )
+    (directory / "assets").mkdir()
+    (directory / "assets" / "icon.svg").write_text("<svg/>", encoding="utf-8")
+    (directory / "agents").mkdir()
+    (directory / "agents" / "openai.yaml").write_text(
+        """interface:
+  display_name: Review changes
+  short_description: Focused review
+  icon_small: ./assets/icon.svg
+  brand_color: '#3b82f6'
+  default_prompt: Review the selected change.
+policy:
+  allow_implicit_invocation: false
+""",
+        encoding="utf-8",
+    )
+
+    runtime = SkillRuntime(
+        workspace,
+        include_user=False,
+        include_system=False,
+    )
+    record = runtime.catalog().get_active("review")
+
+    assert record is not None
+    assert record.metadata.interface.display_name == "Review changes"
+    assert record.metadata.interface.short_description == "Focused review"
+    assert record.metadata.interface.brand_color == "#3B82F6"
+    assert record.metadata.allow_implicit_invocation is False
+    assert "review" not in runtime.preamble(context_window_tokens=100_000)
+    context, token = runtime.begin_turn("Use $review")
+    try:
+        assert context.snapshot.records == (record,)
+        with pytest.raises(SkillResolutionError, match="explicit selection"):
+            runtime.load_implicit("review")
+    finally:
+        runtime.end_turn(token)
+
+    (directory / "agents" / "openai.yaml").write_text(
+        "interface: []\n",
+        encoding="utf-8",
+    )
+    runtime.invalidate()
+    refreshed = runtime.catalog(force=True).get_active("review")
+    assert refreshed is not None
+    assert refreshed.metadata.allow_implicit_invocation is True
+    assert any(
+        "interface must be a mapping" in warning
+        for warning in runtime.catalog().warnings
+    )
+
+
+def test_bundled_skill_creator_is_shared_and_its_scripts_are_safe(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = SkillRuntime(workspace, include_user=False)
+    creator = runtime.catalog().get_active("skill-creator")
+
+    assert creator is not None
+    assert creator.scope.value == "system"
+    assert creator.source_root.value == "system"
+    assert creator.deletable is False
+    with pytest.raises(ValueError, match="read-only|mutable policy"):
+        runtime.policy.set_enabled(
+            creator.id,
+            enabled=False,
+            scope=SkillScope.SYSTEM,
+        )
+
+    scripts = Path(creator.directory) / "scripts"
+    destination_root = workspace / ".agents" / "skills"
+    initialized = subprocess.run(
+        [
+            sys.executable,
+            str(scripts / "init_skill.py"),
+            "review-api",
+            "--path",
+            str(destination_root),
+            "--resources",
+            "scripts,references",
+            "--display-name",
+            "Review API",
+            "--short-description",
+            "Review API changes",
+            "--default-prompt",
+            "Use $review-api to review this API change.",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert initialized.returncode == 0, initialized.stderr or initialized.stdout
+    created = destination_root / "review-api"
+    assert (created / "SKILL.md").is_file()
+    assert (created / "agents" / "openai.yaml").is_file()
+    assert (created / "scripts").is_dir()
+    assert (created / "references").is_dir()
+    scaffold = discover_skill_catalog(
+        workspace,
+        include_user=False,
+        include_system=False,
+    ).get_active("review-api")
+    assert scaffold is not None
+
+    duplicate = subprocess.run(
+        [
+            sys.executable,
+            str(scripts / "init_skill.py"),
+            "review-api",
+            "--path",
+            str(destination_root),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert duplicate.returncode == 1
+    assert "already exists" in duplicate.stdout
+
+    skill_file = created / "SKILL.md"
+    skill_file.write_text(
+        """---
+name: review-api
+description: Review API changes for compatibility, safety, and tests.
+---
+
+# Review API
+
+Inspect the public contract, implementation, and focused verification evidence.
+""",
+        encoding="utf-8",
+    )
+    validated = subprocess.run(
+        [sys.executable, str(scripts / "quick_validate.py"), str(created)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert validated.returncode == 0, validated.stderr or validated.stdout
+
+
 def test_user_aliases_support_plugin_locations_without_weakening_project_boundary(
     tmp_path: Path,
 ) -> None:
@@ -486,16 +719,43 @@ def test_catalog_limit_is_explicit_and_deterministic(
     for name in ("alpha", "bravo", "charlie"):
         _write_skill(root, name)
     monkeypatch.setattr(skill_catalog, "MAX_CATALOG_ENTRIES", 2)
-    monkeypatch.setattr(skill_runtime_module, "MAX_PREAMBLE_SKILLS", 1)
-
     catalog = discover_skill_catalog(workspace, include_user=False)
-    preamble = SkillRuntime(workspace, include_user=False).preamble()
+    preamble = SkillRuntime(workspace, include_user=False).preamble(
+        context_window_tokens=10_000,
+    )
 
     assert [record.name for record in catalog.records] == ["alpha", "bravo"]
     assert any("limited to 2 entries" in warning for warning in catalog.warnings)
     assert "**alpha**" in preamble
-    assert "1 additional Skills" in preamble
-    assert "**bravo**" not in preamble
+    assert "**bravo**" in preamble
+    assert "**charlie**" not in preamble
+
+
+def test_skill_directory_budget_scales_with_model_context(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    root = workspace / ".agents" / "skills"
+    for index in range(20):
+        _write_skill(
+            root,
+            f"workflow-{index:02d}",
+            description="Review implementation, tests, and evidence for this workflow "
+            * 4,
+        )
+    runtime = SkillRuntime(
+        workspace,
+        include_user=False,
+        include_system=False,
+    )
+
+    small = runtime.preamble(context_window_tokens=10_000)
+    large = runtime.preamble(context_window_tokens=200_000)
+    unknown = runtime.preamble(context_window_tokens=None)
+
+    assert small.count("**workflow-") < large.count("**workflow-")
+    assert "additional Skills" in small
+    assert large.count("**workflow-") == 20
+    assert len(unknown) <= 8_000
 
 
 def test_local_manager_import_policy_delete_and_symlink_rejection(
@@ -516,6 +776,8 @@ def test_local_manager_import_policy_delete_and_symlink_rejection(
         target_scope=SkillScope.PROJECT,
     )
     assert imported.status is SkillStatus.ACTIVE
+    assert imported.source_root.value == "agents"
+    assert Path(imported.directory).parent == workspace / ".agents" / "skills"
     disabled = manager.set_enabled(
         imported.id,
         enabled=False,
@@ -549,7 +811,7 @@ def test_import_does_not_replace_a_dangling_destination_alias(
     source = tmp_path / "source"
     workspace.mkdir()
     _write_skill(source, "managed")
-    destination = workspace / ".deepcode" / "skills" / "managed"
+    destination = workspace / ".agents" / "skills" / "managed"
     destination.parent.mkdir(parents=True)
     destination.symlink_to(tmp_path / "missing-target")
 

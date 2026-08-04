@@ -21,12 +21,14 @@ from __future__ import annotations
 import asyncio
 from contextvars import ContextVar
 from functools import partial
+from pathlib import Path
 from time import monotonic
 from typing import Any
 from uuid import uuid4
 
 from loguru import logger
 
+from core.agent_runtime.context import EnvironmentContext
 from core.agent_runtime.hook import AgentHook, AgentHookContext
 from core.agent_runtime.runner import AgentRunner, AgentRunSpec
 from core.agent_runtime.tools.base import ToolResult
@@ -385,6 +387,7 @@ class AgentSession:
         hooks_engine: Any | None = None,
         agent_context: tuple[str, str] | None = None,
         context_window_tokens: int | None = None,
+        workspace: str | Path | None = None,
         streaming: bool = False,
         streaming_transport: bool | None = None,
         skill_runtime: SkillRuntime | None = None,
@@ -416,6 +419,14 @@ class AgentSession:
         # model catalog is what makes "long sessions don't crash" (P2 exit
         # criterion) true for every AgentSession frontend — exec, TUI, web.
         self._context_window_tokens = context_window_tokens or context_window_for(model)
+        # The execution root is model-visible Turn context, not just an
+        # implementation detail of file and shell tools. This keeps Skill
+        # resource paths from being mistaken for the task workspace.
+        self._workspace = (
+            Path(workspace).expanduser().resolve(strict=False)
+            if workspace is not None
+            else None
+        )
         # When on, assistant text streams out as AgentMessageDelta events
         # (terminated by the authoritative AgentMessage). Interactive
         # frontends enable this; headless NDJSON consumers leave it off.
@@ -746,16 +757,22 @@ class AgentSession:
         initial: list[dict[str, Any]] = []
         if self._system_prompt:
             initial.append({"role": "system", "content": self._system_prompt})
-        if self._skill_runtime is not None and skill_context is not None:
-            preamble = self._skill_runtime.preamble(skill_context.catalog)
-            if preamble:
-                initial.append({"role": "system", "content": preamble})
-            instructions = skill_context.snapshot.injected_instructions
-            if instructions:
-                initial.append({"role": "system", "content": instructions})
         for ctx in hook_contexts:
             initial.append({"role": "system", "content": ctx})
         initial.extend(self._history)
+
+        turn_context_messages: list[dict[str, Any]] = []
+        if self._workspace is not None:
+            turn_context_messages.append(
+                EnvironmentContext.for_workspace(self._workspace).message()
+            )
+        if self._skill_runtime is not None and skill_context is not None:
+            turn_context_messages.extend(
+                self._skill_runtime.prompt_bundle(
+                    skill_context,
+                    context_window_tokens=self._context_window_tokens,
+                ).messages()
+            )
 
         pre_tool_hook = post_tool_hook = permission_request_hook = stop_hook = None
         pre_compact_hook = post_compact_hook = None
@@ -836,6 +853,8 @@ class AgentSession:
             model=self._model,
             max_iterations=self._max_iterations,
             max_tool_result_chars=_DEFAULT_MAX_TOOL_RESULT_CHARS,
+            transient_context_messages=tuple(turn_context_messages),
+            workspace=self._workspace,
             context_window_tokens=self._context_window_tokens,
             hook=event_hook,
             permission_checker=self._permission_checker,

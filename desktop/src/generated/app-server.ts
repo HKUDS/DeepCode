@@ -872,8 +872,8 @@ export interface SkillInfo {
   name: string;
   description: string;
   allowedTools: string[];
-  scope: "user" | "project";
-  sourceRoot: "deepcode" | "claude";
+  scope: "user" | "project" | "system";
+  sourceRoot: "agents" | "deepcode" | "claude" | "system";
   source: string;
   location: string;
   status: "active" | "shadowed" | "disabled" | "invalid";
@@ -883,14 +883,22 @@ export interface SkillInfo {
   byteSize: number;
   shadowedBy: string | null;
   error: string | null;
+  displayName: string | null;
+  shortDescription: string | null;
+  iconSmall: string | null;
+  iconLarge: string | null;
+  brandColor: string | null;
+  defaultPrompt: string | null;
+  allowImplicitInvocation: boolean;
+  deletable: boolean;
 }
 export interface SkillDetail {
   id: string;
   name: string;
   description: string;
   allowedTools: string[];
-  scope: "user" | "project";
-  sourceRoot: "deepcode" | "claude";
+  scope: "user" | "project" | "system";
+  sourceRoot: "agents" | "deepcode" | "claude" | "system";
   source: string;
   location: string;
   status: "active" | "shadowed" | "disabled" | "invalid";
@@ -900,6 +908,14 @@ export interface SkillDetail {
   byteSize: number;
   shadowedBy: string | null;
   error: string | null;
+  displayName: string | null;
+  shortDescription: string | null;
+  iconSmall: string | null;
+  iconLarge: string | null;
+  brandColor: string | null;
+  defaultPrompt: string | null;
+  allowImplicitInvocation: boolean;
+  deletable: boolean;
   instructions: string;
   truncated: boolean;
 }

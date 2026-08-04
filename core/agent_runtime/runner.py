@@ -105,6 +105,9 @@ class AgentRunSpec:
     model: str
     max_iterations: int | None
     max_tool_result_chars: int
+    # Ephemeral user-priority context included in every provider request for
+    # this run, but never added to persisted history or compaction summaries.
+    transient_context_messages: tuple[dict[str, Any], ...] = ()
     temperature: float | None = None
     max_tokens: int | None = None
     reasoning_effort: str | None = None
@@ -835,6 +838,13 @@ class AgentRunner:
         hook: AgentHook,
         context: AgentHookContext,
     ):
+        messages = self._with_transient_context(
+            messages,
+            spec.transient_context_messages,
+        )
+        messages = self._snip_history(spec, messages)
+        messages = self._drop_orphan_tool_results(messages)
+        messages = self._backfill_missing_tool_results(messages)
         kwargs = self._build_request_kwargs(
             spec,
             messages,
@@ -911,6 +921,11 @@ class AgentRunner:
     ):
         retry_messages = list(messages)
         retry_messages.append(build_finalization_retry_message())
+        retry_messages = self._with_transient_context(
+            retry_messages,
+            spec.transient_context_messages,
+        )
+        retry_messages = self._snip_history(spec, retry_messages)
         kwargs = self._build_request_kwargs(spec, retry_messages, tools=None)
         return await self._await_provider_response(
             self.provider.chat_with_retry(**kwargs),
@@ -1501,7 +1516,13 @@ class AgentRunner:
             return messages
         try:
             estimate, _ = estimate_prompt_tokens_chain(
-                self.provider, spec.model, messages, spec.tool_definitions()
+                self.provider,
+                spec.model,
+                self._with_transient_context(
+                    messages,
+                    spec.transient_context_messages,
+                ),
+                spec.tool_definitions(),
             )
         except Exception:
             return messages
@@ -1649,6 +1670,70 @@ class AgentRunner:
             if start:
                 kept = kept[start:]
         return system_messages + kept
+
+    @classmethod
+    def _with_transient_context(
+        cls,
+        messages: list[dict[str, Any]],
+        context_messages: tuple[dict[str, Any], ...],
+    ) -> list[dict[str, Any]]:
+        """Compose provider-neutral context around the latest user input.
+
+        ``developer`` is an internal priority used by capability catalogs. Some
+        supported providers do not accept that wire role, and both Anthropic
+        Messages and OpenAI Responses expose one top-level instruction block.
+        Merge existing system messages and transient developer guidance into a
+        single system message, then place user-priority Turn context immediately
+        before the canonical user request.
+        """
+
+        if not context_messages:
+            return list(messages)
+
+        privileged_contents: list[Any] = []
+        non_system_messages: list[dict[str, Any]] = []
+        for message in messages:
+            if message.get("role") == "system":
+                privileged_contents.append(message.get("content"))
+            else:
+                non_system_messages.append(dict(message))
+
+        turn_context: list[dict[str, Any]] = []
+        for message in context_messages:
+            role = message.get("role")
+            if role in {"developer", "system"}:
+                privileged_contents.append(message.get("content"))
+            else:
+                turn_context.append(dict(message))
+
+        composed: list[dict[str, Any]] = non_system_messages
+        if privileged_contents:
+            privileged_content: Any = privileged_contents[0]
+            for content in privileged_contents[1:]:
+                privileged_content = cls._merge_message_content(
+                    privileged_content,
+                    content,
+                )
+            composed = [
+                {"role": "system", "content": privileged_content},
+                *composed,
+            ]
+
+        if not turn_context:
+            return composed
+        insertion = next(
+            (
+                index
+                for index in range(len(composed) - 1, -1, -1)
+                if composed[index].get("role") == "user"
+            ),
+            len(composed),
+        )
+        return [
+            *composed[:insertion],
+            *turn_context,
+            *composed[insertion:],
+        ]
 
     def _partition_tool_batches(
         self,

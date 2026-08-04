@@ -2087,14 +2087,17 @@
           "type": "string",
           "enum": [
             "user",
-            "project"
+            "project",
+            "system"
           ]
         },
         "sourceRoot": {
           "type": "string",
           "enum": [
+            "agents",
             "deepcode",
-            "claude"
+            "claude",
+            "system"
           ]
         },
         "source": {
@@ -2137,6 +2140,30 @@
             "string",
             "null"
           ]
+        },
+        "displayName": {
+          "type": ["string", "null"]
+        },
+        "shortDescription": {
+          "type": ["string", "null"]
+        },
+        "iconSmall": {
+          "type": ["string", "null"]
+        },
+        "iconLarge": {
+          "type": ["string", "null"]
+        },
+        "brandColor": {
+          "type": ["string", "null"]
+        },
+        "defaultPrompt": {
+          "type": ["string", "null"]
+        },
+        "allowImplicitInvocation": {
+          "type": "boolean"
+        },
+        "deletable": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -2154,7 +2181,15 @@
         "revision",
         "byteSize",
         "shadowedBy",
-        "error"
+        "error",
+        "displayName",
+        "shortDescription",
+        "iconSmall",
+        "iconLarge",
+        "brandColor",
+        "defaultPrompt",
+        "allowImplicitInvocation",
+        "deletable"
       ]
     },
     "SkillDetail": {
@@ -2181,14 +2216,17 @@
           "type": "string",
           "enum": [
             "user",
-            "project"
+            "project",
+            "system"
           ]
         },
         "sourceRoot": {
           "type": "string",
           "enum": [
+            "agents",
             "deepcode",
-            "claude"
+            "claude",
+            "system"
           ]
         },
         "source": {
@@ -2232,6 +2270,30 @@
             "null"
           ]
         },
+        "displayName": {
+          "type": ["string", "null"]
+        },
+        "shortDescription": {
+          "type": ["string", "null"]
+        },
+        "iconSmall": {
+          "type": ["string", "null"]
+        },
+        "iconLarge": {
+          "type": ["string", "null"]
+        },
+        "brandColor": {
+          "type": ["string", "null"]
+        },
+        "defaultPrompt": {
+          "type": ["string", "null"]
+        },
+        "allowImplicitInvocation": {
+          "type": "boolean"
+        },
+        "deletable": {
+          "type": "boolean"
+        },
         "instructions": {
           "type": "string"
         },
@@ -2255,6 +2317,14 @@
         "byteSize",
         "shadowedBy",
         "error",
+        "displayName",
+        "shortDescription",
+        "iconSmall",
+        "iconLarge",
+        "brandColor",
+        "defaultPrompt",
+        "allowImplicitInvocation",
+        "deletable",
         "instructions",
         "truncated"
       ]

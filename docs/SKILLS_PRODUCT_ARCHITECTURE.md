@@ -31,8 +31,9 @@ explicitly out of scope.
 - `catalog_skill_path`: the absolute path of the catalog entry before resolving
   a symbolic-link target, hashed into the ID and never exposed as part of the
   protocol identity; this keeps intentional aliases independently addressable
-- `scope`: `project` or `user`
-- `source_root`: `deepcode` or `claude`
+- `scope`: `project`, `user`, or read-only `system`
+- `source_root`: canonical `agents`, compatibility `deepcode` / `claude`, or
+  bundled `system`
 - `relative_path`: the normalized path of the Skill directory below its
   configured root
 
@@ -42,13 +43,18 @@ creates a new identity. Editing it in place preserves identity and changes its
 SHA-256 `revision`. User-owned aliases may target plugin/cache locations.
 Project aliases may target only paths inside the trusted workspace.
 
-Catalog entries retain all valid candidates. For a duplicated, case-folded
-name, the existing precedence is preserved:
+Catalog entries retain all valid candidates. Discovery precedence is:
 
-1. project `.deepcode/skills`
-2. project `.claude/skills`
-3. user `~/.deepcode/skills`
-4. user `~/.claude/skills`
+1. project `.agents/skills`, from the working directory up to the registered
+   workspace boundary;
+2. project `.deepcode/skills` and `.claude/skills` compatibility roots;
+3. user `~/.agents/skills`;
+4. user `~/.deepcode/skills` and `~/.claude/skills` compatibility roots;
+5. bundled system Skills.
+
+New imports and creator output use `.agents/skills` only. Compatibility roots
+are never migrated, overwritten, or deleted automatically, so existing IDs and
+Sessions remain valid.
 
 Only the first enabled candidate is active for implicit name lookup. Other
 candidates remain visible as `shadowed`. Structured selection by `skillId` is
@@ -60,6 +66,15 @@ before model execution instead of guessing.
 An explicit selection is submitted as a structured `SkillSelection`. The
 backend resolves it against the Session's immutable catalog snapshot and
 injects the exact instructions before the first model request.
+
+The base DeepCode prompt, permission policy, and security boundaries remain
+system instructions. Skill catalog metadata is developer-priority capability
+guidance; selected Skill bodies are transient user-priority context for the
+current Turn. The runner folds privileged guidance into the provider's single
+instruction block, reattaches selected Skill context to each task request, and
+excludes both from Session history and compaction summaries. This gives OpenAI,
+Anthropic, and compatible providers one consistent role model without
+elevating user-authored Skill bodies.
 
 Plain `$name` mentions are a compatibility path. They are parsed in the core
 runtime, never in a frontend, and become explicit selections only when the name
@@ -82,6 +97,20 @@ Multiple Skills:
 
 Skill instructions are contextual workflow guidance. They are lower priority
 than system, security, sandbox, approval, and explicit user requirements.
+
+## Authoring and optional metadata
+
+The bundled `skill-creator` is a normal read-only system Skill. CLI invokes it
+with `$skill-creator` or `/skill skill-creator`; Desktop's Create Skill action
+starts a normal Thread with the same Skill selected. Creation therefore uses
+the ordinary AgentSession, tools, trust, approvals, and audit trail.
+
+`agents/openai.yaml` is optional. Supported interface fields are
+`display_name`, `short_description`, relative icon paths, `brand_color`, and
+`default_prompt`. `policy.allow_implicit_invocation` defaults to true. False
+removes a Skill from model-driven discovery while preserving structured and
+`$name` selection. Invalid optional metadata produces a bounded catalog warning
+and never invalidates an otherwise valid `SKILL.md`.
 
 ## Configuration
 
@@ -148,14 +177,17 @@ error classes, but not Skill instructions or user prompts.
 - one `SKILL.md`: 64 KiB UTF-8 maximum;
 - one catalog response/runtime snapshot: at most 256 entries, with an explicit
   truncation warning;
-- model discovery preamble: at most 64 entries and 16,000 characters;
+- model discovery directory: at most two percent of a known model context
+  window, or 8,000 characters when the window is unknown; descriptions are
+  shortened before entries are omitted;
 - one Turn: at most eight loaded Skills across every invocation path;
 - injected Skill instructions: 48,000 characters maximum until the runtime
   owns a model-token estimator;
 - catalog warnings: at most 100 per response;
 - imported folder: one Skill, no symlinks, no overwrite without an explicit
   request, atomic destination replacement;
-- no Git or network installation in the first production release.
+- optional Skill metadata: 32 KiB maximum with relative, in-directory assets;
+- no Git or network installation in this release.
 
 ## Release gates
 
@@ -164,6 +196,9 @@ The feature is complete only when:
 - Desktop and CLI return identical IDs and revisions for the same workspace;
 - structured and unambiguous `$name` invocation resolve to the same snapshot;
 - explicit instructions are present before the first provider call;
+- Skill bodies never appear in system messages or persisted history;
+- project/user/system `.agents` discovery and legacy roots remain deterministic;
+- bundled creator scripts reject overwrite and pass production validation;
 - duplicate, disabled, invalid, stale, oversized, and untrusted cases fail
   deterministically;
 - permission and Hook behavior remains unchanged;

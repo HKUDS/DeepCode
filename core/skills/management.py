@@ -10,7 +10,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-from core.config import deepcode_home
 from core.skills.catalog import SkillCatalog, validate_skill_directory
 from core.skills.models import (
     SkillRecord,
@@ -20,6 +19,7 @@ from core.skills.models import (
     SkillValidationError,
 )
 from core.skills.runtime import SkillRuntime
+from core.skills.roots import managed_skill_root
 
 MAX_IMPORT_FILES = 500
 MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024
@@ -124,7 +124,7 @@ class LocalSkillManager:
             (
                 record
                 for record in self.catalog(force=True).records
-                if record.source_root is SkillSourceRoot.DEEPCODE
+                if record.source_root is SkillSourceRoot.AGENTS
                 and record.scope is target_scope
                 and record.key.relative_path == candidate.name
             ),
@@ -136,10 +136,10 @@ class LocalSkillManager:
 
     def delete(self, skill_id: str) -> SkillRecord:
         record = self.find(skill_id)
-        if record.source_root is not SkillSourceRoot.DEEPCODE:
+        if not record.deletable:
             raise PermissionError(
-                "Claude-compatible Skills are read-only; remove them from "
-                "their .claude/skills directory"
+                "Compatibility and system Skills are read-only; remove legacy "
+                "Skills from their source directory"
             )
         target_root = self.managed_root(record.scope)
         directory = Path(record.directory).resolve(strict=False)
@@ -161,9 +161,7 @@ class LocalSkillManager:
         return record
 
     def managed_root(self, scope: SkillScope) -> Path:
-        if scope is SkillScope.PROJECT:
-            return self.workspace / ".deepcode" / "skills"
-        return deepcode_home() / "skills"
+        return managed_skill_root(self.workspace, scope)
 
 
 def _validate_import_tree(source: Path) -> None:

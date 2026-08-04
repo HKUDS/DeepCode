@@ -43,6 +43,14 @@ class SkillInfo:
     byte_size: int
     shadowed_by: str | None
     error: str | None
+    display_name: str | None
+    short_description: str | None
+    icon_small: str | None
+    icon_large: str | None
+    brand_color: str | None
+    default_prompt: str | None
+    allow_implicit_invocation: bool
+    deletable: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,7 +183,12 @@ def _discovery(catalog) -> SkillDiscovery:
 
 
 def _skill_info(record: SkillRecord) -> SkillInfo:
-    root = ".deepcode" if record.source_root is SkillSourceRoot.DEEPCODE else ".claude"
+    root = {
+        SkillSourceRoot.AGENTS: ".agents",
+        SkillSourceRoot.DEEPCODE: ".deepcode",
+        SkillSourceRoot.CLAUDE: ".claude",
+        SkillSourceRoot.SYSTEM: "bundled",
+    }[record.source_root]
     return SkillInfo(
         id=record.id,
         name=record.name,
@@ -192,6 +205,14 @@ def _skill_info(record: SkillRecord) -> SkillInfo:
         byte_size=record.byte_size,
         shadowed_by=record.shadowed_by,
         error=record.error,
+        display_name=record.metadata.interface.display_name,
+        short_description=record.metadata.interface.short_description,
+        icon_small=record.metadata.interface.icon_small,
+        icon_large=record.metadata.interface.icon_large,
+        brand_color=record.metadata.interface.brand_color,
+        default_prompt=record.metadata.interface.default_prompt,
+        allow_implicit_invocation=record.metadata.allow_implicit_invocation,
+        deletable=record.deletable,
     )
 
 

@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from core.agent_runtime.context import EnvironmentContext
 from core.agent_runtime.hook import AgentHook, AgentHookContext
 from core.agent_runtime.runner import AgentRunner, AgentRunSpec
 from core.agent_runtime.tools.base import Tool, ToolResult, tool_parameters
@@ -147,6 +148,58 @@ def _spec(provider: ScriptedProvider, **overrides: Any) -> AgentRunSpec:
     }
     defaults.update(overrides)
     return AgentRunSpec(**defaults)
+
+
+def test_transient_context_preserves_priority_and_latest_user_order() -> None:
+    messages = [
+        {"role": "system", "content": "base system"},
+        {"role": "system", "content": "hook context"},
+        {"role": "user", "content": "previous question"},
+        {"role": "assistant", "content": "previous answer"},
+        {"role": "user", "content": "current task"},
+    ]
+    context = (
+        {"role": "developer", "content": "skill catalog"},
+        {"role": "user", "content": "environment facts"},
+        {"role": "user", "content": "selected skill"},
+    )
+
+    composed = AgentRunner._with_transient_context(messages, context)
+
+    assert [message["role"] for message in composed] == [
+        "system",
+        "user",
+        "assistant",
+        "user",
+        "user",
+        "user",
+    ]
+    assert all(
+        marker in composed[0]["content"]
+        for marker in ("base system", "hook context", "skill catalog")
+    )
+    assert [message["content"] for message in composed[-3:]] == [
+        "environment facts",
+        "selected skill",
+        "current task",
+    ]
+    assert all(message["role"] != "developer" for message in composed)
+
+
+def test_environment_context_is_resolved_and_xml_safe(tmp_path: Path) -> None:
+    workspace = tmp_path / "project & sources"
+    context = EnvironmentContext.for_workspace(workspace)
+
+    rendered = context.render()
+
+    assert context.cwd == str(workspace.resolve())
+    assert (
+        f"<cwd>{workspace.resolve().as_posix().replace('&', '&amp;')}</cwd>" in rendered
+    )
+    assert "<shell>" in rendered
+    assert "<current_date>" in rendered
+    assert "<timezone>" in rendered
+    assert context.message() == {"role": "user", "content": rendered}
 
 
 @pytest.mark.asyncio

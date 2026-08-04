@@ -44,8 +44,10 @@ function readAttachments(threadId: string): string[] {
   }
 }
 
-export function usePromptDraft(threadId: string) {
-  const [prompt, setPrompt] = useState(() => readValue(draftKey(threadId)));
+export function usePromptDraft(threadId: string, initialPrompt = "") {
+  const [prompt, setPrompt] = useState(
+    () => readValue(draftKey(threadId)) || initialPrompt,
+  );
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [attachments, setAttachments] = useState(() =>
     readAttachments(threadId),

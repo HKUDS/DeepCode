@@ -17,11 +17,14 @@ from core.skills.models import (
     SkillSelection,
     SkillTurnSnapshot,
 )
+from core.skills.prompting import (
+    SkillPromptBundle,
+    build_skill_prompt_bundle,
+    render_skill_catalog,
+)
 
 MAX_SKILLS_PER_TURN = 8
 MAX_INJECTED_SKILL_CHARS = 48_000
-MAX_PREAMBLE_SKILLS = 64
-MAX_PREAMBLE_CHARS = 16_000
 
 
 @dataclass(slots=True)
@@ -66,7 +69,9 @@ class SkillRuntime:
         workspace: str | Path,
         *,
         home: str | Path | None = None,
+        working_directory: str | Path | None = None,
         include_user: bool = True,
+        include_system: bool = True,
         policy: SkillPolicyStore | None = None,
     ) -> None:
         self.workspace = Path(workspace).expanduser().resolve(strict=False)
@@ -74,7 +79,9 @@ class SkillRuntime:
         self.catalog_provider = SkillCatalogProvider(
             self.workspace,
             home=home,
+            working_directory=working_directory,
             include_user=include_user,
+            include_system=include_system,
             disabled_loader=self.policy.effective_disabled,
         )
         self._turn: ContextVar[SkillTurnContext | None] = ContextVar(
@@ -160,15 +167,22 @@ class SkillRuntime:
         context = self.current_context()
         if context is None:
             # Compatibility for direct Tool execution outside AgentSession.
-            record = self.catalog().get_active(name)
+            record = self.catalog().get_implicit(name)
             if record is None:
                 raise SkillResolutionError(f"Skill is not available: {name}")
             return record, True
-        record = context.catalog.get_active(name)
+        record = context.catalog.get_implicit(name)
         if record is None:
+            explicit_only = context.catalog.get_active(name)
+            message = (
+                f"Skill requires explicit selection: {name}"
+                if explicit_only is not None
+                and not explicit_only.metadata.allow_implicit_invocation
+                else f"Skill is not available: {name}"
+            )
             if context.on_failure is not None:
-                context.on_failure(f"Skill is not available: {name}", None)
-            raise SkillResolutionError(f"Skill is not available: {name}")
+                context.on_failure(message, explicit_only.id if explicit_only else None)
+            raise SkillResolutionError(message)
         if record.id in context.loaded:
             return record, False
         if len(context.loaded) >= MAX_SKILLS_PER_TURN:
@@ -218,35 +232,32 @@ class SkillRuntime:
             return frozenset(
                 name for name in registered_names if name.casefold() in allowed
             )
-        if context is None or context.catalog.active():
+        if context is None or context.catalog.implicit():
             return None
         return frozenset(name for name in registered_names if name != "skill")
 
-    def preamble(self, catalog: SkillCatalog | None = None) -> str:
-        active = (catalog or self.catalog()).active()
-        if not active:
-            return ""
-        lines: list[str] = []
-        used_chars = 0
-        for record in active[:MAX_PREAMBLE_SKILLS]:
-            line = record.summary_line
-            if lines and used_chars + len(line) + 1 > MAX_PREAMBLE_CHARS:
-                break
-            lines.append(line)
-            used_chars += len(line) + 1
-        omitted = len(active) - len(lines)
-        if omitted:
-            lines.append(
-                f"- … {omitted} additional Skills are available through the "
-                "frontend catalog."
-            )
-        return (
-            "## Available skills\n\n"
-            "Pre-authored workflows for specific tasks. The user may explicitly "
-            "select one with `$name`. When an unselected Skill clearly matches "
-            "the task, call the `skill` tool before starting. A Skill never "
-            "overrides system, security, sandbox, approval, hook, or explicit "
-            "user constraints.\n\n" + "\n".join(lines)
+    def preamble(
+        self,
+        catalog: SkillCatalog | None = None,
+        *,
+        context_window_tokens: int | None = None,
+    ) -> str:
+        active = (catalog or self.catalog()).implicit()
+        return render_skill_catalog(
+            active,
+            context_window_tokens=context_window_tokens,
+        )
+
+    def prompt_bundle(
+        self,
+        context: SkillTurnContext,
+        *,
+        context_window_tokens: int | None = None,
+    ) -> SkillPromptBundle:
+        return build_skill_prompt_bundle(
+            context.catalog.implicit(),
+            context.snapshot,
+            context_window_tokens=context_window_tokens,
         )
 
     def invalidate(self) -> None:
@@ -262,16 +273,16 @@ def render_skill(record: SkillRecord) -> str:
             + "\n"
         )
     header += (
-        f"\nSkill files are in `{record.directory}`. Read bundled resources only "
-        "through the normal permission and sandbox policy.\n"
+        f"\nSkill resources are in `{record.directory}`. This is not the task "
+        "workspace: keep repository operations in `<environment_context><cwd>`. "
+        "Resolve Skill-relative files against this directory and access bundled "
+        "resources only through the normal permission and sandbox policy.\n"
     )
     return f"{header}\n{record.instructions}"
 
 
 __all__ = [
     "MAX_INJECTED_SKILL_CHARS",
-    "MAX_PREAMBLE_CHARS",
-    "MAX_PREAMBLE_SKILLS",
     "MAX_SKILLS_PER_TURN",
     "SkillRuntime",
     "SkillTurnContext",

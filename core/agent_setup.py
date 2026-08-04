@@ -402,6 +402,7 @@ def build_agent_session(
         streaming_transport=streaming_transport,
         skill_runtime=skill_runtime,
         context_window_tokens=resolved_execution.context_window,
+        workspace=workspace,
         execution_profile=resolved_execution,
         tool_filter=(
             goal_runtime.visible_tool_names if goal_runtime is not None else None

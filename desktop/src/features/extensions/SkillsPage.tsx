@@ -1,7 +1,11 @@
-import { FolderInput, Power, RefreshCw, Trash2 } from "lucide-react";
+import { FolderInput, Power, RefreshCw, Sparkles, Trash2 } from "lucide-react";
 import { useState } from "react";
 
-import type { ConfigScope, Project } from "../../generated/app-server";
+import type {
+  ConfigScope,
+  Project,
+  SkillInfo,
+} from "../../generated/app-server";
 import type { DesktopRuntime } from "../../rpc/contracts";
 import styles from "../management/ManagementWorkspace.module.css";
 import { MarkdownContent } from "../thread/MarkdownContent";
@@ -10,11 +14,26 @@ import { useSkillManagement } from "./useSkillManagement";
 interface SkillsPageProps {
   runtime: DesktopRuntime;
   project: Project | null;
+  onCreateSkill(skill: SkillInfo): Promise<void>;
 }
 
-export function SkillsPage({ runtime, project }: SkillsPageProps) {
+export function SkillsPage({ runtime, project, onCreateSkill }: SkillsPageProps) {
   const catalog = useSkillManagement(runtime, project?.id ?? null);
   const [scope, setScope] = useState<ConfigScope>("project");
+  const [creating, setCreating] = useState(false);
+  const creator = catalog.skills.find(
+    (skill) => skill.name === "skill-creator" && skill.selectable && skill.enabled,
+  );
+
+  const createSkill = async () => {
+    if (!creator || creating) return;
+    setCreating(true);
+    try {
+      await onCreateSkill(creator);
+    } finally {
+      setCreating(false);
+    }
+  };
 
   const importSkill = async () => {
     const path = await runtime.pickDirectory();
@@ -53,6 +72,15 @@ export function SkillsPage({ runtime, project }: SkillsPageProps) {
           >
             <RefreshCw size={14} />
             Reload
+          </button>
+          <button
+            className={styles.secondaryButton}
+            type="button"
+            disabled={!project || !creator || catalog.loading || creating}
+            onClick={() => void createSkill()}
+          >
+            <Sparkles size={14} />
+            {creating ? "Opening…" : "Create Skill"}
           </button>
           <button
             className={styles.primaryButton}
@@ -100,14 +128,18 @@ export function SkillsPage({ runtime, project }: SkillsPageProps) {
                       {skill.source.replace(":", " · ")}
                       <em data-status={skill.status}>{skill.status}</em>
                     </span>
-                    <strong>{skill.name || "Invalid Skill"}</strong>
-                    <small>{skill.description || skill.error}</small>
+                    <strong>
+                      {skill.displayName ?? skill.name ?? "Invalid Skill"}
+                    </strong>
+                    <small>
+                      {skill.shortDescription ?? skill.description ?? skill.error}
+                    </small>
                   </button>
                 ))
               ) : (
                 <p className={styles.emptyCopy}>
                   No Skills yet. Import a folder containing a valid SKILL.md, or
-                  add one under .deepcode/skills.
+                  add one under .agents/skills.
                 </p>
               )}
             </div>
@@ -117,8 +149,14 @@ export function SkillsPage({ runtime, project }: SkillsPageProps) {
                   <p className={styles.eyebrow}>
                     {catalog.selectedSkill.source.replace(":", " · ")}
                   </p>
-                  <h2>{catalog.selectedSkill.name}</h2>
-                  <p>{catalog.selectedSkill.description}</p>
+                  <h2>
+                    {catalog.selectedSkill.displayName ??
+                      catalog.selectedSkill.name}
+                  </h2>
+                  <p>
+                    {catalog.selectedSkill.shortDescription ??
+                      catalog.selectedSkill.description}
+                  </p>
                   <div className={styles.skillActions}>
                     <span
                       className={styles.badge}
@@ -140,7 +178,7 @@ export function SkillsPage({ runtime, project }: SkillsPageProps) {
                       <Power size={13} />
                       {catalog.selectedSkill.enabled ? "Disable" : "Enable"}
                     </button>
-                    {catalog.selectedSkill.sourceRoot === "deepcode" ? (
+                    {catalog.selectedSkill.deletable ? (
                       <button
                         type="button"
                         className={styles.dangerButton}
@@ -172,6 +210,14 @@ export function SkillsPage({ runtime, project }: SkillsPageProps) {
                       <dd>
                         {catalog.selectedSkill.allowedTools.join(", ") ||
                           "Not declared"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Invocation</dt>
+                      <dd>
+                        {catalog.selectedSkill.allowImplicitInvocation
+                          ? "Explicit or automatic"
+                          : "Explicit selection only"}
                       </dd>
                     </div>
                     <div>

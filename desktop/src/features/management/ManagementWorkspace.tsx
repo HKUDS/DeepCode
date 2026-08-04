@@ -3,6 +3,7 @@ import type {
   JsonObject,
   Project,
   SettingsSnapshot,
+  SkillInfo,
   Thread,
 } from "../../generated/app-server";
 import type { DesktopDestination } from "../../app/useDesktopUi";
@@ -25,6 +26,7 @@ interface ManagementWorkspaceProps {
   ): Promise<void>;
   onThreadCreated(thread: Thread): void;
   onOpenThread(threadId: string): void;
+  onCreateSkill(skill: SkillInfo): Promise<void>;
 }
 
 export function ManagementWorkspace({
@@ -37,6 +39,7 @@ export function ManagementWorkspace({
   onUpdateSettings,
   onThreadCreated,
   onOpenThread,
+  onCreateSkill,
 }: ManagementWorkspaceProps) {
   if (destination === "automations") {
     return (
@@ -50,7 +53,13 @@ export function ManagementWorkspace({
     );
   }
   if (destination === "skills") {
-    return <SkillsPage runtime={runtime} project={project} />;
+    return (
+      <SkillsPage
+        runtime={runtime}
+        project={project}
+        onCreateSkill={onCreateSkill}
+      />
+    );
   }
   return (
     <SettingsPage

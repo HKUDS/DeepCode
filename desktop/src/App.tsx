@@ -1,5 +1,5 @@
 import { FolderOpen, MessageSquarePlus } from "lucide-react";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useState } from "react";
 
 import { projectCanExecute } from "./app/projectPresentation";
 import { latestExecutingTurn } from "./app/interactiveTurnRouter";
@@ -7,7 +7,10 @@ import { useDesktopUi } from "./app/useDesktopUi";
 import { useComposerCommands } from "./app/useComposerCommands";
 import { useWorkspaceController } from "./app/useWorkspaceController";
 import { RuntimeNotice } from "./components/RuntimeNotice";
-import { Composer } from "./features/execution/Composer";
+import {
+  Composer,
+  type ComposerLaunchIntent,
+} from "./features/execution/Composer";
 import { DesktopSidebar } from "./features/navigation/DesktopSidebar";
 import { ThreadHeader } from "./features/thread/ThreadHeader";
 import { useTranscriptMode } from "./features/thread/transcriptMode";
@@ -59,6 +62,8 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
   const ui = useDesktopUi();
   const transcript = useTranscriptMode();
   const runComposerCommand = useComposerCommands(controller, ui);
+  const [composerIntent, setComposerIntent] =
+    useState<ComposerLaunchIntent | null>(null);
   const { state, selectedProject, selectedThread } = controller;
   const activeTurn = latestExecutingTurn(state.turns, selectedThread?.id);
   const queuedTurns = state.turns
@@ -350,6 +355,8 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
                 onSend={controller.sendTurn}
                 onQueue={controller.queueTurn}
                 onInterrupt={() => void controller.interrupt()}
+                launchIntent={composerIntent}
+                onLaunchIntentConsumed={() => setComposerIntent(null)}
               />
             ) : null}
           </>
@@ -372,6 +379,21 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
                     await controller.selectThread(threadId);
                   }
                 })();
+              }}
+              onCreateSkill={async (skill) => {
+                if (!(await ui.navigateTo("threads"))) return;
+                const created = await controller.createThread(
+                  "code",
+                  "Create a Skill",
+                );
+                if (!created) return;
+                setComposerIntent({
+                  threadId: created.id,
+                  prompt:
+                    skill.defaultPrompt ??
+                    "Use $skill-creator to create a focused reusable Skill for this project.",
+                  skillIds: [skill.id],
+                });
               }}
             />
           </Suspense>

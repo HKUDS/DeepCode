@@ -12,7 +12,6 @@ from typing import Any
 
 import yaml
 
-from core.config import deepcode_home
 from core.skills.models import (
     SkillKey,
     SkillRecord,
@@ -22,6 +21,8 @@ from core.skills.models import (
     SkillStatus,
     SkillValidationError,
 )
+from core.skills.metadata import OPENAI_METADATA_PATH, read_skill_metadata
+from core.skills.roots import discover_skill_roots
 
 SKILL_FILENAME = "SKILL.md"
 MAX_SKILL_BYTES = 64 * 1024
@@ -83,7 +84,10 @@ class SkillCatalog:
             for record in self._records
             if record.status is SkillStatus.INVALID
         )
-        return (*self._warnings, *invalid)[:MAX_CATALOG_WARNINGS]
+        metadata = tuple(
+            warning for record in self._records for warning in record.metadata.warnings
+        )
+        return (*self._warnings, *invalid, *metadata)[:MAX_CATALOG_WARNINGS]
 
     def active(self) -> tuple[SkillRecord, ...]:
         return tuple(
@@ -102,6 +106,19 @@ class SkillCatalog:
 
     def get_active(self, name: str) -> SkillRecord | None:
         return self._active_by_name.get(name.casefold())
+
+    def implicit(self) -> tuple[SkillRecord, ...]:
+        return tuple(
+            record
+            for record in self.active()
+            if record.metadata.allow_implicit_invocation
+        )
+
+    def get_implicit(self, name: str) -> SkillRecord | None:
+        record = self.get_active(name)
+        if record is None or not record.metadata.allow_implicit_invocation:
+            return None
+        return record
 
     def select_id(self, skill_id: str) -> SkillRecord:
         record = self.get(skill_id)
@@ -154,28 +171,34 @@ def discover_skill_catalog(
     workspace: str | Path,
     *,
     home: str | Path | None = None,
+    working_directory: str | Path | None = None,
     include_user: bool = True,
+    include_system: bool = True,
     disabled_ids: frozenset[str] = frozenset(),
 ) -> SkillCatalog:
     """Discover every direct child Skill in deterministic precedence order."""
 
     records: list[SkillRecord] = []
     truncated = False
-    for root, scope, source_root in skill_roots(
+    for root_spec in discover_skill_roots(
         workspace,
+        working_directory=working_directory,
         home=home,
         include_user=include_user,
+        include_system=include_system,
     ):
-        for directory in _iter_skill_directories(root):
+        for directory in _iter_skill_directories(root_spec.path):
             if len(records) >= MAX_CATALOG_ENTRIES:
                 truncated = True
                 break
             records.append(
                 _read_candidate(
-                    root=root,
+                    root=root_spec.path,
                     directory=directory,
-                    scope=scope,
-                    source_root=source_root,
+                    scope=root_spec.scope,
+                    source_root=root_spec.source_root,
+                    trust_boundary=root_spec.trust_boundary,
+                    writable=root_spec.writable,
                 )
             )
         if truncated:
@@ -217,50 +240,6 @@ def discover_skill_catalog(
     return SkillCatalog(tuple(resolved), warnings=warnings)
 
 
-def skill_roots(
-    workspace: str | Path,
-    *,
-    home: str | Path | None = None,
-    include_user: bool = True,
-) -> tuple[tuple[Path, SkillScope, SkillSourceRoot], ...]:
-    workspace_path = Path(workspace).expanduser().resolve(strict=False)
-    roots: list[tuple[Path, SkillScope, SkillSourceRoot]] = [
-        (
-            workspace_path / ".deepcode" / "skills",
-            SkillScope.PROJECT,
-            SkillSourceRoot.DEEPCODE,
-        ),
-        (
-            workspace_path / ".claude" / "skills",
-            SkillScope.PROJECT,
-            SkillSourceRoot.CLAUDE,
-        ),
-    ]
-    if include_user:
-        if home is not None:
-            home_path = Path(home).expanduser().resolve(strict=False)
-            deepcode_skills = home_path / ".deepcode" / "skills"
-            claude_skills = home_path / ".claude" / "skills"
-        else:
-            deepcode_skills = deepcode_home() / "skills"
-            claude_skills = Path.home().resolve() / ".claude" / "skills"
-        roots.extend(
-            (
-                (
-                    deepcode_skills,
-                    SkillScope.USER,
-                    SkillSourceRoot.DEEPCODE,
-                ),
-                (
-                    claude_skills,
-                    SkillScope.USER,
-                    SkillSourceRoot.CLAUDE,
-                ),
-            )
-        )
-    return tuple(roots)
-
-
 class SkillCatalogProvider:
     """Thread-safe catalog cache invalidated by filesystem or policy changes."""
 
@@ -269,14 +248,22 @@ class SkillCatalogProvider:
         workspace: str | Path,
         *,
         home: str | Path | None = None,
+        working_directory: str | Path | None = None,
         include_user: bool = True,
+        include_system: bool = True,
         disabled_loader: Callable[[], frozenset[str]] | None = None,
     ) -> None:
         self.workspace = Path(workspace).expanduser().resolve(strict=False)
         self.home = (
             Path(home).expanduser().resolve(strict=False) if home is not None else None
         )
+        self.working_directory = (
+            Path(working_directory).expanduser().resolve(strict=False)
+            if working_directory is not None
+            else self.workspace
+        )
         self.include_user = include_user
+        self.include_system = include_system
         self.disabled_loader = disabled_loader or (lambda: frozenset())
         self._lock = threading.RLock()
         self._signature: tuple[Any, ...] | None = None
@@ -290,8 +277,10 @@ class SkillCatalogProvider:
                 return self._catalog
             catalog = discover_skill_catalog(
                 self.workspace,
+                working_directory=self.working_directory,
                 home=self.home,
                 include_user=self.include_user,
+                include_system=self.include_system,
                 disabled_ids=disabled,
             )
             self._catalog = catalog
@@ -304,11 +293,14 @@ class SkillCatalogProvider:
 
     def _filesystem_signature(self) -> tuple[Any, ...]:
         values: list[Any] = []
-        for root, _scope, _source in skill_roots(
+        for root_spec in discover_skill_roots(
             self.workspace,
+            working_directory=self.working_directory,
             home=self.home,
             include_user=self.include_user,
+            include_system=self.include_system,
         ):
+            root = root_spec.path
             try:
                 root_stat = root.stat()
                 values.append((str(root), root_stat.st_mtime_ns, root_stat.st_size))
@@ -317,11 +309,14 @@ class SkillCatalogProvider:
                 continue
             for directory in _iter_skill_directories(root):
                 skill_file = directory / SKILL_FILENAME
-                try:
-                    stat = skill_file.stat()
-                    values.append((str(skill_file), stat.st_mtime_ns, stat.st_size))
-                except OSError:
-                    values.append((str(skill_file), None, None))
+                for tracked_file in (skill_file, directory / OPENAI_METADATA_PATH):
+                    try:
+                        stat = tracked_file.stat()
+                        values.append(
+                            (str(tracked_file), stat.st_mtime_ns, stat.st_size)
+                        )
+                    except OSError:
+                        values.append((str(tracked_file), None, None))
         return tuple(values)
 
 
@@ -340,6 +335,8 @@ def validate_skill_directory(
         directory=path,
         scope=scope,
         source_root=source_root,
+        trust_boundary=None,
+        writable=False,
     )
     if record.status is SkillStatus.INVALID:
         raise SkillValidationError(record.error or "Skill validation failed")
@@ -365,6 +362,8 @@ def _read_candidate(
     directory: Path,
     scope: SkillScope,
     source_root: SkillSourceRoot,
+    trust_boundary: Path | None,
+    writable: bool,
 ) -> SkillRecord:
     unresolved_file = directory / SKILL_FILENAME
     fallback_name = directory.name
@@ -373,15 +372,14 @@ def _read_candidate(
     try:
         root.resolve(strict=True)
         skill_file = unresolved_file.resolve(strict=True)
-        if scope is SkillScope.PROJECT:
+        if trust_boundary is not None:
             # Repository aliases may organize Skills, but must not load
             # instructions from outside the trusted workspace. User-owned
             # aliases may point at plugin or cache locations.
-            # Derive the boundary from the configured (unresolved) root.
-            # Following the root first would let a symlinked `skills/`
-            # directory move the trust boundary outside the workspace.
-            workspace_boundary = root.absolute().parent.parent.resolve(strict=True)
-            skill_file.relative_to(workspace_boundary)
+            # The discovery layer supplies the workspace boundary explicitly.
+            # Following a symlinked `skills/` directory must not move that
+            # boundary outside the trusted workspace.
+            skill_file.relative_to(trust_boundary.resolve(strict=True))
         stat = skill_file.stat()
         byte_size = stat.st_size
         if byte_size > MAX_SKILL_BYTES:
@@ -389,7 +387,11 @@ def _read_candidate(
                 f"{skill_file}: SKILL.md exceeds {MAX_SKILL_BYTES} bytes"
             )
         payload = skill_file.read_bytes()
-        revision = f"sha256:{hashlib.sha256(payload).hexdigest()}"
+        metadata, metadata_payload = read_skill_metadata(skill_file.parent)
+        revision_payload = payload
+        if metadata_payload is not None:
+            revision_payload += b"\0agents/openai.yaml\0" + metadata_payload
+        revision = f"sha256:{hashlib.sha256(revision_payload).hexdigest()}"
         text = payload.decode("utf-8")
         name, description, instructions, allowed_tools = _parse_text(
             text,
@@ -401,6 +403,7 @@ def _read_candidate(
             skill_file=unresolved_file.absolute(),
             scope=scope,
             source_root=source_root,
+            writable=writable,
         )
         return SkillRecord(
             key=key,
@@ -411,6 +414,7 @@ def _read_candidate(
             revision=revision,
             status=SkillStatus.ACTIVE,
             byte_size=byte_size,
+            metadata=metadata,
         )
     except (OSError, ValueError) as exc:
         skill_file = unresolved_file.absolute()
@@ -419,6 +423,7 @@ def _read_candidate(
             skill_file=skill_file,
             scope=scope,
             source_root=source_root,
+            writable=writable,
         )
         return SkillRecord(
             key=key,
@@ -439,6 +444,7 @@ def _key(
     skill_file: Path,
     scope: SkillScope,
     source_root: SkillSourceRoot,
+    writable: bool,
 ) -> SkillKey:
     try:
         relative = str(skill_file.parent.relative_to(root))
@@ -449,6 +455,7 @@ def _key(
         source_root=source_root,
         skill_file=skill_file,
         relative_path=relative,
+        writable=writable,
     )
 
 
@@ -532,6 +539,5 @@ __all__ = [
     "SkillCatalog",
     "SkillCatalogProvider",
     "discover_skill_catalog",
-    "skill_roots",
     "validate_skill_directory",
 ]

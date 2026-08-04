@@ -285,9 +285,9 @@ DeepCode 不绑定单一模型厂商。你可以连接 OpenRouter、OpenAI、Ant
 
 ### Reusable Skills
 
-Skills 可以把团队规范、领域知识、评审方法或重复工作流变成 Agent 可复用的能力。Skills 可以存放在项目中，也可以安装到用户目录，并在具体任务中按需选择。
+Skills 可以把团队规范、领域知识、评审方法或重复工作流变成 Agent 可复用的能力。项目 Skill 放在 `.agents/skills`，个人 Skill 放在 `~/.agents/skills`，也可以通过内置 Skill Creator 以对话方式创建。
 
-DeepCode 同时兼容 DeepCode 和 Claude 风格的 Skill 目录。Skill 可以指导 Agent 如何工作，但不能绕过项目信任、工具权限或安全边界。
+DeepCode 继续读取已有的 `.deepcode/skills` 和 Claude 风格目录，不会自动迁移。Skill 可以指导 Agent 如何工作，但不能绕过项目信任、工具权限或安全边界。
 
 ### Permissions you can understand
 
@@ -482,6 +482,7 @@ Project，或者从项目目录启动 `deepcode`，然后创建新 Session 或�
 | 调整 Thinking 档位 | 输入框 Thinking 选择器 | `/effort` |
 | 选择工具权限 | 输入框权限选择器 | `/permissions` |
 | 为下一个 Turn 加载 Skills | 输入框 Skills 控件 | `/skill <名称>` |
+| 创建可复用 Skill | **Skills → Create Skill** | `$skill-creator` |
 | 设置或修改持久 Goal | Goal 面板 | `/goal` |
 | 停止当前 Turn | 使用停止按钮 | `/stop` |
 
@@ -505,12 +506,14 @@ Provider 明确提供时展示推理摘要，不会把原始 chain-of-thought �
 
 Skills 可以把可复用的工程知识变成 Agent 在任务中加载的指导。Desktop
 提供 Skills 工作区；交互式 CLI 使用 `/skills` 发现可用 Skill，使用
-`/skill <名称>` 为下一个 Turn 选择能力。
+`/skill <名称>` 为下一个 Turn 选择能力。在 Desktop 选择 **Skills → Create
+Skill**，或在 CLI 调用 `$skill-creator`，即可通过普通 Agent Turn 创建并校验。
 
-项目级 Skills 可以随仓库共享，用户级 Skills 可以跨 Project 使用。DeepCode
-同时兼容 Claude 风格的 Skill 目录。Skill 只能指导 Agent，不能授予权限，
-也不能绕过 Project trust、审批或工具策略。导入、启用、禁用和目录管理命令
-统一放在 [高级指南](docs/HEADLESS_AND_AUTOMATION.md#skills-管理)中。
+项目级 Skills 存放在 `.agents/skills` 并可随仓库共享，用户级 Skills 存放在
+`~/.agents/skills` 并可跨 Project 使用。旧 DeepCode 与 Claude 风格目录继续
+兼容读取。Skill 只能指导 Agent，不能授予权限，也不能绕过 Project trust、
+审批或工具策略。导入、启用、禁用和目录管理命令统一放在
+[高级指南](docs/HEADLESS_AND_AUTOMATION.md#skills-管理)中。
 
 ### 安全与执行
 

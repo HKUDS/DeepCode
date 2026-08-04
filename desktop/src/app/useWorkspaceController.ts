@@ -79,7 +79,7 @@ export interface WorkspaceController {
   openProject(): Promise<void>;
   selectProject(projectId: string): Promise<void>;
   trustProject(): Promise<void>;
-  createThread(mode?: ThreadMode): Promise<void>;
+  createThread(mode?: ThreadMode, title?: string): Promise<Thread | undefined>;
   forkThread(): Promise<void>;
   selectThread(threadId: string): Promise<void>;
   renameThread(threadId: string, title: string): Promise<void>;
@@ -363,18 +363,19 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
   );
 
   const createThread = useCallback(
-    (mode: ThreadMode = "code") =>
+    (mode: ThreadMode = "code", title?: string) =>
       withBusy(async () => {
         if (!selectedProject) return;
         const result = await runtime.request("thread/start", {
           projectId: selectedProject.id,
-          title: mode === "paper" ? "New Paper2Code run" : "New task",
+          title: title ?? (mode === "paper" ? "New Paper2Code run" : "New task"),
           mode,
         });
         dispatch({ type: "thread-upsert", thread: result.thread });
         dispatch({ type: "select-thread", threadId: result.thread.id });
         selectedThreadRef.current = result.thread.id;
         localStorage.setItem(THREAD_KEY, result.thread.id);
+        return result.thread;
       }),
     [runtime, selectedProject, withBusy],
   );

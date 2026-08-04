@@ -77,12 +77,14 @@ def discover_skills(
     *,
     home: str | Path | None = None,
     include_user: bool = True,
+    include_system: bool = True,
 ) -> SkillRegistry:
     return SkillRegistry(
         discover_skill_catalog(
             workspace,
             home=home,
             include_user=include_user,
+            include_system=include_system,
         )
     )
 

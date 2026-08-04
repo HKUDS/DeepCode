@@ -137,6 +137,14 @@ def skill_info_view(skill) -> dict[str, Any]:
         "byteSize": skill.byte_size,
         "shadowedBy": skill.shadowed_by,
         "error": skill.error,
+        "displayName": skill.display_name,
+        "shortDescription": skill.short_description,
+        "iconSmall": skill.icon_small,
+        "iconLarge": skill.icon_large,
+        "brandColor": skill.brand_color,
+        "defaultPrompt": skill.default_prompt,
+        "allowImplicitInvocation": skill.allow_implicit_invocation,
+        "deletable": skill.deletable,
     }
 
 
