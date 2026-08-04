@@ -41,7 +41,9 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _resources(raw: str) -> tuple[str, ...]:
-    values = tuple(dict.fromkeys(item.strip() for item in raw.split(",") if item.strip()))
+    values = tuple(
+        dict.fromkeys(item.strip() for item in raw.split(",") if item.strip())
+    )
     invalid = sorted(set(values) - _RESOURCE_NAMES)
     if invalid:
         raise ValueError(f"unknown resource directories: {', '.join(invalid)}")
