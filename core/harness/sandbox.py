@@ -413,6 +413,18 @@ def build_exec_command(
     return wrap_argv_command(list(argv or []), policy)
 
 
+#: Backends that confine writes to the policy's writable roots. The Job Object
+#: backend deliberately does not (see the module docstring): it isolates the
+#: process tree but leaves the filesystem open, so callers must not advertise a
+#: write-fence on Windows.
+_WRITE_FENCING_BACKENDS = frozenset({"seatbelt", "bwrap"})
+
+
+def fences_writes() -> bool:
+    """Whether the active backend actually confines writes to the workspace."""
+    return sandbox_backend() in _WRITE_FENCING_BACKENDS
+
+
 def describe_backend() -> str:
     """Human-readable one-liner for logs/prompts."""
     backend = sandbox_backend()

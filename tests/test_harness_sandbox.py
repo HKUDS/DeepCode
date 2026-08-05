@@ -21,6 +21,7 @@ if str(ROOT) not in sys.path:
 from core.harness.sandbox import (  # noqa: E402
     SandboxPolicy,
     _seatbelt_profile,
+    fences_writes,
     wrap_shell_command,
 )
 from core.harness.windows_sandbox import _run_in_job  # noqa: E402
@@ -39,7 +40,9 @@ def test_wrap_returns_runnable_argv(tmp_path):
     assert wrapped.backend in ("seatbelt", "bwrap", "job", "none")
 
 
-@pytest.mark.skipif(platform.system() != "Darwin", reason="seatbelt policy is macOS-only")
+@pytest.mark.skipif(
+    platform.system() != "Darwin", reason="seatbelt policy is macOS-only"
+)
 def test_seatbelt_profile_is_deny_default_and_grants_workspace_writes(tmp_path):
     policy = SandboxPolicy.for_workspace(tmp_path)
     profile = _seatbelt_profile(policy)
@@ -54,7 +57,9 @@ def test_seatbelt_profile_is_deny_default_and_grants_workspace_writes(tmp_path):
     assert "network-outbound" not in profile
 
 
-@pytest.mark.skipif(platform.system() != "Darwin", reason="seatbelt policy is macOS-only")
+@pytest.mark.skipif(
+    platform.system() != "Darwin", reason="seatbelt policy is macOS-only"
+)
 def test_seatbelt_profile_network_toggle(tmp_path):
     policy = SandboxPolicy.for_workspace(tmp_path, allow_network=True)
     # Network is re-granted only when the policy allows it.
@@ -68,6 +73,22 @@ def test_none_backend_is_flagged(monkeypatch, tmp_path):
     wrapped = wrap_shell_command("echo hi", SandboxPolicy.for_workspace(tmp_path))
     assert wrapped.backend == "none"
     assert wrapped.argv == ["/bin/bash", "-c", "echo hi"]
+
+
+@pytest.mark.parametrize(
+    ("backend", "fenced"),
+    [
+        ("seatbelt", True),
+        ("bwrap", True),
+        # The Job Object isolates the process tree but leaves the filesystem
+        # open, so callers must not advertise a write-fence on Windows.
+        ("job", False),
+        ("none", False),
+    ],
+)
+def test_fences_writes_tracks_backend_capability(monkeypatch, backend, fenced):
+    monkeypatch.setattr("core.harness.sandbox.sandbox_backend", lambda: backend)
+    assert fences_writes() is fenced
 
 
 # ---- real enforcement smoke (macOS only) -----------------------------------
