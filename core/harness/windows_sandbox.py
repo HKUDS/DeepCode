@@ -142,9 +142,7 @@ def _run_in_job(argv: list[str]) -> int:
         return _passthrough(argv)
 
     # Build the command line: quote each argument for the C runtime.
-    command_line = " ".join(
-        f'"{a}"' if (" " in a or "\t" in a) else a for a in argv
-    )
+    command_line = " ".join(f'"{a}"' if (" " in a or "\t" in a) else a for a in argv)
 
     startup = _STARTUPINFOW()
     startup.cb = ctypes.sizeof(_STARTUPINFOW)
