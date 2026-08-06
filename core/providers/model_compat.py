@@ -60,6 +60,23 @@ def is_reasoning_model(model_name: str) -> bool:
     return any(token in name for token in _REASONING_MODEL_TOKENS)
 
 
+def model_supports_thinking(model_name: str) -> bool:
+    """Whether the model itself has a thinking mode, per the catalog.
+
+    Distinct from :func:`is_reasoning_model`, which asks the narrower question
+    "does this model reject a temperature while reasoning". This one gates the
+    provider's thinking body, so it must follow the catalog rather than a
+    token list: a model absent from it has no advertised thinking mode and
+    must not be sent one.
+    """
+
+    # Imported inside the call: the catalog reaches this module's sibling
+    # ``reasoning`` at import time.
+    from core.providers.catalog import resolve_model_info
+
+    return resolve_model_info(model_name).reasoning is not None
+
+
 def is_kimi_thinking_model(model_name: str) -> bool:
     name = model_name.lower()
     return (
@@ -141,8 +158,17 @@ def resolve_model_compat(
     thinking_enabled = reasoning_active
 
     # Thinking extra_body: provider-level style OR model-level Kimi injection.
+    #
+    # ``thinking_style`` says how *this endpoint* spells a thinking toggle; it
+    # says nothing about whether the model behind it has one. Those are
+    # separate axes, and applying the style on the provider alone sent a
+    # thinking body to models with no thinking mode — a gpt-4o request routed
+    # through a Zhipu- or DeepSeek-compatible endpoint would carry
+    # ``thinking: {"type": "enabled"}``. Require both.
     thinking_extra_body: dict[str, Any] | None = None
     style = getattr(spec, "thinking_style", "") if spec is not None else ""
+    if style and not model_supports_thinking(resolved_name):
+        style = ""
     if style and semantic_effort not in {None, "auto"}:
         builder = _THINKING_STYLE_BUILDERS.get(style)
         if builder is not None:
