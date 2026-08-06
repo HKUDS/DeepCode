@@ -228,6 +228,23 @@ _SEED: dict[str, ModelInfo] = {
     "qwen3-coder": ModelInfo(
         "qwen3-coder", 256_000, 65_536, 1.0, 5.0, reasoning=_REASONING_TOGGLE
     ),
+    # Zhipu GLM — 200K context / 128K output, thinking toggled with
+    # ``thinking: {"type": ...}`` (docs.z.ai/guides/llm/glm-4.6).
+    "glm-4.6": ModelInfo(
+        "glm-4.6", 204_800, 131_072, 0.43, 1.75, reasoning=_REASONING_TOGGLE
+    ),
+    # MiniMax — the M2 line shares one window; M3 is the long-context tier
+    # (platform.minimax.io/docs/api-reference/api-overview). The published
+    # limit is the input+output total.
+    "minimax-m2": ModelInfo(
+        "minimax-m2", 204_800, 131_072, 0.30, 1.20, reasoning=_REASONING_TOGGLE
+    ),
+    "minimax-m2.7": ModelInfo(
+        "minimax-m2.7", 204_800, 131_072, 0.30, 1.20, reasoning=_REASONING_TOGGLE
+    ),
+    "minimax-m3": ModelInfo(
+        "minimax-m3", 1_000_000, 131_072, 0.30, 1.20, reasoning=_REASONING_TOGGLE
+    ),
     # xAI Grok.
     "grok-4": ModelInfo(
         "grok-4", 256_000, 64_000, 3.0, 15.0, reasoning=_REASONING_ALWAYS_ON
@@ -271,6 +288,10 @@ _FAMILY_RULES: tuple[tuple[str, ModelInfo], ...] = (
     ("deepseek", _SEED["deepseek-v3"]),
     ("qwen", _SEED["qwen3-max"]),
     ("grok", _SEED["grok-4"]),
+    # Longest prefix first: M3 is the 1M tier, the rest of the line is 200K.
+    ("minimax-m3", _SEED["minimax-m3"]),
+    ("minimax", _SEED["minimax-m2.7"]),
+    ("glm", _SEED["glm-4.6"]),
 )
 
 # Conservative fallback for a genuinely unknown model: 128K is the smallest

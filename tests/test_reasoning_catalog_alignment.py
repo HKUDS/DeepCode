@@ -120,3 +120,39 @@ def test_capabilities_travel_with_the_rest_of_the_model_row() -> None:
     info = resolve_model_info("deepseek-r1")
     assert info.context_window == _SEED["deepseek-r1"].context_window
     assert info.reasoning is infer_reasoning_capabilities("deepseek-r1")
+
+
+@pytest.mark.parametrize(
+    ("model_id", "context_window"),
+    [
+        # docs.z.ai/guides/llm/glm-4.6 — 200K in, 128K out.
+        ("glm-4.6", 204_800),
+        ("zai/glm-4.6", 204_800),
+        ("glm-4.7", 204_800),
+        # platform.minimax.io — the M2 line shares one window, M3 is the
+        # long-context tier, and the published figure is input+output.
+        ("MiniMax-M2", 204_800),
+        ("MiniMax-M2.5", 204_800),
+        ("MiniMax-M3", 1_000_000),
+    ],
+)
+def test_zhipu_and_minimax_resolve_off_the_default(
+    model_id: str, context_window: int
+) -> None:
+    """Both lines used to land on the 128K default with no thinking at all.
+
+    That is the failure mode the default is designed to avoid: a 200K model
+    trimmed to 128K, and a thinking-capable one advertising nothing.
+    """
+
+    info = resolve_model_info(model_id)
+    assert info.source != "default"
+    assert info.context_window == context_window
+    assert info.reasoning is not None
+
+
+def test_minimax_long_context_tier_beats_the_general_prefix() -> None:
+    """Rule order matters: ``minimax-m3`` must win over ``minimax``."""
+
+    assert resolve_model_info("minimax-m3-preview").context_window == 1_000_000
+    assert resolve_model_info("minimax-m2.1").context_window == 204_800
