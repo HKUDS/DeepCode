@@ -1,6 +1,6 @@
 .emptyRail,
 .rail {
-  width: min(820px, 100%);
+  width: var(--conversation-width);
   margin: 0 auto 8px;
   pointer-events: auto;
 }

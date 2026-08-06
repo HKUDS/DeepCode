@@ -3,6 +3,7 @@ import { lazy, Suspense, useState } from "react";
 
 import { projectCanExecute } from "./app/projectPresentation";
 import { latestExecutingTurn } from "./app/interactiveTurnRouter";
+import { useAppearance } from "./app/useAppearance";
 import { useDesktopUi } from "./app/useDesktopUi";
 import { useComposerCommands } from "./app/useComposerCommands";
 import { useWorkspaceController } from "./app/useWorkspaceController";
@@ -59,6 +60,8 @@ function LoadingSurface({
 
 export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
   const controller = useWorkspaceController(runtime);
+  // Mounted for its effect: paints saved appearance preferences at startup.
+  useAppearance();
   const ui = useDesktopUi();
   const transcript = useTranscriptMode();
   const runComposerCommand = useComposerCommands(controller, ui);

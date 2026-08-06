@@ -21,6 +21,7 @@ import type {
   DesktopUpdateProgress,
 } from "../../rpc/contracts";
 import { useDiagnostics } from "./useDiagnostics";
+import { AppearanceSettings } from "./AppearanceSettings";
 import { ConnectionSettings } from "./ConnectionSettings";
 import { ConnectionVerification } from "./ConnectionVerification";
 import {
@@ -552,6 +553,8 @@ export function SettingsPage({
             </button>
           </footer>
         </section>
+
+        <AppearanceSettings />
       </div>
 
       <section className={styles.section}>
