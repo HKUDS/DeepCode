@@ -1,7 +1,7 @@
 """Platform sandbox command wrapping (mechanism only).
 
 Given a shell command and a :class:`SandboxPolicy`, produce an equivalent
-command that runs confined to a set of writable roots. Two backends:
+command that runs confined to a set of writable roots. Three backends:
 
 * **macOS** — ``sandbox-exec`` (seatbelt) with a generated ``.sbpl`` policy
   that is **closed-by-default** (``(deny default)``, Chrome-inspired, C4b):
@@ -13,19 +13,28 @@ command that runs confined to a set of writable roots. Two backends:
 * **Linux** — ``bwrap`` (bubblewrap): mount-namespace isolation — bind the
   filesystem read-only, bind writable roots read-write, fresh ``/tmp``,
   ``--unshare-net`` for no network.
+* **Windows** — ``job``: a Windows Job Object with
+  ``JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`` provides process-tree isolation and
+  lifetime management (no orphaned descendants survive the wrapper). The
+  inner command is launched through ``core.harness.windows_sandbox``, the
+  same wrapper pattern as the other backends.
 
 Honest boundary: the reference agent adds seccomp-bpf + Landlock on Linux;
 those are kernel facilities Python cannot install from userspace, so DeepCode
 relies on bubblewrap's namespaces (a real, standard isolation primitive) rather
-than faking an equivalent. Native Windows has no backend.
+than faking an equivalent. On Windows, a userspace write-fence (like seatbelt's
+or bubblewrap's) needs disk quotas or an AppContainer/SILO; the Job Object
+backend intentionally does not fake it — it provides process-tree isolation and
+leaves write restriction to explicit approval.
 
-If no backend is available (native Windows, or the tool isn't installed)
-:func:`sandbox_backend` returns ``"none"`` and :func:`wrap_shell_command`
-returns the command unchanged — callers must decide whether to degrade to
-approval-first. This module never raises for an unsupported platform; it
-degrades.
+If no backend is available :func:`sandbox_backend` returns ``"none"`` and
+:func:`wrap_shell_command` returns the command unchanged — callers must decide
+whether to degrade to approval-first. This module never raises for an
+unsupported platform; it degrades.
 
-Network is denied by default (``allow_network=False``) on both backends.
+Network is denied by default (``allow_network=False``) on the seatbelt and
+bwrap backends; the Windows Job Object backend does not gate the network
+(honest boundary above).
 """
 
 from __future__ import annotations
@@ -64,12 +73,17 @@ class SandboxPolicy:
 
 
 def sandbox_backend() -> str:
-    """Return the active backend: ``"seatbelt"`` | ``"bwrap"`` | ``"none"``."""
+    """Return the active backend: ``"seatbelt"`` | ``"bwrap"`` | ``"job"`` | ``"none"``."""
     system = platform.system()
     if system == "Darwin" and os.path.exists(_MACOS_SANDBOX_EXEC):
         return "seatbelt"
     if system == "Linux" and shutil.which("bwrap"):
         return "bwrap"
+    if system == "Windows":
+        # The Job Object launcher is pure ctypes/stdlib; always available on
+        # native Windows. Exposed as an opt-in backend so callers that need a
+        # strict write-fence can still force approval-first degradation.
+        return "job"
     return "none"
 
 
@@ -303,6 +317,22 @@ def wrap_argv_command(
         argv += ["--die-with-parent", *inner_argv]
         return WrappedCommand(argv=argv, backend=backend)
 
+    if backend == "job":
+        # Windows Job Object launcher: same wrapper pattern as seatbelt/bwrap.
+        # ``python -m core.harness.windows_sandbox -- <inner argv...>`` creates
+        # a KILL_ON_JOB_CLOSE job, spawns the inner command into it suspended,
+        # and resumes it — the whole process tree dies with the wrapper.
+        import sys as _sys
+
+        argv = [
+            _sys.executable,
+            "-m",
+            "core.harness.windows_sandbox",
+            "--",
+            *inner_argv,
+        ]
+        return WrappedCommand(argv=argv, backend=backend)
+
     return WrappedCommand(argv=list(inner_argv), backend="none")
 
 
@@ -383,11 +413,24 @@ def build_exec_command(
     return wrap_argv_command(list(argv or []), policy)
 
 
+#: Backends that confine writes to the policy's writable roots. The Job Object
+#: backend deliberately does not (see the module docstring): it isolates the
+#: process tree but leaves the filesystem open, so callers must not advertise a
+#: write-fence on Windows.
+_WRITE_FENCING_BACKENDS = frozenset({"seatbelt", "bwrap"})
+
+
+def fences_writes() -> bool:
+    """Whether the active backend actually confines writes to the workspace."""
+    return sandbox_backend() in _WRITE_FENCING_BACKENDS
+
+
 def describe_backend() -> str:
     """Human-readable one-liner for logs/prompts."""
     backend = sandbox_backend()
     return {
         "seatbelt": "macOS seatbelt (sandbox-exec)",
         "bwrap": "Linux bubblewrap (bwrap)",
+        "job": "Windows Job Object (process-tree isolation)",
         "none": "no sandbox (degraded: approval-first)",
     }[backend]

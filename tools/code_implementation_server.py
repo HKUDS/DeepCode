@@ -29,7 +29,7 @@ from core.platform_compat import (
     subprocess_env,
     subprocess_text_kwargs,
 )
-from core.harness.sandbox import build_exec_command, describe_backend
+from core.harness.sandbox import build_exec_command, describe_backend, fences_writes
 
 configure_utf8_stdio()
 
@@ -1434,8 +1434,11 @@ async def set_workspace(workspace_path: str) -> str:
 
         logger.info(f"New Workspace: {WORKSPACE_DIR}")
         logger.info(
-            "Command execution sandbox: %s (writes fenced to workspace)",
+            "Command execution sandbox: %s (%s)",
             describe_backend(),
+            "writes fenced to workspace"
+            if fences_writes()
+            else "writes NOT fenced to workspace",
         )
 
         result = {

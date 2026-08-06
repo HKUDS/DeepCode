@@ -21,8 +21,10 @@ if str(ROOT) not in sys.path:
 from core.harness.sandbox import (  # noqa: E402
     SandboxPolicy,
     _seatbelt_profile,
+    fences_writes,
     wrap_shell_command,
 )
+from core.harness.windows_sandbox import _run_in_job  # noqa: E402
 
 
 def test_policy_for_workspace_normalizes_root(tmp_path):
@@ -35,9 +37,12 @@ def test_wrap_returns_runnable_argv(tmp_path):
     policy = SandboxPolicy.for_workspace(tmp_path)
     wrapped = wrap_shell_command("echo hi", policy)
     assert wrapped.argv[-2:] == ["-c", "echo hi"]
-    assert wrapped.backend in ("seatbelt", "bwrap", "none")
+    assert wrapped.backend in ("seatbelt", "bwrap", "job", "none")
 
 
+@pytest.mark.skipif(
+    platform.system() != "Darwin", reason="seatbelt policy is macOS-only"
+)
 def test_seatbelt_profile_is_deny_default_and_grants_workspace_writes(tmp_path):
     policy = SandboxPolicy.for_workspace(tmp_path)
     profile = _seatbelt_profile(policy)
@@ -52,6 +57,9 @@ def test_seatbelt_profile_is_deny_default_and_grants_workspace_writes(tmp_path):
     assert "network-outbound" not in profile
 
 
+@pytest.mark.skipif(
+    platform.system() != "Darwin", reason="seatbelt policy is macOS-only"
+)
 def test_seatbelt_profile_network_toggle(tmp_path):
     policy = SandboxPolicy.for_workspace(tmp_path, allow_network=True)
     # Network is re-granted only when the policy allows it.
@@ -65,6 +73,22 @@ def test_none_backend_is_flagged(monkeypatch, tmp_path):
     wrapped = wrap_shell_command("echo hi", SandboxPolicy.for_workspace(tmp_path))
     assert wrapped.backend == "none"
     assert wrapped.argv == ["/bin/bash", "-c", "echo hi"]
+
+
+@pytest.mark.parametrize(
+    ("backend", "fenced"),
+    [
+        ("seatbelt", True),
+        ("bwrap", True),
+        # The Job Object isolates the process tree but leaves the filesystem
+        # open, so callers must not advertise a write-fence on Windows.
+        ("job", False),
+        ("none", False),
+    ],
+)
+def test_fences_writes_tracks_backend_capability(monkeypatch, backend, fenced):
+    monkeypatch.setattr("core.harness.sandbox.sandbox_backend", lambda: backend)
+    assert fences_writes() is fenced
 
 
 # ---- real enforcement smoke (macOS only) -----------------------------------
@@ -122,3 +146,43 @@ def test_seatbelt_allows_reads_everywhere(tmp_path):
         wrapped.cleanup()
     assert proc.returncode == 0
     assert proc.stdout.decode().strip() == "hello"
+
+
+# ---- Windows Job Object backend ------------------------------------------
+
+_job = platform.system() == "Windows"
+
+
+@pytest.mark.skipif(not _job, reason="Windows Job Object backend only")
+def test_windows_job_runs_and_forwards_exit_code():
+    code = "import sys; sys.exit(7)"
+    exit_code = _run_in_job([sys.executable, "-c", code])
+    assert exit_code == 7
+
+
+@pytest.mark.skipif(not _job, reason="Windows Job Object backend only")
+def test_windows_job_wrapper_is_used_by_build_exec_command(tmp_path):
+    from core.harness.sandbox import build_exec_command
+
+    wrapped = build_exec_command(
+        argv=[sys.executable, "-c", "pass"],
+        workspace=tmp_path,
+        allow_network=False,
+    )
+    # The wrapper module must prefix the inner argv.
+    assert "core.harness.windows_sandbox" in wrapped.argv
+    assert wrapped.backend == "job"
+
+
+@pytest.mark.skipif(not _job, reason="Windows Job Object backend only")
+def test_windows_job_kills_descendant_processes():
+    """KILL_ON_JOB_CLOSE: a background child spawned by the inner command must
+    not outlive the wrapper (no orphaned process escapes the job)."""
+    probe = sys.executable
+    code = (
+        "import subprocess, sys, time\n"
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+        "print(child.pid, flush=True)\n"
+    )
+    exit_code = _run_in_job([probe, "-c", code])
+    assert exit_code == 0

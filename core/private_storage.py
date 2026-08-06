@@ -5,14 +5,17 @@ under its user data directory.  Callers use these helpers instead of relying on
 the process umask, which is commonly permissive on desktop systems.
 
 POSIX permissions are repaired to ``0700`` for directories and ``0600`` for
-regular files.  Windows access control is inherited from the user's profile;
-the mode arguments are still supplied at creation time where supported.
+regular files.  Windows access control is not inherited from the user profile
+by default (the profile ACL typically grants ``Authenticated Users`` modify
+rights), so we remove inheritance and grant the current user exclusive access —
+matching the POSIX ``0700``/``0600`` intent on NTFS.
 """
 
 from __future__ import annotations
 
 import os
 import stat
+import subprocess
 from pathlib import Path
 
 PRIVATE_DIRECTORY_MODE = 0o700
@@ -21,6 +24,65 @@ PRIVATE_FILE_MODE = 0o600
 
 class UnsafePrivateFileError(OSError):
     """A private-state path is not a regular file owned by this path entry."""
+
+
+def _windows_identity() -> str | None:
+    """Return the current Windows user (``DOMAIN\\user``) for ACL grants.
+
+    ``%USERNAME%`` alone is ambiguous across domains, so we ask ``whoami``
+    for the fully qualified principal.  Returns ``None`` when the identity
+    cannot be resolved (defensive: callers fall back to no-op).
+    """
+    try:
+        completed = subprocess.run(
+            ["whoami"],
+            capture_output=True,
+            text=True,
+            encoding="mbcs",
+            errors="replace",
+            timeout=5,
+            check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    principal = (completed.stdout or "").strip()
+    return principal or None
+
+
+def _restrict_windows_acl(path: Path) -> None:
+    """Restrict ``path`` to the current user on Windows (NTFS).
+
+    Two steps, both idempotent and safe to run repeatedly:
+
+    1. ``/inheritance:r`` removes all inherited ACEs so a permissive parent
+       (e.g. the profile root granting ``Authenticated Users``) no longer
+       applies.
+    2. ``/grant:r <user>:F`` grants the current user exclusive full control
+       (``:r`` replaces any existing user ACE rather than appending).
+
+    Runs ``icacls`` out of process because the standard library has no NTFS
+    ACL API.  Failures are deliberately swallowed (best-effort, like POSIX
+    chmod) — callers still get the POSIX mode at creation time.
+    """
+    identity = _windows_identity()
+    if identity is None:
+        return
+    for args in (
+        ["icacls", os.fspath(path), "/inheritance:r"],
+        ["icacls", os.fspath(path), "/grant:r", f"{identity}:F"],
+    ):
+        try:
+            subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                encoding="mbcs",
+                errors="replace",
+                timeout=15,
+                check=True,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return  # best-effort; keep the caller moving
 
 
 def ensure_private_directory(path: Path | str) -> Path:
@@ -63,6 +125,8 @@ def open_private_file(path: Path | str, flags: int) -> int:
             )
         if os.name != "nt":
             os.fchmod(descriptor, PRIVATE_FILE_MODE)
+        else:
+            _restrict_windows_acl(target)
         return descriptor
     except BaseException:
         os.close(descriptor)
@@ -97,6 +161,8 @@ def open_existing_private_file(
             )
         if os.name != "nt":
             os.fchmod(descriptor, PRIVATE_FILE_MODE)
+        else:
+            _restrict_windows_acl(target)
         return descriptor
     except BaseException:
         os.close(descriptor)
@@ -119,8 +185,6 @@ def harden_private_tree(root: Path | str) -> Path:
     """Repair a DeepCode-owned tree while refusing to traverse symlinks."""
 
     base = ensure_private_directory(root)
-    if os.name == "nt":
-        return base
 
     for current, directories, files in os.walk(base, followlinks=False):
         current_path = Path(current)
@@ -137,6 +201,7 @@ def harden_private_tree(root: Path | str) -> Path:
 
 def _chmod(path: Path, mode: int) -> None:
     if os.name == "nt":
+        _restrict_windows_acl(path)
         return
     try:
         os.chmod(path, mode, follow_symlinks=False)
