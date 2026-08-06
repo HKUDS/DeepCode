@@ -75,6 +75,10 @@ _DEFAULT_OPENROUTER_HEADERS = {
     "X-OpenRouter-Title": "DeepCode",
     "X-OpenRouter-Categories": "cli-agent,research-agent",
 }
+_DEFAULT_REQUESTY_HEADERS = {
+    "HTTP-Referer": "https://github.com/HKUDS/DeepCode",
+    "X-Title": "DeepCode",
+}
 # Per-model thinking / reasoning quirks now live declaratively in
 # ``core.providers.model_compat`` (resolved via ``resolve_model_compat``);
 # this module only assembles requests from the resolved value.
@@ -158,6 +162,15 @@ def _uses_openrouter_attribution(
     return bool(api_base and "openrouter" in api_base.lower())
 
 
+def _uses_requesty_attribution(
+    spec: "ProviderSpec | None", api_base: str | None
+) -> bool:
+    """Apply DeepCode attribution headers to Requesty requests by default."""
+    if spec and spec.name == "requesty":
+        return True
+    return bool(api_base and "requesty" in api_base.lower())
+
+
 _RESPONSES_FAILURE_THRESHOLD = 3
 _RESPONSES_PROBE_INTERVAL_S = 300  # 5 minutes
 
@@ -232,6 +245,8 @@ class OpenAICompatProvider(LLMProvider):
         default_headers = {"x-session-affinity": uuid.uuid4().hex}
         if _uses_openrouter_attribution(spec, effective_base):
             default_headers.update(_DEFAULT_OPENROUTER_HEADERS)
+        if _uses_requesty_attribution(spec, effective_base):
+            default_headers.update(_DEFAULT_REQUESTY_HEADERS)
         if extra_headers:
             default_headers.update(extra_headers)
 
@@ -262,7 +277,13 @@ class OpenAICompatProvider(LLMProvider):
             resolved = env_val.replace("{api_key}", api_key).replace(
                 "{api_base}", effective_base
             )
-            os.environ.setdefault(env_name, resolved)
+            # Same rule as ``spec.env_key`` above: a gateway routes to whatever
+            # the user selected, so its values must win over a stale ambient
+            # variable. Direct providers keep deferring to the environment.
+            if spec.is_gateway:
+                os.environ[env_name] = resolved
+            else:
+                os.environ.setdefault(env_name, resolved)
 
     @classmethod
     def _apply_cache_control(

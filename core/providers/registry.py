@@ -84,6 +84,30 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         supports_prompt_caching=True,
     ),
     ProviderSpec(
+        name="requesty",
+        keywords=("requesty",),
+        env_key="REQUESTY_API_KEY",
+        display_name="Requesty",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_base_keyword="requesty",
+        default_api_base="https://router.requesty.ai/v1",
+        supports_prompt_caching=True,
+    ),
+    ProviderSpec(
+        name="forge",
+        keywords=("forge",),
+        env_key="FORGE_API_KEY",
+        display_name="Forge",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_base_keyword="forge.tensorblock.co",
+        default_api_base="https://api.forge.tensorblock.co/v1",
+        # Forge resolves bare model ids, not ``vendor/model`` — unlike the
+        # OpenRouter-style gateways above.
+        strip_model_prefix=True,
+    ),
+    ProviderSpec(
         name="anthropic",
         keywords=("anthropic", "claude"),
         env_key="ANTHROPIC_API_KEY",
@@ -133,6 +157,14 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         default_api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
         thinking_style="enable_thinking",
+    ),
+    ProviderSpec(
+        name="minimax",
+        keywords=("minimax", "abab"),
+        env_key="MINIMAX_API_KEY",
+        display_name="MiniMax",
+        backend="openai_compat",
+        default_api_base="https://api.minimax.io/v1",
     ),
     ProviderSpec(
         name="vllm",
