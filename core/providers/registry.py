@@ -148,6 +148,8 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         env_extras=(("ZHIPUAI_API_KEY", "{api_key}"),),
         default_api_base="https://open.bigmodel.cn/api/paas/v4",
+        # GLM takes the same ``thinking: {"type": ...}`` body as DeepSeek.
+        thinking_style="thinking_type",
     ),
     ProviderSpec(
         name="dashscope",

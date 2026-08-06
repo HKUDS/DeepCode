@@ -16,7 +16,7 @@
 }
 
 .composer {
-  width: min(820px, 100%);
+  width: var(--conversation-width);
   margin: 0 auto;
   overflow: visible;
   border: 1px solid var(--border-strong);

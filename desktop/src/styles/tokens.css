@@ -2,9 +2,23 @@
   color: #202321;
   background: #edf0ee;
   color-scheme: light dark;
+
+  /* Appearance preferences (src/app/appearance.ts) override the three
+     variables below on the root element. They are declared here so the app
+     works untouched when nothing has been customised, and so the defaults
+     stay in the stylesheet rather than being duplicated in TypeScript. */
+
+  /* Empty by default; the preference prepends families to the stack. */
+  --font-ui-preferred: ;
+  --font-size-base: 14px;
+  /* Width of the conversation column, its composer, and the goal rail —
+     one value so the three cannot drift apart. */
+  --conversation-width: min(820px, 100%);
+
   font-family:
-    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable",
-    "Segoe UI", Inter, sans-serif;
+    var(--font-ui-preferred) -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "Segoe UI Variable", "Segoe UI", Inter, sans-serif;
+  font-size: var(--font-size-base);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -62,8 +76,10 @@
     0 18px 42px rgb(27 34 30 / 14%), 0 3px 10px rgb(27 34 30 / 7%);
 }
 
+/* System preference. The :not() lets an explicit light choice win here,
+   and the rule below lets an explicit dark choice win on a light OS. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     color: #f1f4f2;
     background: #101211;
 
@@ -106,6 +122,53 @@
     --shadow-menu:
       0 20px 46px rgb(0 0 0 / 42%), 0 3px 10px rgb(0 0 0 / 26%);
   }
+}
+
+/* Explicit dark, whatever the OS says. CSS cannot share one declaration
+   block across a media query and a selector, so this palette is stated
+   twice — tokens.test.ts fails if the two ever disagree. */
+:root[data-theme="dark"] {
+    color: #f1f4f2;
+    background: #101211;
+
+    --surface-shell: #101211;
+    --surface-canvas: #181b19;
+    --surface-sidebar: #151816;
+    --surface-sidebar-strong: #1b1f1c;
+    --surface-raised: #222624;
+    --surface-overlay: rgb(29 33 30 / 88%);
+    --surface-hover: #292e2b;
+    --surface-selected: #303632;
+    --surface-user: #282d2a;
+    --surface-code: #151816;
+    --surface-inset: #121513;
+
+    --text-primary: #f1f4f2;
+    --text-secondary: #b3bab5;
+    --text-tertiary: #808982;
+    --text-inverse: #151816;
+    --text-on-accent: #ffffff;
+
+    --border-subtle: #2b302d;
+    --border-strong: #3a413d;
+    --border-emphasis: #59625d;
+
+    --signal: #929cff;
+    --signal-strong: #aab2ff;
+    --signal-soft: rgb(146 156 255 / 16%);
+    --signal-faint: rgb(146 156 255 / 8%);
+    --success: #6abb9c;
+    --success-soft: rgb(63 125 103 / 17%);
+    --attention: #d79058;
+    --attention-soft: rgb(178 100 43 / 14%);
+    --danger: #e4777e;
+    --danger-soft: rgb(179 64 73 / 14%);
+
+    --shadow-soft: 0 1px 2px rgb(0 0 0 / 16%);
+    --shadow-float:
+      0 20px 52px rgb(0 0 0 / 32%), 0 3px 10px rgb(0 0 0 / 22%);
+    --shadow-menu:
+      0 20px 46px rgb(0 0 0 / 42%), 0 3px 10px rgb(0 0 0 / 26%);
 }
 
 * {
