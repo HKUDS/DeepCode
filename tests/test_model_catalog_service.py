@@ -10,6 +10,7 @@ from core.config import DeepCodeConfig
 from core.providers.catalog_service import CatalogModel, ModelCatalogService
 from core.providers.credentials import CredentialStore
 from core.providers.profiles import ConnectionResolver
+from core.providers.reasoning import ModelReasoningCapabilities
 
 
 def _connection(
@@ -51,6 +52,10 @@ def test_remote_catalog_is_cached_and_refresh_falls_back_to_last_known_good(
             context_window=262_144,
             max_output_tokens=65_536,
             supported_parameters=("tools",),
+            # Stated explicitly so the round-trip below compares like with
+            # like: rehydration infers capabilities only when the payload
+            # carries none, and this test is about caching, not inference.
+            reasoning=ModelReasoningCapabilities(default_enabled=True),
         ),
     )
     monkeypatch.setattr(service, "_fetch", lambda _connection: discovered)

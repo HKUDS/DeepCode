@@ -134,55 +134,46 @@ def resolve_reasoning_effort(
     )
 
 
+#: Parameter names a remote catalog uses to advertise a reasoning control.
+_REASONING_PARAMETERS = frozenset(
+    {"reasoning", "reasoning_effort", "include_reasoning", "thinking"}
+)
+
+
 def infer_reasoning_capabilities(
     model_id: str,
     *,
     provider_name: str | None = None,
     supported_parameters: Iterable[str] = (),
 ) -> ModelReasoningCapabilities | None:
-    """Conservative offline fallback when a catalog has no structured data.
+    """Resolve the reasoning controls a model advertises, offline.
 
-    This is intentionally centralized.  Remote provider metadata wins; these
-    families only keep manual/custom catalogs usable without scattering
-    ``model_id`` checks through product code.
+    Two ordered sources, no model-name conditionals:
+
+    1. The model catalog (:mod:`core.providers.catalog`), whose
+       normalize → snapshot → seed → family cascade already answers "what is
+       this model" for context window and pricing. An unseen ``deepseek-r2``
+       inherits the ``deepseek-r`` family row here exactly as it does there.
+    2. ``supported_parameters`` published by a remote catalog, which proves a
+       reasoning control exists even when the model is absent from the seed.
+       No named levels come with it, so the surface is Auto/Off.
+
+    Returns ``None`` when neither source knows of a reasoning mode. Callers
+    treat that as "no thinking controls", so guessing here would put dead
+    options in the product; a missing model belongs in the seed table, not in
+    a branch added to this function.
     """
 
-    model = model_id.strip().lower()
-    provider = (provider_name or "").strip().lower()
-    parameters = {str(item).strip().lower() for item in supported_parameters}
+    # Imported lazily: the catalog imports this module for ``ModelInfo``.
+    from core.providers.catalog import resolve_model_info
 
-    if "kimi-k3" in model:
-        return ModelReasoningCapabilities(
-            supported_efforts=("low", "high", "max"),
-            default_effort="max",
-            default_enabled=True,
-            supports_summary=True,
-        )
-    if model.startswith(("o1", "o3", "o4")) or "gpt-5" in model:
-        return ModelReasoningCapabilities(
-            supported_efforts=("minimal", "low", "medium", "high"),
-            default_effort="medium",
-            default_enabled=True,
-            supports_summary=True,
-        )
-    if "claude-" in model and any(
-        family in model
-        for family in (
-            "opus-4-6",
-            "opus-4.6",
-            "sonnet-4-6",
-            "sonnet-4.6",
-        )
-    ):
-        return ModelReasoningCapabilities(
-            supported_efforts=("low", "medium", "high", "max"),
-            default_effort="high",
-            default_enabled=True,
-            supports_summary=True,
-        )
-    if parameters.intersection(
-        {"reasoning", "reasoning_effort", "include_reasoning", "thinking"}
-    ):
+    known = resolve_model_info(model_id).reasoning
+    if known is not None:
+        return known
+
+    parameters = {str(item).strip().lower() for item in supported_parameters}
+    if parameters & _REASONING_PARAMETERS:
+        provider = (provider_name or "").strip().lower()
         return ModelReasoningCapabilities(supports_summary=provider != "anthropic")
     return None
 

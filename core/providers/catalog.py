@@ -35,6 +35,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from core.providers.reasoning import ModelReasoningCapabilities
+
 
 @dataclass(frozen=True, slots=True)
 class ModelInfo:
@@ -46,6 +48,12 @@ class ModelInfo:
     unpriced model). ``source`` records where the value came from — ``seed``,
     ``family:<prefix>``, ``default``, or ``snapshot`` — so a surprising
     compaction budget is traceable to its origin.
+
+    ``reasoning`` describes the thinking controls the model advertises, or
+    ``None`` for a model with no reasoning mode. It lives here rather than in
+    a separate resolver so that one model id yields one answer through one
+    cascade: a family rule that grants ``deepseek-r2`` the right context
+    window grants it the right effort levels in the same step.
     """
 
     id: str
@@ -54,7 +62,58 @@ class ModelInfo:
     input_cost_per_1m: float | None = None
     output_cost_per_1m: float | None = None
     source: str = "seed"
+    reasoning: ModelReasoningCapabilities | None = None
 
+
+# --------------------------------------------------------------------------
+# Reasoning profiles shared by the seed rows below.
+#
+# Naming them keeps the table scannable and makes "these models expose the
+# same controls" an explicit statement instead of repeated literals. A ladder
+# is only claimed where the vendor publishes named effort levels; everything
+# else gets the honest Auto/Off surface that ``ModelReasoningCapabilities``
+# documents for "reasoning exists, levels unpublished".
+# --------------------------------------------------------------------------
+
+#: OpenAI ``reasoning_effort`` — gpt-5 family and the o-series.
+_REASONING_OPENAI = ModelReasoningCapabilities(
+    supported_efforts=("minimal", "low", "medium", "high"),
+    default_effort="medium",
+    default_enabled=True,
+    supports_summary=True,
+)
+#: Anthropic extended thinking, mapped onto DeepCode's semantic ladder.
+_REASONING_ANTHROPIC = ModelReasoningCapabilities(
+    supported_efforts=("low", "medium", "high", "max"),
+    default_effort="high",
+    default_enabled=True,
+    supports_summary=True,
+)
+#: Same ladder, but the model streams raw thinking blocks rather than the
+#: summarised channel. Used for the family fallback: an unrecognised
+#: ``claude-sonnet-4-<date>`` predates summarisation, and claiming it would
+#: route real trace text through the summary channel.
+_REASONING_ANTHROPIC_TRACE = ModelReasoningCapabilities(
+    supported_efforts=_REASONING_ANTHROPIC.supported_efforts,
+    default_effort=_REASONING_ANTHROPIC.default_effort,
+    default_enabled=True,
+    supports_summary=False,
+)
+#: Moonshot Kimi K3 publishes three levels.
+_REASONING_KIMI_K3 = ModelReasoningCapabilities(
+    supported_efforts=("low", "high", "max"),
+    default_effort="max",
+    default_enabled=True,
+    supports_summary=True,
+)
+#: A binary thinking switch with no published ladder (``thinking_style`` on
+#: the ProviderSpec is the wire mechanism). Product surface: Auto / Off.
+_REASONING_TOGGLE = ModelReasoningCapabilities(default_enabled=True)
+#: Reasoning is intrinsic and cannot be switched off (DeepSeek R, Grok 4).
+_REASONING_ALWAYS_ON = ModelReasoningCapabilities(
+    default_enabled=True,
+    mandatory=True,
+)
 
 # --------------------------------------------------------------------------
 # Seed catalog — exact ids DeepCode targets, curated from models.dev.
@@ -66,44 +125,113 @@ class ModelInfo:
 # --------------------------------------------------------------------------
 _SEED: dict[str, ModelInfo] = {
     # OpenAI GPT-5 family (400K context / 128K output).
-    "gpt-5": ModelInfo("gpt-5", 400_000, 128_000, 1.25, 10.0),
-    "gpt-5-mini": ModelInfo("gpt-5-mini", 400_000, 128_000, 0.25, 2.0),
-    "gpt-5-nano": ModelInfo("gpt-5-nano", 400_000, 128_000, 0.05, 0.40),
-    "gpt-5.1": ModelInfo("gpt-5.1", 400_000, 128_000, 1.25, 10.0),
-    "gpt-5.2": ModelInfo("gpt-5.2", 400_000, 128_000, 1.25, 10.0),
-    "gpt-5.4": ModelInfo("gpt-5.4", 400_000, 128_000, 1.25, 10.0),
+    "gpt-5": ModelInfo(
+        "gpt-5", 400_000, 128_000, 1.25, 10.0, reasoning=_REASONING_OPENAI
+    ),
+    "gpt-5-mini": ModelInfo(
+        "gpt-5-mini", 400_000, 128_000, 0.25, 2.0, reasoning=_REASONING_OPENAI
+    ),
+    "gpt-5-nano": ModelInfo(
+        "gpt-5-nano", 400_000, 128_000, 0.05, 0.40, reasoning=_REASONING_OPENAI
+    ),
+    "gpt-5.1": ModelInfo(
+        "gpt-5.1", 400_000, 128_000, 1.25, 10.0, reasoning=_REASONING_OPENAI
+    ),
+    "gpt-5.2": ModelInfo(
+        "gpt-5.2", 400_000, 128_000, 1.25, 10.0, reasoning=_REASONING_OPENAI
+    ),
+    "gpt-5.4": ModelInfo(
+        "gpt-5.4", 400_000, 128_000, 1.25, 10.0, reasoning=_REASONING_OPENAI
+    ),
     # OpenAI reasoning o-series (200K context / 100K output).
-    "o1": ModelInfo("o1", 200_000, 100_000, 15.0, 60.0),
-    "o3": ModelInfo("o3", 200_000, 100_000, 2.0, 8.0),
-    "o3-mini": ModelInfo("o3-mini", 200_000, 100_000, 1.1, 4.4),
-    "o4-mini": ModelInfo("o4-mini", 200_000, 100_000, 1.1, 4.4),
+    "o1": ModelInfo("o1", 200_000, 100_000, 15.0, 60.0, reasoning=_REASONING_OPENAI),
+    "o3": ModelInfo("o3", 200_000, 100_000, 2.0, 8.0, reasoning=_REASONING_OPENAI),
+    "o3-mini": ModelInfo(
+        "o3-mini", 200_000, 100_000, 1.1, 4.4, reasoning=_REASONING_OPENAI
+    ),
+    "o4-mini": ModelInfo(
+        "o4-mini", 200_000, 100_000, 1.1, 4.4, reasoning=_REASONING_OPENAI
+    ),
     # OpenAI GPT-4 family.
     "gpt-4o": ModelInfo("gpt-4o", 128_000, 16_384, 2.5, 10.0),
     "gpt-4o-mini": ModelInfo("gpt-4o-mini", 128_000, 16_384, 0.15, 0.60),
     "gpt-4.1": ModelInfo("gpt-4.1", 1_047_576, 32_768, 2.0, 8.0),
     # Anthropic Claude (200K context; output varies by tier).
-    "claude-opus-4-1": ModelInfo("claude-opus-4-1", 200_000, 32_000, 15.0, 75.0),
-    "claude-opus-4-8": ModelInfo("claude-opus-4-8", 200_000, 32_000, 15.0, 75.0),
-    "claude-sonnet-4-5": ModelInfo("claude-sonnet-4-5", 200_000, 64_000, 3.0, 15.0),
-    "claude-sonnet-5": ModelInfo("claude-sonnet-5", 200_000, 64_000, 3.0, 15.0),
-    "claude-haiku-4-5": ModelInfo("claude-haiku-4-5", 200_000, 64_000, 1.0, 5.0),
+    "claude-opus-4-1": ModelInfo(
+        "claude-opus-4-1", 200_000, 32_000, 15.0, 75.0, reasoning=_REASONING_ANTHROPIC
+    ),
+    "claude-opus-4-6": ModelInfo(
+        "claude-opus-4-6", 200_000, 32_000, 15.0, 75.0, reasoning=_REASONING_ANTHROPIC
+    ),
+    "claude-opus-4-8": ModelInfo(
+        "claude-opus-4-8", 200_000, 32_000, 15.0, 75.0, reasoning=_REASONING_ANTHROPIC
+    ),
+    "claude-sonnet-4-5": ModelInfo(
+        "claude-sonnet-4-5", 200_000, 64_000, 3.0, 15.0, reasoning=_REASONING_ANTHROPIC
+    ),
+    "claude-sonnet-4-6": ModelInfo(
+        "claude-sonnet-4-6", 200_000, 64_000, 3.0, 15.0, reasoning=_REASONING_ANTHROPIC
+    ),
+    "claude-sonnet-5": ModelInfo(
+        "claude-sonnet-5", 200_000, 64_000, 3.0, 15.0, reasoning=_REASONING_ANTHROPIC
+    ),
+    "claude-haiku-4-5": ModelInfo(
+        "claude-haiku-4-5", 200_000, 64_000, 1.0, 5.0, reasoning=_REASONING_ANTHROPIC
+    ),
+    # Dotted spellings of the same Anthropic releases. Listed rather than
+    # normalised away, because the dot is meaningful elsewhere in this table
+    # (``gpt-5.4``, ``kimi-k2.5`` are distinct models, not separator noise).
+    "claude-opus-4.6": ModelInfo(
+        "claude-opus-4.6", 200_000, 32_000, 15.0, 75.0, reasoning=_REASONING_ANTHROPIC
+    ),
+    "claude-sonnet-4.6": ModelInfo(
+        "claude-sonnet-4.6", 200_000, 64_000, 3.0, 15.0, reasoning=_REASONING_ANTHROPIC
+    ),
+    "claude-sonnet-4.5": ModelInfo(
+        "claude-sonnet-4.5", 200_000, 64_000, 3.0, 15.0, reasoning=_REASONING_ANTHROPIC
+    ),
+    "claude-haiku-4.5": ModelInfo(
+        "claude-haiku-4.5", 200_000, 64_000, 1.0, 5.0, reasoning=_REASONING_ANTHROPIC
+    ),
     # Google Gemini (very large windows).
-    "gemini-2.5-pro": ModelInfo("gemini-2.5-pro", 1_048_576, 65_536, 1.25, 10.0),
-    "gemini-2.5-flash": ModelInfo("gemini-2.5-flash", 1_048_576, 65_536, 0.30, 2.5),
-    "gemini-3-pro": ModelInfo("gemini-3-pro", 1_048_576, 65_536, 1.25, 10.0),
+    "gemini-2.5-pro": ModelInfo(
+        "gemini-2.5-pro", 1_048_576, 65_536, 1.25, 10.0, reasoning=_REASONING_TOGGLE
+    ),
+    "gemini-2.5-flash": ModelInfo(
+        "gemini-2.5-flash", 1_048_576, 65_536, 0.30, 2.5, reasoning=_REASONING_TOGGLE
+    ),
+    "gemini-3-pro": ModelInfo(
+        "gemini-3-pro", 1_048_576, 65_536, 1.25, 10.0, reasoning=_REASONING_TOGGLE
+    ),
     # Moonshot Kimi.
     "kimi-k2": ModelInfo("kimi-k2", 256_000, 128_000, 0.60, 2.5),
-    "kimi-k2.5": ModelInfo("kimi-k2.5", 256_000, 128_000, 0.60, 2.5),
-    "kimi-k2.6": ModelInfo("kimi-k2.6", 256_000, 128_000, 0.60, 2.5),
-    "kimi-k3": ModelInfo("kimi-k3", 1_048_576, 128_000, 3.0, 15.0),
+    "kimi-k2.5": ModelInfo(
+        "kimi-k2.5", 256_000, 128_000, 0.60, 2.5, reasoning=_REASONING_TOGGLE
+    ),
+    "kimi-k2.6": ModelInfo(
+        "kimi-k2.6", 256_000, 128_000, 0.60, 2.5, reasoning=_REASONING_TOGGLE
+    ),
+    "kimi-k3": ModelInfo(
+        "kimi-k3", 1_048_576, 128_000, 3.0, 15.0, reasoning=_REASONING_KIMI_K3
+    ),
     # DeepSeek.
-    "deepseek-v3": ModelInfo("deepseek-v3", 128_000, 8_192, 0.27, 1.10),
-    "deepseek-r1": ModelInfo("deepseek-r1", 128_000, 65_536, 0.55, 2.19),
+    "deepseek-v3": ModelInfo(
+        "deepseek-v3", 128_000, 8_192, 0.27, 1.10, reasoning=_REASONING_TOGGLE
+    ),
+    "deepseek-r1": ModelInfo(
+        "deepseek-r1", 128_000, 65_536, 0.55, 2.19, reasoning=_REASONING_ALWAYS_ON
+    ),
     # Alibaba Qwen.
-    "qwen3-max": ModelInfo("qwen3-max", 256_000, 32_768, 1.2, 6.0),
-    "qwen3-coder": ModelInfo("qwen3-coder", 256_000, 65_536, 1.0, 5.0),
+    "qwen3-max": ModelInfo(
+        "qwen3-max", 256_000, 32_768, 1.2, 6.0, reasoning=_REASONING_TOGGLE
+    ),
+    "qwen3-coder": ModelInfo(
+        "qwen3-coder", 256_000, 65_536, 1.0, 5.0, reasoning=_REASONING_TOGGLE
+    ),
     # xAI Grok.
-    "grok-4": ModelInfo("grok-4", 256_000, 64_000, 3.0, 15.0),
+    "grok-4": ModelInfo(
+        "grok-4", 256_000, 64_000, 3.0, 15.0, reasoning=_REASONING_ALWAYS_ON
+    ),
 }
 
 
@@ -118,10 +246,22 @@ _FAMILY_RULES: tuple[tuple[str, ModelInfo], ...] = (
     ("o1", _SEED["o1"]),
     ("o3", _SEED["o3"]),
     ("o4", _SEED["o4-mini"]),
-    ("claude-opus", _SEED["claude-opus-4-8"]),
-    ("claude-sonnet", _SEED["claude-sonnet-5"]),
-    ("claude-haiku", _SEED["claude-haiku-4-5"]),
-    ("claude", _SEED["claude-sonnet-5"]),
+    # Limits carry over from the newest tier member, but summarised thinking
+    # does not: a dated id like ``claude-sonnet-4-20250514`` predates it and
+    # streams raw trace. Exact seed rows above keep the full capability.
+    (
+        "claude-opus",
+        replace(_SEED["claude-opus-4-8"], reasoning=_REASONING_ANTHROPIC_TRACE),
+    ),
+    (
+        "claude-sonnet",
+        replace(_SEED["claude-sonnet-5"], reasoning=_REASONING_ANTHROPIC_TRACE),
+    ),
+    (
+        "claude-haiku",
+        replace(_SEED["claude-haiku-4-5"], reasoning=_REASONING_ANTHROPIC_TRACE),
+    ),
+    ("claude", replace(_SEED["claude-sonnet-5"], reasoning=_REASONING_ANTHROPIC_TRACE)),
     ("gemini-3", _SEED["gemini-3-pro"]),
     ("gemini", _SEED["gemini-2.5-pro"]),
     ("kimi-k3", _SEED["kimi-k3"]),
