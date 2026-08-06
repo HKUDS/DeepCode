@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useMemo, useId } from "react";
 
 import {
   APPEARANCE_DEFAULTS,
@@ -7,6 +7,10 @@ import {
   type AppearanceState,
   type ThemePreference,
 } from "../../app/appearance";
+import {
+  appendFamily,
+  availableFontCandidates,
+} from "../../app/fontCandidates";
 import { useAppearance } from "../../app/useAppearance";
 import styles from "../management/ManagementWorkspace.module.css";
 
@@ -27,6 +31,9 @@ const THEME_LABELS: Record<ThemePreference, string> = {
 export function AppearanceSettings() {
   const { appearance, set, reset } = useAppearance();
   const fieldId = useId();
+  // Probed once per mount: the set of installed fonts does not change while
+  // the settings page is open.
+  const installed = useMemo(() => availableFontCandidates(), []);
   const isDefault = APPEARANCE_SETTINGS.every(
     (setting) => appearance[setting.key] === APPEARANCE_DEFAULTS[setting.key],
   );
@@ -105,6 +112,39 @@ export function AppearanceSettings() {
                   set(setting.key as "fontFamily", event.target.value)
                 }
               />
+              {installed.length > 0 ? (
+                <select
+                  aria-label="Add an installed font"
+                  value=""
+                  onChange={(event) => {
+                    if (!event.target.value) return;
+                    set(
+                      "fontFamily",
+                      appendFamily(appearance.fontFamily, event.target.value),
+                    );
+                  }}
+                >
+                  <option value="">Add an installed font…</option>
+                  {["Interface", "Monospace", "CJK"].map((group) => {
+                    const members = installed.filter(
+                      (candidate) => candidate.group === group,
+                    );
+                    if (members.length === 0) return null;
+                    return (
+                      <optgroup key={group} label={group}>
+                        {members.map((candidate) => (
+                          <option
+                            key={candidate.family}
+                            value={candidate.family}
+                          >
+                            {candidate.family}
+                          </option>
+                        ))}
+                      </optgroup>
+                    );
+                  })}
+                </select>
+              ) : null}
             </label>
           );
         })}
