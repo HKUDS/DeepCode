@@ -134,6 +134,7 @@ Skills, permissions, Goals, and Automations. See the
 - [🎬 Live demonstrations](#live-demonstrations)
 - [🛠️ Development](#development)
 - [⭐ Star History](#star-history)
+- [🙏 Appreciation](#contributors)
 - [📖 Citation](#citation)
 - [📄 License](#license)
 
@@ -142,6 +143,21 @@ Skills, permissions, Goals, and Automations. See the
 </p>
 
 ## News
+
+**2026-08-07 · Thinking controls, more providers, and a Desktop you can tune**
+
+- **Reasoning controls work again across the board.** Thinking levels are now
+  resolved from the model catalog, so Claude, GPT-5, Kimi, Qwen and Grok all
+  offer their real effort levels, and DeepSeek, GLM and MiniMax get a working
+  thinking toggle. A newly released model inherits its family's controls
+  instead of silently losing them.
+- **Three more providers.** Requesty and Forge join as gateways, and MiniMax
+  arrives with its own catalog entry — including the 1M-context M3 tier.
+- **Make the Desktop yours.** Settings → Appearance adds conversation width,
+  a light/dark override that no longer follows the OS blindly, font size, and
+  font selection filtered to what is actually installed on your machine.
+- **Safer command execution on Windows.** A Job Object backend gives the
+  sandbox real process-tree isolation where previously there was none.
 
 **2026-08-04 · Skills that work wherever you do**
 
@@ -943,6 +959,27 @@ The empty product-image slots have a shared
 </p>
 
 </div>
+
+---
+
+<a id="contributors"></a>
+
+## 🙏 Appreciation
+
+Thanks to everyone in the open-source community — your stars, issues, pull
+requests and discussions shape where DeepCode goes next.
+
+<div align="center">
+
+<a href="https://github.com/HKUDS/DeepCode/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=HKUDS/DeepCode&max=999" alt="DeepCode contributors" />
+</a>
+
+</div>
+
+Everyone who has opened a pull request is listed in
+[CONTRIBUTORS.md](CONTRIBUTORS.md), including contributions that predate the
+v2.0 rebuild and so are not reflected in the graph above.
 
 ---
 

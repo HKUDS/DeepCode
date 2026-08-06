@@ -134,6 +134,7 @@ Automations。从源码启动请参考
 - [🎬 实时演示](#live-demonstrations)
 - [🛠️ 开发](#开发)
 - [⭐ 星标历史](#star-history)
+- [🙏 致谢](#contributors)
 - [📖 引用](#citation)
 - [📄 许可证](#license)
 
@@ -142,6 +143,18 @@ Automations。从源码启动请参考
 </p>
 
 ## 新闻
+
+**2026-08-07 · 思考强度控制、更多模型服务商、可调的 Desktop**
+
+- **思考强度控制全面恢复。** 思考档位改为从模型目录解析，Claude、GPT-5、
+  Kimi、Qwen、Grok 都能选到各自真实的档位，DeepSeek、GLM、MiniMax 也拿到了
+  可用的思考开关。新发布的模型会继承同族的能力，而不会悄悄失去控制项。
+- **新增三家模型服务商。** Requesty 与 Forge 作为网关加入，MiniMax 拥有独立的
+  目录条目——包含 100 万上下文的 M3 层级。
+- **把 Desktop 调成你习惯的样子。** 设置 → 外观新增会话区宽度、不再盲从系统的
+  浅色/深色手动切换、字号，以及只列出本机实际已安装字体的字体选择。
+- **Windows 上的命令执行更安全。** 新的 Job Object 后端为沙箱带来了真正的
+  进程树隔离——此前这里是空白。
 
 **2026-08-04 · 让 Skills 在每一种工作方式中保持一致**
 
@@ -830,6 +843,27 @@ Desktop 打包、Rust 检查、签名和发布流程请参考
 </p>
 
 </div>
+
+---
+
+<a id="contributors"></a>
+
+## 🙏 致谢
+
+感谢开源社区的每一位——你们的 star、issue、pull request 和讨论，
+共同塑造了 DeepCode 的走向。
+
+<div align="center">
+
+<a href="https://github.com/HKUDS/DeepCode/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=HKUDS/DeepCode&max=999" alt="DeepCode contributors" />
+</a>
+
+</div>
+
+所有提交过 pull request 的贡献者都记录在
+[CONTRIBUTORS.md](CONTRIBUTORS.md) 中，其中也包含早于 v2.0 重构、
+因而未体现在上方贡献图中的那些贡献。
 
 ---
 
