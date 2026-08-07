@@ -85,8 +85,46 @@ def launch_paper_test(paper_name: str, fast_mode: bool = False):
         sys.exit(1)
 
 
+def _bootstrap_logging() -> None:
+    """Install log sinks before anything can log.
+
+    Without this, loguru keeps its built-in stderr sink at DEBUG level, so
+    routine internals reach the terminal — most visibly the "config layer
+    absent" line that ``load_config`` emits in any directory without a
+    project-level ``deepcode_config.json`` (#167).
+
+    Order matters and is the reason this is not simply
+    ``setup_logging(load_config().logger)``: reading the config is itself
+    one of the things that logs. So install a quiet default first, then
+    re-apply only if the user asked for something else. ``DEEPCODE_LOG_LEVEL``
+    wins over both and needs no config file, matching ``deepcode mcp``.
+
+    Every subcommand below is dispatched from here, so this is the one place
+    that has to remember — a per-entrypoint call would be the same four lines
+    repeated ten times, and the next subcommand would forget them.
+    """
+    from core.config import LoggerConfig, load_config
+    from core.observability import setup_logging
+
+    override = os.environ.get("DEEPCODE_LOG_LEVEL")
+    setup_logging(LoggerConfig(level=override or "INFO", transports=["console"]))
+    if override:
+        return
+
+    try:
+        configured = load_config().logger
+    except Exception:
+        # A broken or unreadable config is the subcommand's problem to report
+        # properly; logging is already usable, so do not fail here.
+        return
+    if configured.level.upper() != "INFO":
+        setup_logging(configured, force=True)
+
+
 def main():
     """Main function"""
+    _bootstrap_logging()
+
     # Parse command line arguments
     if len(sys.argv) > 1:
         if sys.argv[1] in {"--version", "-V"}:
