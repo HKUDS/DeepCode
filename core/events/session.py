@@ -666,6 +666,21 @@ class AgentSession:
             logger.exception("start hook failed")
             return None
 
+    async def _run_end_hook(self, reason: str = "complete") -> None:
+        """Run SessionEnd hooks at the close of a turn.
+
+        Notification-only: a failure is logged and never crashes the turn.
+        Fired on every terminal path (complete / interrupted / error) so
+        summaries can be persisted even when compaction never ran.
+        """
+        engine = self._hooks_engine
+        if engine is None or not engine.has_event("SessionEnd"):
+            return
+        try:
+            await engine.run_session_end(reason=reason)
+        except Exception:  # noqa: BLE001 - hooks never crash a turn
+            logger.exception("session end hook failed")
+
     async def _run_prompt_hooks(
         self, text: str, hook_contexts: list[str]
     ) -> str | None:
@@ -786,6 +801,13 @@ class AgentSession:
             self._active_turn_task = None
             if terminal is not None:
                 self._emit(terminal)
+            reason = (
+                terminal.stop_reason
+                if terminal is not None
+                and terminal.stop_reason in ("interrupted", "error")
+                else "complete"
+            )
+            await self._run_end_hook(reason)
 
     async def _execute_turn(
         self,

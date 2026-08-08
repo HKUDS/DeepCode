@@ -176,6 +176,22 @@ class HooksEngine:
             additional_contexts=folded.additional_contexts,
         )
 
+    async def run_session_end(self, reason: str = "complete") -> ContextOutcome:
+        """Session lifecycle end — a notification hook (summary persistence, etc.).
+
+        Fires unconditionally at the close of a turn (complete / interrupted /
+        error), unlike ``PreCompact`` which only fires when a summarization pass
+        actually runs. Matchers are ignored (see ``_EVENTS_WITHOUT_MATCHER``);
+        the caller logs failures so a hook can never crash the turn.
+        """
+        payload = {"hook_event_name": "SessionEnd", "reason": reason}
+        folded = await self._dispatch("SessionEnd", None, payload)
+        return ContextOutcome(
+            block=folded.block,
+            block_reason=folded.block_reason,
+            additional_contexts=folded.additional_contexts,
+        )
+
     async def run_user_prompt_submit(self, prompt: str) -> ContextOutcome:
         payload = {"hook_event_name": "UserPromptSubmit", "prompt": prompt}
         folded = await self._dispatch("UserPromptSubmit", None, payload)
@@ -192,10 +208,18 @@ class HooksEngine:
 
     async def run_pre_compact(self, trigger: str = "auto") -> ContextOutcome:
         """Before a summarization pass. A ``block`` (continue:false) asks to skip
-        compaction this turn; the matcher runs against ``trigger`` (auto/manual)."""
+        compaction this turn; the matcher runs against ``trigger`` (auto/manual).
+
+        ``additional_contexts`` from hook ``hookSpecificOutput.additionalContext``
+        are passed through so a PreCompact hook can inject a checkpoint summary
+        (memento-style) that survives the compaction."""
         payload = {"hook_event_name": "PreCompact", "trigger": trigger}
         folded = await self._dispatch("PreCompact", trigger, payload)
-        return ContextOutcome(block=folded.block, block_reason=folded.block_reason)
+        return ContextOutcome(
+            block=folded.block,
+            block_reason=folded.block_reason,
+            additional_contexts=folded.additional_contexts,
+        )
 
     async def run_post_compact(self, trigger: str = "auto") -> ContextOutcome:
         """After a summarization pass — a notification hook (state saved, etc.)."""

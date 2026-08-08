@@ -31,15 +31,19 @@ HOOK_EVENT_NAMES: tuple[str, ...] = (
     "PreCompact",
     "PostCompact",
     "SessionStart",
+    "SessionEnd",
     "UserPromptSubmit",
     "SubagentStart",
     "SubagentStop",
     "Stop",
 )
 
-# Events whose ``matcher`` field is meaningful. ``UserPromptSubmit`` and ``Stop``
-# fire unconditionally, so their matchers are ignored (mirrors the reference).
-_EVENTS_WITHOUT_MATCHER: frozenset[str] = frozenset({"UserPromptSubmit", "Stop"})
+# Events whose ``matcher`` field is meaningful. ``UserPromptSubmit``, ``Stop``
+# and ``SessionEnd`` fire unconditionally, so their matchers are ignored
+# (mirrors the reference).
+_EVENTS_WITHOUT_MATCHER: frozenset[str] = frozenset(
+    {"UserPromptSubmit", "Stop", "SessionEnd"}
+)
 
 
 def matcher_applies_to_event(event_name: str, matcher: str | None) -> str | None:

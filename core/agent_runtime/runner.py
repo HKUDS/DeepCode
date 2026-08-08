@@ -1662,10 +1662,12 @@ class AgentRunner:
                 if estimate is None or estimate <= trigger:
                     return messages
 
+        pre_contexts: list[str] = []
         if spec.pre_compact_hook is not None:
             pre = await self._call_tool_hook(spec.pre_compact_hook, "auto")
             if pre is not None and getattr(pre, "block", False):
                 return messages  # a PreCompact hook aborted compaction this turn
+            pre_contexts = list(getattr(pre, "additional_contexts", None) or [])
 
         summary = await self._summarize(
             spec,
@@ -1685,6 +1687,15 @@ class AgentRunner:
                 spec.session_key or "default",
             )
             return messages
+        # memento 式 checkpoint 回注: PreCompact hook 的 additionalContext
+        # 作为独立 user 消息追加, 随压缩历史一起幸存 (供压缩后模型恢复上下文)。
+        if pre_contexts:
+            compacted = compacted + [
+                {
+                    "role": "user",
+                    "content": "[PreCompact checkpoint]\n" + "\n".join(pre_contexts),
+                }
+            ]
         if spec.post_compact_hook is not None:
             await self._call_tool_hook(spec.post_compact_hook, "auto")
         logger.info(

@@ -18,8 +18,9 @@ Sources are read lowest-precedence first so ``display_order`` — which fixes th
 fold order when several hooks fire for one event — is stable and deterministic:
 
     1. user     ``~/.deepcode/hooks.json``
-    2. project  ``<workspace>/.deepcode/hooks.json``
-    3. project  ``<workspace>/.claude/settings.json``  (Claude-Code-compatible)
+    2. user-mcp ``~/.deepcode/hooks_config.json``  (deepcode-hooks MCP list format)
+    3. project  ``<workspace>/.deepcode/hooks.json``
+    4. project  ``<workspace>/.claude/settings.json``  (Claude-Code-compatible)
 
 Only ``type: command`` handlers are supported; ``prompt`` / ``agent`` handlers
 and ``async: true`` are skipped with a warning (the reference does the same).
@@ -39,6 +40,22 @@ from core.harness.hooks.events import (
 
 _DEFAULT_TIMEOUT_SEC = 600
 
+# deepcode-hooks MCP stores camelCase event names; core uses the reference
+# agent's PascalCase names. Keys are matched case-insensitively via .lower().
+_MCP_EVENT_ALIASES: dict[str, str] = {
+    "sessionstart": "SessionStart",
+    "sessionend": "SessionEnd",
+    "pretooluse": "PreToolUse",
+    "posttooluse": "PostToolUse",
+    "userpromptsubmit": "UserPromptSubmit",
+    "permissionrequest": "PermissionRequest",
+    "precompact": "PreCompact",
+    "postcompact": "PostCompact",
+    "subagentstart": "SubagentStart",
+    "subagentstop": "SubagentStop",
+    "stop": "Stop",
+}
+
 
 @dataclass(slots=True)
 class Handler:
@@ -48,7 +65,7 @@ class Handler:
     matcher: str | None
     command: str
     timeout_sec: int
-    source: str  # "user" | "project" — for reporting only
+    source: str  # "user" | "user-mcp" | "project" — for reporting only
     source_path: str
     display_order: int
     status_message: str | None = None
@@ -67,6 +84,7 @@ def _hook_source_files(workspace: str, home: str | None) -> list[tuple[Path, str
     ws = Path(workspace)
     return [
         (home_dir / ".deepcode" / "hooks.json", "user"),
+        (home_dir / ".deepcode" / "hooks_config.json", "user-mcp"),
         (ws / ".deepcode" / "hooks.json", "project"),
         (ws / ".claude" / "settings.json", "project"),
     ]
@@ -97,7 +115,12 @@ def discover_hooks(workspace: str, home: str | None = None) -> DiscoveryResult:
 
 
 def _load_hook_events(path: Path, warnings: list[str]) -> dict | None:
-    """Read one config file and return its ``hooks`` object (or ``None``)."""
+    """Read one config file and return its ``hooks`` object (or ``None``).
+
+    Accepts both shapes:
+    - Claude-Code dict format: ``{"hooks": {"EventName": [...]}}``
+    - deepcode-hooks MCP list format: ``{"hooks": [ {name, event, handler, ...} ]}``
+    """
     if not path.is_file():
         return None
     try:
@@ -106,9 +129,61 @@ def _load_hook_events(path: Path, warnings: list[str]) -> dict | None:
         warnings.append(f"failed to read hooks config {path}: {exc}")
         return None
     hooks = data.get("hooks") if isinstance(data, dict) else None
-    if not isinstance(hooks, dict):
-        return None
-    return hooks
+    if isinstance(hooks, dict):
+        return hooks  # Claude-Code format
+    if isinstance(hooks, list):
+        # deepcode-hooks MCP list format (hooks_config.json)
+        return _mcp_hooks_to_events(hooks, warnings, path)
+    return None
+
+
+def _mcp_hooks_to_events(mcp_hooks: list, warnings: list[str], path: Path) -> dict:
+    """Convert the deepcode-hooks MCP ``hooks`` list to the events-dict shape.
+
+    Each entry: ``{name, event, handler, type, priority, timeout, enabled, ...}``.
+    Only ``shell`` / ``node`` handlers are kept — they runnable as plain
+    commands; ``python``-typed snippets are skipped with a warning.
+    """
+    events: dict[str, list] = {}
+    for hook in mcp_hooks:
+        if not isinstance(hook, dict):
+            continue
+        if hook.get("enabled") is False:
+            continue
+        event = hook.get("event")
+        if not isinstance(event, str):
+            continue
+        canonical = _MCP_EVENT_ALIASES.get(event.lower(), event)
+        if canonical not in HOOK_EVENT_NAMES:
+            continue  # 与未知事件键一致：静默跳过 (forward-compat)
+        handler = hook.get("handler")
+        if not isinstance(handler, str) or not handler.strip():
+            continue
+        htype = hook.get("type", "shell")
+        if htype not in ("shell", "node"):
+            warnings.append(
+                f"skipping {htype!r} hook {hook.get('name', '')!r} in {path}: "
+                "only shell/node handlers are runnable as commands"
+            )
+            continue
+        timeout = hook.get("timeout")
+        try:
+            timeout_sec = max(1, int(timeout)) if timeout is not None else None
+        except (TypeError, ValueError):
+            timeout_sec = None
+        events.setdefault(canonical, []).append(
+            {
+                "matcher": "*",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": handler,
+                        **({"timeout": timeout_sec} if timeout_sec is not None else {}),
+                    }
+                ],
+            }
+        )
+    return events
 
 
 def _append_group(
