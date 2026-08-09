@@ -353,8 +353,8 @@ Paper2Code 是 DeepCode 最初的研究方向，也是当前产品中专门面�
 DeepCode 提供两种界面，并且对应两条独立安装路径。任选一种即可开始；两端
 使用相同的 Agent 运行时和规范 Session 历史。
 
-> `uv tool install deepcode-hku` 安装的是 CLI 和共享 Python 运行时，
-> **不会**安装 Tauri Desktop 应用。
+> `uv tool install --python 3.12 deepcode-hku` 安装的是 CLI 和共享 Python
+> 运行时，**不会**安装 Tauri Desktop 应用。
 
 ### 方案 A：安装 CLI
 
@@ -367,9 +367,14 @@ winget install --id astral-sh.uv --exact
 首次安装 `uv` 后重新打开终端，再执行：
 
 ```console
-uv tool install deepcode-hku
+uv tool install --python 3.12 deepcode-hku
 deepcode init
 ```
+
+这里显式选择 Python 是有意的：DeepCode 要求 Python 3.12+，不能在旧解释器上
+回退安装已经不受支持的历史版本。
+如果现有 uv tool 环境仍安装着 DeepCode 1.x，可执行
+`uv tool upgrade --python 3.12 deepcode-hku` 完成迁移。
 
 首次创建模型连接。`--api-key` 会打开不回显的安全输入：
 

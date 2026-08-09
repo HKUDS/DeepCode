@@ -430,8 +430,8 @@ run, be inspected, and keep improving.
 DeepCode has two interfaces with separate installation paths. Choose one to get
 started; both use the same Agent runtime and canonical Session history.
 
-> `uv tool install deepcode-hku` installs the CLI and shared Python runtime. It
-> does **not** install the Tauri Desktop application.
+> `uv tool install --python 3.12 deepcode-hku` installs the CLI and shared
+> Python runtime. It does **not** install the Tauri Desktop application.
 
 ### Option A — Install the CLI
 
@@ -444,9 +444,14 @@ winget install --id astral-sh.uv --exact
 Open a new terminal after the first `uv` installation, then run:
 
 ```console
-uv tool install deepcode-hku
+uv tool install --python 3.12 deepcode-hku
 deepcode init
 ```
+
+The explicit Python selection is intentional: DeepCode requires Python 3.12+
+and must not fall back to an unsupported legacy package on an older interpreter.
+If an existing uv tool environment still contains DeepCode 1.x, migrate it with
+`uv tool upgrade --python 3.12 deepcode-hku`.
 
 Create a model connection once. `--api-key` opens a non-echoing prompt:
 

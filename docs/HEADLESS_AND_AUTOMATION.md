@@ -28,7 +28,7 @@ Install and initialize DeepCode, configure a model connection, and open the
 target repository in DeepCode at least once:
 
 ```console
-uv tool install deepcode-hku
+uv tool install --python 3.12 deepcode-hku
 deepcode init
 cd <your-project>
 deepcode
@@ -264,7 +264,7 @@ Project、规范 Session、模型、Skills、权限、Goal、工具、恢复规�
 仓库：
 
 ```console
-uv tool install deepcode-hku
+uv tool install --python 3.12 deepcode-hku
 deepcode init
 cd <你的项目>
 deepcode
