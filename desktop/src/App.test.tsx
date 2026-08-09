@@ -1470,9 +1470,20 @@ describe("desktop command center", () => {
     await screen.findByRole("heading", { name: "Skills" });
     fireEvent.click(await screen.findByRole("button", { name: "Create Skill" }));
 
-    const composer = (await screen.findByRole("textbox", {
-      name: "Task instruction",
-    })) as HTMLTextAreaElement;
+    // Creating a Skill crosses an async navigation and a thread/start RPC.
+    // Synchronize on that observable boundary before asserting the destination UI.
+    await waitFor(
+      () =>
+        expect(
+          runtime.requests.some((request) => request.method === "thread/start"),
+        ).toBe(true),
+      { timeout: 5_000 },
+    );
+    const composer = (await screen.findByRole(
+      "textbox",
+      { name: "Task instruction" },
+      { timeout: 5_000 },
+    )) as HTMLTextAreaElement;
     await waitFor(() =>
       expect(composer.value).toContain("$skill-creator"),
     );
