@@ -12,8 +12,12 @@ from typing import Any
 
 import yaml
 
+from core.skills.metadata import OPENAI_METADATA_PATH, read_skill_metadata
 from core.skills.models import (
+    LOCAL_SKILL_AUTHORITY,
+    SkillAuthority,
     SkillKey,
+    SkillPackageId,
     SkillRecord,
     SkillResolutionError,
     SkillScope,
@@ -21,7 +25,14 @@ from core.skills.models import (
     SkillStatus,
     SkillValidationError,
 )
-from core.skills.metadata import OPENAI_METADATA_PATH, read_skill_metadata
+from core.skills.provider import (
+    SkillListQuery,
+    SkillReadRequest,
+    SkillReadResult,
+    SkillSearchRequest,
+    SkillSearchMatch,
+    SkillSearchResult,
+)
 from core.skills.roots import discover_skill_roots
 
 SKILL_FILENAME = "SKILL.md"
@@ -49,12 +60,17 @@ class SkillCatalog:
     ) -> None:
         self._records = records
         self._warnings = warnings
-        self._by_id: dict[str, SkillRecord] = {}
+        self._by_id: dict[str, list[SkillRecord]] = {}
+        self._by_package: dict[tuple[SkillAuthority, SkillPackageId], SkillRecord] = {}
         active: dict[str, SkillRecord] = {}
         names: dict[str, list[SkillRecord]] = {}
         all_names: set[str] = set()
         for record in records:
-            self._by_id.setdefault(record.id, record)
+            self._by_id.setdefault(record.id, []).append(record)
+            self._by_package.setdefault(
+                (record.authority, record.package_id),
+                record,
+            )
             all_names.add(record.name.casefold())
             if record.status is SkillStatus.ACTIVE:
                 active[record.name.casefold()] = record
@@ -68,6 +84,10 @@ class SkillCatalog:
         digest = hashlib.sha256()
         for record in records:
             digest.update(record.id.encode())
+            if record.authority != LOCAL_SKILL_AUTHORITY:
+                digest.update(record.authority.kind.value.encode())
+                digest.update(record.authority.provider_id.encode())
+                digest.update(record.package_id.value.encode())
             digest.update(record.revision.encode())
             digest.update(record.status.value.encode())
             digest.update((record.shadowed_by or "").encode())
@@ -89,6 +109,12 @@ class SkillCatalog:
         )
         return (*self._warnings, *invalid, *metadata)[:MAX_CATALOG_WARNINGS]
 
+    @property
+    def provider_warnings(self) -> tuple[str, ...]:
+        """Warnings supplied by the owner, excluding record-derived diagnostics."""
+
+        return self._warnings
+
     def active(self) -> tuple[SkillRecord, ...]:
         return tuple(
             sorted(
@@ -102,7 +128,15 @@ class SkillCatalog:
         )
 
     def get(self, skill_id: str) -> SkillRecord | None:
-        return self._by_id.get(skill_id)
+        candidates = self._by_id.get(skill_id, ())
+        return candidates[0] if len(candidates) == 1 else None
+
+    def get_package(
+        self,
+        authority: SkillAuthority,
+        package: SkillPackageId,
+    ) -> SkillRecord | None:
+        return self._by_package.get((authority, package))
 
     def get_active(self, name: str) -> SkillRecord | None:
         return self._active_by_name.get(name.casefold())
@@ -121,9 +155,18 @@ class SkillCatalog:
         return record
 
     def select_id(self, skill_id: str) -> SkillRecord:
-        record = self.get(skill_id)
-        if record is None:
+        candidates = self._by_id.get(skill_id, ())
+        if not candidates:
             raise SkillResolutionError(f"Skill is no longer available: {skill_id}")
+        if len(candidates) > 1:
+            authorities = ", ".join(
+                f"{record.authority.kind.value}:{record.authority.provider_id}"
+                for record in candidates
+            )
+            raise SkillResolutionError(
+                f"Skill ID is ambiguous across providers: {skill_id} ({authorities})"
+            )
+        record = candidates[0]
         if record.status is SkillStatus.DISABLED:
             raise SkillResolutionError(f"Skill is disabled: {record.name}")
         if record.status is SkillStatus.INVALID:
@@ -237,11 +280,14 @@ def discover_skill_catalog(
         if truncated
         else ()
     )
-    return SkillCatalog(tuple(resolved), warnings=warnings)
+    return SkillCatalog(
+        tuple(record.without_instructions() for record in resolved),
+        warnings=warnings,
+    )
 
 
-class SkillCatalogProvider:
-    """Thread-safe catalog cache invalidated by filesystem or policy changes."""
+class LocalSkillProvider:
+    """Local/system Skill provider with a filesystem-aware catalog cache."""
 
     def __init__(
         self,
@@ -269,11 +315,15 @@ class SkillCatalogProvider:
         self._signature: tuple[Any, ...] | None = None
         self._catalog: SkillCatalog | None = None
 
-    def catalog(self, *, force: bool = False) -> SkillCatalog:
+    def list(self, query: SkillListQuery) -> SkillCatalog:
         disabled = self.disabled_loader()
         signature = (*self._filesystem_signature(), tuple(sorted(disabled)))
         with self._lock:
-            if not force and self._catalog is not None and signature == self._signature:
+            if (
+                not query.force
+                and self._catalog is not None
+                and signature == self._signature
+            ):
                 return self._catalog
             catalog = discover_skill_catalog(
                 self.workspace,
@@ -286,6 +336,100 @@ class SkillCatalogProvider:
             self._catalog = catalog
             self._signature = signature
             return catalog
+
+    def read(self, request: SkillReadRequest) -> SkillReadResult:
+        from core.skills.resources import read_local_resource
+
+        self._validate_authority(request.authority)
+        record = self.list(SkillListQuery()).get_package(
+            request.authority,
+            request.package,
+        )
+        if record is None:
+            raise SkillResolutionError(f"Skill not found: {request.package.value}")
+        contents, resource_revision = read_local_resource(
+            record,
+            request.resource,
+            workspace=self.workspace,
+        )
+        package_revision = record.revision
+        if request.resource == record.main_resource:
+            loaded = validate_skill_directory(
+                record.directory,
+                scope=record.scope,
+                source_root=record.source_root,
+            )
+            if loaded.id != record.id:
+                raise SkillResolutionError("Local Skill identity changed during read")
+            contents = loaded.require_instructions()
+            package_revision = loaded.revision
+        return SkillReadResult(
+            reference=request.reference,
+            contents=contents,
+            package_revision=package_revision,
+            resource_revision=resource_revision,
+        )
+
+    def search(self, request: SkillSearchRequest) -> SkillSearchResult:
+        self._validate_authority(request.authority)
+        query = request.query.strip().casefold()
+        if not query:
+            return SkillSearchResult()
+        matches: list[SkillSearchMatch] = []
+        catalog = self.list(SkillListQuery())
+        if request.package is None:
+            candidates = catalog.records
+        else:
+            record = catalog.get_package(request.authority, request.package)
+            if record is None:
+                raise SkillResolutionError(f"Skill not found: {request.package.value}")
+            from core.skills.resources import search_local_resources
+
+            return SkillSearchResult(
+                matches=search_local_resources(
+                    record,
+                    request.query,
+                    workspace=self.workspace,
+                    limit=request.limit,
+                )
+            )
+        for record in candidates:
+            interface = record.metadata.interface
+            searchable = "\n".join(
+                value
+                for value in (
+                    record.name,
+                    record.description,
+                    interface.display_name,
+                    interface.short_description,
+                    record.source,
+                )
+                if value
+            ).casefold()
+            if query in searchable:
+                matches.append(
+                    SkillSearchMatch(
+                        reference=record.provider_reference,
+                        title=record.name,
+                        snippet=record.description,
+                    )
+                )
+                if len(matches) >= request.limit:
+                    break
+        return SkillSearchResult(matches=tuple(matches))
+
+    @staticmethod
+    def _validate_authority(authority: SkillAuthority) -> None:
+        if authority != LOCAL_SKILL_AUTHORITY:
+            raise SkillResolutionError(
+                "Local Skill provider does not own authority "
+                f"{authority.kind.value}:{authority.provider_id}"
+            )
+
+    def catalog(self, *, force: bool = False) -> SkillCatalog:
+        """Compatibility alias for callers predating the provider contract."""
+
+        return self.list(SkillListQuery(force=force))
 
     def invalidate(self) -> None:
         with self._lock:
@@ -532,10 +676,15 @@ def _coerce_tools(value: Any, *, path: Path) -> tuple[str, ...]:
     return tuple(tools)
 
 
+# Compatibility for code that imported the original cache-oriented name.
+SkillCatalogProvider = LocalSkillProvider
+
+
 __all__ = [
-    "MAX_SKILL_BYTES",
     "MAX_CATALOG_ENTRIES",
+    "MAX_SKILL_BYTES",
     "SKILL_FILENAME",
+    "LocalSkillProvider",
     "SkillCatalog",
     "SkillCatalogProvider",
     "discover_skill_catalog",

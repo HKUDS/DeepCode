@@ -41,7 +41,16 @@ class SkillRegistry:
         return True
 
     def get(self, name: str) -> SkillRecord | None:
-        return self._extra.get(name.casefold()) or self.catalog.get_active(name)
+        record = self._extra.get(name.casefold()) or self.catalog.get_active(name)
+        if record is None or record.loaded:
+            return record
+        # The compatibility registry is local-only. Product code reads through
+        # SkillRuntime so provider ownership and revision pinning are enforced.
+        return validate_skill_directory(
+            record.directory,
+            scope=record.scope,
+            source_root=record.source_root,
+        )
 
     def all(self) -> list[SkillRecord]:
         records = {record.id: record for record in self.catalog.active()}
@@ -96,9 +105,18 @@ def discover_skills(
             "name": {
                 "type": "string",
                 "description": "The available Skill to load before starting.",
-            }
+            },
+            "resource": {
+                "type": "string",
+                "description": "Optional provider-owned resource ID to read.",
+            },
+            "query": {
+                "type": "string",
+                "description": "Optional text to search inside package resources.",
+            },
         },
         "required": ["name"],
+        "additionalProperties": False,
     }
 )
 class SkillTool(Tool):
@@ -114,8 +132,8 @@ class SkillTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Load the full instructions for an available Skill before doing that "
-            "kind of task. An explicitly selected Skill is already loaded."
+            "Load an available Skill, or read/search one of its provider-owned "
+            "resources. An explicitly selected Skill is already loaded."
         )
 
     @property
@@ -124,15 +142,41 @@ class SkillTool(Tool):
 
     async def execute(self, **kwargs):
         name = str(kwargs.get("name") or "").strip()
+        resource = str(kwargs.get("resource") or "").strip()
+        query = str(kwargs.get("query") or "").strip()
+        if resource and query:
+            return "Error: pass either resource or query, not both"
         try:
             if isinstance(self._source, SkillRuntime):
                 record, added = self._source.load_implicit(name)
+                if resource:
+                    return self._source.read_package_resource(
+                        record,
+                        resource,
+                    ).contents
+                if query:
+                    result = self._source.search_package_resources(
+                        record,
+                        query,
+                    )
+                    if not result.matches:
+                        return (
+                            f"No resources in Skill {record.name!r} matched {query!r}."
+                        )
+                    return "\n\n".join(
+                        f"## {match.title}\n{match.snippet}" for match in result.matches
+                    )
                 if not added:
                     return (
                         f"Skill {record.name!r} is already loaded for this Turn. "
                         "Follow the previously injected instructions."
                     )
             else:
+                if resource or query:
+                    return (
+                        "Error: resource access requires the provider-aware "
+                        "SkillRuntime"
+                    )
                 record = self._source.get(name)
                 if record is None:
                     available = ", ".join(self._source.names()) or "(none)"

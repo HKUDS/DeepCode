@@ -95,11 +95,12 @@ class SkillService:
                     "project must be trusted before project Skill instructions "
                     "can be read"
                 )
-        instructions = record.instructions[:MAX_SKILL_INSTRUCTIONS]
+        full_instructions = record.require_instructions()
+        instructions = full_instructions[:MAX_SKILL_INSTRUCTIONS]
         return SkillDetail(
             info=_skill_info(record),
             instructions=instructions,
-            truncated=len(record.instructions) > MAX_SKILL_INSTRUCTIONS,
+            truncated=len(full_instructions) > MAX_SKILL_INSTRUCTIONS,
         )
 
     def set_enabled(

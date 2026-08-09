@@ -6,9 +6,9 @@ import os
 import shutil
 import threading
 import uuid
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
 
 from core.skills.catalog import SkillCatalog, validate_skill_directory
 from core.skills.models import (
@@ -18,8 +18,8 @@ from core.skills.models import (
     SkillSourceRoot,
     SkillValidationError,
 )
-from core.skills.runtime import SkillRuntime
 from core.skills.roots import managed_skill_root
+from core.skills.runtime import SkillRuntime
 
 MAX_IMPORT_FILES = 500
 MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024
@@ -44,14 +44,14 @@ class LocalSkillManager:
         clean = identifier.strip()
         if not clean:
             raise SkillResolutionError("Skill ID must not be empty")
+        if clean.startswith("sk_"):
+            return self.runtime.read(clean)
         catalog = self.catalog()
-        record = catalog.get(clean)
-        if record is None and not clean.startswith("sk_"):
-            # Read-only compatibility with the original name-based API.
-            record = catalog.get_active(clean)
+        # Read-only compatibility with the original name-based API.
+        record = catalog.get_active(clean)
         if record is None:
             raise SkillResolutionError(f"Skill not found: {clean}")
-        return record
+        return self.runtime.read(record.id)
 
     def select(self, identifier: str) -> SkillRecord:
         """Resolve a Turn selection without guessing between duplicate names."""
@@ -233,8 +233,8 @@ def _fsync_directory(path: Path) -> None:
 
 
 __all__ = [
-    "LocalSkillManager",
     "MAX_IMPORT_FILES",
     "MAX_IMPORT_FILE_BYTES",
     "MAX_IMPORT_TOTAL_BYTES",
+    "LocalSkillManager",
 ]

@@ -144,6 +144,24 @@ Skills, permissions, Goals, and Automations. See the
 
 ## News
 
+**2026-08-09 · Skills now have a real runtime contract**
+
+- **Load guidance through one provider boundary.** Skill discovery, content
+  reads, and package search now stay with the provider that owns the Skill,
+  while the catalog remains metadata-only. Local Skills keep their existing
+  precedence and identity, and future providers no longer need filesystem
+  shortcuts to fit the runtime.
+- **Compose Skills without hiding missing capabilities.** Skills can declare
+  tool and Skill dependencies; DeepCode expands them in order, detects cycles,
+  and fails before the first model request when a requirement is unavailable.
+- **Reveal only what the task needs.** The Agent can search and read bounded
+  package resources progressively, with revision, traversal, symlink, and size
+  checks applied at the shared provider contract.
+- **Keep execution constrained and auditable.** A Skill can narrow the tools
+  already allowed by the Session but cannot grant new permissions. CLI, TUI,
+  and Desktop share the same immutable Turn snapshot and persist only Skill
+  identity, invocation kind, and revision—not the instruction body.
+
 **2026-08-07 · Thinking controls, more providers, and a Desktop you can tune**
 
 - **Reasoning controls work again across the board.** Thinking levels are now
@@ -202,50 +220,25 @@ DeepCode v2.0 is built to help you spend less time supervising every step and
 more time shipping software you are proud of. We cannot wait to see what you
 build! 🚀
 
-**2026-07-31 · One execution model across CLI and Desktop**
-
-- Interactive, headless, Goal, Automation, and Desktop work all use the same
-  durable Project, Session, Thread, and Turn lifecycle.
-- Workspace trust is explicit and independent from the Session access preset:
-  **Ask**, **Read only**, or **Full access**.
-- Model-aware Thinking controls and typed reasoning presentation remain
-  separate, so changing display detail never changes the model request.
-
-**2026-07-21 · Durable Goals and safe Session lifecycle**
-
-- Run long tasks as resumable, evidence-driven Goals shared by CLI and Desktop.
-- Archive history for later or permanently delete it through one guarded
-  Session lifecycle, without touching repository files.
-- Interrupted deletions recover from a durable tombstone instead of reviving
-  stale Session records.
-
-**2026-07-20 · Session-level model control and shared Skills**
-
-- Configure named LLM connections once and use them throughout DeepCode.
-- Switch the connection or model for future Turns without losing the
-  conversation that came before it.
-- Discover, import, enable, and select the same project or user Skills
-  regardless of how the task was started.
-
-**2026-07-17 · Durable Session navigation and replay**
-
-- Projects organize their own collapsible Session history while older Sessions
-  remain discoverable across directories.
-- Long conversations replay incrementally instead of being rejected as one
-  oversized message.
-- Approvals, change review, tests, and Artifacts remain attached to the task
-  that produced them.
-
-**2026-07-10 · Loop Engineering and parallel agents**
-
-- Give DeepCode a mutable Goal; it can inspect, implement, verify where
-  appropriate, and repair across ordinary Turns while remaining steerable.
-- Delegate focused work to agents in isolated worktrees, then surface conflicts
-  explicitly before integration.
-
 <details>
-<summary><strong>Earlier milestones</strong></summary>
+<summary><strong>Earlier 2026 milestones</strong></summary>
 
+- **2026-07-31 · One execution model across CLI and Desktop.** Interactive,
+  headless, Goal, Automation, and Desktop work share the same durable Project,
+  Session, Thread, and Turn lifecycle. Workspace trust stays independent from
+  the Session access preset, and reasoning controls remain model-aware.
+- **2026-07-21 · Durable Goals and safe Session lifecycle.** Long-running Goals
+  are resumable across CLI and Desktop, while guarded archival and deletion
+  preserve repository files and recover safely after interruption.
+- **2026-07-20 · Session-level model control and shared Skills.** Named LLM
+  connections and future-Turn model switches preserve conversation history;
+  project and user Skills are shared across entry points.
+- **2026-07-17 · Durable Session navigation and replay.** Projects organize
+  collapsible Session history, long conversations replay incrementally, and
+  approvals, reviews, tests, and Artifacts remain attached to their task.
+- **2026-07-10 · Loop Engineering and parallel agents.** Mutable Goals can
+  inspect, implement, verify, and repair across steerable Turns, while focused
+  work can be delegated in isolated worktrees with explicit conflict handling.
 - **2026-07-08 · Durable Sessions and memory.** Session history survives
   restarts, project instructions can live in `AGENTS.md` or `DEEPCODE.md`, and
   persistent notes remain with the workspace.

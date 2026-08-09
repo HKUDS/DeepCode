@@ -8,10 +8,16 @@ from typing import Any
 
 import yaml
 
-from core.skills.models import SkillInterface, SkillMetadata
+from core.skills.models import (
+    SkillDependencies,
+    SkillInterface,
+    SkillMetadata,
+    SkillToolDependency,
+)
 
 OPENAI_METADATA_PATH = Path("agents") / "openai.yaml"
 MAX_METADATA_BYTES = 32 * 1024
+MAX_METADATA_DEPENDENCIES = 64
 _COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
@@ -34,12 +40,16 @@ def read_skill_metadata(directory: Path) -> tuple[SkillMetadata, bytes | None]:
             raise ValueError("metadata must be a mapping")
         interface_raw = raw.get("interface", {})
         policy_raw = raw.get("policy", {})
+        dependencies_raw = raw.get("dependencies", {})
         interface_raw = {} if interface_raw is None else interface_raw
         policy_raw = {} if policy_raw is None else policy_raw
+        dependencies_raw = {} if dependencies_raw is None else dependencies_raw
         if not isinstance(interface_raw, dict):
             raise ValueError("interface must be a mapping")
         if not isinstance(policy_raw, dict):
             raise ValueError("policy must be a mapping")
+        if not isinstance(dependencies_raw, dict):
+            raise ValueError("dependencies must be a mapping")
 
         interface = SkillInterface(
             display_name=_optional_text(
@@ -76,6 +86,7 @@ def read_skill_metadata(directory: Path) -> tuple[SkillMetadata, bytes | None]:
             SkillMetadata(
                 interface=interface,
                 allow_implicit_invocation=allow_implicit,
+                dependencies=_dependencies(dependencies_raw),
             ),
             payload,
         )
@@ -118,8 +129,83 @@ def _icon_path(value: Any, *, field: str, directory: Path) -> str | None:
     return relative.as_posix()
 
 
+def _dependencies(raw: dict[str, Any]) -> SkillDependencies:
+    tools_raw = raw.get("tools", ()) or ()
+    skills_raw = raw.get("skills", ()) or ()
+    if not isinstance(tools_raw, (list, tuple)):
+        raise ValueError("dependencies.tools must be a list")
+    if not isinstance(skills_raw, (list, tuple)):
+        raise ValueError("dependencies.skills must be a list")
+    if len(tools_raw) + len(skills_raw) > MAX_METADATA_DEPENDENCIES:
+        raise ValueError(f"dependencies exceed {MAX_METADATA_DEPENDENCIES} entries")
+
+    tools: list[SkillToolDependency] = []
+    for index, item in enumerate(tools_raw):
+        if not isinstance(item, dict):
+            raise ValueError(f"dependencies.tools[{index}] must be a mapping")
+        dependency_type = _required_text(
+            item.get("type"),
+            field=f"dependencies.tools[{index}].type",
+            limit=40,
+        ).casefold()
+        tools.append(
+            SkillToolDependency(
+                type=dependency_type,
+                value=_required_text(
+                    item.get("value"),
+                    field=f"dependencies.tools[{index}].value",
+                    limit=240,
+                ),
+                description=_optional_text(
+                    item.get("description"),
+                    field=f"dependencies.tools[{index}].description",
+                    limit=500,
+                ),
+                transport=_optional_text(
+                    item.get("transport"),
+                    field=f"dependencies.tools[{index}].transport",
+                    limit=40,
+                ),
+                command=_optional_text(
+                    item.get("command"),
+                    field=f"dependencies.tools[{index}].command",
+                    limit=500,
+                ),
+                url=_optional_text(
+                    item.get("url"),
+                    field=f"dependencies.tools[{index}].url",
+                    limit=2_000,
+                ),
+            )
+        )
+
+    skills: list[str] = []
+    seen: set[str] = set()
+    for index, item in enumerate(skills_raw):
+        if isinstance(item, dict):
+            item = item.get("name")
+        name = _required_text(
+            item,
+            field=f"dependencies.skills[{index}]",
+            limit=80,
+        )
+        folded = name.casefold()
+        if folded not in seen:
+            skills.append(name)
+            seen.add(folded)
+    return SkillDependencies(tools=tuple(tools), skills=tuple(skills))
+
+
+def _required_text(value: Any, *, field: str, limit: int) -> str:
+    text = _optional_text(value, field=field, limit=limit)
+    if text is None:
+        raise ValueError(f"{field} is required")
+    return text
+
+
 __all__ = [
     "MAX_METADATA_BYTES",
+    "MAX_METADATA_DEPENDENCIES",
     "OPENAI_METADATA_PATH",
     "read_skill_metadata",
 ]

@@ -61,6 +61,90 @@ candidates remain visible as `shadowed`. Structured selection by `skillId` is
 unambiguous. A plain `$name` that is ambiguous among selectable entries fails
 before model execution instead of guessing.
 
+## Provider boundary
+
+`SkillRuntime` depends on a `SkillProvider` contract with three operations:
+
+- `list` returns the immutable catalog snapshot used for one Turn;
+- `read` resolves an opaque package resource through the Provider that listed it;
+- `search` performs bounded catalog or package-resource search.
+
+The initial `LocalSkillProvider` owns project, user, compatibility, and bundled
+system roots. It retains the existing discovery order, filesystem cache,
+policy layering, IDs, revisions, statuses, and warnings. The previous
+`SkillCatalogProvider` name remains a compatibility alias.
+
+Runtime code must not turn a provider record into an ambient local path and
+then bypass the provider for read or search. This keeps the source boundary
+usable by later providers without adding remote installation, federation,
+marketplace, or Plugin behavior to this release.
+
+Every catalog record carries a `SkillReference` composed of:
+
+- `authority`: provider kind plus an opaque provider ID;
+- `package`: an opaque package ID;
+- `resource`: an opaque provider-owned resource ID.
+
+The local authority is `local:local`. Its package remains the existing opaque
+`skillId`, and its main resource is `SKILL.md`; adding provider identity does
+not change existing Skill IDs, revisions, precedence, or source labels.
+
+`SkillProviderSource` declares which authorities a Provider owns.
+`SkillProviders` routes `read` and `search` only to an owning source, rejects
+catalog entries from an unowned authority, rejects duplicate package identities,
+and verifies that returned resources still belong to the requested
+authority/package/resource. A Turn retains the immutable reference on its
+selected `SkillRecord`.
+
+Configured Provider catalogs are merged in source order. Existing local
+precedence remains inside the local Provider; the first active package with a
+given name wins across Providers and later candidates remain visible as
+`shadowed`. A Provider may explicitly report a temporary availability failure,
+which becomes a bounded warning while the remaining catalogs continue.
+Validation, ownership, and policy errors are not swallowed. A colliding
+`skillId` across authorities is visible in the catalog but cannot be selected by
+ID, because `SkillSelection` intentionally remains backward-compatible and
+contains no Provider authority.
+
+## Catalog, content, and package resources
+
+Catalog records contain identity, description, policy, dependency metadata,
+status, byte size, and revision, but never retain the `SKILL.md` body. Selection
+and progressive disclosure issue a `read` to the same Provider that listed the
+package. The returned package revision must match the catalog revision before
+the body can enter a Turn snapshot. A body changed between list and read fails
+closed instead of mixing revisions.
+
+`SkillReadResult` carries text, package revision, resource revision, and the
+exact `SkillReference`. `SkillSearchMatch` carries an exact reference plus a
+bounded title and snippet. Provider responses are size-checked at the shared
+contract, so a custom Provider cannot bypass local limits.
+
+The `skill` tool accepts a Skill name and optionally either `resource` or
+`query`. With neither it loads the main instructions. `resource` reads one
+opaque resource and `query` searches within the selected package. Callers never
+convert remote resource IDs into filesystem paths. The local Provider accepts
+relative POSIX paths only, rejects traversal and symlink escape, reads UTF-8
+text within a fixed byte limit, and searches a deterministic bounded number of
+files.
+
+## Dependencies and capabilities
+
+Optional `agents/openai.yaml` metadata may declare `dependencies.tools` and
+`dependencies.skills`. Tool dependency records retain Codex-compatible
+`type`, `value`, `description`, `transport`, `command`, and `url` fields. DeepCode
+currently resolves `tool`, Codex-compatible `mcp` / `cli`, and the `command`
+alias; an unsupported type is blocked explicitly instead of being guessed.
+
+At Turn start, `AgentSession` supplies the actually registered tool names.
+The capability resolver reports `ready`, `unavailable`, or `blocked`, validates
+`allowed-tools` consistency, expands Skill dependencies in topological order,
+detects cycles, and fails before the first model request. Dependency Skills use
+the same Provider reads, revision checks, count budget, character budget,
+invocation ledger, and permission narrowing as selected Skills. Dependencies
+never register a tool, bypass Session permissions, or turn a resource into an
+ambient executable path.
+
 ## Invocation semantics
 
 An explicit selection is submitted as a structured `SkillSelection`. The
@@ -89,7 +173,7 @@ All explicit, `$name`, and progressive-disclosure loads share one Turn budget.
 Multiple Skills:
 
 - retain user selection order;
-- are deduplicated by `(skillId, revision)`;
+- are deduplicated by `(authority, package)`;
 - are limited to eight loaded Skills per Turn;
 - share a bounded instruction budget;
 - fail before model execution if a selected Skill is disabled, missing,
@@ -109,8 +193,10 @@ the ordinary AgentSession, tools, trust, approvals, and audit trail.
 `display_name`, `short_description`, relative icon paths, `brand_color`, and
 `default_prompt`. `policy.allow_implicit_invocation` defaults to true. False
 removes a Skill from model-driven discovery while preserving structured and
-`$name` selection. Invalid optional metadata produces a bounded catalog warning
-and never invalidates an otherwise valid `SKILL.md`.
+`$name` selection. `dependencies.tools` and `dependencies.skills` declare
+capability requirements and composable Skill prerequisites. Invalid optional
+metadata produces a bounded catalog warning and never invalidates an otherwise
+valid `SKILL.md`.
 
 ## Configuration
 
@@ -187,6 +273,10 @@ error classes, but not Skill instructions or user prompts.
 - imported folder: one Skill, no symlinks, no overwrite without an explicit
   request, atomic destination replacement;
 - optional Skill metadata: 32 KiB maximum with relative, in-directory assets;
+- optional dependencies: at most 64 tool and Skill entries combined;
+- one Provider resource response: 1 MiB UTF-8 maximum;
+- local resource search: at most 256 files, 256 KiB per searched file, and 100
+  matches per request;
 - no Git or network installation in this release.
 
 ## Release gates
@@ -195,7 +285,13 @@ The feature is complete only when:
 
 - Desktop and CLI return identical IDs and revisions for the same workspace;
 - structured and unambiguous `$name` invocation resolve to the same snapshot;
-- explicit instructions are present before the first provider call;
+- explicit instructions are present before the first model-provider call;
+- catalog listing retains no instruction bodies and every content read stays on
+  the listing Provider;
+- Provider outage isolation never hides validation, ownership, or policy errors;
+- resource traversal/symlink escape and oversized Provider responses fail
+  deterministically;
+- missing, conflicting, and cyclic dependencies fail before model execution;
 - Skill bodies never appear in system messages or persisted history;
 - project/user/system `.agents` discovery and legacy roots remain deterministic;
 - bundled creator scripts reject overwrite and pass production validation;

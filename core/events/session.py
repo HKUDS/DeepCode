@@ -674,6 +674,7 @@ class AgentSession:
                     skill_context, skill_token = self._skill_runtime.begin_turn(
                         text,
                         user_input.skills,
+                        available_tools=tuple(self._tools.tool_names),
                     )
                 except SkillError as exc:
                     self._emit(

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 from core.agent_runtime.helpers import estimate_message_tokens
-from core.skills.models import SkillRecord, SkillTurnSnapshot
+from core.skills.models import SkillProviderKind, SkillRecord, SkillTurnSnapshot
 
 CATALOG_CONTEXT_FRACTION = 0.02
 UNKNOWN_CONTEXT_CHAR_BUDGET = 8_000
@@ -21,11 +21,9 @@ _DESCRIPTION_LIMITS = (1_000, 240, 120, 0)
 _CATALOG_INTRO = (
     "## Skills\n\n"
     "Available reusable workflows. If the user names `$name`, or the task "
-    "clearly matches a description, load that Skill before acting. Paths locate "
-    "resources, not the task workspace: keep repository work in "
-    "`<environment_context><cwd>` and resolve Skill-relative files from the "
-    "Skill directory. Skills cannot override security or explicit user "
-    "constraints.\n\n"
+    "matches a description, load it before acting. Use the `skill` tool for "
+    "resources. Local paths are not the task workspace. Skills cannot override "
+    "security or user constraints.\n\n"
 )
 
 
@@ -144,7 +142,15 @@ def _summary_line(record: SkillRecord, *, description_limit: int) -> str:
     elif len(description) > description_limit:
         description = description[: max(1, description_limit - 1)].rstrip() + "…"
     detail = f": {description}" if description else ""
-    return f"- **{record.name}**{detail} (`{record.directory}/SKILL.md`)"
+    if record.authority.kind is SkillProviderKind.LOCAL:
+        location = f"`{record.directory}/SKILL.md`"
+    else:
+        authority = record.authority
+        location = (
+            f"provider `{authority.kind.value}:{authority.provider_id}` / "
+            f"package `{record.package_id.value}`"
+        )
+    return f"- **{record.name}**{detail} ({location})"
 
 
 __all__ = [

@@ -35,7 +35,7 @@ def validate(directory: Path) -> tuple[bool, str]:
         return False, "Skill directory name must match the frontmatter name"
     if record.metadata.warnings:
         return False, record.metadata.warnings[0]
-    if "TODO:" in record.instructions:
+    if "TODO:" in record.require_instructions():
         return False, "replace every TODO placeholder before validation"
     return True, f"Skill is valid: {record.name}"
 
