@@ -410,11 +410,20 @@ def build_exec_command(
     if (command is None) == (argv is None):
         raise ValueError("provide exactly one of command= or argv=")
 
+    # ``enabled`` is the immutable per-execution value used by product access
+    # presets.  ``None`` intentionally retains the legacy env/default behavior
+    # for direct embedders that have not adopted ExecutionSecurityProfile yet.
+    effective_enabled = sandbox_enabled() if enabled is None else enabled
+    if not effective_enabled:
+        bare = [shell, "-c", command] if command is not None else list(argv or [])
+        return WrappedCommand(argv=bare, backend="disabled")
+
     # On Windows the wrapped command is launched by the Job Object sandbox
-    # (``CreateProcessW``) or, in the disabled path, directly by the executor —
-    # neither can resolve POSIX-style shell paths like ``/bin/bash``. Resolve a
-    # real executable path (e.g. Git Bash ``sh``) so the inner command starts;
-    # callers may still override ``shell`` with any Windows-resolvable value.
+    # (``CreateProcessW``), which cannot resolve POSIX-style shell paths like
+    # ``/bin/bash``. Resolve a real executable path (e.g. Git Bash ``sh``) so
+    # the inner command starts; callers may still override ``shell`` with any
+    # Windows-resolvable value. The disabled path above keeps the bare argv
+    # untouched (upstream-locked contract).
     if command is not None and os.name == "nt":
         import shutil
 
@@ -423,14 +432,6 @@ def build_exec_command(
             resolved = shutil.which("sh")
         if resolved:
             shell = resolved
-
-    # ``enabled`` is the immutable per-execution value used by product access
-    # presets.  ``None`` intentionally retains the legacy env/default behavior
-    # for direct embedders that have not adopted ExecutionSecurityProfile yet.
-    effective_enabled = sandbox_enabled() if enabled is None else enabled
-    if not effective_enabled:
-        bare = [shell, "-c", command] if command is not None else list(argv or [])
-        return WrappedCommand(argv=bare, backend="disabled")
 
     policy = SandboxPolicy.for_workspace(workspace, allow_network=allow_network)
     if command is not None:
