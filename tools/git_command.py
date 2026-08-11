@@ -69,8 +69,8 @@ class GitHubURLExtractor:
                         continue
 
                 # 规范化 URL
-                url = url.rstrip(".git")
                 url = url.rstrip("/")
+                url = url.removesuffix(".git")
 
                 # 修复重复的 github.com
                 if "github.com/github.com/" in url:
@@ -112,7 +112,7 @@ class GitHubURLExtractor:
     @staticmethod
     def infer_repo_name(url: str) -> str:
         """从URL推断仓库名称"""
-        url = url.rstrip(".git")
+        url = url.removesuffix(".git")
         if "github.com" in url:
             parts = url.split("/")
             if len(parts) >= 2:
