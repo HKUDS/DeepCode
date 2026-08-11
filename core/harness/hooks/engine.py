@@ -176,16 +176,17 @@ class HooksEngine:
             additional_contexts=folded.additional_contexts,
         )
 
-    async def run_session_end(self, reason: str = "complete") -> ContextOutcome:
-        """Session lifecycle end — a notification hook (summary persistence, etc.).
+    async def run_session_end(self, reason: str = "shutdown") -> ContextOutcome:
+        """Session lifecycle end — fires exactly once when the session terminates.
 
-        Fires unconditionally at the close of a turn (complete / interrupted /
-        error), unlike ``PreCompact`` which only fires when a summarization pass
-        actually runs. Matchers are ignored (see ``_EVENTS_WITHOUT_MATCHER``);
-        the caller logs failures so a hook can never crash the turn.
+        Called from ``AgentSession.submit(Shutdown)``, never per turn. The
+        reason doubles as the matcher input so a hook can target a specific
+        exit path (e.g. ``matcher: "shutdown"``); supported session-exit
+        reasons are ``shutdown``, ``interrupted`` and ``error``. The caller
+        logs failures so a hook can never crash the session close.
         """
         payload = {"hook_event_name": "SessionEnd", "reason": reason}
-        folded = await self._dispatch("SessionEnd", None, payload)
+        folded = await self._dispatch("SessionEnd", reason, payload)
         return ContextOutcome(
             block=folded.block,
             block_reason=folded.block_reason,
