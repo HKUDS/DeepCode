@@ -44,6 +44,7 @@ import platform
 import shutil
 import tempfile
 from dataclasses import dataclass, field
+from pathlib import Path
 
 # Absolute path — never resolved via PATH (PATH-injection defense).
 _MACOS_SANDBOX_EXEC = "/usr/bin/sandbox-exec"
@@ -322,8 +323,14 @@ def wrap_argv_command(
         # ``python -m core.harness.windows_sandbox -- <inner argv...>`` creates
         # a KILL_ON_JOB_CLOSE job, spawns the inner command into it suspended,
         # and resumes it — the whole process tree dies with the wrapper.
+        #
+        # The wrapper runs as ``python -m core.harness.windows_sandbox``, so the
+        # child interpreter must be able to import ``core``. The BashTool cwd is
+        # the workspace (often a tmp dir) — not on sys.path — so inject the repo
+        # root through PYTHONPATH to keep the module importable.
         import sys as _sys
 
+        repo_root = str(Path(__file__).resolve().parents[2])
         argv = [
             _sys.executable,
             "-m",
@@ -331,7 +338,11 @@ def wrap_argv_command(
             "--",
             *inner_argv,
         ]
-        return WrappedCommand(argv=argv, backend=backend)
+        return WrappedCommand(
+            argv=argv,
+            backend=backend,
+            extra_env={"PYTHONPATH": repo_root},
+        )
 
     return WrappedCommand(argv=list(inner_argv), backend="none")
 
@@ -398,6 +409,20 @@ def build_exec_command(
     """
     if (command is None) == (argv is None):
         raise ValueError("provide exactly one of command= or argv=")
+
+    # On Windows the wrapped command is launched by the Job Object sandbox
+    # (``CreateProcessW``) or, in the disabled path, directly by the executor —
+    # neither can resolve POSIX-style shell paths like ``/bin/bash``. Resolve a
+    # real executable path (e.g. Git Bash ``sh``) so the inner command starts;
+    # callers may still override ``shell`` with any Windows-resolvable value.
+    if command is not None and os.name == "nt":
+        import shutil
+
+        resolved = shutil.which(shell)
+        if resolved is None and shell in ("/bin/bash", "/bin/sh", "bash", "sh"):
+            resolved = shutil.which("sh")
+        if resolved:
+            shell = resolved
 
     # ``enabled`` is the immutable per-execution value used by product access
     # presets.  ``None`` intentionally retains the legacy env/default behavior
