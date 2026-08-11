@@ -75,11 +75,15 @@ class LoopDetector:
             Dict with status and warnings
         """
         current_time = time.time()
-        self.tool_history.append(tool_name)
+        # Empty tool names (probe calls from should_abort/get_abort_reason)
+        # must not pollute the history — a run of "" entries would otherwise
+        # trip the repeat check and report a bogus loop.
+        if tool_name:
+            self.tool_history.append(tool_name)
 
-        # Keep only recent history (last 10 calls)
-        if len(self.tool_history) > 10:
-            self.tool_history = self.tool_history[-10:]
+            # Keep only recent history (last 10 calls)
+            if len(self.tool_history) > 10:
+                self.tool_history = self.tool_history[-10:]
 
         # Check for repeated tool calls
         if len(self.tool_history) >= self.max_repeats:
@@ -87,7 +91,7 @@ class LoopDetector:
             if len(set(recent_tools)) == 1:  # All same tool
                 return {
                     "status": "loop_detected",
-                    "message": f"⚠️ Loop detected: {tool_name} called {self.max_repeats} times consecutively",
+                    "message": f"⚠️ Loop detected: {recent_tools[0]} called {self.max_repeats} times consecutively",
                     "should_stop": True,
                 }
 
