@@ -172,9 +172,7 @@ def _mcp_hooks_to_events(mcp_hooks: list, warnings: list[str], path: Path) -> di
             continue
         event = hook.get("event")
         if not isinstance(event, str) or not event.strip():
-            warnings.append(
-                f"skipping hook {name!r} without an event in {path}"
-            )
+            warnings.append(f"skipping hook {name!r} without an event in {path}")
             continue
         canonical = _MCP_EVENT_ALIASES.get(event.lower(), event)
         if canonical not in HOOK_EVENT_NAMES:
@@ -184,9 +182,7 @@ def _mcp_hooks_to_events(mcp_hooks: list, warnings: list[str], path: Path) -> di
             continue
         handler = hook.get("handler")
         if not isinstance(handler, str) or not handler.strip():
-            warnings.append(
-                f"skipping hook {name!r} without a handler in {path}"
-            )
+            warnings.append(f"skipping hook {name!r} without a handler in {path}")
             continue
         htype = hook.get("type", "shell")
         if htype not in ("shell", "node"):
@@ -205,9 +201,7 @@ def _mcp_hooks_to_events(mcp_hooks: list, warnings: list[str], path: Path) -> di
             timeout_sec = None
         raw_matcher = hook.get("matcher")
         matcher = (
-            raw_matcher
-            if isinstance(raw_matcher, str) and raw_matcher.strip()
-            else "*"
+            raw_matcher if isinstance(raw_matcher, str) and raw_matcher.strip() else "*"
         )
         priority = hook.get("priority", 0)
         try:
@@ -237,6 +231,7 @@ def _mcp_hooks_to_events(mcp_hooks: list, warnings: list[str], path: Path) -> di
         for group in groups:
             group.pop("priority", None)
     return events
+
 
 def _append_group(
     handlers: list[Handler],

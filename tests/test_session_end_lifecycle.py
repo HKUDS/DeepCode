@@ -213,7 +213,9 @@ def test_maybe_compact_checkpoint_injected_after_success(monkeypatch):
     ]
     compacted = asyncio.run(runner._maybe_compact(spec, messages))
     checkpoint_msgs = [
-        m for m in compacted if m.get("role") == "user" and "PreCompact checkpoint" in str(m.get("content"))
+        m
+        for m in compacted
+        if m.get("role") == "user" and "PreCompact checkpoint" in str(m.get("content"))
     ]
     assert checkpoint_msgs, "checkpoint must survive a successful compaction"
     assert "checkpoint ctx" in checkpoint_msgs[0]["content"]
@@ -316,7 +318,9 @@ def test_mcp_list_format_accepted_from_user_mcp(tmp_path):
     )
     result = discover_hooks(ws, home)
     assert result.warnings == []
-    assert any(h.event_name == "PreToolUse" and h.command == "echo hi" for h in result.handlers)
+    assert any(
+        h.event_name == "PreToolUse" and h.command == "echo hi" for h in result.handlers
+    )
 
 
 def test_mcp_list_format_rejected_from_other_sources(tmp_path):
@@ -326,7 +330,9 @@ def test_mcp_list_format_rejected_from_other_sources(tmp_path):
     (ws / ".deepcode").mkdir(parents=True, exist_ok=True)
     # list shape in a project hooks.json (non user-mcp source) must be rejected
     (ws / ".deepcode" / "hooks.json").write_text(
-        json.dumps({"hooks": [{"name": "h1", "event": "PreToolUse", "handler": "echo hi"}]}),
+        json.dumps(
+            {"hooks": [{"name": "h1", "event": "PreToolUse", "handler": "echo hi"}]}
+        ),
         encoding="utf-8",
     )
     result = discover_hooks(str(ws), str(home))
@@ -340,8 +346,18 @@ def test_mcp_priority_ordering(tmp_path):
         tmp_path / "ws",
         {
             "hooks": [
-                {"name": "low", "event": "PreToolUse", "handler": "echo low", "priority": 1},
-                {"name": "high", "event": "PreToolUse", "handler": "echo high", "priority": 10},
+                {
+                    "name": "low",
+                    "event": "PreToolUse",
+                    "handler": "echo low",
+                    "priority": 1,
+                },
+                {
+                    "name": "high",
+                    "event": "PreToolUse",
+                    "handler": "echo high",
+                    "priority": 10,
+                },
             ]
         },
     )
@@ -357,9 +373,19 @@ def test_mcp_disabled_and_invalid_entries(tmp_path):
         tmp_path / "ws",
         {
             "hooks": [
-                {"name": "disabled", "event": "PreToolUse", "handler": "echo x", "enabled": False},
+                {
+                    "name": "disabled",
+                    "event": "PreToolUse",
+                    "handler": "echo x",
+                    "enabled": False,
+                },
                 {"name": "no-event", "handler": "echo x"},
-                {"name": "bad-type", "event": "PreToolUse", "handler": "pass", "type": "python"},
+                {
+                    "name": "bad-type",
+                    "event": "PreToolUse",
+                    "handler": "pass",
+                    "type": "python",
+                },
                 {"name": "ok", "event": "PreToolUse", "handler": "echo ok"},
             ]
         },
@@ -374,7 +400,16 @@ def test_mcp_timeout_and_event_alias(tmp_path):
     ws, home = _write_config(
         tmp_path / "home",
         tmp_path / "ws",
-        {"hooks": [{"name": "aliased", "event": "sessionStart", "handler": "echo aliased", "timeout": 7}]},
+        {
+            "hooks": [
+                {
+                    "name": "aliased",
+                    "event": "sessionStart",
+                    "handler": "echo aliased",
+                    "timeout": 7,
+                }
+            ]
+        },
     )
     result = discover_hooks(ws, home)
     assert result.warnings == []

@@ -43,9 +43,7 @@ HOOK_EVENT_NAMES: tuple[str, ...] = (
 # reference). ``SessionEnd`` DOES honour its matcher: the session-exit reason
 # (``shutdown`` / ``interrupted`` / ``error``) is matched against the
 # ``matcher`` field so hooks can target a specific exit path.
-_EVENTS_WITHOUT_MATCHER: frozenset[str] = frozenset(
-    {"UserPromptSubmit", "Stop"}
-)
+_EVENTS_WITHOUT_MATCHER: frozenset[str] = frozenset({"UserPromptSubmit", "Stop"})
 
 
 def matcher_applies_to_event(event_name: str, matcher: str | None) -> str | None:
