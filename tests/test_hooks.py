@@ -567,7 +567,9 @@ def test_session_start_and_prompt_context_injected():
 
 def test_subagent_start_payload_and_plaintext_context(tmp_path):
     capture = tmp_path / "p.json"
-    eng = _engine([_handler("SubagentStart", f"cat > {capture.as_posix()}; echo sub-context")])
+    eng = _engine(
+        [_handler("SubagentStart", f"cat > {capture.as_posix()}; echo sub-context")]
+    )
     res = asyncio.run(eng.run_subagent_start("worker-7", "subagent"))
     assert res.additional_contexts == ["sub-context"]  # plain-text context works
     p = json.loads(capture.read_text())
