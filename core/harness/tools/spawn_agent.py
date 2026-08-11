@@ -17,6 +17,7 @@ from typing import Any
 
 from core.agent_runtime.tools.base import Tool, tool_parameters
 from core.harness.agents.control import AgentControl, AgentLimitError
+from core.loop.guards import delegation_admission
 
 
 def _parse_fork_turns(value: Any) -> str | int:
@@ -154,6 +155,22 @@ class SpawnAgentTool(Tool):
         output_schema = kwargs.get("output_schema")
         if output_schema is not None and not isinstance(output_schema, dict):
             return "Error: 'output_schema' must be a JSON object."
+        # Delegation admission (REASONIX §1.10 delegationAdmission adaptation):
+        # spawn_agent is a local concurrent delegation (C2); self-contained
+        # tasks are allowed by default. Only tasks that reference the parent
+        # conversation but would not inherit it are rejected (the sub-agent
+        # cannot see your messages).
+        decision, reason = delegation_admission(task, fork_turns=str(fork_turns))
+        if decision == "deny":
+            return (
+                "Error: delegation denied (local_fix_no_external_need). "
+                f"The subtask references the parent conversation but "
+                f"fork_turns is '{fork_turns}', so the sub-agent inherits no "
+                "context and cannot act on those references. Either do the "
+                "work yourself, or rewrite the task to be self-contained, or "
+                "pass fork_turns='all'/'<N>' to inherit the needed context. "
+                f"(reason: {reason})"
+            )
         try:
             agent_id = self._control.spawn(
                 task,

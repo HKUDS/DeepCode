@@ -64,6 +64,7 @@ from core.events.protocol import (
 )
 from core.mcp.models import McpStartupError
 from core.mcp.runtime import McpSessionRuntime
+from core.loop.guards import LoopGuards
 from core.providers.base import LLMProvider
 from core.providers.catalog import context_window_for
 from core.reasoning import ReasoningAvailability, ReasoningChannel
@@ -399,6 +400,7 @@ class AgentSession:
         tool_filter: Any | None = None,
         closure_callback: Any | None = None,
         mcp_runtime: McpSessionRuntime | None = None,
+        guards: LoopGuards | None = None,
     ) -> None:
         self._runner = AgentRunner(provider)
         self._provider = provider
@@ -460,6 +462,11 @@ class AgentSession:
         # ordinary Turns leave it unset.
         self._closure_callback = closure_callback
         self._mcp_runtime = mcp_runtime
+        # Loop guards (REASONIX P3.5/P3.6 port): anti-wandering circuit
+        # breakers observed across tool batches; None keeps the feature dormant
+        # at zero cost. LoopTask passes the same instance every round so
+        # ProgressGuard/StormBreaker state survives across rounds.
+        self._guards = guards
         # Secret-free immutable selection used by persistence/frontends.
         self.execution_profile = execution_profile
 
@@ -989,6 +996,7 @@ class AgentSession:
             stop_hook=stop_hook,
             pre_compact_hook=pre_compact_hook,
             post_compact_hook=post_compact_hook,
+            guards=self._guards,
             tool_filter=(
                 visible_tool_names
                 if self._skill_runtime is not None or self._tool_filter is not None
