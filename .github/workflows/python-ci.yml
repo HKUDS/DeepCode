@@ -64,12 +64,13 @@ jobs:
           tests/application/test_session_deletion_service.py
           tests/application/test_execution_coordinator.py
 
-      # These suites carry Windows-gated cases (the Job Object backend) that
-      # the ubuntu job can only skip. This is the sole place they actually
-      # execute.
-      - name: Verify Job Object sandbox
+      # These suites carry Windows-gated cases (NTFS ACLs, the Job Object
+      # backend) that the ubuntu job can only skip. This is the sole place
+      # they actually execute.
+      - name: Verify Windows ACLs and Job Object sandbox
         run: >-
           python -m pytest -q
+          tests/test_private_storage_windows.py
           tests/test_harness_sandbox.py
           tests/test_exec_sandbox_wiring.py
 
