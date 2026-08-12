@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "skills": {
+    "frontend-design": {
+      "repository": "https://github.com/anthropics/skills",
+      "revision": "f17010c9bb483898c1d9c9f42dde2b3a98889434",
+      "path": "skills/frontend-design"
+    },
+    "mcp-builder": {
+      "repository": "https://github.com/anthropics/skills",
+      "revision": "f17010c9bb483898c1d9c9f42dde2b3a98889434",
+      "path": "skills/mcp-builder"
+    },
+    "review-agent": {
+      "repository": "https://github.com/openai/codex",
+      "revision": "4ef836f883c38ba6d39e6920f335ce6452b7de33",
+      "path": "codex-rs/skills/src/assets/samples/review-agent"
+    },
+    "security-best-practices": {
+      "repository": "https://github.com/openai/skills",
+      "revision": "49f948faa9258a0c61caceaf225e179651397431",
+      "path": "skills/.curated/security-best-practices"
+    },
+    "security-ownership-map": {
+      "repository": "https://github.com/openai/skills",
+      "revision": "49f948faa9258a0c61caceaf225e179651397431",
+      "path": "skills/.curated/security-ownership-map"
+    },
+    "security-threat-model": {
+      "repository": "https://github.com/openai/skills",
+      "revision": "49f948faa9258a0c61caceaf225e179651397431",
+      "path": "skills/.curated/security-threat-model"
+    },
+    "skill-creator": {
+      "repository": "https://github.com/openai/skills",
+      "revision": "49f948faa9258a0c61caceaf225e179651397431",
+      "path": "skills/.system/skill-creator"
+    },
+    "webapp-testing": {
+      "repository": "https://github.com/anthropics/skills",
+      "revision": "f17010c9bb483898c1d9c9f42dde2b3a98889434",
+      "path": "skills/webapp-testing"
+    }
+  }
+}

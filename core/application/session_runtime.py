@@ -29,6 +29,7 @@ from core.domain.execution_profile import ExecutionProfile
 from core.domain.execution_security import ExecutionSecurityProfile
 from core.sessions import Session, SessionStore
 from core.sessions.continuation import session_message_history_entry
+from core.skills.host import SkillWorkspaceRegistry
 
 
 class ApprovalRouter:
@@ -80,12 +81,14 @@ class SessionRuntimeRegistry:
         factory: AgentSessionFactory,
         *,
         max_live_sessions: int = 16,
+        skill_hosts: SkillWorkspaceRegistry | None = None,
     ) -> None:
         if max_live_sessions < 1:
             raise ValueError("max_live_sessions must be positive")
         self.store = store
         self.factory = factory
         self.max_live_sessions = max_live_sessions
+        self.skill_hosts = skill_hosts
         self._runtimes: OrderedDict[str, LiveSessionRuntime] = OrderedDict()
         self._mailbox_lock = threading.Lock()
         self._mailboxes: dict[str, TurnInputMailbox] = {}
@@ -325,6 +328,8 @@ class SessionRuntimeRegistry:
         goals_enabled = _accepts_keyword(create, "goal_runtime")
         if goals_enabled:
             create_kwargs["goal_runtime"] = goals
+        if self.skill_hosts is not None and _accepts_keyword(create, "skill_runtime"):
+            create_kwargs["skill_runtime"] = self.skill_hosts.new_runtime(workspace)
         agent = create(**create_kwargs)
         agent.load_history(self._visible_history(canonical))
         return LiveSessionRuntime(

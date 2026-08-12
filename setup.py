@@ -78,6 +78,18 @@ setuptools.setup(
     include_package_data=True,
     package_data={
         "core.application.goal_prompts": ["*.md"],
+        "core.skills": [
+            "builtin/*.json",
+            "builtin/*/SKILL.md",
+            "builtin/*/LICENSE.txt",
+            "builtin/*/agents/*.yaml",
+            "builtin/*/examples/*",
+            "builtin/*/scripts/*",
+            "builtin/*/reference/*",
+            "builtin/*/references/*",
+            "builtin/*/assets/*",
+        ],
+        "core.mcp": ["presets.json"],
         "tools": ["*.yaml"],
     },
     entry_points={

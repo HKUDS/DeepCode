@@ -43,20 +43,52 @@ def configure_utf8_stdio() -> None:
                     errors="replace",
                 )
                 setattr(sys, stream_name, wrapped)
-        except Exception:
+        except Exception:  # noqa: BLE001,S112 - startup compatibility boundary
             # Do not make startup fail because a host replaced stdio with a
             # non-standard object.
             continue
 
 
-def subprocess_env(extra: Mapping[str, Any] | None = None) -> dict[str, str]:
-    """Return an environment suitable for child Python/MCP processes."""
-    env = os.environ.copy()
+def subprocess_env(
+    extra: Mapping[str, Any] | None = None,
+    *,
+    inherit: bool = True,
+) -> dict[str, str]:
+    """Return a UTF-8 environment for a child process.
+
+    Existing callers retain normal subprocess inheritance. Security-sensitive
+    extension runtimes may opt out and receive only process-launch essentials;
+    every other variable must then be forwarded explicitly.
+    """
+    env = os.environ.copy() if inherit else _minimal_subprocess_env()
     env.update(UTF8_ENV)
     env.setdefault("PYTHONLEGACYWINDOWSSTDIO", "0")
     if extra:
         env.update({str(k): str(v) for k, v in extra.items()})
     return env
+
+
+def _minimal_subprocess_env() -> dict[str, str]:
+    exact = {
+        "PATH",
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "TMPDIR",
+        "TMP",
+        "TEMP",
+        "SystemRoot",
+        "WINDIR",
+        "COMSPEC",
+        "PATHEXT",
+        "LANG",
+    }
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if key in exact or key.startswith("LC_")
+    }
 
 
 def subprocess_text_kwargs() -> dict[str, Any]:
@@ -72,6 +104,8 @@ def normalize_stdio_command(
     command: str,
     args: list[str] | None,
     env: Mapping[str, Any] | None = None,
+    *,
+    inherit_env: bool = True,
 ) -> tuple[str, list[str], dict[str, str]]:
     """Normalize MCP stdio command/env for Windows and virtualenv safety.
 
@@ -83,11 +117,12 @@ def normalize_stdio_command(
     - The returned environment is always a full environment plus UTF-8 flags.
     """
     normalized_args = list(args or [])
-    child_env = subprocess_env(env)
+    child_env = subprocess_env(env, inherit=inherit_env)
     command = str(command)
 
     base = _basename(command)
-    if base in {"python", "python.exe", "python3", "python3.exe"}:
+    bare_command = "/" not in command and "\\" not in command
+    if bare_command and base in {"python", "python.exe", "python3", "python3.exe"}:
         command = sys.executable
         base = _basename(command)
 

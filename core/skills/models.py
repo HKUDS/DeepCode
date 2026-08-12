@@ -59,6 +59,14 @@ class SkillProviderKind(StrEnum):
     CUSTOM = "custom"
 
 
+class SkillOriginKind(StrEnum):
+    """User-facing ownership category without exposing ambient paths."""
+
+    LOCAL = "local"
+    BUNDLED = "bundled"
+    PROVIDER = "provider"
+
+
 @dataclass(frozen=True, slots=True)
 class SkillAuthority:
     """Opaque provider identity used for list/read/search routing."""
@@ -97,6 +105,19 @@ class SkillReference:
     authority: SkillAuthority
     package: SkillPackageId
     resource: SkillResourceId
+
+
+@dataclass(frozen=True, slots=True)
+class SkillOrigin:
+    """Provider-owned presentation that remains safe across protocol boundaries."""
+
+    kind: SkillOriginKind
+    label: str
+    location: str
+
+    def __post_init__(self) -> None:
+        _validate_provider_handle("origin label", self.label)
+        _validate_provider_handle("origin location", self.location)
 
 
 LOCAL_SKILL_AUTHORITY = SkillAuthority(SkillProviderKind.LOCAL, "local")
@@ -171,6 +192,38 @@ class SkillKey:
     def source(self) -> str:
         return f"{self.scope.value}:{self.source_root.value}"
 
+    @property
+    def display_location(self) -> str:
+        root = {
+            SkillSourceRoot.AGENTS: ".agents",
+            SkillSourceRoot.DEEPCODE: ".deepcode",
+            SkillSourceRoot.CLAUDE: ".claude",
+            SkillSourceRoot.SYSTEM: "bundled",
+        }[self.source_root]
+        return f"{self.scope.value}/{root}/skills/{self.relative_path}"
+
+
+def _default_origin(key: SkillKey, reference: SkillReference) -> SkillOrigin:
+    if reference.authority != LOCAL_SKILL_AUTHORITY:
+        authority = reference.authority
+        label = f"{authority.kind.value}:{authority.provider_id}"
+        return SkillOrigin(
+            kind=SkillOriginKind.PROVIDER,
+            label=label,
+            location=f"{label}/{reference.package.value}",
+        )
+    if key.source_root is SkillSourceRoot.SYSTEM:
+        return SkillOrigin(
+            kind=SkillOriginKind.BUNDLED,
+            label="DeepCode bundled",
+            location=key.display_location,
+        )
+    return SkillOrigin(
+        kind=SkillOriginKind.LOCAL,
+        label=key.source,
+        location=key.display_location,
+    )
+
 
 @dataclass(frozen=True, slots=True)
 class SkillRecord:
@@ -188,23 +241,29 @@ class SkillRecord:
     revision: str
     status: SkillStatus
     byte_size: int
+    policy_enabled: bool = True
     metadata: SkillMetadata = SkillMetadata()
     error: str | None = None
     shadowed_by: str | None = None
     reference: SkillReference | None = None
+    origin: SkillOrigin | None = None
     instructions: str | None = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
-        if self.reference is None:
+        reference = self.reference
+        if reference is None:
+            reference = SkillReference(
+                authority=LOCAL_SKILL_AUTHORITY,
+                package=SkillPackageId(self.key.id),
+                resource=SKILL_MAIN_RESOURCE,
+            )
             object.__setattr__(
                 self,
                 "reference",
-                SkillReference(
-                    authority=LOCAL_SKILL_AUTHORITY,
-                    package=SkillPackageId(self.key.id),
-                    resource=SKILL_MAIN_RESOURCE,
-                ),
+                reference,
             )
+        if self.origin is None:
+            object.__setattr__(self, "origin", _default_origin(self.key, reference))
 
     @property
     def id(self) -> str:
@@ -220,6 +279,8 @@ class SkillRecord:
 
     @property
     def source(self) -> str:
+        if self.authority != LOCAL_SKILL_AUTHORITY:
+            return f"{self.authority.kind.value}:{self.authority.provider_id}"
         return self.key.source
 
     @property
@@ -252,7 +313,8 @@ class SkillRecord:
     @property
     def deletable(self) -> bool:
         return (
-            self.key.writable
+            self.authority == LOCAL_SKILL_AUTHORITY
+            and self.key.writable
             and self.scope is not SkillScope.SYSTEM
             and self.source_root is SkillSourceRoot.AGENTS
         )

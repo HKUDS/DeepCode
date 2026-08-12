@@ -31,6 +31,11 @@ from core.application.views import (
     hook_info_view,
     item_view,
     mcp_inventory_view,
+    mcp_oauth_flow_view,
+    mcp_preset_inventory_view,
+    mcp_probe_view,
+    plugin_diagnostic_view,
+    plugin_info_view,
     project_view,
     skill_detail_view,
     skill_info_view,
@@ -194,10 +199,21 @@ class Dispatcher:
             rpc_methods.SKILLS_SET_ENABLED: self._skills_set_enabled,
             rpc_methods.SKILLS_DELETE: self._skills_delete,
             rpc_methods.SKILLS_RELOAD: self._skills_reload,
+            rpc_methods.PLUGINS_LIST: self._plugins_list,
+            rpc_methods.PLUGINS_ADD: self._plugins_add,
+            rpc_methods.PLUGINS_SET_ENABLED: self._plugins_set_enabled,
+            rpc_methods.PLUGINS_REMOVE: self._plugins_remove,
             rpc_methods.HOOKS_LIST: self._hooks_list,
             rpc_methods.MCP_LIST: self._mcp_list,
             rpc_methods.MCP_UPSERT: self._mcp_upsert,
             rpc_methods.MCP_REMOVE: self._mcp_remove,
+            rpc_methods.MCP_PRESETS: self._mcp_presets,
+            rpc_methods.MCP_PRESET_ADD: self._mcp_preset_add,
+            rpc_methods.MCP_SET_ENABLED: self._mcp_set_enabled,
+            rpc_methods.MCP_PROBE: self._mcp_probe,
+            rpc_methods.MCP_OAUTH_START: self._mcp_oauth_start,
+            rpc_methods.MCP_OAUTH_CANCEL: self._mcp_oauth_cancel,
+            rpc_methods.MCP_OAUTH_LOGOUT: self._mcp_oauth_logout,
             rpc_methods.DIAGNOSTICS_READ: self._diagnostics_read,
             rpc_methods.AUTOMATION_LIST: self._automation_list,
             rpc_methods.AUTOMATION_CREATE: self._automation_create,
@@ -430,6 +446,7 @@ class Dispatcher:
             "skills": [skill_info_view(skill) for skill in discovery.skills],
             "warnings": list(discovery.warnings),
             "catalogRevision": discovery.catalog_revision,
+            "authoringSkillId": discovery.authoring_skill_id,
         }
 
     def _skill_read(self, params: Params) -> dict[str, Any]:
@@ -467,6 +484,7 @@ class Dispatcher:
             "skills": [skill_info_view(skill) for skill in discovery.skills],
             "warnings": list(discovery.warnings),
             "catalogRevision": discovery.catalog_revision,
+            "authoringSkillId": discovery.authoring_skill_id,
         }
 
     def _skills_delete(self, params: Params) -> dict[str, Any]:
@@ -488,6 +506,39 @@ class Dispatcher:
             "skills": [skill_info_view(skill) for skill in discovery.skills],
             "warnings": list(discovery.warnings),
             "catalogRevision": discovery.catalog_revision,
+            "authoringSkillId": discovery.authoring_skill_id,
+        }
+
+    def _plugins_list(self, params: Params) -> dict[str, Any]:
+        params.only()
+        return self._plugin_discovery_view(self.application.plugins.list())
+
+    def _plugins_add(self, params: Params) -> dict[str, Any]:
+        params.only("path")
+        discovery = self.application.plugins.add(str(params.string("path")))
+        return self._plugin_discovery_view(discovery)
+
+    def _plugins_set_enabled(self, params: Params) -> dict[str, Any]:
+        params.only("pluginId", "enabled")
+        discovery = self.application.plugins.set_enabled(
+            str(params.string("pluginId")),
+            enabled=params.required_boolean("enabled"),
+        )
+        return self._plugin_discovery_view(discovery)
+
+    def _plugins_remove(self, params: Params) -> dict[str, Any]:
+        params.only("pluginId")
+        removed = self.application.plugins.remove(str(params.string("pluginId")))
+        return {"removed": True, "plugin": plugin_info_view(removed)}
+
+    @staticmethod
+    def _plugin_discovery_view(discovery) -> dict[str, Any]:
+        return {
+            "plugins": [plugin_info_view(plugin) for plugin in discovery.plugins],
+            "diagnostics": [
+                plugin_diagnostic_view(item) for item in discovery.diagnostics
+            ],
+            "revision": discovery.revision,
         }
 
     @staticmethod
@@ -529,6 +580,70 @@ class Dispatcher:
             name=str(params.string("name")),
         )
         return mcp_inventory_view(inventory)
+
+    def _mcp_presets(self, params: Params) -> dict[str, Any]:
+        params.only("projectId")
+        return mcp_preset_inventory_view(
+            self.application.mcp.list_presets(
+                params.string("projectId", required=False)
+            )
+        )
+
+    def _mcp_preset_add(self, params: Params) -> dict[str, Any]:
+        params.only("projectId", "presetId", "enabled")
+        inventory = self.application.mcp.add_preset(
+            str(params.string("presetId")),
+            project_id=params.string("projectId", required=False),
+            enabled=params.boolean("enabled", default=False),
+        )
+        return mcp_inventory_view(inventory)
+
+    def _mcp_set_enabled(self, params: Params) -> dict[str, Any]:
+        params.only("projectId", "name", "enabled")
+        inventory = self.application.mcp.set_enabled(
+            str(params.string("name")),
+            project_id=params.string("projectId", required=False),
+            enabled=params.required_boolean("enabled"),
+        )
+        return mcp_inventory_view(inventory)
+
+    def _mcp_probe(self, params: Params) -> dict[str, Any]:
+        params.only("projectId", "name")
+        return mcp_probe_view(
+            self.application.mcp.probe(
+                str(params.string("name")),
+                project_id=params.string("projectId", required=False),
+            )
+        )
+
+    def _mcp_oauth_start(self, params: Params) -> dict[str, Any]:
+        params.only("projectId", "name", "openBrowser", "resetCredentials")
+        return mcp_oauth_flow_view(
+            self.application.mcp.oauth_start(
+                str(params.string("name")),
+                project_id=params.string("projectId", required=False),
+                open_browser=params.boolean("openBrowser", default=True),
+                reset_credentials=params.boolean("resetCredentials", default=False),
+            )
+        )
+
+    def _mcp_oauth_cancel(self, params: Params) -> dict[str, Any]:
+        params.only("projectId", "name")
+        return {
+            "cancelled": self.application.mcp.oauth_cancel(
+                str(params.string("name")),
+                project_id=params.string("projectId", required=False),
+            )
+        }
+
+    def _mcp_oauth_logout(self, params: Params) -> dict[str, Any]:
+        params.only("projectId", "name")
+        return {
+            "removed": self.application.mcp.oauth_logout(
+                str(params.string("name")),
+                project_id=params.string("projectId", required=False),
+            )
+        }
 
     def _diagnostics_read(self, params: Params) -> dict[str, Any]:
         params.only("projectId")

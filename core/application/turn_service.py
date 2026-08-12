@@ -99,6 +99,7 @@ from core.persistence.execution_repository import (
 from core.persistence.project_repository import ProjectRepository
 from core.persistence.thread_repository import ThreadRepository
 from core.sessions import SessionStore
+from core.skills.host import SkillWorkspaceRegistry
 from core.sessions.continuation import assistant_continuation_metadata
 from core.skills.models import MAX_SELECTED_SKILLS, SkillInvocation, SkillSelection
 
@@ -197,6 +198,7 @@ class TurnService:
         session_store: SessionStore,
         llm_configuration: LLMConfigurationService | None = None,
         execution_security_policy: ExecutionSecurityPolicy | None = None,
+        skill_hosts: SkillWorkspaceRegistry | None = None,
     ) -> None:
         self.database = database
         self.broker = broker
@@ -211,6 +213,7 @@ class TurnService:
         self.session_runtimes = SessionRuntimeRegistry(
             session_store,
             self.session_factory,
+            skill_hosts=skill_hosts,
         )
         self.turn_inputs = TurnInputService(
             database,

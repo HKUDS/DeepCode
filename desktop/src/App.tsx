@@ -394,7 +394,7 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
                   threadId: created.id,
                   prompt:
                     skill.defaultPrompt ??
-                    "Use $skill-creator to create a focused reusable Skill for this project.",
+                    `Use $${skill.name} to create a focused reusable Skill for this project.`,
                   skillIds: [skill.id],
                 });
               }}

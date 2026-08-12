@@ -1,0 +1,253 @@
+{
+  "version": 1,
+  "source": "https://github.com/HKUDS/nanobot",
+  "sourceRevision": "abfcdd481a503fea8248d25a036d82a4d51c5917",
+  "presets": [
+    {
+      "id": "browserbase",
+      "displayName": "Browserbase",
+      "category": "browser",
+      "description": "Cloud browser automation through Browserbase's hosted MCP server.",
+      "docsUrl": "https://docs.browserbase.com/integrations/mcp/setup",
+      "requires": "BROWSERBASE_API_KEY",
+      "server": {
+        "type": "streamableHttp",
+        "url": "https://mcp.browserbase.com/mcp",
+        "envUrlParams": {"browserbaseApiKey": "BROWSERBASE_API_KEY"},
+        "toolTimeoutSeconds": 60,
+        "approvalMode": "writes"
+      }
+    },
+    {
+      "id": "playwright",
+      "displayName": "Playwright",
+      "category": "browser",
+      "description": "Local browser inspection and automation with Playwright's MCP server.",
+      "docsUrl": "https://playwright.dev/docs/getting-started-mcp",
+      "requires": "Node.js and npx",
+      "server": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "@playwright/mcp@latest"],
+        "toolTimeoutSeconds": 60,
+        "approvalMode": "writes"
+      }
+    },
+    {
+      "id": "context7",
+      "displayName": "Context7",
+      "category": "docs",
+      "description": "Fetch current library documentation and code examples.",
+      "docsUrl": "https://context7.com/docs/resources/all-clients",
+      "requires": "Node.js and npx",
+      "note": "Works without an API key for public documentation.",
+      "server": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "@upstash/context7-mcp@latest"],
+        "toolTimeoutSeconds": 45,
+        "approvalMode": "auto"
+      }
+    },
+    {
+      "id": "firecrawl",
+      "displayName": "Firecrawl",
+      "category": "web",
+      "description": "Scrape, crawl, search, and extract web pages through Firecrawl.",
+      "docsUrl": "https://docs.firecrawl.dev/use-cases/developers-mcp",
+      "requires": "Network access",
+      "note": "The hosted keyless endpoint does not require an API key.",
+      "server": {
+        "type": "streamableHttp",
+        "url": "https://mcp.firecrawl.dev/v2/mcp",
+        "toolTimeoutSeconds": 60,
+        "approvalMode": "writes"
+      }
+    },
+    {
+      "id": "parallel-search",
+      "displayName": "Parallel Search",
+      "category": "web",
+      "description": "Search the web and fetch relevant page content through Parallel.",
+      "docsUrl": "https://docs.parallel.ai/integrations/mcp/search-mcp",
+      "requires": "Network access",
+      "note": "Free anonymous access for light use.",
+      "server": {
+        "type": "streamableHttp",
+        "url": "https://search.parallel.ai/mcp",
+        "enabledTools": ["web_search", "web_fetch"],
+        "toolTimeoutSeconds": 60,
+        "approvalMode": "auto"
+      }
+    },
+    {
+      "id": "exa",
+      "displayName": "Exa",
+      "category": "web",
+      "description": "Search the web and fetch clean page content through Exa.",
+      "docsUrl": "https://exa.ai/mcp",
+      "requires": "Network access",
+      "note": "The hosted endpoint currently does not require an API key.",
+      "server": {
+        "type": "streamableHttp",
+        "url": "https://mcp.exa.ai/mcp",
+        "toolTimeoutSeconds": 45,
+        "approvalMode": "auto"
+      }
+    },
+    {
+      "id": "microsoft-learn",
+      "displayName": "Microsoft Learn",
+      "category": "docs",
+      "description": "Search and fetch public Microsoft Learn documentation.",
+      "docsUrl": "https://learn.microsoft.com/en-us/training/support/mcp",
+      "requires": "Network access",
+      "server": {
+        "type": "streamableHttp",
+        "url": "https://learn.microsoft.com/api/mcp",
+        "toolTimeoutSeconds": 45,
+        "approvalMode": "auto"
+      }
+    },
+    {
+      "id": "aws-docs",
+      "displayName": "AWS Documentation",
+      "category": "docs",
+      "description": "Search AWS documentation and service guidance.",
+      "docsUrl": "https://awslabs.github.io/mcp/servers/aws-documentation-mcp-server/",
+      "requires": "uvx",
+      "server": {
+        "type": "stdio",
+        "command": "uvx",
+        "args": ["awslabs.aws-documentation-mcp-server@latest"],
+        "env": {"FASTMCP_LOG_LEVEL": "ERROR", "AWS_DOCUMENTATION_PARTITION": "aws"},
+        "toolTimeoutSeconds": 60,
+        "approvalMode": "auto"
+      }
+    },
+    {
+      "id": "brave-search",
+      "displayName": "Brave Search",
+      "category": "web",
+      "description": "Run web, news, image, video, and local search through Brave Search.",
+      "docsUrl": "https://www.npmjs.com/package/@brave/brave-search-mcp-server",
+      "requires": "Node.js, npx, and BRAVE_API_KEY",
+      "server": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "@brave/brave-search-mcp-server@latest", "--transport", "stdio"],
+        "requiredEnvVars": ["BRAVE_API_KEY"],
+        "toolTimeoutSeconds": 45,
+        "approvalMode": "auto"
+      }
+    },
+    {
+      "id": "postman",
+      "displayName": "Postman",
+      "category": "api",
+      "description": "Inspect and manage Postman APIs, collections, and workspaces.",
+      "docsUrl": "https://learning.postman.com/docs/developer/postman-api/postman-mcp-server/postman-mcp-local-server",
+      "requires": "Node.js, npx, and POSTMAN_API_KEY",
+      "server": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "@postman/postman-mcp-server@latest", "--full"],
+        "requiredEnvVars": ["POSTMAN_API_KEY"],
+        "toolTimeoutSeconds": 60,
+        "approvalMode": "writes"
+      }
+    },
+    {
+      "id": "figma",
+      "displayName": "Figma",
+      "category": "design",
+      "description": "Read design context from the local Figma Dev Mode MCP server.",
+      "docsUrl": "https://help.figma.com/hc/en-us/articles/32132100833559-Guide-to-the-Figma-MCP-server",
+      "requires": "Figma Desktop with MCP enabled",
+      "server": {
+        "type": "streamableHttp",
+        "url": "http://127.0.0.1:3845/mcp",
+        "toolTimeoutSeconds": 45,
+        "approvalMode": "auto"
+      }
+    },
+    {
+      "id": "xmind",
+      "displayName": "Xmind",
+      "category": "productivity",
+      "description": "Create, read, and edit cloud mind maps through Xmind.",
+      "docsUrl": "https://xmind.com/user-guide/xmind-mcp",
+      "requires": "Xmind account",
+      "server": {
+        "type": "streamableHttp",
+        "auth": "oauth",
+        "url": "https://app.xmind.com/api/mcp",
+        "toolTimeoutSeconds": 60,
+        "approvalMode": "writes"
+      }
+    },
+    {
+      "id": "notion",
+      "displayName": "Notion",
+      "category": "productivity",
+      "description": "Read and update a Notion workspace through Notion MCP.",
+      "docsUrl": "https://developers.notion.com/guides/mcp/get-started-with-mcp",
+      "requires": "Notion account",
+      "server": {
+        "type": "streamableHttp",
+        "auth": "oauth",
+        "url": "https://mcp.notion.com/mcp",
+        "toolTimeoutSeconds": 60,
+        "approvalMode": "writes"
+      }
+    },
+    {
+      "id": "linear",
+      "displayName": "Linear",
+      "category": "productivity",
+      "description": "Find and manage Linear issues, projects, and comments.",
+      "docsUrl": "https://linear.app/docs/mcp",
+      "requires": "Linear account",
+      "server": {
+        "type": "streamableHttp",
+        "auth": "oauth",
+        "url": "https://mcp.linear.app/mcp",
+        "toolTimeoutSeconds": 60,
+        "approvalMode": "writes"
+      }
+    },
+    {
+      "id": "github",
+      "displayName": "GitHub",
+      "category": "code",
+      "description": "Repository, issue, and pull-request workflows via GitHub MCP.",
+      "docsUrl": "https://github.com/github/github-mcp-server",
+      "requires": "Docker and GITHUB_PERSONAL_ACCESS_TOKEN",
+      "server": {
+        "type": "stdio",
+        "command": "docker",
+        "args": ["run", "-i", "--rm", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "ghcr.io/github/github-mcp-server"],
+        "requiredEnvVars": ["GITHUB_PERSONAL_ACCESS_TOKEN"],
+        "toolTimeoutSeconds": 60,
+        "approvalMode": "writes"
+      }
+    },
+    {
+      "id": "supabase",
+      "displayName": "Supabase",
+      "category": "database",
+      "description": "Inspect Supabase projects through the read-only Supabase MCP server.",
+      "docsUrl": "https://supabase.com/docs/guides/ai-tools/mcp",
+      "requires": "Node.js, npx, and SUPABASE_ACCESS_TOKEN",
+      "note": "The bundled template starts in read-only mode.",
+      "server": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "@supabase/mcp-server-supabase@latest", "--read-only"],
+        "requiredEnvVars": ["SUPABASE_ACCESS_TOKEN"],
+        "toolTimeoutSeconds": 60,
+        "approvalMode": "auto"
+      }
+    }
+  ]
+}

@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.application.agent_adapter import AgentSessionFactory
+from core.application.agent_adapter import (
+    AgentSessionFactory,
+    ConfiguredAgentSessionFactory,
+    DefaultAgentSessionFactory,
+)
 from core.application.application_lease import ApplicationLease
 from core.application.approval_service import ApprovalService
 from core.application.automation_schedule_policy import AutomationSchedulePolicy
@@ -29,6 +33,7 @@ from core.application.goal_extension import GoalExtension
 from core.application.legacy_session_importer import LegacySessionImporter
 from core.application.llm_configuration_service import LLMConfigurationService
 from core.application.mcp_service import McpService
+from core.application.plugin_service import PluginService
 from core.application.project_service import ProjectService
 from core.application.session_deletion_service import SessionDeletionService
 from core.application.settings_service import SettingsService
@@ -46,12 +51,14 @@ from core.domain.turn import TurnExecutor
 from core.persistence.database import Database
 from core.persistence.event_repository import EventRepository
 from core.persistence.migrations import LATEST_SCHEMA_VERSION
+from core.plugins.host import LocalPluginHost
 from core.providers.credentials import CredentialStore
 from core.sessions import (
     SessionStore,
     ThreadGoalStore,
     get_default_store,
 )
+from core.skills.host import SkillWorkspaceRegistry
 
 
 class DeepCodeApplication:
@@ -91,9 +98,25 @@ class DeepCodeApplication:
             self.projects,
             credential_store=self.credentials,
         )
-        self.skills = SkillService(self.projects)
+        self.skill_hosts = SkillWorkspaceRegistry()
+        self.plugins = PluginService(LocalPluginHost(self.skill_hosts))
+        effective_session_factory = session_factory or DefaultAgentSessionFactory()
+        if isinstance(effective_session_factory, ConfiguredAgentSessionFactory):
+            effective_session_factory.configure_plugin_mcp(
+                self.plugins.host.mcp_servers,
+                revision_provider=lambda: self.plugins.host.snapshot().revision,
+            )
+        self.skills = SkillService(self.projects, self.skill_hosts)
         self.extensions = ExtensionService(self.projects, self.skills)
-        self.mcp = McpService(self.projects)
+        self.mcp = McpService(
+            self.projects,
+            plugin_servers=self.plugins.host.mcp_servers,
+            credential_resolver=self.llm.resolve_api_credential,
+        )
+        if isinstance(effective_session_factory, ConfiguredAgentSessionFactory):
+            effective_session_factory.configure_mcp_status_observer(
+                self.mcp.publish_runtime_status
+            )
         self.diagnostics = DiagnosticsService(
             database,
             self.projects,
@@ -120,9 +143,10 @@ class DeepCodeApplication:
             self.broker,
             self.approvals,
             self.executions,
-            session_factory=session_factory,
+            session_factory=effective_session_factory,
             session_store=self.session_store,
             llm_configuration=self.llm,
+            skill_hosts=self.skill_hosts,
         )
         self.workflows = WorkflowService(
             database,
@@ -320,6 +344,10 @@ class DeepCodeApplication:
             "execution runtime",
             lambda: self.executions.close(cleanup=self.turns.close_live_sessions),
         )
+        attempt("Plugin service", self.plugins.close)
+        attempt("Skill service", self.skills.close)
+        attempt("Skill workspace registry", self.skill_hosts.close)
+        attempt("MCP service", self.mcp.close)
         attempt(
             "queued execution settlement",
             lambda: self.execution_handlers.interrupt_unclaimed_queued_for_worker(

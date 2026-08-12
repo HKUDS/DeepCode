@@ -144,6 +144,62 @@ Skills, permissions, Goals, and Automations. See the
 
 ## News
 
+**2026-08-12 · Reviewed upstream core Skills**
+
+- **Start with reviewed upstream Skills.** DeepCode now bundles eight pinned,
+  provenance-tracked Agent Skills from OpenAI, Codex, and Anthropic for Skill
+  authoring, code review, security analysis, frontend design, MCP construction,
+  and web application testing. They use the same catalog and Turn runtime as
+  project, user, and Plugin Skills.
+
+**2026-08-12 · Managed MCP catalog, OAuth, and real connection checks**
+
+- **Start from reviewed templates without hidden execution.** DeepCode bundles
+  a validated catalog based on Nanobot's current 16 MCP templates. Adding
+  one copies ordinary user configuration in a disabled state; it never silently
+  runs `npx`, Docker, or a remote server.
+- **Configure MCP consistently in every interface.** Desktop and TUI now join
+  the management CLI and App Server on one preset, configuration, test, OAuth,
+  and live-status service rather than maintaining interface-specific clients.
+- **Distinguish config, authorization, and connectivity.** A real MCP probe
+  initializes the server and counts tools, resources, and prompts. Browser
+  OAuth uses a loopback callback and a private credential file outside project
+  configuration, while Agent startup never opens a browser implicitly.
+
+**2026-08-10 · Generic MCP runtime and portable local Plugins**
+
+- **Connect standard MCP servers from every interface.** User and trusted
+  project configuration, App Server, CLI, and Desktop now share one generic
+  stdio/SSE/Streamable HTTP client runtime with bounded discovery, stable tool
+  identities, timeouts, cancellation, and session-owned cleanup.
+- **Keep credentials and authority explicit.** Executable config layers replace
+  whole entries, child processes receive a minimal environment, provider keys
+  stay in private DeepCode connections, and MCP policy can only narrow global
+  trust, read-only, approval, and sandbox decisions.
+- **Run Agent Plugins 1.0 MCP components without format forks.** Valid
+  `mcp.json` servers join the same runtime only when an Agent Session starts,
+  receive isolated `PLUGIN_ROOT` / `PLUGIN_DATA`, and fail independently from
+  bundled Skills and other servers.
+- **Connect OpenSpace as MCP plus two ordinary Skills.** A reviewed recipe binds
+  an OpenRouter connection without plaintext secrets, imports OpenSpace's host
+  Skills into the standalone catalog, and keeps cloud/upload tools disabled by
+  default.
+
+- **Register trusted local Plugin folders.** CLI and Desktop now share a
+  user-level Plugin registry with add, inspect, enable, disable, and unregister
+  operations; unregistering never deletes source files.
+- **Keep one execution path.** Enabled Plugins contribute authority-bound
+  Skills through the existing Skill Provider host, so selection, dependencies,
+  progressive reads, permissions, revisions, and audit metadata remain the
+  same across CLI, TUI, headless execution, and Desktop.
+- **Preserve standalone Skills.** Project and user Skills remain independently
+  installable and take precedence over a same-named Plugin Skill. Plugins are
+  an optional packaging source, never a replacement Skill lifecycle.
+- **Use one portable package contract.** Local Plugins use the Agent Plugins
+  1.0.0 root manifest and fixed `skills/` layout; experimental DeepCode
+  manifests are no longer accepted. Hooks, Apps, Marketplaces, downloads, and
+  updates remain inert.
+
 **2026-08-09 · Skills now have a real runtime contract**
 
 - **Load guidance through one provider boundary.** Skill discovery, content
@@ -161,6 +217,11 @@ Skills, permissions, Goals, and Automations. See the
   already allowed by the Session but cannot grant new permissions. CLI, TUI,
   and Desktop share the same immutable Turn snapshot and persist only Skill
   identity, invocation kind, and revision—not the instruction body.
+- **See changes everywhere without restarting.** One workspace host now owns
+  the shared catalog and provider cache, while each Agent Session keeps its own
+  Turn context. Local Skill and policy changes refresh Desktop automatically,
+  and Composer, management, CLI, and headless execution resolve through the
+  same lifecycle.
 
 **2026-08-07 · Thinking controls, more providers, and a Desktop you can tune**
 
@@ -368,9 +429,11 @@ reasoning summary returned by the Provider.
 ### Reusable Skills
 
 Skills turn team conventions, domain knowledge, review methods, and repeated
-workflows into reusable Agent capabilities. Keep project Skills in
-`.agents/skills`, keep personal Skills in `~/.agents/skills`, or use the bundled
-Skill Creator to build one conversationally.
+workflows into reusable Agent capabilities. DeepCode includes pinned upstream
+Skills for authoring, review, security, frontend, MCP, and web testing workflows.
+Keep project Skills in `.agents/skills`, keep personal Skills in
+`~/.agents/skills`, or use the bundled Skill Creator to build one
+conversationally.
 
 DeepCode also reads existing `.deepcode/skills` and Claude-style directories
 without migrating them. A Skill can guide how the Agent works, but it cannot
@@ -634,6 +697,40 @@ Claude-compatible directories remain readable. A Skill can guide the Agent,
 but it cannot grant permissions or bypass Project trust, approvals, or tool
 policy. Import, enable, disable, and catalog commands live in the
 [advanced guide](docs/HEADLESS_AND_AUTOMATION.md#skill-management).
+
+### Local Plugins
+
+Plugins optionally package Skills behind a validated local manifest; standalone
+project and user Skills continue to install and run without a Plugin. New
+packages must use the Agent Plugins 1.0.0 manifest and fixed `skills/` layout.
+Add a trusted folder from the Desktop Plugins workspace or with `deepcode
+plugin add <path>`; its Skills then appear in the ordinary Skill catalog and
+Composer. A standards-compliant `mcp.json` may also contribute MCP servers;
+registration remains inert and those processes start only inside an Agent
+Session. DeepCode does not execute Plugin hooks or Apps and does not download
+from a Marketplace. See the
+[local Plugin contract](docs/LOCAL_PLUGINS.md).
+
+### MCP servers
+
+Generic coding-agent MCP servers live in the top-level `mcpServers` section of
+`deepcode_config.json`; the historical Paper2Code `tools.mcpServers` section is
+kept separate. Configure servers in Desktop under **MCP**, or use the compact
+`deepcode mcp` CLI. The bundled catalog is listed with `deepcode mcp presets`;
+`add <id>` copies a disabled definition, `test <name>` performs a real
+handshake, and `login/logout <name>` manages explicit browser OAuth. The TUI
+offers the same actions under the single `/mcp` command. User and
+trusted-project layers replace whole server entries rather than merging
+executable fields. Provider secrets are referenced from private DeepCode
+connections, and MCP tool policy can only narrow global trust, read-only,
+approval, and sandbox decisions.
+
+DeepCode supports stdio, SSE, and Streamable HTTP, session-owned startup and
+shutdown, bounded discovery, stable `mcp__server__tool` identities, tool
+annotations, allow/deny lists, per-tool approvals, timeouts, and cancellation.
+For a concrete two-Skill plus MCP integration, see the
+[OpenSpace guide](docs/integrations/OPENSPACE.md). Setup, preset, OAuth, and
+connection-state details are in the [MCP client guide](docs/integrations/MCP.md).
 
 ### Safety and execution
 
@@ -913,6 +1010,8 @@ in [`desktop/README.md`](desktop/README.md) and the
 | Durable Paper2Code workflow                   | [P5 Paper2Code](docs/P5_PAPER2CODE_ARCHITECTURE.md)           |
 | Canonical Sessions and cross-directory resume | [P6 Session alignment](docs/P6_SESSION_ALIGNMENT_REVIEW.md)   |
 | Skills identity, security, and persistence    | [Skills architecture](docs/SKILLS_PRODUCT_ARCHITECTURE.md)    |
+| Generic MCP setup and connection lifecycle     | [MCP client guide](docs/integrations/MCP.md)                  |
+| OpenSpace integration                          | [OpenSpace integration](docs/integrations/OPENSPACE.md)       |
 | Automation scheduling and execution           | [Automation architecture](docs/AUTOMATION_ARCHITECTURE.md)    |
 | Desktop product and interaction model         | [Desktop UI specification](docs/DESKTOP_PRODUCT_UI_SPEC.md)   |
 | Privacy and diagnostics                       | [Privacy contract](docs/PRIVACY_AND_DIAGNOSTICS.md)           |

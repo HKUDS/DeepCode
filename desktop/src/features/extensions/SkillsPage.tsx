@@ -21,9 +21,14 @@ export function SkillsPage({ runtime, project, onCreateSkill }: SkillsPageProps)
   const catalog = useSkillManagement(runtime, project?.id ?? null);
   const [scope, setScope] = useState<ConfigScope>("project");
   const [creating, setCreating] = useState(false);
-  const creator = catalog.skills.find(
-    (skill) => skill.name === "skill-creator" && skill.selectable && skill.enabled,
-  );
+  const creator = catalog.authoringSkillId
+    ? catalog.skills.find(
+        (skill) =>
+          skill.id === catalog.authoringSkillId &&
+          skill.selectable &&
+          skill.enabled,
+      )
+    : undefined;
 
   const createSkill = async () => {
     if (!creator || creating) return;
@@ -125,7 +130,7 @@ export function SkillsPage({ runtime, project, onCreateSkill }: SkillsPageProps)
                     onClick={() => void catalog.selectSkill(skill.id)}
                   >
                     <span className={styles.skillRowMeta}>
-                      {skill.source.replace(":", " · ")}
+                      {skill.originLabel}
                       <em data-status={skill.status}>{skill.status}</em>
                     </span>
                     <strong>
@@ -138,8 +143,8 @@ export function SkillsPage({ runtime, project, onCreateSkill }: SkillsPageProps)
                 ))
               ) : (
                 <p className={styles.emptyCopy}>
-                  No Skills yet. Import a folder containing a valid SKILL.md, or
-                  add one under .agents/skills.
+                  No Skills yet. Import a folder containing a valid SKILL.md or
+                  create a reusable workflow.
                 </p>
               )}
             </div>
@@ -147,7 +152,7 @@ export function SkillsPage({ runtime, project, onCreateSkill }: SkillsPageProps)
               {catalog.selectedSkill ? (
                 <>
                   <p className={styles.eyebrow}>
-                    {catalog.selectedSkill.source.replace(":", " · ")}
+                    {catalog.selectedSkill.originLabel}
                   </p>
                   <h2>
                     {catalog.selectedSkill.displayName ??
@@ -173,7 +178,10 @@ export function SkillsPage({ runtime, project, onCreateSkill }: SkillsPageProps)
                           scope,
                         )
                       }
-                      disabled={catalog.loading}
+                      disabled={
+                        catalog.loading ||
+                        !catalog.selectedSkill.configurableScopes.includes(scope)
+                      }
                     >
                       <Power size={13} />
                       {catalog.selectedSkill.enabled ? "Disable" : "Enable"}

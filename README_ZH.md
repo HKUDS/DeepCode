@@ -144,6 +144,17 @@ Automations。从源码启动请参考
 
 ## 新闻
 
+**2026-08-12 · MCP 模板目录、OAuth 与真实连接测试**
+
+- **预装模板，但不偷偷执行。** DeepCode 内置基于 Nanobot 当前 16 个 MCP
+  模板整理的校验目录。安装模板只会复制一份默认禁用的普通配置，不会自动运行
+  `npx`、Docker 或连接远程服务。
+- **所有入口共用一套管理逻辑。** Desktop、TUI、管理 CLI 与 App Server
+  现在共享模板安装、配置、连接测试、OAuth 和运行状态服务。
+- **分开显示配置、授权与连接状态。** 真实测试会初始化 MCP 并统计 tools、
+  resources 和 prompts；浏览器 OAuth 使用本机回调，凭据保存在项目配置之外，
+  Agent 启动时不会擅自打开浏览器。
+
 **2026-08-07 · 思考强度控制、更多模型服务商、可调的 Desktop**
 
 - **思考强度控制全面恢复。** 思考档位改为从模型目录解析，Claude、GPT-5、
@@ -546,6 +557,21 @@ Skill**，或在 CLI 调用 `$skill-creator`，即可通过普通 Agent Turn 创
 审批或工具策略。导入、启用、禁用和目录管理命令统一放在
 [高级指南](docs/HEADLESS_AND_AUTOMATION.md#skills-管理)中。
 
+### MCP 服务器
+
+DeepCode 的 Agent Session、Desktop、TUI、管理 CLI 与 App Server 共用同一套
+MCP 客户端。Desktop 在 **MCP Servers** 页面管理；TUI 统一使用 `/mcp`；
+Shell 中可先运行 `deepcode mcp presets` 查看内置的 16 个 Nanobot 模板，再用
+`deepcode mcp add <id>` 添加配置。模板默认禁用，不会自动下载依赖或启动进程。
+
+用 `deepcode mcp test <名称>`、`/mcp test <名称>` 或 Desktop 的 **Test connection**
+进行真实 MCP 初始化和能力枚举，确认后再用 `deepcode mcp enable <名称>`、
+`/mcp enable <名称>` 或 Desktop 的 **Enable** 启用。启用后，用户只需正常
+描述 coding 任务，模型会在需要时自动调用 MCP 工具。Notion、Linear、Xmind 等 OAuth
+服务通过 `login/logout` 或 Desktop 的 **Authenticate/Logout** 显式授权；凭据
+单独保存在私有文件中，Agent 启动不会自动打开浏览器。配置方式、环境变量、
+OAuth 与三类状态的说明见 [MCP 客户端指南](docs/integrations/MCP.md)。
+
 ### 安全与执行
 
 DeepCode 将执行安全视为产品边界，而不是客户端确认框：
@@ -801,6 +827,7 @@ Desktop 打包、Rust 检查、签名和发布流程请参考
 | Agent 执行与批准           | [P2 Agent execution](docs/P2_AGENT_EXECUTION_ARCHITECTURE.md) |
 | Desktop Sidecar 与生命周期 | [P3 Desktop runtime](docs/P3_DESKTOP_RUNTIME_ARCHITECTURE.md) |
 | Git 审查、文件、终端与测试 | [P4 Code workbench](docs/P4_CODE_WORKBENCH_ARCHITECTURE.md)   |
+| MCP 配置与连接生命周期     | [MCP client guide](docs/integrations/MCP.md)                  |
 | 持久化 Paper2Code 工作流   | [P5 Paper2Code](docs/P5_PAPER2CODE_ARCHITECTURE.md)           |
 | 中央 Session 与跨目录恢复  | [P6 Session alignment](docs/P6_SESSION_ALIGNMENT_REVIEW.md)   |
 | Skills 身份、安全与持久化  | [Skills architecture](docs/SKILLS_PRODUCT_ARCHITECTURE.md)    |
