@@ -42,6 +42,15 @@ export function useSkillManagement(
     [projectId],
   );
 
+  useEffect(() => {
+    const selected = state.selectedSkill;
+    if (!selected || state.projectId !== projectId) return;
+    const current = catalog.skills.find((skill) => skill.id === selected.id);
+    if (current?.revision === selected.revision) return;
+    generation.current += 1;
+    setState((value) => ({ ...value, selectedSkill: null }));
+  }, [catalog.skills, projectId, state.projectId, state.selectedSkill]);
+
   const selectSkill = useCallback(
     async (skillId: string) => {
       if (!projectId) return;

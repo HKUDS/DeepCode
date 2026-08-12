@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from core.agent_runtime.goal_runtime import GoalRuntimeRouter
 from core.agent_runtime.injections import InjectionCallback, TurnInputSink
@@ -17,6 +17,10 @@ from core.domain.execution_security import ExecutionSecurityProfile
 from core.events import Event, Op
 from core.harness.permissions import PermissionMode
 from core.providers.credentials import default_credentials_path
+
+if TYPE_CHECKING:
+    from core.mcp.models import ResolvedMcpServer
+    from core.skills.runtime import SkillRuntime
 
 ApprovalCallback = Callable[[str, dict[str, Any], str | None], Any]
 
@@ -56,6 +60,7 @@ class AgentSessionFactory(Protocol):
         active_turn_id_provider: Callable[[], str | None] | None = None,
         runtime_input_sink: TurnInputSink | None = None,
         goal_runtime: GoalRuntimeRouter | None = None,
+        skill_runtime: SkillRuntime | None = None,
     ) -> AgentSessionPort: ...
 
 
@@ -72,6 +77,28 @@ class ConfiguredAgentSessionFactory:
         self.default_permission_mode = default_permission_mode
         self.streaming = streaming
         self.max_iterations = max_iterations
+        self._plugin_mcp_provider: (
+            Callable[[Path], tuple[ResolvedMcpServer, ...]] | None
+        ) = None
+        self._plugin_revision_provider: Callable[[], str] | None = None
+        self._mcp_status_observer: Callable[[str, tuple[Any, ...]], None] | None = None
+
+    def configure_plugin_mcp(
+        self,
+        provider: Callable[[Path], tuple[ResolvedMcpServer, ...]],
+        *,
+        revision_provider: Callable[[], str],
+    ) -> None:
+        """Attach the application-owned Plugin host without coupling kernels."""
+
+        self._plugin_mcp_provider = provider
+        self._plugin_revision_provider = revision_provider
+
+    def configure_mcp_status_observer(
+        self,
+        observer: Callable[[str, tuple[Any, ...]], None],
+    ) -> None:
+        self._mcp_status_observer = observer
 
     def create(
         self,
@@ -86,11 +113,17 @@ class ConfiguredAgentSessionFactory:
         active_turn_id_provider: Callable[[], str | None] | None = None,
         runtime_input_sink: TurnInputSink | None = None,
         goal_runtime: GoalRuntimeRouter | None = None,
+        skill_runtime: SkillRuntime | None = None,
     ) -> AgentSessionPort:
         options: dict[str, Any] = {}
         if self.max_iterations is not None:
             options["max_iterations"] = self.max_iterations
         runtime = DeepCodeRuntime(load_config_for_workspace(workspace))
+        plugin_mcp_servers = (
+            self._plugin_mcp_provider(Path(workspace))
+            if self._plugin_mcp_provider is not None
+            else ()
+        )
         session, _resolved_model, _engine = build_agent_session(
             workspace=workspace,
             model=model,
@@ -101,6 +134,7 @@ class ConfiguredAgentSessionFactory:
             active_turn_id_provider=active_turn_id_provider,
             runtime_input_sink=runtime_input_sink,
             goal_runtime=goal_runtime,
+            skill_runtime=skill_runtime,
             streaming=self.streaming,
             default_permission_mode=self.default_permission_mode,
             permission_mode_override=(
@@ -109,6 +143,9 @@ class ConfiguredAgentSessionFactory:
                 else None
             ),
             runtime=runtime,
+            project_trusted=True,
+            plugin_mcp_servers=plugin_mcp_servers,
+            mcp_status_observer=self._mcp_status_observer,
             **options,
         )
         return session
@@ -151,6 +188,12 @@ class ConfiguredAgentSessionFactory:
             _config_signature(home_config_path()),
             _config_signature(project_config_path(workspace)),
             _config_signature(default_credentials_path()),
+            _mcp_oauth_signature(),
+            (
+                self._plugin_revision_provider()
+                if self._plugin_revision_provider is not None
+                else None
+            ),
             id(get_runtime()),
         )
 
@@ -161,6 +204,12 @@ def _config_signature(path: Path) -> tuple[str, int, int] | tuple[str, None, Non
     except OSError:
         return (str(path), None, None)
     return (str(path), stat.st_mtime_ns, stat.st_size)
+
+
+def _mcp_oauth_signature() -> tuple[str, int, int] | tuple[str, None, None]:
+    from core.mcp.oauth import default_mcp_oauth_path
+
+    return _config_signature(default_mcp_oauth_path())
 
 
 class DefaultAgentSessionFactory(ConfiguredAgentSessionFactory):

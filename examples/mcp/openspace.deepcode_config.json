@@ -1,0 +1,42 @@
+{
+  "mcpServers": {
+    "openspace": {
+      "type": "stdio",
+      "command": "openspace-mcp",
+      "cwd": "${workspace}",
+      "env": {
+        "OPENSPACE_WORKSPACE": "${workspace}",
+        "OPENSPACE_HOST_SKILL_DIRS": "${workspace}/.agents/skills",
+        "OPENSPACE_MODEL": "openrouter/anthropic/claude-sonnet-4.5",
+        "OPENSPACE_CLOUD_MODE": "off",
+        "OPENSPACE_SKIP_DOTENV": "1"
+      },
+      "credentialEnv": {
+        "OPENROUTER_API_KEY": {
+          "credentialRef": "provider:openrouter"
+        }
+      },
+      "enabledTools": [
+        "search_skills",
+        "execute_task",
+        "fix_skill",
+        "cloud_browse_skills",
+        "cloud_auth_flow",
+        "upload_skill"
+      ],
+      "disabledTools": [
+        "cloud_browse_skills",
+        "cloud_auth_flow",
+        "upload_skill"
+      ],
+      "approvalMode": "prompt",
+      "tools": {
+        "search_skills": {
+          "approvalMode": "auto"
+        }
+      },
+      "startupTimeoutSeconds": 30,
+      "toolTimeoutSeconds": 1200
+    }
+  }
+}

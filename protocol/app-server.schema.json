@@ -1165,6 +1165,9 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "id": {
+          "type": "string"
+        },
         "name": {
           "type": "string"
         },
@@ -1193,6 +1196,7 @@
         }
       },
       "required": [
+        "id",
         "name",
         "label",
         "configured",
@@ -2063,6 +2067,46 @@
         "name"
       ]
     },
+    "McpIdentityParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {"type": "string", "pattern": "^proj_"},
+        "name": {"type": "string", "minLength": 1}
+      },
+      "required": ["name"]
+    },
+    "McpPresetAddParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {"type": "string", "pattern": "^proj_"},
+        "presetId": {"type": "string", "minLength": 1},
+        "enabled": {"type": "boolean"}
+      },
+      "required": ["presetId"]
+    },
+    "McpSetEnabledParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {"type": "string", "pattern": "^proj_"},
+        "name": {"type": "string", "minLength": 1},
+        "enabled": {"type": "boolean"}
+      },
+      "required": ["name", "enabled"]
+    },
+    "McpOAuthStartParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {"type": "string", "pattern": "^proj_"},
+        "name": {"type": "string", "minLength": 1},
+        "openBrowser": {"type": "boolean"},
+        "resetCredentials": {"type": "boolean"}
+      },
+      "required": ["name"]
+    },
     "SkillInfo": {
       "type": "object",
       "additionalProperties": false,
@@ -2104,6 +2148,23 @@
           "type": "string"
         },
         "location": {
+          "type": "string"
+        },
+        "originKind": {
+          "type": "string",
+          "enum": ["local", "bundled", "provider"]
+        },
+        "originLabel": {
+          "type": "string"
+        },
+        "providerKind": {
+          "type": "string",
+          "enum": ["local", "executor", "orchestrator", "custom"]
+        },
+        "providerId": {
+          "type": "string"
+        },
+        "packageId": {
           "type": "string"
         },
         "status": {
@@ -2162,6 +2223,12 @@
         "allowImplicitInvocation": {
           "type": "boolean"
         },
+        "configurableScopes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ConfigScope"
+          }
+        },
         "deletable": {
           "type": "boolean"
         }
@@ -2175,6 +2242,11 @@
         "sourceRoot",
         "source",
         "location",
+        "originKind",
+        "originLabel",
+        "providerKind",
+        "providerId",
+        "packageId",
         "status",
         "enabled",
         "selectable",
@@ -2189,6 +2261,7 @@
         "brandColor",
         "defaultPrompt",
         "allowImplicitInvocation",
+        "configurableScopes",
         "deletable"
       ]
     },
@@ -2235,6 +2308,23 @@
         "location": {
           "type": "string"
         },
+        "originKind": {
+          "type": "string",
+          "enum": ["local", "bundled", "provider"]
+        },
+        "originLabel": {
+          "type": "string"
+        },
+        "providerKind": {
+          "type": "string",
+          "enum": ["local", "executor", "orchestrator", "custom"]
+        },
+        "providerId": {
+          "type": "string"
+        },
+        "packageId": {
+          "type": "string"
+        },
         "status": {
           "type": "string",
           "enum": [
@@ -2291,6 +2381,12 @@
         "allowImplicitInvocation": {
           "type": "boolean"
         },
+        "configurableScopes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ConfigScope"
+          }
+        },
         "deletable": {
           "type": "boolean"
         },
@@ -2310,6 +2406,11 @@
         "sourceRoot",
         "source",
         "location",
+        "originKind",
+        "originLabel",
+        "providerKind",
+        "providerId",
+        "packageId",
         "status",
         "enabled",
         "selectable",
@@ -2324,6 +2425,7 @@
         "brandColor",
         "defaultPrompt",
         "allowImplicitInvocation",
+        "configurableScopes",
         "deletable",
         "instructions",
         "truncated"
@@ -2348,13 +2450,166 @@
         "catalogRevision": {
           "type": "string",
           "pattern": "^sha256:"
+        },
+        "authoringSkillId": {
+          "type": ["string", "null"],
+          "pattern": "^sk_[0-9a-f]{24}$"
         }
       },
       "required": [
         "skills",
         "warnings",
-        "catalogRevision"
+        "catalogRevision",
+        "authoringSkillId"
       ]
+    },
+    "PluginIdentityParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pluginId": {
+          "type": "string",
+          "pattern": "^plg_[0-9a-f]{24}$"
+        }
+      },
+      "required": ["pluginId"]
+    },
+    "PluginAddParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": ["path"]
+    },
+    "PluginSetEnabledParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pluginId": {
+          "type": "string",
+          "pattern": "^plg_[0-9a-f]{24}$"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": ["pluginId", "enabled"]
+    },
+    "PluginDiagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "code": {"type": "string", "minLength": 1},
+        "severity": {
+          "type": "string",
+          "enum": ["warning", "error"]
+        },
+        "message": {"type": "string"},
+        "component": {
+          "type": ["string", "null"],
+          "enum": ["skills", "mcp", null]
+        },
+        "resource": {"type": ["string", "null"]}
+      },
+      "required": ["code", "severity", "message", "component", "resource"]
+    },
+    "PluginComponent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["skills", "mcp"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ready", "unsupported", "invalid"]
+        },
+        "resource": {"type": ["string", "null"]},
+        "itemCount": {"type": ["integer", "null"], "minimum": 0},
+        "diagnostics": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/PluginDiagnostic"}
+        }
+      },
+      "required": ["kind", "status", "resource", "itemCount", "diagnostics"]
+    },
+    "PluginInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string"},
+        "name": {"type": "string"},
+        "version": {"type": ["string", "null"]},
+        "description": {"type": "string"},
+        "status": {
+          "type": "string",
+          "enum": ["active", "disabled", "invalid"]
+        },
+        "enabled": {"type": "boolean"},
+        "source": {"const": "linked-directory"},
+        "path": {"type": "string"},
+        "schema": {
+          "type": ["string", "null"],
+          "enum": [
+            "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+            null
+          ]
+        },
+        "manifestPath": {"type": "string"},
+        "manifestRevision": {
+          "type": ["string", "null"],
+          "pattern": "^sha256:"
+        },
+        "components": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/PluginComponent"}
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/PluginDiagnostic"}
+        },
+        "error": {"type": ["string", "null"]}
+      },
+      "required": [
+        "id",
+        "name",
+        "version",
+        "description",
+        "status",
+        "enabled",
+        "source",
+        "path",
+        "schema",
+        "manifestPath",
+        "manifestRevision",
+        "components",
+        "diagnostics",
+        "error"
+      ]
+    },
+    "PluginCatalogResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "plugins": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/PluginInfo"}
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/PluginDiagnostic"}
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^sha256:"
+        }
+      },
+      "required": ["plugins", "diagnostics", "revision"]
     },
     "HookInfo": {
       "type": "object",
@@ -2412,8 +2667,23 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "id": {
+          "type": "string"
+        },
         "name": {
           "type": "string"
+        },
+        "pluginId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "policyKey": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "transport": {
           "type": "string",
@@ -2435,21 +2705,59 @@
             "type": "string"
           }
         },
+        "cwd": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "url": {
           "type": [
             "string",
             "null"
           ]
         },
+        "auth": {
+          "type": ["string", "null"],
+          "enum": ["oauth", null]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "required": {
+          "type": "boolean"
+        },
         "enabledTools": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "disabledTools": {
           "type": "array",
           "items": {
             "type": "string"
           }
         },
-        "toolTimeout": {
-          "type": "integer",
-          "minimum": 1
+        "startupTimeoutSeconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "toolTimeoutSeconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "approvalMode": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "prompt",
+            "writes",
+            "approve"
+          ]
         },
         "description": {
           "type": [
@@ -2458,6 +2766,26 @@
           ]
         },
         "envKeys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "forwardedEnvKeys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "requiredEnvKeys": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "missingEnvKeys": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "credentialEnvKeys": {
           "type": "array",
           "items": {
             "type": "string"
@@ -2474,34 +2802,69 @@
           "enum": [
             "user",
             "project",
-            "default"
+            "plugin"
           ]
         },
         "configurationState": {
           "type": "string",
           "enum": [
             "configured",
-            "invalid"
+            "invalid",
+            "disabled",
+            "blocked",
+            "missing_credentials"
           ]
         },
         "configurationMessage": {
           "type": "string"
-        }
+        },
+        "authState": {
+          "type": "string",
+          "enum": ["not_required", "login_required", "authorizing", "authenticated"]
+        },
+        "runtimeState": {
+          "type": "string",
+          "enum": ["stopped", "connecting", "tested", "connected", "failed"]
+        },
+        "runtimeMessage": {"type": "string"},
+        "toolCount": {"type": "integer", "minimum": 0},
+        "resourceCount": {"type": "integer", "minimum": 0},
+        "promptCount": {"type": "integer", "minimum": 0}
       },
       "required": [
+        "id",
         "name",
+        "pluginId",
+        "policyKey",
         "transport",
         "command",
         "args",
+        "cwd",
         "url",
+        "auth",
+        "enabled",
+        "required",
         "enabledTools",
-        "toolTimeout",
+        "disabledTools",
+        "startupTimeoutSeconds",
+        "toolTimeoutSeconds",
+        "approvalMode",
         "description",
         "envKeys",
+        "forwardedEnvKeys",
+        "requiredEnvKeys",
+        "missingEnvKeys",
+        "credentialEnvKeys",
         "headerKeys",
         "source",
         "configurationState",
-        "configurationMessage"
+        "configurationMessage",
+        "authState",
+        "runtimeState",
+        "runtimeMessage",
+        "toolCount",
+        "resourceCount",
+        "promptCount"
       ]
     },
     "McpInventory": {
@@ -2528,6 +2891,81 @@
         "servers",
         "userConfigPath",
         "projectConfigPath"
+      ]
+    },
+    "McpPresetInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string"},
+        "displayName": {"type": "string"},
+        "category": {"type": "string"},
+        "description": {"type": "string"},
+        "docsUrl": {"type": "string"},
+        "transport": {"type": "string", "enum": ["stdio", "sse", "streamableHttp"]},
+        "auth": {"type": ["string", "null"], "enum": ["oauth", null]},
+        "requires": {"type": "string"},
+        "note": {"type": "string"},
+        "requiredEnvironment": {"type": "array", "items": {"type": "string"}},
+        "missingEnvironment": {"type": "array", "items": {"type": "string"}},
+        "configured": {"type": "boolean"}
+      },
+      "required": [
+        "id", "displayName", "category", "description", "docsUrl",
+        "transport", "auth", "requires", "note", "requiredEnvironment",
+        "missingEnvironment", "configured"
+      ]
+    },
+    "McpPresetInventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "presets": {"type": "array", "items": {"$ref": "#/$defs/McpPresetInfo"}},
+        "source": {"type": "string"},
+        "sourceRevision": {"type": "string"}
+      },
+      "required": ["presets", "source", "sourceRevision"]
+    },
+    "McpProbeResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "serverId": {"type": "string"},
+        "name": {"type": "string"},
+        "ok": {"type": "boolean"},
+        "transport": {"type": "string", "enum": ["stdio", "sse", "streamableHttp"]},
+        "toolCount": {"type": "integer", "minimum": 0},
+        "resourceCount": {"type": "integer", "minimum": 0},
+        "promptCount": {"type": "integer", "minimum": 0},
+        "elapsedSeconds": {"type": "number", "minimum": 0},
+        "error": {"type": ["string", "null"]}
+      },
+      "required": [
+        "serverId", "name", "ok", "transport", "toolCount", "resourceCount",
+        "promptCount", "elapsedSeconds", "error"
+      ]
+    },
+    "McpOAuthFlow": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "flowId": {"type": "string"},
+        "serverId": {"type": "string"},
+        "name": {"type": "string"},
+        "status": {
+          "type": "string",
+          "enum": [
+            "starting", "authorization_required", "connecting", "authenticated",
+            "failed", "cancelled", "logged_out"
+          ]
+        },
+        "authorizationUrl": {"type": ["string", "null"]},
+        "expiresInSeconds": {"type": "integer", "minimum": 0},
+        "error": {"type": ["string", "null"]}
+      },
+      "required": [
+        "flowId", "serverId", "name", "status", "authorizationUrl",
+        "expiresInSeconds", "error"
       ]
     },
     "DiagnosticsCheck": {
@@ -4638,6 +5076,18 @@
         "skills/reload": {
           "$ref": "#/$defs/ProjectReadParams"
         },
+        "plugins/list": {
+          "$ref": "#/$defs/EmptyParams"
+        },
+        "plugins/add": {
+          "$ref": "#/$defs/PluginAddParams"
+        },
+        "plugins/set-enabled": {
+          "$ref": "#/$defs/PluginSetEnabledParams"
+        },
+        "plugins/remove": {
+          "$ref": "#/$defs/PluginIdentityParams"
+        },
         "hooks/list": {
           "$ref": "#/$defs/ProjectReadParams"
         },
@@ -4649,6 +5099,27 @@
         },
         "mcp/remove": {
           "$ref": "#/$defs/McpRemoveParams"
+        },
+        "mcp/presets": {
+          "$ref": "#/$defs/OptionalProjectParams"
+        },
+        "mcp/preset/add": {
+          "$ref": "#/$defs/McpPresetAddParams"
+        },
+        "mcp/set-enabled": {
+          "$ref": "#/$defs/McpSetEnabledParams"
+        },
+        "mcp/probe": {
+          "$ref": "#/$defs/McpIdentityParams"
+        },
+        "mcp/oauth/start": {
+          "$ref": "#/$defs/McpOAuthStartParams"
+        },
+        "mcp/oauth/cancel": {
+          "$ref": "#/$defs/McpIdentityParams"
+        },
+        "mcp/oauth/logout": {
+          "$ref": "#/$defs/McpIdentityParams"
         },
         "diagnostics/read": {
           "$ref": "#/$defs/OptionalProjectParams"
@@ -4834,10 +5305,21 @@
         "skills/set-enabled",
         "skills/delete",
         "skills/reload",
+        "plugins/list",
+        "plugins/add",
+        "plugins/set-enabled",
+        "plugins/remove",
         "hooks/list",
         "mcp/list",
         "mcp/upsert",
         "mcp/remove",
+        "mcp/presets",
+        "mcp/preset/add",
+        "mcp/set-enabled",
+        "mcp/probe",
+        "mcp/oauth/start",
+        "mcp/oauth/cancel",
+        "mcp/oauth/logout",
         "diagnostics/read",
         "automation/list",
         "automation/create",
@@ -5060,6 +5542,24 @@
         "skills/reload": {
           "$ref": "#/$defs/SkillCatalogResult"
         },
+        "plugins/list": {
+          "$ref": "#/$defs/PluginCatalogResult"
+        },
+        "plugins/add": {
+          "$ref": "#/$defs/PluginCatalogResult"
+        },
+        "plugins/set-enabled": {
+          "$ref": "#/$defs/PluginCatalogResult"
+        },
+        "plugins/remove": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "removed": {"type": "boolean"},
+            "plugin": {"$ref": "#/$defs/PluginInfo"}
+          },
+          "required": ["removed", "plugin"]
+        },
         "hooks/list": {
           "type": "object",
           "additionalProperties": false,
@@ -5094,6 +5594,33 @@
         },
         "mcp/remove": {
           "$ref": "#/$defs/McpInventory"
+        },
+        "mcp/presets": {
+          "$ref": "#/$defs/McpPresetInventory"
+        },
+        "mcp/preset/add": {
+          "$ref": "#/$defs/McpInventory"
+        },
+        "mcp/set-enabled": {
+          "$ref": "#/$defs/McpInventory"
+        },
+        "mcp/probe": {
+          "$ref": "#/$defs/McpProbeResult"
+        },
+        "mcp/oauth/start": {
+          "$ref": "#/$defs/McpOAuthFlow"
+        },
+        "mcp/oauth/cancel": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {"cancelled": {"type": "boolean"}},
+          "required": ["cancelled"]
+        },
+        "mcp/oauth/logout": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {"removed": {"type": "boolean"}},
+          "required": ["removed"]
         },
         "diagnostics/read": {
           "type": "object",
@@ -5784,10 +6311,21 @@
         "skills/set-enabled",
         "skills/delete",
         "skills/reload",
+        "plugins/list",
+        "plugins/add",
+        "plugins/set-enabled",
+        "plugins/remove",
         "hooks/list",
         "mcp/list",
         "mcp/upsert",
         "mcp/remove",
+        "mcp/presets",
+        "mcp/preset/add",
+        "mcp/set-enabled",
+        "mcp/probe",
+        "mcp/oauth/start",
+        "mcp/oauth/cancel",
+        "mcp/oauth/logout",
         "diagnostics/read",
         "automation/list",
         "automation/create",
@@ -5951,6 +6489,29 @@
             "exitCode"
           ]
         },
+        "skills.changed": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "projectId": {
+              "type": "string",
+              "pattern": "^proj_"
+            }
+          },
+          "required": [
+            "projectId"
+          ]
+        },
+        "plugins.changed": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        },
+        "mcp.changed": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        },
         "server.warning": {
           "type": "object",
           "additionalProperties": false,
@@ -5994,6 +6555,9 @@
         "turn.plan.updated",
         "terminal.output",
         "terminal.exit",
+        "skills.changed",
+        "plugins.changed",
+        "mcp.changed",
         "server.warning"
       ]
     },

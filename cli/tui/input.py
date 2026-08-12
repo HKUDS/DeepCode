@@ -13,8 +13,9 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
+from typing import Protocol
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
@@ -30,7 +31,6 @@ from core.private_storage import (
     ensure_private_file,
     open_private_file,
 )
-from core.skills.management import LocalSkillManager
 
 _HISTORY_PATH: Path | None = None
 _SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv"}
@@ -41,12 +41,28 @@ class InputInterrupted(Exception):
     """The user requested that the active Turn stop, not that the CLI exit."""
 
 
+class SkillCompletionItem(Protocol):
+    name: str
+    description: str
+    status: str
+
+
 class TuiCompleter(Completer):
     """Complete ``/commands`` at line start and ``@paths`` anywhere."""
 
-    def __init__(self, workspace: str) -> None:
+    def __init__(
+        self,
+        workspace: str,
+        skill_provider: Callable[[], Iterable[SkillCompletionItem]] | None = None,
+    ) -> None:
         self.workspace = Path(workspace)
-        self._skill_manager: LocalSkillManager | None = None
+        self._skill_provider = skill_provider
+
+    def set_skill_provider(
+        self,
+        provider: Callable[[], Iterable[SkillCompletionItem]],
+    ) -> None:
+        self._skill_provider = provider
 
     def get_completions(self, document, complete_event):
         text = document.text_before_cursor
@@ -62,18 +78,23 @@ class TuiCompleter(Completer):
             if fragment and any(character.isspace() for character in fragment):
                 return
             try:
-                if self._skill_manager is None:
-                    self._skill_manager = LocalSkillManager(self.workspace)
-                records = self._skill_manager.catalog().active()
-            except (OSError, ValueError):
+                records = (
+                    tuple(self._skill_provider())
+                    if self._skill_provider is not None
+                    else ()
+                )
+            except Exception:  # noqa: BLE001 - completion must remain best effort
                 records = ()
             for record in records:
-                if record.name.casefold().startswith(fragment.casefold()):
-                    yield Completion(
-                        record.name,
-                        start_position=-len(fragment),
-                        display=f"${record.name} — {record.description}",
-                    )
+                if record.status != "active" or not record.name.casefold().startswith(
+                    fragment.casefold()
+                ):
+                    continue
+                yield Completion(
+                    record.name,
+                    start_position=-len(fragment),
+                    display=f"${record.name} — {record.description}",
+                )
             return
         at = text.rfind("@")
         if at == -1:
@@ -115,6 +136,7 @@ class InputReader:
     ) -> None:
         self.interactive = sys.stdin.isatty()
         self._prompt_session: PromptSession | None = None
+        self._completer = TuiCompleter(workspace)
         if self.interactive:
             history_path = _HISTORY_PATH or deepcode_home() / "tui_history"
             ensure_private_directory(history_path.parent)
@@ -139,12 +161,18 @@ class InputReader:
 
             self._prompt_session = PromptSession(
                 history=FileHistory(str(history_path)),
-                completer=TuiCompleter(workspace),
+                completer=self._completer,
                 complete_while_typing=True,
                 key_bindings=bindings,
                 bottom_toolbar=status_provider,
                 refresh_interval=0.5 if status_provider is not None else None,
             )
+
+    def set_skill_provider(
+        self,
+        provider: Callable[[], Iterable[SkillCompletionItem]],
+    ) -> None:
+        self._completer.set_skill_provider(provider)
 
     async def read(self) -> str | None:
         """Next input line, or ``None`` on EOF (ctrl-d / pipe end)."""

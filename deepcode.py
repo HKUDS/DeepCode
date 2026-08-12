@@ -145,15 +145,19 @@ def main():
 
             raise SystemExit(init_run(sys.argv[2:]))
         elif sys.argv[1] == "mcp":
-            # Expose DeepCode as an MCP server over stdio (no banner — stdout is
-            # the JSON-RPC channel).
-            from cli.mcp_server import main as mcp_main
+            # Bare/serve exposes DeepCode over stdio; list/add/remove manage the
+            # generic MCP clients shared by CLI and Desktop.
+            from cli.mcp_cli import run as mcp_main
 
             raise SystemExit(mcp_main(sys.argv[2:]))
         elif sys.argv[1] in {"skill", "skills"}:
             from cli.skill_cli import run as skill_run
 
             raise SystemExit(skill_run(sys.argv[2:]))
+        elif sys.argv[1] in {"plugin", "plugins"}:
+            from cli.plugin_cli import run as plugin_run
+
+            raise SystemExit(plugin_run(sys.argv[2:]))
         elif sys.argv[1] in {"provider", "providers"}:
             from cli.provider_cli import run as provider_run
 
@@ -200,10 +204,15 @@ def main():
                         ),
                         row("deepcode test <paper>", "Test paper reproduction"),
                         row("deepcode test <paper> --fast", "Test paper (fast mode)"),
-                        row("deepcode mcp", "Expose DeepCode as an MCP server (stdio)"),
+                        row("deepcode mcp serve", "Expose DeepCode as an MCP server"),
+                        row("deepcode mcp list|add|remove", "Manage MCP clients"),
                         row(
                             "deepcode skill <command>",
                             "List, inspect, import, and manage Agent Skills",
+                        ),
+                        row(
+                            "deepcode plugin <command>",
+                            "Register and manage local Agent Plugins",
                         ),
                         row(
                             "deepcode provider <command>",

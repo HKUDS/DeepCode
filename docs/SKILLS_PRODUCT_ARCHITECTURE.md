@@ -1,8 +1,9 @@
 # DeepCode Skills product architecture
 
 Status: implementation contract
-Scope: Skills only; MCP, plugins, marketplaces, and remote Skill distribution are
-explicitly out of scope.
+Scope: Skills, local Agent Plugins 1.0 packages, and their MCP components.
+Marketplace, remote distribution, Hooks, Apps, and arbitrary Plugin lifecycle
+code are explicitly out of scope.
 
 ## Product invariants
 
@@ -105,6 +106,71 @@ Validation, ownership, and policy errors are not swallowed. A colliding
 `skillId` across authorities is visible in the catalog but cannot be selected by
 ID, because `SkillSelection` intentionally remains backward-compatible and
 contains no Provider authority.
+
+## Host lifecycle and change propagation
+
+`SkillCatalogHost` is the application-lifetime owner for one canonical
+workspace. It owns the layered `SkillPolicyStore`, the provider router, and
+provider discovery caches. `SkillWorkspaceRegistry` canonicalizes paths and
+ensures Application services, interactive CLI Sessions, headless Turns, and
+the App Server all obtain the same host for that workspace.
+
+An `AgentSession` never shares mutable Turn context with another Session. The
+registry creates a distinct `SkillRuntime` for each Session over the host's
+shared provider backend; `begin_turn` still creates an immutable catalog and
+instruction snapshot in a runtime-local `ContextVar`. Replacing a provider,
+editing a Skill, or changing policy therefore affects only a subsequent Turn.
+
+The host has two source layers:
+
+- base sources owned by the core runtime, currently the local Provider;
+- keyed contributors owned independently by extension systems.
+
+`SkillWorkspaceRegistry.register_contributor` assigns each owner a lifecycle
+handle. Refreshing or unregistering one contributor recomputes the combined
+source set without overwriting another owner's Providers. MCP uses a parallel
+session-plan contribution boundary; it is not represented as a Skill Provider.
+
+`LocalPluginHost` is the first production contributor. It reads a user-owned
+registry, resolves Agent Plugins 1.0.0 packages into format-neutral metadata
+and component models, and contributes one authority-bound source per enabled
+Plugin installation. There is no legacy manifest adapter. The Skill runtime
+has no Plugin-format branch and does not interpret Plugin paths. Standalone
+local Skills remain the base source and win deterministic precedence over a
+same-named contributed Skill.
+
+The registry separates installation identity from package metadata. Each entry
+has an opaque `plg_...` ID, the declared package name, enabled state, and a
+typed linked-directory source. Skill authorities use the installation ID, so a
+package rename cannot silently reuse an earlier provider identity.
+
+Plugin discovery is inert. It never imports Plugin code or starts a process.
+The fixed Agent Plugins 1.0 `mcp.json` component is schema-validated during
+discovery, then converted into immutable server contributions only while an
+Agent Session is assembled. The generic MCP runtime, not the Plugin host, owns
+transport startup, tool publication, timeout, cancellation, and shutdown.
+Registry, manifest, and fixed-component revisions are monitored at application
+lifetime; Skill file changes remain owned by the contributed Provider.
+Disabling or removing a Plugin replaces sources for the next Turn, while an
+active Turn retains its catalog and provider-routing snapshot. Removing a
+registration never deletes the Plugin source directory.
+
+`SkillCatalogMonitor` is one portable, application-owned monitor for every
+registered workspace. It polls bounded, equality-comparable change tokens from
+mutable Providers. The local token covers every discoverable `SKILL.md`,
+optional OpenAI metadata, and effective user/project policy. A change
+invalidates the shared host and publishes one workspace event. This avoids a
+platform-specific watcher dependency in the packaged sidecar while retaining
+deterministic manual polling in tests. Providers with their own push channel
+may omit a token and call the registry's explicit `invalidate` boundary through
+their contribution owner.
+
+`SkillService` maps changed workspaces back to registered Project IDs. The App
+Server emits a body-free `skills.changed` notification containing only the
+Project ID. Desktop keeps one runtime-scoped Catalog Store shared by Composer
+and the Skills workspace, deduplicates concurrent loads, and force-refreshes
+that Project on the notification. Detail views are discarded when their Skill
+revision disappears or changes.
 
 ## Catalog, content, and package resources
 
@@ -228,6 +294,17 @@ Skill management methods:
 - `skills/delete`
 - `skills/reload`
 
+Catalog responses also expose provider-neutral presentation and capabilities:
+
+- `originKind`, `originLabel`, and `location` for display;
+- `providerKind`, `providerId`, and `packageId` for opaque ownership;
+- `configurableScopes` so a frontend never guesses whether policy can change;
+- `authoringSkillId`, resolved from a backend-only bundled-role registry.
+
+Frontends must not infer these values from paths, source strings, or a Skill
+name. `skills.changed` is an ephemeral invalidation notification, not durable
+Session history and never contains instructions.
+
 User Session messages remain ordinary text. New clients add versioned metadata:
 
 ```json
@@ -284,6 +361,14 @@ error classes, but not Skill instructions or user prompts.
 The feature is complete only when:
 
 - Desktop and CLI return identical IDs and revisions for the same workspace;
+- every surface in one process resolves through the same workspace host while
+  AgentSession Turn contexts remain isolated;
+- external Skill or policy changes invalidate the host, emit
+  `skills.changed`, and become visible on the next Turn without mutating the
+  current Turn;
+- Desktop Composer and management views share one deduplicated catalog state;
+- a fake contributed Provider works through the public source seam without
+  local-path access or frontend special cases;
 - structured and unambiguous `$name` invocation resolve to the same snapshot;
 - explicit instructions are present before the first model-provider call;
 - catalog listing retains no instruction bodies and every content read stays on

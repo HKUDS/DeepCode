@@ -178,6 +178,16 @@ async def _cmd_skill(app, args: str) -> str | None:
     return app.select_skill(args.strip())
 
 
+async def _cmd_plugins(app, args: str) -> str | None:
+    if args.strip():
+        return "usage: /plugins"
+    return app.list_plugins()
+
+
+async def _cmd_mcp(app, args: str) -> str | None:
+    return await app.manage_mcp(args)
+
+
 async def _cmd_goal(app, args: str) -> str | None:
     return await app.run_goal_command(args)
 
@@ -239,6 +249,13 @@ REGISTRY: dict[str, Command] = {
             "/skill <id|name>",
             "select a Skill for the next turn",
             _cmd_skill,
+        ),
+        Command("plugins", "/plugins", "list installed Plugins", _cmd_plugins),
+        Command(
+            "mcp",
+            "/mcp [action]",
+            "list, add, test, authorize, or manage MCP servers",
+            _cmd_mcp,
         ),
         Command(
             "goal",

@@ -100,6 +100,7 @@ const desktopSettings: SettingsSnapshot = {
   resolvedDefaultSecuritySource: "built_in",
   providers: [
     {
+      id: "openai",
       name: "openai",
       label: "OpenAI",
       configured: true,
@@ -138,6 +139,11 @@ const reviewSkill = {
   sourceRoot: "agents",
   source: "project:agents",
   location: "project/.agents/skills/review",
+  originKind: "local",
+  originLabel: "project:agents",
+  providerKind: "local",
+  providerId: "local",
+  packageId: SKILL_ID,
   status: "active",
   enabled: true,
   selectable: true,
@@ -152,11 +158,13 @@ const reviewSkill = {
   brandColor: null,
   defaultPrompt: null,
   allowImplicitInvocation: true,
+  configurableScopes: ["project", "user"],
   deletable: true,
 } as const;
 const verifySkill = {
   ...reviewSkill,
   id: VERIFY_SKILL_ID,
+  packageId: VERIFY_SKILL_ID,
   name: "verify",
   description: "Run the focused verification",
   allowedTools: ["bash"],
@@ -175,6 +183,9 @@ const creatorSkill = {
   sourceRoot: "system",
   source: "system:system",
   location: "system/bundled/skills/skill-creator",
+  originKind: "bundled",
+  originLabel: "DeepCode bundled",
+  packageId: CREATOR_SKILL_ID,
   revision: `sha256:${"d".repeat(64)}`,
   defaultPrompt:
     "Use $skill-creator to create a focused reusable Skill for this project.",
@@ -403,7 +414,7 @@ class TestRuntime implements DesktopRuntime {
               modelId: request.model ?? null,
             },
           ],
-        } as MethodResults[M];
+        } as unknown as MethodResults[M];
       }
       case "provider/remove":
         return {
@@ -522,6 +533,18 @@ class TestRuntime implements DesktopRuntime {
       }
       case "skills/reload":
         return this.skillCatalog() as unknown as MethodResults[M];
+      case "plugins/list":
+        return {
+          plugins: [],
+          diagnostics: [],
+          revision: `sha256:${"0".repeat(64)}`,
+        } as unknown as MethodResults[M];
+      case "mcp/list":
+        return {
+          servers: [],
+          userConfigPath: "/tmp/deepcode_config.json",
+          projectConfigPath: "/workspace/deepcode/deepcode_config.json",
+        } as unknown as MethodResults[M];
       case "diagnostics/read":
         return { diagnostics } as MethodResults[M];
       case "automation/list":
@@ -993,6 +1016,7 @@ class TestRuntime implements DesktopRuntime {
         ),
       warnings: [],
       catalogRevision: CATALOG_REVISION,
+      authoringSkillId: CREATOR_SKILL_ID,
     };
   }
 }
@@ -1749,18 +1773,19 @@ describe("desktop command center", () => {
     ).toMatchObject({ expectedGoalId: "goal-completed" });
   });
 
-  it("keeps dormant Hook and MCP management out of primary navigation", async () => {
+  it("opens MCP management without reviving the dormant Hooks surface", async () => {
     const runtime = new TestRuntime([project], [thread], []);
     render(<App runtime={runtime} />);
 
     await screen.findByRole("heading", { name: "Recovered task" });
-    expect(screen.queryByRole("button", { name: "MCP" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "MCP" }));
+    await screen.findByRole("heading", { name: "MCP Servers" });
+    expect(runtime.calls).toContain("mcp/list");
 
     fireEvent.click(screen.getByRole("button", { name: "Skills" }));
     await screen.findByRole("heading", { name: "Skills" });
     expect(screen.queryByRole("tab", { name: /Hooks/ })).toBeNull();
     expect(runtime.calls).not.toContain("hooks/list");
-    expect(runtime.calls).not.toContain("mcp/list");
   });
 
   it("loads effective Settings and sanitized diagnostics for the selected project", async () => {

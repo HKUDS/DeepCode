@@ -22,7 +22,6 @@ from core.providers.credentials import CredentialStore
 from core.providers.profiles import ConnectionResolver, validate_connection_id
 from core.providers.registry import PROVIDERS, find_by_name
 
-
 _PROFILE_FIELDS = {
     "id",
     "label",
@@ -91,6 +90,22 @@ class LLMConfigurationService:
             "configPath": str(self.config_store.path),
             "credentialPath": str(self.credentials.path),
         }
+
+    def resolve_api_credential(
+        self,
+        connection_id: str,
+        project_id: str | None = None,
+    ) -> str | None:
+        """Resolve one secret for an internal tool adapter without exposing it."""
+
+        try:
+            return (
+                self._resolver(project_id=project_id)
+                .resolve_connection(connection_id)
+                .api_key
+            )
+        except ValueError:
+            return None
 
     def upsert(self, value: dict[str, Any]) -> dict[str, Any]:
         connection_id, api_key, clear_api_key = self._parse_mutation(value)

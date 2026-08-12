@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from core.skills.catalog import SkillCatalog, validate_skill_directory
+from core.skills.host import SkillCatalogHost
 from core.skills.models import (
     SkillRecord,
     SkillResolutionError,
@@ -19,7 +20,6 @@ from core.skills.models import (
     SkillValidationError,
 )
 from core.skills.roots import managed_skill_root
-from core.skills.runtime import SkillRuntime
 
 MAX_IMPORT_FILES = 500
 MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024
@@ -31,11 +31,23 @@ class LocalSkillManager:
 
     _thread_lock = threading.RLock()
 
-    def __init__(self, workspace: str | Path) -> None:
-        self.workspace = Path(workspace).expanduser().resolve(strict=True)
-        if not self.workspace.is_dir():
-            raise ValueError("workspace must be a directory")
-        self.runtime = SkillRuntime(self.workspace)
+    def __init__(
+        self,
+        workspace: str | Path | None = None,
+        *,
+        host: SkillCatalogHost | None = None,
+    ) -> None:
+        if host is None:
+            if workspace is None:
+                raise ValueError("workspace or host is required")
+            host = SkillCatalogHost(workspace)
+        elif workspace is not None:
+            canonical = Path(workspace).expanduser().resolve(strict=True)
+            if canonical != host.workspace:
+                raise ValueError("workspace does not match Skill host")
+        self.host = host
+        self.workspace = host.workspace
+        self.runtime = host.new_runtime()
 
     def catalog(self, *, force: bool = False) -> SkillCatalog:
         return self.runtime.catalog(force=force)

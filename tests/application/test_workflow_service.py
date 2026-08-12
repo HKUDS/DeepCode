@@ -692,7 +692,12 @@ def test_persisted_cancel_request_rejects_late_interaction_response(
             )
         assert rejected.value.details["reason"] == "cancel_requested"
 
-        assert observer.workflows.interrupt(started.run.id)[0] is True
+        accepted, current = observer.workflows.interrupt(started.run.id)
+        # The durable request above is visible to the owning worker. It may
+        # finish cancellation before this process reaches ``interrupt``; a
+        # terminal Workflow correctly reports that there is nothing left to
+        # interrupt.
+        assert accepted is True or current.status is WorkflowStatus.CANCELLED
         cancelled = _wait_for(
             owner,
             started.run.id,

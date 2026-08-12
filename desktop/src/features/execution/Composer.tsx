@@ -422,7 +422,7 @@ export function Composer({
                           {skill.shortDescription ?? skill.description}
                         </small>
                       </span>
-                      <em>{skill.source.replace(":", " · ")}</em>
+                      <em>{skill.originLabel}</em>
                     </button>
                   );
                 })

@@ -61,6 +61,8 @@ from core.events.protocol import (
     summarize_call,
     summarize_result,
 )
+from core.mcp.models import McpStartupError
+from core.mcp.runtime import McpSessionRuntime
 from core.providers.base import LLMProvider
 from core.providers.catalog import context_window_for
 from core.reasoning import ReasoningAvailability, ReasoningChannel
@@ -394,6 +396,7 @@ class AgentSession:
         execution_profile: Any | None = None,
         tool_filter: Any | None = None,
         closure_callback: Any | None = None,
+        mcp_runtime: McpSessionRuntime | None = None,
     ) -> None:
         self._runner = AgentRunner(provider)
         self._provider = provider
@@ -449,6 +452,7 @@ class AgentSession:
         # this to ask the model for one final complete/blocked/continue decision;
         # ordinary Turns leave it unset.
         self._closure_callback = closure_callback
+        self._mcp_runtime = mcp_runtime
         # Secret-free immutable selection used by persistence/frontends.
         self.execution_profile = execution_profile
 
@@ -578,6 +582,8 @@ class AgentSession:
         control = getattr(self, "_agent_control", None)
         if control is not None:
             await control.close()
+        if self._mcp_runtime is not None:
+            await self._mcp_runtime.aclose()
         await self._tools.aclose()
 
     async def _cancel_turn_subagents(self) -> None:
@@ -669,12 +675,27 @@ class AgentSession:
         skill_token = None
         terminal: TaskComplete | None = None
         try:
+            if self._mcp_runtime is not None:
+                try:
+                    await self._mcp_runtime.ensure_started()
+                except McpStartupError as exc:
+                    self._emit(ErrorEvent(message=str(exc)))
+                    terminal = TaskComplete(
+                        final_text=None,
+                        stop_reason="mcp_startup_failed",
+                    )
+                    return
             if self._skill_runtime is not None:
                 try:
                     skill_context, skill_token = self._skill_runtime.begin_turn(
                         text,
                         user_input.skills,
                         available_tools=tuple(self._tools.tool_names),
+                        available_mcp_servers=(
+                            self._mcp_runtime.skill_capabilities
+                            if self._mcp_runtime is not None
+                            else None
+                        ),
                     )
                 except SkillError as exc:
                     self._emit(
@@ -774,6 +795,10 @@ class AgentSession:
                     context_window_tokens=self._context_window_tokens,
                 ).messages()
             )
+        if self._mcp_runtime is not None:
+            mcp_context = self._mcp_runtime.instruction_context()
+            if mcp_context:
+                turn_context_messages.append({"role": "system", "content": mcp_context})
 
         pre_tool_hook = post_tool_hook = permission_request_hook = stop_hook = None
         pre_compact_hook = post_compact_hook = None

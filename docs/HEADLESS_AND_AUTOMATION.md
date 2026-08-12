@@ -218,6 +218,45 @@ deepcode skill remove <skill-id>
 deepcode skill reload
 ```
 
+### Local Plugin management
+
+Local Plugins contribute Skills to the same catalog. A valid Agent Plugins
+1.0 `mcp.json` may additionally contribute session-scoped MCP servers;
+registration and listing remain inert. Standalone project and user Skills
+continue to work without a Plugin and retain precedence over same-named Plugin
+Skills:
+
+```console
+deepcode plugin list
+deepcode plugin add ./my-plugin
+deepcode plugin disable <plugin-id>
+deepcode plugin enable <plugin-id>
+deepcode plugin remove <plugin-id> --yes
+```
+
+Adding and removing only changes the user registry; source files stay in their
+original directory. See [Local Plugins](LOCAL_PLUGINS.md) for the manifest and
+security contract.
+
+### Generic MCP clients
+
+Coding-agent MCP configuration uses the top-level `mcpServers` object, separate
+from the historical Paper2Code `tools.mcpServers` settings:
+
+```console
+deepcode mcp list
+deepcode mcp add local-tools --approval writes --command python3 server.py
+deepcode mcp remove local-tools
+```
+
+Place `--command` last because the remaining values are passed to the stdio
+server. Use `--workspace <path> --scope project --trust` for an explicitly
+trusted project layer. Bind stored user credentials with
+`--credential-env NAME=connection-id`; raw sensitive environment and header
+values are rejected. Desktop's **MCP** workspace uses the same service and
+configuration files. See [OpenSpace with DeepCode](integrations/OPENSPACE.md)
+for a real MCP-plus-Skills integration.
+
 Use `--workspace <path>` before the Skill subcommand when its project-level
 catalog should be resolved from a directory other than the current one. A Skill
 can guide an Agent Turn, but it cannot grant permissions or bypass trust,
@@ -441,6 +480,38 @@ deepcode skill disable <skill-id> --scope project
 deepcode skill remove <skill-id>
 deepcode skill reload
 ```
+
+### 本地 Plugin 管理
+
+本地 Plugin 通过同一份 Skill 目录贡献能力。符合 Agent Plugins 1.0 的
+`mcp.json` 还可以贡献会话级 MCP server；注册和查看 Plugin 时不会启动进程：
+
+```console
+deepcode plugin list
+deepcode plugin add ./my-plugin
+deepcode plugin disable <plugin-id>
+deepcode plugin enable <plugin-id>
+deepcode plugin remove <plugin-id> --yes
+```
+
+添加和移除只会修改用户注册表，不会复制或删除源文件。Manifest 与安全边界见
+[Local Plugins](LOCAL_PLUGINS.md)。
+
+### 通用 MCP client
+
+Coding Agent 使用顶层 `mcpServers`，与历史 Paper2Code 的
+`tools.mcpServers` 完全分开：
+
+```console
+deepcode mcp list
+deepcode mcp add local-tools --approval writes --command python3 server.py
+deepcode mcp remove local-tools
+```
+
+`--command` 之后的参数会原样传给 stdio server，因此应放在最后。用户凭据用
+`--credential-env NAME=connection-id` 绑定，不要把 secret 写进 JSON。Desktop
+的 **MCP** 页面使用同一服务。OpenSpace 示例见
+[OpenSpace with DeepCode](integrations/OPENSPACE.md)。
 
 如果需要从当前目录以外的位置解析项目级 Skills，请把
 `--workspace <路径>` 放在 Skill 子命令之前。Skill 可以指导 Agent，但不能授予

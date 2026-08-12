@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+import threading
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from core.application.errors import (
     ConflictError,
@@ -13,17 +17,20 @@ from core.application.errors import (
 )
 from core.application.project_service import ProjectService
 from core.domain.project import TrustState
+from core.skills.builtin_registry import BuiltinSkillRole, find_builtin_skill
+from core.skills.host import SkillWorkspaceRegistry
 from core.skills.management import LocalSkillManager
 from core.skills.models import (
+    LOCAL_SKILL_AUTHORITY,
+    MUTABLE_SKILL_SCOPES,
     SkillRecord,
     SkillResolutionError,
     SkillScope,
-    SkillSourceRoot,
-    SkillStatus,
     SkillValidationError,
 )
 
 MAX_SKILL_INSTRUCTIONS = 64 * 1024
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +43,11 @@ class SkillInfo:
     source_root: str
     source: str
     location: str
+    origin_kind: str
+    origin_label: str
+    provider_kind: str
+    provider_id: str
+    package_id: str
     status: str
     enabled: bool
     selectable: bool
@@ -50,6 +62,7 @@ class SkillInfo:
     brand_color: str | None
     default_prompt: str | None
     allow_implicit_invocation: bool
+    configurable_scopes: tuple[str, ...]
     deletable: bool
 
 
@@ -65,13 +78,51 @@ class SkillDiscovery:
     skills: tuple[SkillInfo, ...]
     warnings: tuple[str, ...]
     catalog_revision: str
+    authoring_skill_id: str | None
 
 
 class SkillService:
     """Product-safe Skill operations scoped through a registered Project."""
 
-    def __init__(self, projects: ProjectService) -> None:
+    def __init__(
+        self,
+        projects: ProjectService,
+        hosts: SkillWorkspaceRegistry | None = None,
+    ) -> None:
         self.projects = projects
+        self._owns_hosts = hosts is None
+        self.hosts = hosts or SkillWorkspaceRegistry()
+        self._project_ids_by_workspace: dict[Path, set[str]] = {}
+        self._listeners: dict[int, Callable[[str], None]] = {}
+        self._next_listener = 1
+        self._lock = threading.RLock()
+        self._host_subscription: int | None = self.hosts.subscribe(
+            self._catalog_changed
+        )
+
+    def close(self) -> None:
+        with self._lock:
+            subscription = self._host_subscription
+            self._host_subscription = None
+            self._project_ids_by_workspace.clear()
+            self._listeners.clear()
+        if subscription is not None:
+            self.hosts.unsubscribe(subscription)
+        if self._owns_hosts:
+            self.hosts.close()
+
+    def subscribe_changes(self, listener: Callable[[str], None]) -> int:
+        """Subscribe to catalog invalidations for discovered projects."""
+
+        with self._lock:
+            token = self._next_listener
+            self._next_listener += 1
+            self._listeners[token] = listener
+            return token
+
+    def unsubscribe_changes(self, token: int) -> None:
+        with self._lock:
+            self._listeners.pop(token, None)
 
     def list(self, project_id: str, *, force: bool = False) -> SkillDiscovery:
         try:
@@ -102,6 +153,17 @@ class SkillService:
             instructions=instructions,
             truncated=len(full_instructions) > MAX_SKILL_INSTRUCTIONS,
         )
+
+    def select(self, project_id: str, identifier: str) -> SkillInfo:
+        """Resolve an explicit selection without loading its instruction body."""
+
+        try:
+            record = self._manager(project_id).select(identifier)
+        except SkillResolutionError as exc:
+            raise SkillNotFoundError(str(exc)) from exc
+        except (OSError, ValueError) as exc:
+            raise InvalidArgumentError(str(exc)) from exc
+        return _skill_info(record)
 
     def set_enabled(
         self,
@@ -168,28 +230,45 @@ class SkillService:
                 "project must be trusted before project Skill changes"
             )
         try:
-            return LocalSkillManager(project.canonical_path)
+            workspace = Path(project.canonical_path).resolve(strict=True)
+            host = self.hosts.get(workspace)
+            with self._lock:
+                self._project_ids_by_workspace.setdefault(workspace, set()).add(
+                    project.id
+                )
+            return LocalSkillManager(host=host)
         except (OSError, ValueError) as exc:
             raise InvalidArgumentError(
                 f"project path does not exist: {project.canonical_path}"
             ) from exc
 
+    def _catalog_changed(self, workspace: Path) -> None:
+        with self._lock:
+            project_ids = tuple(self._project_ids_by_workspace.get(workspace, ()))
+            listeners = tuple(self._listeners.values())
+        for project_id in project_ids:
+            for listener in listeners:
+                try:
+                    listener(project_id)
+                except Exception:  # noqa: BLE001 - observers are isolated
+                    logger.exception("Skill catalog change listener failed")
+
 
 def _discovery(catalog) -> SkillDiscovery:
+    authoring = find_builtin_skill(catalog.records, BuiltinSkillRole.AUTHORING)
     return SkillDiscovery(
         skills=tuple(_skill_info(record) for record in catalog.records),
         warnings=catalog.warnings,
         catalog_revision=catalog.revision,
+        authoring_skill_id=authoring.id if authoring is not None else None,
     )
 
 
 def _skill_info(record: SkillRecord) -> SkillInfo:
-    root = {
-        SkillSourceRoot.AGENTS: ".agents",
-        SkillSourceRoot.DEEPCODE: ".deepcode",
-        SkillSourceRoot.CLAUDE: ".claude",
-        SkillSourceRoot.SYSTEM: "bundled",
-    }[record.source_root]
+    origin = record.origin
+    if origin is None:  # Defensive guard for non-dataclass deserializers.
+        raise RuntimeError("Skill record has no origin")
+    authority = record.authority
     return SkillInfo(
         id=record.id,
         name=record.name,
@@ -198,9 +277,14 @@ def _skill_info(record: SkillRecord) -> SkillInfo:
         scope=record.scope.value,
         source_root=record.source_root.value,
         source=record.source,
-        location=f"{record.scope.value}/{root}/skills/{record.key.relative_path}",
+        location=origin.location,
+        origin_kind=origin.kind.value,
+        origin_label=origin.label,
+        provider_kind=authority.kind.value,
+        provider_id=authority.provider_id,
+        package_id=record.package_id.value,
         status=record.status.value,
-        enabled=record.status is not SkillStatus.DISABLED,
+        enabled=record.policy_enabled,
         selectable=record.selectable,
         revision=record.revision,
         byte_size=record.byte_size,
@@ -213,6 +297,11 @@ def _skill_info(record: SkillRecord) -> SkillInfo:
         brand_color=record.metadata.interface.brand_color,
         default_prompt=record.metadata.interface.default_prompt,
         allow_implicit_invocation=record.metadata.allow_implicit_invocation,
+        configurable_scopes=(
+            tuple(scope.value for scope in MUTABLE_SKILL_SCOPES)
+            if authority == LOCAL_SKILL_AUTHORITY
+            else ()
+        ),
         deletable=record.deletable,
     )
 

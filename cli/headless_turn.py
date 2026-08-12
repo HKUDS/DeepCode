@@ -22,7 +22,6 @@ from core.domain.message_provenance import ClientSurface
 from core.domain.turn import Turn, TurnStatus
 from core.events import Event
 from core.harness.permissions import PermissionMode
-from core.skills.management import LocalSkillManager
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,9 +137,9 @@ def run_headless_turn(
                 )
 
         workspace = thread.workspace_path
-        manager = LocalSkillManager(workspace)
         skill_ids = tuple(
-            manager.select(identifier).id for identifier in options.skill_identifiers
+            application.skills.select(project.id, identifier).id
+            for identifier in options.skill_identifiers
         )
         activity_lease = application.session_store.acquire_activity_lease(thread.id)
         if activity_lease is None:
