@@ -31,6 +31,10 @@ BUNDLED_DATA = (
         REPOSITORY_ROOT / "core" / "skills" / "builtin",
         "core/skills/builtin",
     ),
+    (
+        REPOSITORY_ROOT / "core" / "mcp" / "presets.json",
+        "core/mcp",
+    ),
 )
 REQUIRED_IMPORTS = (
     "PyInstaller",
@@ -168,10 +172,8 @@ def main() -> int:
     for module in EXCLUDED_MODULES:
         command.extend(("--exclude-module", module))
     for source, destination in BUNDLED_DATA:
-        if not source.is_dir():
-            raise RuntimeError(
-                f"required sidecar resource directory is missing: {source}"
-            )
+        if not source.exists():
+            raise RuntimeError(f"required sidecar resource is missing: {source}")
         command.extend(("--add-data", f"{source}{os.pathsep}{destination}"))
     command.append(str(REPOSITORY_ROOT / "app_server" / "__main__.py"))
     DIST_ROOT.mkdir(parents=True, exist_ok=True)
@@ -195,7 +197,11 @@ def _verify_bundle(binary: Path) -> None:
         timeout=30,
     )
     result = json.loads(probe.stdout)
-    if result.get("ok") is not True or result.get("skillCreator") is not True:
+    if (
+        result.get("ok") is not True
+        or result.get("skillCreator") is not True
+        or not result.get("bundledMcpPresets")
+    ):
         raise RuntimeError("packaged runtime import probe did not report success")
 
     smoke_root = BUILD_ROOT / "smoke"

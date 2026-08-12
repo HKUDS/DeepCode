@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from core.mcp.presets import McpPresetCatalog
 from core.skills import roots as skill_roots
 from core.version import __version__
 
@@ -58,6 +59,7 @@ def verify_runtime() -> dict[str, Any]:
     for module in RUNTIME_MODULES:
         importlib.import_module(module)
     bundled_skills = _verify_bundled_skills()
+    bundled_mcp_presets = [preset.id for preset in McpPresetCatalog().list()]
     return {
         "ok": True,
         "modules": list(RUNTIME_MODULES),
@@ -66,5 +68,6 @@ def verify_runtime() -> dict[str, Any]:
         "documentFormats": ["pdf", "md", "markdown", "txt", "docx", "html", "htm"],
         "bundledSkills": bundled_skills,
         "skillCreator": "skill-creator" in bundled_skills,
+        "bundledMcpPresets": bundled_mcp_presets,
         "version": __version__,
     }

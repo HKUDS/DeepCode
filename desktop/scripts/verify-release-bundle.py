@@ -40,6 +40,7 @@ def _verify_runtime(binary: Path) -> None:
     if (
         result.get("ok") is not True
         or result.get("skillCreator") is not True
+        or not result.get("bundledMcpPresets")
         or "tools.document_conversion" not in result.get("modules", [])
     ):
         raise RuntimeError("packaged App Server runtime probe is incomplete")
