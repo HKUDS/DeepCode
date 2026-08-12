@@ -995,7 +995,9 @@ class CodeIndexer:
         try:
             # Create tasks for all files
             tasks = [
-                _process_with_semaphore(file_path, i, len(files_to_analyze))
+                asyncio.create_task(
+                    _process_with_semaphore(file_path, i, len(files_to_analyze))
+                )
                 for i, file_path in enumerate(files_to_analyze, 1)
             ]
 
