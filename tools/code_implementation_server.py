@@ -91,7 +91,7 @@ def validate_path(path: str) -> Path:
         initialize_workspace()
 
     full_path = (WORKSPACE_DIR / path).resolve()
-    if not str(full_path).startswith(str(WORKSPACE_DIR)):
+    if not full_path.is_relative_to(WORKSPACE_DIR):
         raise ValueError(f"Path {path} is outside workspace scope")
     return full_path
 
