@@ -1,10 +1,12 @@
 import {
   ChevronRight,
+  Cable,
   Folder,
   FolderClock,
   FolderOpen,
   MessageSquare,
   Plus,
+  Puzzle,
   Search,
   Settings,
   ShieldAlert,
@@ -239,6 +241,22 @@ export function DesktopSidebar({
         >
           <WandSparkles size={15} />
           Skills
+        </button>
+        <button
+          type="button"
+          data-active={destination === "plugins"}
+          onClick={() => onDestination("plugins")}
+        >
+          <Puzzle size={15} />
+          Plugins
+        </button>
+        <button
+          type="button"
+          data-active={destination === "mcp"}
+          onClick={() => onDestination("mcp")}
+        >
+          <Cable size={15} />
+          MCP
         </button>
         <button
           type="button"

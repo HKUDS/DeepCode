@@ -1,6 +1,4 @@
 interface:
   display_name: "Skill Creator"
-  short_description: "Create and validate reusable Agent Skills"
-  default_prompt: "Use $skill-creator to create a focused reusable Skill for this project."
-policy:
-  allow_implicit_invocation: true
+  short_description: "Create or update a skill"
+  default_prompt: "Read my repository and create a skill to bootstrap new components for my project."

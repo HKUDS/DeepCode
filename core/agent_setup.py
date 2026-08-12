@@ -102,7 +102,7 @@ def _wire_code_mode(
                 approved = approval_callback(tool_name, args, reason)
                 if inspect.isawaitable(approved):
                     approved = await approved
-            except Exception:
+            except Exception:  # noqa: BLE001 - host callback boundary
                 logger.exception("code-mode approval_callback failed for {}", tool_name)
                 return (
                     "Error: permission denied: approval request errored (fail-closed)"
@@ -233,6 +233,10 @@ def build_agent_session(
     permission_mode_override: PermissionMode | None = None,
     execution_security_profile: ExecutionSecurityProfile | None = None,
     runtime: DeepCodeRuntime | None = None,
+    skill_runtime: Any | None = None,
+    project_trusted: bool = False,
+    plugin_mcp_servers: tuple[Any, ...] = (),
+    mcp_status_observer: Any | None = None,
 ) -> tuple[AgentSession, str, Any]:
     """Build an :class:`AgentSession` over ``workspace``.
 
@@ -315,7 +319,8 @@ def build_agent_session(
     from core.harness.memory import system_preamble
     from core.skills.runtime import SkillRuntime
 
-    skill_runtime = SkillRuntime(workspace)
+    if skill_runtime is None:
+        skill_runtime = SkillRuntime(workspace)
     addenda = [
         collaboration_preamble(engine.mode),
         system_preamble(workspace),
@@ -341,6 +346,7 @@ def build_agent_session(
             runtime=active_runtime,
             active_turn_id_provider=active_turn_id_provider,
             runtime_input_sink=runtime_input_sink,
+            project_trusted=project_trusted,
         )
 
     # External-command hooks (C3): discover Claude-Code-compatible hooks.json in
@@ -377,13 +383,57 @@ def build_agent_session(
     )
     _wire_tool_permissions(tool_registry, engine)
 
+    from core.mcp import (
+        McpConfigResolver,
+        McpSessionRuntime,
+        create_mcp_oauth_provider,
+    )
+    from core.mcp.tools import McpToolAdapter
+
+    mcp_plan = McpConfigResolver().resolve(
+        workspace,
+        project_trusted=project_trusted,
+        plugin_servers=plugin_mcp_servers,
+    )
+
+    def _mcp_credential(connection_id: str) -> str | None:
+        try:
+            return active_runtime.connection_resolver.resolve_connection(
+                connection_id
+            ).api_key
+        except (AttributeError, ValueError):
+            return None
+
+    mcp_runtime = McpSessionRuntime(
+        mcp_plan,
+        tool_registry,
+        credential_resolver=_mcp_credential,
+        oauth_provider_factory=create_mcp_oauth_provider,
+        status_observer=(
+            (lambda statuses: mcp_status_observer(workspace, statuses))
+            if mcp_status_observer is not None
+            else None
+        ),
+    )
+
+    def _permission_checker(name: str, arguments: dict[str, Any]):
+        tool = tool_registry.get(name)
+        if isinstance(tool, McpToolAdapter):
+            return engine.evaluate_tool(
+                name,
+                arguments,
+                read_only=tool.read_only,
+                approval_mode=tool.approval_mode,
+            )
+        return engine.evaluate(name, arguments)
+
     session = AgentSession(
         provider,
         tool_registry,
         model=resolved_model,
         system_prompt=full_system_prompt,
         max_iterations=max_iterations,
-        permission_checker=engine.evaluate,
+        permission_checker=_permission_checker,
         approval_callback=approval_callback,
         # Application-backed sessions send sub-agent results directly into the
         # same atomic Turn mailbox as user steering. Direct CLI sessions retain
@@ -410,6 +460,7 @@ def build_agent_session(
         closure_callback=(
             goal_runtime.closure_prompt if goal_runtime is not None else None
         ),
+        mcp_runtime=mcp_runtime,
     )
     if control is not None:
         # `session.history` is a @property (a list), so it must be wrapped in a

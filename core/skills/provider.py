@@ -8,6 +8,7 @@ changing Turn resolution.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
@@ -147,6 +148,19 @@ class InvalidatableSkillProvider(Protocol):
         """Invalidate cached state before the next list operation."""
 
 
+@runtime_checkable
+class SkillChangeTokenProvider(Protocol):
+    """Optional cheap change token for locally mutable provider state.
+
+    The application-lifetime host polls this token outside Turn execution. A
+    provider that has its own push subscription can omit this protocol and
+    invalidate the host through its contribution owner instead.
+    """
+
+    def skill_change_token(self) -> object:
+        """Return an equality-comparable token for catalog-affecting state."""
+
+
 @dataclass(frozen=True, slots=True)
 class SkillProviderSource:
     """Bind a Provider to the authorities it is permitted to own."""
@@ -225,18 +239,33 @@ class SkillProviders:
     """Compose catalogs and route access without weakening ownership."""
 
     def __init__(self, sources: tuple[SkillProviderSource, ...]) -> None:
-        self._sources = sources
+        if not sources:
+            raise ValueError("SkillProviders requires at least one source")
+        self._sources = tuple(sources)
+        self._lock = threading.RLock()
 
     @property
     def sources(self) -> tuple[SkillProviderSource, ...]:
-        return self._sources
+        with self._lock:
+            return self._sources
+
+    def replace_sources(self, sources: tuple[SkillProviderSource, ...]) -> None:
+        """Replace routing sources without changing active Turn snapshots."""
+
+        if not sources:
+            raise ValueError("SkillProviders requires at least one source")
+        with self._lock:
+            previous = self._sources
+            self._sources = tuple(sources)
+        self._invalidate_sources(previous)
+        self.invalidate()
 
     def list(self, query: SkillListQuery) -> SkillCatalog:
         from core.skills.aggregation import merge_skill_catalogs
 
         catalogs: list[SkillCatalog] = []
         warnings: list[str] = []
-        for source in self._sources:
+        for source in self.sources:
             try:
                 catalogs.append(source.list(query))
             except SkillProviderUnavailableError as exc:
@@ -245,7 +274,7 @@ class SkillProviders:
 
     def read(self, request: SkillReadRequest) -> SkillReadResult:
         sources = tuple(
-            source for source in self._sources if source.owns(request.authority)
+            source for source in self.sources if source.owns(request.authority)
         )
         if not sources:
             raise self._not_configured(request.authority)
@@ -273,7 +302,7 @@ class SkillProviders:
 
     def search(self, request: SkillSearchRequest) -> SkillSearchResult:
         sources = tuple(
-            source for source in self._sources if source.owns(request.authority)
+            source for source in self.sources if source.owns(request.authority)
         )
         if not sources:
             raise self._not_configured(request.authority)
@@ -309,8 +338,12 @@ class SkillProviders:
         raise self._not_configured(request.authority)
 
     def invalidate(self) -> None:
+        self._invalidate_sources(self.sources)
+
+    @staticmethod
+    def _invalidate_sources(sources: tuple[SkillProviderSource, ...]) -> None:
         seen: set[int] = set()
-        for source in self._sources:
+        for source in sources:
             provider_identity = id(source.provider)
             if provider_identity in seen:
                 continue

@@ -58,7 +58,6 @@ from core.domain.execution_security import ExecutionAccessPreset
 from core.domain.project import TrustState
 from core.file_lock import FileLease
 from core.providers.reasoning import normalize_reasoning_effort
-from core.skills.management import LocalSkillManager
 
 
 class TuiApp:
@@ -110,7 +109,7 @@ class TuiApp:
         if access_preset is not None:
             self.thread_client.set_access_preset(access_preset)
         self._sync_thread_state()
-        self.skill_manager = LocalSkillManager(self.workspace)
+        self.reader.set_skill_provider(self._completion_skills)
         self.goal_controller = TuiGoalController(self)
 
     # -- shared Thread lifecycle -------------------------------------------
@@ -243,48 +242,221 @@ class TuiApp:
 
     def list_skills(self) -> str:
         try:
-            catalog = self.skill_manager.catalog()
-        except (OSError, ValueError) as exc:
+            skills = self.thread_client.application.skills.list(
+                self.thread_client.project.id
+            ).skills
+        except (ApplicationError, OSError, ValueError) as exc:
             return f"Skill error: {exc}"
-        if not catalog.records:
+        if not skills:
             return "no Skills discovered"
         selected = set(self.selected_skill_ids)
         lines = ["", "Skills (select with /skill <id|name>):"]
-        for record in catalog.records:
-            marker = "*" if record.id in selected else " "
-            lines.append(
-                f" {marker} {record.status.value:<9} {record.name:<24} {record.id}"
-            )
+        for skill in skills:
+            marker = "*" if skill.id in selected else " "
+            lines.append(f" {marker} {skill.status:<9} {skill.name:<24} {skill.id}")
         return "\n".join(lines)
 
     def select_skill(self, identifier: str) -> str:
         try:
-            record = self.skill_manager.select(identifier)
-        except (OSError, ValueError) as exc:
-            return f"Skill error: {exc}"
-        if not record.selectable:
-            return (
-                f"Skill {record.name} is {record.status.value} and cannot be selected"
+            skill = self.thread_client.application.skills.select(
+                self.thread_client.project.id,
+                identifier,
             )
-        if record.id not in self.selected_skill_ids:
+        except (ApplicationError, OSError, ValueError) as exc:
+            return f"Skill error: {exc}"
+        if not skill.selectable:
+            return f"Skill {skill.name} is {skill.status} and cannot be selected"
+        if skill.id not in self.selected_skill_ids:
             if len(self.selected_skill_ids) >= 8:
                 return "a turn may select at most 8 Skills"
-            self.selected_skill_ids.append(record.id)
-        return f"selected {record.name} for the next turn"
+            self.selected_skill_ids.append(skill.id)
+        return f"selected {skill.name} for the next turn"
 
     def remove_skill(self, identifier: str) -> str:
         try:
-            record = self.skill_manager.find(identifier)
-        except (OSError, ValueError) as exc:
+            skills = self.thread_client.application.skills.list(
+                self.thread_client.project.id
+            ).skills
+        except (ApplicationError, OSError, ValueError) as exc:
             return f"Skill error: {exc}"
-        if record.id not in self.selected_skill_ids:
-            return f"{record.name} is not selected"
-        self.selected_skill_ids.remove(record.id)
-        return f"removed {record.name} from the next turn"
+        folded = identifier.casefold()
+        matches = tuple(
+            skill
+            for skill in skills
+            if skill.id in self.selected_skill_ids
+            and (skill.id == identifier or skill.name.casefold() == folded)
+        )
+        if not matches:
+            return f"{identifier} is not selected"
+        if len(matches) > 1:
+            return f"Skill name is ambiguous: {identifier}; remove it by ID"
+        skill = matches[0]
+        self.selected_skill_ids.remove(skill.id)
+        return f"removed {skill.name} from the next turn"
+
+    def _completion_skills(self):
+        return self.thread_client.application.skills.list(
+            self.thread_client.project.id
+        ).skills
 
     def clear_skills(self) -> str:
         self.selected_skill_ids.clear()
         return "cleared next-turn Skills"
+
+    def list_plugins(self) -> str:
+        try:
+            discovery = self.thread_client.application.plugins.list()
+        except (ApplicationError, OSError, ValueError) as exc:
+            return f"Plugin error: {exc}"
+        if not discovery.plugins:
+            return "no Plugins installed"
+        lines = ["", "Plugins (manage with `deepcode plugin ...`):"]
+        for plugin in discovery.plugins:
+            components = (
+                ", ".join(
+                    f"{component.kind}:{component.status}"
+                    for component in plugin.components
+                )
+                or "no components"
+            )
+            lines.append(f"  {plugin.status:<9} {plugin.name:<24} {components}")
+        return "\n".join(lines)
+
+    def list_mcp_servers(self) -> str:
+        try:
+            inventory = self.thread_client.application.mcp.list(
+                self.thread_client.project.id
+            )
+        except (ApplicationError, OSError, ValueError) as exc:
+            return f"MCP error: {exc}"
+        if not inventory.servers:
+            return "no MCP servers configured"
+        lines = ["", "MCP servers (/mcp help for actions):"]
+        for server in inventory.servers:
+            lines.append(
+                f"  {server.configuration_state:<20} {server.auth_state:<16} "
+                f"{server.runtime_state:<12} {server.name}"
+            )
+        return "\n".join(lines)
+
+    async def manage_mcp(self, args: str) -> str:
+        action, _, target = args.strip().partition(" ")
+        action = action.casefold()
+        target = target.strip()
+        project_id = self.thread_client.project.id
+        usage = (
+            "usage: /mcp [presets | add <preset> | test <name> | "
+            "login <name> | logout <name> | cancel <name> | "
+            "enable <name> | disable <name> | remove <name>]"
+        )
+        if not action or action == "list":
+            return self.list_mcp_servers()
+        if action == "help":
+            return usage
+        try:
+            if action == "presets":
+                presets = self.thread_client.application.mcp.list_presets(project_id)
+                lines = ["", "Bundled MCP presets (add with /mcp add <id>):"]
+                for preset in presets.presets:
+                    status = "configured" if preset.configured else "available"
+                    missing = (
+                        f" · missing {', '.join(preset.missing_environment)}"
+                        if preset.missing_environment
+                        else ""
+                    )
+                    lines.append(
+                        f"  {status:<10} {preset.category:<13} {preset.id}{missing}"
+                    )
+                return "\n".join(lines)
+            if not target:
+                return usage
+            if action == "add":
+                await asyncio.to_thread(
+                    self.thread_client.application.mcp.add_preset,
+                    target,
+                    project_id=project_id,
+                )
+                return (
+                    f"added MCP preset {target} in disabled state; "
+                    f"run /mcp test {target}, then /mcp enable {target}"
+                )
+            if action == "test":
+                result = await asyncio.to_thread(
+                    self.thread_client.application.mcp.probe,
+                    target,
+                    project_id=project_id,
+                )
+                if not result.ok:
+                    return f"MCP test failed for {target}: {result.error}"
+                return (
+                    f"MCP test passed for {target}: {result.tool_count} tools, "
+                    f"{result.resource_count} resources, {result.prompt_count} prompts"
+                )
+            if action == "login":
+                flow = await asyncio.to_thread(
+                    self.thread_client.application.mcp.oauth_start,
+                    target,
+                    project_id=project_id,
+                    open_browser=True,
+                )
+                if flow.status == "failed":
+                    return f"MCP authorization failed: {flow.error}"
+                suffix = (
+                    f"\nIf the browser did not open: {flow.authorization_url}"
+                    if flow.authorization_url
+                    else ""
+                )
+                return f"Browser authorization started for {target}.{suffix}"
+            if action == "logout":
+                removed = await asyncio.to_thread(
+                    self.thread_client.application.mcp.oauth_logout,
+                    target,
+                    project_id=project_id,
+                )
+                return (
+                    f"removed OAuth credentials for {target}"
+                    if removed
+                    else f"no OAuth credentials were stored for {target}"
+                )
+            if action == "cancel":
+                await asyncio.to_thread(
+                    self.thread_client.application.mcp.oauth_cancel,
+                    target,
+                    project_id=project_id,
+                )
+                return f"cancelled OAuth authorization for {target}"
+            if action in {"enable", "disable", "remove"}:
+                if action != "remove":
+                    enabled = action == "enable"
+                    await asyncio.to_thread(
+                        self.thread_client.application.mcp.set_enabled,
+                        target,
+                        enabled=enabled,
+                        project_id=project_id,
+                    )
+                    return f"{'enabled' if enabled else 'disabled'} MCP server {target}"
+                inventory = self.thread_client.application.mcp.list(project_id)
+                matches = [
+                    server
+                    for server in inventory.servers
+                    if server.id == target or server.name == target
+                ]
+                if len(matches) != 1:
+                    return f"unknown or ambiguous MCP server: {target}"
+                server = matches[0]
+                if server.source == "plugin":
+                    return "Plugin MCP servers are managed through /plugins"
+                scope = "project" if server.source == "project" else "user"
+                await asyncio.to_thread(
+                    self.thread_client.application.mcp.remove,
+                    name=server.name,
+                    scope=scope,
+                    project_id=project_id,
+                )
+                return f"removed MCP server {server.name}"
+            return usage
+        except (ApplicationError, OSError, ValueError) as exc:
+            return f"MCP error: {exc}"
 
     async def run_goal_command(self, args: str) -> str:
         result = await self.goal_controller.execute(args)

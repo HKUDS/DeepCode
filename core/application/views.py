@@ -130,6 +130,11 @@ def skill_info_view(skill) -> dict[str, Any]:
         "sourceRoot": skill.source_root,
         "source": skill.source,
         "location": skill.location,
+        "originKind": skill.origin_kind,
+        "originLabel": skill.origin_label,
+        "providerKind": skill.provider_kind,
+        "providerId": skill.provider_id,
+        "packageId": skill.package_id,
         "status": skill.status,
         "enabled": skill.enabled,
         "selectable": skill.selectable,
@@ -144,6 +149,7 @@ def skill_info_view(skill) -> dict[str, Any]:
         "brandColor": skill.brand_color,
         "defaultPrompt": skill.default_prompt,
         "allowImplicitInvocation": skill.allow_implicit_invocation,
+        "configurableScopes": list(skill.configurable_scopes),
         "deletable": skill.deletable,
     }
 
@@ -153,6 +159,46 @@ def skill_detail_view(skill) -> dict[str, Any]:
         **skill_info_view(skill.info),
         "instructions": skill.instructions,
         "truncated": skill.truncated,
+    }
+
+
+def plugin_info_view(plugin) -> dict[str, Any]:
+    return {
+        "id": plugin.id,
+        "name": plugin.name,
+        "version": plugin.version,
+        "description": plugin.description,
+        "status": plugin.status,
+        "enabled": plugin.enabled,
+        "source": plugin.source,
+        "path": plugin.path,
+        "schema": plugin.schema,
+        "manifestPath": plugin.manifest_path,
+        "manifestRevision": plugin.manifest_revision,
+        "components": [
+            {
+                "kind": component.kind,
+                "status": component.status,
+                "resource": component.resource,
+                "itemCount": component.item_count,
+                "diagnostics": [
+                    plugin_diagnostic_view(item) for item in component.diagnostics
+                ],
+            }
+            for component in plugin.components
+        ],
+        "diagnostics": [plugin_diagnostic_view(item) for item in plugin.diagnostics],
+        "error": plugin.error,
+    }
+
+
+def plugin_diagnostic_view(diagnostic) -> dict[str, Any]:
+    return {
+        "code": diagnostic.code,
+        "severity": diagnostic.severity,
+        "message": diagnostic.message,
+        "component": diagnostic.component,
+        "resource": diagnostic.resource,
     }
 
 
@@ -171,19 +217,41 @@ def hook_info_view(hook) -> dict[str, Any]:
 
 def mcp_server_view(server) -> dict[str, Any]:
     return {
+        "id": server.id,
         "name": server.name,
+        "pluginId": server.plugin_id,
+        "policyKey": server.policy_key,
         "transport": server.transport,
         "command": server.command,
         "args": list(server.args),
+        "cwd": server.cwd,
         "url": server.url,
-        "enabledTools": list(server.enabled_tools),
-        "toolTimeout": server.tool_timeout,
+        "auth": server.auth,
+        "enabled": server.enabled,
+        "required": server.required,
+        "enabledTools": (
+            list(server.enabled_tools) if server.enabled_tools is not None else None
+        ),
+        "disabledTools": list(server.disabled_tools),
+        "startupTimeoutSeconds": server.startup_timeout_seconds,
+        "toolTimeoutSeconds": server.tool_timeout_seconds,
+        "approvalMode": server.approval_mode,
         "description": server.description,
         "envKeys": list(server.env_keys),
+        "forwardedEnvKeys": list(server.forwarded_env_keys),
+        "requiredEnvKeys": list(server.required_env_keys),
+        "missingEnvKeys": list(server.missing_env_keys),
+        "credentialEnvKeys": list(server.credential_env_keys),
         "headerKeys": list(server.header_keys),
         "source": server.source,
         "configurationState": server.configuration_state,
         "configurationMessage": server.configuration_message,
+        "authState": server.auth_state,
+        "runtimeState": server.runtime_state,
+        "runtimeMessage": server.runtime_message,
+        "toolCount": server.tool_count,
+        "resourceCount": server.resource_count,
+        "promptCount": server.prompt_count,
     }
 
 
@@ -192,6 +260,56 @@ def mcp_inventory_view(inventory) -> dict[str, Any]:
         "servers": [mcp_server_view(server) for server in inventory.servers],
         "userConfigPath": inventory.user_config_path,
         "projectConfigPath": inventory.project_config_path,
+    }
+
+
+def mcp_preset_inventory_view(inventory) -> dict[str, Any]:
+    return {
+        "presets": [
+            {
+                "id": preset.id,
+                "displayName": preset.display_name,
+                "category": preset.category,
+                "description": preset.description,
+                "docsUrl": preset.docs_url,
+                "transport": preset.transport,
+                "auth": preset.auth,
+                "requires": preset.requires,
+                "note": preset.note,
+                "requiredEnvironment": list(preset.required_environment),
+                "missingEnvironment": list(preset.missing_environment),
+                "configured": preset.configured,
+            }
+            for preset in inventory.presets
+        ],
+        "source": inventory.source,
+        "sourceRevision": inventory.source_revision,
+    }
+
+
+def mcp_probe_view(result) -> dict[str, Any]:
+    return {
+        "serverId": result.server_id,
+        "name": result.name,
+        "ok": result.ok,
+        "transport": result.transport,
+        "toolCount": result.tool_count,
+        "resourceCount": result.resource_count,
+        "promptCount": result.prompt_count,
+        "elapsedSeconds": result.elapsed_seconds,
+        "error": result.error,
+    }
+
+
+def mcp_oauth_flow_view(flow) -> dict[str, Any]:
+    return {
+        "flowId": flow.flow_id,
+        "serverId": flow.server_id,
+        "name": flow.name,
+        "status": flow.status,
+        "authorizationUrl": flow.authorization_url,
+        "expiresInSeconds": flow.expires_in_seconds,
+        "error": flow.error,
     }
 
 

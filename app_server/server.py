@@ -22,7 +22,6 @@ from core.application.errors import ApplicationError
 from core.application.event_service import DeliveryBatch
 from core.application.views import event_view
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -54,6 +53,45 @@ class AppServer:
                 stop_pump.set()
 
         terminal_token = self.application.terminals.subscribe(deliver_terminal)
+
+        def deliver_skill_change(project_id: str) -> None:
+            try:
+                with delivery_lock:
+                    self._write_notification(
+                        sink,
+                        notification(
+                            rpc_notifications.SKILLS_CHANGED,
+                            {"projectId": project_id},
+                        ),
+                    )
+            except (BrokenPipeError, OSError, ValueError):
+                stop_pump.set()
+
+        skill_token = self.application.skills.subscribe_changes(deliver_skill_change)
+
+        def deliver_plugin_change(_discovery) -> None:
+            try:
+                with delivery_lock:
+                    self._write_notification(
+                        sink,
+                        notification(rpc_notifications.PLUGINS_CHANGED, {}),
+                    )
+            except (BrokenPipeError, OSError, ValueError):
+                stop_pump.set()
+
+        plugin_token = self.application.plugins.subscribe_changes(deliver_plugin_change)
+
+        def deliver_mcp_change() -> None:
+            try:
+                with delivery_lock:
+                    self._write_notification(
+                        sink,
+                        notification(rpc_notifications.MCP_CHANGED, {}),
+                    )
+            except (BrokenPipeError, OSError, ValueError):
+                stop_pump.set()
+
+        mcp_token = self.application.mcp.subscribe_changes(deliver_mcp_change)
         pump = threading.Thread(
             target=self._pump_events,
             args=(sink, connection, delivery_lock, stop_pump),
@@ -99,7 +137,7 @@ class AppServer:
                         if request is None or request.has_id:
                             self._write_error(sink, request_id, exc)
                         continue
-                    except Exception:  # noqa: BLE001 - adapter hides internals
+                    except Exception:
                         logger.exception("Unhandled App Server request failure")
                         if request is not None and request.has_id:
                             self._write_error(
@@ -124,6 +162,9 @@ class AppServer:
             stop_pump.set()
             pump.join(timeout=1.0)
             self.application.terminals.unsubscribe(terminal_token)
+            self.application.skills.unsubscribe_changes(skill_token)
+            self.application.plugins.unsubscribe_changes(plugin_token)
+            self.application.mcp.unsubscribe_changes(mcp_token)
             connection.close()
             self.application.close()
         return 0

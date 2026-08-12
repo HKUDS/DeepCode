@@ -27,6 +27,125 @@ def test_typescript_contract_is_generated_from_the_canonical_schema() -> None:
     assert '"event/replay": EventReplayParams' in generated
 
 
+def test_skill_contract_exposes_provider_origin_and_change_notification() -> None:
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    definitions = schema["$defs"]
+    skill = definitions["SkillInfo"]
+
+    assert skill["properties"]["originKind"]["enum"] == [
+        "local",
+        "bundled",
+        "provider",
+    ]
+    assert skill["properties"]["providerKind"]["enum"] == [
+        "local",
+        "executor",
+        "orchestrator",
+        "custom",
+    ]
+    assert {
+        "originKind",
+        "originLabel",
+        "providerKind",
+        "providerId",
+        "packageId",
+        "configurableScopes",
+    } <= set(skill["required"])
+    assert definitions["SkillCatalogResult"]["properties"]["authoringSkillId"] == {
+        "type": ["string", "null"],
+        "pattern": "^sk_[0-9a-f]{24}$",
+    }
+    notifications = definitions["Notifications"]
+    assert notifications["properties"]["skills.changed"]["required"] == ["projectId"]
+    assert "skills.changed" in notifications["required"]
+
+    generated = GENERATED_TYPES.read_text(encoding="utf-8")
+    assert 'originKind: "local" | "bundled" | "provider";' in generated
+    assert '"skills.changed": {' in generated
+
+
+def test_plugin_contract_exposes_local_lifecycle_without_execution_fields() -> None:
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    definitions = schema["$defs"]
+    plugin = definitions["PluginInfo"]
+
+    assert plugin["properties"]["status"]["enum"] == [
+        "active",
+        "disabled",
+        "invalid",
+    ]
+    assert {"schema", "components", "diagnostics", "manifestRevision"} <= set(
+        plugin["required"]
+    )
+    assert plugin["properties"]["source"]["const"] == "linked-directory"
+    assert definitions["PluginCatalogResult"]["required"] == [
+        "plugins",
+        "diagnostics",
+        "revision",
+    ]
+    assert not ({"command", "hooks", "mcpServers"} & set(plugin["properties"]))
+    methods = definitions["MethodParams"]["properties"]
+    assert {
+        "plugins/list",
+        "plugins/add",
+        "plugins/set-enabled",
+        "plugins/remove",
+    } <= set(methods)
+    assert definitions["Notifications"]["properties"]["plugins.changed"] == {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {},
+    }
+
+    generated = GENERATED_TYPES.read_text(encoding="utf-8")
+    assert "export interface PluginInfo" in generated
+    assert '"plugins.changed": {};' in generated
+
+
+def test_mcp_contract_exposes_presets_probe_oauth_and_runtime_state() -> None:
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    definitions = schema["$defs"]
+    methods = definitions["MethodParams"]["properties"]
+
+    assert {
+        "mcp/list",
+        "mcp/upsert",
+        "mcp/remove",
+        "mcp/presets",
+        "mcp/preset/add",
+        "mcp/set-enabled",
+        "mcp/probe",
+        "mcp/oauth/start",
+        "mcp/oauth/cancel",
+        "mcp/oauth/logout",
+    } <= set(methods)
+    assert "mcp/preset/install" not in methods
+    server = definitions["McpServerInfo"]
+    assert {
+        "configurationState",
+        "authState",
+        "runtimeState",
+        "toolCount",
+        "resourceCount",
+        "promptCount",
+    } <= set(server["required"])
+    assert definitions["McpPresetInventory"]["required"] == [
+        "presets",
+        "source",
+        "sourceRevision",
+    ]
+    assert definitions["Notifications"]["properties"]["mcp.changed"] == {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {},
+    }
+
+    generated = GENERATED_TYPES.read_text(encoding="utf-8")
+    assert "export interface McpPresetInfo" in generated
+    assert '"mcp/probe": McpIdentityParams;' in generated
+    assert '"mcp.changed": {};' in generated
+
+
 def test_turn_contract_exposes_nullable_execution_permission_snapshot() -> None:
     schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
     definitions = schema["$defs"]

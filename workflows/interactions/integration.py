@@ -1,26 +1,26 @@
 """
-Plugin Integration Helper
+Workflow Interaction Integration Helper
 
-This module shows how to integrate the User-in-Loop plugin system
+This module shows how to integrate user-in-loop interaction handlers
 into existing workflows with minimal code changes.
 
 The key idea is to add ONE LINE at each hook point:
-    context = await plugins.run_hook(InteractionPoint.XXX, context, task_id)
+    context = await interactions.run_hook(InteractionPoint.XXX, context, task_id)
 
 Example integration in execute_chat_based_planning_pipeline:
 
     # Before (original code):
     planning_result = await run_chat_planning_agent(user_input, logger)
 
-    # After (with plugin):
+    # After (with interactions):
     context = {"user_input": user_input, "task_id": task_id}
-    context = await plugins.run_hook(InteractionPoint.BEFORE_PLANNING, context, task_id)
+    context = await interactions.run_hook(InteractionPoint.BEFORE_PLANNING, context, task_id)
     user_input = context.get("requirements", user_input)  # May be enhanced
 
     planning_result = await run_chat_planning_agent(user_input, logger)
 
     context["planning_result"] = planning_result
-    context = await plugins.run_hook(InteractionPoint.AFTER_PLANNING, context, task_id)
+    context = await interactions.run_hook(InteractionPoint.AFTER_PLANNING, context, task_id)
 
     if context.get("workflow_cancelled"):
         return {"status": "cancelled", "reason": context.get("cancel_reason")}
@@ -31,7 +31,7 @@ from typing import Any, Callable, Dict, List, Optional
 from datetime import datetime
 
 from .base import (
-    PluginRegistry,
+    InteractionRegistry,
     InteractionPoint,
     InteractionRequest,
     InteractionResponse,
@@ -39,30 +39,30 @@ from .base import (
 )
 
 
-class WorkflowPluginIntegration:
+class WorkflowInteractionIntegration:
     """
-    Helper class for integrating plugins with workflow execution.
+    Helper class for integrating interaction handlers with workflow execution.
 
-    This class bridges the plugin system with the workflow service,
+    This class bridges interaction handlers with the workflow service,
     handling the communication between backend and frontend.
 
     Usage in workflow_service.py:
 
-        from workflows.plugins.integration import WorkflowPluginIntegration
+        from workflows.interactions.integration import WorkflowInteractionIntegration
 
         class WorkflowService:
             def __init__(self):
-                self._plugin_integration = WorkflowPluginIntegration(self)
+                self._interaction_integration = WorkflowInteractionIntegration(self)
 
             async def execute_chat_planning(self, task_id, requirements, ...):
-                # Get context with plugin support
-                context = self._plugin_integration.create_context(
+                # Get context with interaction support
+                context = self._interaction_integration.create_context(
                     task_id=task_id,
                     user_input=requirements,
                 )
 
-                # Run before-planning plugins
-                context = await self._plugin_integration.run_hook(
+                # Run before-planning handlers
+                context = await self._interaction_integration.run_hook(
                     InteractionPoint.BEFORE_PLANNING,
                     context
                 )
@@ -73,14 +73,14 @@ class WorkflowPluginIntegration:
     """
 
     def __init__(
-        self, workflow_service: Any, registry: Optional[PluginRegistry] = None
+        self, workflow_service: Any, registry: Optional[InteractionRegistry] = None
     ):
         """
-        Initialize plugin integration.
+        Initialize workflow interaction integration.
 
         Args:
             workflow_service: The WorkflowService instance
-            registry: Optional custom plugin registry (uses default if not provided)
+            registry: Optional custom interaction registry
         """
         self._workflow_service = workflow_service
         self._registry = registry or get_default_registry()
@@ -92,7 +92,7 @@ class WorkflowPluginIntegration:
         self._pending_interactions: Dict[str, asyncio.Future] = {}
 
     def create_context(self, task_id: str, **kwargs) -> Dict[str, Any]:
-        """Create a workflow context with plugin support."""
+        """Create a workflow context with interaction-handler support."""
         return {
             "task_id": task_id,
             "timestamp": datetime.utcnow().isoformat(),
@@ -105,9 +105,9 @@ class WorkflowPluginIntegration:
         context: Dict[str, Any],
     ) -> Dict[str, Any]:
         """
-        Run plugins at a hook point.
+        Run handlers at an interaction point.
 
-        This is the main entry point for plugin execution.
+        This is the main entry point for interaction execution.
         """
         task_id = context.get("task_id")
         return await self._registry.run_hook(hook_point, context, task_id)
@@ -117,7 +117,7 @@ class WorkflowPluginIntegration:
         task_id: str,
         request: InteractionRequest,
     ) -> InteractionResponse:
-        """Request one user interaction without running plugin mutation logic."""
+        """Request one user interaction without running handler mutation logic."""
         return await self._handle_interaction(task_id, request)
 
     async def _handle_interaction(
@@ -126,12 +126,12 @@ class WorkflowPluginIntegration:
         request: InteractionRequest,
     ) -> InteractionResponse:
         """
-        Handle interaction request from a plugin.
+        Handle an interaction request from a handler.
 
         This method:
         1. Publishes the interaction request through the workflow event sink
         2. Waits for user response (via submit_response)
-        3. Returns the response to the plugin
+        3. Returns the response to the handler
         """
         # Update task status
         task = self._workflow_service.get_task(task_id)
@@ -237,14 +237,14 @@ class WorkflowPluginIntegration:
         return False
 
 
-def create_plugin_enabled_wrapper(
+def create_interaction_wrapper(
     original_function: Callable,
     before_hooks: List[InteractionPoint],
     after_hooks: List[InteractionPoint],
-    integration: WorkflowPluginIntegration,
+    integration: WorkflowInteractionIntegration,
 ) -> Callable:
     """
-    Create a wrapper that adds plugin hooks around an existing function.
+    Create a wrapper that adds interaction points around an existing function.
 
     This is useful for wrapping existing workflow functions without
     modifying their code.
@@ -254,12 +254,12 @@ def create_plugin_enabled_wrapper(
         async def execute_planning(requirements, logger):
             ...
 
-        # Wrap with plugins
-        execute_planning_with_plugins = create_plugin_enabled_wrapper(
+        # Wrap with interaction handlers
+        execute_planning_with_interactions = create_interaction_wrapper(
             execute_planning,
             before_hooks=[InteractionPoint.BEFORE_PLANNING],
             after_hooks=[InteractionPoint.AFTER_PLANNING],
-            integration=plugin_integration,
+            integration=interaction_integration,
         )
     """
 

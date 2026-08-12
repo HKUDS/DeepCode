@@ -7,6 +7,7 @@ import re
 import threading
 from collections.abc import Callable, Iterator
 from dataclasses import replace
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,8 @@ from core.skills.roots import discover_skill_roots
 SKILL_FILENAME = "SKILL.md"
 MAX_SKILL_BYTES = 64 * 1024
 MAX_DESCRIPTION_CHARS = 1_000
+MAX_AGENT_SKILL_DESCRIPTION_CHARS = 1_024
+MAX_AGENT_SKILL_COMPATIBILITY_CHARS = 500
 MAX_ALLOWED_TOOLS = 128
 MAX_CATALOG_WARNINGS = 100
 MAX_CATALOG_ENTRIES = 256
@@ -47,6 +50,14 @@ _TEXT_MENTION_RE = re.compile(
     r"(?<![\w$])\$([^\s$.,;:!?()\[\]{}<>\"']+)",
     re.UNICODE,
 )
+_AGENT_SKILL_NAME_RE = re.compile(r"^(?!.*--)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
+
+
+class SkillValidationProfile(StrEnum):
+    """Validation contract selected by the owner of a Skill package."""
+
+    DEEPCODE_COMPAT = "deepcode-compat"
+    AGENT_SKILLS_V1 = "agent-skills-v1"
 
 
 class SkillCatalog:
@@ -90,6 +101,7 @@ class SkillCatalog:
                 digest.update(record.package_id.value.encode())
             digest.update(record.revision.encode())
             digest.update(record.status.value.encode())
+            digest.update(b"1" if record.policy_enabled else b"0")
             digest.update((record.shadowed_by or "").encode())
         self.revision = f"sha256:{digest.hexdigest()}"
 
@@ -251,7 +263,13 @@ def discover_skill_catalog(
     resolved: list[SkillRecord] = []
     for record in records:
         if record.id in disabled_ids:
-            resolved.append(replace(record, status=SkillStatus.DISABLED))
+            resolved.append(
+                replace(
+                    record,
+                    status=SkillStatus.DISABLED,
+                    policy_enabled=False,
+                )
+            )
             continue
         if record.status is SkillStatus.INVALID:
             resolved.append(record)
@@ -435,8 +453,17 @@ class LocalSkillProvider:
         with self._lock:
             self._signature = None
 
+    def skill_change_token(self) -> object:
+        """Return the catalog-affecting filesystem and policy fingerprint."""
+
+        return (
+            *self._filesystem_signature(),
+            tuple(sorted(self.disabled_loader())),
+        )
+
     def _filesystem_signature(self) -> tuple[Any, ...]:
         values: list[Any] = []
+        tracked_skills = 0
         for root_spec in discover_skill_roots(
             self.workspace,
             working_directory=self.working_directory,
@@ -452,6 +479,9 @@ class LocalSkillProvider:
                 values.append((str(root), None, None))
                 continue
             for directory in _iter_skill_directories(root):
+                if tracked_skills >= MAX_CATALOG_ENTRIES:
+                    return tuple(values)
+                tracked_skills += 1
                 skill_file = directory / SKILL_FILENAME
                 for tracked_file in (skill_file, directory / OPENAI_METADATA_PATH):
                     try:
@@ -500,7 +530,7 @@ def _iter_skill_directories(root: Path) -> Iterator[Path]:
             continue
 
 
-def _read_candidate(
+def read_skill_candidate(
     *,
     root: Path,
     directory: Path,
@@ -508,7 +538,15 @@ def _read_candidate(
     source_root: SkillSourceRoot,
     trust_boundary: Path | None,
     writable: bool,
+    validation_profile: SkillValidationProfile = SkillValidationProfile.DEEPCODE_COMPAT,
 ) -> SkillRecord:
+    """Read one Skill candidate while preserving invalid entries.
+
+    Provider implementations use this parser so local, bundled, and Plugin
+    Skills share one frontmatter and metadata contract. ``trust_boundary`` is
+    explicit: callers that expose a filesystem-backed package must supply the
+    directory that every resolved resource is required to remain inside.
+    """
     unresolved_file = directory / SKILL_FILENAME
     fallback_name = directory.name
     byte_size = 0
@@ -531,6 +569,13 @@ def _read_candidate(
                 f"{skill_file}: SKILL.md exceeds {MAX_SKILL_BYTES} bytes"
             )
         payload = skill_file.read_bytes()
+        metadata_file = directory / OPENAI_METADATA_PATH
+        if trust_boundary is not None and (
+            metadata_file.exists() or metadata_file.is_symlink()
+        ):
+            metadata_file.resolve(strict=True).relative_to(
+                trust_boundary.resolve(strict=True)
+            )
         metadata, metadata_payload = read_skill_metadata(skill_file.parent)
         revision_payload = payload
         if metadata_payload is not None:
@@ -541,6 +586,7 @@ def _read_candidate(
             text,
             fallback_name=fallback_name,
             path=skill_file,
+            validation_profile=validation_profile,
         )
         key = _key(
             root=root.absolute(),
@@ -582,6 +628,11 @@ def _read_candidate(
         )
 
 
+# Private compatibility name for the local discovery implementation. Keeping
+# the call sites below small also makes the public provider seam explicit.
+_read_candidate = read_skill_candidate
+
+
 def _key(
     *,
     root: Path,
@@ -608,6 +659,7 @@ def _parse_text(
     *,
     fallback_name: str,
     path: Path,
+    validation_profile: SkillValidationProfile,
 ) -> tuple[str, str, str, tuple[str, ...]]:
     match = _FRONTMATTER_RE.match(text)
     if not match:
@@ -621,23 +673,99 @@ def _parse_text(
     if not isinstance(metadata, dict):
         raise SkillValidationError(f"{path}: frontmatter must be a mapping")
 
-    name = str(metadata.get("name") or fallback_name).strip()
-    _validate_name(name, path)
-    description = str(metadata.get("description") or "").strip()
-    if not description:
-        raise SkillValidationError(f"{path}: Skill {name!r} needs a description")
-    if len(description) > MAX_DESCRIPTION_CHARS:
-        raise SkillValidationError(
-            f"{path}: description exceeds {MAX_DESCRIPTION_CHARS} characters"
+    if validation_profile is SkillValidationProfile.AGENT_SKILLS_V1:
+        name, description, allowed_tools = _parse_agent_skills_metadata(
+            metadata,
+            directory_name=fallback_name,
+            path=path,
+        )
+    else:
+        name = str(metadata.get("name") or fallback_name).strip()
+        _validate_name(name, path)
+        description = str(metadata.get("description") or "").strip()
+        if not description:
+            raise SkillValidationError(f"{path}: Skill {name!r} needs a description")
+        if len(description) > MAX_DESCRIPTION_CHARS:
+            raise SkillValidationError(
+                f"{path}: description exceeds {MAX_DESCRIPTION_CHARS} characters"
+            )
+        allowed_tools = _coerce_tools(
+            metadata.get("allowed-tools", metadata.get("allowed_tools")),
+            path=path,
         )
     instructions = text[match.end() :].strip()
     if not instructions:
         raise SkillValidationError(f"{path}: Skill {name!r} has no instructions")
-    allowed_tools = _coerce_tools(
-        metadata.get("allowed-tools", metadata.get("allowed_tools")),
-        path=path,
-    )
     return name, description, instructions, allowed_tools
+
+
+def _parse_agent_skills_metadata(
+    metadata: dict[Any, Any],
+    *,
+    directory_name: str,
+    path: Path,
+) -> tuple[str, str, tuple[str, ...]]:
+    """Validate the portable Agent Skills frontmatter contract."""
+
+    name = metadata.get("name")
+    if not isinstance(name, str):
+        raise SkillValidationError(f"{path}: Agent Skill name must be a string")
+    if len(name) > 64 or not _AGENT_SKILL_NAME_RE.fullmatch(name):
+        raise SkillValidationError(
+            f"{path}: Agent Skill name must be 1-64 lowercase letters, numbers, "
+            "or hyphens without leading, trailing, or consecutive hyphens"
+        )
+    if name != directory_name:
+        raise SkillValidationError(
+            f"{path}: Agent Skill name {name!r} must match directory {directory_name!r}"
+        )
+
+    description = metadata.get("description")
+    if not isinstance(description, str) or not description:
+        raise SkillValidationError(
+            f"{path}: Agent Skill description must be a non-empty string"
+        )
+    if len(description) > MAX_AGENT_SKILL_DESCRIPTION_CHARS:
+        raise SkillValidationError(
+            f"{path}: Agent Skill description exceeds "
+            f"{MAX_AGENT_SKILL_DESCRIPTION_CHARS} characters"
+        )
+
+    compatibility = metadata.get("compatibility")
+    if compatibility is not None and (
+        not isinstance(compatibility, str)
+        or not compatibility
+        or len(compatibility) > MAX_AGENT_SKILL_COMPATIBILITY_CHARS
+    ):
+        raise SkillValidationError(
+            f"{path}: Agent Skill compatibility must be a 1-"
+            f"{MAX_AGENT_SKILL_COMPATIBILITY_CHARS} character string"
+        )
+
+    license_name = metadata.get("license")
+    if license_name is not None and not isinstance(license_name, str):
+        raise SkillValidationError(f"{path}: Agent Skill license must be a string")
+
+    custom_metadata = metadata.get("metadata")
+    if custom_metadata is not None and (
+        not isinstance(custom_metadata, dict)
+        or any(
+            not isinstance(key, str) or not isinstance(value, str)
+            for key, value in custom_metadata.items()
+        )
+    ):
+        raise SkillValidationError(
+            f"{path}: Agent Skill metadata must map strings to strings"
+        )
+
+    return (
+        name,
+        description,
+        _coerce_agent_tools(
+            metadata.get("allowed-tools"),
+            path=path,
+        ),
+    )
 
 
 def _validate_name(name: str, path: Path) -> None:
@@ -676,6 +804,25 @@ def _coerce_tools(value: Any, *, path: Path) -> tuple[str, ...]:
     return tuple(tools)
 
 
+def _coerce_agent_tools(value: Any, *, path: Path) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, str):
+        raise SkillValidationError(
+            f"{path}: Agent Skill allowed-tools must be a space-delimited string"
+        )
+    tools = tuple(dict.fromkeys(value.split()))
+    if not tools:
+        raise SkillValidationError(
+            f"{path}: Agent Skill allowed-tools cannot be empty when declared"
+        )
+    if len(tools) > MAX_ALLOWED_TOOLS:
+        raise SkillValidationError(
+            f"{path}: allowed-tools exceeds {MAX_ALLOWED_TOOLS} entries"
+        )
+    return tools
+
+
 # Compatibility for code that imported the original cache-oriented name.
 SkillCatalogProvider = LocalSkillProvider
 
@@ -687,6 +834,8 @@ __all__ = [
     "LocalSkillProvider",
     "SkillCatalog",
     "SkillCatalogProvider",
+    "SkillValidationProfile",
     "discover_skill_catalog",
+    "read_skill_candidate",
     "validate_skill_directory",
 ]

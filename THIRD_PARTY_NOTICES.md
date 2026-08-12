@@ -37,3 +37,18 @@ Icons designed by The Icon Tree from Flaticon.
 
 These image assets are presentation-only and do not participate in Agent,
 Session, protocol, or execution behavior.
+
+## Bundled Agent Skills
+
+DeepCode bundles upstream Agent Skills from the following repositories. The
+exact source path and pinned revision for each bundled package are recorded in
+`core/skills/builtin/UPSTREAM_SOURCES.json`; upstream license files are kept
+inside their respective Skill directories when supplied by the source.
+
+- OpenAI Skills: https://github.com/openai/skills
+- OpenAI Codex: https://github.com/openai/codex
+- Anthropic Skills: https://github.com/anthropics/skills
+
+The Skill instructions remain attributable to their upstream authors. DeepCode
+provides the host runtime, discovery, selection, resource access, and tool/MCP
+integration used to execute them.
