@@ -27,10 +27,16 @@ def read_local_resource(
     resource: SkillResourceId,
     *,
     workspace: Path,
+    trust_boundary: Path | None = None,
 ) -> tuple[str, str]:
     """Read one UTF-8 package resource without crossing its trust boundary."""
 
-    path = _resource_path(entry, resource, workspace=workspace)
+    path = _resource_path(
+        entry,
+        resource,
+        workspace=workspace,
+        trust_boundary=trust_boundary,
+    )
     try:
         with path.open("rb") as stream:
             payload = stream.read(MAX_SKILL_RESOURCE_BYTES + 1)
@@ -57,13 +63,18 @@ def search_local_resources(
     *,
     workspace: Path,
     limit: int,
+    trust_boundary: Path | None = None,
 ) -> tuple[SkillSearchMatch, ...]:
     """Search bounded UTF-8 package files in deterministic path order."""
 
     needle = query.strip().casefold()
     if not needle:
         return ()
-    root = _package_root(entry, workspace=workspace)
+    root = _package_root(
+        entry,
+        workspace=workspace,
+        trust_boundary=trust_boundary,
+    )
     matches: list[SkillSearchMatch] = []
     visited = 0
     directories = 0
@@ -84,7 +95,12 @@ def search_local_resources(
                     continue
                 resolved = path.resolve(strict=True)
                 resolved.relative_to(root)
-                _enforce_workspace_boundary(entry, resolved, workspace)
+                _enforce_trust_boundary(
+                    entry,
+                    resolved,
+                    workspace,
+                    trust_boundary=trust_boundary,
+                )
                 visited += 1
                 with resolved.open("rb") as stream:
                     payload = stream.read(MAX_SKILL_SEARCH_FILE_BYTES + 1)
@@ -118,13 +134,23 @@ def _resource_path(
     resource: SkillResourceId,
     *,
     workspace: Path,
+    trust_boundary: Path | None,
 ) -> Path:
     relative = _normalize_resource(resource)
-    root = _package_root(entry, workspace=workspace)
+    root = _package_root(
+        entry,
+        workspace=workspace,
+        trust_boundary=trust_boundary,
+    )
     try:
         path = root.joinpath(*relative.parts).resolve(strict=True)
         path.relative_to(root)
-        _enforce_workspace_boundary(entry, path, workspace)
+        _enforce_trust_boundary(
+            entry,
+            path,
+            workspace,
+            trust_boundary=trust_boundary,
+        )
     except (OSError, ValueError) as exc:
         raise SkillResolutionError(
             f"Skill resource is outside its package or unavailable: {resource.value}"
@@ -134,10 +160,20 @@ def _resource_path(
     return path
 
 
-def _package_root(entry: SkillRecord, *, workspace: Path) -> Path:
+def _package_root(
+    entry: SkillRecord,
+    *,
+    workspace: Path,
+    trust_boundary: Path | None,
+) -> Path:
     try:
         root = entry.key.skill_file.parent.resolve(strict=True)
-        _enforce_workspace_boundary(entry, root, workspace)
+        _enforce_trust_boundary(
+            entry,
+            root,
+            workspace,
+            trust_boundary=trust_boundary,
+        )
     except (OSError, ValueError) as exc:
         raise SkillResolutionError(
             f"Skill package is unavailable: {entry.name}"
@@ -147,11 +183,16 @@ def _package_root(entry: SkillRecord, *, workspace: Path) -> Path:
     return root
 
 
-def _enforce_workspace_boundary(
+def _enforce_trust_boundary(
     entry: SkillRecord,
     path: Path,
     workspace: Path,
+    *,
+    trust_boundary: Path | None,
 ) -> None:
+    if trust_boundary is not None:
+        path.relative_to(trust_boundary.resolve(strict=True))
+        return
     if entry.scope is SkillScope.PROJECT:
         path.relative_to(workspace.resolve(strict=True))
 

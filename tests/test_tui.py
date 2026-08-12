@@ -151,11 +151,109 @@ def test_slash_help_lists_registry(monkeypatch, tmp_path, capsys):
         "/transcript",
         "/skills",
         "/skill",
+        "/plugins",
+        "/mcp",
         "/goal",
         "/clear",
         "/exit",
     ):
         assert name in out
+
+
+def test_tui_lists_plugin_and_its_mcp_without_a_model_turn(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    from core.plugins.registry import LocalPluginRegistry
+    from core.plugins.resolver import resolve_plugin
+
+    plugin_root = tmp_path / "plugin"
+    plugin_root.mkdir()
+    (plugin_root / "plugin.json").write_text(
+        json.dumps(
+            {
+                "$schema": (
+                    "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
+                ),
+                "name": "review-tools",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (plugin_root / "mcp.json").write_text(
+        json.dumps(
+            {
+                "$schema": ("https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"),
+                "mcpServers": {
+                    "context": {
+                        "type": "streamable-http",
+                        "url": "http://127.0.0.1:8765/mcp",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    LocalPluginRegistry(tmp_path / "home" / "plugins" / "registry.json").add(
+        resolve_plugin(plugin_root)
+    )
+
+    rc, provider = _run_tui(
+        monkeypatch,
+        tmp_path,
+        "/plugins\n/mcp\n/exit\n",
+        ["unused"],
+    )
+
+    assert rc == 0
+    assert provider.calls == 0
+    output = capsys.readouterr().out
+    assert "review-tools" in output
+    assert "mcp:ready" in output
+    assert "plugin" in output
+    assert "review-tools/context" in output
+
+
+def test_tui_adds_presets_and_really_probes_without_a_model_turn(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    home = tmp_path / "home"
+    fixture = Path(__file__).parent / "fixtures" / "mcp_runtime_server.py"
+    home.mkdir()
+    (home / "deepcode_config.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "fixture": {
+                        "type": "stdio",
+                        "command": sys.executable,
+                        "args": [str(fixture)],
+                        "enabled": False,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rc, provider = _run_tui(
+        monkeypatch,
+        tmp_path,
+        "/mcp presets\n/mcp add context7\n/mcp test fixture\n/mcp\n/exit\n",
+        ["unused"],
+    )
+
+    assert rc == 0
+    assert provider.calls == 0
+    output = capsys.readouterr().out
+    assert "Bundled MCP presets" in output
+    assert "notion" in output
+    assert "added MCP preset context7 in disabled state" in output
+    assert "MCP test passed for fixture: 3 tools, 1 resources, 1 prompts" in output
+    assert "tested" in output
 
 
 def test_unknown_command_hints(monkeypatch, tmp_path, capsys):

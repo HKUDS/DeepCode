@@ -41,6 +41,7 @@ from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
 from core.agent_runtime.tools.mcp import MCPServerConfig
+from core.mcp.models import McpServerDefinition
 from core.providers.base import GenerationSettings, LLMProvider
 from core.providers.registry import (
     PROVIDERS,
@@ -336,6 +337,14 @@ class DeepCodeConfig(BaseSettings):
 
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
+    # Canonical MCP client configuration for the coding agent. The legacy
+    # paper workflow remains isolated under ``tools.mcpServers`` and is
+    # materialized only by the compatibility property below.
+    agent_mcp_servers: dict[str, McpServerDefinition] = Field(
+        default_factory=dict,
+        validation_alias=AliasChoices("mcpServers", "agent_mcp_servers"),
+        serialization_alias="mcpServers",
+    )
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
@@ -636,6 +645,11 @@ def _project_runtime_layer(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def _resolve_env_refs(value: Any, *, path: str = "") -> Any:
+    # Generic MCP secrets are late-bound by core.mcp immediately before a
+    # connection starts. Eager interpolation here would erase provenance and
+    # risk reflecting a credential through validation errors or inventories.
+    if path in {"mcpServers", "agent_mcp_servers"}:
+        return value
     if isinstance(value, str):
         # ``apiKeyEnv`` stores the *name* of an environment variable. It is
         # never an interpolation site: expanding ``${NAME}`` here would place
@@ -823,6 +837,7 @@ __all__ = [
     "LoggerPathSettings",
     "LoggerTaskFile",
     "MCPServerSchema",
+    "McpServerDefinition",
     "ProviderConfig",
     "ProvidersConfig",
     "ResolvedAgentSettings",

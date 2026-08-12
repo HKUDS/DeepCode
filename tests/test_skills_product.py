@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -11,7 +12,11 @@ import core.skills.catalog as skill_catalog
 from core.events import AgentSession, UserInput
 from core.harness.tools import default_coding_tools
 from core.providers.base import LLMResponse, ToolCallRequest
-from core.skills.catalog import discover_skill_catalog
+from core.skills.catalog import (
+    SkillValidationProfile,
+    discover_skill_catalog,
+    read_skill_candidate,
+)
 from core.skills.management import LocalSkillManager
 from core.skills.models import (
     SkillInvocationKind,
@@ -547,6 +552,14 @@ policy:
     context, token = runtime.begin_turn("Use $review")
     try:
         assert context.snapshot.records == (record,)
+        loaded, added = runtime.load_implicit("review")
+        assert loaded == record
+        assert added is False
+    finally:
+        runtime.end_turn(token)
+
+    context, token = runtime.begin_turn("Do not use a Skill")
+    try:
         with pytest.raises(SkillResolutionError, match="explicit selection"):
             runtime.load_implicit("review")
     finally:
@@ -596,12 +609,12 @@ def test_bundled_skill_creator_is_shared_and_its_scripts_are_safe(
             str(destination_root),
             "--resources",
             "scripts,references",
-            "--display-name",
-            "Review API",
-            "--short-description",
-            "Review API changes",
-            "--default-prompt",
-            "Use $review-api to review this API change.",
+            "--interface",
+            "display_name=Review API",
+            "--interface",
+            "short_description=Review API changes and workflows",
+            "--interface",
+            "default_prompt=Use $review-api to review this API change.",
         ],
         check=False,
         capture_output=True,
@@ -655,6 +668,85 @@ Inspect the public contract, implementation, and focused verification evidence.
         text=True,
     )
     assert validated.returncode == 0, validated.stderr or validated.stdout
+
+
+def test_bundled_core_skills_load_with_resources_and_fixed_provenance(
+    tmp_path: Path,
+) -> None:
+    bundled_root = Path(__file__).resolve().parents[1] / "core" / "skills" / "builtin"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = SkillRuntime(workspace, include_user=False)
+    catalog = runtime.catalog()
+    expected = {
+        "frontend-design",
+        "mcp-builder",
+        "review-agent",
+        "security-best-practices",
+        "security-ownership-map",
+        "security-threat-model",
+        "skill-creator",
+        "webapp-testing",
+    }
+
+    assert {record.name for record in catalog.active()} == expected
+    assert catalog.warnings == ()
+    for name in sorted(expected):
+        record = catalog.get_active(name)
+        assert record is not None
+        assert record.scope is SkillScope.SYSTEM
+        assert record.source_root is SkillSourceRoot.SYSTEM
+        assert record.deletable is False
+        context, token = runtime.begin_turn(f"Use ${name}")
+        try:
+            assert context.snapshot.records[0].name == name
+            assert context.snapshot.records[0].require_instructions()
+        finally:
+            runtime.end_turn(token)
+
+    mcp_builder = catalog.get_active("mcp-builder")
+    security = catalog.get_active("security-best-practices")
+    webapp_testing = catalog.get_active("webapp-testing")
+    assert mcp_builder is not None
+    assert security is not None
+    assert webapp_testing is not None
+    assert (
+        "MCP Server Best Practices"
+        in runtime.read_package_resource(
+            mcp_builder,
+            "reference/mcp_best_practices.md",
+        ).contents
+    )
+    assert (
+        "Django (Python) Web Security Spec"
+        in runtime.read_package_resource(
+            security,
+            "references/python-django-web-server-security.md",
+        ).contents
+    )
+    assert (
+        "sync_playwright"
+        in runtime.read_package_resource(
+            webapp_testing,
+            "examples/static_html_automation.py",
+        ).contents
+    )
+
+    manifest = bundled_root / "UPSTREAM_SOURCES.json"
+    sources = json.loads(manifest.read_text(encoding="utf-8"))["skills"]
+    assert set(sources) == expected
+    assert all(len(source["revision"]) == 40 for source in sources.values())
+    for name in sorted(expected):
+        strict = read_skill_candidate(
+            root=bundled_root,
+            directory=bundled_root / name,
+            scope=SkillScope.SYSTEM,
+            source_root=SkillSourceRoot.SYSTEM,
+            trust_boundary=bundled_root,
+            writable=False,
+            validation_profile=SkillValidationProfile.AGENT_SKILLS_V1,
+        )
+        assert strict.status is SkillStatus.ACTIVE, strict.error
 
 
 def test_user_aliases_support_plugin_locations_without_weakening_project_boundary(

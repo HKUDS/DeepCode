@@ -262,6 +262,12 @@
   color: var(--success);
 }
 
+.badge[data-status="tested"],
+.badge[data-status="connected"] {
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border-subtle));
+  color: var(--success);
+}
+
 .badge[data-status="neutral"] {
   border-color: var(--border-strong);
   color: var(--text-tertiary);
@@ -272,6 +278,12 @@
   color: var(--danger);
 }
 
+.badge[data-status="blocked"],
+.badge[data-status="disabled"] {
+  border-color: color-mix(in srgb, var(--attention) 45%, var(--border-subtle));
+  color: var(--attention);
+}
+
 .badge[data-status="completed"],
 .badge[data-status="enabled"] {
   border-color: color-mix(in srgb, var(--success) 45%, var(--border-subtle));
@@ -280,6 +292,7 @@
 
 .badge[data-status="running"],
 .badge[data-status="queued"],
+.badge[data-status="connecting"],
 .badge[data-status="waiting"] {
   border-color: color-mix(in srgb, var(--signal) 45%, var(--border-subtle));
   color: var(--signal);
@@ -588,15 +601,25 @@
 }
 
 .errorBanner,
+.successBanner,
 .warningBlock {
   margin: 0 0 14px;
   padding: 12px 14px;
-  border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--border-subtle));
   border-radius: var(--radius-md);
-  background: var(--danger-soft);
-  color: var(--danger);
   font-size: 11px;
   line-height: 1.55;
+}
+
+.errorBanner {
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--border-subtle));
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.successBanner {
+  border: 1px solid color-mix(in srgb, var(--success) 30%, var(--border-subtle));
+  background: color-mix(in srgb, var(--success) 9%, var(--surface-raised));
+  color: var(--success);
 }
 
 .warningBlock {
@@ -805,6 +828,10 @@
   color: var(--signal);
 }
 
+.skillRowMeta em[data-status="disabled"] {
+  color: var(--attention);
+}
+
 .skillRowMeta em[data-status="invalid"] {
   background: var(--danger-soft);
   color: var(--danger);
@@ -849,6 +876,11 @@
   border-color: color-mix(in srgb, var(--signal) 24%, var(--border-strong));
   background: var(--signal-faint);
   color: var(--signal);
+}
+
+.skillActions .badge[data-status="disabled"] {
+  border-color: color-mix(in srgb, var(--attention) 45%, var(--border-subtle));
+  color: var(--attention);
 }
 
 .skillActions .badge[data-status="invalid"] {

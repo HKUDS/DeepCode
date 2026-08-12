@@ -20,7 +20,6 @@ from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_NAME = "deepcode-hku"
 MINIMUM_MCP_VERSION = Version("1.29")
@@ -319,6 +318,13 @@ def smoke_installed_wheel(wheel: Path) -> None:
                     "from importlib.resources import files; "
                     "assert files('core.application.goal_prompts')"
                     ".joinpath('continuation.md').read_text(encoding='utf-8').strip(); "
+                    "from core.skills.runtime import SkillRuntime; "
+                    "assert {record.name for record in "
+                    "SkillRuntime('.', include_user=False).catalog().active()} "
+                    "== {'frontend-design', 'mcp-builder', "
+                    "'review-agent', 'security-best-practices', "
+                    "'security-ownership-map', 'security-threat-model', "
+                    "'skill-creator', 'webapp-testing'}; "
                     "from cli.mcp_server import build_server; build_server()"
                 ),
             ],

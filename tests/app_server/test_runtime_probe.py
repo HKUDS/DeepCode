@@ -16,3 +16,14 @@ def test_runtime_probe_imports_lazy_desktop_capabilities(monkeypatch):
     assert imported == list(runtime_probe.RUNTIME_MODULES)
     assert result["providers"] == ["anthropic", "openai_compat"]
     assert result["paperFallback"] == "pypdf"
+    assert result["skillCreator"] is True
+    assert result["bundledSkills"] == [
+        "frontend-design",
+        "mcp-builder",
+        "review-agent",
+        "security-best-practices",
+        "security-ownership-map",
+        "security-threat-model",
+        "skill-creator",
+        "webapp-testing",
+    ]

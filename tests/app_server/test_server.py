@@ -39,6 +39,7 @@ from core.events import (
     ToolStarted,
     TurnStarted,
 )
+from core.plugins.formats.agent_plugins_v1 import AGENT_PLUGIN_SCHEMA
 from core.sessions import SessionStore
 
 
@@ -869,14 +870,14 @@ def test_management_methods_round_trip_real_project_state(
         json.dumps(
             {
                 "providers": {"openai": {"apiKey": "never-return-this"}},
-                "tools": {
-                    "mcpServers": {
-                        "demo": {
-                            "type": "stdio",
-                            "command": "python3",
-                            "args": ["server.py", "--token", "mcp-secret"],
-                            "env": {"API_TOKEN": "mcp-secret"},
-                        }
+                "mcpServers": {
+                    "demo": {
+                        "type": "stdio",
+                        "command": "python3",
+                        "args": ["server.py", "--token", "mcp-secret"],
+                        "credentialEnv": {
+                            "API_TOKEN": {"credentialRef": "provider:openrouter"}
+                        },
                     }
                 },
             }
@@ -979,7 +980,15 @@ def test_management_methods_round_trip_real_project_state(
             for message in _messages(sink)
             if "id" in message and "result" in message
         }
-        assert any(skill["name"] == "review" for skill in responses[2]["skills"])
+        review_info = next(
+            skill for skill in responses[2]["skills"] if skill["name"] == "review"
+        )
+        assert review_info["originKind"] == "local"
+        assert review_info["originLabel"] == "project:deepcode"
+        assert review_info["providerKind"] == "local"
+        assert review_info["providerId"] == "local"
+        assert review_info["configurableScopes"] == ["project", "user"]
+        assert "authoringSkillId" in responses[2]
         assert "concrete evidence" in responses[3]["skill"]["instructions"]
         assert any(
             hook["eventName"] == "PreToolUse" and hook["command"] == "python3 check.py"
@@ -1017,6 +1026,229 @@ def test_management_methods_round_trip_real_project_state(
         assert "mcp-secret" not in serialized
     finally:
         application.close()
+
+
+def test_mcp_presets_and_real_probe_round_trip_through_app_server(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "deepcode-home"
+    fixture = Path(__file__).resolve().parents[1] / "fixtures" / "mcp_runtime_server.py"
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    source = io.BytesIO(
+        _request(
+            1,
+            "initialize",
+            {
+                "protocolVersion": "1.0",
+                "clientInfo": {"name": "mcp-test", "version": "1.0"},
+            },
+        )
+        + _request(2, "mcp/presets", {})
+        + _request(
+            3,
+            "mcp/preset/add",
+            {"presetId": "context7", "enabled": False},
+        )
+        + _request(
+            4,
+            "mcp/upsert",
+            {
+                "scope": "user",
+                "name": "fixture",
+                "server": {
+                    "type": "stdio",
+                    "command": sys.executable,
+                    "args": [str(fixture)],
+                    "enabled": False,
+                },
+            },
+        )
+        + _request(5, "mcp/probe", {"name": "fixture"})
+        + _request(6, "mcp/list", {})
+        + _request(7, "shutdown", {})
+    )
+    sink = io.BytesIO()
+
+    try:
+        assert AppServer(application).serve(source, sink) == 0
+        messages = _messages(sink)
+        responses = {
+            message["id"]: message["result"]
+            for message in messages
+            if "id" in message and "result" in message
+        }
+        assert len(responses[2]["presets"]) == 16
+        assert responses[2]["sourceRevision"]
+        context7 = next(
+            server for server in responses[3]["servers"] if server["name"] == "context7"
+        )
+        assert context7["enabled"] is False
+        probe = responses[5]
+        assert probe["name"] == "fixture"
+        assert probe["ok"] is True
+        assert probe["toolCount"] == 3
+        assert probe["resourceCount"] == 1
+        assert probe["promptCount"] == 1
+        fixture_info = next(
+            server for server in responses[6]["servers"] if server["name"] == "fixture"
+        )
+        assert fixture_info["runtimeState"] == "tested"
+        assert fixture_info["toolCount"] == 3
+        assert any(message.get("method") == "mcp.changed" for message in messages)
+    finally:
+        application.close()
+
+
+def test_skill_file_change_invalidates_catalog_and_notifies_client(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    skill_directory = workspace / ".agents" / "skills" / "review"
+    skill_directory.mkdir(parents=True)
+    skill_file = skill_directory / "SKILL.md"
+    skill_file.write_text(
+        "---\nname: review\ndescription: First description\n---\n"
+        "Use the first workflow.\n",
+        encoding="utf-8",
+    )
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    project = application.projects.add(
+        str(workspace),
+        trust_state=TrustState.TRUSTED,
+    )
+    input_read_fd, input_write_fd = os.pipe()
+    output_read_fd, output_write_fd = os.pipe()
+    source = os.fdopen(input_read_fd, "rb", buffering=0)
+    writer = os.fdopen(input_write_fd, "wb", buffering=0)
+    reader = os.fdopen(output_read_fd, "rb", buffering=0)
+    sink = os.fdopen(output_write_fd, "wb", buffering=0)
+    server_thread = threading.Thread(
+        target=AppServer(application).serve,
+        args=(source, sink),
+        daemon=True,
+    )
+    server_thread.start()
+    try:
+        writer.write(
+            _request(
+                1,
+                "initialize",
+                {
+                    "protocolVersion": "1.0",
+                    "clientInfo": {"name": "skill-watch", "version": "1.0"},
+                },
+            )
+        )
+        assert _read_until(reader, lambda message: message.get("id") == 1)
+        writer.write(_request(2, "skills/list", {"projectId": project.id}))
+        initial = _read_until(reader, lambda message: message.get("id") == 2)
+        initial_revision = initial["result"]["catalogRevision"]
+
+        skill_file.write_text(
+            "---\nname: review\ndescription: Second description\n---\n"
+            "Use the second workflow.\n",
+            encoding="utf-8",
+        )
+        changed = _read_until(
+            reader,
+            lambda message: message.get("method") == "skills.changed",
+        )
+        assert changed["params"] == {"projectId": project.id}
+
+        writer.write(_request(3, "skills/list", {"projectId": project.id}))
+        refreshed = _read_until(reader, lambda message: message.get("id") == 3)
+        review = next(
+            skill
+            for skill in refreshed["result"]["skills"]
+            if skill["name"] == "review"
+        )
+        assert review["description"] == "Second description"
+        assert refreshed["result"]["catalogRevision"] != initial_revision
+
+        writer.write(_request(4, "shutdown", {}))
+        assert _read_until(reader, lambda message: message.get("id") == 4)
+        server_thread.join(timeout=3)
+        assert not server_thread.is_alive()
+    finally:
+        writer.close()
+        reader.close()
+        if server_thread.is_alive():
+            source.close()
+            server_thread.join(timeout=3)
+
+
+def test_plugin_protocol_registers_and_contributes_skills(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    plugin_root = tmp_path / "review-plugin"
+    skill = plugin_root / "skills" / "plugin-review"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: plugin-review\ndescription: Review from Plugin\n---\n"
+        "Review the code.\n",
+        encoding="utf-8",
+    )
+    (plugin_root / "plugin.json").write_text(
+        json.dumps(
+            {
+                "$schema": AGENT_PLUGIN_SCHEMA,
+                "name": "review-tools",
+                "version": "1.0.0",
+                "description": "Review tools",
+            }
+        ),
+        encoding="utf-8",
+    )
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    project = application.projects.add(
+        str(workspace),
+        trust_state=TrustState.TRUSTED,
+    )
+    source = io.BytesIO(
+        _request(
+            1,
+            "initialize",
+            {
+                "protocolVersion": "1.0",
+                "clientInfo": {"name": "plugin-test", "version": "1.0"},
+            },
+        )
+        + _request(2, "skills/list", {"projectId": project.id})
+        + _request(3, "plugins/add", {"path": str(plugin_root)})
+        + _request(4, "skills/list", {"projectId": project.id})
+        + _request(
+            5,
+            "plugins/set-enabled",
+            {"pluginId": "review-tools", "enabled": False},
+        )
+        + _request(6, "skills/list", {"projectId": project.id})
+        + _request(7, "plugins/remove", {"pluginId": "review-tools"})
+        + _request(8, "shutdown", {})
+    )
+    sink = io.BytesIO()
+
+    assert AppServer(application).serve(source, sink) == 0
+    messages = _messages(sink)
+    responses = {message["id"]: message for message in messages if "id" in message}
+    assert responses[3]["result"]["plugins"][0]["status"] == "active"
+    added_skill = next(
+        skill
+        for skill in responses[4]["result"]["skills"]
+        if skill["name"] == "plugin-review"
+    )
+    assert added_skill["providerId"].startswith("plg_")
+    assert responses[5]["result"]["plugins"][0]["status"] == "disabled"
+    assert all(
+        skill["name"] != "plugin-review" for skill in responses[6]["result"]["skills"]
+    )
+    assert responses[7]["result"]["removed"] is True
+    assert plugin_root.is_dir()
+    assert any(message.get("method") == "plugins.changed" for message in messages)
+    assert any(message.get("method") == "skills.changed" for message in messages)
 
 
 class _AutomationSession:

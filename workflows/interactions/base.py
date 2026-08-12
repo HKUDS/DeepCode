@@ -1,23 +1,23 @@
 """
-User-in-Loop Plugin System - Base Classes
+User-in-loop interaction handlers - base classes
 
-This module provides a plugin-based architecture for adding user interaction
+This module provides hook-based handlers for adding user interaction
 points to workflows without modifying core workflow code.
 
 Design Philosophy:
-- Plugins are registered at specific "hook points" in the workflow
-- Each plugin decides if it should trigger based on context
-- Plugins are completely optional and can be enabled/disabled via config
-- Zero changes to core workflow code - just call `await plugins.run_hook(...)`
+- Handlers are registered at specific workflow interaction points
+- Each handler decides if it should trigger based on context
+- Handlers are optional and can be enabled or disabled via config
+- Workflows call `await interactions.run_hook(...)` at an interaction point
 
 Usage:
-    from workflows.plugins import PluginRegistry, InteractionPoint
+    from workflows.interactions import InteractionRegistry, InteractionPoint
 
     # Initialize registry with interaction callback
-    plugins = PluginRegistry(interaction_callback=my_callback)
+    interactions = InteractionRegistry(interaction_callback=my_callback)
 
     # In workflow, call hooks at specific points
-    context = await plugins.run_hook(
+    context = await interactions.run_hook(
         InteractionPoint.BEFORE_PLANNING,
         context={"user_input": user_input, "task_id": task_id}
     )
@@ -33,7 +33,7 @@ import logging
 
 class InteractionPoint(Enum):
     """
-    Defines hook points where plugins can be inserted in the workflow.
+    Defines points where interaction handlers can run in the workflow.
 
     Hook points are named by their position relative to workflow phases:
     - BEFORE_* : Before a phase starts
@@ -76,22 +76,22 @@ class InteractionResponse:
     skipped: bool = False  # True if user chose to skip
 
 
-class InteractionPlugin(ABC):
+class InteractionHandler(ABC):
     """
-    Base class for User-in-Loop plugins.
+    Base class for user-in-loop interaction handlers.
 
-    Each plugin implements:
-    1. should_trigger() - Decides if plugin should run based on context
+    Each handler implements:
+    1. should_trigger() - Decides if the handler should run based on context
     2. create_interaction() - Creates the interaction request
     3. process_response() - Handles user's response and updates context
 
     Example:
-        class MyPlugin(InteractionPlugin):
-            name = "my_plugin"
+        class MyHandler(InteractionHandler):
+            name = "my_handler"
             hook_point = InteractionPoint.AFTER_PLANNING
 
             async def should_trigger(self, context):
-                return context.get("enable_my_plugin", True)
+                return context.get("enable_my_handler", True)
 
             async def create_interaction(self, context):
                 return InteractionRequest(...)
@@ -101,27 +101,27 @@ class InteractionPlugin(ABC):
                 return context
     """
 
-    # Plugin metadata - override in subclass
-    name: str = "base_plugin"
-    description: str = "Base plugin"
+    # Handler metadata - override in subclasses.
+    name: str = "base_handler"
+    description: str = "Base interaction handler"
     hook_point: InteractionPoint = InteractionPoint.BEFORE_PLANNING
     priority: int = 100  # Lower number = higher priority (runs first)
 
     def __init__(self, enabled: bool = True, config: Optional[Dict] = None):
         self.enabled = enabled
         self.config = config or {}
-        self.logger = logging.getLogger(f"plugin.{self.name}")
+        self.logger = logging.getLogger(f"workflow.interactions.{self.name}")
 
     @abstractmethod
     async def should_trigger(self, context: Dict[str, Any]) -> bool:
         """
-        Determine if this plugin should trigger.
+        Determine if this handler should trigger.
 
         Args:
             context: Current workflow context
 
         Returns:
-            True if plugin should run, False to skip
+            True if the handler should run, False to skip
         """
         pass
 
@@ -165,7 +165,7 @@ class InteractionPlugin(ABC):
         Returns:
             Updated context (default: unchanged)
         """
-        self.logger.info(f"Plugin {self.name} skipped by user")
+        self.logger.info(f"Interaction handler {self.name} skipped by user")
         return context
 
     async def on_timeout(self, context: Dict[str, Any]) -> Dict[str, Any]:
@@ -179,7 +179,7 @@ class InteractionPlugin(ABC):
         Returns:
             Updated context (default: same as skip)
         """
-        self.logger.warning(f"Plugin {self.name} timed out")
+        self.logger.warning(f"Interaction handler {self.name} timed out")
         return await self.on_skip(context)
 
 
@@ -190,23 +190,23 @@ InteractionCallback = Callable[
 ]
 
 
-class PluginRegistry:
+class InteractionRegistry:
     """
-    Registry for managing and executing User-in-Loop plugins.
+    Registry for managing and executing user-in-loop interaction handlers.
 
     Features:
-    - Register plugins at specific hook points
-    - Enable/disable plugins dynamically
-    - Execute all plugins at a hook point in priority order
+    - Register handlers at specific interaction points
+    - Enable or disable handlers dynamically
+    - Execute handlers at an interaction point in priority order
     - Handle interaction callbacks to the application layer
 
     Usage:
         # Create registry
-        registry = PluginRegistry()
+        registry = InteractionRegistry()
 
-        # Register plugins
-        registry.register(RequirementAnalysisPlugin())
-        registry.register(PlanReviewPlugin(enabled=False))
+        # Register handlers
+        registry.register(RequirementAnalysisHandler())
+        registry.register(PlanReviewHandler(enabled=False))
 
         # Set interaction callback (connects to an application event sink)
         registry.set_interaction_callback(my_callback)
@@ -216,47 +216,47 @@ class PluginRegistry:
     """
 
     def __init__(self, interaction_callback: Optional[InteractionCallback] = None):
-        self._plugins: Dict[InteractionPoint, List[InteractionPlugin]] = {
+        self._handlers: Dict[InteractionPoint, List[InteractionHandler]] = {
             point: [] for point in InteractionPoint
         }
         self._interaction_callback = interaction_callback
-        self.logger = logging.getLogger("plugin.registry")
+        self.logger = logging.getLogger("workflow.interactions")
 
-    def register(self, plugin: InteractionPlugin) -> None:
-        """Register a plugin at its hook point."""
-        hook_point = plugin.hook_point
-        self._plugins[hook_point].append(plugin)
+    def register(self, handler: InteractionHandler) -> None:
+        """Register a handler at its interaction point."""
+        hook_point = handler.hook_point
+        self._handlers[hook_point].append(handler)
         # Sort by priority (lower number first)
-        self._plugins[hook_point].sort(key=lambda p: p.priority)
-        self.logger.info(f"Registered plugin '{plugin.name}' at {hook_point.value}")
+        self._handlers[hook_point].sort(key=lambda item: item.priority)
+        self.logger.info(f"Registered handler '{handler.name}' at {hook_point.value}")
 
-    def unregister(self, plugin_name: str) -> bool:
-        """Unregister a plugin by name."""
-        for hook_point, plugins in self._plugins.items():
-            for plugin in plugins:
-                if plugin.name == plugin_name:
-                    plugins.remove(plugin)
-                    self.logger.info(f"Unregistered plugin '{plugin_name}'")
+    def unregister(self, handler_name: str) -> bool:
+        """Unregister a handler by name."""
+        for handlers in self._handlers.values():
+            for handler in handlers:
+                if handler.name == handler_name:
+                    handlers.remove(handler)
+                    self.logger.info(f"Unregistered handler '{handler_name}'")
                     return True
         return False
 
-    def enable(self, plugin_name: str) -> bool:
-        """Enable a plugin by name."""
-        for plugins in self._plugins.values():
-            for plugin in plugins:
-                if plugin.name == plugin_name:
-                    plugin.enabled = True
-                    self.logger.info(f"Enabled plugin '{plugin_name}'")
+    def enable(self, handler_name: str) -> bool:
+        """Enable a handler by name."""
+        for handlers in self._handlers.values():
+            for handler in handlers:
+                if handler.name == handler_name:
+                    handler.enabled = True
+                    self.logger.info(f"Enabled handler '{handler_name}'")
                     return True
         return False
 
-    def disable(self, plugin_name: str) -> bool:
-        """Disable a plugin by name."""
-        for plugins in self._plugins.values():
-            for plugin in plugins:
-                if plugin.name == plugin_name:
-                    plugin.enabled = False
-                    self.logger.info(f"Disabled plugin '{plugin_name}'")
+    def disable(self, handler_name: str) -> bool:
+        """Disable a handler by name."""
+        for handlers in self._handlers.values():
+            for handler in handlers:
+                if handler.name == handler_name:
+                    handler.enabled = False
+                    self.logger.info(f"Disabled handler '{handler_name}'")
                     return True
         return False
 
@@ -264,9 +264,9 @@ class PluginRegistry:
         """Set the callback function for user interactions."""
         self._interaction_callback = callback
 
-    def get_plugins(self, hook_point: InteractionPoint) -> List[InteractionPlugin]:
-        """Get all plugins registered at a hook point."""
-        return self._plugins.get(hook_point, [])
+    def get_handlers(self, hook_point: InteractionPoint) -> List[InteractionHandler]:
+        """Get handlers registered at an interaction point."""
+        return self._handlers.get(hook_point, [])
 
     async def run_hook(
         self,
@@ -275,9 +275,9 @@ class PluginRegistry:
         task_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Execute all enabled plugins at a hook point.
+        Execute all enabled handlers at an interaction point.
 
-        Plugins are executed in priority order. Each plugin can:
+        Handlers are executed in priority order. Each handler can:
         - Modify the context
         - Request user interaction
         - Be skipped by the user
@@ -288,33 +288,31 @@ class PluginRegistry:
             task_id: Task ID for interaction callbacks
 
         Returns:
-            Updated context after all plugins have run
+            Updated context after all handlers have run
         """
-        plugins = self._plugins.get(hook_point, [])
+        handlers = self._handlers.get(hook_point, [])
 
-        if not plugins:
-            self.logger.debug(f"No plugins registered at {hook_point.value}")
+        if not handlers:
+            self.logger.debug(f"No handlers registered at {hook_point.value}")
             return context
 
         self.logger.info(
-            f"Running hook {hook_point.value} with {len(plugins)} plugin(s)"
+            f"Running hook {hook_point.value} with {len(handlers)} handler(s)"
         )
 
-        for plugin in plugins:
-            if not plugin.enabled:
-                self.logger.debug(f"Plugin '{plugin.name}' is disabled, skipping")
+        for handler in handlers:
+            if not handler.enabled:
+                self.logger.debug(f"Handler '{handler.name}' is disabled, skipping")
                 continue
 
             try:
-                # Check if plugin should trigger
-                if not await plugin.should_trigger(context):
-                    self.logger.debug(f"Plugin '{plugin.name}' chose not to trigger")
+                if not await handler.should_trigger(context):
+                    self.logger.debug(f"Handler '{handler.name}' chose not to trigger")
                     continue
 
-                self.logger.info(f"Running plugin '{plugin.name}'")
+                self.logger.info(f"Running handler '{handler.name}'")
 
-                # Create interaction request
-                interaction = await plugin.create_interaction(context)
+                interaction = await handler.create_interaction(context)
 
                 # If we have a callback, request user interaction
                 if self._interaction_callback and task_id:
@@ -325,62 +323,63 @@ class PluginRegistry:
                         )
 
                         if response.skipped:
-                            context = await plugin.on_skip(context)
+                            context = await handler.on_skip(context)
                         else:
-                            context = await plugin.process_response(response, context)
+                            context = await handler.process_response(response, context)
 
                     except asyncio.TimeoutError:
                         self.logger.warning(
-                            f"Plugin '{plugin.name}' interaction timed out"
+                            f"Handler '{handler.name}' interaction timed out"
                         )
-                        context = await plugin.on_timeout(context)
+                        context = await handler.on_timeout(context)
                 else:
                     # No callback - auto-skip non-required interactions
                     if not interaction.required:
                         self.logger.info(
-                            f"No callback, auto-skipping plugin '{plugin.name}'"
+                            f"No callback, auto-skipping handler '{handler.name}'"
                         )
-                        context = await plugin.on_skip(context)
+                        context = await handler.on_skip(context)
                     else:
                         raise RuntimeError(
-                            f"Plugin '{plugin.name}' requires interaction but no callback provided"
+                            f"Handler '{handler.name}' requires interaction but no "
+                            "callback was provided"
                         )
 
             except Exception as e:
-                self.logger.error(f"Plugin '{plugin.name}' failed: {e}")
-                # Continue with other plugins
+                self.logger.error(f"Handler '{handler.name}' failed: {e}")
+                # Continue with the remaining independent handlers.
                 continue
 
         return context
 
 
 # Global default registry
-_default_registry: Optional[PluginRegistry] = None
+_default_registry: Optional[InteractionRegistry] = None
 
 
-def get_default_registry(auto_register: bool = True) -> PluginRegistry:
+def get_default_registry(auto_register: bool = True) -> InteractionRegistry:
     """
-    Get or create the default plugin registry.
+    Get or create the default interaction registry.
 
     Args:
-        auto_register: If True, auto-register default plugins. Set to False to avoid
-                       circular imports when called from plugin modules.
+        auto_register: If True, auto-register default handlers. Set to False to
+                       avoid circular imports when called from handler modules.
     """
     global _default_registry
     if _default_registry is None:
-        _default_registry = PluginRegistry()
+        _default_registry = InteractionRegistry()
 
         if auto_register:
             # Lazy import to avoid circular imports
             try:
-                from .requirement_analysis import RequirementAnalysisPlugin
-                from .plan_review import PlanReviewPlugin
+                from .plan_review import PlanReviewHandler
+                from .requirement_analysis import RequirementAnalysisHandler
 
-                _default_registry.register(RequirementAnalysisPlugin())
-                _default_registry.register(PlanReviewPlugin())
+                _default_registry.register(RequirementAnalysisHandler())
+                _default_registry.register(PlanReviewHandler())
             except ImportError as e:
-                logging.getLogger("plugin.registry").warning(
-                    f"Could not auto-register default plugins: {e}"
+                logging.getLogger("workflow.interactions").warning(
+                    f"Could not auto-register default handlers: {e}"
                 )
 
     return _default_registry

@@ -107,6 +107,7 @@ class AgentControl:
         runtime: DeepCodeRuntime | None = None,
         active_turn_id_provider: Any | None = None,
         runtime_input_sink: TurnInputSink | None = None,
+        project_trusted: bool = False,
     ) -> None:
         self._workspace = workspace
         self._model = model
@@ -118,6 +119,7 @@ class AgentControl:
         self._runtime = runtime
         self._active_turn_id_provider = active_turn_id_provider
         self._runtime_input_sink = runtime_input_sink
+        self._project_trusted = project_trusted
         self._local_runtime_id = f"local-agent-runtime-{uuid.uuid4().hex}"
         self._agents: dict[str, SubAgent] = {}
         self._seq = 0
@@ -362,6 +364,7 @@ class AgentControl:
             ),
             execution_security_profile=self._execution_security_profile,
             runtime=self._runtime,
+            project_trusted=self._project_trusted,
         )
         try:
             if seed_history:

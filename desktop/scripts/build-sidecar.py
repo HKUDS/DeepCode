@@ -27,6 +27,10 @@ BUNDLED_DATA = (
         REPOSITORY_ROOT / "core" / "application" / "goal_prompts",
         "core/application/goal_prompts",
     ),
+    (
+        REPOSITORY_ROOT / "core" / "skills" / "builtin",
+        "core/skills/builtin",
+    ),
 )
 REQUIRED_IMPORTS = (
     "PyInstaller",
@@ -191,7 +195,7 @@ def _verify_bundle(binary: Path) -> None:
         timeout=30,
     )
     result = json.loads(probe.stdout)
-    if result.get("ok") is not True:
+    if result.get("ok") is not True or result.get("skillCreator") is not True:
         raise RuntimeError("packaged runtime import probe did not report success")
 
     smoke_root = BUILD_ROOT / "smoke"
