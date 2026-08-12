@@ -1,53 +1,101 @@
 #!/usr/bin/env python3
-"""Validate an Agent Skill with DeepCode's production parser."""
-
-from __future__ import annotations
+"""
+Quick validation script for skills - minimal version
+"""
 
 import re
 import sys
 from pathlib import Path
 
-try:
-    from core.skills.catalog import validate_skill_directory
-    from core.skills.models import SkillValidationError
-except ModuleNotFoundError:
-    # Source-checkout execution starts with this script directory on sys.path.
-    # Locate the package root structurally; installed distributions import on
-    # the first attempt and never use this fallback.
-    for parent in Path(__file__).resolve().parents:
-        if (parent / "core" / "skills" / "catalog.py").is_file():
-            sys.path.insert(0, str(parent))
-            break
-    from core.skills.catalog import validate_skill_directory
-    from core.skills.models import SkillValidationError
+import yaml
 
-_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+MAX_SKILL_NAME_LENGTH = 64
 
 
-def validate(directory: Path) -> tuple[bool, str]:
+def validate_skill(skill_path):
+    """Basic validation of a skill"""
+    skill_path = Path(skill_path)
+
+    skill_md = skill_path / "SKILL.md"
+    if not skill_md.exists():
+        return False, "SKILL.md not found"
+
+    content = skill_md.read_text()
+    if not content.startswith("---"):
+        return False, "No YAML frontmatter found"
+
+    match = re.match(r"^---\n(.*?)\n---", content, re.DOTALL)
+    if not match:
+        return False, "Invalid frontmatter format"
+
+    frontmatter_text = match.group(1)
+
     try:
-        record = validate_skill_directory(directory)
-    except (OSError, SkillValidationError, ValueError) as exc:
-        return False, str(exc)
-    if not _NAME_RE.fullmatch(record.name) or len(record.name) > 64:
-        return False, "name must use lowercase hyphen-case and be at most 64 characters"
-    if directory.name != record.name:
-        return False, "Skill directory name must match the frontmatter name"
-    if record.metadata.warnings:
-        return False, record.metadata.warnings[0]
-    if "TODO:" in record.require_instructions():
-        return False, "replace every TODO placeholder before validation"
-    return True, f"Skill is valid: {record.name}"
+        frontmatter = yaml.safe_load(frontmatter_text)
+        if not isinstance(frontmatter, dict):
+            return False, "Frontmatter must be a YAML dictionary"
+    except yaml.YAMLError as e:
+        return False, f"Invalid YAML in frontmatter: {e}"
 
+    allowed_properties = {"name", "description", "license", "allowed-tools", "metadata"}
 
-def main(argv: list[str]) -> int:
-    if len(argv) != 2:
-        print("Usage: quick_validate.py <skill-directory>")
-        return 2
-    valid, message = validate(Path(argv[1]).expanduser().resolve(strict=False))
-    print(message)
-    return 0 if valid else 1
+    unexpected_keys = set(frontmatter.keys()) - allowed_properties
+    if unexpected_keys:
+        allowed = ", ".join(sorted(allowed_properties))
+        unexpected = ", ".join(sorted(unexpected_keys))
+        return (
+            False,
+            f"Unexpected key(s) in SKILL.md frontmatter: {unexpected}. Allowed properties are: {allowed}",
+        )
+
+    if "name" not in frontmatter:
+        return False, "Missing 'name' in frontmatter"
+    if "description" not in frontmatter:
+        return False, "Missing 'description' in frontmatter"
+
+    name = frontmatter.get("name", "")
+    if not isinstance(name, str):
+        return False, f"Name must be a string, got {type(name).__name__}"
+    name = name.strip()
+    if name:
+        if not re.match(r"^[a-z0-9-]+$", name):
+            return (
+                False,
+                f"Name '{name}' should be hyphen-case (lowercase letters, digits, and hyphens only)",
+            )
+        if name.startswith("-") or name.endswith("-") or "--" in name:
+            return (
+                False,
+                f"Name '{name}' cannot start/end with hyphen or contain consecutive hyphens",
+            )
+        if len(name) > MAX_SKILL_NAME_LENGTH:
+            return (
+                False,
+                f"Name is too long ({len(name)} characters). "
+                f"Maximum is {MAX_SKILL_NAME_LENGTH} characters.",
+            )
+
+    description = frontmatter.get("description", "")
+    if not isinstance(description, str):
+        return False, f"Description must be a string, got {type(description).__name__}"
+    description = description.strip()
+    if description:
+        if "<" in description or ">" in description:
+            return False, "Description cannot contain angle brackets (< or >)"
+        if len(description) > 1024:
+            return (
+                False,
+                f"Description is too long ({len(description)} characters). Maximum is 1024 characters.",
+            )
+
+    return True, "Skill is valid!"
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv))
+    if len(sys.argv) != 2:
+        print("Usage: python quick_validate.py <skill_directory>")
+        sys.exit(1)
+
+    valid, message = validate_skill(sys.argv[1])
+    print(message)
+    sys.exit(0 if valid else 1)

@@ -9,6 +9,8 @@ import sys
 
 from core.skills.management import LocalSkillManager
 from core.skills.models import MUTABLE_SKILL_SCOPES, SkillRecord, SkillScope
+from core.plugins.host import LocalPluginHost
+from core.skills.host import SkillWorkspaceRegistry
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -70,8 +72,10 @@ def _parser() -> argparse.ArgumentParser:
 
 def run(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    skill_hosts = SkillWorkspaceRegistry()
+    plugin_host = LocalPluginHost(skill_hosts, monitor=False)
     try:
-        manager = LocalSkillManager(args.workspace)
+        manager = LocalSkillManager(host=skill_hosts.get(args.workspace))
         if args.command in {"list", "reload"}:
             catalog = manager.catalog(force=args.command == "reload")
             return _print_catalog(catalog.records, catalog.revision, as_json=args.json)
@@ -120,6 +124,9 @@ def run(argv: list[str] | None = None) -> int:
         else:
             print(f"error: {exc}", file=sys.stderr)
         return 2
+    finally:
+        plugin_host.close()
+        skill_hosts.close()
     return 2
 
 

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from core.skills.catalog import LocalSkillProvider, SkillCatalog
 from core.skills.capabilities import SkillCapabilityResolver
+from core.skills.catalog import LocalSkillProvider, SkillCatalog
 from core.skills.config import SkillPolicyStore
 from core.skills.models import (
     SkillAuthority,
@@ -34,8 +34,8 @@ from core.skills.provider import (
     SkillProviderSource,
     SkillReadRequest,
     SkillReadResult,
-    SkillSearchRequest,
     SkillSearchMatch,
+    SkillSearchRequest,
     SkillSearchResult,
 )
 
@@ -46,6 +46,7 @@ MAX_INJECTED_SKILL_CHARS = 48_000
 @dataclass(slots=True)
 class SkillTurnContext:
     catalog: SkillCatalog
+    providers: SkillProviders
     snapshot: SkillTurnSnapshot
     loaded: dict[tuple[SkillAuthority, SkillPackageId], SkillInvocation] = field(
         default_factory=dict
@@ -54,6 +55,7 @@ class SkillTurnContext:
         default_factory=dict
     )
     capability_tools: frozenset[str] | None = None
+    capability_mcp_servers: Mapping[str, frozenset[str]] | None = None
     allowed_tools: set[str] = field(default_factory=set)
     has_tool_restriction: bool = False
     on_invocation: Callable[[SkillInvocation], None] | None = None
@@ -100,16 +102,26 @@ class SkillRuntime:
         skill_provider: SkillProvider | None = None,
         skill_source: SkillProviderSource | None = None,
         skill_sources: tuple[SkillProviderSource, ...] | None = None,
+        skill_providers: SkillProviders | None = None,
     ) -> None:
         self.workspace = Path(workspace).expanduser().resolve(strict=False)
         self.policy = policy or SkillPolicyStore(self.workspace)
         configured = sum(
-            value is not None for value in (skill_provider, skill_source, skill_sources)
+            value is not None
+            for value in (
+                skill_provider,
+                skill_source,
+                skill_sources,
+                skill_providers,
+            )
         )
         if configured > 1:
             raise ValueError(
-                "pass only one of skill_provider, skill_source, or skill_sources"
+                "pass only one of skill_provider, skill_source, skill_sources, "
+                "or skill_providers"
             )
+        if skill_providers is not None:
+            skill_sources = skill_providers.sources
         if skill_sources is None and skill_source is None:
             provider = skill_provider or LocalSkillProvider(
                 self.workspace,
@@ -128,7 +140,7 @@ class SkillRuntime:
         self.skill_sources = skill_sources
         self.skill_source = skill_sources[0]
         self.skill_provider = self.skill_source.provider
-        self.skill_providers = SkillProviders(skill_sources)
+        self.skill_providers = skill_providers or SkillProviders(skill_sources)
         # Compatibility for integrations that inspected the original concrete
         # cache. New code should depend on ``skill_provider``.
         self.catalog_provider = self.skill_provider
@@ -167,7 +179,9 @@ class SkillRuntime:
             entry.package_id,
             SkillResourceId(resource),
         )
-        result = self.skill_providers.read(SkillReadRequest.from_reference(reference))
+        result = self._active_providers().read(
+            SkillReadRequest.from_reference(reference)
+        )
         if result.package_revision != entry.revision:
             raise SkillResolutionError(
                 f"Skill changed after catalog discovery: {entry.name}"
@@ -184,7 +198,7 @@ class SkillRuntime:
         entry = self._current_entry(entry)
         if not 1 <= limit <= 100:
             raise ValueError("Skill search limit must be between 1 and 100")
-        return self.skill_providers.search(
+        return self._active_providers().search(
             SkillSearchRequest(
                 authority=entry.authority,
                 package=entry.package_id,
@@ -202,7 +216,9 @@ class SkillRuntime:
     ) -> SkillSearchResult:
         if not 1 <= limit <= 100:
             raise ValueError("Skill search limit must be between 1 and 100")
-        catalog = self.catalog()
+        context = self.current_context()
+        catalog = context.catalog if context is not None else self.catalog()
+        providers = context.providers if context is not None else self.skill_providers
         if skill_id is not None:
             record = catalog.get(skill_id)
             if record is None:
@@ -220,7 +236,7 @@ class SkillRuntime:
             if skill_id is None and reference.authority in searched_authorities:
                 continue
             searched_authorities.add(reference.authority)
-            result = self.skill_providers.search(
+            result = providers.search(
                 SkillSearchRequest(
                     authority=reference.authority,
                     package=reference.package if skill_id is not None else None,
@@ -242,9 +258,13 @@ class SkillRuntime:
         selections: tuple[SkillSelection, ...] = (),
         *,
         available_tools: tuple[str, ...] | None = None,
+        available_mcp_servers: (
+            Mapping[str, Iterable[str]] | Iterable[str] | None
+        ) = None,
         on_invocation: Callable[[SkillInvocation], None] | None = None,
     ) -> tuple[SkillTurnContext, Token]:
-        catalog = self.catalog()
+        turn_providers = SkillProviders(self.skill_providers.sources)
+        catalog = turn_providers.list(SkillListQuery())
         roots: list[tuple[SkillRecord, SkillInvocationKind]] = []
         seen: set[tuple[SkillAuthority, SkillPackageId]] = set()
         for selection in selections:
@@ -266,12 +286,16 @@ class SkillRuntime:
         ordered = SkillCapabilityResolver(
             catalog,
             available_tools=available_tools,
+            available_mcp_servers=available_mcp_servers,
         ).expand(roots)
         if len(ordered) > MAX_SKILLS_PER_TURN:
             raise SkillResolutionError(
                 f"A Turn may select at most {MAX_SKILLS_PER_TURN} Skills"
             )
-        loaded = tuple((self._load_entry(record), kind) for record, kind in ordered)
+        loaded = tuple(
+            (self._load_entry(record, providers=turn_providers), kind)
+            for record, kind in ordered
+        )
         instruction_chars = sum(
             len(record.require_instructions()) for record, _kind in loaded
         )
@@ -302,10 +326,16 @@ class SkillRuntime:
         )
         context = SkillTurnContext(
             catalog=catalog,
+            providers=turn_providers,
             snapshot=snapshot,
             capability_tools=(
                 frozenset(tool.casefold() for tool in available_tools)
                 if available_tools is not None
+                else None
+            ),
+            capability_mcp_servers=(
+                _freeze_mcp_capabilities(available_mcp_servers)
+                if available_mcp_servers is not None
                 else None
             ),
             on_invocation=on_invocation,
@@ -335,25 +365,25 @@ class SkillRuntime:
                     "Skill dependencies require an active Agent Turn"
                 )
             return self._load_entry(record), True
-        record = context.catalog.get_implicit(name)
+        record = context.catalog.get_active(name)
         if record is None:
-            explicit_only = context.catalog.get_active(name)
-            message = (
-                f"Skill requires explicit selection: {name}"
-                if explicit_only is not None
-                and not explicit_only.metadata.allow_implicit_invocation
-                else f"Skill is not available: {name}"
-            )
+            message = f"Skill is not available: {name}"
             if context.on_failure is not None:
-                context.on_failure(message, explicit_only.id if explicit_only else None)
+                context.on_failure(message, None)
             raise SkillResolutionError(message)
         identity = (record.authority, record.package_id)
         existing = context.loaded_records.get(identity)
         if existing is not None:
             return existing, False
+        if not record.metadata.allow_implicit_invocation:
+            message = f"Skill requires explicit selection: {name}"
+            if context.on_failure is not None:
+                context.on_failure(message, record.id)
+            raise SkillResolutionError(message)
         expanded = SkillCapabilityResolver(
             context.catalog,
             available_tools=context.capability_tools,
+            available_mcp_servers=context.capability_mcp_servers,
         ).expand(((record, SkillInvocationKind.IMPLICIT),))
         new_entries = tuple(
             (entry, kind)
@@ -450,8 +480,13 @@ class SkillRuntime:
     def invalidate(self) -> None:
         self.skill_providers.invalidate()
 
-    def _load_entry(self, entry: SkillRecord) -> SkillRecord:
-        result = self.skill_providers.read(
+    def _load_entry(
+        self,
+        entry: SkillRecord,
+        *,
+        providers: SkillProviders | None = None,
+    ) -> SkillRecord:
+        result = (providers or self._active_providers()).read(
             SkillReadRequest.from_reference(entry.provider_reference)
         )
         if result.package_revision != entry.revision:
@@ -461,7 +496,9 @@ class SkillRuntime:
         return entry.with_instructions(result.contents)
 
     def _current_entry(self, entry: SkillRecord) -> SkillRecord:
-        current = self.catalog().get_package(entry.authority, entry.package_id)
+        context = self.current_context()
+        catalog = context.catalog if context is not None else self.catalog()
+        current = catalog.get_package(entry.authority, entry.package_id)
         if current is None:
             raise SkillResolutionError(f"Skill is no longer available: {entry.name}")
         if current.revision != entry.revision:
@@ -469,6 +506,21 @@ class SkillRuntime:
                 f"Skill changed after catalog discovery: {entry.name}"
             )
         return current
+
+    def _active_providers(self) -> SkillProviders:
+        context = self.current_context()
+        return context.providers if context is not None else self.skill_providers
+
+
+def _freeze_mcp_capabilities(
+    value: Mapping[str, Iterable[str]] | Iterable[str],
+) -> Mapping[str, frozenset[str]]:
+    if isinstance(value, Mapping):
+        return {
+            name.casefold(): frozenset(tool.casefold() for tool in tools)
+            for name, tools in value.items()
+        }
+    return {name.casefold(): frozenset() for name in value}
 
 
 def render_skill(record: SkillRecord) -> str:

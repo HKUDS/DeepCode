@@ -34,6 +34,7 @@ class GoalRunOptions:
     model: str | None = None
     reasoning_effort: str | None = None
     skill_ids: tuple[str, ...] = ()
+    skill_identifiers: tuple[str, ...] = ()
     completion_evidence_command: str = ""
     token_budget: int | None = None
     max_iterations: int | None = None
@@ -98,6 +99,12 @@ async def run_goal(
             grant_trust=options.trust_workspace,
         )
         require_project_trusted(project)
+        if options.skill_ids and options.skill_identifiers:
+            raise InvalidArgumentError("pass Skill IDs or Skill identifiers, not both")
+        skill_ids = options.skill_ids or tuple(
+            application.skills.select(project.id, identifier).id
+            for identifier in options.skill_identifiers
+        )
         thread = application.threads.start(
             project.id,
             title=objective.splitlines()[0][:60],
@@ -115,7 +122,7 @@ async def run_goal(
             thread.id,
             objective=objective,
             token_budget=options.token_budget,
-            skill_ids=options.skill_ids,
+            skill_ids=skill_ids,
             start=True,
             client_surface=ClientSurface.HEADLESS,
         )

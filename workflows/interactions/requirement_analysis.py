@@ -1,31 +1,31 @@
 """
-Requirement Analysis Plugin
+Requirement Analysis Interaction Handler
 
-This plugin triggers before planning to gather more detailed requirements
+This handler runs before planning to gather more detailed requirements
 from the user through guided questions.
 
 Flow:
 1. User submits initial requirements
-2. Plugin generates 1-3 targeted questions
+2. Handler generates 1-3 targeted questions
 3. User answers questions (or skips)
-4. Plugin creates enhanced requirements document
+4. Handler creates an enhanced requirements document
 5. Enhanced requirements passed to planning phase
 """
 
 from typing import Any, Dict, Optional
 from .base import (
-    InteractionPlugin,
+    InteractionHandler,
     InteractionPoint,
     InteractionRequest,
     InteractionResponse,
 )
 
 
-class RequirementAnalysisPlugin(InteractionPlugin):
+class RequirementAnalysisHandler(InteractionHandler):
     """
-    Plugin for enhanced requirement gathering through AI-generated questions.
+    Handler for enhanced requirement gathering through AI-generated questions.
 
-    This plugin uses the existing RequirementAnalysisAgent to:
+    This handler uses the existing RequirementAnalysisAgent to:
     1. Generate targeted questions based on initial requirements
     2. Collect user answers
     3. Create a detailed requirements document

@@ -179,6 +179,10 @@ class PermissionEngine:
         Makes mutating-tool denial an upper bound that rules cannot broaden.
         This is enabled only by the canonical Read only product preset; the
         default remains false for legacy rule compatibility.
+    bypass_origin_approval:
+        Skips an origin-specific confirmation gate after the shared policy has
+        allowed a call. This is enabled only by the canonical Full Access
+        preset; explicit permission rules still run first and can deny or ask.
     """
 
     mode: PermissionMode = PermissionMode.DEFAULT
@@ -188,6 +192,7 @@ class PermissionEngine:
     approval_policy: ApprovalPolicy = ApprovalPolicy.ON_REQUEST
     protect_sensitive_paths: bool = True
     enforce_read_only: bool = False
+    bypass_origin_approval: bool = False
 
     def is_read_only(self, tool_name: str) -> bool:
         known = _READ_ONLY_TOOLS | self.read_only_tools
@@ -259,6 +264,57 @@ class PermissionEngine:
     def evaluate(
         self, tool_name: str, arguments: Mapping[str, object] | None = None
     ) -> tuple[PermissionDecision, str]:
+        return self._evaluate(tool_name, arguments, read_only_override=None)
+
+    def evaluate_tool(
+        self,
+        tool_name: str,
+        arguments: Mapping[str, object] | None = None,
+        *,
+        read_only: bool | None = None,
+        approval_mode: str | None = None,
+    ) -> tuple[PermissionDecision, str]:
+        """Evaluate a concrete Tool and then apply an origin-specific gate.
+
+        MCP approval modes are restrictions only: they may turn a global
+        ``allow`` into ``ask``, but can never widen a global ``ask`` or
+        ``deny``. Tool metadata therefore composes with the product security
+        profile instead of creating a second permission engine.
+        """
+
+        decision, reason = self._evaluate(
+            tool_name,
+            arguments,
+            read_only_override=read_only,
+        )
+        if decision is not PermissionDecision.ALLOW or approval_mode is None:
+            return decision, reason
+        if self.bypass_origin_approval:
+            return decision, reason
+        mode = str(getattr(approval_mode, "value", approval_mode)).casefold()
+        if mode in {"auto", "approve"}:
+            return decision, reason
+        if mode == "prompt":
+            return self._apply_approval_policy(
+                PermissionDecision.ASK,
+                "MCP tool policy requires confirmation",
+            )
+        if mode == "writes":
+            if read_only is True:
+                return decision, reason
+            return self._apply_approval_policy(
+                PermissionDecision.ASK,
+                "MCP tool is not declared read-only and requires confirmation",
+            )
+        return PermissionDecision.DENY, "unknown MCP approval policy (fail-closed)"
+
+    def _evaluate(
+        self,
+        tool_name: str,
+        arguments: Mapping[str, object] | None,
+        *,
+        read_only_override: bool | None,
+    ) -> tuple[PermissionDecision, str]:
         """Return ``(decision, reason)`` for a tool call.
 
         ``reason`` is a short human/model-readable string; when a call is
@@ -282,7 +338,11 @@ class PermissionEngine:
                 ),
             )
 
-        read_only = self.is_read_only(tool_name)
+        read_only = (
+            self.is_read_only(tool_name)
+            if read_only_override is None
+            else read_only_override
+        )
         if self.enforce_read_only and not read_only:
             return (
                 PermissionDecision.DENY,

@@ -82,3 +82,39 @@ def test_desktop_runtime_key_changes_after_credential_rotation(
     )
 
     assert before != after
+
+
+def test_factory_injects_plugin_mcp_and_invalidates_on_plugin_revision(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    captured = {}
+    sentinel_session = object()
+    sentinel_server = object()
+    revision = ["revision-one"]
+
+    def build(**kwargs):
+        captured.update(kwargs)
+        return sentinel_session, "model", object()
+
+    monkeypatch.setattr("core.application.agent_adapter.build_agent_session", build)
+    factory = DefaultAgentSessionFactory()
+    factory.configure_plugin_mcp(
+        lambda path: (sentinel_server,),
+        revision_provider=lambda: revision[0],
+    )
+
+    before = factory.runtime_key(workspace=str(workspace), model=None)
+    result = factory.create(
+        workspace=str(workspace),
+        model=None,
+        approval_callback=object(),
+    )
+    revision[0] = "revision-two"
+    after = factory.runtime_key(workspace=str(workspace), model=None)
+
+    assert result is sentinel_session
+    assert captured["plugin_mcp_servers"] == (sentinel_server,)
+    assert before != after

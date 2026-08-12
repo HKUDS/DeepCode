@@ -6,6 +6,7 @@ from core.skills.capabilities import (
     SkillCapabilityResolver,
     SkillCapabilityStatus,
 )
+from core.skills.host import SkillCatalogHost, SkillWorkspaceRegistry
 from core.skills.models import (
     LOCAL_SKILL_AUTHORITY,
     MUTABLE_SKILL_SCOPES,
@@ -18,6 +19,8 @@ from core.skills.models import (
     SkillInvocationKind,
     SkillKey,
     SkillMetadata,
+    SkillOrigin,
+    SkillOriginKind,
     SkillPackageId,
     SkillProviderKind,
     SkillRecord,
@@ -34,6 +37,7 @@ from core.skills.models import (
 )
 from core.skills.provider import (
     InvalidatableSkillProvider,
+    SkillChangeTokenProvider,
     SkillListQuery,
     SkillProvider,
     SkillProviderUnavailableError,
@@ -56,6 +60,8 @@ __all__ = [
     "SkillCapabilityReport",
     "SkillCapabilityResolver",
     "SkillCapabilityStatus",
+    "SkillCatalogHost",
+    "SkillChangeTokenProvider",
     "SkillDependencies",
     "SkillError",
     "SkillInterface",
@@ -64,6 +70,8 @@ __all__ = [
     "SkillKey",
     "SkillListQuery",
     "SkillMetadata",
+    "SkillOrigin",
+    "SkillOriginKind",
     "SkillPackageId",
     "SkillProvider",
     "SkillProviderKind",
@@ -86,4 +94,5 @@ __all__ = [
     "SkillTurnSnapshot",
     "SkillToolDependency",
     "SkillValidationError",
+    "SkillWorkspaceRegistry",
 ]

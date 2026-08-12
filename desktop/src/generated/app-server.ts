@@ -103,10 +103,21 @@ export interface MethodParams {
   "skills/set-enabled": SkillSetEnabledParams;
   "skills/delete": SkillIdentityParams;
   "skills/reload": ProjectReadParams;
+  "plugins/list": EmptyParams;
+  "plugins/add": PluginAddParams;
+  "plugins/set-enabled": PluginSetEnabledParams;
+  "plugins/remove": PluginIdentityParams;
   "hooks/list": ProjectReadParams;
   "mcp/list": OptionalProjectParams;
   "mcp/upsert": McpUpsertParams;
   "mcp/remove": McpRemoveParams;
+  "mcp/presets": OptionalProjectParams;
+  "mcp/preset/add": McpPresetAddParams;
+  "mcp/set-enabled": McpSetEnabledParams;
+  "mcp/probe": McpIdentityParams;
+  "mcp/oauth/start": McpOAuthStartParams;
+  "mcp/oauth/cancel": McpIdentityParams;
+  "mcp/oauth/logout": McpIdentityParams;
   "diagnostics/read": OptionalProjectParams;
   "automation/list": AutomationListParams;
   "automation/create": AutomationCreateParams;
@@ -250,6 +261,16 @@ export interface SkillIdentityParams {
   projectId: string;
   skillId: string;
 }
+export interface PluginAddParams {
+  path: string;
+}
+export interface PluginSetEnabledParams {
+  pluginId: string;
+  enabled: boolean;
+}
+export interface PluginIdentityParams {
+  pluginId: string;
+}
 export interface McpUpsertParams {
   projectId?: string;
   scope: ConfigScope;
@@ -260,6 +281,26 @@ export interface McpRemoveParams {
   projectId?: string;
   scope: ConfigScope;
   name: string;
+}
+export interface McpPresetAddParams {
+  projectId?: string;
+  presetId: string;
+  enabled?: boolean;
+}
+export interface McpSetEnabledParams {
+  projectId?: string;
+  name: string;
+  enabled: boolean;
+}
+export interface McpIdentityParams {
+  projectId?: string;
+  name: string;
+}
+export interface McpOAuthStartParams {
+  projectId?: string;
+  name: string;
+  openBrowser?: boolean;
+  resetCredentials?: boolean;
 }
 export interface AutomationListParams {
   projectId?: string;
@@ -547,6 +588,13 @@ export interface MethodResults {
     removed: boolean;
   };
   "skills/reload": SkillCatalogResult;
+  "plugins/list": PluginCatalogResult;
+  "plugins/add": PluginCatalogResult;
+  "plugins/set-enabled": PluginCatalogResult;
+  "plugins/remove": {
+    removed: boolean;
+    plugin: PluginInfo;
+  };
   "hooks/list": {
     hooks: HookInfo[];
     warnings: string[];
@@ -555,6 +603,17 @@ export interface MethodResults {
   "mcp/list": McpInventory;
   "mcp/upsert": McpInventory;
   "mcp/remove": McpInventory;
+  "mcp/presets": McpPresetInventory;
+  "mcp/preset/add": McpInventory;
+  "mcp/set-enabled": McpInventory;
+  "mcp/probe": McpProbeResult;
+  "mcp/oauth/start": McpOAuthFlow;
+  "mcp/oauth/cancel": {
+    cancelled: boolean;
+  };
+  "mcp/oauth/logout": {
+    removed: boolean;
+  };
   "diagnostics/read": {
     diagnostics: DiagnosticsSnapshot;
   };
@@ -849,6 +908,7 @@ export interface ExecutionPermissionRule {
   action: "allow" | "ask" | "deny";
 }
 export interface SettingsProvider {
+  id: string;
   name: string;
   label: string;
   configured: boolean;
@@ -866,6 +926,7 @@ export interface SkillCatalogResult {
   skills: SkillInfo[];
   warnings: string[];
   catalogRevision: string;
+  authoringSkillId: string | null;
 }
 export interface SkillInfo {
   id: string;
@@ -876,6 +937,11 @@ export interface SkillInfo {
   sourceRoot: "agents" | "deepcode" | "claude" | "system";
   source: string;
   location: string;
+  originKind: "local" | "bundled" | "provider";
+  originLabel: string;
+  providerKind: "local" | "executor" | "orchestrator" | "custom";
+  providerId: string;
+  packageId: string;
   status: "active" | "shadowed" | "disabled" | "invalid";
   enabled: boolean;
   selectable: boolean;
@@ -890,6 +956,7 @@ export interface SkillInfo {
   brandColor: string | null;
   defaultPrompt: string | null;
   allowImplicitInvocation: boolean;
+  configurableScopes: ConfigScope[];
   deletable: boolean;
 }
 export interface SkillDetail {
@@ -901,6 +968,11 @@ export interface SkillDetail {
   sourceRoot: "agents" | "deepcode" | "claude" | "system";
   source: string;
   location: string;
+  originKind: "local" | "bundled" | "provider";
+  originLabel: string;
+  providerKind: "local" | "executor" | "orchestrator" | "custom";
+  providerId: string;
+  packageId: string;
   status: "active" | "shadowed" | "disabled" | "invalid";
   enabled: boolean;
   selectable: boolean;
@@ -915,9 +987,45 @@ export interface SkillDetail {
   brandColor: string | null;
   defaultPrompt: string | null;
   allowImplicitInvocation: boolean;
+  configurableScopes: ConfigScope[];
   deletable: boolean;
   instructions: string;
   truncated: boolean;
+}
+export interface PluginCatalogResult {
+  plugins: PluginInfo[];
+  diagnostics: PluginDiagnostic[];
+  revision: string;
+}
+export interface PluginInfo {
+  id: string;
+  name: string;
+  version: string | null;
+  description: string;
+  status: "active" | "disabled" | "invalid";
+  enabled: boolean;
+  source: "linked-directory";
+  path: string;
+  schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json" | null;
+  manifestPath: string;
+  manifestRevision: string | null;
+  components: PluginComponent[];
+  diagnostics: PluginDiagnostic[];
+  error: string | null;
+}
+export interface PluginComponent {
+  kind: "skills" | "mcp";
+  status: "ready" | "unsupported" | "invalid";
+  resource: string | null;
+  itemCount: number | null;
+  diagnostics: PluginDiagnostic[];
+}
+export interface PluginDiagnostic {
+  code: string;
+  severity: "warning" | "error";
+  message: string;
+  component: "skills" | "mcp" | null;
+  resource: string | null;
 }
 export interface HookInfo {
   eventName: string;
@@ -935,19 +1043,79 @@ export interface McpInventory {
   projectConfigPath: string | null;
 }
 export interface McpServerInfo {
+  id: string;
   name: string;
+  pluginId: string | null;
+  policyKey: string | null;
   transport: "stdio" | "sse" | "streamableHttp";
   command: string | null;
   args: string[];
+  cwd: string | null;
   url: string | null;
-  enabledTools: string[];
-  toolTimeout: number;
+  auth: "oauth" | null;
+  enabled: boolean;
+  required: boolean;
+  enabledTools: string[] | null;
+  disabledTools: string[];
+  startupTimeoutSeconds: number;
+  toolTimeoutSeconds: number;
+  approvalMode: "auto" | "prompt" | "writes" | "approve";
   description: string | null;
   envKeys: string[];
+  forwardedEnvKeys: string[];
+  requiredEnvKeys: string[];
+  missingEnvKeys: string[];
+  credentialEnvKeys: string[];
   headerKeys: string[];
-  source: "user" | "project" | "default";
-  configurationState: "configured" | "invalid";
+  source: "user" | "project" | "plugin";
+  configurationState: "configured" | "invalid" | "disabled" | "blocked" | "missing_credentials";
   configurationMessage: string;
+  authState: "not_required" | "login_required" | "authorizing" | "authenticated";
+  runtimeState: "stopped" | "connecting" | "tested" | "connected" | "failed";
+  runtimeMessage: string;
+  toolCount: number;
+  resourceCount: number;
+  promptCount: number;
+}
+export interface McpPresetInventory {
+  presets: McpPresetInfo[];
+  source: string;
+  sourceRevision: string;
+}
+export interface McpPresetInfo {
+  id: string;
+  displayName: string;
+  category: string;
+  description: string;
+  docsUrl: string;
+  transport: "stdio" | "sse" | "streamableHttp";
+  auth: "oauth" | null;
+  requires: string;
+  note: string;
+  requiredEnvironment: string[];
+  missingEnvironment: string[];
+  configured: boolean;
+}
+export interface McpProbeResult {
+  serverId: string;
+  name: string;
+  ok: boolean;
+  transport: "stdio" | "sse" | "streamableHttp";
+  toolCount: number;
+  resourceCount: number;
+  promptCount: number;
+  elapsedSeconds: number;
+  error: string | null;
+}
+export interface McpOAuthFlow {
+  flowId: string;
+  serverId: string;
+  name: string;
+  status:
+    "starting" | "authorization_required" | "connecting" | "authenticated" | "failed" | "cancelled" | "logged_out";
+  authorizationUrl: string | null;
+  expiresInSeconds: number;
+  error: string | null;
 }
 export interface DiagnosticsSnapshot {
   appVersion: string;
@@ -1389,6 +1557,11 @@ export interface Notifications {
     threadId: string;
     exitCode: number | null;
   };
+  "skills.changed": {
+    projectId: string;
+  };
+  "plugins.changed": {};
+  "mcp.changed": {};
   "server.warning": {
     code: string;
     dropped: number;

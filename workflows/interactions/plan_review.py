@@ -1,12 +1,12 @@
 """
-Plan Review Plugin
+Plan Review Interaction Handler
 
-This plugin triggers after planning to let users review and modify
+This handler runs after planning to let users review and modify
 the implementation plan before code generation begins.
 
 Flow:
 1. AI generates implementation plan
-2. Plugin presents plan to user
+2. Handler presents the plan to the user
 3. User can: Confirm / Request modifications / Cancel
 4. If modifications requested, AI updates the plan
 5. Code generation proceeds with approved plan
@@ -18,16 +18,16 @@ from typing import Any, Dict, Optional
 from workflows.planning_runtime import validate_plan_text
 from workflows.plan_review_runtime import revise_plan_with_feedback
 from .base import (
-    InteractionPlugin,
+    InteractionHandler,
     InteractionPoint,
     InteractionRequest,
     InteractionResponse,
 )
 
 
-class PlanReviewPlugin(InteractionPlugin):
+class PlanReviewHandler(InteractionHandler):
     """
-    Plugin for reviewing and modifying implementation plans.
+    Handler for reviewing and modifying implementation plans.
 
     This allows users to:
     - Review the generated YAML implementation plan
