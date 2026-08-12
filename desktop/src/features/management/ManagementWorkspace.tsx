@@ -10,6 +10,8 @@ import type { DesktopDestination } from "../../app/useDesktopUi";
 import type { DesktopRuntime } from "../../rpc/contracts";
 import { AutomationsPage } from "../automations/AutomationsPage";
 import { SkillsPage } from "../extensions/SkillsPage";
+import { PluginsPage } from "../plugins/PluginsPage";
+import { McpPage } from "../mcp/McpPage";
 import { SettingsPage } from "../settings/SettingsPage";
 
 interface ManagementWorkspaceProps {
@@ -60,6 +62,12 @@ export function ManagementWorkspace({
         onCreateSkill={onCreateSkill}
       />
     );
+  }
+  if (destination === "plugins") {
+    return <PluginsPage runtime={runtime} />;
+  }
+  if (destination === "mcp") {
+    return <McpPage runtime={runtime} project={project} />;
   }
   return (
     <SettingsPage

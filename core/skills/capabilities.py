@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import shlex
 import shutil
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -13,6 +13,7 @@ from core.skills.models import (
     SkillAuthority,
     SkillInvocationKind,
     SkillPackageId,
+    SkillProviderKind,
     SkillRecord,
     SkillResolutionError,
     SkillToolDependency,
@@ -50,6 +51,9 @@ class SkillCapabilityResolver:
         catalog: SkillCatalog,
         *,
         available_tools: Iterable[str] | None = None,
+        available_mcp_servers: (
+            Mapping[str, Iterable[str]] | Iterable[str] | None
+        ) = None,
         command_lookup: Callable[[str], str | None] = shutil.which,
     ) -> None:
         self.catalog = catalog
@@ -58,6 +62,7 @@ class SkillCapabilityResolver:
             if available_tools is not None
             else None
         )
+        self.available_mcp_servers = _normalize_mcp_capabilities(available_mcp_servers)
         self.command_lookup = command_lookup
 
     def report(self, record: SkillRecord) -> SkillCapabilityReport:
@@ -160,13 +165,31 @@ class SkillCapabilityResolver:
             candidates = frozenset((value,))
             available = self.available_tools is None or value in self.available_tools
         elif dependency_type == "mcp":
-            prefix = f"mcp_{value}_"
-            candidates = frozenset(
-                name
-                for name in (self.available_tools or allowed)
-                if name.startswith(prefix)
-            )
-            available = self.available_tools is None or bool(candidates)
+            capability_keys = [value]
+            if record.authority.kind is SkillProviderKind.CUSTOM:
+                capability_keys.insert(
+                    0,
+                    f"{record.authority.provider_id.casefold()}:{value}",
+                )
+            if self.available_mcp_servers is not None:
+                matched = tuple(
+                    self.available_mcp_servers[key]
+                    for key in capability_keys
+                    if key in self.available_mcp_servers
+                )
+                candidates = frozenset(
+                    tool for tool_names in matched for tool in tool_names
+                )
+                available = bool(matched)
+            else:
+                legacy_prefix = f"mcp_{value}_"
+                canonical_prefix = f"mcp__{value}__"
+                candidates = frozenset(
+                    name
+                    for name in (self.available_tools or allowed)
+                    if name.startswith((legacy_prefix, canonical_prefix))
+                )
+                available = self.available_tools is None or bool(candidates)
         elif dependency_type in {"cli", "command"}:
             command = dependency.command or dependency.value
             try:
@@ -207,6 +230,19 @@ class SkillCapabilityResolver:
                     ),
                 )
         return None
+
+
+def _normalize_mcp_capabilities(
+    value: Mapping[str, Iterable[str]] | Iterable[str] | None,
+) -> dict[str, frozenset[str]] | None:
+    if value is None:
+        return None
+    if isinstance(value, Mapping):
+        return {
+            name.casefold(): frozenset(tool.casefold() for tool in tools)
+            for name, tools in value.items()
+        }
+    return {name.casefold(): frozenset() for name in value}
 
 
 __all__ = [

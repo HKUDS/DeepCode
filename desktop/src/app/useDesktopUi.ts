@@ -6,6 +6,8 @@ export type DesktopDestination =
   | "threads"
   | "automations"
   | "skills"
+  | "plugins"
+  | "mcp"
   | "settings";
 export type DesktopInspectorTab =
   | "changes"

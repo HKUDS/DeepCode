@@ -40,7 +40,6 @@ from cli.tui.renderer import EventRenderer
 from core.application.errors import ApplicationError
 from core.config import ConfigError
 from core.domain.thread_goal import ThreadGoalStatus
-from core.skills.management import LocalSkillManager
 
 _STATUS_STYLE = {
     "succeeded": "bold green",
@@ -106,8 +105,6 @@ def _run(args: argparse.Namespace) -> int:
             )
         else:
             assert workspace is not None and args.goal is not None
-            manager = LocalSkillManager(workspace)
-            skill_ids = tuple(manager.select(value).id for value in args.skill)
             result = asyncio.run(
                 run_goal(
                     GoalRunOptions(
@@ -117,7 +114,7 @@ def _run(args: argparse.Namespace) -> int:
                         model=args.model,
                         connection_id=args.connection,
                         reasoning_effort=args.reasoning_effort,
-                        skill_ids=skill_ids,
+                        skill_identifiers=tuple(args.skill),
                         token_budget=args.token_budget,
                         max_iterations=args.max_iterations,
                         trust_workspace=args.trust,

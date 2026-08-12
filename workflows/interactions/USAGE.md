@@ -1,4 +1,4 @@
-# User-in-Loop 插件系统使用指南
+# User-in-Loop 交互处理器使用指南
 
 ## 概述
 
@@ -10,7 +10,7 @@
 工作流执行:  [Phase 1] ──▶ [Hook Point] ──▶ [Phase 2] ──▶ [Hook Point] ──▶ [Phase 3]
                               │                              │
                               ▼                              ▼
-                         [Plugin A]                     [Plugin B]
+                         [Handler A]                    [Handler B]
                          需求分析                        计划确认
 ```
 
@@ -21,15 +21,15 @@
 ```python
 # workflow_service.py
 
-from workflows.plugins.integration import WorkflowPluginIntegration
-from workflows.plugins import InteractionPoint
+from workflows.interactions.integration import WorkflowInteractionIntegration
+from workflows.interactions import InteractionPoint
 
 class WorkflowService:
     def __init__(self):
         self._tasks = {}
         self._subscribers = {}
         # 添加这一行
-        self._plugin_integration = WorkflowPluginIntegration(self)
+        self._interaction_integration = WorkflowInteractionIntegration(self)
 
     async def execute_chat_planning(self, task_id, requirements, enable_indexing=False):
         # ... 原有代码 ...
@@ -37,14 +37,14 @@ class WorkflowService:
         # ===== 添加插件支持 (仅需3行代码) =====
 
         # 1. 创建上下文
-        context = self._plugin_integration.create_context(
+        context = self._interaction_integration.create_context(
             task_id=task_id,
             user_input=requirements,
             enable_indexing=enable_indexing,
         )
 
         # 2. 运行 BEFORE_PLANNING 插件 (需求分析)
-        context = await self._plugin_integration.run_hook(
+        context = await self._interaction_integration.run_hook(
             InteractionPoint.BEFORE_PLANNING,
             context
         )
@@ -61,7 +61,7 @@ class WorkflowService:
 
         # ===== 添加计划确认插件 =====
         context["planning_result"] = planning_result
-        context = await self._plugin_integration.run_hook(
+        context = await self._interaction_integration.run_hook(
             InteractionPoint.AFTER_PLANNING,
             context
         )
@@ -84,7 +84,7 @@ class WorkflowService:
 @router.post("/respond/{task_id}")
 async def respond_to_interaction(task_id: str, response: InteractionResponseRequest):
     """用户提交交互响应"""
-    success = workflow_service._plugin_integration.submit_response(
+    success = workflow_service._interaction_integration.submit_response(
         task_id=task_id,
         action=response.action,
         data=response.data,
@@ -119,7 +119,7 @@ case 'interaction_required':
 ### 启用/禁用插件
 
 ```python
-from workflows.plugins import get_default_registry
+from workflows.interactions import get_default_registry
 
 registry = get_default_registry()
 
@@ -133,16 +133,16 @@ registry.enable("plan_review")
 ### 创建自定义插件
 
 ```python
-from workflows.plugins import InteractionPlugin, InteractionPoint, InteractionRequest
+from workflows.interactions import InteractionHandler, InteractionPoint, InteractionRequest
 
-class MyCustomPlugin(InteractionPlugin):
-    name = "my_custom_plugin"
+class MyCustomHandler(InteractionHandler):
+    name = "my_custom_handler"
     description = "My custom interaction"
     hook_point = InteractionPoint.BEFORE_IMPLEMENTATION
     priority = 50
 
     async def should_trigger(self, context):
-        return context.get("enable_my_plugin", True)
+        return context.get("enable_my_handler", True)
 
     async def create_interaction(self, context):
         return InteractionRequest(
@@ -161,15 +161,15 @@ class MyCustomPlugin(InteractionPlugin):
         return context
 
 # 注册插件
-registry.register(MyCustomPlugin())
+registry.register(MyCustomHandler())
 ```
 
 ## 交互点列表
 
 | Hook Point | 位置 | 默认插件 |
 |------------|------|----------|
-| `BEFORE_PLANNING` | 生成计划前 | RequirementAnalysisPlugin |
-| `AFTER_PLANNING` | 计划生成后 | PlanReviewPlugin |
+| `BEFORE_PLANNING` | 生成计划前 | RequirementAnalysisHandler |
+| `AFTER_PLANNING` | 计划生成后 | PlanReviewHandler |
 | `BEFORE_IMPLEMENTATION` | 代码生成前 | (无) |
 | `AFTER_IMPLEMENTATION` | 代码生成后 | (无) |
 

@@ -24,6 +24,7 @@ from loguru import logger
 
 from core.agent_runtime.tools.base import Tool
 from core.agent_runtime.tools.registry import ToolRegistry
+from core.mcp.schema import normalize_schema_for_openai
 from core.observability import current_task_id, log_mcp_call
 from core.platform_compat import normalize_stdio_command
 
@@ -44,63 +45,8 @@ class MCPServerConfig:
     description: str | None = None
 
 
-def _extract_nullable_branch(options: Any) -> tuple[dict[str, Any], bool] | None:
-    if not isinstance(options, list):
-        return None
-
-    non_null: list[dict[str, Any]] = []
-    saw_null = False
-    for option in options:
-        if not isinstance(option, dict):
-            return None
-        if option.get("type") == "null":
-            saw_null = True
-            continue
-        non_null.append(option)
-
-    if saw_null and len(non_null) == 1:
-        return non_null[0], True
-    return None
-
-
 def _normalize_schema_for_openai(schema: Any) -> dict[str, Any]:
-    if not isinstance(schema, dict):
-        return {"type": "object", "properties": {}}
-
-    normalized = dict(schema)
-
-    raw_type = normalized.get("type")
-    if isinstance(raw_type, list):
-        non_null = [item for item in raw_type if item != "null"]
-        if "null" in raw_type and len(non_null) == 1:
-            normalized["type"] = non_null[0]
-            normalized["nullable"] = True
-
-    for key in ("oneOf", "anyOf"):
-        nullable_branch = _extract_nullable_branch(normalized.get(key))
-        if nullable_branch is not None:
-            branch, _ = nullable_branch
-            merged = {k: v for k, v in normalized.items() if k != key}
-            merged.update(branch)
-            normalized = merged
-            normalized["nullable"] = True
-            break
-
-    if "properties" in normalized and isinstance(normalized["properties"], dict):
-        normalized["properties"] = {
-            name: _normalize_schema_for_openai(prop) if isinstance(prop, dict) else prop
-            for name, prop in normalized["properties"].items()
-        }
-
-    if "items" in normalized and isinstance(normalized["items"], dict):
-        normalized["items"] = _normalize_schema_for_openai(normalized["items"])
-
-    if normalized.get("type") != "object":
-        return normalized
-
-    normalized.setdefault("properties", {})
-    normalized.setdefault("required", [])
-    return normalized
+    return normalize_schema_for_openai(schema)
 
 
 class MCPToolWrapper(Tool):

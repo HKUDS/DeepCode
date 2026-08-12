@@ -105,6 +105,10 @@ class SkillNotFoundError(ApplicationError):
     code = "SKILL_NOT_FOUND"
 
 
+class PluginNotFoundError(ApplicationError):
+    code = "PLUGIN_NOT_FOUND"
+
+
 class WorkflowInteractionError(ApplicationError):
     code = "WORKFLOW_INTERACTION_INVALID"
 

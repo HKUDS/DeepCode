@@ -13,6 +13,14 @@ line-length = 88
 [tool.ruff.lint]
 ignore = ["E402"]
 
+[tool.ruff.lint.per-file-ignores]
+# The repository root is a historical package named `DeepCode`; Ruff derives
+# that parent name when linting newly added package initializers.
+"core/mcp/__init__.py" = ["N999"]
+# Bundled Skills are pinned, provenance-tracked upstream packages. Lint the
+# DeepCode host around them without silently rewriting vendor workflows.
+"core/skills/builtin/**" = ["ALL"]
+
 [tool.check-manifest]
 # The Python sdist contains the shared Agent runtime and CLI. Desktop, tests,
 # CI/development material, and README artwork are distributed from the source
@@ -21,8 +29,10 @@ ignore = [
     ".dockerignore",
     ".pre-commit-config.yaml",
     "assets/**",
+    "CONTRIBUTORS.md",
     "desktop/**",
     "docs/**",
+    "examples/**",
     "rust-toolchain.toml",
     "scripts/**",
     "tests/**",

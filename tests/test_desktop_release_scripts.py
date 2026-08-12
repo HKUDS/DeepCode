@@ -48,6 +48,10 @@ python_audit = _load_script(
     "deepcode_test_audit_python_environment",
     "audit-python-environment.py",
 )
+sidecar_build = _load_script(
+    "deepcode_test_build_sidecar",
+    "build-sidecar.py",
+)
 
 
 def test_release_endpoint_defaults_to_the_repository(monkeypatch):
@@ -162,6 +166,16 @@ def test_sidecar_version_probe_is_fail_closed(monkeypatch, tmp_path):
 
     monkeypatch.setattr(sidecar_setup, "_check_version", reject)
     assert sidecar_setup._is_python312(python) is False
+
+
+def test_sidecar_bundles_every_file_backed_runtime_resource():
+    bundled = {
+        (source.relative_to(REPOSITORY_ROOT).as_posix(), destination)
+        for source, destination in sidecar_build.BUNDLED_DATA
+    }
+
+    assert ("core/mcp/presets.json", "core/mcp") in bundled
+    assert all(source.exists() for source, _destination in sidecar_build.BUNDLED_DATA)
 
 
 def test_python_audit_preserves_virtualenv_executable_symlink(

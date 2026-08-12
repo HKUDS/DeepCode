@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,8 @@ from core.application import DeepCodeApplication
 from core.application.errors import InvalidArgumentError, ProjectNotTrustedError
 from core.domain import TrustState
 from core.persistence.migrations import LATEST_SCHEMA_VERSION
+from core.plugins.registry import LocalPluginRegistry
+from core.plugins.resolver import resolve_plugin
 from core.skills.management import LocalSkillManager
 from core.skills.runtime import SkillRuntime
 
@@ -16,6 +19,31 @@ from core.skills.runtime import SkillRuntime
 def _write_json(path: Path, value: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value), encoding="utf-8")
+
+
+def _write_mcp_plugin(root: Path) -> Path:
+    root.mkdir(parents=True)
+    _write_json(
+        root / "plugin.json",
+        {
+            "$schema": ("https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"),
+            "name": "review-tools",
+            "version": "1.0.0",
+        },
+    )
+    _write_json(
+        root / "mcp.json",
+        {
+            "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+            "mcpServers": {
+                "context": {
+                    "type": "streamable-http",
+                    "url": "http://127.0.0.1:8765/mcp",
+                }
+            },
+        },
+    )
+    return root
 
 
 def test_extension_inventory_matches_agent_skill_and_hook_discovery(
@@ -134,15 +162,14 @@ def test_mcp_inventory_redacts_secrets_and_mutates_explicit_scope(
     _write_json(
         home / "deepcode_config.json",
         {
-            "tools": {
-                "mcpServers": {
-                    "demo": {
-                        "type": "stdio",
-                        "command": "python3",
-                        "args": ["server.py", "--token", "secret-value"],
-                        "env": {"API_TOKEN": "secret"},
-                        "headers": {"Authorization": "Bearer secret"},
-                    }
+            "mcpServers": {
+                "demo": {
+                    "type": "stdio",
+                    "command": "python3",
+                    "args": ["server.py", "--token", "secret-value"],
+                    "credentialEnv": {
+                        "API_TOKEN": {"credentialRef": "provider:openrouter"}
+                    },
                 }
             }
         },
@@ -154,8 +181,9 @@ def test_mcp_inventory_redacts_secrets_and_mutates_explicit_scope(
         server = inventory.servers[0]
         assert server.name == "demo"
         assert server.args == ("server.py", "--token", "••••••")
-        assert server.env_keys == ("API_TOKEN",)
-        assert server.header_keys == ("Authorization",)
+        assert server.env_keys == ()
+        assert server.credential_env_keys == ("API_TOKEN",)
+        assert server.header_keys == ()
         assert "secret-value" not in repr(server)
         assert "Bearer secret" not in repr(server)
 
@@ -189,14 +217,14 @@ def test_mcp_inventory_redacts_secrets_and_mutates_explicit_scope(
             (workspace / "deepcode_config.json").read_text(encoding="utf-8")
         )
         assert (
-            project_config["tools"]["mcpServers"]["project-server"]["url"]
+            project_config["mcpServers"]["project-server"]["url"]
             == "https://mcp.example.test/rpc"
         )
         assert (
             "project-server"
             not in json.loads(
                 (home / "deepcode_config.json").read_text(encoding="utf-8")
-            )["tools"]["mcpServers"]
+            )["mcpServers"]
         )
 
         inherited = application.mcp.remove(
@@ -205,6 +233,114 @@ def test_mcp_inventory_redacts_secrets_and_mutates_explicit_scope(
             name="project-server",
         )
         assert [server.name for server in inherited.servers] == ["demo"]
+    finally:
+        application.close()
+
+
+def test_mcp_inventory_includes_plugin_servers_with_effective_user_policy(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    home.mkdir()
+    workspace.mkdir()
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+    plugin = resolve_plugin(_write_mcp_plugin(tmp_path / "review-tools"))
+    registration = LocalPluginRegistry(home / "plugins" / "registry.json").add(plugin)
+    _write_json(
+        home / "deepcode_config.json",
+        {
+            "pluginMcpServers": {
+                "review-tools/context": {
+                    "approvalMode": "prompt",
+                    "enabledTools": ["inspect_repository"],
+                }
+            }
+        },
+    )
+
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    project = application.projects.add(
+        str(workspace),
+        trust_state=TrustState.TRUSTED,
+    )
+    try:
+        inventory = application.mcp.list(project.id)
+
+        assert len(inventory.servers) == 1
+        server = inventory.servers[0]
+        assert server.id == "review-tools--context"
+        assert server.name == "review-tools/context"
+        assert server.plugin_id == registration.installation_id
+        assert server.policy_key == "review-tools/context"
+        assert server.source == "plugin"
+        assert server.transport == "streamableHttp"
+        assert server.approval_mode == "prompt"
+        assert server.enabled_tools == ("inspect_repository",)
+        assert server.configuration_state == "configured"
+    finally:
+        application.close()
+
+
+def test_mcp_presets_add_disabled_and_real_probe_reports_capabilities(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    home.mkdir()
+    workspace.mkdir()
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+    fixture = Path(__file__).parents[1] / "fixtures" / "mcp_runtime_server.py"
+    _write_json(
+        home / "deepcode_config.json",
+        {
+            "mcpServers": {
+                "fixture": {
+                    "type": "stdio",
+                    "command": sys.executable,
+                    "args": [str(fixture)],
+                    "enabled": False,
+                }
+            }
+        },
+    )
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    project = application.projects.add(
+        str(workspace),
+        trust_state=TrustState.TRUSTED,
+    )
+    try:
+        presets = application.mcp.list_presets(project.id)
+        assert len(presets.presets) == 16
+        notion = next(item for item in presets.presets if item.id == "notion")
+        assert notion.auth == "oauth"
+        assert notion.configured is False
+
+        configured = application.mcp.add_preset("context7", project_id=project.id)
+        context7 = next(item for item in configured.servers if item.name == "context7")
+        assert context7.configuration_state == "disabled"
+        stored = json.loads((home / "deepcode_config.json").read_text())
+        assert stored["mcpServers"]["context7"]["enabled"] is False
+        with pytest.raises(InvalidArgumentError, match="already configured"):
+            application.mcp.add_preset("context7", project_id=project.id)
+
+        result = application.mcp.probe("fixture", project_id=project.id)
+        assert result.ok is True
+        assert result.tool_count == 3
+        assert result.resource_count == 1
+        assert result.prompt_count == 1
+        fixture_info = next(
+            item
+            for item in application.mcp.list(project.id).servers
+            if item.name == "fixture"
+        )
+        assert fixture_info.runtime_state == "tested"
+        assert fixture_info.runtime_message == (
+            "Connection test passed; the one-shot connection is closed"
+        )
+        assert fixture_info.tool_count == 3
     finally:
         application.close()
 
