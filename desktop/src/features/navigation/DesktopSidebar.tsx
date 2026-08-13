@@ -174,8 +174,14 @@ export function DesktopSidebar({
     <aside className={styles.sidebar} aria-label="Projects and Sessions">
       <div className={styles.brandRow}>
         <span className={styles.brandMark} aria-hidden="true">
-          <i />
-          <i />
+          {/* Three rules stepping inward: nesting, and so depth. The tile takes
+              its fill from --text-primary and the mark from --text-inverse, so
+              the pair swaps itself in the dark theme. */}
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M4.75 7.5h14.5" opacity="1" />
+            <path d="M9 12h10.25" opacity="0.72" />
+            <path d="M13.25 16.5h6" opacity="0.44" />
+          </svg>
         </span>
         <span className={styles.brandCopy}>
           <strong>DeepCode</strong>
@@ -197,7 +203,7 @@ export function DesktopSidebar({
           </button>
 
           <label className={styles.search}>
-            <Search size={15} strokeWidth={1.8} aria-hidden="true" />
+            <Search size={16} strokeWidth={1.8} aria-hidden="true" />
             <span className={styles.srOnly}>Search Sessions</span>
             <input
               ref={searchRef}
@@ -223,7 +229,7 @@ export function DesktopSidebar({
           data-active={destination === "threads"}
           onClick={() => onDestination("threads")}
         >
-          <MessageSquare size={15} />
+          <MessageSquare size={16} />
           Threads
         </button>
         <button
@@ -231,7 +237,7 @@ export function DesktopSidebar({
           data-active={destination === "automations"}
           onClick={() => onDestination("automations")}
         >
-          <Sparkles size={15} />
+          <Sparkles size={16} />
           Automations
         </button>
         <button
@@ -239,7 +245,7 @@ export function DesktopSidebar({
           data-active={destination === "skills"}
           onClick={() => onDestination("skills")}
         >
-          <WandSparkles size={15} />
+          <WandSparkles size={16} />
           Skills
         </button>
         <button
@@ -247,7 +253,7 @@ export function DesktopSidebar({
           data-active={destination === "plugins"}
           onClick={() => onDestination("plugins")}
         >
-          <Puzzle size={15} />
+          <Puzzle size={16} />
           Plugins
         </button>
         <button
@@ -255,7 +261,7 @@ export function DesktopSidebar({
           data-active={destination === "mcp"}
           onClick={() => onDestination("mcp")}
         >
-          <Cable size={15} />
+          <Cable size={16} />
           MCP
         </button>
         <button
@@ -263,7 +269,7 @@ export function DesktopSidebar({
           data-active={destination === "settings"}
           onClick={() => onDestination("settings")}
         >
-          <Settings size={15} />
+          <Settings size={16} />
           Settings
         </button>
       </nav>
@@ -277,7 +283,7 @@ export function DesktopSidebar({
           aria-label="Open project folder"
           title="Open project folder"
         >
-          <Plus size={15} />
+          <Plus size={16} />
         </button>
       </div>
 
@@ -321,18 +327,18 @@ export function DesktopSidebar({
                   title={project?.canonicalPath ?? group.description}
                 >
                   <ChevronRight
-                    size={13}
+                    size={14}
                     className={styles.disclosure}
                     aria-hidden="true"
                   />
                   {project ? (
                     group.active ? (
-                      <FolderOpen size={15} />
+                      <FolderOpen size={16} />
                     ) : (
-                      <Folder size={15} />
+                      <Folder size={16} />
                     )
                   ) : (
-                    <FolderClock size={15} />
+                    <FolderClock size={16} />
                   )}
                   <strong>{group.displayName}</strong>
                   {project?.trustState === "untrusted" ? (

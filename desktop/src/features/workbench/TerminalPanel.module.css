@@ -1,9 +1,9 @@
 .panel {
   display: none;
   height: 100%;
-  grid-template-rows: 42px auto minmax(0, 1fr);
+  grid-template-rows: minmax(42px, auto) auto minmax(0, 1fr);
   overflow: hidden;
-  background: #171b19;
+  background: var(--surface-terminal);
 }
 
 .panel[data-active="true"] {
@@ -15,32 +15,35 @@
   align-items: center;
   justify-content: space-between;
   padding: 6px 10px 6px 13px;
-  border-bottom: 1px solid #303832;
-  color: #b3bcb6;
-  font: 8.5px var(--font-mono);
+  border-bottom: 1px solid var(--border-terminal);
+  background: var(--surface-terminal-raised);
+  color: var(--text-terminal-dim);
+  font: var(--text-micro) var(--font-mono);
+  letter-spacing: var(--tracking-wide);
 }
 
 .toolbar button {
   min-height: 29px;
   padding: 0 9px;
-  border: 1px solid #465048;
-  border-radius: 8px;
-  color: #e8ebf0;
-  font-size: 8.5px;
+  border: 1px solid var(--border-terminal);
+  border-radius: var(--radius-xs);
+  color: var(--text-terminal);
+  font-size: var(--text-micro);
 }
 
 .toolbar button:hover:not(:disabled) {
-  background: #252c27;
+  border-color: color-mix(in srgb, var(--text-terminal) 34%, transparent);
+  background: color-mix(in srgb, var(--text-terminal) 9%, transparent);
 }
 
 .error {
   margin: 8px;
   padding: 7px 9px;
-  border: 1px solid #6d3b3c;
-  border-radius: 9px;
-  background: #342021;
-  color: #f2aaa4;
-  font-size: 9px;
+  border: 1px solid color-mix(in srgb, var(--danger) 46%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--danger) 17%, var(--surface-terminal));
+  color: color-mix(in srgb, var(--danger) 58%, var(--text-terminal));
+  font-size: var(--text-micro);
   line-height: 1.45;
 }
 

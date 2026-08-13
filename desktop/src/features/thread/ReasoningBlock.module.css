@@ -1,7 +1,7 @@
 .reasoning {
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--signal) 13%, var(--border-subtle));
-  border-radius: 13px;
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--surface-raised) 62%, transparent);
   color: var(--text-tertiary);
 }
@@ -34,8 +34,8 @@
 .reasoning strong {
   overflow: hidden;
   color: var(--text-secondary);
-  font-size: 11.5px;
-  font-weight: 610;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
   text-overflow: ellipsis;
   text-transform: capitalize;
   white-space: nowrap;
@@ -43,7 +43,7 @@
 
 .reasoning small {
   color: var(--text-tertiary);
-  font: 8.5px var(--font-mono);
+  font: var(--text-micro) var(--font-mono);
   text-transform: capitalize;
 }
 
@@ -74,7 +74,7 @@
   border-top: 1px solid var(--border-subtle);
   background: color-mix(in srgb, var(--surface-canvas) 55%, transparent);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.65;
 }
 
@@ -91,9 +91,9 @@
 .trace h4 {
   margin: 0 0 8px;
   color: var(--text-tertiary);
-  font: 8.5px var(--font-mono);
-  font-weight: 500;
-  letter-spacing: 0.03em;
+  font: var(--text-micro) var(--font-mono);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-wide);
   text-transform: uppercase;
 }
 
@@ -106,7 +106,7 @@
   padding: 10px 0 3px;
   color: var(--text-tertiary);
   cursor: pointer;
-  font: 9px var(--font-mono);
+  font: var(--text-micro) var(--font-mono);
 }
 
 .waiting {

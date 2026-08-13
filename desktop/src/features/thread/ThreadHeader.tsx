@@ -49,17 +49,25 @@ export function ThreadHeader({
 }: ThreadHeaderProps) {
   const recoveredHistory = isRecoveredHistoryProject(project);
   const title = thread?.title ?? "Start a local coding thread";
+  const root = recoveredHistory
+    ? "Previous sessions"
+    : (project?.displayName ?? "DeepCode");
+  const workspace = thread ? workspaceLabel(thread, project) : null;
   return (
     <header className={styles.header}>
       <div className={styles.identity}>
         <div className={styles.breadcrumb}>
-          <span>
-            {recoveredHistory
-              ? "Previous sessions"
-              : (project?.displayName ?? "DeepCode")}
-          </span>
-          {thread ? <span aria-hidden="true">/</span> : null}
-          {thread ? <span>{workspaceLabel(thread, project)}</span> : null}
+          <span>{root}</span>
+          {/* A Session usually opens at the project root, and then both
+              segments are the same folder name — "Test_workbench /
+              Test_workbench" reads as a bug. The trail only earns its second
+              step when the Session actually sits somewhere else. */}
+          {workspace && workspace !== root ? (
+            <>
+              <span aria-hidden="true">/</span>
+              <span>{workspace}</span>
+            </>
+          ) : null}
         </div>
         <div className={styles.titleRow}>
           <span
@@ -89,7 +97,7 @@ export function ThreadHeader({
             onClick={onTrustProject}
             disabled={busy}
           >
-            <ShieldAlert size={15} />
+            <ShieldAlert size={16} />
             Trust folder
           </button>
         ) : project ? (
@@ -108,7 +116,7 @@ export function ThreadHeader({
                 disabled={busy || hasActiveWork}
                 title="Create a Paper2Code thread"
               >
-                <ScrollText size={15} />
+                <ScrollText size={16} />
                 Paper
               </button>
             ) : null}
@@ -118,7 +126,7 @@ export function ThreadHeader({
               disabled={busy || hasActiveWork}
               title="Fork into an isolated worktree"
             >
-              <GitFork size={15} />
+              <GitFork size={16} />
               Fork
             </button>
           </>
@@ -133,7 +141,7 @@ export function ThreadHeader({
             aria-pressed={inspectorOpen}
             title={inspectorOpen ? "Close review panel" : "Open review panel"}
           >
-            <Files size={15} />
+            <Files size={16} />
             Review
             {inspectorOpen ? <PanelRightClose size={14} /> : <PanelRight size={14} />}
           </button>

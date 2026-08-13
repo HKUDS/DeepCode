@@ -183,7 +183,7 @@ export function SkillsPage({ runtime, project, onCreateSkill }: SkillsPageProps)
                         !catalog.selectedSkill.configurableScopes.includes(scope)
                       }
                     >
-                      <Power size={13} />
+                      <Power size={14} />
                       {catalog.selectedSkill.enabled ? "Disable" : "Enable"}
                     </button>
                     {catalog.selectedSkill.deletable ? (
@@ -203,7 +203,7 @@ export function SkillsPage({ runtime, project, onCreateSkill }: SkillsPageProps)
                           }
                         }}
                       >
-                        <Trash2 size={13} />
+                        <Trash2 size={14} />
                         Delete
                       </button>
                     ) : null}

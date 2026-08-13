@@ -81,9 +81,9 @@ export function ReasoningBlock({ item, mode }: ReasoningBlockProps) {
         }}
       >
         {active ? (
-          <CircleDashed className={styles.spinner} size={15} aria-hidden="true" />
+          <CircleDashed className={styles.spinner} size={16} aria-hidden="true" />
         ) : (
-          <BrainCircuit size={15} aria-hidden="true" />
+          <BrainCircuit size={16} aria-hidden="true" />
         )}
         <span>
           <strong>{title}</strong>

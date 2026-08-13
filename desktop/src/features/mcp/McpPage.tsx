@@ -183,11 +183,11 @@ export function McpPage({
   };
 
   return (
-    <section className={styles.page}>
+    <section className={styles.page} aria-labelledby="mcp-title">
       <header className={styles.pageHeader}>
         <div>
           <p className={styles.eyebrow}>Agent capabilities</p>
-          <h1>MCP Servers</h1>
+          <h1 id="mcp-title">MCP Servers</h1>
           <p>
             Add an MCP server, test the connection, then enable it. Enabled
             tools become available to the coding agent automatically when a
@@ -275,7 +275,7 @@ export function McpPage({
                   });
                 })}
               >
-                <Play size={13} /> Test connection
+                <Play size={14} /> Test connection
               </button>
               {server.auth === "oauth" ? (
                 server.authState === "authenticated" ? (
@@ -283,7 +283,7 @@ export function McpPage({
                     await catalog.logout(server.id);
                     setFeedback({ tone: "success", message: `Signed out of ${server.name}.` });
                   })}>
-                    <LogOut size={13} /> Logout
+                    <LogOut size={14} /> Logout
                   </button>
                 ) : (
                   <button type="button" disabled={busy !== null || server.authState === "authorizing"} onClick={() => void perform(`login:${server.id}`, async () => {
@@ -291,7 +291,7 @@ export function McpPage({
                     setAuthorizationUrl(flow.authorizationUrl);
                     setFeedback({ tone: "success", message: `Authorization started for ${server.name}. Return here after approving access.` });
                   })}>
-                    <LogIn size={13} /> Authenticate
+                    <LogIn size={14} /> Authenticate
                   </button>
                 )
               ) : null}
@@ -306,9 +306,9 @@ export function McpPage({
                         : `Enabled ${server.name}. The agent can now call its tools when a task needs them.`,
                     });
                   })}>
-                    <CirclePower size={13} /> {server.enabled ? "Disable" : "Enable"}
+                    <CirclePower size={14} /> {server.enabled ? "Disable" : "Enable"}
                   </button>
-                  <button type="button" onClick={() => edit(server)}><Pencil size={13} /> Edit</button>
+                  <button type="button" onClick={() => edit(server)}><Pencil size={14} /> Edit</button>
                   <button type="button" disabled={busy !== null || server.configurationState === "blocked"} onClick={() => {
                     if (window.confirm(`Remove MCP server “${server.name}”?`)) {
                       void perform(`remove:${server.id}`, async () => {
@@ -316,7 +316,7 @@ export function McpPage({
                         setFeedback({ tone: "success", message: `Removed ${server.name}.` });
                       });
                     }
-                  }}><Trash2 size={13} /> Remove</button>
+                  }}><Trash2 size={14} /> Remove</button>
                 </>
               ) : null}
             </div>
@@ -375,7 +375,7 @@ export function McpPage({
                     });
                   })}
                 >
-                  <Plus size={13} /> Add server
+                  <Plus size={14} /> Add server
                 </button>
               </div>
             </article>

@@ -265,7 +265,7 @@ export function ConnectionSettings({
                   disabled={busy || testingId === connection.id}
                   title="Check credential and model catalog"
                 >
-                  <FlaskConical size={13} />
+                  <FlaskConical size={14} />
                   {testingId === connection.id ? "Checking…" : "Check"}
                 </button>
                 <button
@@ -283,7 +283,7 @@ export function ConnectionSettings({
                     disabled={busy}
                     title="Remove connection"
                   >
-                    <Trash2 size={13} />
+                    <Trash2 size={14} />
                   </button>
                 ) : null}
               </div>
@@ -292,11 +292,11 @@ export function ConnectionSettings({
         })}
         {!controller.loading && !connections.some(isManagedConnection) ? (
           <div className={styles.emptyState}>
-            <Server size={20} />
+            <Server size={18} />
             <strong>No provider connected</strong>
             <span>Add an API provider or a local model service to begin.</span>
             <button type="button" onClick={() => setEditing({ ...emptyDraft })}>
-              <Plus size={13} /> Add provider
+              <Plus size={14} /> Add provider
             </button>
           </div>
         ) : null}
@@ -328,7 +328,7 @@ export function ConnectionSettings({
                 onClick={() => setEditing(null)}
                 aria-label="Close connection editor"
               >
-                <X size={15} />
+                <X size={16} />
               </button>
             </header>
             {!editing.template ? (
@@ -365,7 +365,7 @@ export function ConnectionSettings({
                   </p>
                 ) : null}
                 <div className={`${styles.providerSummary} ${styles.wide}`}>
-                  <Server size={17} />
+                  <Server size={18} />
                   <span>
                     <strong>{selectedTemplate?.label ?? editing.label}</strong>
                     <small>
@@ -481,7 +481,7 @@ export function ConnectionSettings({
                 ) : null}
                 <details className={`${styles.advanced} ${styles.wide}`}>
                   <summary>
-                    <SlidersHorizontal size={13} /> Advanced connection settings
+                    <SlidersHorizontal size={14} /> Advanced connection settings
                   </summary>
                   <div>
                     <label>
@@ -615,7 +615,7 @@ export function ConnectionSettings({
                   (endpointRequired && !editing.apiBase.trim())
                 }
               >
-                <Save size={13} />
+                <Save size={14} />
                 {saving ? "Saving…" : "Save and check"}
               </button>
             </footer>

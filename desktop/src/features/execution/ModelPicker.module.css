@@ -36,18 +36,18 @@
 
 .trigger small {
   color: var(--text-tertiary);
-  font: 8px/1.1 var(--font-mono);
+  font: var(--text-micro)/1.1 var(--font-mono);
 }
 
 .trigger strong {
   color: var(--text-secondary);
-  font-size: 9.5px;
-  font-weight: 590;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
 }
 
 .trigger em {
   color: var(--text-tertiary);
-  font: 8px/1.1 var(--font-mono);
+  font: var(--text-micro)/1.1 var(--font-mono);
   font-style: normal;
 }
 
@@ -82,12 +82,12 @@
 
 .menu > header strong {
   color: var(--text-primary);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
 }
 
 .menu > header span {
   color: var(--text-tertiary);
-  font-size: 9.5px;
+  font-size: var(--text-2xs);
 }
 
 .menu > header button {
@@ -114,18 +114,18 @@
   overflow: visible !important;
   clip: auto !important;
   color: var(--text-tertiary);
-  font-size: 9px;
+  font-size: var(--text-micro);
 }
 
 .connectionField select {
   min-height: 36px;
-  padding: 0 10px;
+  padding: 0 30px 0 10px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   outline: 0;
-  background: var(--surface-raised);
+  background-color: var(--surface-raised);
   color: var(--text-primary);
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
 }
 
 .search {
@@ -161,7 +161,7 @@
   outline: 0;
   background: transparent;
   color: var(--text-primary);
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
 }
 
 .connectionField select:focus,
@@ -209,13 +209,13 @@
 
 .models strong {
   color: var(--text-primary);
-  font-size: 10.5px;
-  font-weight: 590;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
 }
 
 .models code {
   color: var(--text-tertiary);
-  font: 8.5px var(--font-mono);
+  font: var(--text-micro) var(--font-mono);
 }
 
 .models small {
@@ -224,7 +224,7 @@
   align-items: center;
   gap: 7px;
   color: var(--text-tertiary);
-  font: 8.5px var(--font-mono);
+  font: var(--text-micro) var(--font-mono);
 }
 
 .models small svg {
@@ -235,7 +235,7 @@
   margin: 0;
   padding: 22px 12px;
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   line-height: 1.5;
   text-align: center;
 }
@@ -254,12 +254,12 @@
 
 .effort strong {
   color: var(--text-primary);
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
 }
 
 .effort span {
   color: var(--text-tertiary);
-  font-size: 9px;
+  font-size: var(--text-micro);
 }
 
 .effort > div:last-child {
@@ -272,10 +272,10 @@
   min-height: 28px;
   padding: 0 10px;
   border: 1px solid var(--border-subtle);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--surface-raised);
   color: var(--text-secondary);
-  font-size: 9.5px;
+  font-size: var(--text-2xs);
 }
 
 .effort button:hover,
@@ -299,21 +299,21 @@
   min-height: 34px;
   padding: 0 9px;
   border: 1px solid var(--border-subtle);
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   outline: 0;
   background: var(--surface-raised);
   color: var(--text-primary);
-  font: 9.5px var(--font-mono);
+  font: var(--text-2xs) var(--font-mono);
 }
 
 .menu > footer button {
   min-height: 34px;
   padding: 0 10px;
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   background: var(--signal);
   color: var(--text-on-accent);
-  font-size: 9.5px;
-  font-weight: 620;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-bold);
 }
 
 .menu > footer button:disabled {

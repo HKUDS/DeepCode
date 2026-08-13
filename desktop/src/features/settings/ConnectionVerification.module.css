@@ -16,12 +16,12 @@
 
 .verification > header strong {
   color: var(--text-primary);
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
 }
 
 .verification > header span {
   color: var(--text-tertiary);
-  font: 8.5px var(--font-mono);
+  font: var(--text-micro) var(--font-mono);
 }
 
 .stages {
@@ -58,13 +58,13 @@
 
 .stages strong {
   color: var(--text-secondary);
-  font-size: 9px;
+  font-size: var(--text-micro);
 }
 
 .stages small {
   overflow: hidden;
   color: var(--text-tertiary);
-  font-size: 8.5px;
+  font-size: var(--text-micro);
   line-height: 1.35;
   text-overflow: ellipsis;
 }

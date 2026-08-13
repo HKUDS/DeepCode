@@ -275,7 +275,7 @@ export function AutomationsPage({
                       disabled={automations.loading || !canExecute}
                       onClick={() => void automations.runNow(automation.id)}
                     >
-                      <Play size={13} />
+                      <Play size={14} />
                       Run now
                     </button>
                     {automation.scheduleKind === "interval" ? (
@@ -293,9 +293,9 @@ export function AutomationsPage({
                         }
                       >
                         {automation.status === "enabled" ? (
-                          <Pause size={13} />
+                          <Pause size={14} />
                         ) : (
-                          <Play size={13} />
+                          <Play size={14} />
                         )}
                         {automation.status === "enabled" ? "Pause" : "Resume"}
                       </button>
@@ -314,7 +314,7 @@ export function AutomationsPage({
                       disabled={automations.loadingRunsFor === automation.id}
                       onClick={() => void toggleRuns(automation.id)}
                     >
-                      <History size={13} />
+                      <History size={14} />
                       Runs
                     </button>
                     <button
@@ -322,7 +322,7 @@ export function AutomationsPage({
                       disabled={Boolean(latest && !isTerminal(latest.status))}
                       onClick={() => void remove(automation)}
                     >
-                      <Trash2 size={13} />
+                      <Trash2 size={14} />
                       Remove
                     </button>
                   </footer>

@@ -241,7 +241,7 @@ function ActivityItem({
         data-status={approval.status}
       >
         <div className={styles.runApprovalHeading}>
-          {pending ? <AlertTriangle size={15} /> : <CheckCircle2 size={15} />}
+          {pending ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}
           <span>
             <strong>
               {pending ? "Approval required" : approvalOutcome(approval.status)}
@@ -280,7 +280,7 @@ function ActivityItem({
       <span className={styles.runStepStatus}>
         {item.status.replaceAll("_", " ")}
       </span>
-      {hasBody ? <ChevronRight className={styles.runStepChevron} size={13} /> : null}
+      {hasBody ? <ChevronRight className={styles.runStepChevron} size={14} /> : null}
     </>
   );
 
@@ -338,7 +338,7 @@ function RunStatus({ group }: { group: ConversationTurn }) {
 
   return (
     <div className={styles.runStatus} data-status={group.turn?.status}>
-      <Clock3 size={13} aria-hidden="true" />
+      <Clock3 size={14} aria-hidden="true" />
       <span>{runLabel(group, now)}</span>
     </div>
   );
@@ -490,7 +490,7 @@ export function TurnBlock({
                   key={skill.skillId}
                   title={[skill.invocation, skill.revision].filter(Boolean).join(" · ")}
                 >
-                  <Sparkles size={10} />
+                  <Sparkles size={12} />
                   {skill.name}
                 </span>
               ))}
@@ -513,7 +513,7 @@ export function TurnBlock({
       ))}
       {group.turn?.executionProfile ? (
         <div className={styles.executionBadge}>
-          <Cpu size={10} />
+          <Cpu size={12} />
           <span>{group.turn.executionProfile.connectionId}</span>
           <i aria-hidden="true">/</i>
           <strong>{group.turn.executionProfile.modelId}</strong>
@@ -586,7 +586,7 @@ export function TurnBlock({
               onClick={() => onRetryTurn(turnId)}
               disabled={busy}
             >
-              <RotateCcw size={13} />
+              <RotateCcw size={14} />
               Retry
             </button>
           ) : null}
@@ -599,7 +599,7 @@ export function TurnBlock({
               }}
             >
               Review changes
-              <ChevronRight size={13} />
+              <ChevronRight size={14} />
             </button>
           ) : null}
         </div>

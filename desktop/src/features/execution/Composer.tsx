@@ -377,7 +377,7 @@ export function Composer({
                 onClick={() => setSkillPickerOpen(false)}
                 aria-label="Close Skill picker"
               >
-                <X size={13} />
+                <X size={14} />
               </button>
             </header>
             <input
@@ -414,7 +414,7 @@ export function Composer({
                       }
                     >
                       <span className={styles.skillCheck}>
-                        {selected ? <Check size={11} /> : null}
+                        {selected ? <Check size={12} /> : null}
                       </span>
                       <span>
                         <strong>{skill.displayName ?? skill.name}</strong>
@@ -443,7 +443,7 @@ export function Composer({
                 key={skill.id}
                 title={skill.shortDescription ?? skill.description}
               >
-                <Sparkles size={11} />
+                <Sparkles size={12} />
                 {skill.displayName ?? skill.name}
                 <button
                   type="button"
@@ -454,7 +454,7 @@ export function Composer({
                   }
                   aria-label={`Remove ${skill.name}`}
                 >
-                  <X size={11} />
+                  <X size={12} />
                 </button>
               </span>
             ))}
@@ -464,14 +464,14 @@ export function Composer({
           <div className={styles.attachments} aria-label="Attached context files">
             {attachments.map((path) => (
               <span key={path} title={path}>
-                <Paperclip size={11} />
+                <Paperclip size={12} />
                 {fileName(path)}
                 <button
                   type="button"
                   onClick={() => removeAttachment(path)}
                   aria-label={`Remove ${fileName(path)}`}
                 >
-                  <X size={11} />
+                  <X size={12} />
                 </button>
               </span>
             ))}
@@ -523,7 +523,7 @@ export function Composer({
               aria-label="Attach workspace files"
               title="Attach workspace files"
             >
-              <Paperclip size={13} />
+              <Paperclip size={14} />
             </button>
             <button
               className={styles.skillButton}
@@ -540,7 +540,7 @@ export function Composer({
                   : "No selectable Skills"
               }
             >
-              <Sparkles size={13} />
+              <Sparkles size={14} />
               {selectedSkills.length ? <b>{selectedSkills.length}</b> : null}
             </button>
             <span title={thread?.workspacePath ?? project?.canonicalPath}>
@@ -615,7 +615,7 @@ export function Composer({
                 onClick={onInterrupt}
                 aria-label="Stop turn"
               >
-                <Square size={13} fill="currentColor" />
+                <Square size={14} fill="currentColor" />
                 Stop
               </button>
             </div>
@@ -627,7 +627,7 @@ export function Composer({
               disabled={!canExecute || busy || !prompt.trim()}
               aria-label="Run turn"
             >
-              <ArrowUp size={17} strokeWidth={2.2} />
+              <ArrowUp size={18} strokeWidth={2.2} />
             </button>
           )}
         </div>

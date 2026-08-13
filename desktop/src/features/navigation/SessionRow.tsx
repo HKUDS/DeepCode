@@ -106,14 +106,14 @@ export function SessionRow({
             disabled={busy || !draft.trim()}
             aria-label="Save Session name"
           >
-            <Check size={13} />
+            <Check size={14} />
           </button>
           <button
             type="button"
             onClick={() => setMode("closed")}
             aria-label="Cancel Session rename"
           >
-            <X size={13} />
+            <X size={14} />
           </button>
         </form>
       ) : (
@@ -147,7 +147,7 @@ export function SessionRow({
             aria-expanded={mode !== "closed"}
             aria-haspopup="menu"
           >
-            <MoreHorizontal size={15} />
+            <MoreHorizontal size={16} />
           </button>
         </>
       )}
@@ -162,7 +162,7 @@ export function SessionRow({
               setMode("rename");
             }}
           >
-            <Pencil size={13} />
+            <Pencil size={14} />
             Rename
           </button>
           <button
@@ -177,7 +177,7 @@ export function SessionRow({
                 : undefined
             }
           >
-            <Archive size={13} />
+            <Archive size={14} />
             Archive
           </button>
           <button
@@ -192,7 +192,7 @@ export function SessionRow({
                 : undefined
             }
           >
-            <Trash2 size={13} />
+            <Trash2 size={14} />
             Delete permanently
           </button>
         </div>

@@ -14,8 +14,8 @@
   background: color-mix(in srgb, var(--surface-overlay) 92%, transparent);
   box-shadow: var(--shadow-float);
   color: var(--text-secondary);
-  font-size: 11px;
-  font-weight: 560;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
   backdrop-filter: blur(14px);
   transition:
     border-color 140ms ease,
@@ -54,7 +54,7 @@
   width: min(430px, calc(100vw - 48px));
   padding: 10px;
   border: 1px solid var(--border-strong);
-  border-radius: 15px;
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--surface-overlay) 96%, transparent);
   box-shadow: var(--shadow-float);
   color: var(--text-primary);
@@ -76,8 +76,8 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  font-size: 11px;
-  font-weight: 650;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
 }
 
 .popover header svg {
@@ -86,13 +86,13 @@
 
 .popover header small {
   color: var(--text-tertiary);
-  font: 8.5px var(--font-mono);
+  font: var(--text-micro) var(--font-mono);
 }
 
 .popover > p {
   margin: 9px 6px 5px;
   color: var(--text-tertiary);
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
   line-height: 1.5;
 }
 
@@ -111,7 +111,7 @@
   align-items: start;
   gap: 7px;
   padding: 7px 8px;
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   color: var(--text-tertiary);
 }
 
@@ -132,14 +132,14 @@
 
 .popover li strong {
   color: var(--text-secondary);
-  font-size: 10.5px;
-  font-weight: 520;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
   line-height: 1.55;
 }
 
 .popover li[data-status="in_progress"] strong {
   color: var(--text-primary);
-  font-weight: 610;
+  font-weight: var(--weight-bold);
 }
 
 .popover li[data-status="completed"] strong {

@@ -23,7 +23,7 @@ export function RuntimeNotice({
   const message = error?.message ?? runtime.message ?? "The local App Server is unavailable.";
   return (
     <div className={styles.notice} role="alert">
-      <AlertTriangle size={17} aria-hidden="true" />
+      <AlertTriangle size={18} aria-hidden="true" />
       <div className={styles.copy}>
         <strong>{error?.code ?? "APP_SERVER_OFFLINE"}</strong>
         <span>{message}</span>
@@ -41,7 +41,7 @@ export function RuntimeNotice({
         ) : null}
         {serviceOffline ? (
           <button type="button" onClick={onRestart} disabled={busy}>
-            <RotateCw size={13} />
+            <RotateCw size={14} />
             Restart service
           </button>
         ) : null}

@@ -18,22 +18,22 @@
 .heading p {
   margin: 0;
   color: var(--signal);
-  font: 9px/1 var(--font-mono);
-  letter-spacing: 0.11em;
+  font: var(--text-micro)/1.0 var(--font-mono);
+  letter-spacing: var(--tracking-caps);
   text-transform: uppercase;
 }
 
 .heading h2 {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 22px;
-  letter-spacing: -0.025em;
+  font-size: var(--text-xl);
+  letter-spacing: var(--tracking-tight);
 }
 
 .heading span {
   max-width: 590px;
   color: var(--text-secondary);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   line-height: 1.55;
 }
 
@@ -50,8 +50,8 @@
   border-radius: var(--radius-sm);
   background: var(--surface-raised);
   color: var(--text-secondary);
-  font-size: 10.5px;
-  font-weight: 620;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-bold);
 }
 
 .addButton:hover,
@@ -137,14 +137,14 @@
 
 .connectionBody strong {
   overflow: hidden;
-  font-size: 13px;
+  font-size: var(--text-base);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .connectionBody code {
   color: var(--text-tertiary);
-  font: 9px var(--font-mono);
+  font: var(--text-micro) var(--font-mono);
 }
 
 .connectionBody > header > span {
@@ -153,7 +153,7 @@
   border-radius: var(--radius-pill);
   background: var(--attention-soft);
   color: var(--attention);
-  font: 8.5px var(--font-mono);
+  font: var(--text-micro) var(--font-mono);
 }
 
 .connectionBody > header > span[data-status="ready"],
@@ -174,12 +174,12 @@
   margin: 0;
   overflow-wrap: anywhere;
   color: var(--text-secondary);
-  font: 10.5px/1.4 var(--font-mono);
+  font: var(--text-2xs)/1.4 var(--font-mono);
 }
 
 .connectionBody small {
   color: var(--text-tertiary);
-  font: 9px/1.4 var(--font-mono);
+  font: var(--text-micro)/1.4 var(--font-mono);
 }
 
 .actions {
@@ -199,7 +199,7 @@
   margin: 0;
   padding: 12px 14px;
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .emptyState {
@@ -217,11 +217,11 @@
 
 .emptyState strong {
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .emptyState span {
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
 }
 
 .emptyState button {
@@ -235,7 +235,7 @@
   border-radius: var(--radius-sm);
   background: var(--surface-raised);
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: var(--text-2xs);
 }
 
 .error {
@@ -295,12 +295,12 @@
 
 .editor > header strong {
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 
 .editor > header small {
   color: var(--text-tertiary);
-  font-size: 9.5px;
+  font-size: var(--text-2xs);
 }
 
 .editor > header button {
@@ -336,12 +336,12 @@
 }
 
 .providerPicker > div:first-child strong {
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 
 .providerPicker > div:first-child span {
   color: var(--text-tertiary);
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
 }
 
 .providerGrid {
@@ -379,13 +379,13 @@
 .providerGrid strong,
 .providerSummary strong {
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .providerGrid small,
 .providerSummary small {
   color: var(--text-tertiary);
-  font-size: 9px;
+  font-size: var(--text-micro);
 }
 
 .providerSummary {
@@ -409,7 +409,7 @@
   padding: 0 8px;
   border-radius: var(--radius-sm);
   color: var(--text-tertiary);
-  font-size: 9px;
+  font-size: var(--text-micro);
 }
 
 .providerSummary button:hover {
@@ -429,12 +429,12 @@
 .credentials legend {
   padding: 0 5px;
   color: var(--text-secondary);
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
 }
 
 .credentials > small {
   color: var(--text-tertiary);
-  font-size: 9px;
+  font-size: var(--text-micro);
 }
 
 .credentialTabs {
@@ -449,9 +449,9 @@
 .credentialTabs button {
   min-height: 28px;
   padding: 0 9px;
-  border-radius: 7px;
+  border-radius: var(--radius-xs);
   color: var(--text-tertiary);
-  font-size: 9.5px;
+  font-size: var(--text-2xs);
 }
 
 .credentialTabs button[data-active="true"] {
@@ -472,7 +472,7 @@
   gap: 7px;
   color: var(--text-tertiary);
   cursor: pointer;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   list-style: none;
 }
 
@@ -491,13 +491,13 @@
   display: grid;
   gap: 7px;
   color: var(--text-secondary);
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
 }
 
 .form label > small {
   color: var(--text-tertiary);
-  font-size: 9px;
-  font-weight: 400;
+  font-size: var(--text-micro);
+  font-weight: var(--weight-regular);
   line-height: 1.45;
 }
 
@@ -511,9 +511,14 @@
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   outline: 0;
-  background: var(--surface-canvas);
+  /* See ManagementWorkspace: the shorthand would drop the select chevron. */
+  background-color: var(--surface-canvas);
   color: var(--text-primary);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
+}
+
+.form select {
+  padding-right: 32px;
 }
 
 .form input:focus,
@@ -525,7 +530,7 @@
 
 .form textarea {
   resize: vertical;
-  font: 10.5px/1.5 var(--font-mono);
+  font: var(--text-2xs)/1.5 var(--font-mono);
 }
 
 .wide {
@@ -557,12 +562,12 @@
 
 .credentialAction strong {
   color: var(--text-primary);
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
 }
 
 .credentialAction small {
   color: var(--text-tertiary);
-  font-size: 9.5px;
+  font-size: var(--text-2xs);
 }
 
 .editor > footer {
@@ -577,7 +582,7 @@
 .editor > footer span {
   margin-right: auto;
   color: var(--text-tertiary);
-  font: 9px var(--font-mono);
+  font: var(--text-micro) var(--font-mono);
 }
 
 .editor footer .saveButton {

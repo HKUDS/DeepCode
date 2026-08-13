@@ -14,10 +14,17 @@ import {
 import { useAppearance } from "../../app/useAppearance";
 import styles from "../management/ManagementWorkspace.module.css";
 
+// Record, not Partial — TypeScript fails the build if a palette is added to
+// THEME_PREFERENCES without a name to show for it.
 const THEME_LABELS: Record<ThemePreference, string> = {
   system: "Match system",
   light: "Light",
   dark: "Dark",
+  paper: "Paper — warm, low blue",
+  midnight: "Midnight — deep, cool",
+  claude: "Claude — ivory & terracotta",
+  "claude-dark": "Claude Dark — slate & terracotta",
+  contrast: "High contrast — AAA",
 };
 
 /**

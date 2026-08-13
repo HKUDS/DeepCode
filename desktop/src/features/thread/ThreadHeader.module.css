@@ -24,7 +24,7 @@
   gap: 7px;
   overflow: hidden;
   color: var(--text-tertiary);
-  font: 9px var(--font-mono);
+  font: var(--text-micro) var(--font-mono);
   white-space: nowrap;
 }
 
@@ -46,9 +46,9 @@
   overflow: hidden;
   color: var(--text-primary);
   font-family: var(--font-display);
-  font-size: 16.5px;
-  font-weight: 680;
-  letter-spacing: -0.03em;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-display);
+  letter-spacing: var(--tracking-display);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -98,8 +98,8 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
-  font-size: 11px;
-  font-weight: 600;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
 }
 
 .actions button:hover:not(:disabled) {

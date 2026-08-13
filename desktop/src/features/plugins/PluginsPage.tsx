@@ -110,7 +110,7 @@ export function PluginsPage({ runtime }: { runtime: DesktopRuntime }) {
                     )
                   }
                 >
-                  <Power size={13} />
+                  <Power size={14} />
                   {catalog.selected.enabled ? "Disable" : "Enable"}
                 </button>
                 <button
@@ -129,7 +129,7 @@ export function PluginsPage({ runtime }: { runtime: DesktopRuntime }) {
                     }
                   }}
                 >
-                  <Trash2 size={13} />
+                  <Trash2 size={14} />
                   Unregister
                 </button>
               </div>

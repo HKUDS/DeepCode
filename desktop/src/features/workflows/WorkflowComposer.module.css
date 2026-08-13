@@ -31,10 +31,10 @@
   min-height: 32px;
   padding: 0 10px;
   border: 1px solid transparent;
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   color: var(--text-tertiary);
-  font: 9.5px var(--font-mono);
-  letter-spacing: 0.04em;
+  font: var(--text-2xs) var(--font-mono);
+  letter-spacing: var(--tracking-wide);
   text-transform: uppercase;
 }
 
@@ -64,7 +64,7 @@
   outline: 0;
   background: var(--surface-code);
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.55;
 }
 
@@ -85,7 +85,7 @@
   border-radius: var(--radius-sm);
   background: var(--surface-raised);
   color: var(--text-secondary);
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
   white-space: nowrap;
 }
 
@@ -117,7 +117,7 @@
   flex-wrap: wrap;
   gap: 12px;
   color: var(--text-secondary);
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
 }
 
 .options label {
@@ -135,7 +135,7 @@
   max-width: 310px;
   overflow: hidden;
   color: var(--text-tertiary);
-  font-size: 9.5px;
+  font-size: var(--text-2xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -154,22 +154,22 @@
 .consoleHead strong {
   display: block;
   margin-top: 3px;
-  font-size: 14px;
-  font-weight: 650;
+  font-size: var(--text-base);
+  font-weight: var(--weight-bold);
   text-transform: capitalize;
 }
 
 .kicker,
 .percent {
   color: var(--signal);
-  font: 9.5px var(--font-mono);
-  letter-spacing: 0.06em;
+  font: var(--text-2xs) var(--font-mono);
+  letter-spacing: var(--tracking-caps);
   text-transform: uppercase;
 }
 
 .percent {
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .progress {
@@ -206,13 +206,13 @@
 .review h3 {
   margin: 3px 0;
   font-family: var(--font-display);
-  font-size: 16px;
+  font-size: var(--text-lg);
 }
 
 .review p {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .review pre {
@@ -224,7 +224,7 @@
   border-radius: var(--radius-sm);
   background: var(--surface-code);
   color: var(--text-secondary);
-  font: 9.5px/1.55 var(--font-mono);
+  font: var(--text-2xs)/1.55 var(--font-mono);
   white-space: pre-wrap;
 }
 

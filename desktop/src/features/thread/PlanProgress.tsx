@@ -130,7 +130,7 @@ export function PlanProgress({ plan }: PlanProgressProps) {
         }}
       >
         <span data-complete={complete}>
-          {complete ? <Check size={13} /> : <Circle size={13} />}
+          {complete ? <Check size={14} /> : <Circle size={14} />}
         </span>
         {complete ? "Plan complete" : `Step ${index + 1} / ${plan.steps.length}`}
       </button>

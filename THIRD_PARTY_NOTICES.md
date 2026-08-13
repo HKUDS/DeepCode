@@ -38,6 +38,18 @@ Icons designed by The Icon Tree from Flaticon.
 These image assets are presentation-only and do not participate in Agent,
 Session, protocol, or execution behavior.
 
+## Phosphor Icons
+
+DeepCode Desktop includes two outline marks from the **Phosphor Icons** core
+set, used for the Plugins and Skills empty states.
+
+- Source: https://github.com/phosphor-icons/core
+- Package: `@phosphor-icons/core` 2.1.1
+- License: MIT — Copyright (c) 2023 Phosphor Icons
+
+These image assets are presentation-only and do not participate in Agent,
+Session, protocol, or execution behavior.
+
 ## Bundled Agent Skills
 
 DeepCode bundles upstream Agent Skills from the following repositories. The
