@@ -30,14 +30,14 @@
 }
 
 .emptyRail span {
-  font-size: 10.5px;
-  font-weight: 650;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-bold);
 }
 
 .emptyRail small {
   overflow: hidden;
   color: var(--text-tertiary);
-  font-size: 9.5px;
+  font-size: var(--text-2xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -82,7 +82,7 @@
   width: 23px;
   height: 23px;
   place-items: center;
-  border-radius: 8px;
+  border-radius: var(--radius-xs);
   background: var(--signal-faint);
   color: var(--signal);
 }
@@ -113,8 +113,8 @@
 .summaryText strong {
   overflow: hidden;
   color: var(--text-primary);
-  font-size: 10.5px;
-  font-weight: 650;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-bold);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -125,7 +125,7 @@
   align-items: center;
   gap: 4px;
   color: var(--text-tertiary);
-  font: 8.5px var(--font-mono);
+  font: var(--text-micro) var(--font-mono);
 }
 
 .summaryText i {
@@ -138,23 +138,23 @@
   height: 3px;
   overflow: hidden;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   appearance: none;
   background: var(--surface-inset);
 }
 
 .summary progress::-webkit-progress-bar {
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--surface-inset);
 }
 
 .summary progress::-webkit-progress-value {
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--signal);
 }
 
 .summary progress::-moz-progress-bar {
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--signal);
 }
 
@@ -172,10 +172,10 @@
   align-items: center;
   gap: 5px;
   padding: 0 8px;
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   color: var(--text-secondary);
-  font-size: 9.5px;
-  font-weight: 600;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
 }
 
 .actions button:hover:not(:disabled),
@@ -205,7 +205,7 @@
   align-items: flex-start;
   gap: 6px;
   color: var(--text-secondary);
-  font-size: 9.5px;
+  font-size: var(--text-2xs);
   line-height: 1.45;
 }
 
@@ -218,7 +218,7 @@
 .details p {
   margin: 0;
   color: var(--text-tertiary);
-  font-size: 9.5px;
+  font-size: var(--text-2xs);
   line-height: 1.45;
 }
 
@@ -227,7 +227,7 @@
   gap: 6px;
   padding: 9px 10px;
   border: 1px solid var(--border-subtle);
-  border-radius: 11px;
+  border-radius: var(--radius-sm);
   background: var(--surface-inset);
 }
 
@@ -240,14 +240,14 @@
 
 .outcome > header strong {
   color: var(--text-primary);
-  font-size: 10px;
-  font-weight: 650;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-bold);
 }
 
 .outcome > header small,
 .outcome > small {
   color: var(--text-tertiary);
-  font: 8.5px var(--font-mono);
+  font: var(--text-micro) var(--font-mono);
 }
 
 .outcome code {
@@ -262,10 +262,10 @@
 
 .evidence > span {
   color: var(--text-tertiary);
-  font-size: 8.5px;
-  font-weight: 650;
+  font-size: var(--text-micro);
+  font-weight: var(--weight-bold);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: var(--tracking-caps);
 }
 
 .evidence button {
@@ -275,7 +275,7 @@
   align-items: center;
   gap: 5px;
   padding: 5px 7px;
-  border-radius: 8px;
+  border-radius: var(--radius-xs);
   color: var(--text-secondary);
   text-align: left;
 }
@@ -291,7 +291,7 @@
 
 .evidence button span {
   overflow: hidden;
-  font-size: 9px;
+  font-size: var(--text-micro);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -312,7 +312,7 @@
   gap: 11px;
   padding: 14px;
   border: 1px solid var(--border-strong);
-  border-radius: 18px;
+  border-radius: var(--radius-lg);
   background: var(--surface-raised);
   box-shadow: var(--shadow-menu);
 }
@@ -332,13 +332,13 @@
 
 .editor > header strong {
   font-family: var(--font-display);
-  font-size: 13px;
-  letter-spacing: -0.015em;
+  font-size: var(--text-base);
+  letter-spacing: var(--tracking-tight);
 }
 
 .editor > header span {
   color: var(--text-tertiary);
-  font-size: 9.5px;
+  font-size: var(--text-2xs);
 }
 
 .editor > header button {
@@ -346,7 +346,7 @@
   width: 28px;
   height: 28px;
   place-items: center;
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   color: var(--text-tertiary);
 }
 
@@ -363,8 +363,8 @@
 .editor label > span,
 .editor legend {
   color: var(--text-secondary);
-  font-size: 9.5px;
-  font-weight: 650;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-bold);
 }
 
 .editor textarea,
@@ -372,11 +372,11 @@
   width: 100%;
   padding: 9px 10px;
   border: 1px solid var(--border-subtle);
-  border-radius: 11px;
+  border-radius: var(--radius-sm);
   outline: 0;
   background: var(--surface-code);
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.5;
 }
 
@@ -415,7 +415,7 @@
 
 .editor legend small {
   color: var(--text-tertiary);
-  font: 8px var(--font-mono);
+  font: var(--text-micro) var(--font-mono);
 }
 
 .skillList {
@@ -433,9 +433,9 @@
   gap: 4px;
   padding: 0 8px;
   border: 1px solid var(--border-subtle);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   color: var(--text-secondary);
-  font-size: 9px;
+  font-size: var(--text-micro);
 }
 
 .skillList button[aria-pressed="true"] {
@@ -454,10 +454,10 @@
   align-items: center;
   gap: 6px;
   padding: 0 11px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   color: var(--text-secondary);
-  font-size: 10px;
-  font-weight: 620;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-bold);
 }
 
 .editor > footer button:hover:not(:disabled) {

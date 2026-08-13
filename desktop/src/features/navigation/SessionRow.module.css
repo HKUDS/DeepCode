@@ -50,15 +50,15 @@
 }
 
 .copy strong {
-  font-size: 11.5px;
-  font-weight: 540;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
 }
 
 .beacon {
   width: 7px;
   height: 7px;
   border: 1.5px solid var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--surface-sidebar);
 }
 
@@ -88,7 +88,7 @@
   width: 25px;
   height: 25px;
   place-items: center;
-  border-radius: 8px;
+  border-radius: var(--radius-xs);
   color: var(--text-tertiary);
   opacity: 0;
 }
@@ -128,7 +128,7 @@
   outline: 0;
   background: var(--surface-raised);
   color: var(--text-primary);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   box-shadow: 0 0 0 3px var(--signal-soft);
 }
 
@@ -137,7 +137,7 @@
   width: 23px;
   height: 23px;
   place-items: center;
-  border-radius: 8px;
+  border-radius: var(--radius-xs);
   color: var(--text-secondary);
 }
 
@@ -167,9 +167,9 @@
   align-items: center;
   gap: 8px;
   padding: 0 10px;
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   text-align: left;
 }
 
@@ -192,14 +192,14 @@
   gap: 3px;
   margin: 0;
   color: var(--text-primary);
-  font-size: 12px;
-  font-weight: 650;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
 }
 
 .confirmation p span {
   color: var(--text-tertiary);
-  font-size: 10.5px;
-  font-weight: 400;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-regular);
   line-height: 1.4;
 }
 
@@ -213,9 +213,9 @@
 .confirmation button {
   min-height: 34px;
   padding: 0 11px;
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   color: var(--text-secondary);
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
 }
 
 .confirmation button:hover:not(:disabled) {

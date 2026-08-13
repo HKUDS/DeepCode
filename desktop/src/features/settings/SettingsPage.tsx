@@ -491,7 +491,7 @@ export function SettingsPage({
               }
               onClick={() => void verifyDefaultModel()}
             >
-              <FlaskConical size={13} />
+              <FlaskConical size={14} />
               {verifyingModel ? "Verifying…" : "Save and verify model"}
             </button>
           </footer>
@@ -693,6 +693,7 @@ export function SettingsPage({
           <strong>Visual credits</strong>
           <small>
             Selected outline accents designed by The Icon Tree from Flaticon.
+            Plugins and Skills empty-state marks from Phosphor Icons (MIT).
           </small>
         </p>
       </aside>

@@ -36,8 +36,8 @@
   place-items: center;
   padding: 24px;
   color: var(--text-tertiary);
-  font: 11.5px var(--font-mono);
-  letter-spacing: 0.03em;
+  font: var(--text-xs) var(--font-mono);
+  letter-spacing: var(--tracking-wide);
 }
 
 .loadingSurface[data-compact="true"] {
@@ -63,17 +63,19 @@
   border-radius: var(--radius-pill);
   background: var(--surface-code);
   color: var(--text-secondary) !important;
-  font: 560 10px var(--font-mono) !important;
-  letter-spacing: 0.01em;
+  font: var(--weight-semibold) var(--text-2xs) var(--font-mono) !important;
+  letter-spacing: var(--tracking-normal);
 }
 
 .startState h2 {
   margin: 0;
   color: var(--text-primary);
   font-family: var(--font-display);
-  font-size: clamp(30px, 3.2vw, 38px);
-  font-weight: 680;
-  letter-spacing: -0.045em;
+  /* Fluid, so it sits outside the discrete scale — but still rem, so it tracks
+     --font-size-base along with everything else. */
+  font-size: clamp(2.15rem, 3.2vw, 2.7rem);
+  font-weight: var(--weight-display);
+  letter-spacing: var(--tracking-display);
   line-height: 1.08;
 }
 
@@ -81,7 +83,7 @@
   max-width: 540px;
   margin: 17px 0 28px;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 1.68;
 }
 
@@ -100,8 +102,8 @@
   border-radius: var(--radius-md);
   background: var(--text-primary);
   color: var(--text-inverse);
-  font-size: 12.5px;
-  font-weight: 650;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
   box-shadow: 0 6px 16px rgb(27 34 30 / 12%);
   transition:
     transform 150ms ease,
@@ -115,7 +117,7 @@
 
 .startActions > span {
   color: var(--text-tertiary);
-  font: 10.5px var(--font-mono);
+  font: var(--text-2xs) var(--font-mono);
 }
 
 .reviewPane {

@@ -43,7 +43,7 @@ function CodeBlock({ code, language }: CodeBlockProps) {
       <figcaption>
         <span>{language || "text"}</span>
         <button type="button" onClick={() => void copy()} aria-label="Copy code">
-          {copied ? <Check size={13} /> : <Copy size={13} />}
+          {copied ? <Check size={14} /> : <Copy size={14} />}
           {copied ? "Copied" : "Copy"}
         </button>
       </figcaption>

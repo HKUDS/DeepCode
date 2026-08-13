@@ -200,7 +200,7 @@ export function ModelPicker({
           <strong>{effectiveModel || "Configured model"}</strong>
           <em>{effortLabel(effectiveEffort)}</em>
         </span>
-        <ChevronDown size={11} />
+        <ChevronDown size={12} />
       </button>
 
       {open ? (
@@ -220,7 +220,7 @@ export function ModelPicker({
               disabled={!selectedConnectionId || loadingModels}
               aria-label="Refresh model catalog"
             >
-              <RefreshCw size={13} />
+              <RefreshCw size={14} />
             </button>
           </header>
 
@@ -251,7 +251,7 @@ export function ModelPicker({
           </label>
 
           <label className={styles.search}>
-            <Search size={13} />
+            <Search size={14} />
             <span>Search models</span>
             <input
               value={query}

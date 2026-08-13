@@ -21,12 +21,12 @@
 
 .operation strong {
   color: var(--text-primary);
-  font: 11.5px var(--font-mono);
+  font: var(--text-xs) var(--font-mono);
 }
 
 .operation small {
   color: var(--text-tertiary);
-  font-size: 9.5px;
+  font-size: var(--text-2xs);
   text-transform: capitalize;
 }
 
@@ -34,7 +34,7 @@
 .resolution {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   line-height: 1.62;
 }
 
@@ -50,8 +50,8 @@
   padding: 8px 10px;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 10.5px;
-  font-weight: 580;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
 }
 
 .arguments pre {
@@ -62,7 +62,7 @@
   border-top: 1px solid var(--border-subtle);
   background: var(--surface-code);
   color: var(--text-secondary);
-  font: 10.5px/1.62 var(--font-mono);
+  font: var(--text-2xs)/1.62 var(--font-mono);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -81,8 +81,8 @@
   border-radius: var(--radius-sm);
   background: var(--surface-raised);
   color: var(--attention);
-  font-size: 10.5px;
-  font-weight: 620;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-bold);
 }
 
 .actions button:hover:not(:disabled) {
@@ -98,6 +98,6 @@
 .resolution {
   margin-top: 10px;
   color: var(--text-tertiary);
-  font: 9px var(--font-mono);
+  font: var(--text-micro) var(--font-mono);
   text-transform: capitalize;
 }

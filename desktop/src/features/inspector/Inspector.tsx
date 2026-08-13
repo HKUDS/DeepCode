@@ -132,7 +132,7 @@ export function Inspector({
         onClick={onClose}
         aria-label="Close review panel"
       >
-        <X size={15} />
+        <X size={16} />
       </button>
 
       <div className={styles.panel}>

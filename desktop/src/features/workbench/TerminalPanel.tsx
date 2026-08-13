@@ -48,14 +48,19 @@ export function TerminalPanel({
         cursorBlink: true,
         convertEol: true,
         fontFamily: '"SFMono-Regular", Consolas, monospace',
+        // Left alone on purpose: the fit addon derives cols/rows from these,
+        // and those numbers are sent to the PTY. Colour below is canvas-only.
         fontSize: 11,
         lineHeight: 1.25,
         scrollback: 4000,
+        // xterm paints its own canvas, so these cannot be CSS variables. They
+        // are the literal values of the --*-terminal tokens in tokens.css;
+        // when they disagree, a seam shows between the panel and the terminal.
         theme: {
-          background: "#171a20",
-          foreground: "#e8ebf0",
-          cursor: "#7f9aff",
-          selectionBackground: "#3659d955",
+          background: "#151816",
+          foreground: "#e6eae7",
+          cursor: "#929cff",
+          selectionBackground: "#4d5bd555",
         },
       });
       const fitAddon = new XTermFitAddon();

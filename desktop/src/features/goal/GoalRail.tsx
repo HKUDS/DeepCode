@@ -109,7 +109,7 @@ export function GoalRail({
         onClick={() => openEditor()}
         disabled={!enabled || busy}
       >
-        <Target size={13} />
+        <Target size={14} />
         <span>Set a Goal</span>
         <small>Keep a durable outcome across ordinary Turns</small>
       </button>
@@ -157,7 +157,7 @@ export function GoalRail({
             ) : (
               <span />
             )}
-            {expanded ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
+            {expanded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
           </button>
           <div className={styles.actions}>
             {goal.status === "active" ? (
@@ -262,7 +262,7 @@ export function GoalRail({
                           onClick={() => onSelectEvidence(evidence.itemId)}
                           title={`Open ${evidence.kind.replaceAll("_", " ")} details`}
                         >
-                          <Check size={11} />
+                          <Check size={12} />
                           <span>{evidence.summary}</span>
                         </button>
                       ))}
@@ -276,7 +276,7 @@ export function GoalRail({
                     const skill = skills.find((candidate) => candidate.id === skillId);
                     return (
                       <li key={skillId}>
-                        <Check size={11} />
+                        <Check size={12} />
                         {skill?.name ?? shortId(skillId)}
                       </li>
                     );
@@ -295,7 +295,7 @@ export function GoalRail({
                 }}
                 disabled={busy}
               >
-                <Trash2 size={11} />
+                <Trash2 size={12} />
                 Clear Goal
               </button>
             </div>
@@ -351,7 +351,7 @@ export function GoalRail({
           {selectableSkills.length ? (
             <fieldset>
               <legend>
-                <Sparkles size={11} />
+                <Sparkles size={12} />
                 Skills
                 <small>
                   {skillIds.length}/{MAX_GOAL_SKILLS}
@@ -376,7 +376,7 @@ export function GoalRail({
                       }
                       title={skill.description}
                     >
-                      {selected ? <Check size={10} /> : null}
+                      {selected ? <Check size={12} /> : null}
                       {skill.name}
                     </button>
                   );

@@ -24,13 +24,13 @@
 
 .copy strong {
   color: var(--text-primary);
-  font: 9.5px var(--font-mono);
+  font: var(--text-2xs) var(--font-mono);
 }
 
 .copy span {
   overflow: hidden;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.45;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -52,8 +52,8 @@
   border-radius: var(--radius-sm);
   background: var(--surface-raised);
   color: var(--danger);
-  font-size: 10.5px;
-  font-weight: 610;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-bold);
 }
 
 .actions button:hover:not(:disabled) {

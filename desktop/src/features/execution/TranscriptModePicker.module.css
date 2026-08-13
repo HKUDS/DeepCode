@@ -24,6 +24,6 @@
   outline: 0;
   background: transparent;
   color: inherit;
-  font: 9px var(--font-mono);
+  font: var(--text-micro) var(--font-mono);
   text-transform: capitalize;
 }
