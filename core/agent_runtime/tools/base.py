@@ -178,6 +178,18 @@ class Tool(ABC):
         return False
 
     @property
+    def timeout_s(self) -> float | None:
+        """Wall-clock budget for one ``execute()`` call, or ``None`` for none.
+
+        Declared here rather than enforced here: the runner arms the deadline
+        around dispatch and turns its expiry into a structured ``TOOL_TIMEOUT``
+        result the model can read and react to — never an exception that ends
+        the run. A tool that owns a finer-grained budget internally (MCP's
+        per-call timeout) simply leaves this ``None``.
+        """
+        return None
+
+    @property
     def concurrency_safe(self) -> bool:
         return self.read_only and not self.exclusive
 
