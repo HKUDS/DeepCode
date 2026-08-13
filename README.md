@@ -144,6 +144,24 @@ Skills, permissions, Goals, and Automations. See the
 
 ## News
 
+**2026-08-13 · Desktop typography, themes, and native controls**
+
+- **Make the type-size preference actually resize the app.** Every interface
+  size now derives from one rem-based scale, so the Appearance slider moves the
+  whole window. It previously moved almost nothing: 255 hardcoded pixel values
+  ignored it, and the smallest labels sat at 7px.
+- **Pick from eight themes, including high contrast.** Light, Dark, Paper, and
+  Midnight are joined by two terracotta palettes and a WCAG AAA high-contrast
+  option. Tests compare each palette against the complete token set, so a theme
+  cannot half-apply and leave a stray default showing through.
+- **See one design language rather than the operating system's.** Sliders,
+  selects, and focus rings now follow the active theme instead of falling back
+  to platform chrome, and an explicit theme choice moves `color-scheme` with it
+  so native controls stop rendering in the OS scheme.
+- **Read the quiet text.** The light palette's secondary tones and every accent
+  colour were refitted to clear WCAG AA against the surfaces they actually sit
+  on, several of which previously measured under 3:1.
+
 **2026-08-12 · Reviewed upstream core Skills**
 
 - **Start with reviewed upstream Skills.** DeepCode now bundles eight pinned,
