@@ -60,6 +60,15 @@ def _parse_fork_turns(value: Any) -> str | int:
                 "inherits: 'none' (default, fresh), 'all', or a number N for the "
                 "last N turns. Use it when the subtask needs your prior context.",
             },
+            "backend": {
+                "type": "string",
+                "enum": ["native", "codex"],
+                "description": "Which agent runs the subtask: 'native' "
+                "(default, a DeepCode sub-agent) or 'codex' (the Codex CLI, "
+                "with its own model and policies). A codex sub-agent gets ONLY "
+                "the task text and the workspace — no conversation context and "
+                "no send_message — so write it a fully self-contained task.",
+            },
         },
         "required": ["name", "task"],
     }
@@ -94,9 +103,14 @@ class SpawnAgentTool(Tool):
         name = str(kwargs.get("name") or "").strip() or None
         isolate = bool(kwargs.get("isolate", True))
         fork_turns = _parse_fork_turns(kwargs.get("fork_turns"))
+        backend = str(kwargs.get("backend") or "native").strip().lower()
         try:
             agent_id = self._control.spawn(
-                task, name=name, isolate=isolate, fork_turns=fork_turns
+                task,
+                name=name,
+                isolate=isolate,
+                fork_turns=fork_turns,
+                backend=backend,
             )
         except AgentLimitError as exc:
             return f"Error: {exc}"
@@ -181,7 +195,14 @@ class ListAgentsTool(Tool):
         agents = self._control.all()
         if not agents:
             return "No sub-agents have been spawned."
-        return "\n".join(f"- {a.id}: {a.status} — {a.task[:80]}" for a in agents)
+        # The backend is part of the row because it decides what the model may
+        # do next: only native sub-agents accept send_message.
+        return "\n".join(
+            f"- {a.id}: {a.status}"
+            + (f" [{a.backend}]" if a.backend != "native" else "")
+            + f" — {a.task[:80]}"
+            for a in agents
+        )
 
 
 @tool_parameters(

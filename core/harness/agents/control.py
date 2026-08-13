@@ -60,11 +60,23 @@ class DuplicateAgentError(AgentLimitError):
     """A sub-agent is already running this exact task (a re-spawn is redundant)."""
 
 
+# Sub-agent execution backends. "native" builds an in-process AgentSession;
+# "codex" delegates the task to the Codex CLI (see codex_backend). External
+# backends are separate products with their own credentials and policy: they
+# take a self-contained text task plus the workspace cwd and return only the
+# final answer — no parent context, no send_message channel. Requests that
+# need either are rejected loud at spawn time, never accepted-then-ignored.
+NATIVE_BACKEND = "native"
+CODEX_BACKEND = "codex"
+_BACKENDS = (NATIVE_BACKEND, CODEX_BACKEND)
+
+
 @dataclass
 class SubAgent:
     id: str
     task: str
     isolate: bool = True
+    backend: str = NATIVE_BACKEND
     status: str = _RUNNING
     result: str = ""
     seed_history: list = field(default_factory=list, repr=False)
@@ -164,6 +176,14 @@ class AgentControl:
         sub = self._agents.get(agent_id)
         if sub is None:
             return f"no such agent: {agent_id}"
+        if sub.backend != NATIVE_BACKEND:
+            # External CLIs take one task and answer once; there is no inbox
+            # on their side, so accepting the message would silently drop it.
+            return (
+                f"Error: {agent_id} runs on the {sub.backend} backend, which "
+                "accepts no messages after start — its result will arrive on "
+                "its own, or interrupt_agent it."
+            )
         if not sub.running:
             return f"{agent_id} already finished ({sub.status}); cannot deliver"
         if not message.strip():
@@ -207,6 +227,7 @@ class AgentControl:
         name: str | None = None,
         isolate: bool = True,
         fork_turns: str | int = "none",
+        backend: str = NATIVE_BACKEND,
     ) -> str:
         """Start a sub-agent in the background and return its id (non-blocking).
 
@@ -219,6 +240,29 @@ class AgentControl:
         :class:`DuplicateAgentError` when a matching subtask is already running,
         :class:`AgentLimitError` when the concurrency limit is reached.
         """
+        if backend not in _BACKENDS:
+            raise AgentLimitError(
+                f"unknown backend {backend!r}; available: {', '.join(_BACKENDS)}"
+            )
+        if backend != NATIVE_BACKEND and fork_turns != "none":
+            # dsh's capability rule: a request needing a capability the
+            # backend lacks fails loud — external CLIs never inherit parent
+            # conversation, so silently dropping it would mislead the model
+            # into under-specifying the task.
+            raise AgentLimitError(
+                f"the {backend} backend does not inherit parent context; "
+                "use fork_turns='none' and write a self-contained task"
+            )
+        if backend == CODEX_BACKEND:
+            from core.harness.agents.codex_backend import (
+                CodexBackendError,
+                resolve_codex_executable,
+            )
+
+            try:
+                resolve_codex_executable()
+            except CodexBackendError as exc:
+                raise AgentLimitError(str(exc)) from exc
         # Dedup against any prior subtask with this key that is still running OR
         # already succeeded — re-spawning finished work is the exact waste a real
         # model produced (it re-spawned modules it had already built). A FAILED
@@ -247,6 +291,7 @@ class AgentControl:
             id=agent_id,
             task=task,
             isolate=isolate,
+            backend=backend,
             seed_history=self._fork_history(fork_turns),
             dedup_key=key,
         )
@@ -282,13 +327,7 @@ class AgentControl:
             if sub.isolate:
                 sub.result = await self._run_isolated(sub)
             else:
-                sub.result = await self._run_subagent(
-                    sub.task,
-                    self._workspace,
-                    seed_history=sub.seed_history,
-                    inbox_drainer=self._make_inbox_drainer(sub),
-                    agent_id=sub.id,
-                )
+                sub.result = await self._run_task_in(sub, self._workspace)
             sub.status = _DONE
         except asyncio.CancelledError:
             sub.status = _FAILED
@@ -309,13 +348,7 @@ class AgentControl:
             wt.ensure_base()
             tree = wt.create(sub.id)
         try:
-            summary = await self._run_subagent(
-                sub.task,
-                tree,
-                seed_history=sub.seed_history,
-                inbox_drainer=self._make_inbox_drainer(sub),
-                agent_id=sub.id,
-            )
+            summary = await self._run_task_in(sub, tree)
             async with self._git_lock:
                 merge = wt.merge(sub.id)
         finally:
@@ -336,6 +369,25 @@ class AgentControl:
                 f"reconcile manually)\n{summary}"
             )
         return f"(isolated, merge blocked: {merge.detail})\n{summary}"
+
+    async def _run_task_in(self, sub: SubAgent, workspace: str) -> str:
+        """Dispatch one sub-agent's task to its backend in ``workspace``.
+
+        Both execution modes (shared workspace and isolated worktree) funnel
+        through here, so a backend never needs to know about isolation — it
+        only ever sees a directory to work in.
+        """
+        if sub.backend == CODEX_BACKEND:
+            from core.harness.agents.codex_backend import run_codex_subagent
+
+            return await run_codex_subagent(sub.task, workspace)
+        return await self._run_subagent(
+            sub.task,
+            workspace,
+            seed_history=sub.seed_history,
+            inbox_drainer=self._make_inbox_drainer(sub),
+            agent_id=sub.id,
+        )
 
     async def _run_subagent(
         self,
