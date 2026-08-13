@@ -3,9 +3,17 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { THEME_PREFERENCES } from "../app/appearance";
+
 // Vitest runs from the Vite root (desktop/); jsdom leaves import.meta.url as
 // a non-file URL, so resolve against the project root instead.
-const CSS = readFileSync(resolve("src/styles/tokens.css"), "utf8");
+// Comments are stripped first: the declaration regex below is not a CSS parser,
+// so a `word:` inside prose swallows everything up to the next real semicolon —
+// and with it the declaration that followed.
+const CSS = readFileSync(resolve("src/styles/tokens.css"), "utf8").replace(
+  /\/\*[\s\S]*?\*\//g,
+  "",
+);
 
 /** Declarations inside the first `{ … }` that follows `selector`. */
 function declarationsAfter(selector: string): Map<string, string> {
@@ -60,6 +68,61 @@ describe("dark palette", () => {
   it("covers the palette rather than a token or two", () => {
     // A guard against the parser silently matching an empty block.
     expect(fromMediaQuery.size).toBeGreaterThan(25);
+  });
+});
+
+describe("optional palettes", () => {
+  // A theme that forgets a token does not fail loudly — the base :root value
+  // shows through, so one component keeps a light surface inside a dark
+  // palette and nothing anywhere reports it. Dark is the reference set because
+  // it overrides exactly the palette and nothing else.
+  const reference = [...declarationsAfter(':root[data-theme="dark"]').keys()];
+
+  // Driven off the real list, so adding a name to THEME_PREFERENCES without
+  // writing its palette fails here rather than shipping a half-themed app.
+  // Two names are exempt: "system" sets no attribute at all, and "light" is
+  // the base :root, so its block carries only `color-scheme`.
+  const palettes = THEME_PREFERENCES.filter(
+    (theme) => theme !== "system" && theme !== "light",
+  );
+
+  it("checks every theme the picker offers", () => {
+    expect(palettes.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it.each(palettes)("%s declares the whole palette", (theme) => {
+    const declared = [
+      ...declarationsAfter(`:root[data-theme="${theme}"]`).keys(),
+    ];
+    expect(declared.sort()).toEqual([...reference].sort());
+  });
+
+  it.each(palettes)("%s pins its own color-scheme", (theme) => {
+    // Native controls follow this, not the custom properties.
+    expect(
+      declarationsAfter(`:root[data-theme="${theme}"]`).get("color-scheme"),
+    ).toMatch(/^(light|dark)$/);
+  });
+});
+
+describe("terminal palette", () => {
+  // xterm paints a canvas, so it takes colours as JS config and cannot read a
+  // custom property. That makes TerminalPanel.tsx a second copy of these four
+  // tokens, and the two had already drifted apart — the panel green (#171b19),
+  // the terminal blue (#171a20) — leaving a visible seam between them.
+  const TERMINAL = readFileSync(
+    resolve("src/features/workbench/TerminalPanel.tsx"),
+    "utf8",
+  );
+  const rootDeclarations = declarationsAfter(":root {");
+
+  it.each([
+    ["--surface-terminal", "background"],
+    ["--text-terminal", "foreground"],
+  ])("gives %s the same value as xterm's %s", (variable, option) => {
+    const token = rootDeclarations.get(variable);
+    expect(token).toMatch(/^#[0-9a-f]{6}$/);
+    expect(TERMINAL).toContain(`${option}: "${token}"`);
   });
 });
 

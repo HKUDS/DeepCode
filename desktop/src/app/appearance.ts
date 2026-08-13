@@ -14,13 +14,33 @@
 
 const STORAGE_KEY = "deepcode.desktop.appearance.v1";
 
-/** Follow the OS, or pin one scheme regardless of it. */
-export type ThemePreference = "system" | "light" | "dark";
+/**
+ * Follow the OS, or pin one palette regardless of it.
+ *
+ * Each name past "system" is also a `:root[data-theme="…"]` block in
+ * tokens.css; adding one is those two edits and nothing else, because the
+ * value only ever reaches CSS. Dropping one is safe too — `sanitize` returns
+ * a stored name that is no longer listed to the default.
+ */
+export type ThemePreference =
+  | "system"
+  | "light"
+  | "dark"
+  | "paper"
+  | "midnight"
+  | "claude"
+  | "claude-dark"
+  | "contrast";
 
 export const THEME_PREFERENCES: readonly ThemePreference[] = [
   "system",
   "light",
   "dark",
+  "paper",
+  "midnight",
+  "claude",
+  "claude-dark",
+  "contrast",
 ];
 
 export interface AppearanceState {
@@ -88,8 +108,9 @@ const THEME: AppearanceSetting<"theme"> = {
   key: "theme",
   label: "Theme",
   description:
-    "Light and dark are both built in. 'System' follows the OS setting; the " +
-    "other two override it.",
+    "'System' follows the OS setting; every other choice overrides it. Paper " +
+    "is warmer and lower in blue, Midnight deeper and cooler, Claude an ivory " +
+    "and terracotta pair. High contrast clears WCAG AAA throughout.",
   cssVariable: null,
   sanitize: (value) =>
     THEME_PREFERENCES.includes(value as ThemePreference)
