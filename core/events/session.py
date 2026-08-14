@@ -386,6 +386,7 @@ class AgentSession:
         permission_checker: Any | None = None,
         approval_callback: Any | None = None,
         injection_callback: Any | None = None,
+        context_note_sink: Any | None = None,
         hooks_engine: Any | None = None,
         agent_context: tuple[str, str] | None = None,
         context_window_tokens: int | None = None,
@@ -408,6 +409,9 @@ class AgentSession:
         self._approval_callback = approval_callback
         # Drains delegated sub-agents' results into this turn (see AgentControl).
         self._injection_callback = injection_callback
+        # Records mid-turn model-visible messages into canonical history
+        # (model-visible means logged); None keeps the kernel host-agnostic.
+        self._context_note_sink = context_note_sink
         # External-command hooks (C3). Fires SessionStart (once) + UserPromptSubmit
         # (each prompt) here, and PreToolUse/PostToolUse in the runner. None when
         # no hooks are configured, so the whole feature is dormant at zero cost.
@@ -886,6 +890,7 @@ class AgentSession:
             permission_checker=self._permission_checker,
             approval_callback=self._approval_callback,
             injection_callback=self._injection_callback,
+            context_note_sink=self._context_note_sink,
             pre_tool_hook=pre_tool_hook,
             post_tool_hook=post_tool_hook,
             permission_request_hook=permission_request_hook,

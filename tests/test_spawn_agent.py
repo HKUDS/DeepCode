@@ -23,6 +23,7 @@ from core.harness.agents.control import (
     AgentControl,
     AgentLimitError,
     DuplicateAgentError,
+    SubAgent,
 )
 from core.harness.tools.spawn_agent import (
     InterruptAgentTool,
@@ -43,32 +44,16 @@ class _HeldControl(AgentControl):
         self.release = asyncio.Event()
         self.last_seed = None
 
-    async def _run_subagent(
-        self,
-        task,
-        workspace,
-        *,
-        seed_history=None,
-        inbox_drainer=None,
-        agent_id="subagent",
-    ):
-        self.last_seed = seed_history
+    async def _run_subagent(self, sub, workspace):
+        self.last_seed = sub.seed_history or None
         await self.release.wait()
-        return f"did: {task}"
+        return f"did: {sub.task}"
 
 
 class _WritingControl(AgentControl):
     """Sub-agent writes a file (to exercise isolate + merge)."""
 
-    async def _run_subagent(
-        self,
-        task,
-        workspace,
-        *,
-        seed_history=None,
-        inbox_drainer=None,
-        agent_id="subagent",
-    ):
+    async def _run_subagent(self, sub, workspace):
         (Path(workspace) / "feature.py").write_text("VALUE = 1\n")
         return "wrote feature.py"
 
@@ -127,7 +112,7 @@ def test_application_backed_result_uses_the_active_turn_sink(tmp_path):
 
         active_turn_id = None
         second_id = ctrl.spawn("t2", isolate=False)
-        await ctrl.get(second_id).handle
+        await ctrl.get(second_id).settled.wait()
         assert len(delivered) == 1
         assert await ctrl.drain_injections() == []
 
@@ -145,8 +130,8 @@ def test_duplicate_named_subtask_running_or_done_is_refused(tmp_path):
         assert ctrl.active_count() == 1
         # let it finish → done
         ctrl.release.set()
-        await ctrl.get("parser").handle
-        assert ctrl.get("parser").status == "done"
+        await ctrl.get("parser").settled.wait()
+        assert ctrl.get("parser").status == "idle"
         # DONE → still refused (re-spawning completed work is the real over-spawn)
         with pytest.raises(DuplicateAgentError):
             ctrl.spawn("redo the parser", name="parser", isolate=False)
@@ -159,9 +144,7 @@ def test_duplicate_named_subtask_running_or_done_is_refused(tmp_path):
 
 def test_failed_subtask_can_be_retried(tmp_path):
     class _FailControl(AgentControl):
-        async def _run_subagent(
-            self, task, workspace, *, seed_history=None, inbox_drainer=None
-        ):
+        async def _run_subagent(self, sub, workspace):
             raise RuntimeError("boom")
 
     async def scenario():
@@ -203,12 +186,13 @@ def test_isolated_subagent_merges_back(tmp_path):
     async def scenario():
         ctrl = _WritingControl(str(ws))
         aid = ctrl.spawn("build feature", isolate=True)
-        await ctrl.get(aid).handle  # let it finish
-        return ctrl.get(aid)
+        sub = ctrl.get(aid)
+        await sub.settled.wait()  # first turn done; child parks idle
+        return sub.status, sub.result
 
-    sub = asyncio.run(scenario())
-    assert sub.status == "done"
-    assert "merged cleanly" in sub.result
+    status, result = asyncio.run(scenario())
+    assert status == "idle"
+    assert "merged cleanly" in result
     assert (ws / "feature.py").read_text() == "VALUE = 1\n"  # landed in the base
 
 
@@ -289,10 +273,11 @@ def test_fork_seed_reaches_subagent(tmp_path):
             ]
         )
         aid = ctrl.spawn("t", isolate=False, fork_turns="all")
-        await asyncio.sleep(0)  # sub-agent records its seed, then blocks
+        while ctrl.last_seed is None:  # the turn task records it, then blocks
+            await asyncio.sleep(0)
         seed = ctrl.last_seed
         ctrl.release.set()
-        await ctrl.get(aid).handle
+        await ctrl.get(aid).settled.wait()
         return seed
 
     assert asyncio.run(scenario()) == [
@@ -331,14 +316,14 @@ def test_interrupt_agent_tool(tmp_path):
         aid = ctrl.spawn("t", isolate=False)
         await asyncio.sleep(0)
         assert ctrl.active_count() == 1
-        handle = ctrl.get(aid).handle
         out = await InterruptAgentTool(ctrl).execute(agent=aid)
-        await asyncio.gather(handle, return_exceptions=True)  # let cancel settle
+        await ctrl.get(aid).settled.wait()  # the soft interrupt parks it idle
         return out, ctrl.get(aid).status
 
     out, status = asyncio.run(scenario())
     assert "interrupt requested" in out
-    assert status == "failed"
+    assert "send_message to redirect" in out
+    assert status == "idle"
     # unknown agent is reported, not crashed
     assert "no such agent" in asyncio.run(
         InterruptAgentTool(_HeldControl(str(tmp_path))).execute(agent="nope")
@@ -357,14 +342,18 @@ def test_send_message_to_running_and_finished(tmp_path):
         # its own inbox drainer would inject the message on its next step
         drainer = ctrl._make_inbox_drainer(sub)
         injected = await drainer()
-        # let it finish, then a second send must be refused
+        # let the turn finish: the child parks idle and a follow-up WAKES it
         ctrl.release.set()
-        await sub.handle
+        await sub.settled.wait()
+        resumed = await SendMessageTool(ctrl).execute(agent=aid, message="more")
+        # tear the child down: only then is a send actually refused
+        await ctrl.cancel_running()
         finished = await SendMessageTool(ctrl).execute(agent=aid, message="late")
-        return out, drained_before, injected, finished
+        return out, drained_before, injected, resumed, finished
 
-    out, inbox, injected, finished = asyncio.run(scenario())
+    out, inbox, injected, resumed, finished = asyncio.run(scenario())
     assert "delivered" in out
+    assert "resumes" in resumed
     assert inbox == [("parent:agent-1:1", "use value 42")]
     assert injected == [
         SubagentMessage(
@@ -481,7 +470,8 @@ def test_subagent_inherits_parent_permission_and_approval(tmp_path, monkeypatch)
         approval_callback=approval,
     )
 
-    result = asyncio.run(control._run_subagent("task", str(tmp_path), agent_id="child"))
+    sub = SubAgent(id="child", task="task", isolate=False)
+    result = asyncio.run(control._run_subagent(sub, str(tmp_path)))
 
     assert result == "done"
     assert captured["permission_mode_override"] is PermissionMode.DEFAULT
@@ -521,7 +511,8 @@ def test_subagent_inherits_atomic_execution_security_profile(tmp_path, monkeypat
         approval_callback=approval,
     )
 
-    result = asyncio.run(control._run_subagent("task", str(tmp_path), agent_id="child"))
+    sub = SubAgent(id="child", task="task", isolate=False)
+    result = asyncio.run(control._run_subagent(sub, str(tmp_path)))
 
     assert result == "done"
     assert captured["execution_security_profile"] is profile
@@ -549,9 +540,10 @@ def test_subagent_closes_session_when_stream_fails(tmp_path, monkeypatch):
         lambda **_kwargs: (session, "model", object()),
     )
     control = AgentControl(str(tmp_path))
+    sub = SubAgent(id="x", task="task", isolate=False)
 
     with pytest.raises(RuntimeError, match="stream failed"):
-        asyncio.run(control._run_subagent("task", str(tmp_path)))
+        asyncio.run(control._run_subagent(sub, str(tmp_path)))
 
     assert session.closed is True
 
@@ -579,7 +571,8 @@ def test_subagent_closes_session_when_cancelled(tmp_path, monkeypatch):
             lambda **_kwargs: (session, "model", object()),
         )
         control = AgentControl(str(tmp_path))
-        task = asyncio.create_task(control._run_subagent("task", str(tmp_path)))
+        sub = SubAgent(id="x", task="task", isolate=False)
+        task = asyncio.create_task(control._run_subagent(sub, str(tmp_path)))
         await started.wait()
 
         task.cancel()

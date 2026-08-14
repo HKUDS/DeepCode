@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import inspect
+import json
+import os
+import re
 import threading
+import uuid
 from collections import OrderedDict
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
+
+from core.private_storage import ensure_private_directory, open_private_file
 
 from core.agent_runtime.goal_runtime import (
     GoalRuntimeContext,
@@ -325,6 +332,25 @@ class SessionRuntimeRegistry:
             create_kwargs["active_turn_id_provider"] = lambda: inputs.active_turn_id
         if _accepts_keyword(create, "runtime_input_sink"):
             create_kwargs["runtime_input_sink"] = inputs.put_transient
+        if _accepts_keyword(create, "subagent_transcript_sink"):
+            # The child-autopsy channel: every sub-agent turn dumps its full
+            # conversation under the parent Session's own directory, where
+            # Goal-ledger companion data already lives. Without it a failed
+            # child leaves nothing to inspect but a one-line error string.
+            create_kwargs["subagent_transcript_sink"] = self._subagent_transcript_sink(
+                canonical.session_id
+            )
+        if _accepts_keyword(create, "context_note_sink"):
+            # Model-visible means logged: the runner reports each mid-turn
+            # message it adds to model history that no service persisted —
+            # sub-agent results, repeat-call reminders — and this sink appends
+            # them to the canonical Session. Without it a resume rebuilds a
+            # history the model never actually saw (steering survives, these
+            # vanish). ``mark_persisted`` keeps the append from reading as a
+            # foreign process's write on the next acquire.
+            create_kwargs["context_note_sink"] = self._context_note_sink(
+                canonical.session_id, inputs
+            )
         goals_enabled = _accepts_keyword(create, "goal_runtime")
         if goals_enabled:
             create_kwargs["goal_runtime"] = goals
@@ -430,6 +456,89 @@ class SessionRuntimeRegistry:
                 return
             victim = self._runtimes.pop(victim_id)
             await victim.agent.aclose()
+
+    def _subagent_transcript_sink(self, session_id: str):
+        """A per-child transcript writer rooted in the Session's directory.
+
+        Transcripts are companion data, not canonical history: they live
+        beside the Session JSONL (like the Goal ledger) under ``subagents/``,
+        one file per child, replaced whole on every turn so the file is
+        always a complete, self-describing snapshot. ``session_guard`` gives
+        the same cross-process lock every other companion mutation takes.
+        """
+
+        def write(
+            agent_id: str,
+            task: str,
+            status: str,
+            messages: list[dict[str, Any]],
+        ) -> None:
+            safe_id = re.sub(r"[^A-Za-z0-9_-]+", "-", agent_id) or "subagent"
+            with self.store.session_guard(session_id) as directory:
+                if directory is None:
+                    return
+                transcripts = ensure_private_directory(directory / "subagents")
+                path = transcripts / f"{safe_id}.jsonl"
+                header = {
+                    "_type": "subagent_transcript",
+                    "agentId": agent_id,
+                    "task": task,
+                    "status": status,
+                    "updatedAt": datetime.now(UTC).isoformat(),
+                }
+                temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+                descriptor = open_private_file(
+                    temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                )
+                try:
+                    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                        for row in (header, *messages):
+                            json.dump(row, handle, ensure_ascii=False, default=str)
+                            handle.write("\n")
+                    os.replace(temporary, path)
+                except BaseException:
+                    temporary.unlink(missing_ok=True)
+                    raise
+
+        return write
+
+    def _context_note_sink(self, session_id: str, inputs: TurnInputMailbox):
+        """The runner's mid-turn persistence callback for one live Session."""
+
+        def note(content: str, source: str, *, already_in_history: bool = True) -> None:
+            text = str(content or "").strip()
+            if not text:
+                return
+            stored = self.store.append_message(
+                session_id,
+                "user",
+                text,
+                metadata={
+                    "schemaVersion": 3,
+                    "delivery": ("mid_turn" if already_in_history else "between_turns"),
+                    "source": source,
+                    **(
+                        {"turnId": inputs.active_turn_id}
+                        if inputs.active_turn_id
+                        else {}
+                    ),
+                },
+            )
+            if stored is None:
+                return
+            # ``already_in_history`` decides whether the live runtime's model
+            # history already contains this text. Mid-turn notes do (the
+            # runner appended them before reporting), so the count is synced
+            # to keep the resident history authoritative. A note written
+            # AFTER its Turn closed — a sub-agent result that lost the
+            # delivery race — is only in the canonical log, so the count is
+            # deliberately left stale: the next acquire sees the mismatch and
+            # reloads visible history, which is exactly what carries the
+            # message into the model's next Turn.
+            if already_in_history:
+                self.mark_persisted(session_id)
+
+        return note
 
     @staticmethod
     def _visible_history(session: Session) -> list[dict[str, Any]]:

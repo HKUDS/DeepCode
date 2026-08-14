@@ -19,7 +19,10 @@ from typing import Any
 
 from loguru import logger
 
-from core.agent_runtime.injections import runtime_input_to_provider_message
+from core.agent_runtime.injections import (
+    SubagentMessage,
+    runtime_input_to_provider_message,
+)
 from core.agent_runtime.helpers import (
     build_assistant_message,
     estimate_message_tokens,
@@ -29,6 +32,10 @@ from core.agent_runtime.helpers import (
     truncate_text,
 )
 from core.agent_runtime.hook import AgentHook, AgentHookContext
+from core.agent_runtime.repeat_guard import (
+    DEFAULT_THRESHOLDS as DEFAULT_REPEAT_THRESHOLDS,
+    RepeatCallTracker,
+)
 from core.agent_runtime.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
     build_finalization_retry_message,
@@ -116,6 +123,19 @@ class AgentRunSpec:
     max_iterations_message: str | None = None
     concurrent_tools: bool = False
     fail_on_tool_error: bool = False
+    # Advisory repeat-call reminders (see core.agent_runtime.repeat_guard):
+    # run lengths of identical consecutive tool calls that earn an escalating
+    # reminder instead of a hard stop. ``None`` disables the guard.
+    repeat_call_thresholds: tuple[int, ...] | None = DEFAULT_REPEAT_THRESHOLDS
+    # Model-visible means logged (the dsh session-log rule): mid-turn messages
+    # the runner itself adds to model history — injected sub-agent results and
+    # steering drained mid-turn, repeat-call reminders — reach the model but
+    # are invisible to the host's canonical persistence, so a resumed Session
+    # would silently rebuild a DIFFERENT history than the model actually saw.
+    # This optional callable ``(content: str, source: str) -> None`` lets the
+    # host record each one as it happens. A sink failure is logged and
+    # swallowed: persistence trouble must not abort the run it documents.
+    context_note_sink: Any | None = None
     workspace: Path | None = None
     session_key: str | None = None
     context_window_tokens: int | None = None
@@ -315,6 +335,17 @@ class AgentRunner:
         )
         return True
 
+    @staticmethod
+    def _note_context(spec: AgentRunSpec, content: str, source: str) -> None:
+        """Report one mid-turn model-visible message to the host's sink."""
+        if spec.context_note_sink is None:
+            return
+        try:
+            spec.context_note_sink(content, source)
+        except Exception:
+            # Persistence trouble must not abort the run it documents.
+            logger.exception("context_note_sink failed (source={})", source)
+
     async def _drain_injections(
         self,
         spec: AgentRunSpec,
@@ -339,6 +370,12 @@ class AgentRunner:
         injected_messages: list[dict[str, Any]] = []
         for item in items:
             message = runtime_input_to_provider_message(item)
+            # Model-visible means logged — but only for inputs nothing else
+            # persists. Steering and Goal updates are appended to the
+            # canonical Session by the services that accepted them; sub-agent
+            # results exist only in this run's memory until noted here.
+            if isinstance(item, SubagentMessage):
+                self._note_context(spec, str(message.get("content", "")), "subagent")
             if message.get("role") == "user" and "content" in message:
                 injected_messages.append(message)
                 continue
@@ -357,6 +394,11 @@ class AgentRunner:
         stop_reason = "completed"
         tool_events: list[dict[str, str]] = []
         external_lookup_counts: dict[str, int] = {}
+        repeat_tracker = (
+            RepeatCallTracker(spec.repeat_call_thresholds)
+            if spec.repeat_call_thresholds is not None
+            else None
+        )
         empty_content_retries = 0
         length_recovery_count = 0
         had_injections = False
@@ -559,6 +601,27 @@ class AgentRunner:
                     }
                     messages.append(tool_message)
                     completed_tool_results.append(tool_message)
+                if repeat_tracker is not None:
+                    # Observed at the result boundary so denied and failed
+                    # calls count too — a model hammering a rejected call is
+                    # exactly the loop worth interrupting. The reminder rides
+                    # a user message AFTER the results, so the model reads
+                    # what happened and then why it should change course.
+                    reminders = [
+                        reminder
+                        for tc in response.tool_calls
+                        if (reminder := repeat_tracker.observe(tc.name, tc.arguments))
+                        is not None
+                    ]
+                    if reminders:
+                        reminder_text = "\n\n".join(reminders)
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": reminder_text,
+                            }
+                        )
+                        self._note_context(spec, reminder_text, "repeat_guard")
                 if fatal_error is not None:
                     error = f"Error: {type(fatal_error).__name__}: {fatal_error}"
                     final_content = error
@@ -1090,8 +1153,58 @@ class AgentRunner:
                 event,
                 RuntimeError(prep_error) if spec.fail_on_tool_error else None,
             )
+        # Per-tool deadline (declared on Tool.timeout_s, enforced here so
+        # every tool gets one implementation). ``asyncio.timeout`` gives the
+        # attribution this needs for free: only OUR expired deadline becomes
+        # ``TimeoutError`` with ``expired()`` true — an outer cancellation
+        # passes through as ``CancelledError`` (re-raised below, unchanged),
+        # and a ``TimeoutError`` the tool raised itself fails ``expired()``
+        # and falls to the ordinary error path. Both mis-attributions would
+        # otherwise blame this deadline for a stop it did not cause.
+        declared = tool
+        if declared is None:
+            # ``spec.tools`` is a duck-typed seam (see ``prepare_call`` above):
+            # a minimal registry without ``get`` simply declares no budgets.
+            getter = getattr(spec.tools, "get", None)
+            declared = getter(tool_call.name) if callable(getter) else None
+        timeout_s = getattr(declared, "timeout_s", None)
         try:
-            if tool is not None:
+            if timeout_s is not None:
+                deadline = asyncio.timeout(timeout_s)
+                try:
+                    async with deadline:
+                        if tool is not None:
+                            result = await tool.execute(**params)
+                        else:
+                            result = await spec.tools.execute(tool_call.name, params)
+                except TimeoutError:
+                    if not deadline.expired():
+                        raise
+                    message = (
+                        f"Error: tool call timed out after {timeout_s:g}s. "
+                        "The call was cancelled; nothing further ran."
+                    )
+                    event = {
+                        "name": tool_call.name,
+                        "status": "timeout",
+                        "detail": f"exceeded declared budget of {timeout_s:g}s",
+                    }
+                    return await self._finish_tool(
+                        spec,
+                        tool_call,
+                        ToolResult(
+                            message + _HINT,
+                            is_error=True,
+                            metadata={
+                                "error_code": "TOOL_TIMEOUT",
+                                "timeout_s": timeout_s,
+                            },
+                        ),
+                        event,
+                        None,
+                        pre_contexts,
+                    )
+            elif tool is not None:
                 result = await tool.execute(**params)
             else:
                 result = await spec.tools.execute(tool_call.name, params)
