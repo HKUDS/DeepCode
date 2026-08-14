@@ -20,7 +20,9 @@ from typing import Any
 from loguru import logger
 
 from core.agent_runtime.injections import (
+    GoalObjectiveUpdated,
     SubagentMessage,
+    UserSteer,
     runtime_input_to_provider_message,
 )
 from core.agent_runtime.helpers import (
@@ -32,6 +34,7 @@ from core.agent_runtime.helpers import (
     truncate_text,
 )
 from core.agent_runtime.hook import AgentHook, AgentHookContext
+from core.agent_runtime.pruner import ToolResultPruner
 from core.agent_runtime.repeat_guard import (
     DEFAULT_THRESHOLDS as DEFAULT_REPEAT_THRESHOLDS,
     RepeatCallTracker,
@@ -62,8 +65,6 @@ _DEFAULT_MAX_ITERATIONS_MESSAGE = (
 _MAX_EMPTY_RETRIES = 2
 _MAX_LENGTH_RECOVERIES = 3
 _SNIP_SAFETY_BUFFER = 1024
-_MICROCOMPACT_KEEP_RECENT = 10
-_MICROCOMPACT_MIN_CHARS = 500
 
 # Summarization-based compaction (C4a). When the prompt nears the context
 # budget, a model call condenses the conversation into a handoff summary that
@@ -83,22 +84,12 @@ _SUMMARIZATION_PROMPT = (
     "- What remains to be done (clear next steps)\n"
     "- Any critical data, examples, file paths, or references needed to continue\n\n"
     "Be concise, structured, and focused on helping the next agent seamlessly "
-    "continue the work."
+    "continue the work. Respond with the summary text only; do not call tools."
 )
 _SUMMARY_PREFIX = (
     "An earlier agent worked on this task and produced the summary below of its "
     "progress and the state of the tools it used. Build on this work and avoid "
     "duplicating it. Here is the summary:"
-)
-_COMPACTABLE_TOOLS = frozenset(
-    {
-        "read_file",
-        "exec",
-        "grep",
-        "glob",
-        "web_fetch",
-        "list_dir",
-    }
 )
 _BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
 
@@ -128,10 +119,14 @@ class AgentRunSpec:
     # reminder instead of a hard stop. ``None`` disables the guard.
     repeat_call_thresholds: tuple[int, ...] | None = DEFAULT_REPEAT_THRESHOLDS
     # Model-visible means logged (the dsh session-log rule): mid-turn messages
-    # the runner itself adds to model history — injected sub-agent results and
-    # steering drained mid-turn, repeat-call reminders — reach the model but
-    # are invisible to the host's canonical persistence, so a resumed Session
-    # would silently rebuild a DIFFERENT history than the model actually saw.
+    # the runner itself adds to the PERSISTED model history — injected
+    # sub-agent results, Goal updates, repeat-call reminders, length-recovery
+    # prompts, stop-hook continuations — reach the model but are invisible to
+    # the host's canonical persistence, so a resumed Session would silently
+    # rebuild a DIFFERENT history than the model actually saw. Per-request
+    # transients (context messages, the finalization-retry prompt, the
+    # compaction instruction) are exempt: they never enter persisted history,
+    # so resident and canonical state already agree without a note.
     # This optional callable ``(content: str, source: str) -> None`` lets the
     # host record each one as it happens. A sink failure is logged and
     # swallowed: persistence trouble must not abort the run it documents.
@@ -181,6 +176,14 @@ class AgentRunSpec:
     # "auto" (only automatic compaction exists so far).
     pre_compact_hook: Any | None = None
     post_compact_hook: Any | None = None
+    # Model-free pruning pass (dsh's tool-result pruner). Under context
+    # pressure, oversized tool results are middle-pruned in the PERSISTED
+    # history before any summarization round-trip is considered; when the
+    # free pass alone clears pressure, no model call happens. ``None``
+    # disables pruning.
+    tool_result_pruner: ToolResultPruner | None = field(
+        default_factory=ToolResultPruner
+    )
     # Stop hook (C3.1): fires when the turn would end cleanly. If it asks to
     # continue (``.block`` with ``.block_reason``), the reason is injected as a
     # follow-up prompt and the loop keeps going. ``stop_hook_active`` is passed
@@ -370,12 +373,16 @@ class AgentRunner:
         injected_messages: list[dict[str, Any]] = []
         for item in items:
             message = runtime_input_to_provider_message(item)
-            # Model-visible means logged — but only for inputs nothing else
-            # persists. Steering and Goal updates are appended to the
-            # canonical Session by the services that accepted them; sub-agent
-            # results exist only in this run's memory until noted here.
-            if isinstance(item, SubagentMessage):
-                self._note_context(spec, str(message.get("content", "")), "subagent")
+            # Model-visible means logged — for every drained input nothing
+            # else persists. Steering is appended to the canonical Session by
+            # the service that accepted it; Goal updates, sub-agent results,
+            # and raw injections exist only in this run's memory until noted.
+            if not isinstance(item, UserSteer):
+                self._note_context(
+                    spec,
+                    str(message.get("content", "")),
+                    self._injection_note_source(item),
+                )
             if message.get("role") == "user" and "content" in message:
                 injected_messages.append(message)
                 continue
@@ -383,6 +390,14 @@ class AgentRunner:
             if text.strip():
                 injected_messages.append({"role": "user", "content": text})
         return injected_messages
+
+    @staticmethod
+    def _injection_note_source(item: Any) -> str:
+        if isinstance(item, SubagentMessage):
+            return "subagent"
+        if isinstance(item, GoalObjectiveUpdated):
+            return "goal_update"
+        return "injection"
 
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
         hook = spec.hook or AgentHook()
@@ -509,34 +524,9 @@ class AgentRunner:
                 response_observer=record_compaction_response,
             )
 
-            try:
-                messages_for_model = self._drop_orphan_tool_results(messages)
-                messages_for_model = self._backfill_missing_tool_results(
-                    messages_for_model
-                )
-                messages_for_model = self._microcompact(messages_for_model)
-                messages_for_model = self._apply_tool_result_budget(
-                    spec, messages_for_model
-                )
-                messages_for_model = self._snip_history(spec, messages_for_model)
-                messages_for_model = self._drop_orphan_tool_results(messages_for_model)
-                messages_for_model = self._backfill_missing_tool_results(
-                    messages_for_model
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Context governance failed on turn {} for {}: {}; applying minimal repair",
-                    current_iteration,
-                    spec.session_key or "default",
-                    exc,
-                )
-                try:
-                    messages_for_model = self._drop_orphan_tool_results(messages)
-                    messages_for_model = self._backfill_missing_tool_results(
-                        messages_for_model
-                    )
-                except Exception:
-                    messages_for_model = messages
+            messages_for_model = self._request_view(
+                spec, messages, iteration=current_iteration
+            )
             context = AgentHookContext(
                 iteration=current_iteration,
                 messages=messages,
@@ -730,7 +720,15 @@ class AgentRunner:
                             thinking_blocks=response.thinking_blocks,
                         )
                     )
-                    messages.append(build_length_recovery_message())
+                    recovery_message = build_length_recovery_message()
+                    messages.append(recovery_message)
+                    # Model-visible means logged: this recovery prompt joins
+                    # the persisted history, so canonical storage must see it.
+                    self._note_context(
+                        spec,
+                        str(recovery_message.get("content", "")),
+                        "length_recovery",
+                    )
                     await hook.after_iteration(context)
                     continue
 
@@ -845,6 +843,9 @@ class AgentRunner:
                 self._append_injected_messages(
                     messages, [{"role": "user", "content": continuation}]
                 )
+                # Model-visible means logged: the continuation joins the
+                # persisted history, so canonical storage must see it.
+                self._note_context(spec, continuation, "stop_hook")
                 await hook.after_iteration(context)
                 continue
 
@@ -894,6 +895,46 @@ class AgentRunner:
             kwargs["reasoning_effort"] = spec.reasoning_effort
         return kwargs
 
+    def _request_view(
+        self,
+        spec: AgentRunSpec,
+        messages: list[dict[str, Any]],
+        *,
+        iteration: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Compose the exact provider-visible message list from history.
+
+        One composition shared by the routed model request and the compaction
+        summarizer: the summarizer replays this view and appends only its
+        instruction, so the auxiliary call is a genuine prefix of the routed
+        request and the provider's prefix/KV cache is reused rather than
+        invalidated (the dsh rule). Any governance failure degrades to a
+        minimal repair instead of aborting the run.
+        """
+        try:
+            view = self._drop_orphan_tool_results(messages)
+            view = self._backfill_missing_tool_results(view)
+            view = self._apply_tool_result_budget(spec, view)
+            view = self._with_transient_context(
+                view,
+                spec.transient_context_messages,
+            )
+            view = self._snip_history(spec, view)
+            view = self._drop_orphan_tool_results(view)
+            return self._backfill_missing_tool_results(view)
+        except Exception as exc:
+            logger.warning(
+                "Context governance failed on turn {} for {}: {}; applying minimal repair",
+                iteration if iteration is not None else "?",
+                spec.session_key or "default",
+                exc,
+            )
+            try:
+                view = self._drop_orphan_tool_results(messages)
+                return self._backfill_missing_tool_results(view)
+            except Exception:
+                return messages
+
     async def _request_model(
         self,
         spec: AgentRunSpec,
@@ -901,13 +942,7 @@ class AgentRunner:
         hook: AgentHook,
         context: AgentHookContext,
     ):
-        messages = self._with_transient_context(
-            messages,
-            spec.transient_context_messages,
-        )
-        messages = self._snip_history(spec, messages)
-        messages = self._drop_orphan_tool_results(messages)
-        messages = self._backfill_missing_tool_results(messages)
+        """Dispatch one provider request over an already-composed view."""
         kwargs = self._build_request_kwargs(
             spec,
             messages,
@@ -1536,33 +1571,6 @@ class AgentRunner:
             offset += 1
         return updated
 
-    @staticmethod
-    def _microcompact(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        compactable_indices: list[int] = []
-        for idx, msg in enumerate(messages):
-            if msg.get("role") == "tool" and msg.get("name") in _COMPACTABLE_TOOLS:
-                compactable_indices.append(idx)
-
-        if len(compactable_indices) <= _MICROCOMPACT_KEEP_RECENT:
-            return messages
-
-        stale = compactable_indices[
-            : len(compactable_indices) - _MICROCOMPACT_KEEP_RECENT
-        ]
-        updated: list[dict[str, Any]] | None = None
-        for idx in stale:
-            msg = messages[idx]
-            content = msg.get("content")
-            if not isinstance(content, str) or len(content) < _MICROCOMPACT_MIN_CHARS:
-                continue
-            name = msg.get("name", "tool")
-            summary = f"[{name} result omitted from context]"
-            if updated is None:
-                updated = [dict(m) for m in messages]
-            updated[idx]["content"] = summary
-
-        return updated if updated is not None else messages
-
     def _apply_tool_result_budget(
         self,
         spec: AgentRunSpec,
@@ -1612,9 +1620,13 @@ class AgentRunner:
         *,
         response_observer: Callable[[LLMResponse], Awaitable[None]] | None = None,
     ) -> list[dict[str, Any]]:
-        """Summarize the conversation into a handoff summary when it nears the
-        context budget (C4a) — semantic compaction that replaces old turns,
-        unlike the drop-based ``_snip_history`` fallback that still follows.
+        """Relieve context pressure with the cheapest sufficient measure.
+
+        The ladder (dsh's ordering): pressure gate → model-free prune of
+        oversized tool results → remeasure → only if still over pressure,
+        a summarization round-trip that replaces old turns (C4a). Both
+        effects are persisted in ``messages``; the drop-based
+        ``_snip_history`` fallback still follows for anything left over.
 
         PreCompact/PostCompact hooks fire around it; a PreCompact ``block`` skips
         compaction this turn. Any failure returns the history unchanged so the
@@ -1627,20 +1639,28 @@ class AgentRunner:
         # Need a few real turns before a summary is worth a model round-trip.
         if sum(1 for m in messages if m.get("role") != "system") < 4:
             return messages
-        try:
-            estimate, _ = estimate_prompt_tokens_chain(
-                self.provider,
-                spec.model,
-                self._with_transient_context(
-                    messages,
-                    spec.transient_context_messages,
-                ),
-                spec.tool_definitions(),
-            )
-        except Exception:
+        trigger = int(budget * _COMPACT_TRIGGER_FRACTION)
+        estimate = self._estimate_prompt(spec, messages)
+        if estimate is None or estimate <= trigger:
             return messages
-        if estimate <= int(budget * _COMPACT_TRIGGER_FRACTION):
-            return messages
+
+        # Model-free pass first (the dsh ladder): middle-prune oversized tool
+        # results in the persisted history, remeasure, and skip the model
+        # round-trip entirely when pruning alone clears pressure. A landed
+        # prune is durable even when the summary phase later fails or is
+        # blocked — that reduction is real and keeping it costs nothing.
+        if spec.tool_result_pruner is not None:
+            pruned, pruned_count = spec.tool_result_pruner.prune_messages(messages)
+            if pruned_count:
+                messages = pruned
+                logger.info(
+                    "Pruned {} oversized tool result(s) for {}",
+                    pruned_count,
+                    spec.session_key or "default",
+                )
+                estimate = self._estimate_prompt(spec, messages)
+                if estimate is None or estimate <= trigger:
+                    return messages
 
         if spec.pre_compact_hook is not None:
             pre = await self._call_tool_hook(spec.pre_compact_hook, "auto")
@@ -1656,6 +1676,15 @@ class AgentRunner:
             return messages  # summarization failed → leave it to _snip_history
 
         compacted = self._build_compacted_history(messages, summary)
+        # dsh's convergence rule, applied to the AUTO path too: a summary that
+        # does not shrink its source by volume is growth wearing a summary's
+        # clothes — keep the original and let _snip_history bound the prompt.
+        if self._history_chars(compacted) >= self._history_chars(messages):
+            logger.info(
+                "Compaction summary for {} did not shrink the history; keeping it",
+                spec.session_key or "default",
+            )
+            return messages
         if spec.post_compact_hook is not None:
             await self._call_tool_hook(spec.post_compact_hook, "auto")
         logger.info(
@@ -1669,6 +1698,26 @@ class AgentRunner:
         )
         return compacted
 
+    def _estimate_prompt(
+        self,
+        spec: AgentRunSpec,
+        messages: list[dict[str, Any]],
+    ) -> int | None:
+        """Estimate the routed-request token size of ``messages``, or ``None``."""
+        try:
+            estimate, _ = estimate_prompt_tokens_chain(
+                self.provider,
+                spec.model,
+                self._with_transient_context(
+                    messages,
+                    spec.transient_context_messages,
+                ),
+                spec.tool_definitions(),
+            )
+        except Exception:
+            return None
+        return estimate
+
     async def _summarize(
         self,
         spec: AgentRunSpec,
@@ -1676,13 +1725,24 @@ class AgentRunner:
         *,
         response_observer: Callable[[LLMResponse], Awaitable[None]] | None = None,
     ) -> str | None:
-        """Ask the model for a handoff summary of ``messages`` (no tools)."""
-        request = list(messages) + [{"role": "user", "content": _SUMMARIZATION_PROMPT}]
-        # Fit the summarization request itself within budget, and keep it valid.
-        request = self._snip_history(spec, request)
-        request = self._drop_orphan_tool_results(request)
-        request = self._backfill_missing_tool_results(request)
-        kwargs = self._build_request_kwargs(spec, request, tools=None)
+        """Ask the model for a handoff summary of ``messages``.
+
+        The request replays the routed request's exact view — same governance
+        composition, same transient context, same tool schemas (kept even
+        though the summarizer never calls one: dropping them would shorten
+        the token sequence and misalign every following token) — and appends
+        only the compaction instruction. That makes this auxiliary call a
+        genuine prefix of the last request the provider saw, so provider-side
+        prefix/KV caching is reused instead of invalidated (the dsh rule).
+        """
+        request = self._request_view(spec, messages) + [
+            {"role": "user", "content": _SUMMARIZATION_PROMPT}
+        ]
+        kwargs = self._build_request_kwargs(
+            spec,
+            request,
+            tools=spec.tool_definitions(),
+        )
         try:
             response = await self._await_provider_response(
                 self.provider.chat_with_retry(**kwargs),

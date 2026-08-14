@@ -2,8 +2,8 @@
 
 Why this exists
 ---------------
-The runner's context-governance ladder (``AgentRunner._snip_history`` /
-``_microcompact``) only activates when it knows the model's **context
+The runner's context-governance ladder (``AgentRunner._snip_history`` and
+the compaction/pruning pass) only activates when it knows the model's **context
 window** — the token budget it must keep the prompt under. Until now that
 number came from a single global ``AgentDefaults.context_window_tokens``
 (65 536, DEEPCODE_V2_MASTER_PLAN.md §7 P2), the same value for a 400 K-window

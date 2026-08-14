@@ -1,7 +1,7 @@
 """P2g: AgentSession arms the runner's context-compaction ladder.
 
 The runner has always had ``_snip_history`` (trim history to a token budget)
-and ``_microcompact`` (drop stale tool results), but they are dormant unless
+and a pressure-gated prune/summarize pass, but they are dormant unless
 ``AgentRunSpec.context_window_tokens`` is set. AgentSession now resolves that
 from the model catalog, so a session whose history outgrows the window gets
 trimmed instead of overflowing the model. These tests prove the wiring:
