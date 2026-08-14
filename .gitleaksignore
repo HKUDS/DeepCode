@@ -13,7 +13,10 @@ b2dccbe6d37e74e98b8a57593c1a5bb4994fba59:mcp_agent.secrets.yaml:generic-api-key:
 # the finding cannot be fixed by editing it.
 6421db9a2fb04589200f8883f950a329b7ced1cd:tests/ui_session_resume_test.py:generic-api-key:87
 
-# Test fixture, not a credential: an "sk-live-"-shaped placeholder in the
-# config-layer redaction test. The working tree now uses a non-key-shaped
-# value; this fingerprint acknowledges the immutable historical commit.
+# Test fixture, not a credential: the config-layer redaction test assigns a
+# placeholder to "apiKey", which the generic rule flags regardless of value
+# shape (the key name is the trigger). The working tree now carries an inline
+# gitleaks:allow; these fingerprints acknowledge the immutable historical
+# commits (the original fixture and its first, value-only fix attempt).
 86294aa61c2fc68dbbd51dbb8a594700fb38e3dc:tests/test_config_layers.py:generic-api-key:80
+46f1b7111706e58cd2b457c9483fda8fcbbb07eb:tests/test_config_layers.py:generic-api-key:82
