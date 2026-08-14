@@ -144,6 +144,48 @@ Skills, permissions, Goals, and Automations. See the
 
 ## News
 
+**2026-08-14 · Manual compaction, config provenance, and dsh Skill interop**
+
+- **Compact a long conversation on demand.** `/compact` summarizes older turns
+  in the resident context without waiting for automatic pressure. Every refusal
+  is a stable, readable reason — a busy Turn, too little history, a failed
+  summary, or a summary that would not actually shrink the conversation — and
+  the conversation is reported unchanged rather than left half-compacted.
+  Canonical session data is never touched.
+- **See which file set every configuration value.** Diagnostics now report each
+  configured leaf with the layer that supplied it, merged exactly as the loader
+  merges (project overrides user), with a bounded preview. Credential-shaped
+  subtrees — keys, tokens, env, headers, proxies — are redacted whole, so
+  values never leave the process unmasked.
+- **Drop a deepseek-harness Skill in unchanged.** Both products scan
+  `.agents/skills`, and a verbatim copy of a dsh Skill loads without
+  translation; dialect-specific frontmatter keys are tolerated rather than
+  rejected, with a regression test to keep it that way.
+
+**2026-08-14 · Subagent backends, composition, and runtime guards**
+
+- **Delegate a task to Codex or Claude Code as a subagent.** `spawn_agent`
+  gains external backends that run the installed CLI non-interactively with a
+  scrubbed environment — no parent API keys, tokens, or secrets — plus
+  per-backend configuration for env and time budget, and strict success
+  criteria: an empty or failed result is an error, never a plausible answer.
+- **Shape a native subagent for its task.** Spawn with a persona, a narrowed
+  tool allowlist, and a JSON output schema enforced through a capture tool.
+  Tool names are validated against the parent's real registry, because an
+  unknown name previously produced a silently tool-less child that invented
+  its answer.
+- **Keep talking to a subagent.** A native child idles after its turn and wakes
+  on `send_message`; interrupts stop the turn but keep queued messages. Each
+  turn's file changes merge back incrementally, a full transcript of the
+  child's work — tool rounds included — lands in the parent session's
+  directory, and a result that outlives its parent turn is recorded as a
+  context note rather than dropped.
+- **Stop stuck tools and runaway loops.** Tools can declare a timeout the
+  runner enforces and attributes honestly (timeout versus interrupt), and a
+  repeat-call tracker notices identical calls repeating and injects an
+  escalating, model-visible reminder — verified live with a real model quoting
+  it back.
+
 **2026-08-13 · Desktop typography, themes, and native controls**
 
 - **Make the type-size preference actually resize the app.** Every interface
