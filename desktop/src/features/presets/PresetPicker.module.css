@@ -1,0 +1,37 @@
+.picker {
+  display: inline-flex;
+  min-width: 0;
+  height: 25px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  color: var(--text-tertiary);
+}
+
+.picker:hover,
+.picker:focus-within {
+  border-color: var(--border-subtle);
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+}
+
+.picker select {
+  max-width: 104px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: var(--text-micro) var(--font-mono);
+}
+
+.picker select:disabled {
+  cursor: default;
+  opacity: 0.8;
+}
+
+.pickerError {
+  border-color: var(--danger);
+}

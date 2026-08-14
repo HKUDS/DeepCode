@@ -97,6 +97,9 @@ export interface MethodParams {
   "provider/remove": ConnectionIdentityParams;
   "provider/test": ProviderTestParams;
   "model/list": ModelListParams;
+  "preset/list": PresetListParams;
+  "preset/current": PresetCurrentParams;
+  "preset/select": PresetSelectParams;
   "skills/list": SkillListParams;
   "skill/read": SkillReadParams;
   "skills/import": SkillImportParams;
@@ -242,6 +245,16 @@ export interface ModelListParams {
   projectId?: string;
   refresh?: boolean;
 }
+export interface PresetListParams {
+  projectId: string;
+}
+export interface PresetCurrentParams {
+  threadId: string;
+}
+export interface PresetSelectParams {
+  threadId: string;
+  agentPreset: string | null;
+}
 export interface SkillListParams {
   projectId: string;
   refresh?: boolean;
@@ -347,6 +360,7 @@ export interface ThreadStartParams {
   reasoningEffort?: string;
   workspacePath?: string;
   parentThreadId?: string;
+  agentPreset?: string;
 }
 export interface ThreadListParams {
   projectId?: string;
@@ -576,6 +590,9 @@ export interface MethodResults {
   "settings/update": {
     settings: SettingsSnapshot;
   };
+  "preset/list": PresetListResult;
+  "preset/current": PresetCurrentResult;
+  "preset/select": PresetSelectResult;
   "skills/list": SkillCatalogResult;
   "skill/read": {
     skill: SkillDetail;
@@ -921,6 +938,23 @@ export interface SettingsModel {
   contextWindow: number;
   maxOutputTokens: number;
   source: string;
+}
+export interface PresetListResult {
+  presets: AgentPresetEntry[];
+}
+export interface AgentPresetEntry {
+  id: string;
+  trust: "system" | "user" | "project";
+  name: string;
+  description: string;
+  tools: string[] | null;
+  broken: string | null;
+}
+export interface PresetCurrentResult {
+  agentPreset: string | null;
+}
+export interface PresetSelectResult {
+  agentPreset: string | null;
 }
 export interface SkillCatalogResult {
   skills: SkillInfo[];

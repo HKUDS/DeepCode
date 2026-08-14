@@ -29,6 +29,8 @@ import {
 } from "../../app/accessPreset";
 import type { DesktopRuntime } from "../../rpc/contracts";
 import type { TranscriptMode } from "../thread/transcriptMode";
+import { PresetPicker } from "../presets/PresetPicker";
+import { usePresetCatalog } from "../presets/usePresetCatalog";
 import { useSkillCatalog } from "../skills/useSkillCatalog";
 import { GoalRail } from "../goal/GoalRail";
 import {
@@ -45,6 +47,8 @@ interface ComposerProps {
   editable: boolean;
   canExecute: boolean;
   busy: boolean;
+  /** True once this thread has any Turn — the agent preset is then fixed. */
+  conversationStarted: boolean;
   executingTurn: Turn | null;
   queuedTurns: readonly Turn[];
   runtime: DesktopRuntime;
@@ -91,6 +95,7 @@ export function Composer({
   editable,
   canExecute,
   busy,
+  conversationStarted,
   executingTurn,
   queuedTurns,
   runtime,
@@ -146,6 +151,11 @@ export function Composer({
   );
   const [deliveryNotice, setDeliveryNotice] = useState<string | null>(null);
   const skillCatalog = useSkillCatalog(runtime, project?.id ?? null);
+  const presetCatalog = usePresetCatalog(
+    runtime,
+    project?.id ?? null,
+    thread?.id ?? null,
+  );
   const availableSkills = useMemo(() => {
     const query = skillQuery.trim().toLocaleLowerCase();
     return skillCatalog.activeSkills.filter(
@@ -553,6 +563,14 @@ export function Composer({
               settings={settings}
               disabled={busy}
               onChange={onModelChange}
+            />
+            <PresetPicker
+              entries={presetCatalog.entries}
+              current={presetCatalog.current}
+              locked={conversationStarted}
+              busy={busy || presetCatalog.busy}
+              error={presetCatalog.error}
+              onSelect={(presetId) => void presetCatalog.select(presetId)}
             />
             <TranscriptModePicker
               mode={transcriptMode}
