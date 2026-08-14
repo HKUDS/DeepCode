@@ -705,6 +705,84 @@ def load_config(config_path: str | Path | None = None) -> DeepCodeConfig:
     return DeepCodeConfig.model_validate(raw)
 
 
+# Any config path segment matching this marks its whole subtree as
+# credential-bearing: the value is reported as present, never echoed.
+# ``env``/``headers``/``proxy`` are included wholesale because their VALUES
+# routinely embed credentials (user:pass@ proxy URLs, Authorization headers)
+# even when the key name looks harmless.
+_SENSITIVE_CONFIG_SEGMENT = re.compile(
+    r"key|token|secret|password|credential|env|headers|proxy", re.IGNORECASE
+)
+
+_LAYER_VALUE_PREVIEW_CHARS = 80
+
+
+def effective_config_layers(
+    workspace: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    """Every configured leaf with the layer that supplied it — the answer to
+    "why is my setting not taking effect?".
+
+    The dsh ``--dump-config`` counterpart for DeepCode's two-layer model:
+    each row names the dotted path, the winning layer (``project`` overrides
+    ``user``, mirroring :func:`load_config_for_workspace` exactly — including
+    the project-layer provider sanitization), and a credential-safe preview
+    of the effective value. Consumed by the diagnostics snapshot, so the
+    Desktop diagnostics page and its exported report carry it.
+    """
+    base = _load_raw(home_config_path())
+    project: dict[str, Any] = {}
+    if workspace is not None:
+        project = _project_runtime_layer(_load_raw(project_config_path(workspace)))
+    merged = _deep_merge(base, project)
+
+    def leaf_paths(tree: Any, prefix: str = "") -> set[str]:
+        if not isinstance(tree, dict) or not tree:
+            return {prefix} if prefix else set()
+        paths: set[str] = set()
+        for key, value in tree.items():
+            if key == "$comment":
+                continue
+            paths |= leaf_paths(value, f"{prefix}.{key}" if prefix else str(key))
+        return paths
+
+    project_paths = leaf_paths(project)
+
+    def render(path: str, value: Any) -> str:
+        if any(
+            _SENSITIVE_CONFIG_SEGMENT.search(segment) for segment in path.split(".")
+        ):
+            return "••• (set)"
+        if isinstance(value, dict):
+            return f"({len(value)} entries)"
+        if isinstance(value, list):
+            return f"({len(value)} items)"
+        text = json.dumps(value, ensure_ascii=False, default=str)
+        if len(text) > _LAYER_VALUE_PREVIEW_CHARS:
+            return text[:_LAYER_VALUE_PREVIEW_CHARS] + "…"
+        return text
+
+    rows: list[dict[str, Any]] = []
+
+    def walk(tree: Any, prefix: str = "") -> None:
+        if not isinstance(tree, dict) or not tree:
+            rows.append(
+                {
+                    "path": prefix,
+                    "source": "project" if prefix in project_paths else "user",
+                    "value": render(prefix, tree),
+                }
+            )
+            return
+        for key, value in sorted(tree.items()):
+            if key == "$comment":
+                continue
+            walk(value, f"{prefix}.{key}" if prefix else str(key))
+
+    walk(merged)
+    return rows
+
+
 def load_config_for_workspace(workspace: str | Path) -> DeepCodeConfig:
     """Load the user base plus the project layer for an explicit workspace.
 

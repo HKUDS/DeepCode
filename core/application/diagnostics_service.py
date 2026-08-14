@@ -125,8 +125,24 @@ class DiagnosticsService:
             "projectPath": str(workspace) if workspace is not None else None,
             "projectTrust": project.trust_state.value if project is not None else None,
             "configError": config_error,
+            "configLayers": self._config_layers(workspace),
             "checks": checks,
         }
+
+    @staticmethod
+    def _config_layers(workspace: Path | None) -> list[dict[str, Any]]:
+        """Effective configuration with per-leaf provenance, or ``[]``.
+
+        Values are credential-safe previews (see
+        :func:`core.config.effective_config_layers`); a config too broken to
+        walk yields an empty list rather than failing the whole snapshot.
+        """
+        from core.config import effective_config_layers
+
+        try:
+            return effective_config_layers(workspace)
+        except Exception:  # noqa: BLE001 - diagnostics report, never crash
+            return []
 
     def _database_health(self) -> bool:
         try:
