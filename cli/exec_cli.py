@@ -137,6 +137,7 @@ def _run(args: argparse.Namespace) -> int:
                 max_iterations=args.max_iterations,
                 trust_workspace=args.trust,
                 access_preset=parse_access_preset(args.access),
+                agent_preset=args.preset,
             ),
             on_event=on_event,
             decide_approval=_approval_decider,
@@ -210,6 +211,15 @@ def main(argv: list[str] | None = None) -> int:
     add_reasoning_effort_argument(parser)
     add_access_preset_argument(parser)
     add_workspace_trust_argument(parser)
+    parser.add_argument(
+        "--preset",
+        default=None,
+        metavar="ID",
+        help=(
+            "Agent preset for a new Session (persona + tool face); "
+            "see `deepcode exec` docs or the TUI /preset list."
+        ),
+    )
     parser.add_argument(
         "--skill",
         action="append",

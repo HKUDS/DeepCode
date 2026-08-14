@@ -143,6 +143,16 @@ async def _cmd_permissions(app, args: str) -> str | None:
         return f"Session access update failed: {exc}"
 
 
+async def _cmd_preset(app, args: str) -> str | None:
+    wanted = args.strip()
+    if not wanted:
+        return app.agent_preset_overview()
+    try:
+        return app.set_agent_preset(None if wanted == "clear" else wanted)
+    except (OSError, RuntimeError, ValueError) as exc:
+        return str(exc)
+
+
 async def _cmd_transcript(app, args: str) -> str | None:
     wanted = args.strip()
     if not wanted:
@@ -251,6 +261,12 @@ REGISTRY: dict[str, Command] = {
             "/transcript [normal|verbose|summary]",
             "show or switch transcript detail (ctrl-o cycles)",
             _cmd_transcript,
+        ),
+        Command(
+            "preset",
+            "/preset [id|clear]",
+            "list agent presets or select one for this blank Session",
+            _cmd_preset,
         ),
         Command("skills", "/skills", "list discovered Skills", _cmd_skills),
         Command(

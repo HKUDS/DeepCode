@@ -798,6 +798,7 @@ class Dispatcher:
             "reasoningEffort",
             "workspacePath",
             "parentThreadId",
+            "agentPreset",
         )
         raw_mode = params.string("mode", required=False) or ThreadMode.CODE
         try:
@@ -813,6 +814,7 @@ class Dispatcher:
             reasoning_effort=params.string("reasoningEffort", required=False),
             workspace_path=params.string("workspacePath", required=False),
             parent_thread_id=params.string("parentThreadId", required=False),
+            agent_preset=params.string("agentPreset", required=False),
         )
         return {"thread": thread_view(thread)}
 

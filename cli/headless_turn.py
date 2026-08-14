@@ -36,6 +36,7 @@ class HeadlessTurnOptions:
     max_iterations: int | None = None
     trust_workspace: bool = False
     access_preset: ExecutionAccessPreset | None = None
+    agent_preset: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +118,7 @@ def run_headless_turn(
                 reasoning_effort=options.reasoning_effort,
                 access_preset_override=options.access_preset,
                 workspace_path=requested_workspace,
+                agent_preset=options.agent_preset,
             )
         else:
             session_id = options.resume_id.strip()
@@ -134,6 +136,13 @@ def run_headless_turn(
                 thread = application.threads.set_access_preset(
                     thread.id,
                     options.access_preset,
+                )
+            if options.agent_preset is not None:
+                # Enforces the blank-Session lock: succeeds only before the
+                # conversation has started, else reports the conflict.
+                thread = application.threads.set_agent_preset(
+                    thread.id,
+                    options.agent_preset,
                 )
 
         workspace = thread.workspace_path
