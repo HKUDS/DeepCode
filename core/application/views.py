@@ -263,6 +263,18 @@ def mcp_inventory_view(inventory) -> dict[str, Any]:
     }
 
 
+def agent_preset_view(preset) -> dict[str, Any]:
+    """One agent-preset roster row for the wire (AgentPresetEntry)."""
+    return {
+        "id": preset.id,
+        "trust": preset.trust,
+        "name": preset.display_name or preset.id,
+        "description": preset.description,
+        "tools": list(preset.tools) if preset.tools is not None else None,
+        "broken": preset.broken,
+    }
+
+
 def mcp_preset_inventory_view(inventory) -> dict[str, Any]:
     return {
         "presets": [

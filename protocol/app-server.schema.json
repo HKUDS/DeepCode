@@ -3538,6 +3538,10 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 255
+        },
+        "agentPreset": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "required": [
@@ -5012,6 +5016,125 @@
         "argv"
       ]
     },
+    "AgentPresetEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "trust": {
+          "type": "string",
+          "enum": ["system", "user", "project"]
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "tools": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "string"
+          }
+        },
+        "broken": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": [
+        "id",
+        "trust",
+        "name",
+        "description",
+        "tools",
+        "broken"
+      ]
+    },
+    "PresetListParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^proj_"
+        }
+      },
+      "required": [
+        "projectId"
+      ]
+    },
+    "PresetListResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "presets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentPresetEntry"
+          }
+        }
+      },
+      "required": [
+        "presets"
+      ]
+    },
+    "PresetCurrentParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "threadId"
+      ]
+    },
+    "PresetCurrentResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "agentPreset": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": [
+        "agentPreset"
+      ]
+    },
+    "PresetSelectParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "agentPreset": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": [
+        "threadId",
+        "agentPreset"
+      ]
+    },
+    "PresetSelectResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "agentPreset": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": [
+        "agentPreset"
+      ]
+    },
     "MethodParams": {
       "type": "object",
       "additionalProperties": false,
@@ -5057,6 +5180,15 @@
         },
         "model/list": {
           "$ref": "#/$defs/ModelListParams"
+        },
+        "preset/list": {
+          "$ref": "#/$defs/PresetListParams"
+        },
+        "preset/current": {
+          "$ref": "#/$defs/PresetCurrentParams"
+        },
+        "preset/select": {
+          "$ref": "#/$defs/PresetSelectParams"
         },
         "skills/list": {
           "$ref": "#/$defs/SkillListParams"
@@ -5299,6 +5431,9 @@
         "provider/remove",
         "provider/test",
         "model/list",
+        "preset/list",
+        "preset/current",
+        "preset/select",
         "skills/list",
         "skill/read",
         "skills/import",
@@ -5496,6 +5631,15 @@
           "required": [
             "settings"
           ]
+        },
+        "preset/list": {
+          "$ref": "#/$defs/PresetListResult"
+        },
+        "preset/current": {
+          "$ref": "#/$defs/PresetCurrentResult"
+        },
+        "preset/select": {
+          "$ref": "#/$defs/PresetSelectResult"
         },
         "skills/list": {
           "$ref": "#/$defs/SkillCatalogResult"
@@ -6305,6 +6449,9 @@
         "provider/remove",
         "provider/test",
         "model/list",
+        "preset/list",
+        "preset/current",
+        "preset/select",
         "skills/list",
         "skill/read",
         "skills/import",

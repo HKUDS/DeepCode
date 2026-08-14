@@ -15,9 +15,16 @@ from app_server.errors import (
 from app_server.protocol import methods as rpc_methods
 from app_server.protocol.codec import DEFAULT_MAX_MESSAGE_BYTES
 from app_server.protocol.models import Request
+from core.agent_presets import METADATA_KEY as PRESET_METADATA_KEY
+from core.agent_presets import list_agent_presets
 from core.application.application import DeepCodeApplication
-from core.application.errors import NoActiveTurnError, TurnNotSteerableError
+from core.application.errors import (
+    NoActiveTurnError,
+    ThreadNotFoundError,
+    TurnNotSteerableError,
+)
 from core.application.views import (
+    agent_preset_view,
     approval_view,
     artifact_view,
     automation_run_view,
@@ -193,6 +200,9 @@ class Dispatcher:
             rpc_methods.PROVIDER_REMOVE: self._provider_remove,
             rpc_methods.PROVIDER_TEST: self._provider_test,
             rpc_methods.MODEL_LIST: self._model_list,
+            rpc_methods.PRESET_LIST: self._preset_list,
+            rpc_methods.PRESET_CURRENT: self._preset_current,
+            rpc_methods.PRESET_SELECT: self._preset_select,
             rpc_methods.SKILLS_LIST: self._skills_list,
             rpc_methods.SKILL_READ: self._skill_read,
             rpc_methods.SKILLS_IMPORT: self._skills_import,
@@ -435,6 +445,42 @@ class Dispatcher:
             project_id=params.string("projectId", required=False),
             refresh=params.boolean("refresh"),
         )
+
+    def _preset_list(self, params: Params) -> dict[str, Any]:
+        """The trust-ranked agent-preset roster for one project's workspace.
+
+        Broken entries ride along with their reason (the dsh roster rule) —
+        a picker excludes them, a management surface shows why they failed.
+        """
+        params.only("projectId")
+        project = self.application.projects.read(str(params.string("projectId")))
+        return {
+            "presets": [
+                agent_preset_view(preset)
+                for preset in list_agent_presets(project.canonical_path)
+            ]
+        }
+
+    def _preset_current(self, params: Params) -> dict[str, Any]:
+        params.only("threadId")
+        thread_id = str(params.string("threadId"))
+        session = self.application.session_store.get_session(thread_id)
+        if session is None:
+            raise ThreadNotFoundError(f"thread not found: {thread_id}")
+        stored = session.metadata.get(PRESET_METADATA_KEY)
+        return {"agentPreset": stored.get("id") if isinstance(stored, dict) else None}
+
+    def _preset_select(self, params: Params) -> dict[str, Any]:
+        params.only("threadId", "agentPreset")
+        thread = self.application.threads.set_agent_preset(
+            str(params.string("threadId")),
+            params.nullable_string("agentPreset"),
+        )
+        session = self.application.session_store.get_session(thread.id)
+        stored = (
+            session.metadata.get(PRESET_METADATA_KEY) if session is not None else None
+        )
+        return {"agentPreset": stored.get("id") if isinstance(stored, dict) else None}
 
     def _skills_list(self, params: Params) -> dict[str, Any]:
         params.only("projectId", "refresh")

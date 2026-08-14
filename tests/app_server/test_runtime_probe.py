@@ -5,10 +5,12 @@ def test_runtime_probe_imports_lazy_desktop_capabilities(monkeypatch):
     imported: list[str] = []
     import_module = runtime_probe.importlib.import_module
 
-    def track_runtime_import(name: str):
+    def track_runtime_import(name: str, package: str | None = None):
+        # Mirror importlib's real signature: transitive imports may use the
+        # two-argument relative form (e.g. dateutil's lazy submodules).
         if name in runtime_probe.RUNTIME_MODULES:
             imported.append(name)
-        return import_module(name)
+        return import_module(name, package)
 
     monkeypatch.setattr(
         runtime_probe.importlib,
