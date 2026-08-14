@@ -2042,6 +2042,28 @@ describe("desktop command center", () => {
     expect(clearRequest.connection.apiKey).toBeUndefined();
   });
 
+  it("warns when the launch environment shadows a pasted API key", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    await screen.findByRole("heading", { name: "AI providers" });
+
+    // The stubbed openai connection resolves its key from the environment.
+    const connectionName = await screen.findByText("OpenAI", {
+      selector: "strong",
+    });
+    const card = connectionName.closest("article");
+    fireEvent.click(
+      within(card as HTMLElement).getByRole("button", { name: "Edit" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Paste API key" }));
+    expect(
+      screen.getByText(/OPENAI_API_KEY currently provides this key/),
+    ).toBeTruthy();
+  });
+
   it("saves and verifies the selected Agent model with the project context", async () => {
     const runtime = new TestRuntime([project], [thread], []);
     render(<App runtime={runtime} />);

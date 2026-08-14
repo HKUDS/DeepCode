@@ -38,6 +38,11 @@ interface Draft {
   clearApiKey: boolean;
   modelCatalog: "auto" | "openrouter" | "openai" | "anthropic" | "manual";
   manualModels: string;
+  /** True when the launch environment currently provides this key: it
+   * outranks a pasted key, so the form must say so instead of letting a
+   * paste silently lose. */
+  environmentShadows: boolean;
+  shadowingEnvName: string;
 }
 
 const emptyDraft: Draft = {
@@ -52,6 +57,8 @@ const emptyDraft: Draft = {
   clearApiKey: false,
   modelCatalog: "auto",
   manualModels: "",
+  environmentShadows: false,
+  shadowingEnvName: "",
 };
 
 export function ConnectionSettings({
@@ -99,6 +106,8 @@ export function ConnectionSettings({
       clearApiKey: false,
       modelCatalog: connection.modelCatalog,
       manualModels: connection.manualModels.join("\n"),
+      environmentShadows: connection.credentialSource === "environment",
+      shadowingEnvName: connection.apiKeyEnv ?? "",
     });
   };
 
@@ -439,6 +448,16 @@ export function ConnectionSettings({
                         Environment variable
                       </button>
                     </div>
+                    {editing.credentialMode === "key" &&
+                    editing.environmentShadows ? (
+                      <p className={styles.credentialShadowNote} role="note">
+                        {editing.shadowingEnvName
+                          ? `The launch environment variable ${editing.shadowingEnvName} currently provides this key and takes precedence. `
+                          : "A launch environment variable currently provides this key and takes precedence. "}
+                        A pasted key is saved but will not take effect until
+                        that variable is unset.
+                      </p>
+                    ) : null}
                     {editing.credentialMode === "key" ? (
                       <input
                         type="password"
