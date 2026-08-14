@@ -223,6 +223,7 @@ def build_agent_session(
     ask_user_callback: Any | None = None,
     allow_spawn: bool = True,
     injection_callback: Any | None = None,
+    context_note_sink: Any | None = None,
     active_turn_id_provider: Any | None = None,
     runtime_input_sink: Any | None = None,
     goal_runtime: Any | None = None,
@@ -446,6 +447,7 @@ def build_agent_session(
                 else None
             ),
         ),
+        context_note_sink=context_note_sink,
         hooks_engine=hooks_engine,
         agent_context=agent_context,
         streaming=streaming,

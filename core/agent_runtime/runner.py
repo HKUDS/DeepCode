@@ -19,7 +19,10 @@ from typing import Any
 
 from loguru import logger
 
-from core.agent_runtime.injections import runtime_input_to_provider_message
+from core.agent_runtime.injections import (
+    SubagentMessage,
+    runtime_input_to_provider_message,
+)
 from core.agent_runtime.helpers import (
     build_assistant_message,
     estimate_message_tokens,
@@ -124,6 +127,15 @@ class AgentRunSpec:
     # run lengths of identical consecutive tool calls that earn an escalating
     # reminder instead of a hard stop. ``None`` disables the guard.
     repeat_call_thresholds: tuple[int, ...] | None = DEFAULT_REPEAT_THRESHOLDS
+    # Model-visible means logged (the dsh session-log rule): mid-turn messages
+    # the runner itself adds to model history — injected sub-agent results and
+    # steering drained mid-turn, repeat-call reminders — reach the model but
+    # are invisible to the host's canonical persistence, so a resumed Session
+    # would silently rebuild a DIFFERENT history than the model actually saw.
+    # This optional callable ``(content: str, source: str) -> None`` lets the
+    # host record each one as it happens. A sink failure is logged and
+    # swallowed: persistence trouble must not abort the run it documents.
+    context_note_sink: Any | None = None
     workspace: Path | None = None
     session_key: str | None = None
     context_window_tokens: int | None = None
@@ -323,6 +335,17 @@ class AgentRunner:
         )
         return True
 
+    @staticmethod
+    def _note_context(spec: AgentRunSpec, content: str, source: str) -> None:
+        """Report one mid-turn model-visible message to the host's sink."""
+        if spec.context_note_sink is None:
+            return
+        try:
+            spec.context_note_sink(content, source)
+        except Exception:
+            # Persistence trouble must not abort the run it documents.
+            logger.exception("context_note_sink failed (source={})", source)
+
     async def _drain_injections(
         self,
         spec: AgentRunSpec,
@@ -347,6 +370,12 @@ class AgentRunner:
         injected_messages: list[dict[str, Any]] = []
         for item in items:
             message = runtime_input_to_provider_message(item)
+            # Model-visible means logged — but only for inputs nothing else
+            # persists. Steering and Goal updates are appended to the
+            # canonical Session by the services that accepted them; sub-agent
+            # results exist only in this run's memory until noted here.
+            if isinstance(item, SubagentMessage):
+                self._note_context(spec, str(message.get("content", "")), "subagent")
             if message.get("role") == "user" and "content" in message:
                 injected_messages.append(message)
                 continue
@@ -585,12 +614,14 @@ class AgentRunner:
                         is not None
                     ]
                     if reminders:
+                        reminder_text = "\n\n".join(reminders)
                         messages.append(
                             {
                                 "role": "user",
-                                "content": "\n\n".join(reminders),
+                                "content": reminder_text,
                             }
                         )
+                        self._note_context(spec, reminder_text, "repeat_guard")
                 if fatal_error is not None:
                     error = f"Error: {type(fatal_error).__name__}: {fatal_error}"
                     final_content = error

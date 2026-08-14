@@ -325,6 +325,17 @@ class SessionRuntimeRegistry:
             create_kwargs["active_turn_id_provider"] = lambda: inputs.active_turn_id
         if _accepts_keyword(create, "runtime_input_sink"):
             create_kwargs["runtime_input_sink"] = inputs.put_transient
+        if _accepts_keyword(create, "context_note_sink"):
+            # Model-visible means logged: the runner reports each mid-turn
+            # message it adds to model history that no service persisted —
+            # sub-agent results, repeat-call reminders — and this sink appends
+            # them to the canonical Session. Without it a resume rebuilds a
+            # history the model never actually saw (steering survives, these
+            # vanish). ``mark_persisted`` keeps the append from reading as a
+            # foreign process's write on the next acquire.
+            create_kwargs["context_note_sink"] = self._context_note_sink(
+                canonical.session_id, inputs
+            )
         goals_enabled = _accepts_keyword(create, "goal_runtime")
         if goals_enabled:
             create_kwargs["goal_runtime"] = goals
@@ -430,6 +441,33 @@ class SessionRuntimeRegistry:
                 return
             victim = self._runtimes.pop(victim_id)
             await victim.agent.aclose()
+
+    def _context_note_sink(self, session_id: str, inputs: TurnInputMailbox):
+        """The runner's mid-turn persistence callback for one live Session."""
+
+        def note(content: str, source: str) -> None:
+            text = str(content or "").strip()
+            if not text:
+                return
+            stored = self.store.append_message(
+                session_id,
+                "user",
+                text,
+                metadata={
+                    "schemaVersion": 3,
+                    "delivery": "mid_turn",
+                    "source": source,
+                    **(
+                        {"turnId": inputs.active_turn_id}
+                        if inputs.active_turn_id
+                        else {}
+                    ),
+                },
+            )
+            if stored is not None:
+                self.mark_persisted(session_id)
+
+        return note
 
     @staticmethod
     def _visible_history(session: Session) -> list[dict[str, Any]]:
