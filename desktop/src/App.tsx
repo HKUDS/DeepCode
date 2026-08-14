@@ -318,6 +318,9 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
                 editable={composerEditable}
                 canExecute={agentExecutionEnabled}
                 busy={state.busy}
+                conversationStarted={state.turns.some(
+                  (turn) => turn.threadId === selectedThread.id,
+                )}
                 executingTurn={activeTurn}
                 queuedTurns={queuedTurns}
                 runtime={runtime}

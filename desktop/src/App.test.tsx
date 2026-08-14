@@ -256,6 +256,8 @@ class TestRuntime implements DesktopRuntime {
     this.goalOutcomeState = initialGoalOutcome;
   }
 
+  readonly presetState = new Map<string, string>();
+
   async request<M extends RpcMethod>(
     method: M,
     params: MethodParams[M],
@@ -490,6 +492,42 @@ class TestRuntime implements DesktopRuntime {
             : {}),
         };
         return { settings: this.settingsState } as MethodResults[M];
+      }
+      case "preset/list":
+        return {
+          presets: [
+            {
+              id: "code-reader",
+              trust: "system",
+              name: "Code reader",
+              description: "Read-only investigator",
+              tools: ["read", "grep", "glob", "skill"],
+              broken: null,
+            },
+            {
+              id: "damaged",
+              trust: "project",
+              name: "damaged",
+              description: "",
+              tools: null,
+              broken: "missing YAML frontmatter block",
+            },
+          ],
+        } as unknown as MethodResults[M];
+      case "preset/current": {
+        const request = params as MethodParams["preset/current"];
+        return {
+          agentPreset: this.presetState.get(request.threadId) ?? null,
+        } as MethodResults[M];
+      }
+      case "preset/select": {
+        const request = params as MethodParams["preset/select"];
+        if (request.agentPreset === null) {
+          this.presetState.delete(request.threadId);
+        } else {
+          this.presetState.set(request.threadId, request.agentPreset);
+        }
+        return { agentPreset: request.agentPreset } as MethodResults[M];
       }
       case "skills/list":
         return this.skillCatalog() as unknown as MethodResults[M];
@@ -2513,6 +2551,33 @@ describe("desktop command center", () => {
       threadId: thread.id,
       accessPreset: "read_only",
     });
+  });
+
+  it("selects an agent preset for a blank Session and hides broken ones", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    const picker = await screen.findByRole("combobox", {
+      name: "Agent preset",
+    });
+    expect((picker as HTMLSelectElement).value).toBe("");
+    expect(screen.getByRole("option", { name: "Code reader" })).toBeTruthy();
+    // A broken preset cannot compose a session, so it is never offered.
+    expect(screen.queryByRole("option", { name: "damaged" })).toBeNull();
+
+    fireEvent.change(picker, { target: { value: "code-reader" } });
+    await waitFor(() => {
+      expect((picker as HTMLSelectElement).value).toBe("code-reader");
+      expect(runtime.calls).toContain("preset/select");
+    });
+    expect(
+      runtime.requests.find((request) => request.method === "preset/select")
+        ?.params,
+    ).toEqual({
+      threadId: thread.id,
+      agentPreset: "code-reader",
+    });
+    expect((picker as HTMLSelectElement).disabled).toBe(false);
   });
 
   it("requires confirmation before enabling persistent Full access", async () => {
