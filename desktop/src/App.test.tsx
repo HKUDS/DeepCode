@@ -2062,6 +2062,45 @@ describe("desktop command center", () => {
     expect(
       screen.getByText(/OPENAI_API_KEY currently provides this key/),
     ).toBeTruthy();
+    // The dsh posture: an environment-provided key locks the field instead
+    // of accepting a paste that cannot take effect.
+    const keyInput = screen.getByLabelText("API key") as HTMLInputElement;
+    expect(keyInput.disabled).toBe(true);
+    expect(keyInput.placeholder).toMatch(/launch environment/);
+  });
+
+  it("fetches a connection's live models and adopts picks into its manual list", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    await screen.findByRole("heading", { name: "AI providers" });
+    const connectionName = await screen.findByText("OpenAI", {
+      selector: "strong",
+    });
+    const card = connectionName.closest("article");
+    fireEvent.click(
+      within(card as HTMLElement).getByRole("button", { name: "Edit" }),
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Fetch models from provider" }),
+    );
+    const discovered = await screen.findByRole("list", {
+      name: "Discovered models",
+    });
+    const option = within(discovered).getByText("gpt-5-mini", {
+      selector: "strong",
+    });
+    fireEvent.click(option.closest("label") as HTMLElement);
+    fireEvent.click(
+      screen.getByRole("button", { name: /Add 1 model to this connection/ }),
+    );
+    // Adoption switches the connection to a manual list (the picked models
+    // REPLACE the provider catalog), visible in the summary line.
+    expect(screen.getByText(/Manual list: 1 model/)).toBeTruthy();
+    expect(runtime.calls).toContain("model/list");
   });
 
   it("saves and verifies the selected Agent model with the project context", async () => {
