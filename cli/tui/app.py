@@ -249,6 +249,31 @@ class TuiApp:
             f"(~{saved:,} chars of older turns replaced by a summary)."
         )
 
+    def agent_preset_overview(self) -> str:
+        from core.agent_presets import list_agent_presets
+
+        current = self.thread_client.current_agent_preset_id()
+        lines = [f"agent preset: {current or 'default composition (none)'}"]
+        for preset in list_agent_presets(self.thread_client.workspace):
+            if preset.broken is not None:
+                lines.append(f"  ✗ {preset.id} — broken: {preset.broken}")
+                continue
+            marker = "●" if preset.id == current else "○"
+            face = ", ".join(preset.tools) if preset.tools is not None else "all tools"
+            lines.append(
+                f"  {marker} {preset.id} [{preset.trust}] — "
+                f"{preset.description or preset.display_name} ({face})"
+            )
+        lines.append("usage: /preset <id> on a blank Session · /preset clear")
+        return "\n".join(lines)
+
+    def set_agent_preset(self, preset_id: str | None) -> str:
+        self.thread_client.set_agent_preset(preset_id)
+        chosen = self.thread_client.current_agent_preset_id()
+        return (
+            f"agent preset set to {chosen}" if chosen else "agent preset cleared"
+        ) + " — takes effect from the first message of this Session."
+
     def list_skills(self) -> str:
         try:
             skills = self.thread_client.application.skills.list(

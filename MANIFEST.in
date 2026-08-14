@@ -24,3 +24,4 @@ global-exclude .git*
 global-exclude .history*
 global-exclude .ruff_cache*
 global-exclude __pycache__*
+recursive-include core/agent_presets/builtin *

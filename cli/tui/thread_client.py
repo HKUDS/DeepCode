@@ -12,6 +12,7 @@ from cli.project_trust import (
     set_project_trusted,
 )
 from cli.tui.domain_events import DurableThreadEventCursor
+from core.agent_presets import METADATA_KEY as PRESET_METADATA_KEY
 from core.application.agent_adapter import ConfiguredAgentSessionFactory
 from core.application.application import DeepCodeApplication
 from core.application.interactive_turn_router import (
@@ -328,6 +329,20 @@ class TuiThreadClient:
             access_preset,
         )
         return self.thread
+
+    def set_agent_preset(self, preset_id: str | None) -> Thread:
+        self.thread = self.application.threads.set_agent_preset(
+            self.thread.id,
+            preset_id,
+        )
+        return self.thread
+
+    def current_agent_preset_id(self) -> str | None:
+        session = self.application.session_store.get_session(self.thread.id)
+        if session is None:
+            return None
+        value = session.metadata.get(PRESET_METADATA_KEY)
+        return value.get("id") if isinstance(value, dict) else None
 
     def refresh_thread(self) -> Thread:
         self.thread = self.application.threads.read(self.thread.id)

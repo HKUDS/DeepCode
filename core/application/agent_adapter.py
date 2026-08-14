@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
+from core.agent_presets import AgentPresetSnapshot
 from core.agent_runtime.goal_runtime import GoalRuntimeRouter
 from core.agent_runtime.injections import InjectionCallback, TurnInputSink
 from core.agent_setup import build_agent_session
@@ -118,10 +119,23 @@ class ConfiguredAgentSessionFactory:
         runtime_input_sink: TurnInputSink | None = None,
         goal_runtime: GoalRuntimeRouter | None = None,
         skill_runtime: SkillRuntime | None = None,
+        agent_preset: AgentPresetSnapshot | None = None,
     ) -> AgentSessionPort:
         options: dict[str, Any] = {}
         if self.max_iterations is not None:
             options["max_iterations"] = self.max_iterations
+        if agent_preset is not None:
+            # A preset owns exactly the model-facing composition (persona,
+            # tool narrowing, delegation) — never the model route or the
+            # permission stack, which stay independent knobs (dsh's split).
+            from core.agent_setup import SYSTEM_PROMPT
+
+            options["system_prompt"] = agent_preset.compose_system_prompt(SYSTEM_PROMPT)
+            preset_filter = agent_preset.tool_filter()
+            if preset_filter is not None:
+                options["tool_filter"] = preset_filter
+            if agent_preset.allow_spawn is not None:
+                options["allow_spawn"] = agent_preset.allow_spawn
         runtime = DeepCodeRuntime(load_config_for_workspace(workspace))
         plugin_mcp_servers = (
             self._plugin_mcp_provider(Path(workspace))
@@ -164,12 +178,14 @@ class ConfiguredAgentSessionFactory:
         execution_profile: ExecutionProfile | None = None,
         execution_security_profile: ExecutionSecurityProfile | None = None,
         permission_mode_override: ExecutionPermissionMode | None = None,
+        agent_preset: AgentPresetSnapshot | None = None,
     ) -> object:
         """Invalidate idle sessions after an in-process config reload."""
 
         return (
             str(Path(workspace).expanduser().resolve(strict=False)),
             model,
+            agent_preset.fingerprint() if agent_preset is not None else None,
             (
                 execution_profile.connection_id,
                 execution_profile.config_revision,
