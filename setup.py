@@ -89,6 +89,7 @@ setuptools.setup(
             "builtin/*/references/*",
             "builtin/*/assets/*",
         ],
+        "core.agent_presets": ["builtin/*.md"],
         "core.mcp": ["presets.json"],
         "tools": ["*.yaml"],
     },
