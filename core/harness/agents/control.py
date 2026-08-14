@@ -50,6 +50,10 @@ def _slug(name: str) -> str:
 
 
 _RUNNING = "running"
+# A native sub-agent that completed (or was softly interrupted in) a turn
+# parks here alive: its conversation continues on the next send_message.
+# External-CLI children never reach it — they answer once and are done.
+_IDLE = "idle"
 _DONE = "done"
 _FAILED = "failed"
 
@@ -94,10 +98,25 @@ class SubAgent:
     inbox_sequence: int = 0
     dedup_key: str = ""  # stable key so a re-worded re-spawn is caught
     handle: asyncio.Task | None = field(default=None, repr=False)
+    # Conversational state (native backend): the current turn's inner task —
+    # the soft-interrupt target — and the queue an idle child parks on until
+    # the parent sends a follow-up.
+    turn_task: asyncio.Task | None = field(default=None, repr=False)
+    wake: asyncio.Queue = field(default_factory=asyncio.Queue, repr=False)
+    completed_turns: int = 0
+    # Set whenever the child settles (a turn finished, it parked idle, or it
+    # reached a terminal state); cleared when a new turn starts. The waiting
+    # primitive for "this child has something new" now that a conversational
+    # child's task handle outlives every individual turn.
+    settled: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
 
     @property
     def running(self) -> bool:
         return self.status == _RUNNING
+
+    @property
+    def idle(self) -> bool:
+        return self.status == _IDLE
 
 
 def _format_result_message(sub: SubAgent) -> str:
@@ -127,6 +146,7 @@ class AgentControl:
         active_turn_id_provider: Any | None = None,
         runtime_input_sink: TurnInputSink | None = None,
         context_note_sink: Any | None = None,
+        transcript_sink: Any | None = None,
         project_trusted: bool = False,
     ) -> None:
         self._workspace = workspace
@@ -142,6 +162,8 @@ class AgentControl:
         # Canonical-history fallback for results that lose the delivery race
         # (see _post). Same callable the runner uses for mid-turn notes.
         self._context_note_sink = context_note_sink
+        # Per-child transcript writer (see _dump_transcript); host-provided.
+        self._transcript_sink = transcript_sink
         self._project_trusted = project_trusted
         self._local_runtime_id = f"local-agent-runtime-{uuid.uuid4().hex}"
         self._agents: dict[str, SubAgent] = {}
@@ -169,13 +191,30 @@ class AgentControl:
         return list(self._agents.values())
 
     def interrupt(self, agent_id: str) -> str:
-        """Cancel a running sub-agent. Its cancelled result reaches the mailbox
-        like any other completion."""
+        """Stop a running sub-agent's CURRENT turn.
+
+        dsh's keepInbox rule, in DeepCode form: a native child is not killed —
+        only its in-flight turn is cancelled, and it parks idle with its
+        conversation intact, ready for a redirecting ``send_message``. An
+        external-CLI child has no turn boundary to stop at, so interrupting it
+        remains a whole-run cancellation.
+        """
         sub = self._agents.get(agent_id)
         if sub is None:
             return f"no such agent: {agent_id}"
+        if sub.idle:
+            return (
+                f"{agent_id} is already idle — send_message to give it a new direction"
+            )
         if not sub.running:
             return f"{agent_id} already finished ({sub.status})"
+        if sub.backend == NATIVE_BACKEND and sub.turn_task is not None:
+            if sub.turn_task.cancelling() == 0:
+                sub.turn_task.cancel()
+            return (
+                f"interrupt requested for {agent_id}; it parks idle with its "
+                "conversation intact — send_message to redirect it"
+            )
         if sub.handle is not None and sub.handle.cancelling() == 0:
             sub.handle.cancel()
         return f"interrupt requested for {agent_id}"
@@ -195,10 +234,15 @@ class AgentControl:
                 "accepts no messages after start — its result will arrive on "
                 "its own, or interrupt_agent it."
             )
-        if not sub.running:
-            return f"{agent_id} already finished ({sub.status}); cannot deliver"
         if not message.strip():
             return "Error: message is empty."
+        if sub.idle:
+            # A parked child resumes with the message as its next turn's
+            # input, on top of its accumulated conversation.
+            sub.wake.put_nowait(message.strip())
+            return f"delivered to {agent_id}; it resumes with your message"
+        if not sub.running:
+            return f"{agent_id} already finished ({sub.status}); cannot deliver"
         sub.inbox_sequence += 1
         sub.inbox.append(
             (
@@ -374,11 +418,18 @@ class AgentControl:
 
     async def _run(self, sub: SubAgent) -> None:
         try:
-            if sub.isolate:
-                sub.result = await self._run_isolated(sub)
+            if sub.backend != NATIVE_BACKEND:
+                # External CLIs answer once: run, deliver, done.
+                if sub.isolate:
+                    sub.result = await self._run_isolated(sub)
+                else:
+                    sub.result = await self._run_task_in(sub, self._workspace)
+                sub.status = _DONE
             else:
-                sub.result = await self._run_task_in(sub, self._workspace)
-            sub.status = _DONE
+                # Native children are conversational: _converse posts each
+                # turn's result itself and only ever exits by cancellation
+                # or failure, both handled below.
+                await self._converse(sub)
         except asyncio.CancelledError:
             sub.status = _FAILED
             sub.result = "cancelled"
@@ -387,10 +438,98 @@ class AgentControl:
             sub.status = _FAILED
             sub.result = f"error: {exc}"
         finally:
-            if sub.status != _RUNNING:
+            if sub.status not in (_RUNNING, _IDLE):
                 self._post(sub.id, _format_result_message(sub))
+            sub.settled.set()  # release anyone awaiting this child
+
+    async def _converse(self, sub: SubAgent) -> None:
+        """A native child's whole life: turns alternating with idle parking.
+
+        dsh's continuable-subagent shape in DeepCode form. Each turn runs
+        through the single-turn seam (``_run_subagent``), which extends
+        ``sub.seed_history`` with the finished conversation so the next turn
+        continues it. Between turns the child parks on ``sub.wake`` until the
+        parent sends a follow-up. The loop never returns normally: it ends by
+        the parent's hard cancel (Turn teardown) or by a turn failure, both
+        of which propagate to ``_run``.
+
+        Soft interrupts land here: ``interrupt`` cancels only ``turn_task``,
+        so the ``await`` below raises CancelledError while THIS task was not
+        itself cancelled — distinguishable via ``cancelling()``, the same
+        probe the kernel uses — and the child parks instead of dying.
+        """
+        workspace = self._workspace
+        worktree = None
+        if sub.isolate:
+            from core.team.worktree import WorktreeManager
+
+            worktree = WorktreeManager(self._workspace)
+            async with self._git_lock:
+                worktree.ensure_base()
+                workspace = worktree.create(sub.id)
+        try:
+            while True:
+                sub.status = _RUNNING
+                sub.settled.clear()
+                sub.turn_task = asyncio.ensure_future(
+                    self._run_subagent(sub, workspace)
+                )
+                try:
+                    result = await sub.turn_task
+                except asyncio.CancelledError:
+                    current = asyncio.current_task()
+                    if current is not None and current.cancelling() > 0:
+                        raise  # the parent tore the whole child down
+                    sub.result = (
+                        "(turn interrupted; the sub-agent is parked idle with "
+                        "its conversation intact — send_message to redirect it)"
+                    )
+                else:
+                    if worktree is not None:
+                        async with self._git_lock:
+                            merge = worktree.merge(sub.id)
+                        result = self._describe_merge(merge, result)
+                    sub.completed_turns += 1
+                    sub.result = result
+                finally:
+                    sub.turn_task = None
+                sub.status = _IDLE
+                sub.settled.set()
+                self._post(sub.id, _format_result_message(sub))
+                if sub.seed_history:
+                    # Refresh the transcript now that the turn's status is
+                    # settled — the in-turn dump necessarily wrote "running".
+                    self._write_transcript(sub, sub.seed_history)
+                sub.task = await sub.wake.get()
+        finally:
+            if worktree is not None:
+                async with self._git_lock:
+                    worktree.cleanup(sub.id)
+                    self._remove_empty_worktree_root(worktree)
+
+    @staticmethod
+    def _describe_merge(merge, summary: str) -> str:
+        if merge.clean:
+            return f"(isolated, merged cleanly)\n{summary}"
+        if merge.conflicts:
+            return (
+                f"(isolated, NOT merged — conflicts in "
+                f"{', '.join(merge.conflicts)}; reconcile manually)\n{summary}"
+            )
+        return f"(isolated, merge blocked: {merge.detail})\n{summary}"
+
+    @staticmethod
+    def _remove_empty_worktree_root(worktree) -> None:
+        """Last isolated agent out removes the now-empty shared dir."""
+        try:
+            root = worktree.worktrees_root
+            if root.is_dir() and not any(root.iterdir()):
+                root.rmdir()
+        except OSError:
+            pass
 
     async def _run_isolated(self, sub: SubAgent) -> str:
+        """One-shot isolated run (external backends; natives use _converse)."""
         from core.team.worktree import WorktreeManager
 
         wt = WorktreeManager(self._workspace)
@@ -404,21 +543,8 @@ class AgentControl:
         finally:
             async with self._git_lock:
                 wt.cleanup(sub.id)
-                # Last isolated agent out removes the now-empty shared dir.
-                try:
-                    root = wt.worktrees_root
-                    if root.is_dir() and not any(root.iterdir()):
-                        root.rmdir()
-                except OSError:
-                    pass
-        if merge.clean:
-            return f"(isolated, merged cleanly)\n{summary}"
-        if merge.conflicts:
-            return (
-                f"(isolated, NOT merged — conflicts in {', '.join(merge.conflicts)}; "
-                f"reconcile manually)\n{summary}"
-            )
-        return f"(isolated, merge blocked: {merge.detail})\n{summary}"
+                self._remove_empty_worktree_root(wt)
+        return self._describe_merge(merge, summary)
 
     async def _run_task_in(self, sub: SubAgent, workspace: str) -> str:
         """Dispatch one sub-agent's task to its backend in ``workspace``.
@@ -488,12 +614,18 @@ class AgentControl:
         )
         try:
             if sub.seed_history:
-                # fork_turns: inherit parent context
+                # fork_turns seed on the first turn; on follow-up turns this
+                # is the child's own accumulated conversation, which is what
+                # makes the resumed turn a continuation rather than a restart.
                 session.load_history(sub.seed_history)
             final = ""
             async for event in session.run_stream(UserInput(text=sub.task)):
                 if event.msg.type == "task_complete":
                     final = event.msg.final_text or ""
+            # Carry the finished conversation forward for the next turn.
+            history = getattr(session, "history", None)
+            if history is not None:
+                sub.seed_history = [dict(m) for m in history]
             if capture is not None:
                 structured = capture.render()
                 if structured is None:
@@ -506,7 +638,37 @@ class AgentControl:
                 return structured
             return final.strip() or "(sub-agent produced no summary)"
         finally:
+            self._dump_transcript(sub, session)
             await session.aclose()
+
+    def _dump_transcript(self, sub: SubAgent, session: Any) -> None:
+        """Report the child's full conversation to the host's transcript sink.
+
+        The autopsy channel (dsh children are session-backed; DeepCode's were
+        invisible): every finished or failed turn hands the host the complete
+        message list, so a parent Session can keep a per-child transcript its
+        user can actually inspect. Absent sink or failure never disturbs the
+        run — visibility must not break the thing it observes.
+        """
+        if self._transcript_sink is None:
+            return
+        history = getattr(session, "history", None)
+        if history is None:
+            return
+        self._write_transcript(sub, history)
+
+    def _write_transcript(self, sub: SubAgent, messages: Any) -> None:
+        if self._transcript_sink is None:
+            return
+        try:
+            self._transcript_sink(
+                sub.id,
+                sub.task,
+                sub.status,
+                [dict(m) for m in messages],
+            )
+        except Exception:  # noqa: BLE001 - observability must not kill the run
+            logger.exception("sub-agent transcript could not be written: {}", sub.id)
 
     # -- mailbox ---------------------------------------------------------------
 

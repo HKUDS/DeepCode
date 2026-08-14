@@ -247,6 +247,7 @@ def build_agent_session(
     allow_spawn: bool = True,
     injection_callback: Any | None = None,
     context_note_sink: Any | None = None,
+    subagent_transcript_sink: Any | None = None,
     active_turn_id_provider: Any | None = None,
     runtime_input_sink: Any | None = None,
     goal_runtime: Any | None = None,
@@ -378,6 +379,7 @@ def build_agent_session(
             active_turn_id_provider=active_turn_id_provider,
             runtime_input_sink=runtime_input_sink,
             context_note_sink=context_note_sink,
+            transcript_sink=subagent_transcript_sink,
             project_trusted=project_trusted,
         )
 

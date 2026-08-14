@@ -100,8 +100,18 @@ def _parse_fork_turns(value: Any) -> str | int:
 class SpawnAgentTool(Tool):
     """Start a sub-agent on a subtask in the background (non-blocking)."""
 
-    def __init__(self, control: AgentControl):
+    def __init__(
+        self,
+        control: AgentControl,
+        *,
+        known_tools: tuple[str, ...] = (),
+    ):
         self._control = control
+        # The parent's tool vocabulary, used to fail a `tools` allowlist that
+        # names nothing real. Verified live: an allowlist of ["read_file"]
+        # (the tool is called "read") silently produced a tool-less child
+        # that invented its answer instead of reading anything.
+        self._known_tools = frozenset(known_tools)
 
     @property
     def name(self) -> str:
@@ -132,6 +142,15 @@ class SpawnAgentTool(Tool):
         tools = kwargs.get("tools")
         if tools is not None and not isinstance(tools, (list, tuple)):
             return "Error: 'tools' must be an array of tool names."
+        if tools and self._known_tools:
+            unknown = [str(t) for t in tools if str(t) not in self._known_tools]
+            if unknown:
+                return (
+                    f"Error: unknown tool name(s) {', '.join(unknown)} in "
+                    "'tools' — the allowlist would silently strip the "
+                    "sub-agent of capabilities it needs. Available: "
+                    f"{', '.join(sorted(self._known_tools))}."
+                )
         output_schema = kwargs.get("output_schema")
         if output_schema is not None and not isinstance(output_schema, dict):
             return "Error: 'output_schema' must be a JSON object."
@@ -264,8 +283,11 @@ class InterruptAgentTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Cancel a running sub-agent you spawned (e.g. it is no longer needed "
-            "or is stuck). Its cancelled result is delivered like any other."
+            "Stop a running sub-agent's CURRENT work. A native sub-agent is "
+            "not killed: it parks idle with its conversation intact, and "
+            "send_message gives it a new direction. Use this to redirect a "
+            "sub-agent heading the wrong way without losing its progress. "
+            "External (codex/claude-code) sub-agents are cancelled outright."
         )
 
     async def execute(self, **kwargs: Any) -> Any:
@@ -305,10 +327,11 @@ class SendMessageTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Send a message to a sub-agent you spawned while it is still "
-            "running — extra context, a correction, or a follow-up. It is "
-            "injected into that sub-agent's work at its next step. Only reaches "
-            "a sub-agent that is still running."
+            "Send a message to a sub-agent you spawned. While it is RUNNING, "
+            "the message is injected into its work at its next step. While it "
+            "is IDLE (finished a turn, or interrupted), the message wakes it "
+            "and becomes its next task — continuing the same conversation, so "
+            "follow-up questions and course corrections both work."
         )
 
     @property

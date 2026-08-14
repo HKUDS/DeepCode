@@ -145,7 +145,7 @@ def test_spawn_records_composition_on_the_subagent(
     async def fake_run(sub, workspace):  # noqa: ANN001 - test double
         return "done"
 
-    monkeypatch.setattr(control, "_run_task_in", fake_run)
+    monkeypatch.setattr(control, "_run_subagent", fake_run)
 
     async def scenario() -> None:
         agent_id = control.spawn(
@@ -218,9 +218,11 @@ def test_structured_delegation_returns_the_submission(
             output_schema=_SCHEMA,
         )
         sub = control.get(agent_id)
-        assert sub is not None and sub.handle is not None
-        await sub.handle
-        return sub.result
+        assert sub is not None
+        await sub.settled.wait()
+        result = sub.result
+        await control.cancel_running()
+        return result
 
     result = asyncio.run(scenario())
     assert result == '{"issues": ["none found"], "verdict": "pass"}'
@@ -272,3 +274,15 @@ def test_structured_delegation_without_submission_fails(
     assert status == "failed"
     assert "without submitting a structured result" in result
     assert "I think it looks fine" in result
+
+
+def test_spawn_tool_rejects_unknown_tool_names(tmp_path: Path) -> None:
+    """Verified live: an allowlist naming a nonexistent tool silently strips
+    the child of capabilities and it invents answers. The spawn tool now
+    validates names against the parent's own vocabulary."""
+    from core.harness.tools.spawn_agent import SpawnAgentTool
+
+    tool = SpawnAgentTool(_control(tmp_path), known_tools=("read", "grep", "bash"))
+    out = asyncio.run(tool.execute(name="x", task="t", tools=["read_file", "grep"]))
+    assert "Error: unknown tool name(s) read_file" in out
+    assert "Available: bash, grep, read" in out

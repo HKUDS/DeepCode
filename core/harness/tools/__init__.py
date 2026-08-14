@@ -136,7 +136,12 @@ def default_coding_tools(
     if ask_user is not None:
         tools.append(RequestUserInputTool(ask_user))
     if agent_control is not None:
-        tools.append(SpawnAgentTool(agent_control))
+        # The parent's tool names are the vocabulary for spawn_agent's
+        # `tools` allowlist: a child is built with (almost) the same set, so
+        # validating against them at spawn catches a misspelled name before
+        # it silently strips the child of the very tool it needed.
+        known_tool_names = tuple(tool.name for tool in tools)
+        tools.append(SpawnAgentTool(agent_control, known_tools=known_tool_names))
         tools.append(WaitAgentTool(agent_control))
         tools.append(ListAgentsTool(agent_control))
         tools.append(InterruptAgentTool(agent_control))
