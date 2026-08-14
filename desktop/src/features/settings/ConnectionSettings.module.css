@@ -437,6 +437,17 @@
   font-size: var(--text-micro);
 }
 
+.credentialShadowNote {
+  margin: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--border-subtle);
+  border-left: 2px solid var(--danger);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--text-micro);
+  line-height: 1.45;
+}
+
 .credentialTabs {
   display: flex;
   width: fit-content;

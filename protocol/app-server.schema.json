@@ -1361,6 +1361,7 @@
         "modelCatalog": {
           "type": "string",
           "enum": [
+            "auto",
             "openrouter",
             "openai",
             "anthropic",

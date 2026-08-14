@@ -37,7 +37,12 @@ class ResolvedConnection:
     api_key: str | None
     api_base: str | None
     extra_headers: dict[str, str]
+    # Resolved catalog strategy the runtime fetches with ("openai", ...).
     model_catalog: str
+    # The STORED setting ("auto" or explicit) — what surfaces display and
+    # write back. Echoing the resolved kind instead rewrote a user's "auto"
+    # to a concrete value on every edit round-trip.
+    model_catalog_setting: str
     manual_models: tuple[str, ...]
     credential_source: str
     local: bool
@@ -52,7 +57,7 @@ class ResolvedConnection:
             "adapter": self.adapter,
             "apiBase": self.api_base,
             "apiKeyEnv": None,
-            "modelCatalog": self.model_catalog,
+            "modelCatalog": self.model_catalog_setting,
             "manualModels": list(self.manual_models),
             "configured": self.is_configured,
             "credentialSource": self.credential_source,
@@ -317,6 +322,7 @@ class ConnectionResolver:
             api_base=profile.api_base or spec.default_api_base or None,
             extra_headers=dict(profile.extra_headers),
             model_catalog=_catalog_kind(profile.model_catalog, spec),
+            model_catalog_setting=profile.model_catalog,
             manual_models=_clean_models(profile.manual_models),
             credential_source=source,
             local=spec.is_local,
@@ -341,6 +347,7 @@ class ConnectionResolver:
             api_base=provider.api_base or spec.default_api_base or None,
             extra_headers=dict(provider.extra_headers or {}),
             model_catalog=_catalog_kind("auto", spec),
+            model_catalog_setting="auto",
             manual_models=(),
             credential_source=source,
             local=spec.is_local,

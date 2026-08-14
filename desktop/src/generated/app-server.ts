@@ -812,7 +812,7 @@ export interface ConnectionInfo {
   adapter: "openai_compat" | "anthropic";
   apiBase: string | null;
   apiKeyEnv: string | null;
-  modelCatalog: "openrouter" | "openai" | "anthropic" | "manual";
+  modelCatalog: "auto" | "openrouter" | "openai" | "anthropic" | "manual";
   manualModels: string[];
   configured: boolean;
   credentialSource: "environment" | "credential_store" | "legacy_config" | "not_required" | "missing";

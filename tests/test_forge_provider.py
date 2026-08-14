@@ -1,15 +1,15 @@
-"""Forge gateway registration, plus the gateway rule for ``env_extras``.
+"""Forge gateway registration, plus the no-ambient-credential invariant.
 
-Ported from #116, which added Forge to the (since-removed) nanobot registry
-and fixed the same ``setdefault`` bug in nanobot's provider. Core had that bug
-half-fixed: ``spec.env_key`` was forced for gateways but ``env_extras`` was not.
+Provider construction must never export a key to ``os.environ``: in a
+long-lived App Server an ambient write lets every same-template connection
+resolve another connection's key as "environment" — a cross-connection
+credential bleed. The key travels only on the provider instance.
 """
 
 from __future__ import annotations
 
 import os
 import sys
-from dataclasses import replace
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,24 +52,13 @@ def test_providers_config_exposes_forge():
     assert hasattr(ProvidersConfig(), "forge")
 
 
-def test_gateway_env_extras_override_ambient_values(monkeypatch):
-    spec = replace(find_by_name("forge"), env_extras=(("FORGE_EXTRA", "{api_key}"),))
-    monkeypatch.setenv("FORGE_EXTRA", "stale-from-shell")
-    monkeypatch.delenv("FORGE_API_KEY", raising=False)
+def test_provider_construction_never_mutates_the_environment(monkeypatch):
+    """The key stays on the instance; nothing ambient learns it."""
 
-    OpenAICompatProvider(api_key="fresh-key", spec=spec)._setup_env("fresh-key", None)
-
-    assert os.environ["FORGE_EXTRA"] == "fresh-key"
-
-
-def test_direct_provider_env_extras_still_defer(monkeypatch):
-    """Non-gateway providers keep deferring to the ambient environment."""
-
-    spec = replace(find_by_name("zhipu"), env_extras=(("ZHIPU_EXTRA", "{api_key}"),))
-    assert spec.is_gateway is False
-    monkeypatch.setenv("ZHIPU_EXTRA", "set-by-user")
-    monkeypatch.delenv(spec.env_key, raising=False)
-
-    OpenAICompatProvider(api_key="fresh-key", spec=spec)._setup_env("fresh-key", None)
-
-    assert os.environ["ZHIPU_EXTRA"] == "set-by-user"
+    for name in ("forge", "openrouter", "zhipu", "openai"):
+        spec = find_by_name(name)
+        monkeypatch.delenv(spec.env_key, raising=False)
+        before = dict(os.environ)
+        OpenAICompatProvider(api_key="fresh-key", spec=spec)
+        assert dict(os.environ) == before, f"{name} construction mutated os.environ"
+        assert spec.env_key not in os.environ

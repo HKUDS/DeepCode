@@ -22,12 +22,6 @@ def _isolate_session_store(tmp_path, monkeypatch):
         "OPENAI_API_KEY",
         "OPENROUTER_API_KEY",
         *(provider.env_key for provider in PROVIDERS if provider.env_key),
-        *(
-            name
-            for provider in PROVIDERS
-            for name, _value in provider.env_extras
-            if name
-        ),
     }
     for name in credential_environment_names:
         monkeypatch.delenv(name, raising=False)
