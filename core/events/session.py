@@ -421,7 +421,7 @@ class AgentSession:
         # lifecycle fires SubagentStart/SubagentStop instead of SessionStart/Stop.
         self._agent_context = agent_context
         # Context-window budget that arms the runner's compaction ladder
-        # (_snip_history / _microcompact). Left unset it stays dormant and a
+        # (prune → summarize → _snip_history). Left unset it stays dormant and a
         # long enough session overflows the model; resolving it from the
         # model catalog is what makes "long sessions don't crash" (P2 exit
         # criterion) true for every AgentSession frontend — exec, TUI, web.

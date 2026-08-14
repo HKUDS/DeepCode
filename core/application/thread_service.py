@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -40,6 +41,8 @@ from core.persistence.thread_repository import ThreadRepository
 from core.persistence.workflow_repository import WorkflowRepository
 from core.providers.reasoning import normalize_reasoning_effort
 from core.sessions import Session, SessionMessage, SessionStore
+
+logger = logging.getLogger(__name__)
 
 _DESKTOP_KIND = "desktop"
 _AUTOMATION_KIND = "automation"
@@ -316,16 +319,22 @@ class ThreadService:
         if self.session_store.is_deletion_pending(thread_id):
             raise ThreadNotFoundError(f"thread not found: {thread_id}")
 
-        # A pre-P6 SQLite-only thread may be encountered before startup
-        # reconciliation. Adopt it in place, preserving its existing id.
+        # A projection-only thread may be encountered before startup
+        # reconciliation. Adopt it in place (preserving its id) only when
+        # SQLite is genuinely its system of record — legacy import or
+        # Automation bootstrap; a stale shadow of a removed Session is
+        # dropped, never resurrected (one-way data flow).
         with self.database.read() as connection:
             existing = ThreadRepository(connection).get(thread_id)
         if existing is not None:
-            self._adopt_thread(existing)
-            session = self.session_store.get_session(thread_id)
-            if session is not None:
-                thread, _changed = self._ensure_projection(session)
-                return thread
+            if self._sqlite_is_system_of_record(existing.id):
+                self._adopt_thread(existing)
+                session = self.session_store.get_session(thread_id)
+                if session is not None:
+                    thread, _changed = self._ensure_projection(session)
+                    return thread
+            else:
+                self._drop_stale_projection(existing)
         raise ThreadNotFoundError(f"thread not found: {thread_id}")
 
     def list(
@@ -624,7 +633,9 @@ class ThreadService:
         canonical = [
             message
             for message in session.messages
-            if message.role in {"user", "assistant"} and message.content
+            if message.role in {"user", "assistant"}
+            and message.content
+            and not self._is_context_note(message)
         ]
         items = ItemRepository(connection)
         projected_items = items.conversation_for_thread(thread.id)
@@ -957,6 +968,16 @@ class ThreadService:
             return 1
 
     def _adopt_sqlite_only_threads(self) -> None:
+        """Resolve projection rows whose canonical Session file is missing.
+
+        One-way data flow (the dsh invariant): JSONL owns identity, so a
+        Thread row is promoted back into the canonical store only when SQLite
+        is genuinely its system of record — a P1-P6 legacy import, or an
+        Automation bootstrap whose idempotent Session materialization has not
+        landed yet. Any other projection-only Thread is a stale shadow of a
+        Session removed outside DeepCode; it is dropped from the projection
+        instead of resurrected.
+        """
         with self.database.read() as connection:
             threads = ThreadRepository(connection).list_all(
                 include_archived=True,
@@ -965,8 +986,40 @@ class ThreadService:
         for thread in threads:
             if self.session_store.get_session(
                 thread.id
-            ) is None and not self.session_store.is_deletion_pending(thread.id):
+            ) is not None or self.session_store.is_deletion_pending(thread.id):
+                continue
+            if self._sqlite_is_system_of_record(thread.id):
                 self._adopt_thread(thread)
+            else:
+                self._drop_stale_projection(thread)
+
+    def _sqlite_is_system_of_record(self, thread_id: str) -> bool:
+        """True when this Thread legitimately predates its canonical Session."""
+
+        with self.database.read() as connection:
+            if (
+                LegacyImportRepository(connection).source_for_thread(thread_id)
+                is not None
+            ):
+                return True
+            return (
+                AutomationRepository(connection).get_for_thread(
+                    thread_id,
+                    include_retired=True,
+                )
+                is not None
+            )
+
+    def _drop_stale_projection(self, thread: Thread) -> None:
+        with self.database.transaction() as connection:
+            removed = ThreadRepository(connection).remove(thread.id)
+        if removed:
+            logger.warning(
+                "Dropped stale thread projection %s (%r): its canonical Session "
+                "no longer exists and SQLite was never its system of record",
+                thread.id,
+                thread.title,
+            )
 
     def _adopt_thread(self, thread: Thread) -> None:
         """Promote P1-P6 SQLite-only data into the canonical JSONL store."""
@@ -1151,6 +1204,21 @@ class ThreadService:
             dict(session.metadata),
         )
 
+    @staticmethod
+    def _is_context_note(message: SessionMessage) -> bool:
+        """True for runner-injected mid-turn context, not a conversational turn.
+
+        The context-note sink stamps every note with a ``delivery`` marker
+        (``mid_turn``/``between_turns``). Notes are model-visible log entries
+        — repeat-guard reminders, sub-agent results, Goal updates — that sit
+        BETWEEN a Turn's user prompt and its assistant reply in the canonical
+        JSONL. The projection timeline tracks conversational turns only, so
+        pair-matching must skip them or every noted Turn would read as a
+        projection conflict.
+        """
+        metadata = message.metadata or {}
+        return "delivery" in metadata
+
     def _merge_projection_tail(
         self,
         canonical: Session,
@@ -1161,7 +1229,9 @@ class ThreadService:
         canonical_pairs = [
             (message.role, message.content)
             for message in canonical.messages
-            if message.role in {"user", "assistant"} and message.content
+            if message.role in {"user", "assistant"}
+            and message.content
+            and not self._is_context_note(message)
         ]
         projected_pairs = [
             (

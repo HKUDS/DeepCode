@@ -1,11 +1,12 @@
 """Mid-turn model-visible messages reach the host sink (``context_note_sink``).
 
-The dsh session-log rule under test — model-visible means logged: messages
-the runner itself adds to model history mid-turn (sub-agent results drained
-from the mailbox, repeat-call reminders) must be reported to the host so the
-canonical Session can record them. Steering and Goal updates are NOT
-reported here: the services that accepted them already persisted them, and a
-second copy would duplicate history on replay.
+The dsh session-log rule under test — model-visible means logged: every
+message the runner itself adds to the PERSISTED model history (sub-agent
+results and Goal updates drained from the mailbox, repeat-call reminders,
+length-recovery prompts, stop-hook continuations) must be reported to the
+host so the canonical Session can record them. Steering is NOT reported
+here: the service that accepted it already persisted it, and a second copy
+would duplicate history on replay.
 """
 
 from __future__ import annotations
@@ -19,7 +20,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.agent_runtime.injections import SubagentMessage, UserSteer
+from core.agent_runtime.injections import (
+    GoalObjectiveUpdated,
+    SubagentMessage,
+    UserSteer,
+)
 from core.agent_runtime.runner import AgentRunner, AgentRunSpec
 from core.agent_runtime.tools.base import Tool, tool_parameters
 from core.agent_runtime.tools.registry import ToolRegistry
@@ -150,6 +155,111 @@ def test_subagent_injections_are_reported_but_steering_is_not() -> None:
     assert result.final_content == "done"
     assert [source for source, _ in notes] == ["subagent"]
     assert "RESULT: subtask finished" in notes[0][1]
+
+
+def test_goal_update_injection_is_reported() -> None:
+    """The Goal ledger stores the objective, but the exact prompt text the
+    model read exists only in this run's memory — it must be noted."""
+
+    notes: list[tuple[str, str]] = []
+    delivered = False
+
+    async def injection_callback(**_kwargs: Any) -> list[Any]:
+        nonlocal delivered
+        if delivered:
+            return []
+        delivered = True
+        return [
+            GoalObjectiveUpdated(
+                message_id="goal-1",
+                target_turn_id="turn-1",
+                goal_id="g-42",
+                objective="ship the refactor",
+            )
+        ]
+
+    class _OneShotProvider:
+        def get_default_model(self) -> str:
+            return "fake-model"
+
+        async def chat_with_retry(self, **kwargs: Any) -> LLMResponse:
+            return LLMResponse(content="done", finish_reason="stop")
+
+    asyncio.run(
+        AgentRunner(_OneShotProvider()).run(
+            _spec(
+                _OneShotProvider(),
+                injection_callback=injection_callback,
+                context_note_sink=lambda c, s: notes.append((s, c)),
+            )
+        )
+    )
+    assert [source for source, _ in notes] == ["goal_update"]
+    assert "ship the refactor" in notes[0][1]
+
+
+def test_stop_hook_continuation_is_reported() -> None:
+    notes: list[tuple[str, str]] = []
+    fired = False
+
+    async def stop_hook(_active: bool):
+        nonlocal fired
+        if fired:
+            return None
+        fired = True
+
+        class _Outcome:
+            block = True
+            block_reason = "also run the tests before finishing"
+
+        return _Outcome()
+
+    class _Provider:
+        def get_default_model(self) -> str:
+            return "fake-model"
+
+        async def chat_with_retry(self, **kwargs: Any) -> LLMResponse:
+            return LLMResponse(content="done", finish_reason="stop")
+
+    result = asyncio.run(
+        AgentRunner(_Provider()).run(
+            _spec(
+                _Provider(),
+                stop_hook=stop_hook,
+                context_note_sink=lambda c, s: notes.append((s, c)),
+            )
+        )
+    )
+    assert result.final_content == "done"
+    assert ("stop_hook", "also run the tests before finishing") in notes
+
+
+def test_length_recovery_prompt_is_reported() -> None:
+    notes: list[tuple[str, str]] = []
+
+    class _TruncatingProvider:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def get_default_model(self) -> str:
+            return "fake-model"
+
+        async def chat_with_retry(self, **kwargs: Any) -> LLMResponse:
+            self.calls += 1
+            if self.calls == 1:
+                return LLMResponse(content="partial answ", finish_reason="length")
+            return LLMResponse(content="er, completed", finish_reason="stop")
+
+    result = asyncio.run(
+        AgentRunner(_TruncatingProvider()).run(
+            _spec(
+                _TruncatingProvider(),
+                context_note_sink=lambda c, s: notes.append((s, c)),
+            )
+        )
+    )
+    assert result.error is None
+    assert [source for source, _ in notes] == ["length_recovery"]
 
 
 def test_sink_failure_never_aborts_the_run() -> None:
