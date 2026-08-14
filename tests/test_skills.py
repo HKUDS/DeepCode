@@ -217,3 +217,23 @@ def test_wired_into_default_coding_tools(tmp_path):
     # A project skill → the `skill` tool appears (hermetic: project-only scan).
     _write_skill(tmp_path / ".deepcode/skills", "y")
     assert "skill" in set(default_coding_tools(str(tmp_path)).tool_names)
+
+
+def test_parse_dsh_dialect_frontmatter_is_tolerated(tmp_path):
+    """Cross-harness interop: DeepSeek Harness (dsh) writes the same SKILL.md
+    format and scans the same ``.agents/skills`` roots, so a skill authored
+    for dsh must load here unchanged. Its dialect adds boolean invocation
+    keys this parser does not model — they must be ignored, never fatal.
+    Verified live: dsh's ``dsh-trim-cot-leakage`` loaded verbatim and its
+    methodology was applied by the model (session 1df2feb3)."""
+    p = _write_skill(
+        tmp_path,
+        "dsh-authored",
+        description="a skill written for DeepSeek Harness",
+        frontmatter_extra="disable-model-invocation: false\nuser-invocable: true",
+        body="## The one test\nAsk whether a reader at HEAD can resolve it.",
+    )
+    s = parse_skill_md(p)
+    assert s.name == "dsh-authored"
+    assert s.description == "a skill written for DeepSeek Harness"
+    assert "The one test" in s.instructions
