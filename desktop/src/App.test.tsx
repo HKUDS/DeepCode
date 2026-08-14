@@ -284,6 +284,21 @@ class TestRuntime implements DesktopRuntime {
               enabled: true,
               explicit: false,
             },
+            {
+              id: "anthropic",
+              label: "Anthropic",
+              providerName: "anthropic",
+              adapter: "anthropic",
+              apiBase: "https://api.anthropic.com",
+              apiKeyEnv: "ANTHROPIC_API_KEY",
+              modelCatalog: "anthropic",
+              manualModels: [],
+              configured: false,
+              credentialSource: "missing",
+              local: false,
+              enabled: true,
+              explicit: false,
+            },
           ],
           templates: [
             {
@@ -2067,6 +2082,26 @@ describe("desktop command center", () => {
     const keyInput = screen.getByLabelText("API key") as HTMLInputElement;
     expect(keyInput.disabled).toBe(true);
     expect(keyInput.placeholder).toMatch(/launch environment/);
+  });
+
+  it("lists dormant providers in the directory strip for one-click setup", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    await screen.findByRole("heading", { name: "AI providers" });
+
+    const strip = await screen.findByRole("list", {
+      name: "Available providers",
+    });
+    // The configured connection lives in the rail, not the directory.
+    expect(within(strip).queryByText("OpenAI")).toBeNull();
+    fireEvent.click(within(strip).getByText("Anthropic"));
+    // One click opens the editor prefilled from the template.
+    expect(
+      await screen.findByRole("dialog", { name: /Connect a provider/ }),
+    ).toBeTruthy();
   });
 
   it("fetches a connection's live models and adopts picks into its manual list", async () => {

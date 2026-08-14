@@ -9,7 +9,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import type {
   CatalogModel,
@@ -75,14 +75,19 @@ export function ConnectionSettings({
   // The live model listing fetched for the connection being edited, plus
   // the ids picked for adoption. Fetched results are offered, never
   // auto-written (the dsh rule): only "Add selected" touches the draft.
-  const [modelFetch, setModelFetch] = useState<{
+  // State is keyed by its owning editor id and derived at render time, so
+  // switching editors needs no synchronous reset inside an effect and a
+  // late-landing listing can never bleed into another connection's editor.
+  const [modelFetchState, setModelFetchState] = useState<{
+    editorId: string;
     loading: boolean;
     error: string | null;
     models: CatalogModel[] | null;
-  }>({ loading: false, error: null, models: null });
-  const [pickedModels, setPickedModels] = useState<ReadonlySet<string>>(
-    new Set(),
-  );
+  } | null>(null);
+  const [pickedState, setPickedState] = useState<{
+    editorId: string;
+    picked: ReadonlySet<string>;
+  } | null>(null);
   const connections = useMemo(
     () =>
       [...(controller.catalog?.connections ?? [])].sort(
@@ -199,11 +204,15 @@ export function ConnectionSettings({
   };
 
   const editingId = editing?.id ?? null;
-  useEffect(() => {
-    // A different connection's listing must never leak into this editor.
-    setModelFetch({ loading: false, error: null, models: null });
-    setPickedModels(new Set());
-  }, [editingId]);
+  const modelFetch =
+    modelFetchState?.editorId === editingId
+      ? modelFetchState
+      : { loading: false, error: null, models: null };
+  const pickedModels: ReadonlySet<string> =
+    pickedState?.editorId === editingId ? pickedState.picked : new Set();
+  const setPickedModels = (picked: ReadonlySet<string>) => {
+    if (editingId !== null) setPickedState({ editorId: editingId, picked });
+  };
 
   const manualModelIds = useMemo(
     () =>
@@ -217,14 +226,20 @@ export function ConnectionSettings({
   );
 
   const fetchModels = async () => {
-    if (!editing) return;
-    setModelFetch({ loading: true, error: null, models: null });
+    if (!editing || editingId === null) return;
+    setModelFetchState({
+      editorId: editingId,
+      loading: true,
+      error: null,
+      models: null,
+    });
     try {
       const result = await controller.models(
         editing.id.trim().toLocaleLowerCase(),
         true,
       );
-      setModelFetch({
+      setModelFetchState({
+        editorId: editingId,
         loading: false,
         error:
           result.models.length === 0
@@ -234,7 +249,8 @@ export function ConnectionSettings({
         models: result.models,
       });
     } catch (cause) {
-      setModelFetch({
+      setModelFetchState({
+        editorId: editingId,
         loading: false,
         error: cause instanceof Error ? cause.message : String(cause),
         models: null,
@@ -290,15 +306,29 @@ export function ConnectionSettings({
             Desktop.
           </span>
         </div>
-        <button
-          type="button"
-          className={styles.addButton}
-          onClick={() => setEditing({ ...emptyDraft })}
-          disabled={busy || saving}
-        >
-          <Plus size={14} />
-          Add provider
-        </button>
+        <div className={styles.addActions}>
+          <button
+            type="button"
+            className={styles.addButton}
+            onClick={() => setEditing({ ...emptyDraft })}
+            disabled={busy || saving}
+          >
+            <Plus size={14} />
+            Add provider
+          </button>
+          <button
+            type="button"
+            className={styles.addButton}
+            onClick={() => {
+              setEditing({ ...emptyDraft });
+              chooseTemplate("custom");
+            }}
+            disabled={busy || saving}
+            title="Declare an OpenAI-compatible or Anthropic endpoint DeepCode does not ship"
+          >
+            Add custom
+          </button>
+        </div>
       </header>
 
       {controller.error ? (
@@ -331,11 +361,18 @@ export function ConnectionSettings({
                 <p>
                   {connection.apiBase ?? "Provider default endpoint"}
                   <small>
-                    {connection.adapter.replace("_", " ")} ·{" "}
-                    {credentialLabel(connection)}
-                    {result?.modelCount
-                      ? ` · ${result.modelCount} models`
-                      : ""}
+                    <i
+                      className={styles.credentialDot}
+                      data-configured={connection.configured || undefined}
+                      role="img"
+                      aria-label={
+                        connection.configured
+                          ? "Credential configured"
+                          : "Credential missing"
+                      }
+                    />
+                    {credentialLabel(connection)} ·{" "}
+                    {modelFaceLabel(connection, result)}
                   </small>
                 </p>
                 {result ? (
@@ -388,6 +425,45 @@ export function ConnectionSettings({
           <p className={styles.loading}>Loading connections…</p>
         ) : null}
       </div>
+
+      {!controller.loading ? (
+        <div className={styles.directory}>
+          <p>
+            Available providers
+            <small>
+              Known services DeepCode can connect — pick one to set it up.
+            </small>
+          </p>
+          <div
+            className={styles.directoryStrip}
+            role="list"
+            aria-label="Available providers"
+          >
+            {connections
+              .filter((connection) => !isManagedConnection(connection))
+              .map((connection) => (
+                <button
+                  type="button"
+                  role="listitem"
+                  key={connection.id}
+                  onClick={() => {
+                    setEditing({ ...emptyDraft });
+                    chooseTemplate(connection.providerName);
+                  }}
+                  disabled={busy || saving}
+                  title={connection.apiBase ?? "Provider default endpoint"}
+                >
+                  <Server size={13} />
+                  <span>
+                    <strong>{connection.label}</strong>
+                    <small>{connection.local ? "local" : "cloud"}</small>
+                  </span>
+                  <Plus size={12} />
+                </button>
+              ))}
+          </div>
+        </div>
+      ) : null}
 
       {editing ? (
         <div className={styles.editorBackdrop} role="presentation">
@@ -811,6 +887,21 @@ export function ConnectionSettings({
       ) : null}
     </section>
   );
+}
+
+function modelFaceLabel(
+  connection: ConnectionInfo,
+  result: ProviderTestResult | undefined,
+): string {
+  if (connection.manualModels.length > 0) {
+    return `manual · ${connection.manualModels.length} model${
+      connection.manualModels.length === 1 ? "" : "s"
+    }`;
+  }
+  if (result?.modelCount) return `catalog · ${result.modelCount} models`;
+  return connection.modelCatalog === "auto"
+    ? "provider catalog"
+    : `${connection.modelCatalog} catalog`;
 }
 
 function credentialLabel(connection: ConnectionInfo): string {
