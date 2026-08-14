@@ -169,6 +169,20 @@ class LLMConfigurationService:
                 providers["profiles"] = profiles
             else:
                 providers.pop("profiles", None)
+            # A built-in template may also carry a legacy literal key in its
+            # fixed block. Leaving it would make `remove` a lie: the
+            # connection reappears in the next listing, still configured
+            # from "legacy_config". Un-configure means every key source.
+            legacy_block = providers.get(clean_id)
+            if isinstance(legacy_block, dict) and "apiKey" in legacy_block:
+                legacy_block = {
+                    key: value for key, value in legacy_block.items() if key != "apiKey"
+                }
+                removed = True
+                if legacy_block:
+                    providers[clean_id] = legacy_block
+                else:
+                    providers.pop(clean_id, None)
             if providers:
                 return {**current, "providers": providers}
             return {key: value for key, value in current.items() if key != "providers"}
@@ -353,17 +367,15 @@ class LLMConfigurationService:
 
         started = time.monotonic()
         try:
-            response = asyncio.run(
-                asyncio.wait_for(
-                    provider.chat(
-                        messages=[{"role": "user", "content": _MODEL_PROBE_PROMPT}],
-                        model=profile.model_id,
-                        max_tokens=min(16, profile.max_output_tokens),
-                        temperature=0,
-                        reasoning_effort=None,
-                    ),
-                    timeout=_MODEL_PROBE_TIMEOUT_SECONDS,
-                )
+            response = _run_probe_isolated(
+                provider.chat(
+                    messages=[{"role": "user", "content": _MODEL_PROBE_PROMPT}],
+                    model=profile.model_id,
+                    max_tokens=min(16, profile.max_output_tokens),
+                    temperature=0,
+                    reasoning_effort=None,
+                ),
+                timeout=_MODEL_PROBE_TIMEOUT_SECONDS,
             )
         except TimeoutError:
             return _verification_stage(
@@ -588,11 +600,27 @@ def _credential_detail(source: str) -> str:
     }.get(source, "Credential is configured")
 
 
+def _run_probe_isolated(coroutine: Any, *, timeout: float) -> Any:
+    """Run one probe coroutine on a dedicated thread with its own loop.
+
+    The verification RPC is a synchronous handler that may execute inside a
+    host that already runs an event loop (the Desktop sidecar does); a bare
+    ``asyncio.run`` there raises and used to make verification structurally
+    unavailable. A private thread has no running loop by definition, so the
+    probe works in every host the same way.
+    """
+    import concurrent.futures
+
+    def probe() -> Any:
+        return asyncio.run(asyncio.wait_for(coroutine, timeout=timeout))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        return executor.submit(probe).result()
+
+
 def _safe_configuration_error(exc: Exception) -> str:
     if isinstance(exc, ValueError):
         return str(exc)[:300]
-    if isinstance(exc, RuntimeError) and "asyncio.run" in str(exc):
-        return "Model verification is unavailable while another event loop is active"
     return f"{type(exc).__name__}: model verification could not be completed"
 
 

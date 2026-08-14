@@ -25,21 +25,13 @@ def _to_snake(name: str) -> str:
 
 @dataclass(frozen=True)
 class ProviderSpec:
-    """One LLM provider's metadata.
-
-    Placeholders in ``env_extras`` values:
-
-    - ``{api_key}`` — the user's API key
-    - ``{api_base}`` — ``api_base`` from config, or this spec's
-      ``default_api_base``
-    """
+    """One LLM provider's metadata."""
 
     name: str
     keywords: tuple[str, ...]
     env_key: str
     display_name: str = ""
     backend: str = "openai_compat"
-    env_extras: tuple[tuple[str, str], ...] = ()
     is_gateway: bool = False
     is_local: bool = False
     detect_by_key_prefix: str = ""
@@ -146,7 +138,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         env_key="ZAI_API_KEY",
         display_name="Zhipu AI",
         backend="openai_compat",
-        env_extras=(("ZHIPUAI_API_KEY", "{api_key}"),),
         default_api_base="https://open.bigmodel.cn/api/paas/v4",
         # GLM takes the same ``thinking: {"type": ...}`` body as DeepSeek.
         thinking_style="thinking_type",

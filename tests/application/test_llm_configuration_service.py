@@ -441,3 +441,93 @@ def test_connection_verification_maps_provider_errors_without_leaking_response(
     assert result["status"] == "error"
     assert result["stages"][2]["detail"] == "The provider rejected the API credential"
     assert secret not in repr(result)
+
+
+def test_remove_unconfigures_a_builtin_including_its_legacy_literal_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`remove` means un-configure EVERY key source. Leaving the legacy
+    literal made it a lie: the built-in reappeared on the next listing,
+    still configured from "legacy_config"."""
+    home = tmp_path / "home"
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+    service, config, credentials = _service(home)
+    home.mkdir(parents=True, exist_ok=True)
+    config.path.write_text(
+        json.dumps(
+            {
+                "providers": {
+                    "openai": {"apiKey": "legacy-literal", "apiBase": "https://x/v1"}
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    service.upsert({"id": "openai", "template": "openai", "apiKey": "stored"})
+
+    result = service.remove("openai")
+
+    assert result["removed"] is True
+    assert credentials.get("openai") is None
+    persisted = json.loads(config.path.read_text())
+    assert "apiKey" not in persisted.get("providers", {}).get("openai", {})
+    # The endpoint survives; only credentials are gone.
+    assert persisted["providers"]["openai"]["apiBase"] == "https://x/v1"
+    connection = next(item for item in result["connections"] if item["id"] == "openai")
+    assert connection["configured"] is False
+    assert connection["credentialSource"] == "missing"
+
+
+def test_model_catalog_auto_survives_an_edit_round_trip(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The wire echoes the STORED setting; echoing the resolved kind
+    rewrote "auto" to a concrete value on every open-and-save."""
+    home = tmp_path / "home"
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+    service, config, _credentials = _service(home)
+
+    first = service.upsert(
+        {"id": "router", "template": "openrouter", "modelCatalog": "auto"}
+    )
+    connection = next(item for item in first["connections"] if item["id"] == "router")
+    assert connection["modelCatalog"] == "auto"
+
+    # Round-trip exactly what a client would post back.
+    service.upsert(
+        {
+            "id": "router",
+            "template": "openrouter",
+            "modelCatalog": connection["modelCatalog"],
+        }
+    )
+    persisted = json.loads(config.path.read_text())
+    stored = persisted["providers"]["profiles"]["router"].get("modelCatalog", "auto")
+    assert stored == "auto"
+    # The runtime still resolves a concrete fetch strategy underneath.
+    resolver = ConnectionResolver(load_config(), CredentialStore(home / "c.json"))
+    resolved = resolver.resolve_connection("router")
+    assert resolved.model_catalog == "openrouter"
+    assert resolved.model_catalog_setting == "auto"
+
+
+def test_model_probe_runs_inside_an_active_event_loop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The probe must work in async hosts (the Desktop sidecar runs one)."""
+    import asyncio
+
+    from core.application.llm_configuration_service import _run_probe_isolated
+
+    async def fake_probe() -> str:
+        await asyncio.sleep(0)
+        return "pong"
+
+    async def host() -> str:
+        # A bare asyncio.run here would raise RuntimeError.
+        return _run_probe_isolated(fake_probe(), timeout=5)
+
+    assert asyncio.run(host()) == "pong"
