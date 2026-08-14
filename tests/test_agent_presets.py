@@ -60,12 +60,15 @@ def _write_preset(root: Path, name: str, text: str) -> Path:
 
 def test_builtin_roster_ships_with_system_trust() -> None:
     roster = {p.id: p for p in list_agent_presets()}
-    for expected in ("default", "minimal", "code-reader"):
+    # No shipped "default" entry: the default composition is the ABSENCE of
+    # a preset, and a roster row for it would double the picker's own
+    # "Default" choice (observed live as two identical menu rows).
+    assert "default" not in roster
+    for expected in ("minimal", "code-reader"):
         assert expected in roster
         assert roster[expected].trust == "system"
         assert roster[expected].broken is None
     assert roster["code-reader"].tools == ("read", "grep", "glob", "skill")
-    assert roster["default"].tools is None  # no narrowing
 
 
 def test_project_root_wins_a_duplicate_id(tmp_path: Path) -> None:

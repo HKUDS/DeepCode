@@ -7,6 +7,8 @@ Attribution: Icons designed by The Icon Tree from Flaticon.
 
 Sources:
 
+- Robot: https://www.flaticon.com/free-icon-font/robot_11747164
+  (Uicons by Flaticon — attribution: Uicons by Flaticon)
 - Poll: https://www.flaticon.com/free-icon/poll_15780511
 - Terminal: https://www.flaticon.com/free-icon/terminal_15780766
 - Settings: https://www.flaticon.com/free-icon/settings_15780826
