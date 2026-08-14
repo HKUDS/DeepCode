@@ -157,6 +157,11 @@ Skills, permissions, Goals, and Automations. See the
   and trust marking replaces the cramped native dropdown, the duplicate
   "Default" row is gone, and a started session shows a read-only label of
   what it runs.
+- **Manage what each connection actually serves.** The provider editor can
+  fetch the live model list from a connection's endpoint and adopt picked
+  models as its manual list, an environment-provided key locks the paste
+  field instead of silently outranking it, and connection rows show the
+  discovered model count.
 
 **2026-08-14 · Subagent runtime, compaction, and one-way persistence**
 

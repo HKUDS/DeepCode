@@ -9,9 +9,10 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type {
+  CatalogModel,
   ConnectionInfo,
   ProviderTestResult,
   ProviderUpsertParams,
@@ -71,6 +72,17 @@ export function ConnectionSettings({
   const [testResults, setTestResults] = useState<
     Record<string, ProviderTestResult>
   >({});
+  // The live model listing fetched for the connection being edited, plus
+  // the ids picked for adoption. Fetched results are offered, never
+  // auto-written (the dsh rule): only "Add selected" touches the draft.
+  const [modelFetch, setModelFetch] = useState<{
+    loading: boolean;
+    error: string | null;
+    models: CatalogModel[] | null;
+  }>({ loading: false, error: null, models: null });
+  const [pickedModels, setPickedModels] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
   const connections = useMemo(
     () =>
       [...(controller.catalog?.connections ?? [])].sort(
@@ -186,6 +198,66 @@ export function ConnectionSettings({
     }
   };
 
+  const editingId = editing?.id ?? null;
+  useEffect(() => {
+    // A different connection's listing must never leak into this editor.
+    setModelFetch({ loading: false, error: null, models: null });
+    setPickedModels(new Set());
+  }, [editingId]);
+
+  const manualModelIds = useMemo(
+    () =>
+      new Set(
+        (editing?.manualModels ?? "")
+          .split(/\r?\n|,/)
+          .map((value) => value.trim())
+          .filter(Boolean),
+      ),
+    [editing?.manualModels],
+  );
+
+  const fetchModels = async () => {
+    if (!editing) return;
+    setModelFetch({ loading: true, error: null, models: null });
+    try {
+      const result = await controller.models(
+        editing.id.trim().toLocaleLowerCase(),
+        true,
+      );
+      setModelFetch({
+        loading: false,
+        error:
+          result.models.length === 0
+            ? (result.error ??
+              "The provider listed no models. Add them by hand.")
+            : null,
+        models: result.models,
+      });
+    } catch (cause) {
+      setModelFetch({
+        loading: false,
+        error: cause instanceof Error ? cause.message : String(cause),
+        models: null,
+      });
+    }
+  };
+
+  const adoptPickedModels = () => {
+    if (!editing || pickedModels.size === 0) return;
+    const merged = [
+      ...manualModelIds,
+      ...[...pickedModels].filter((id) => !manualModelIds.has(id)),
+    ];
+    setEditing({
+      ...editing,
+      // A hand-picked list REPLACES the provider catalog for this
+      // connection (the dsh rule), so adoption switches to manual mode.
+      modelCatalog: "manual",
+      manualModels: merged.join("\n"),
+    });
+    setPickedModels(new Set());
+  };
+
   const remove = async (connection: ConnectionInfo) => {
     if (
       !(await confirmAction(
@@ -261,6 +333,9 @@ export function ConnectionSettings({
                   <small>
                     {connection.adapter.replace("_", " ")} ·{" "}
                     {credentialLabel(connection)}
+                    {result?.modelCount
+                      ? ` · ${result.modelCount} models`
+                      : ""}
                   </small>
                 </p>
                 {result ? (
@@ -454,8 +529,8 @@ export function ConnectionSettings({
                         {editing.shadowingEnvName
                           ? `The launch environment variable ${editing.shadowingEnvName} currently provides this key and takes precedence. `
                           : "A launch environment variable currently provides this key and takes precedence. "}
-                        A pasted key is saved but will not take effect until
-                        that variable is unset.
+                        Unset it in the launching shell to manage the key
+                        here.
                       </p>
                     ) : null}
                     {editing.credentialMode === "key" ? (
@@ -470,12 +545,16 @@ export function ConnectionSettings({
                           })
                         }
                         placeholder={
-                          editingExisting
-                            ? "Leave blank to keep the saved key"
-                            : "Paste API key"
+                          editing.environmentShadows
+                            ? "Provided by the launch environment (read-only)"
+                            : editingExisting
+                              ? "Leave blank to keep the saved key"
+                              : "Paste API key"
                         }
                         autoComplete="new-password"
-                        disabled={editing.clearApiKey}
+                        disabled={
+                          editing.clearApiKey || editing.environmentShadows
+                        }
                         aria-label="API key"
                       />
                     ) : (
@@ -496,6 +575,95 @@ export function ConnectionSettings({
                     <small>
                       Stored keys are private and never returned to the app UI.
                     </small>
+                  </fieldset>
+                ) : null}
+                {editing.template ? (
+                  <fieldset className={`${styles.modelsField} ${styles.wide}`}>
+                    <legend>Models</legend>
+                    {editingExisting ? (
+                      <div className={styles.modelFetchRow}>
+                        <button
+                          type="button"
+                          onClick={() => void fetchModels()}
+                          disabled={modelFetch.loading || busy}
+                        >
+                          {modelFetch.loading
+                            ? "Fetching…"
+                            : "Fetch models from provider"}
+                        </button>
+                        <small>
+                          Lists what this connection's endpoint actually
+                          serves; picks become its manual model list.
+                        </small>
+                      </div>
+                    ) : (
+                      <small>
+                        Save the connection first, then fetch its live model
+                        list here.
+                      </small>
+                    )}
+                    {modelFetch.error ? (
+                      <p className={styles.modelFetchError} role="alert">
+                        {modelFetch.error}
+                      </p>
+                    ) : null}
+                    {modelFetch.models && modelFetch.models.length > 0 ? (
+                      <>
+                        <ul
+                          className={styles.modelPicker}
+                          aria-label="Discovered models"
+                        >
+                          {modelFetch.models.map((model) => {
+                            const listed = manualModelIds.has(model.id);
+                            const picked = pickedModels.has(model.id);
+                            return (
+                              <li key={model.id}>
+                                <label data-listed={listed || undefined}>
+                                  <input
+                                    type="checkbox"
+                                    checked={listed || picked}
+                                    disabled={listed}
+                                    onChange={() => {
+                                      const next = new Set(pickedModels);
+                                      if (picked) next.delete(model.id);
+                                      else next.add(model.id);
+                                      setPickedModels(next);
+                                    }}
+                                  />
+                                  <span>
+                                    <strong>{model.name || model.id}</strong>
+                                    <small>
+                                      {model.id}
+                                      {model.contextWindow
+                                        ? ` · ${Math.round(model.contextWindow / 1000)}K context`
+                                        : ""}
+                                      {listed ? " · already listed" : ""}
+                                    </small>
+                                  </span>
+                                </label>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                        <button
+                          type="button"
+                          className={styles.adoptButton}
+                          onClick={adoptPickedModels}
+                          disabled={pickedModels.size === 0}
+                        >
+                          Add {pickedModels.size || "selected"} model
+                          {pickedModels.size === 1 ? "" : "s"} to this
+                          connection
+                        </button>
+                      </>
+                    ) : null}
+                    {manualModelIds.size > 0 ? (
+                      <small>
+                        Manual list: {manualModelIds.size} model
+                        {manualModelIds.size === 1 ? "" : "s"} (editable under
+                        Advanced).
+                      </small>
+                    ) : null}
                   </fieldset>
                 ) : null}
                 <details className={`${styles.advanced} ${styles.wide}`}>
