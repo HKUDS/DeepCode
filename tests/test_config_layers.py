@@ -77,7 +77,9 @@ def test_credential_shaped_subtrees_never_echo_values(config_home: Path) -> None
     _write(
         config_home / "deepcode_config.json",
         {
-            "providers": {"openrouter": {"apiKey": "sk-live-hunter2"}},
+            # Deliberately NOT key-shaped (redaction keys off the path, not
+            # the value) so secret scanners never mistake it for a real one.
+            "providers": {"openrouter": {"apiKey": "hunter2-placeholder"}},
             "subagents": {
                 "codex": {"env": {"HTTPS_PROXY": "http://user:pass@proxy:1"}}
             },
