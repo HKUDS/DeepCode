@@ -62,12 +62,13 @@ def _parse_fork_turns(value: Any) -> str | int:
             },
             "backend": {
                 "type": "string",
-                "enum": ["native", "codex"],
+                "enum": ["native", "codex", "claude-code"],
                 "description": "Which agent runs the subtask: 'native' "
-                "(default, a DeepCode sub-agent) or 'codex' (the Codex CLI, "
-                "with its own model and policies). A codex sub-agent gets ONLY "
-                "the task text and the workspace — no conversation context and "
-                "no send_message — so write it a fully self-contained task.",
+                "(default, a DeepCode sub-agent), 'codex' (the Codex CLI), or "
+                "'claude-code' (the Claude Code CLI) — external CLIs use their "
+                "own models and policies. An external sub-agent gets ONLY the "
+                "task text and the workspace — no conversation context and no "
+                "send_message — so write it a fully self-contained task.",
             },
         },
         "required": ["name", "task"],

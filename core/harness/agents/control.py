@@ -61,14 +61,13 @@ class DuplicateAgentError(AgentLimitError):
 
 
 # Sub-agent execution backends. "native" builds an in-process AgentSession;
-# "codex" delegates the task to the Codex CLI (see codex_backend). External
-# backends are separate products with their own credentials and policy: they
-# take a self-contained text task plus the workspace cwd and return only the
-# final answer — no parent context, no send_message channel. Requests that
-# need either are rejected loud at spawn time, never accepted-then-ignored.
+# the rest delegate the task to an external CLI (see external_backend).
+# External backends are separate products with their own credentials and
+# policy: they take a self-contained text task plus the workspace cwd and
+# return only the final answer — no parent context, no send_message channel.
+# Requests that need either are rejected loud at spawn time, never
+# accepted-then-ignored.
 NATIVE_BACKEND = "native"
-CODEX_BACKEND = "codex"
-_BACKENDS = (NATIVE_BACKEND, CODEX_BACKEND)
 
 
 @dataclass
@@ -240,28 +239,25 @@ class AgentControl:
         :class:`DuplicateAgentError` when a matching subtask is already running,
         :class:`AgentLimitError` when the concurrency limit is reached.
         """
-        if backend not in _BACKENDS:
-            raise AgentLimitError(
-                f"unknown backend {backend!r}; available: {', '.join(_BACKENDS)}"
-            )
-        if backend != NATIVE_BACKEND and fork_turns != "none":
-            # dsh's capability rule: a request needing a capability the
-            # backend lacks fails loud — external CLIs never inherit parent
-            # conversation, so silently dropping it would mislead the model
-            # into under-specifying the task.
-            raise AgentLimitError(
-                f"the {backend} backend does not inherit parent context; "
-                "use fork_turns='none' and write a self-contained task"
-            )
-        if backend == CODEX_BACKEND:
-            from core.harness.agents.codex_backend import (
-                CodexBackendError,
-                resolve_codex_executable,
+        if backend != NATIVE_BACKEND:
+            from core.harness.agents.external_backend import (
+                ExternalBackendError,
+                resolve_backend,
+                resolve_executable,
             )
 
+            if fork_turns != "none":
+                # dsh's capability rule: a request needing a capability the
+                # backend lacks fails loud — external CLIs never inherit
+                # parent conversation, so silently dropping it would mislead
+                # the model into under-specifying the task.
+                raise AgentLimitError(
+                    f"the {backend} backend does not inherit parent context; "
+                    "use fork_turns='none' and write a self-contained task"
+                )
             try:
-                resolve_codex_executable()
-            except CodexBackendError as exc:
+                resolve_executable(resolve_backend(backend))
+            except ExternalBackendError as exc:
                 raise AgentLimitError(str(exc)) from exc
         # Dedup against any prior subtask with this key that is still running OR
         # already succeeded — re-spawning finished work is the exact waste a real
@@ -377,10 +373,10 @@ class AgentControl:
         through here, so a backend never needs to know about isolation — it
         only ever sees a directory to work in.
         """
-        if sub.backend == CODEX_BACKEND:
-            from core.harness.agents.codex_backend import run_codex_subagent
+        if sub.backend != NATIVE_BACKEND:
+            from core.harness.agents.external_backend import run_external_subagent
 
-            return await run_codex_subagent(sub.task, workspace)
+            return await run_external_subagent(sub.backend, sub.task, workspace)
         return await self._run_subagent(
             sub.task,
             workspace,
