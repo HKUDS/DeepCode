@@ -23,6 +23,7 @@ from core.harness.agents.control import (
     AgentControl,
     AgentLimitError,
     DuplicateAgentError,
+    SubAgent,
 )
 from core.harness.tools.spawn_agent import (
     InterruptAgentTool,
@@ -43,32 +44,16 @@ class _HeldControl(AgentControl):
         self.release = asyncio.Event()
         self.last_seed = None
 
-    async def _run_subagent(
-        self,
-        task,
-        workspace,
-        *,
-        seed_history=None,
-        inbox_drainer=None,
-        agent_id="subagent",
-    ):
-        self.last_seed = seed_history
+    async def _run_subagent(self, sub, workspace):
+        self.last_seed = sub.seed_history or None
         await self.release.wait()
-        return f"did: {task}"
+        return f"did: {sub.task}"
 
 
 class _WritingControl(AgentControl):
     """Sub-agent writes a file (to exercise isolate + merge)."""
 
-    async def _run_subagent(
-        self,
-        task,
-        workspace,
-        *,
-        seed_history=None,
-        inbox_drainer=None,
-        agent_id="subagent",
-    ):
+    async def _run_subagent(self, sub, workspace):
         (Path(workspace) / "feature.py").write_text("VALUE = 1\n")
         return "wrote feature.py"
 
@@ -159,9 +144,7 @@ def test_duplicate_named_subtask_running_or_done_is_refused(tmp_path):
 
 def test_failed_subtask_can_be_retried(tmp_path):
     class _FailControl(AgentControl):
-        async def _run_subagent(
-            self, task, workspace, *, seed_history=None, inbox_drainer=None
-        ):
+        async def _run_subagent(self, sub, workspace):
             raise RuntimeError("boom")
 
     async def scenario():
@@ -481,7 +464,8 @@ def test_subagent_inherits_parent_permission_and_approval(tmp_path, monkeypatch)
         approval_callback=approval,
     )
 
-    result = asyncio.run(control._run_subagent("task", str(tmp_path), agent_id="child"))
+    sub = SubAgent(id="child", task="task", isolate=False)
+    result = asyncio.run(control._run_subagent(sub, str(tmp_path)))
 
     assert result == "done"
     assert captured["permission_mode_override"] is PermissionMode.DEFAULT
@@ -521,7 +505,8 @@ def test_subagent_inherits_atomic_execution_security_profile(tmp_path, monkeypat
         approval_callback=approval,
     )
 
-    result = asyncio.run(control._run_subagent("task", str(tmp_path), agent_id="child"))
+    sub = SubAgent(id="child", task="task", isolate=False)
+    result = asyncio.run(control._run_subagent(sub, str(tmp_path)))
 
     assert result == "done"
     assert captured["execution_security_profile"] is profile
@@ -549,9 +534,10 @@ def test_subagent_closes_session_when_stream_fails(tmp_path, monkeypatch):
         lambda **_kwargs: (session, "model", object()),
     )
     control = AgentControl(str(tmp_path))
+    sub = SubAgent(id="x", task="task", isolate=False)
 
     with pytest.raises(RuntimeError, match="stream failed"):
-        asyncio.run(control._run_subagent("task", str(tmp_path)))
+        asyncio.run(control._run_subagent(sub, str(tmp_path)))
 
     assert session.closed is True
 
@@ -579,7 +565,8 @@ def test_subagent_closes_session_when_cancelled(tmp_path, monkeypatch):
             lambda **_kwargs: (session, "model", object()),
         )
         control = AgentControl(str(tmp_path))
-        task = asyncio.create_task(control._run_subagent("task", str(tmp_path)))
+        sub = SubAgent(id="x", task="task", isolate=False)
+        task = asyncio.create_task(control._run_subagent(sub, str(tmp_path)))
         await started.wait()
 
         task.cancel()

@@ -133,6 +133,29 @@ def _wire_code_mode(
     )
 
 
+def _compose_tool_filters(*filters: Any) -> Any:
+    """Chain narrowing filters; each sees the previous one's survivors.
+
+    ``None`` entries are skipped, and zero or one live filter avoids the
+    wrapper entirely. Filters follow the AgentRunSpec contract: a callable
+    over the visible name tuple whose ``None`` return means "unchanged".
+    """
+    live = [f for f in filters if f is not None]
+    if not live:
+        return None
+    if len(live) == 1:
+        return live[0]
+
+    def chained(names: tuple[str, ...]) -> tuple[str, ...]:
+        for tool_filter in live:
+            value = tool_filter(names)
+            if value is not None:
+                names = tuple(str(name) for name in value)
+        return names
+
+    return chained
+
+
 def _wire_tool_permissions(tool_registry: Any, engine: Any) -> None:
     """Make tool-declared read-only metadata authoritative for this session."""
     engine.read_only_tools = engine.read_only_tools.union(
@@ -238,6 +261,13 @@ def build_agent_session(
     project_trusted: bool = False,
     plugin_mcp_servers: tuple[Any, ...] = (),
     mcp_status_observer: Any | None = None,
+    # Caller-supplied tools registered after the standard set — e.g. a
+    # sub-agent's structured-result capture tool. Not a replacement channel:
+    # a duplicate name would shadow in the registry, so callers own novelty.
+    extra_tools: tuple[Any, ...] = (),
+    # Optional narrowing filter over exposed tool names, composed with the
+    # Goal runtime's own filter (both only ever narrow; see AgentRunSpec).
+    tool_filter: Any | None = None,
 ) -> tuple[AgentSession, str, Any]:
     """Build an :class:`AgentSession` over ``workspace``.
 
@@ -347,6 +377,7 @@ def build_agent_session(
             runtime=active_runtime,
             active_turn_id_provider=active_turn_id_provider,
             runtime_input_sink=runtime_input_sink,
+            context_note_sink=context_note_sink,
             project_trusted=project_trusted,
         )
 
@@ -374,6 +405,8 @@ def build_agent_session(
         goal_runtime=goal_runtime,
         execution_security_profile=resolved_security_profile,
     )
+    for extra_tool in extra_tools:
+        tool_registry.register(extra_tool)
     _wire_code_mode(
         tool_registry,
         workspace,
@@ -456,8 +489,9 @@ def build_agent_session(
         context_window_tokens=resolved_execution.context_window,
         workspace=workspace,
         execution_profile=resolved_execution,
-        tool_filter=(
-            goal_runtime.visible_tool_names if goal_runtime is not None else None
+        tool_filter=_compose_tool_filters(
+            tool_filter,
+            goal_runtime.visible_tool_names if goal_runtime is not None else None,
         ),
         closure_callback=(
             goal_runtime.closure_prompt if goal_runtime is not None else None

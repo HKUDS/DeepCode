@@ -28,6 +28,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from loguru import logger
+
 from core.agent_runtime.injections import SubagentMessage, TurnInputSink
 from core.harness.permissions import PermissionMode
 
@@ -76,6 +78,12 @@ class SubAgent:
     task: str
     isolate: bool = True
     backend: str = NATIVE_BACKEND
+    # Optional per-child composition (native backend only): an extra
+    # system-prompt section, a narrowing tool allowlist, and an object-rooted
+    # JSON Schema the child must satisfy through the forced capture tool.
+    persona: str | None = None
+    tool_names: tuple[str, ...] | None = None
+    output_schema: dict | None = field(default=None, repr=False)
     status: str = _RUNNING
     result: str = ""
     seed_history: list = field(default_factory=list, repr=False)
@@ -118,6 +126,7 @@ class AgentControl:
         runtime: DeepCodeRuntime | None = None,
         active_turn_id_provider: Any | None = None,
         runtime_input_sink: TurnInputSink | None = None,
+        context_note_sink: Any | None = None,
         project_trusted: bool = False,
     ) -> None:
         self._workspace = workspace
@@ -130,6 +139,9 @@ class AgentControl:
         self._runtime = runtime
         self._active_turn_id_provider = active_turn_id_provider
         self._runtime_input_sink = runtime_input_sink
+        # Canonical-history fallback for results that lose the delivery race
+        # (see _post). Same callable the runner uses for mid-turn notes.
+        self._context_note_sink = context_note_sink
         self._project_trusted = project_trusted
         self._local_runtime_id = f"local-agent-runtime-{uuid.uuid4().hex}"
         self._agents: dict[str, SubAgent] = {}
@@ -227,6 +239,9 @@ class AgentControl:
         isolate: bool = True,
         fork_turns: str | int = "none",
         backend: str = NATIVE_BACKEND,
+        persona: str | None = None,
+        tools: list[str] | tuple[str, ...] | None = None,
+        output_schema: dict | None = None,
     ) -> str:
         """Start a sub-agent in the background and return its id (non-blocking).
 
@@ -246,18 +261,54 @@ class AgentControl:
                 resolve_executable,
             )
 
+            # dsh's capability rule: a request needing a capability the
+            # backend lacks fails loud — external CLIs never inherit parent
+            # conversation, and take no composition (they run their own
+            # product with its own prompt, tools, and output conventions).
+            # Silently dropping any of these would mislead the model.
             if fork_turns != "none":
-                # dsh's capability rule: a request needing a capability the
-                # backend lacks fails loud — external CLIs never inherit
-                # parent conversation, so silently dropping it would mislead
-                # the model into under-specifying the task.
                 raise AgentLimitError(
                     f"the {backend} backend does not inherit parent context; "
                     "use fork_turns='none' and write a self-contained task"
                 )
+            unsupported = [
+                label
+                for label, value in (
+                    ("persona", persona),
+                    ("tools", tools),
+                    ("output_schema", output_schema),
+                )
+                if value is not None
+            ]
+            if unsupported:
+                raise AgentLimitError(
+                    f"the {backend} backend does not support "
+                    f"{', '.join(unsupported)} — external CLIs run their own "
+                    "product configuration"
+                )
             try:
                 resolve_executable(resolve_backend(backend))
             except ExternalBackendError as exc:
+                raise AgentLimitError(str(exc)) from exc
+        if tools is not None:
+            tool_names = tuple(str(t).strip() for t in tools if str(t).strip())
+            if not tool_names:
+                raise AgentLimitError(
+                    "'tools' must name at least one tool when provided — an "
+                    "empty allowlist would spawn a sub-agent that can do "
+                    "nothing"
+                )
+        else:
+            tool_names = None
+        if output_schema is not None:
+            from core.harness.agents.structured_result import (
+                SchemaError,
+                validate_output_schema,
+            )
+
+            try:
+                output_schema = validate_output_schema(output_schema)
+            except SchemaError as exc:
                 raise AgentLimitError(str(exc)) from exc
         # Dedup against any prior subtask with this key that is still running OR
         # already succeeded — re-spawning finished work is the exact waste a real
@@ -288,6 +339,9 @@ class AgentControl:
             task=task,
             isolate=isolate,
             backend=backend,
+            persona=(persona or "").strip() or None,
+            tool_names=tool_names,
+            output_schema=output_schema,
             seed_history=self._fork_history(fork_turns),
             dedup_key=key,
         )
@@ -377,33 +431,49 @@ class AgentControl:
             from core.harness.agents.external_backend import run_external_subagent
 
             return await run_external_subagent(sub.backend, sub.task, workspace)
-        return await self._run_subagent(
-            sub.task,
-            workspace,
-            seed_history=sub.seed_history,
-            inbox_drainer=self._make_inbox_drainer(sub),
-            agent_id=sub.id,
-        )
+        return await self._run_subagent(sub, workspace)
 
-    async def _run_subagent(
-        self,
-        task: str,
-        workspace: str,
-        *,
-        seed_history: list | None = None,
-        inbox_drainer=None,
-        agent_id: str = "subagent",
-    ) -> str:
-        from core.agent_setup import build_agent_session
+    async def _run_subagent(self, sub: SubAgent, workspace: str) -> str:
+        from core.agent_setup import SYSTEM_PROMPT, build_agent_session
         from core.events import UserInput
+
+        # Per-child composition. The persona and the capture contract ride the
+        # system prompt as ADDITIONAL sections — the base prompt stays, so the
+        # child keeps the ordinary tool discipline it was trained on.
+        prompt_sections = [SYSTEM_PROMPT]
+        if sub.persona:
+            prompt_sections.append(f"## Persona\n{sub.persona}")
+        capture = None
+        extra_tools: tuple = ()
+        if sub.output_schema is not None:
+            from core.harness.agents.structured_result import (
+                StructuredResultCapture,
+            )
+
+            capture = StructuredResultCapture(sub.output_schema)
+            extra_tools = (capture.make_tool(),)
+            prompt_sections.append(capture.prompt_addendum())
+        tool_filter = None
+        if sub.tool_names is not None:
+            from core.harness.agents.structured_result import CAPTURE_TOOL_NAME
+
+            allowed = frozenset(sub.tool_names)
+            if capture is not None:
+                # The allowlist must never lock out the mandatory submission
+                # channel — that would be a self-contradictory composition.
+                allowed |= {CAPTURE_TOOL_NAME}
+
+            def tool_filter(names: tuple[str, ...]) -> tuple[str, ...]:
+                return tuple(n for n in names if n in allowed)
 
         session, _model, _engine = build_agent_session(
             workspace=workspace,
             model=self._model,
+            system_prompt="\n\n".join(prompt_sections),
             execution_profile=self._execution_profile,
             allow_spawn=False,  # depth cap: sub-agents cannot spawn again
-            injection_callback=inbox_drainer,  # receives parent's send_message
-            agent_context=(agent_id, "subagent"),  # fires SubagentStart/Stop hooks
+            injection_callback=self._make_inbox_drainer(sub),
+            agent_context=(sub.id, "subagent"),  # fires SubagentStart/Stop hooks
             approval_callback=self._approval_callback,
             permission_mode_override=(
                 self._permission_mode
@@ -413,14 +483,27 @@ class AgentControl:
             execution_security_profile=self._execution_security_profile,
             runtime=self._runtime,
             project_trusted=self._project_trusted,
+            extra_tools=extra_tools,
+            tool_filter=tool_filter,
         )
         try:
-            if seed_history:
-                session.load_history(seed_history)  # fork_turns: inherit parent context
+            if sub.seed_history:
+                # fork_turns: inherit parent context
+                session.load_history(sub.seed_history)
             final = ""
-            async for event in session.run_stream(UserInput(text=task)):
+            async for event in session.run_stream(UserInput(text=sub.task)):
                 if event.msg.type == "task_complete":
                     final = event.msg.final_text or ""
+            if capture is not None:
+                structured = capture.render()
+                if structured is None:
+                    # dsh's rule: a structured delegation without a submission
+                    # is a failure, not a prose answer quietly standing in.
+                    raise RuntimeError(
+                        "sub-agent finished without submitting a structured "
+                        f"result; its last message: {final.strip()[:400]!r}"
+                    )
+                return structured
             return final.strip() or "(sub-agent produced no summary)"
         finally:
             await session.aclose()
@@ -436,17 +519,34 @@ class AgentControl:
             else None
         )
         if self._runtime_input_sink is not None:
+            delivered = False
             if target_turn_id:
-                self._runtime_input_sink(
-                    SubagentMessage(
-                        message_id=message_id,
-                        target_turn_id=target_turn_id,
-                        agent_id=agent_id,
-                        payload=message,
+                delivered = bool(
+                    self._runtime_input_sink(
+                        SubagentMessage(
+                            message_id=message_id,
+                            target_turn_id=target_turn_id,
+                            agent_id=agent_id,
+                            payload=message,
+                        )
                     )
                 )
-            # A result that loses the active-Turn close race remains inspectable
-            # on SubAgent.result, but is never carried into a future Turn.
+            if not delivered and self._context_note_sink is not None:
+                # The result lost the active-Turn race (the Turn closed before
+                # the sub-agent finished, or the mailbox refused it). Append
+                # it straight to the canonical Session as a between-turns
+                # message: the next acquire reloads visible history and the
+                # model sees it at the start of its next Turn — instead of
+                # the result surviving only on SubAgent.result, unread.
+                try:
+                    self._context_note_sink(
+                        message, "subagent", already_in_history=False
+                    )
+                except Exception:  # noqa: BLE001 - persistence must not kill _run
+                    logger.exception(
+                        "late sub-agent result could not be persisted: {}",
+                        agent_id,
+                    )
         else:
             self._mailbox.append(
                 (

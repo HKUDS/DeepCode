@@ -67,8 +67,31 @@ def _parse_fork_turns(value: Any) -> str | int:
                 "(default, a DeepCode sub-agent), 'codex' (the Codex CLI), or "
                 "'claude-code' (the Claude Code CLI) — external CLIs use their "
                 "own models and policies. An external sub-agent gets ONLY the "
-                "task text and the workspace — no conversation context and no "
-                "send_message — so write it a fully self-contained task.",
+                "task text and the workspace — no conversation context, no "
+                "send_message, and none of persona/tools/output_schema — so "
+                "write it a fully self-contained task.",
+            },
+            "persona": {
+                "type": "string",
+                "description": "Optional extra system-prompt section shaping "
+                "the sub-agent's role (e.g. 'You are a security reviewer; "
+                "report findings, change nothing'). Native backend only.",
+            },
+            "tools": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional allowlist of tool names the "
+                'sub-agent may use (e.g. ["read_file", "grep"] for a '
+                "read-only reviewer). It can only narrow the standard set. "
+                "Native backend only.",
+            },
+            "output_schema": {
+                "type": "object",
+                "description": "Optional object-rooted JSON Schema the "
+                "sub-agent's result must satisfy. It is forced to submit a "
+                "conforming object, and the RESULT you receive is that JSON — "
+                "use this when you need structured data back, not prose. "
+                "Native backend only.",
             },
         },
         "required": ["name", "task"],
@@ -105,6 +128,13 @@ class SpawnAgentTool(Tool):
         isolate = bool(kwargs.get("isolate", True))
         fork_turns = _parse_fork_turns(kwargs.get("fork_turns"))
         backend = str(kwargs.get("backend") or "native").strip().lower()
+        persona = kwargs.get("persona")
+        tools = kwargs.get("tools")
+        if tools is not None and not isinstance(tools, (list, tuple)):
+            return "Error: 'tools' must be an array of tool names."
+        output_schema = kwargs.get("output_schema")
+        if output_schema is not None and not isinstance(output_schema, dict):
+            return "Error: 'output_schema' must be a JSON object."
         try:
             agent_id = self._control.spawn(
                 task,
@@ -112,6 +142,9 @@ class SpawnAgentTool(Tool):
                 isolate=isolate,
                 fork_turns=fork_turns,
                 backend=backend,
+                persona=str(persona) if persona is not None else None,
+                tools=tools,
+                output_schema=output_schema,
             )
         except AgentLimitError as exc:
             return f"Error: {exc}"

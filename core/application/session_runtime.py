@@ -445,7 +445,7 @@ class SessionRuntimeRegistry:
     def _context_note_sink(self, session_id: str, inputs: TurnInputMailbox):
         """The runner's mid-turn persistence callback for one live Session."""
 
-        def note(content: str, source: str) -> None:
+        def note(content: str, source: str, *, already_in_history: bool = True) -> None:
             text = str(content or "").strip()
             if not text:
                 return
@@ -455,7 +455,7 @@ class SessionRuntimeRegistry:
                 text,
                 metadata={
                     "schemaVersion": 3,
-                    "delivery": "mid_turn",
+                    "delivery": ("mid_turn" if already_in_history else "between_turns"),
                     "source": source,
                     **(
                         {"turnId": inputs.active_turn_id}
@@ -464,7 +464,18 @@ class SessionRuntimeRegistry:
                     ),
                 },
             )
-            if stored is not None:
+            if stored is None:
+                return
+            # ``already_in_history`` decides whether the live runtime's model
+            # history already contains this text. Mid-turn notes do (the
+            # runner appended them before reporting), so the count is synced
+            # to keep the resident history authoritative. A note written
+            # AFTER its Turn closed — a sub-agent result that lost the
+            # delivery race — is only in the canonical log, so the count is
+            # deliberately left stale: the next acquire sees the mismatch and
+            # reloads visible history, which is exactly what carries the
+            # message into the model's next Turn.
+            if already_in_history:
                 self.mark_persisted(session_id)
 
         return note
