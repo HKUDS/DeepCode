@@ -11,7 +11,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 from uuid import uuid4
 
 from core.agent_runtime.goal_runtime import (
@@ -1109,6 +1109,17 @@ class TurnService:
         if self.active_for_thread(thread_id) is not None:
             raise ConflictError("cannot clear context while a Turn is active")
         self.session_runtimes.clear_live_history(thread_id)
+
+    async def compact_live_context(self, thread_id: str) -> dict[str, Any]:
+        """Summarize resident model context on demand (`/compact`).
+
+        Canonical Session data is never rewritten — this is `/clear`'s gentler
+        sibling: older turns collapse into a model-written handoff summary
+        while recent user input survives verbatim.
+        """
+        if self.active_for_thread(thread_id) is not None:
+            raise ConflictError("Compaction is unavailable while a Turn is active.")
+        return await self.session_runtimes.compact_live_history(thread_id)
 
     def interrupt(
         self,

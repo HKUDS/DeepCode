@@ -262,6 +262,30 @@ class SessionRuntimeRegistry:
         runtime.agent.load_history([])
         runtime.canonical_message_count = len(canonical.messages)
 
+    async def compact_live_history(self, session_id: str) -> dict[str, Any]:
+        """Summarize the resident model context in place (`/compact`).
+
+        The canonical Session log stays untouched — the same contract as
+        :meth:`clear_live_history`, but replacing older turns with a model
+        summary instead of dropping everything. A Session with no resident
+        runtime has nothing to compact: its context is rebuilt from
+        canonical history on the next acquire anyway.
+        """
+        runtime = self._runtimes.get(session_id)
+        if runtime is None:
+            raise ConflictError(
+                "No resident context to compact — this Session's context is "
+                "rebuilt fresh on its next Turn."
+            )
+        if runtime.active:
+            raise ConflictError(f"session runtime is active: {session_id}")
+        compact = getattr(runtime.agent, "compact", None)
+        if not callable(compact):
+            raise ConflictError(
+                "This Session's runtime does not support manual compaction."
+            )
+        return await compact()
+
     async def discard(self, session_id: str) -> None:
         """Close and forget one idle runtime after permanent Session deletion."""
 

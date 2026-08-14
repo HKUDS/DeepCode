@@ -240,6 +240,15 @@ class TuiApp:
         if self.reader.interactive:
             self.console.clear()
 
+    async def compact_conversation(self) -> str:
+        report = await self.thread_client.compact_context()
+        saved = report["chars_before"] - report["chars_after"]
+        return (
+            f"Compacted: {report['messages_before']} → "
+            f"{report['messages_after']} messages "
+            f"(~{saved:,} chars of older turns replaced by a summary)."
+        )
+
     def list_skills(self) -> str:
         try:
             skills = self.thread_client.application.skills.list(

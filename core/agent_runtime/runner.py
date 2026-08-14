@@ -1700,6 +1700,46 @@ class AgentRunner:
         return content.strip() if isinstance(content, str) and content.strip() else None
 
     @staticmethod
+    def _history_chars(messages: list[dict[str, Any]]) -> int:
+        return sum(len(str(m.get("content", ""))) for m in messages)
+
+    async def compact_history(
+        self,
+        spec: AgentRunSpec,
+        messages: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]] | None, str]:
+        """Summarize ``messages`` on demand — the manual `/compact` engine.
+
+        Unlike :meth:`_maybe_compact`, this skips the automatic pressure
+        gate (dsh's rule: manual compaction works even below pressure) and
+        the compaction hooks — those are the AUTO path's policy points; a
+        human asking directly is the policy. Returns the compacted history,
+        or ``None`` with a stable reason the caller can surface verbatim:
+        the model produced no usable summary, or the summary did not shrink
+        anything (nothing worth replacing).
+        """
+        if sum(1 for m in messages if m.get("role") != "system") < 4:
+            return None, "No compactable history yet."
+        summary = await self._summarize(spec, messages)
+        if not summary:
+            return None, (
+                "Compaction could not produce a useful summary. "
+                "The conversation is unchanged."
+            )
+        compacted = self._build_compacted_history(messages, summary)
+        # Shrinkage is judged by VOLUME, not message count: replacing four
+        # short turns with three longer ones is growth wearing a summary's
+        # clothes (dsh's convergence rule — reject a summary that does not
+        # shrink its source). Observed live: a short conversation "compacted"
+        # 4 → 3 messages while gaining 1,347 characters.
+        if self._history_chars(compacted) >= self._history_chars(messages):
+            return None, (
+                "Compaction would not shrink the conversation. "
+                "The conversation is unchanged."
+            )
+        return compacted, "compacted"
+
+    @staticmethod
     def _build_compacted_history(
         messages: list[dict[str, Any]], summary: str
     ) -> list[dict[str, Any]]:

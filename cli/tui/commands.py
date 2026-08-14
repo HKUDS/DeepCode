@@ -161,6 +161,15 @@ async def _cmd_clear(app, args: str) -> str | None:
     return "context cleared"
 
 
+async def _cmd_compact(app, args: str) -> str | None:
+    if args.strip():
+        return "usage: /compact (no arguments)"
+    try:
+        return await app.compact_conversation()
+    except (RuntimeError, ValueError) as exc:
+        return str(exc)
+
+
 async def _cmd_skills(app, args: str) -> str | None:
     return app.list_skills()
 
@@ -271,6 +280,12 @@ REGISTRY: dict[str, Command] = {
         ),
         Command("stop", "/stop", "interrupt the active Turn", _cmd_stop),
         Command("clear", "/clear", "clear the conversation context", _cmd_clear),
+        Command(
+            "compact",
+            "/compact",
+            "summarize older turns to free context",
+            _cmd_compact,
+        ),
         Command("exit", "/exit", "quit (ctrl-d also works)", _cmd_exit),
     )
 }
