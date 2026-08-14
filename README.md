@@ -144,6 +144,20 @@ Skills, permissions, Goals, and Automations. See the
 
 ## News
 
+**2026-08-15 · Credential hygiene and a real preset menu**
+
+- **A connection's key now reaches exactly the requests it was resolved
+  for.** Building a provider no longer exports the key into the process
+  environment, where every same-template connection could pick it up as its
+  own; removing a provider un-configures every key source instead of letting
+  it reappear; and when a launch environment variable shadows a pasted key,
+  the editor says which one and that it wins. Verification also works from
+  async hosts now.
+- **The agent-preset picker grew up.** A menu with per-preset descriptions
+  and trust marking replaces the cramped native dropdown, the duplicate
+  "Default" row is gone, and a started session shows a read-only label of
+  what it runs.
+
 **2026-08-14 · Subagent runtime, compaction, and one-way persistence**
 
 - **Delegate to Codex or Claude Code as a subagent.** `spawn_agent` gains
