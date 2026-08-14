@@ -144,7 +144,7 @@ Skills, permissions, Goals, and Automations. See the
 
 ## News
 
-**2026-08-14 · Subagent runtime, manual /compact, and config provenance**
+**2026-08-14 · Subagent runtime, compaction, and one-way persistence**
 
 - **Delegate to Codex or Claude Code as a subagent.** `spawn_agent` gains
   external backends that run the installed CLI with a scrubbed environment and
@@ -162,6 +162,18 @@ Skills, permissions, Goals, and Automations. See the
   configured leaf with its providing layer and a bounded preview;
   credential-shaped subtrees are redacted whole. A verbatim deepseek-harness
   Skill also loads unchanged from `.agents/skills`.
+- **Relieve context pressure with the cheapest sufficient measure.** Under
+  pressure the runtime first middle-prunes oversized tool results — a free,
+  convergent pass covering MCP and custom tools alike — and only summarizes
+  if that is not enough; the summarization call replays the routed request as
+  a genuine prefix so provider prompt caching is reused, and a summary that
+  would not shrink the conversation is rejected.
+- **Deleted sessions stay deleted.** The Desktop projection no longer adopts
+  a thread back into canonical storage unless SQLite genuinely owns it
+  (legacy import or automation bootstrap), and every mid-turn message the
+  model sees — goal updates, recovery prompts, injected results — now lands
+  in the canonical session log, so a resumed session rebuilds exactly the
+  history the model saw.
 
 **2026-08-13 · Desktop typography, themes, and native controls**
 
