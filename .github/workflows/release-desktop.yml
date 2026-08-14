@@ -1,0 +1,222 @@
+name: Release Desktop
+
+on:
+  push:
+    tags:
+      - "desktop-v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing desktop-vX.Y.Z tag to publish
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-desktop-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+jobs:
+  verify-tag:
+    name: Verify release identity
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Match tag to all Desktop version files
+        working-directory: desktop
+        run: node scripts/check-version.mjs --tag "${RELEASE_TAG}"
+
+  publish:
+    name: Publish ${{ matrix.name }}
+    needs: verify-tag
+    environment: desktop-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64
+            runner: macos-15
+            platform: macos
+            bundles: dmg
+            verify: dmg
+          - name: macOS x64
+            runner: macos-15-intel
+            platform: macos
+            bundles: dmg
+            verify: dmg
+          - name: Windows x64
+            runner: windows-2022
+            platform: windows
+            bundles: nsis
+            verify: nsis
+          - name: Linux x64
+            runner: ubuntu-22.04
+            platform: linux
+            bundles: deb,appimage
+            verify: appimage
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Install Tauri Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libfuse2
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: desktop/sidecar-requirements.lock
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Validate production signing credentials
+        working-directory: desktop
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          LINUX_GPG_PRIVATE_KEY: ${{ secrets.LINUX_GPG_PRIVATE_KEY }}
+          LINUX_GPG_KEY_ID: ${{ secrets.LINUX_GPG_KEY_ID }}
+          APPIMAGETOOL_SIGN_PASSPHRASE: ${{ secrets.APPIMAGETOOL_SIGN_PASSPHRASE }}
+        run: >-
+          node scripts/run-python.mjs scripts/validate-release-environment.py
+          --platform ${{ matrix.platform }}
+
+      - name: Generate signed updater configuration
+        working-directory: desktop
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          TAURI_UPDATER_ENDPOINT: ${{ vars.TAURI_UPDATER_ENDPOINT }}
+          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+        run: >-
+          node scripts/run-python.mjs scripts/create-release-config.py
+          --output build/release/tauri.release.conf.json
+
+      - name: Verify merged updater configuration
+        working-directory: desktop
+        run: >-
+          node scripts/check-tauri-config.mjs
+          --config build/release/tauri.release.conf.json
+          --require-updater
+
+      - name: Import Windows code-signing certificate
+        if: runner.os == 'Windows'
+        working-directory: desktop
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: >-
+          ./scripts/import-windows-certificate.ps1
+          -Output build/release/tauri.release.windows.conf.json
+
+      - name: Import Linux AppImage signing key
+        if: runner.os == 'Linux'
+        env:
+          LINUX_GPG_PRIVATE_KEY: ${{ secrets.LINUX_GPG_PRIVATE_KEY }}
+        run: printf '%s' "${LINUX_GPG_PRIVATE_KEY}" | gpg --batch --import
+
+      - name: Create locked sidecar environment
+        working-directory: desktop
+        run: npm run setup:sidecar
+
+      - name: Build, sign, notarize and upload release bundles
+        uses: tauri-apps/tauri-action@v1.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          SIGN: ${{ runner.os == 'Linux' && '1' || '' }}
+          SIGN_KEY: ${{ runner.os == 'Linux' && secrets.LINUX_GPG_KEY_ID || '' }}
+          APPIMAGETOOL_SIGN_PASSPHRASE: ${{ runner.os == 'Linux' && secrets.APPIMAGETOOL_SIGN_PASSPHRASE || '' }}
+          APPIMAGETOOL_FORCE_SIGN: ${{ runner.os == 'Linux' && '1' || '' }}
+        with:
+          projectPath: desktop
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: DeepCode Desktop __VERSION__
+          releaseBody: Signed DeepCode Desktop release. Keep the previous installer until the upgraded database and workflows have been verified.
+          releaseDraft: true
+          prerelease: false
+          generateReleaseNotes: true
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
+          uploadUpdaterSignatures: true
+          uploadWorkflowArtifacts: true
+          workflowArtifactNamePattern: deepcode-[platform]-[arch]-[bundle]
+          releaseAssetNamePattern: DeepCode_[version]_[platform]_[arch][setup][ext]
+          args: >-
+            --bundles ${{ matrix.bundles }}
+            --config build/release/tauri.release.conf.json
+            ${{ runner.os == 'Windows' && '--config build/release/tauri.release.windows.conf.json' || '' }}
+
+      - name: Verify production bundle
+        working-directory: desktop
+        run: >-
+          node scripts/run-python.mjs scripts/verify-release-bundle.py
+          --bundle ${{ matrix.verify }}
+          --signed
+          ${{ runner.os == 'macOS' && '--notarized' || '' }}
+
+      - name: Verify Debian release bundle
+        if: runner.os == 'Linux'
+        working-directory: desktop
+        run: >-
+          node scripts/run-python.mjs scripts/verify-release-bundle.py
+          --bundle deb

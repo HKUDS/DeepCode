@@ -1,0 +1,795 @@
+"""AgentControl — the coordination state for model-driven delegation (C2).
+
+Faithful to the reference agent's multi-agent design, adapted to DeepCode:
+
+- **spawn is non-blocking** — it starts a sub-agent as a background task and
+  returns its id immediately; several run *concurrently*, bounded by a per-session
+  limit (``max_threads``);
+- **results flow through the active Turn inbox** — application-backed sessions
+  use the same atomic input boundary as user steering; direct CLI sessions use
+  a local compatibility mailbox owned by that Agent runtime;
+- **wait_agent parks on mailbox activity** (:meth:`wait_for_activity`) rather
+  than joining a future — so the parent can keep working and collect results as
+  they arrive.
+
+Isolation is DeepCode's own guarantee: each sub-agent may run in its own git
+worktree whose result is merged back with 3-way-merge conflict detection; base
+git ops are serialised (``_git_lock``) while the sub-agents build in parallel.
+
+Depth is capped at one: a sub-agent session is built with ``allow_spawn=False``
+so it gets no delegation tools and cannot recurse.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import re
+import uuid
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
+
+from loguru import logger
+
+from core.agent_runtime.injections import SubagentMessage, TurnInputSink
+from core.harness.permissions import PermissionMode
+
+if TYPE_CHECKING:
+    from core.compat.runtime import DeepCodeRuntime
+    from core.domain.execution_profile import ExecutionProfile
+    from core.domain.execution_security import ExecutionSecurityProfile
+
+# Max sub-agents running at once. A small fan-out (3-5 independent subtasks) is
+# the common case, so the default fits it without forcing a wait-and-retry,
+# while still bounding concurrent model sessions.
+MAX_CONCURRENT_SUBAGENTS = 5
+
+
+def _slug(name: str) -> str:
+    """A stable id/dedup key from a subtask name (like the reference task_name)."""
+    return re.sub(r"[^a-z0-9_-]+", "-", name.strip().lower()).strip("-") or "agent"
+
+
+_RUNNING = "running"
+# A native sub-agent that completed (or was softly interrupted in) a turn
+# parks here alive: its conversation continues on the next send_message.
+# External-CLI children never reach it — they answer once and are done.
+_IDLE = "idle"
+_DONE = "done"
+_FAILED = "failed"
+
+
+class AgentLimitError(RuntimeError):
+    """Too many sub-agents are already running concurrently."""
+
+
+class DuplicateAgentError(AgentLimitError):
+    """A sub-agent is already running this exact task (a re-spawn is redundant)."""
+
+
+# Sub-agent execution backends. "native" builds an in-process AgentSession;
+# the rest delegate the task to an external CLI (see external_backend).
+# External backends are separate products with their own credentials and
+# policy: they take a self-contained text task plus the workspace cwd and
+# return only the final answer — no parent context, no send_message channel.
+# Requests that need either are rejected loud at spawn time, never
+# accepted-then-ignored.
+NATIVE_BACKEND = "native"
+
+
+@dataclass
+class SubAgent:
+    id: str
+    task: str
+    isolate: bool = True
+    backend: str = NATIVE_BACKEND
+    # Optional per-child composition (native backend only): an extra
+    # system-prompt section, a narrowing tool allowlist, and an object-rooted
+    # JSON Schema the child must satisfy through the forced capture tool.
+    persona: str | None = None
+    tool_names: tuple[str, ...] | None = None
+    output_schema: dict | None = field(default=None, repr=False)
+    status: str = _RUNNING
+    result: str = ""
+    seed_history: list = field(default_factory=list, repr=False)
+    inbox: list[tuple[str, str]] = field(
+        default_factory=list,
+        repr=False,
+    )  # (message id, parent payload)
+    inbox_sequence: int = 0
+    dedup_key: str = ""  # stable key so a re-worded re-spawn is caught
+    handle: asyncio.Task | None = field(default=None, repr=False)
+    # Conversational state (native backend): the current turn's inner task —
+    # the soft-interrupt target — and the queue an idle child parks on until
+    # the parent sends a follow-up.
+    turn_task: asyncio.Task | None = field(default=None, repr=False)
+    wake: asyncio.Queue = field(default_factory=asyncio.Queue, repr=False)
+    completed_turns: int = 0
+    # Set whenever the child settles (a turn finished, it parked idle, or it
+    # reached a terminal state); cleared when a new turn starts. The waiting
+    # primitive for "this child has something new" now that a conversational
+    # child's task handle outlives every individual turn.
+    settled: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
+
+    @property
+    def running(self) -> bool:
+        return self.status == _RUNNING
+
+    @property
+    def idle(self) -> bool:
+        return self.status == _IDLE
+
+
+def _format_result_message(sub: SubAgent) -> str:
+    """The mailbox envelope a finished sub-agent posts to the parent."""
+    return (
+        f"Message Type: RESULT\n"
+        f"Agent: {sub.id}\n"
+        f"Status: {sub.status}\n"
+        f"Payload:\n{sub.result}"
+    )
+
+
+class AgentControl:
+    """Per-parent-session registry, concurrency limit, and result mailbox."""
+
+    def __init__(
+        self,
+        workspace: str,
+        model: str | None = None,
+        *,
+        execution_profile: ExecutionProfile | None = None,
+        max_threads: int = MAX_CONCURRENT_SUBAGENTS,
+        permission_mode: PermissionMode = PermissionMode.FULL_AUTO,
+        execution_security_profile: ExecutionSecurityProfile | None = None,
+        approval_callback: Any | None = None,
+        runtime: DeepCodeRuntime | None = None,
+        active_turn_id_provider: Any | None = None,
+        runtime_input_sink: TurnInputSink | None = None,
+        context_note_sink: Any | None = None,
+        transcript_sink: Any | None = None,
+        project_trusted: bool = False,
+    ) -> None:
+        self._workspace = workspace
+        self._model = model
+        self._execution_profile = execution_profile
+        self._max_threads = max(1, max_threads)
+        self._permission_mode = permission_mode
+        self._execution_security_profile = execution_security_profile
+        self._approval_callback = approval_callback
+        self._runtime = runtime
+        self._active_turn_id_provider = active_turn_id_provider
+        self._runtime_input_sink = runtime_input_sink
+        # Canonical-history fallback for results that lose the delivery race
+        # (see _post). Same callable the runner uses for mid-turn notes.
+        self._context_note_sink = context_note_sink
+        # Per-child transcript writer (see _dump_transcript); host-provided.
+        self._transcript_sink = transcript_sink
+        self._project_trusted = project_trusted
+        self._local_runtime_id = f"local-agent-runtime-{uuid.uuid4().hex}"
+        self._agents: dict[str, SubAgent] = {}
+        self._seq = 0
+        self._mailbox: list[tuple[str, str, str]] = []
+        self._mailbox_sequence = 0
+        self._activity = asyncio.Event()
+        self._git_lock = asyncio.Lock()
+        self._history_provider = None  # set to the parent session's history()
+
+    def set_history_provider(self, provider) -> None:
+        """Wire the parent session's ``history()`` so fork_turns can inherit
+        the parent's context. Called once, after the session is built."""
+        self._history_provider = provider
+
+    # -- introspection ---------------------------------------------------------
+
+    def active_count(self) -> int:
+        return sum(1 for a in self._agents.values() if a.running)
+
+    def get(self, agent_id: str) -> SubAgent | None:
+        return self._agents.get(agent_id)
+
+    def all(self) -> list[SubAgent]:
+        return list(self._agents.values())
+
+    def interrupt(self, agent_id: str) -> str:
+        """Stop a running sub-agent's CURRENT turn.
+
+        dsh's keepInbox rule, in DeepCode form: a native child is not killed —
+        only its in-flight turn is cancelled, and it parks idle with its
+        conversation intact, ready for a redirecting ``send_message``. An
+        external-CLI child has no turn boundary to stop at, so interrupting it
+        remains a whole-run cancellation.
+        """
+        sub = self._agents.get(agent_id)
+        if sub is None:
+            return f"no such agent: {agent_id}"
+        if sub.idle:
+            return (
+                f"{agent_id} is already idle — send_message to give it a new direction"
+            )
+        if not sub.running:
+            return f"{agent_id} already finished ({sub.status})"
+        if sub.backend == NATIVE_BACKEND and sub.turn_task is not None:
+            if sub.turn_task.cancelling() == 0:
+                sub.turn_task.cancel()
+            return (
+                f"interrupt requested for {agent_id}; it parks idle with its "
+                "conversation intact — send_message to redirect it"
+            )
+        if sub.handle is not None and sub.handle.cancelling() == 0:
+            sub.handle.cancel()
+        return f"interrupt requested for {agent_id}"
+
+    def send_message(self, agent_id: str, message: str) -> str:
+        """Queue a message to a RUNNING sub-agent; it is injected into that
+        sub-agent's turn at its next step. Only works while it is still running
+        (a finished sub-agent cannot receive one)."""
+        sub = self._agents.get(agent_id)
+        if sub is None:
+            return f"no such agent: {agent_id}"
+        if sub.backend != NATIVE_BACKEND:
+            # External CLIs take one task and answer once; there is no inbox
+            # on their side, so accepting the message would silently drop it.
+            return (
+                f"Error: {agent_id} runs on the {sub.backend} backend, which "
+                "accepts no messages after start — its result will arrive on "
+                "its own, or interrupt_agent it."
+            )
+        if not message.strip():
+            return "Error: message is empty."
+        if sub.idle:
+            # A parked child resumes with the message as its next turn's
+            # input, on top of its accumulated conversation.
+            sub.wake.put_nowait(message.strip())
+            return f"delivered to {agent_id}; it resumes with your message"
+        if not sub.running:
+            return f"{agent_id} already finished ({sub.status}); cannot deliver"
+        sub.inbox_sequence += 1
+        sub.inbox.append(
+            (
+                f"parent:{sub.id}:{sub.inbox_sequence}",
+                message.strip(),
+            )
+        )
+        return f"delivered to {agent_id}"
+
+    def _make_inbox_drainer(self, sub: SubAgent):
+        """The injection_callback for a sub-agent: drains its send_message inbox
+        into its own turn (mirrors the parent's drain_injections)."""
+
+        async def drain(limit: int | None = None) -> list[SubagentMessage]:
+            if not sub.inbox:
+                return []
+            take = sub.inbox if limit is None else sub.inbox[:limit]
+            sub.inbox = sub.inbox[len(take) :]
+            return [
+                SubagentMessage(
+                    message_id=message_id,
+                    target_turn_id=sub.id,
+                    agent_id="parent",
+                    payload=payload,
+                )
+                for message_id, payload in take
+            ]
+
+        return drain
+
+    # -- spawn -----------------------------------------------------------------
+
+    def spawn(
+        self,
+        task: str,
+        *,
+        name: str | None = None,
+        isolate: bool = True,
+        fork_turns: str | int = "none",
+        backend: str = NATIVE_BACKEND,
+        persona: str | None = None,
+        tools: list[str] | tuple[str, ...] | None = None,
+        output_schema: dict | None = None,
+    ) -> str:
+        """Start a sub-agent in the background and return its id (non-blocking).
+
+        ``name`` is a short stable label for the subtask; it is the dedup key, so
+        re-spawning the same-named subtask while it runs is refused even if the
+        task text was reworded. Without a name the (normalized) task text is the
+        key. ``fork_turns`` inherits the parent's context: ``"none"`` (fresh),
+        ``"all"`` (the whole conversation), or an int N (the last N turns) — only
+        user messages and the parent's final answers carry over. Raises
+        :class:`DuplicateAgentError` when a matching subtask is already running,
+        :class:`AgentLimitError` when the concurrency limit is reached.
+        """
+        if backend != NATIVE_BACKEND:
+            from core.harness.agents.external_backend import (
+                ExternalBackendError,
+                resolve_backend,
+                resolve_executable,
+            )
+
+            # dsh's capability rule: a request needing a capability the
+            # backend lacks fails loud — external CLIs never inherit parent
+            # conversation, and take no composition (they run their own
+            # product with its own prompt, tools, and output conventions).
+            # Silently dropping any of these would mislead the model.
+            if fork_turns != "none":
+                raise AgentLimitError(
+                    f"the {backend} backend does not inherit parent context; "
+                    "use fork_turns='none' and write a self-contained task"
+                )
+            unsupported = [
+                label
+                for label, value in (
+                    ("persona", persona),
+                    ("tools", tools),
+                    ("output_schema", output_schema),
+                )
+                if value is not None
+            ]
+            if unsupported:
+                raise AgentLimitError(
+                    f"the {backend} backend does not support "
+                    f"{', '.join(unsupported)} — external CLIs run their own "
+                    "product configuration"
+                )
+            try:
+                resolve_executable(resolve_backend(backend))
+            except ExternalBackendError as exc:
+                raise AgentLimitError(str(exc)) from exc
+        if tools is not None:
+            tool_names = tuple(str(t).strip() for t in tools if str(t).strip())
+            if not tool_names:
+                raise AgentLimitError(
+                    "'tools' must name at least one tool when provided — an "
+                    "empty allowlist would spawn a sub-agent that can do "
+                    "nothing"
+                )
+        else:
+            tool_names = None
+        if output_schema is not None:
+            from core.harness.agents.structured_result import (
+                SchemaError,
+                validate_output_schema,
+            )
+
+            try:
+                output_schema = validate_output_schema(output_schema)
+            except SchemaError as exc:
+                raise AgentLimitError(str(exc)) from exc
+        # Dedup against any prior subtask with this key that is still running OR
+        # already succeeded — re-spawning finished work is the exact waste a real
+        # model produced (it re-spawned modules it had already built). A FAILED
+        # subtask may be retried.
+        key = _slug(name) if name else " ".join(task.split()).lower()
+        for existing in self._agents.values():
+            if existing.dedup_key == key and existing.status != _FAILED:
+                verb = "is already handling" if existing.running else "already handled"
+                tail = (
+                    "its result will come back on its own; call wait_agent"
+                    if existing.running
+                    else "its output is already in the workspace; read it — do not re-spawn"
+                )
+                raise DuplicateAgentError(
+                    f"{existing.id} {verb} this subtask — {tail}."
+                )
+        if self.active_count() >= self._max_threads:
+            raise AgentLimitError(
+                f"at most {self._max_threads} sub-agents can run at once; call "
+                "wait_agent to collect a finished one before spawning more"
+            )
+        self._seq += 1
+        base = _slug(name) if name else f"agent-{self._seq}"
+        agent_id = base if base not in self._agents else f"{base}-{self._seq}"
+        sub = SubAgent(
+            id=agent_id,
+            task=task,
+            isolate=isolate,
+            backend=backend,
+            persona=(persona or "").strip() or None,
+            tool_names=tool_names,
+            output_schema=output_schema,
+            seed_history=self._fork_history(fork_turns),
+            dedup_key=key,
+        )
+        self._agents[agent_id] = sub
+        sub.handle = asyncio.ensure_future(self._run(sub))
+        return agent_id
+
+    def _fork_history(self, fork_turns: str | int) -> list:
+        """The filtered slice of parent history a forked sub-agent inherits."""
+        if fork_turns == "none" or self._history_provider is None:
+            return []
+        history = self._history_provider() or []
+        kept = [
+            dict(m)
+            for m in history
+            if m.get("role") == "user"
+            or (
+                m.get("role") == "assistant"
+                and m.get("content")
+                and not m.get("tool_calls")
+            )
+        ]
+        if fork_turns == "all":
+            return kept
+        n = int(fork_turns)
+        boundaries = [i for i, m in enumerate(kept) if m.get("role") == "user"]
+        if n <= 0 or len(boundaries) <= n:
+            return kept
+        return kept[boundaries[len(boundaries) - n] :]
+
+    async def _run(self, sub: SubAgent) -> None:
+        try:
+            if sub.backend != NATIVE_BACKEND:
+                # External CLIs answer once: run, deliver, done.
+                if sub.isolate:
+                    sub.result = await self._run_isolated(sub)
+                else:
+                    sub.result = await self._run_task_in(sub, self._workspace)
+                sub.status = _DONE
+            else:
+                # Native children are conversational: _converse posts each
+                # turn's result itself and only ever exits by cancellation
+                # or failure, both handled below.
+                await self._converse(sub)
+        except asyncio.CancelledError:
+            sub.status = _FAILED
+            sub.result = "cancelled"
+            raise
+        except Exception as exc:  # noqa: BLE001 - a sub-agent failure is data
+            sub.status = _FAILED
+            sub.result = f"error: {exc}"
+        finally:
+            if sub.status not in (_RUNNING, _IDLE):
+                self._post(sub.id, _format_result_message(sub))
+            sub.settled.set()  # release anyone awaiting this child
+
+    async def _converse(self, sub: SubAgent) -> None:
+        """A native child's whole life: turns alternating with idle parking.
+
+        dsh's continuable-subagent shape in DeepCode form. Each turn runs
+        through the single-turn seam (``_run_subagent``), which extends
+        ``sub.seed_history`` with the finished conversation so the next turn
+        continues it. Between turns the child parks on ``sub.wake`` until the
+        parent sends a follow-up. The loop never returns normally: it ends by
+        the parent's hard cancel (Turn teardown) or by a turn failure, both
+        of which propagate to ``_run``.
+
+        Soft interrupts land here: ``interrupt`` cancels only ``turn_task``,
+        so the ``await`` below raises CancelledError while THIS task was not
+        itself cancelled — distinguishable via ``cancelling()``, the same
+        probe the kernel uses — and the child parks instead of dying.
+        """
+        workspace = self._workspace
+        worktree = None
+        if sub.isolate:
+            from core.team.worktree import WorktreeManager
+
+            worktree = WorktreeManager(self._workspace)
+            async with self._git_lock:
+                worktree.ensure_base()
+                workspace = worktree.create(sub.id)
+        try:
+            while True:
+                sub.status = _RUNNING
+                sub.settled.clear()
+                sub.turn_task = asyncio.ensure_future(
+                    self._run_subagent(sub, workspace)
+                )
+                try:
+                    result = await sub.turn_task
+                except asyncio.CancelledError:
+                    current = asyncio.current_task()
+                    if current is not None and current.cancelling() > 0:
+                        raise  # the parent tore the whole child down
+                    sub.result = (
+                        "(turn interrupted; the sub-agent is parked idle with "
+                        "its conversation intact — send_message to redirect it)"
+                    )
+                else:
+                    if worktree is not None:
+                        async with self._git_lock:
+                            merge = worktree.merge(sub.id)
+                        result = self._describe_merge(merge, result)
+                    sub.completed_turns += 1
+                    sub.result = result
+                finally:
+                    sub.turn_task = None
+                sub.status = _IDLE
+                sub.settled.set()
+                self._post(sub.id, _format_result_message(sub))
+                if sub.seed_history:
+                    # Refresh the transcript now that the turn's status is
+                    # settled — the in-turn dump necessarily wrote "running".
+                    self._write_transcript(sub, sub.seed_history)
+                sub.task = await sub.wake.get()
+        finally:
+            if worktree is not None:
+                async with self._git_lock:
+                    worktree.cleanup(sub.id)
+                    self._remove_empty_worktree_root(worktree)
+
+    @staticmethod
+    def _describe_merge(merge, summary: str) -> str:
+        if merge.clean:
+            return f"(isolated, merged cleanly)\n{summary}"
+        if merge.conflicts:
+            return (
+                f"(isolated, NOT merged — conflicts in "
+                f"{', '.join(merge.conflicts)}; reconcile manually)\n{summary}"
+            )
+        return f"(isolated, merge blocked: {merge.detail})\n{summary}"
+
+    @staticmethod
+    def _remove_empty_worktree_root(worktree) -> None:
+        """Last isolated agent out removes the now-empty shared dir."""
+        try:
+            root = worktree.worktrees_root
+            if root.is_dir() and not any(root.iterdir()):
+                root.rmdir()
+        except OSError:
+            pass
+
+    async def _run_isolated(self, sub: SubAgent) -> str:
+        """One-shot isolated run (external backends; natives use _converse)."""
+        from core.team.worktree import WorktreeManager
+
+        wt = WorktreeManager(self._workspace)
+        async with self._git_lock:
+            wt.ensure_base()
+            tree = wt.create(sub.id)
+        try:
+            summary = await self._run_task_in(sub, tree)
+            async with self._git_lock:
+                merge = wt.merge(sub.id)
+        finally:
+            async with self._git_lock:
+                wt.cleanup(sub.id)
+                self._remove_empty_worktree_root(wt)
+        return self._describe_merge(merge, summary)
+
+    async def _run_task_in(self, sub: SubAgent, workspace: str) -> str:
+        """Dispatch one sub-agent's task to its backend in ``workspace``.
+
+        Both execution modes (shared workspace and isolated worktree) funnel
+        through here, so a backend never needs to know about isolation — it
+        only ever sees a directory to work in.
+        """
+        if sub.backend != NATIVE_BACKEND:
+            from core.harness.agents.external_backend import run_external_subagent
+
+            return await run_external_subagent(sub.backend, sub.task, workspace)
+        return await self._run_subagent(sub, workspace)
+
+    async def _run_subagent(self, sub: SubAgent, workspace: str) -> str:
+        from core.agent_setup import SYSTEM_PROMPT, build_agent_session
+        from core.events import UserInput
+
+        # Per-child composition. The persona and the capture contract ride the
+        # system prompt as ADDITIONAL sections — the base prompt stays, so the
+        # child keeps the ordinary tool discipline it was trained on.
+        prompt_sections = [SYSTEM_PROMPT]
+        if sub.persona:
+            prompt_sections.append(f"## Persona\n{sub.persona}")
+        capture = None
+        extra_tools: tuple = ()
+        if sub.output_schema is not None:
+            from core.harness.agents.structured_result import (
+                StructuredResultCapture,
+            )
+
+            capture = StructuredResultCapture(sub.output_schema)
+            extra_tools = (capture.make_tool(),)
+            prompt_sections.append(capture.prompt_addendum())
+        tool_filter = None
+        if sub.tool_names is not None:
+            from core.harness.agents.structured_result import CAPTURE_TOOL_NAME
+
+            allowed = frozenset(sub.tool_names)
+            if capture is not None:
+                # The allowlist must never lock out the mandatory submission
+                # channel — that would be a self-contradictory composition.
+                allowed |= {CAPTURE_TOOL_NAME}
+
+            def tool_filter(names: tuple[str, ...]) -> tuple[str, ...]:
+                return tuple(n for n in names if n in allowed)
+
+        session, _model, _engine = build_agent_session(
+            workspace=workspace,
+            model=self._model,
+            system_prompt="\n\n".join(prompt_sections),
+            execution_profile=self._execution_profile,
+            allow_spawn=False,  # depth cap: sub-agents cannot spawn again
+            injection_callback=self._make_inbox_drainer(sub),
+            agent_context=(sub.id, "subagent"),  # fires SubagentStart/Stop hooks
+            approval_callback=self._approval_callback,
+            permission_mode_override=(
+                self._permission_mode
+                if self._execution_security_profile is None
+                else None
+            ),
+            execution_security_profile=self._execution_security_profile,
+            runtime=self._runtime,
+            project_trusted=self._project_trusted,
+            extra_tools=extra_tools,
+            tool_filter=tool_filter,
+        )
+        try:
+            if sub.seed_history:
+                # fork_turns seed on the first turn; on follow-up turns this
+                # is the child's own accumulated conversation, which is what
+                # makes the resumed turn a continuation rather than a restart.
+                session.load_history(sub.seed_history)
+            final = ""
+            async for event in session.run_stream(UserInput(text=sub.task)):
+                if event.msg.type == "task_complete":
+                    final = event.msg.final_text or ""
+            # Carry the finished conversation forward for the next turn.
+            history = getattr(session, "history", None)
+            if history is not None:
+                sub.seed_history = [dict(m) for m in history]
+            if capture is not None:
+                structured = capture.render()
+                if structured is None:
+                    # dsh's rule: a structured delegation without a submission
+                    # is a failure, not a prose answer quietly standing in.
+                    raise RuntimeError(
+                        "sub-agent finished without submitting a structured "
+                        f"result; its last message: {final.strip()[:400]!r}"
+                    )
+                return structured
+            return final.strip() or "(sub-agent produced no summary)"
+        finally:
+            self._dump_transcript(sub, session)
+            await session.aclose()
+
+    def _dump_transcript(self, sub: SubAgent, session: Any) -> None:
+        """Report the child's full conversation to the host's transcript sink.
+
+        The autopsy channel (dsh children are session-backed; DeepCode's were
+        invisible): every finished or failed turn hands the host the complete
+        message list, so a parent Session can keep a per-child transcript its
+        user can actually inspect. Absent sink or failure never disturbs the
+        run — visibility must not break the thing it observes.
+        """
+        if self._transcript_sink is None:
+            return
+        history = getattr(session, "history", None)
+        if history is None:
+            return
+        self._write_transcript(sub, history)
+
+    def _write_transcript(self, sub: SubAgent, messages: Any) -> None:
+        if self._transcript_sink is None:
+            return
+        try:
+            self._transcript_sink(
+                sub.id,
+                sub.task,
+                sub.status,
+                [dict(m) for m in messages],
+            )
+        except Exception:  # noqa: BLE001 - observability must not kill the run
+            logger.exception("sub-agent transcript could not be written: {}", sub.id)
+
+    # -- mailbox ---------------------------------------------------------------
+
+    def _post(self, agent_id: str, message: str) -> None:
+        self._mailbox_sequence += 1
+        message_id = f"subagent:{agent_id}:{self._mailbox_sequence}"
+        target_turn_id = (
+            self._active_turn_id_provider()
+            if self._active_turn_id_provider is not None
+            else None
+        )
+        if self._runtime_input_sink is not None:
+            delivered = False
+            if target_turn_id:
+                delivered = bool(
+                    self._runtime_input_sink(
+                        SubagentMessage(
+                            message_id=message_id,
+                            target_turn_id=target_turn_id,
+                            agent_id=agent_id,
+                            payload=message,
+                        )
+                    )
+                )
+            if not delivered and self._context_note_sink is not None:
+                # The result lost the active-Turn race (the Turn closed before
+                # the sub-agent finished, or the mailbox refused it). Append
+                # it straight to the canonical Session as a between-turns
+                # message: the next acquire reloads visible history and the
+                # model sees it at the start of its next Turn — instead of
+                # the result surviving only on SubAgent.result, unread.
+                try:
+                    self._context_note_sink(
+                        message, "subagent", already_in_history=False
+                    )
+                except Exception:  # noqa: BLE001 - persistence must not kill _run
+                    logger.exception(
+                        "late sub-agent result could not be persisted: {}",
+                        agent_id,
+                    )
+        else:
+            self._mailbox.append(
+                (
+                    message_id,
+                    agent_id,
+                    message,
+                )
+            )
+        self._activity.set()
+
+    async def wait_for_activity(self, timeout: float | None) -> str:
+        """Park until a sub-agent posts to the mailbox, or timeout. Returns a
+        short outcome; the messages themselves reach the model via injection."""
+        if self._mailbox:
+            return "One or more sub-agents have results waiting."
+        if self.active_count() == 0:
+            return "No sub-agents are running."
+        self._activity.clear()
+        # Re-check after clearing: a result posted in the check→clear window set
+        # the event we just reset, but its message is safe in the mailbox.
+        if self._mailbox:
+            return "One or more sub-agents have results waiting."
+        try:
+            await asyncio.wait_for(self._activity.wait(), timeout=timeout)
+        except TimeoutError:
+            return "Wait timed out; sub-agents are still running."
+        return "One or more sub-agents finished."
+
+    async def drain_injections(
+        self,
+        limit: int | None = None,
+    ) -> list[SubagentMessage]:
+        """Pop pending mailbox messages as user-role injections for the parent's
+        next turn. Wired as the run's ``injection_callback``."""
+        if not self._mailbox:
+            return []
+        target_turn_id = (
+            self._active_turn_id_provider()
+            if self._active_turn_id_provider is not None
+            else self._local_runtime_id
+        )
+        if not target_turn_id:
+            return []
+        take = self._mailbox if limit is None else self._mailbox[:limit]
+        self._mailbox = self._mailbox[len(take) :]
+        if not self._mailbox:
+            self._activity.clear()
+        return [
+            SubagentMessage(
+                message_id=message_id,
+                target_turn_id=target_turn_id,
+                agent_id=agent_id,
+                payload=payload,
+            )
+            for message_id, agent_id, payload in take
+        ]
+
+    async def close(self) -> None:
+        """Release all running sub-agents before session teardown returns."""
+
+        await self.cancel_running()
+
+    async def cancel_running(self) -> None:
+        """Cancel and join every child task owned by the active parent Turn.
+
+        Cancellation is not complete when :meth:`asyncio.Task.cancel` returns;
+        child cleanup runs while the resulting ``CancelledError`` unwinds.  The
+        parent therefore joins each task so no sub-agent can keep using tools,
+        network access, or its worktree after the Turn becomes terminal.
+        """
+
+        handles = tuple(
+            sub.handle
+            for sub in self._agents.values()
+            if sub.handle is not None and not sub.handle.done()
+        )
+        for handle in handles:
+            # A second cancel while the child is unwinding would interrupt its
+            # AgentSession.aclose() finally block. One cancellation request is
+            # sufficient; all callers still join the same task below.
+            if handle.cancelling() == 0:
+                handle.cancel()
+        if handles:
+            await asyncio.gather(*handles, return_exceptions=True)

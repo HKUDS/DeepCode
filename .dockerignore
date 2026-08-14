@@ -1,0 +1,45 @@
+# Git
+.git
+.gitignore
+
+# Node
+new_ui/frontend/node_modules
+new_ui/frontend/dist
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.eggs
+dist
+build
+
+# Virtual environments
+.venv
+venv
+env
+
+# IDE
+.vscode
+.idea
+.cursor
+*.swp
+*.swo
+
+# Runtime data
+deepcode_lab
+uploads
+logs
+*.log
+
+# Docker
+deepcode_docker/Dockerfile
+deepcode_docker/docker-compose.yml
+deepcode_docker/.dockerignore
+deepcode_docker/run_docker.sh
+
+# Documentation
+assets
+*.md
+LICENSE

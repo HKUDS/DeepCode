@@ -1,0 +1,209 @@
+name: Desktop CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Desktop quality gates
+    runs-on: ubuntu-24.04
+    outputs:
+      desktop_changed: ${{ steps.scope.outputs.desktop_changed }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Detect desktop-impacting changes
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "desktop_changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            compare_from="$BASE_SHA"
+          else
+            compare_from="$BEFORE_SHA"
+          fi
+
+          if [[ -z "$compare_from" || "$compare_from" =~ ^0+$ ]]; then
+            echo "desktop_changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! git cat-file -e "${compare_from}^{commit}" 2>/dev/null; then
+            echo "desktop_changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git diff --no-renames --name-only -z "$compare_from" "$HEAD_SHA" \
+            | python3 scripts/desktop_ci_scope.py >> "$GITHUB_OUTPUT"
+
+      - name: Skip unaffected Desktop checks
+        if: steps.scope.outputs.desktop_changed != 'true'
+        run: echo "No Desktop or bundled App Server inputs changed."
+
+      - name: Install Tauri Linux dependencies
+        if: steps.scope.outputs.desktop_changed == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Set up Node
+        if: steps.scope.outputs.desktop_changed == 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Set up Rust
+        if: steps.scope.outputs.desktop_changed == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install frontend dependencies
+        if: steps.scope.outputs.desktop_changed == 'true'
+        working-directory: desktop
+        run: npm ci
+
+      - name: Verify frontend and protocol
+        if: steps.scope.outputs.desktop_changed == 'true'
+        working-directory: desktop
+        run: |
+          npm run check:version
+          npm run check:protocol
+          npm run typecheck
+          npm run lint
+          npm test
+          npm run build
+
+      - name: Prepare Tauri resources for Rust-only checks
+        if: steps.scope.outputs.desktop_changed == 'true'
+        working-directory: desktop
+        run: mkdir -p build/sidecar/dist/deepcode-app-server
+
+      - name: Verify Tauri crate
+        if: steps.scope.outputs.desktop_changed == 'true'
+        working-directory: desktop/src-tauri
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test --all-targets
+
+  bundle:
+    name: Bundle ${{ matrix.name }}
+    needs: quality
+    if: >-
+      needs.quality.result == 'success' &&
+      needs.quality.outputs.desktop_changed == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64
+            runner: macos-15
+            bundle: app
+          - name: macOS x64
+            runner: macos-15-intel
+            bundle: app
+          - name: Windows x64
+            runner: windows-2022
+            bundle: nsis
+          - name: Linux x64
+            runner: ubuntu-22.04
+            bundle: deb
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install Tauri Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Set up Python for App Server sidecar
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: desktop/sidecar-requirements.lock
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Create locked sidecar environment
+        working-directory: desktop
+        run: npm run setup:sidecar
+
+      - name: Build platform bundle
+        working-directory: desktop
+        run: npm run tauri -- build --bundles ${{ matrix.bundle }}
+
+      - name: Verify bundle resources and runtime
+        working-directory: desktop
+        run: >-
+          node scripts/run-python.mjs scripts/verify-release-bundle.py
+          --bundle ${{ matrix.bundle }}
+
+      - name: Upload bundle smoke artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepcode-${{ matrix.name }}
+          path: desktop/src-tauri/target/release/bundle/
+          if-no-files-found: error
+          retention-days: 7

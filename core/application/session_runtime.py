@@ -1,0 +1,588 @@
+"""Long-lived AgentSession runtimes keyed by canonical SessionStore identity."""
+
+from __future__ import annotations
+
+import inspect
+import json
+import os
+import re
+import threading
+import uuid
+from collections import OrderedDict
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Any
+
+from core.private_storage import ensure_private_directory, open_private_file
+
+from core.agent_runtime.goal_runtime import (
+    GoalRuntimeContext,
+    GoalRuntimeHandler,
+    GoalRuntimeRouter,
+)
+from core.agent_runtime.injections import (
+    TurnInputMailbox,
+    TurnInputReservation,
+    TurnRuntimeInput,
+)
+from core.application.agent_adapter import (
+    AgentSessionFactory,
+    AgentSessionPort,
+    ApprovalCallback,
+)
+from core.application.errors import ConflictError, ThreadNotFoundError
+from core.domain.execution_permission import ExecutionPermissionMode
+from core.domain.execution_profile import ExecutionProfile
+from core.domain.execution_security import ExecutionSecurityProfile
+from core.sessions import Session, SessionStore
+from core.sessions.continuation import session_message_history_entry
+from core.skills.host import SkillWorkspaceRegistry
+
+
+class ApprovalRouter:
+    """Keep a stable AgentSession callback while Turns provide fresh context."""
+
+    def __init__(self) -> None:
+        self.current: ApprovalCallback | None = None
+
+    async def __call__(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        reason: str | None,
+    ) -> bool:
+        callback = self.current
+        if callback is None:
+            return False
+        result = callback(tool_name, arguments, reason)
+        if inspect.isawaitable(result):
+            result = await result
+        return bool(result)
+
+
+@dataclass(slots=True)
+class LiveSessionRuntime:
+    session_id: str
+    workspace: str
+    model: str | None
+    execution_profile: ExecutionProfile | None
+    execution_security_profile: ExecutionSecurityProfile | None
+    permission_mode_override: ExecutionPermissionMode | None
+    agent: AgentSessionPort
+    approvals: ApprovalRouter
+    canonical_message_count: int
+    runtime_key: object
+    inputs: TurnInputMailbox
+    inputs_enabled: bool
+    goals: GoalRuntimeRouter
+    goals_enabled: bool
+    active: bool = False
+
+
+class SessionRuntimeRegistry:
+    """Retain one AgentSession per loaded Thread, with bounded idle residency."""
+
+    def __init__(
+        self,
+        store: SessionStore,
+        factory: AgentSessionFactory,
+        *,
+        max_live_sessions: int = 16,
+        skill_hosts: SkillWorkspaceRegistry | None = None,
+    ) -> None:
+        if max_live_sessions < 1:
+            raise ValueError("max_live_sessions must be positive")
+        self.store = store
+        self.factory = factory
+        self.max_live_sessions = max_live_sessions
+        self.skill_hosts = skill_hosts
+        self._runtimes: OrderedDict[str, LiveSessionRuntime] = OrderedDict()
+        self._mailbox_lock = threading.Lock()
+        self._mailboxes: dict[str, TurnInputMailbox] = {}
+        self._goal_handler: GoalRuntimeHandler | None = None
+        self._goal_runtimes: dict[str, GoalRuntimeRouter] = {}
+
+    def configure_goal_handler(self, handler: GoalRuntimeHandler) -> None:
+        """Attach application persistence without rebuilding live sessions."""
+
+        with self._mailbox_lock:
+            self._goal_handler = handler
+            for runtime in self._goal_runtimes.values():
+                runtime.configure(handler)
+
+    async def acquire(
+        self,
+        session_id: str,
+        *,
+        workspace: str,
+        model: str | None,
+        execution_profile: ExecutionProfile | None = None,
+        execution_security_profile: ExecutionSecurityProfile | None = None,
+        permission_mode_override: ExecutionPermissionMode | None = None,
+        approval_callback: ApprovalCallback,
+    ) -> AgentSessionPort:
+        canonical = self.store.get_session(session_id)
+        if canonical is None:
+            raise ThreadNotFoundError(f"session not found: {session_id}")
+
+        runtime_key = self._runtime_key(
+            workspace=workspace,
+            model=model,
+            execution_profile=execution_profile,
+            execution_security_profile=execution_security_profile,
+            permission_mode_override=permission_mode_override,
+        )
+        runtime = self._runtimes.pop(session_id, None)
+        if runtime is not None and runtime.active:
+            self._runtimes[session_id] = runtime
+            raise ConflictError(f"session runtime is already active: {session_id}")
+        if runtime is not None and runtime.runtime_key != runtime_key:
+            await runtime.agent.aclose()
+            runtime = None
+        if runtime is None:
+            runtime = self._create(
+                canonical,
+                workspace=workspace,
+                model=model,
+                execution_profile=execution_profile,
+                execution_security_profile=execution_security_profile,
+                permission_mode_override=permission_mode_override,
+                runtime_key=runtime_key,
+            )
+        elif runtime.canonical_message_count != len(canonical.messages):
+            # Another DeepCode process appended to the shared Session. Visible
+            # JSONL history wins; reloading is safer than silently forking.
+            runtime.agent.load_history(self._visible_history(canonical))
+            runtime.canonical_message_count = len(canonical.messages)
+
+        runtime.approvals.current = approval_callback
+        runtime.active = True
+        self._runtimes[session_id] = runtime
+        await self._evict_idle()
+        return runtime.agent
+
+    def prepare_inputs(self, session_id: str, *, turn_id: str) -> None:
+        """Claim input ownership before asynchronous Session startup.
+
+        A coordinator claim is durable before the AgentSession coroutine gets
+        CPU time. Preparing the mailbox at that boundary lets an immediate
+        Steer wait for activation instead of observing a false ``closed``
+        state. Whether the adapter supports live input is a factory capability,
+        not a property of an already-created runtime.
+        """
+
+        if not _accepts_keyword(self.factory.create, "injection_callback"):
+            return
+        self._mailbox(session_id).prepare(turn_id)
+
+    def activate_inputs(self, session_id: str, *, turn_id: str) -> None:
+        """Open injection after the Turn's first user message is durable."""
+
+        runtime = self._runtimes.get(session_id)
+        if runtime is None or not runtime.active:
+            raise ConflictError(f"session runtime is not active: {session_id}")
+        if not runtime.inputs_enabled:
+            return
+        runtime.inputs.activate(turn_id)
+
+    def activate_goal(
+        self,
+        session_id: str,
+        *,
+        context: GoalRuntimeContext,
+    ) -> None:
+        """Expose Goal tools only for the owning Goal-associated Turn."""
+
+        runtime = self._runtimes.get(session_id)
+        if runtime is None or not runtime.active:
+            raise ConflictError(f"session runtime is not active: {session_id}")
+        if not runtime.goals_enabled:
+            return
+        runtime.goals.activate(context)
+
+    def release(self, session_id: str, *, turn_id: str | None = None) -> None:
+        runtime = self._runtimes.get(session_id)
+        if turn_id is not None:
+            self._mailbox(session_id).deactivate(turn_id)
+            self._goal_runtime(session_id).deactivate(turn_id)
+        if runtime is None:
+            return
+        runtime.approvals.current = None
+        runtime.active = False
+
+    def reserve_input(
+        self,
+        session_id: str,
+        value: TurnRuntimeInput,
+    ) -> TurnInputReservation | None:
+        """Reserve bounded input only while the expected Turn is active."""
+
+        return self._mailbox(session_id).reserve(value)
+
+    def commit_input(
+        self,
+        session_id: str,
+        reservation: TurnInputReservation,
+    ) -> None:
+        self._mailbox(session_id).commit(reservation)
+
+    def cancel_input(
+        self,
+        session_id: str,
+        reservation: TurnInputReservation,
+    ) -> None:
+        self._mailbox(session_id).cancel(reservation)
+
+    def inject_transient(
+        self,
+        session_id: str,
+        value: TurnRuntimeInput,
+    ) -> bool:
+        """Inject ledger-backed internal context without duplicating persistence."""
+
+        return self._mailbox(session_id).put_transient(value)
+
+    def mark_persisted(self, session_id: str) -> None:
+        runtime = self._runtimes.get(session_id)
+        canonical = self.store.get_session(session_id)
+        if runtime is not None and canonical is not None:
+            runtime.canonical_message_count = len(canonical.messages)
+
+    def clear_live_history(self, session_id: str) -> None:
+        """Clear only the resident model context, preserving canonical history."""
+
+        runtime = self._runtimes.get(session_id)
+        if runtime is None:
+            return
+        if runtime.active:
+            raise ConflictError(f"session runtime is active: {session_id}")
+        canonical = self.store.get_session(session_id)
+        if canonical is None:
+            raise ThreadNotFoundError(f"session not found: {session_id}")
+        runtime.agent.load_history([])
+        runtime.canonical_message_count = len(canonical.messages)
+
+    async def compact_live_history(self, session_id: str) -> dict[str, Any]:
+        """Summarize the resident model context in place (`/compact`).
+
+        The canonical Session log stays untouched — the same contract as
+        :meth:`clear_live_history`, but replacing older turns with a model
+        summary instead of dropping everything. A Session with no resident
+        runtime has nothing to compact: its context is rebuilt from
+        canonical history on the next acquire anyway.
+        """
+        runtime = self._runtimes.get(session_id)
+        if runtime is None:
+            raise ConflictError(
+                "No resident context to compact — this Session's context is "
+                "rebuilt fresh on its next Turn."
+            )
+        if runtime.active:
+            raise ConflictError(f"session runtime is active: {session_id}")
+        compact = getattr(runtime.agent, "compact", None)
+        if not callable(compact):
+            raise ConflictError(
+                "This Session's runtime does not support manual compaction."
+            )
+        return await compact()
+
+    async def discard(self, session_id: str) -> None:
+        """Close and forget one idle runtime after permanent Session deletion."""
+
+        runtime = self._runtimes.pop(session_id, None)
+        if runtime is None:
+            with self._mailbox_lock:
+                self._mailboxes.pop(session_id, None)
+                self._goal_runtimes.pop(session_id, None)
+            return
+        if runtime.active:
+            self._runtimes[session_id] = runtime
+            raise ConflictError(f"session runtime is active: {session_id}")
+        runtime.approvals.current = None
+        await runtime.agent.aclose()
+        with self._mailbox_lock:
+            self._mailboxes.pop(session_id, None)
+            self._goal_runtimes.pop(session_id, None)
+
+    async def close_all(self) -> None:
+        runtimes = tuple(self._runtimes.values())
+        self._runtimes.clear()
+        for runtime in runtimes:
+            runtime.approvals.current = None
+            try:
+                await runtime.agent.aclose()
+            except Exception:
+                # Shutdown must continue so every other session gets a chance
+                # to release AgentControl and tool subprocesses.
+                continue
+        with self._mailbox_lock:
+            self._mailboxes.clear()
+            self._goal_runtimes.clear()
+
+    @property
+    def live_session_ids(self) -> tuple[str, ...]:
+        return tuple(self._runtimes)
+
+    def _create(
+        self,
+        canonical: Session,
+        *,
+        workspace: str,
+        model: str | None,
+        execution_profile: ExecutionProfile | None,
+        execution_security_profile: ExecutionSecurityProfile | None,
+        permission_mode_override: ExecutionPermissionMode | None,
+        runtime_key: object,
+    ) -> LiveSessionRuntime:
+        approvals = ApprovalRouter()
+        inputs = self._mailbox(canonical.session_id)
+        goals = self._goal_runtime(canonical.session_id)
+        create = self.factory.create
+        create_kwargs = {
+            "workspace": workspace,
+            "model": model,
+            "approval_callback": approvals,
+        }
+        if _accepts_keyword(create, "execution_profile"):
+            create_kwargs["execution_profile"] = execution_profile
+        if _accepts_keyword(create, "execution_security_profile"):
+            create_kwargs["execution_security_profile"] = execution_security_profile
+        if _accepts_keyword(create, "permission_mode_override"):
+            create_kwargs["permission_mode_override"] = permission_mode_override
+        inputs_enabled = _accepts_keyword(create, "injection_callback")
+        if inputs_enabled:
+            create_kwargs["injection_callback"] = inputs.drain
+        if _accepts_keyword(create, "active_turn_id_provider"):
+            create_kwargs["active_turn_id_provider"] = lambda: inputs.active_turn_id
+        if _accepts_keyword(create, "runtime_input_sink"):
+            create_kwargs["runtime_input_sink"] = inputs.put_transient
+        if _accepts_keyword(create, "subagent_transcript_sink"):
+            # The child-autopsy channel: every sub-agent turn dumps its full
+            # conversation under the parent Session's own directory, where
+            # Goal-ledger companion data already lives. Without it a failed
+            # child leaves nothing to inspect but a one-line error string.
+            create_kwargs["subagent_transcript_sink"] = self._subagent_transcript_sink(
+                canonical.session_id
+            )
+        if _accepts_keyword(create, "context_note_sink"):
+            # Model-visible means logged: the runner reports each mid-turn
+            # message it adds to model history that no service persisted —
+            # sub-agent results, repeat-call reminders — and this sink appends
+            # them to the canonical Session. Without it a resume rebuilds a
+            # history the model never actually saw (steering survives, these
+            # vanish). ``mark_persisted`` keeps the append from reading as a
+            # foreign process's write on the next acquire.
+            create_kwargs["context_note_sink"] = self._context_note_sink(
+                canonical.session_id, inputs
+            )
+        goals_enabled = _accepts_keyword(create, "goal_runtime")
+        if goals_enabled:
+            create_kwargs["goal_runtime"] = goals
+        if self.skill_hosts is not None and _accepts_keyword(create, "skill_runtime"):
+            create_kwargs["skill_runtime"] = self.skill_hosts.new_runtime(workspace)
+        agent = create(**create_kwargs)
+        agent.load_history(self._visible_history(canonical))
+        return LiveSessionRuntime(
+            session_id=canonical.session_id,
+            workspace=workspace,
+            model=model,
+            execution_profile=execution_profile,
+            execution_security_profile=execution_security_profile,
+            permission_mode_override=permission_mode_override,
+            agent=agent,
+            approvals=approvals,
+            canonical_message_count=len(canonical.messages),
+            runtime_key=runtime_key,
+            inputs=inputs,
+            inputs_enabled=inputs_enabled,
+            goals=goals,
+            goals_enabled=goals_enabled,
+        )
+
+    def _mailbox(self, session_id: str) -> TurnInputMailbox:
+        with self._mailbox_lock:
+            mailbox = self._mailboxes.get(session_id)
+            if mailbox is None:
+                mailbox = TurnInputMailbox()
+                self._mailboxes[session_id] = mailbox
+            return mailbox
+
+    def _goal_runtime(self, session_id: str) -> GoalRuntimeRouter:
+        with self._mailbox_lock:
+            runtime = self._goal_runtimes.get(session_id)
+            if runtime is None:
+                runtime = GoalRuntimeRouter()
+                if self._goal_handler is not None:
+                    runtime.configure(self._goal_handler)
+                self._goal_runtimes[session_id] = runtime
+            return runtime
+
+    def _runtime_key(
+        self,
+        *,
+        workspace: str,
+        model: str | None,
+        execution_profile: ExecutionProfile | None,
+        execution_security_profile: ExecutionSecurityProfile | None,
+        permission_mode_override: ExecutionPermissionMode | None,
+    ) -> object:
+        resolver = getattr(self.factory, "runtime_key", None)
+        if callable(resolver):
+            kwargs = {"workspace": workspace, "model": model}
+            if _accepts_keyword(resolver, "execution_profile"):
+                kwargs["execution_profile"] = execution_profile
+            if _accepts_keyword(resolver, "execution_security_profile"):
+                kwargs["execution_security_profile"] = execution_security_profile
+            if _accepts_keyword(resolver, "permission_mode_override"):
+                kwargs["permission_mode_override"] = permission_mode_override
+            factory_key = resolver(**kwargs)
+        else:
+            factory_key = (
+                workspace,
+                model,
+                (
+                    execution_profile.connection_id,
+                    execution_profile.config_revision,
+                    execution_profile.context_window,
+                    execution_profile.max_output_tokens,
+                    execution_profile.max_tokens,
+                    execution_profile.temperature,
+                    execution_profile.reasoning_effort,
+                )
+                if execution_profile
+                else None,
+            )
+        return (
+            factory_key,
+            (
+                permission_mode_override.value
+                if permission_mode_override is not None
+                else None
+            ),
+            (
+                execution_security_profile.to_dict()
+                if execution_security_profile is not None
+                else None
+            ),
+        )
+
+    async def _evict_idle(self) -> None:
+        while len(self._runtimes) > self.max_live_sessions:
+            victim_id = next(
+                (
+                    session_id
+                    for session_id, runtime in self._runtimes.items()
+                    if not runtime.active
+                ),
+                None,
+            )
+            if victim_id is None:
+                return
+            victim = self._runtimes.pop(victim_id)
+            await victim.agent.aclose()
+
+    def _subagent_transcript_sink(self, session_id: str):
+        """A per-child transcript writer rooted in the Session's directory.
+
+        Transcripts are companion data, not canonical history: they live
+        beside the Session JSONL (like the Goal ledger) under ``subagents/``,
+        one file per child, replaced whole on every turn so the file is
+        always a complete, self-describing snapshot. ``session_guard`` gives
+        the same cross-process lock every other companion mutation takes.
+        """
+
+        def write(
+            agent_id: str,
+            task: str,
+            status: str,
+            messages: list[dict[str, Any]],
+        ) -> None:
+            safe_id = re.sub(r"[^A-Za-z0-9_-]+", "-", agent_id) or "subagent"
+            with self.store.session_guard(session_id) as directory:
+                if directory is None:
+                    return
+                transcripts = ensure_private_directory(directory / "subagents")
+                path = transcripts / f"{safe_id}.jsonl"
+                header = {
+                    "_type": "subagent_transcript",
+                    "agentId": agent_id,
+                    "task": task,
+                    "status": status,
+                    "updatedAt": datetime.now(UTC).isoformat(),
+                }
+                temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+                descriptor = open_private_file(
+                    temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                )
+                try:
+                    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                        for row in (header, *messages):
+                            json.dump(row, handle, ensure_ascii=False, default=str)
+                            handle.write("\n")
+                    os.replace(temporary, path)
+                except BaseException:
+                    temporary.unlink(missing_ok=True)
+                    raise
+
+        return write
+
+    def _context_note_sink(self, session_id: str, inputs: TurnInputMailbox):
+        """The runner's mid-turn persistence callback for one live Session."""
+
+        def note(content: str, source: str, *, already_in_history: bool = True) -> None:
+            text = str(content or "").strip()
+            if not text:
+                return
+            stored = self.store.append_message(
+                session_id,
+                "user",
+                text,
+                metadata={
+                    "schemaVersion": 3,
+                    "delivery": ("mid_turn" if already_in_history else "between_turns"),
+                    "source": source,
+                    **(
+                        {"turnId": inputs.active_turn_id}
+                        if inputs.active_turn_id
+                        else {}
+                    ),
+                },
+            )
+            if stored is None:
+                return
+            # ``already_in_history`` decides whether the live runtime's model
+            # history already contains this text. Mid-turn notes do (the
+            # runner appended them before reporting), so the count is synced
+            # to keep the resident history authoritative. A note written
+            # AFTER its Turn closed — a sub-agent result that lost the
+            # delivery race — is only in the canonical log, so the count is
+            # deliberately left stale: the next acquire sees the mismatch and
+            # reloads visible history, which is exactly what carries the
+            # message into the model's next Turn.
+            if already_in_history:
+                self.mark_persisted(session_id)
+
+        return note
+
+    @staticmethod
+    def _visible_history(session: Session) -> list[dict[str, Any]]:
+        return [
+            session_message_history_entry(message)
+            for message in session.messages
+            if message.role in {"user", "assistant"} and message.content
+        ]
+
+
+def _accepts_keyword(callable_object, name: str) -> bool:
+    parameters = inspect.signature(callable_object).parameters.values()
+    return any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD or parameter.name == name
+        for parameter in parameters
+    )
+
+
+__all__ = [
+    "ApprovalRouter",
+    "LiveSessionRuntime",
+    "SessionRuntimeRegistry",
+]

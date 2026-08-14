@@ -1,0 +1,24 @@
+# Core Dependencies
+aiofiles>=0.8.0
+aiohttp>=3.14.3
+anthropic>=0.40.0
+asyncio-mqtt
+
+google-genai
+httpx>=0.27.0
+json-repair>=0.30.0
+loguru>=0.7.0
+
+# DeepCode-native LLM + MCP runtime (replaces legacy mcp-agent)
+mcp>=1.29,<2
+mcp-server-git
+nest_asyncio
+openai>=1.55.0
+openapi
+pathlib2
+prompt_toolkit>=3.0.0
+pydantic-settings>=2.14.2
+pypdf>=6.15.0
+PyYAML>=6.0
+reportlab>=3.5.0
+rich>=13.0.0

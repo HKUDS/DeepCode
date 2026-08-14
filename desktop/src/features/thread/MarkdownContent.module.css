@@ -1,0 +1,224 @@
+.markdown {
+  min-width: 0;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  overflow-wrap: anywhere;
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown blockquote,
+.markdown table,
+.markdown hr {
+  margin: 0 0 12px;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  margin: 24px 0 9px;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-weight: var(--weight-display);
+  line-height: 1.28;
+  letter-spacing: var(--tracking-tight);
+}
+
+.markdown h1 {
+  font-size: 1.36em;
+}
+
+.markdown h2 {
+  font-size: 1.2em;
+}
+
+.markdown h3 {
+  font-size: 1.1em;
+}
+
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  font-size: 1em;
+}
+
+.markdown ul,
+.markdown ol {
+  padding-left: 23px;
+}
+
+.markdown li {
+  margin: 3px 0;
+  padding-left: 3px;
+}
+
+.markdown li > p {
+  margin-bottom: 4px;
+}
+
+.markdown li > ul,
+.markdown li > ol {
+  margin-top: 4px;
+  margin-bottom: 5px;
+}
+
+.markdown blockquote {
+  padding: 9px 14px;
+  border-left: 3px solid var(--signal);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--signal-faint);
+  color: var(--text-secondary);
+}
+
+.markdown a {
+  color: var(--signal);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--signal) 35%, transparent);
+  text-underline-offset: 3px;
+}
+
+.markdown a:hover {
+  text-decoration-color: currentColor;
+}
+
+.markdown :not(pre) > code {
+  padding: 2px 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  background: var(--surface-code);
+  color: var(--text-primary);
+  font: 0.87em/1.4 var(--font-mono);
+}
+
+.markdown table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-spacing: 0;
+  border-collapse: separate;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  font-size: 0.9em;
+}
+
+.markdown th,
+.markdown td {
+  min-width: 110px;
+  padding: 9px 12px;
+  border-right: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: left;
+}
+
+.markdown th {
+  background: var(--surface-code);
+  font-weight: var(--weight-bold);
+}
+
+.markdown tr:last-child td {
+  border-bottom: 0;
+}
+
+.markdown th:last-child,
+.markdown td:last-child {
+  border-right: 0;
+}
+
+.markdown hr {
+  height: 1px;
+  border: 0;
+  background: var(--border-subtle);
+}
+
+.markdown input[type="checkbox"] {
+  margin: 0 6px 0 0;
+  accent-color: var(--signal);
+}
+
+.codeBlock {
+  margin: 14px 0;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-code);
+  box-shadow: var(--shadow-soft);
+}
+
+.codeBlock figcaption {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px 0 13px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
+  font: var(--text-2xs) var(--font-mono);
+  text-transform: lowercase;
+}
+
+.codeBlock figcaption button {
+  display: inline-flex;
+  min-height: 27px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  border-radius: var(--radius-xs);
+  color: var(--text-tertiary);
+  font: var(--text-2xs) var(--font-mono);
+}
+
+.codeBlock figcaption button:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.codeBlock pre {
+  max-height: 520px;
+  margin: 0;
+  padding: 16px 18px;
+  overflow: auto;
+  background: transparent !important;
+  color: var(--text-primary);
+  font: var(--text-sm)/1.7 var(--font-mono);
+  tab-size: 2;
+}
+
+.codeBlock pre > span {
+  display: block;
+  min-width: max-content;
+}
+
+.markdown[data-compact="true"] {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.64;
+}
+
+.markdown[data-compact="true"] p,
+.markdown[data-compact="true"] ul,
+.markdown[data-compact="true"] ol,
+.markdown[data-compact="true"] blockquote {
+  margin-bottom: 8px;
+}
+
+.markdown[data-compact="true"] h1,
+.markdown[data-compact="true"] h2,
+.markdown[data-compact="true"] h3,
+.markdown[data-compact="true"] h4,
+.markdown[data-compact="true"] h5,
+.markdown[data-compact="true"] h6 {
+  margin-top: 14px;
+}

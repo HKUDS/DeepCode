@@ -1,0 +1,638 @@
+:root {
+  color: #202321;
+  background: #e4e9e5;
+  color-scheme: light dark;
+
+  /* Appearance preferences (src/app/appearance.ts) override the three
+     variables below on the root element. They are declared here so the app
+     works untouched when nothing has been customised, and so the defaults
+     stay in the stylesheet rather than being duplicated in TypeScript. */
+
+  /* Empty by default; the preference prepends families to the stack. */
+  --font-ui-preferred: ;
+  --font-size-base: 14px;
+  /* Width of the conversation column, its composer, and the goal rail —
+     one value so the three cannot drift apart. */
+  --conversation-width: min(820px, 100%);
+
+  font-family:
+    var(--font-ui-preferred) -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "Segoe UI Variable", "Segoe UI", Inter, sans-serif;
+  font-size: var(--font-size-base);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+
+  --font-display:
+    ui-rounded, "SF Pro Rounded", "Avenir Next", "Segoe UI Variable Display",
+    -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono:
+    "SFMono-Regular", ui-monospace, "Cascadia Code", Consolas, monospace;
+
+  /* Type scale.
+     Every step is `rem`, so it resolves against the root font-size — which is
+     `--font-size-base`, the Settings ▸ Appearance slider. Stylesheets that
+     hardcode px opt out of that slider silently, which is how the setting came
+     to move almost nothing; the steps below are the only sizes the UI uses.
+     The px comments are the rendered size at the 14px default. */
+  --text-micro: 0.715rem; /* 10px — uppercase mono eyebrows and badges */
+  --text-2xs: 0.786rem; /* 11px — dense metadata */
+  --text-xs: 0.857rem; /* 12px — secondary UI text */
+  --text-sm: 0.929rem; /* 13px — standard controls */
+  --text-base: 1rem; /* 14px — body and conversation */
+  --text-lg: 1.143rem; /* 16px — section titles */
+  --text-xl: 1.429rem; /* 20px — page titles */
+  --text-2xl: 2rem; /* 28px */
+  --text-3xl: 2.286rem; /* 32px — hero */
+
+  /* Weight scale. The stack is variable on macOS and Windows, so the steps sit
+     off the usual 100s where that reads better optically. */
+  --weight-regular: 400;
+  --weight-medium: 520;
+  --weight-semibold: 590;
+  --weight-bold: 650;
+  --weight-display: 680;
+
+  --tracking-display: -0.03em;
+  --tracking-tight: -0.015em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.04em;
+  --tracking-caps: 0.08em;
+
+  /* Icons are sized at the call site, since lucide takes a `size` prop rather
+     than reading CSS. The steps are 12 / 14 / 16 / 18 px — no custom property,
+     because nothing here could consume one. */
+
+  --surface-shell: #e4e9e5;
+  --surface-canvas: #f7f8f7;
+  --surface-sidebar: #eef1ef;
+  --surface-sidebar-strong: #e7ebe8;
+  --surface-raised: #ffffff;
+  --surface-overlay: rgb(255 255 255 / 88%);
+  --surface-hover: #e5e9e6;
+  --surface-selected: #dde3e0;
+  --surface-user: #edf0ef;
+  --surface-code: #f0f2f1;
+  --surface-inset: #e8ece9;
+
+  /* The text ramp and the accents are darker than they look like they should
+     be, because they carry 10–12px text on the shell and sidebar rather than on
+     white. Measured against the dimmest surface each actually lands on, the
+     values they replaced ran 2.8–4.4:1 — under WCAG AA, which is what made the
+     light theme read as washed out.
+
+     Spread, not merely darkened: pushing tertiary alone to 4.5:1 lands it on
+     top of secondary and collapses three levels into two, so the whole ramp is
+     restated at roughly 12.9 / 7.2 / 4.6 against the shell. */
+  --text-primary: #202321;
+  --text-secondary: #474b48;
+  --text-tertiary: #626964;
+  --text-inverse: #f8faf9;
+  --text-on-accent: #ffffff;
+
+  --border-subtle: #dfe4e1;
+  --border-strong: #cfd6d2;
+  --border-emphasis: #aab4ae;
+
+  --signal: #4d5bd5;
+  --signal-strong: #4150bd;
+  --signal-soft: rgb(77 91 213 / 13%);
+  --signal-faint: rgb(77 91 213 / 7%);
+  --success: #3a725e;
+  --success-soft: #e7f1ed;
+  --attention: #935b2f;
+  --attention-soft: #f8eee6;
+  --danger: #ab4850;
+  --danger-soft: #f8e9eb;
+
+  /* The terminal keeps its own dark palette in both themes, the way an embedded
+     terminal does everywhere else. It is stated here rather than inside the
+     component because xterm takes its colours as JS config, not CSS — the
+     values below and `theme:` in TerminalPanel.tsx have to agree or a seam
+     shows between the panel and the terminal inside it, which is what happened
+     when one drifted green (#171b19) and the other blue (#171a20). These are
+     the app's own dark surfaces, so the terminal reads as part of DeepCode. */
+  --surface-terminal: #151816;
+  --surface-terminal-raised: #1f2421;
+  --border-terminal: #333b36;
+  --text-terminal: #e6eae7;
+  --text-terminal-dim: #9aa39c;
+
+  --radius-2xs: 4px;
+  --radius-xs: 7px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --radius-pill: 999px;
+
+  --shadow-soft: 0 1px 2px rgb(27 34 30 / 4%);
+  --shadow-float:
+    0 18px 48px rgb(27 34 30 / 10%), 0 3px 10px rgb(27 34 30 / 5%);
+  --shadow-menu:
+    0 18px 42px rgb(27 34 30 / 14%), 0 3px 10px rgb(27 34 30 / 7%);
+}
+
+/* System preference. The :not() lets an explicit light choice win here,
+   and the rule below lets an explicit dark choice win on a light OS. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    color: #f1f4f2;
+    background: #101211;
+
+    --surface-shell: #101211;
+    --surface-canvas: #181b19;
+    --surface-sidebar: #151816;
+    --surface-sidebar-strong: #1b1f1c;
+    --surface-raised: #222624;
+    --surface-overlay: rgb(29 33 30 / 88%);
+    --surface-hover: #292e2b;
+    --surface-selected: #303632;
+    --surface-user: #282d2a;
+    --surface-code: #151816;
+    --surface-inset: #121513;
+
+    --text-primary: #f1f4f2;
+    --text-secondary: #b3bab5;
+    --text-tertiary: #919892;
+    --text-inverse: #151816;
+    --text-on-accent: #ffffff;
+
+    --border-subtle: #2b302d;
+    --border-strong: #3a413d;
+    --border-emphasis: #59625d;
+
+    --signal: #929cff;
+    --signal-strong: #aab2ff;
+    --signal-soft: rgb(146 156 255 / 16%);
+    --signal-faint: rgb(146 156 255 / 8%);
+    --success: #6abb9c;
+    --success-soft: rgb(63 125 103 / 17%);
+    --attention: #d79058;
+    --attention-soft: rgb(178 100 43 / 14%);
+    --danger: #e4777e;
+    --danger-soft: rgb(179 64 73 / 14%);
+
+    --shadow-soft: 0 1px 2px rgb(0 0 0 / 16%);
+    --shadow-float:
+      0 20px 52px rgb(0 0 0 / 32%), 0 3px 10px rgb(0 0 0 / 22%);
+    --shadow-menu:
+      0 20px 46px rgb(0 0 0 / 42%), 0 3px 10px rgb(0 0 0 / 26%);
+  }
+}
+
+/* An explicit choice has to move `color-scheme` too, not just the palette.
+   The parts of a native control CSS cannot reach — the unfilled half of a
+   range track, scrollbars, the select popup — follow this property, not the
+   variables above. Left at the root's `light dark`, they keep rendering in the
+   OS scheme: picking Dark on a light Mac left a near-white slider track lying
+   across the dark panel. */
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+/* Explicit dark, whatever the OS says. CSS cannot share one declaration
+   block across a media query and a selector, so this palette is stated
+   twice — tokens.test.ts fails if the two ever disagree. */
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    color: #f1f4f2;
+    background: #101211;
+
+    --surface-shell: #101211;
+    --surface-canvas: #181b19;
+    --surface-sidebar: #151816;
+    --surface-sidebar-strong: #1b1f1c;
+    --surface-raised: #222624;
+    --surface-overlay: rgb(29 33 30 / 88%);
+    --surface-hover: #292e2b;
+    --surface-selected: #303632;
+    --surface-user: #282d2a;
+    --surface-code: #151816;
+    --surface-inset: #121513;
+
+    --text-primary: #f1f4f2;
+    --text-secondary: #b3bab5;
+    --text-tertiary: #919892;
+    --text-inverse: #151816;
+    --text-on-accent: #ffffff;
+
+    --border-subtle: #2b302d;
+    --border-strong: #3a413d;
+    --border-emphasis: #59625d;
+
+    --signal: #929cff;
+    --signal-strong: #aab2ff;
+    --signal-soft: rgb(146 156 255 / 16%);
+    --signal-faint: rgb(146 156 255 / 8%);
+    --success: #6abb9c;
+    --success-soft: rgb(63 125 103 / 17%);
+    --attention: #d79058;
+    --attention-soft: rgb(178 100 43 / 14%);
+    --danger: #e4777e;
+    --danger-soft: rgb(179 64 73 / 14%);
+
+    --shadow-soft: 0 1px 2px rgb(0 0 0 / 16%);
+    --shadow-float:
+      0 20px 52px rgb(0 0 0 / 32%), 0 3px 10px rgb(0 0 0 / 22%);
+    --shadow-menu:
+      0 20px 46px rgb(0 0 0 / 42%), 0 3px 10px rgb(0 0 0 / 26%);
+}
+
+/* Two further palettes, offered alongside light and dark.
+
+   Adding one is a palette and a list entry — `applyAppearance` already writes
+   whatever the preference says into `data-theme`, and nothing outside the
+   Appearance picker reads the value. Each restates every token the base
+   `:root` declares, so a theme can never half-apply and leave a stray default
+   showing through; tokens.test.ts fails if one drifts out of step.
+
+   Both were fitted to the same contrast targets as the base themes: the text
+   ramp lands near 12 / 7.2 / 4.6 and every accent clears 4.5:1 against the
+   dimmest surface it can sit on. */
+
+/* Paper — warm, low-blue, for long reading sessions. */
+:root[data-theme="paper"] {
+  color-scheme: light;
+  color: #2a2620;
+  background: #e8e2d6;
+
+  --surface-shell: #e8e2d6;
+  --surface-canvas: #f5f1e8;
+  --surface-sidebar: #efe9dd;
+  --surface-sidebar-strong: #e6e0d2;
+  --surface-raised: #fdfbf6;
+  --surface-overlay: rgb(253 251 246 / 88%);
+  --surface-hover: #e6e0d3;
+  --surface-selected: #ded7c8;
+  --surface-user: #f0ece1;
+  --surface-code: #f1ece1;
+  --surface-inset: #eae4d8;
+
+  --text-primary: #2a2620;
+  --text-secondary: #4b463f;
+  --text-tertiary: #6a6359;
+  --text-inverse: #faf7f0;
+  --text-on-accent: #ffffff;
+
+  --border-subtle: #ded7c8;
+  --border-strong: #cdc5b3;
+  --border-emphasis: #a9a08c;
+
+  --signal: #545ea5;
+  --signal-strong: #464f8d;
+  --signal-soft: rgb(84 94 165 / 15%);
+  --signal-faint: rgb(84 94 165 / 8%);
+  --success: #466c53;
+  --success-soft: #e4ece4;
+  --attention: #855b28;
+  --attention-soft: #f3e9d8;
+  --danger: #9d4b4b;
+  --danger-soft: #f3e3e0;
+
+  --shadow-soft: 0 1px 2px rgb(61 50 32 / 6%);
+  --shadow-float:
+    0 18px 48px rgb(61 50 32 / 13%), 0 3px 10px rgb(61 50 32 / 7%);
+  --shadow-menu:
+    0 18px 42px rgb(61 50 32 / 18%), 0 3px 10px rgb(61 50 32 / 9%);
+}
+
+/* Midnight — cooler and deeper than the default dark. */
+:root[data-theme="midnight"] {
+  color-scheme: dark;
+  color: #e8edf5;
+  background: #0a0d12;
+
+  --surface-shell: #0a0d12;
+  --surface-canvas: #101520;
+  --surface-sidebar: #0d1119;
+  --surface-sidebar-strong: #131926;
+  --surface-raised: #161c28;
+  --surface-overlay: rgb(16 21 32 / 90%);
+  --surface-hover: #1c2432;
+  --surface-selected: #232c3d;
+  --surface-user: #1a2130;
+  --surface-code: #0d1119;
+  --surface-inset: #0b0f16;
+
+  --text-primary: #e8edf5;
+  --text-secondary: #a8b2c4;
+  --text-tertiary: #858f9f;
+  --text-inverse: #0d1119;
+  --text-on-accent: #ffffff;
+
+  --border-subtle: #1e2734;
+  --border-strong: #2c3646;
+  --border-emphasis: #48566b;
+
+  --signal: #7c9cff;
+  --signal-strong: #9db3ff;
+  --signal-soft: rgb(124 156 255 / 17%);
+  --signal-faint: rgb(124 156 255 / 9%);
+  --success: #5fbf9a;
+  --success-soft: rgb(95 191 154 / 16%);
+  --attention: #d99a5c;
+  --attention-soft: rgb(217 154 92 / 15%);
+  --danger: #e8808a;
+  --danger-soft: rgb(232 128 138 / 15%);
+
+  --shadow-soft: 0 1px 2px rgb(0 0 0 / 22%);
+  --shadow-float:
+    0 20px 52px rgb(0 0 0 / 40%), 0 3px 10px rgb(0 0 0 / 28%);
+  --shadow-menu:
+    0 20px 46px rgb(0 0 0 / 50%), 0 3px 10px rgb(0 0 0 / 32%);
+}
+
+/* Claude — ivory ground, terracotta accent.
+
+   The signature coral (#d97757) measures 2.7:1 on ivory: fine as a large
+   fill, unreadable as the 11px link and active-state colour `--signal`
+   actually is here. So `--signal` is the same hue darkened until it clears
+   4.5:1 — 14.9° against the original 14.8°, so it still reads as the same
+   colour — while `--signal-soft` and `--signal-faint`, which only ever tint a
+   background, keep the bright coral. */
+:root[data-theme="claude"] {
+  color-scheme: light;
+  color: #141413;
+  background: #ebe8dd;
+
+  --surface-shell: #ebe8dd;
+  --surface-canvas: #f5f4ef;
+  --surface-sidebar: #f0eee6;
+  --surface-sidebar-strong: #e7e4d8;
+  --surface-raised: #ffffff;
+  --surface-overlay: rgb(255 255 255 / 90%);
+  --surface-hover: #e9e6da;
+  --surface-selected: #e0dccd;
+  --surface-user: #f2f0e8;
+  --surface-code: #f2f0e8;
+  --surface-inset: #edeae0;
+
+  --text-primary: #141413;
+  --text-secondary: #4d4a43;
+  --text-tertiary: #6b675d;
+  --text-inverse: #faf9f5;
+  --text-on-accent: #ffffff;
+
+  --border-subtle: #e0dccd;
+  --border-strong: #cfcab7;
+  --border-emphasis: #a9a494;
+
+  --signal: #ac4827;
+  --signal-strong: #8f3a1e;
+  --signal-soft: rgb(217 119 87 / 17%);
+  --signal-faint: rgb(217 119 87 / 9%);
+  --success: #487053;
+  --success-soft: #e5ece5;
+  --attention: #806329;
+  --attention-soft: #f3ecd9;
+  --danger: #a34a42;
+  --danger-soft: #f4e4e1;
+
+  --shadow-soft: 0 1px 2px rgb(60 45 32 / 6%);
+  --shadow-float:
+    0 18px 48px rgb(60 45 32 / 13%), 0 3px 10px rgb(60 45 32 / 7%);
+  --shadow-menu:
+    0 18px 42px rgb(60 45 32 / 18%), 0 3px 10px rgb(60 45 32 / 9%);
+}
+
+/* Claude Dark — slate ground, the same terracotta lifted for a dark field. */
+:root[data-theme="claude-dark"] {
+  color-scheme: dark;
+  color: #f5f4ef;
+  background: #1f1e1d;
+
+  --surface-shell: #1f1e1d;
+  --surface-canvas: #262624;
+  --surface-sidebar: #232221;
+  --surface-sidebar-strong: #2b2a28;
+  --surface-raised: #30302e;
+  --surface-overlay: rgb(38 38 36 / 90%);
+  --surface-hover: #3a3937;
+  --surface-selected: #444341;
+  --surface-user: #34332f;
+  --surface-code: #232221;
+  --surface-inset: #1c1b1a;
+
+  --text-primary: #f5f4ef;
+  --text-secondary: #c8c5bc;
+  --text-tertiary: #a6a29a;
+  --text-inverse: #1f1e1d;
+  /* The accent is light here, so what sits on it has to be dark. */
+  --text-on-accent: #241009;
+
+  --border-subtle: #383734;
+  --border-strong: #4a4844;
+  --border-emphasis: #6b6862;
+
+  --signal: #e49e87;
+  --signal-strong: #f0b9a6;
+  --signal-soft: rgb(217 119 87 / 22%);
+  --signal-faint: rgb(217 119 87 / 11%);
+  --success: #74be96;
+  --success-soft: rgb(116 190 150 / 16%);
+  --attention: #d9a85c;
+  --attention-soft: rgb(217 168 92 / 15%);
+  --danger: #e3948b;
+  --danger-soft: rgb(227 148 139 / 15%);
+
+  --shadow-soft: 0 1px 2px rgb(0 0 0 / 22%);
+  --shadow-float:
+    0 20px 52px rgb(0 0 0 / 38%), 0 3px 10px rgb(0 0 0 / 26%);
+  --shadow-menu:
+    0 20px 46px rgb(0 0 0 / 48%), 0 3px 10px rgb(0 0 0 / 30%);
+}
+
+/* High contrast — every foreground clears 7:1 (WCAG AAA) on its surface.
+
+   Borders carry the structure the other themes get from tinted fills, so they
+   are deliberately dark rather than subtle, and the soft shadows are dropped:
+   at this contrast a blur reads as a smudge, not as depth. */
+:root[data-theme="contrast"] {
+  color-scheme: light;
+  color: #000000;
+  background: #ffffff;
+
+  --surface-shell: #ffffff;
+  --surface-canvas: #ffffff;
+  --surface-sidebar: #ffffff;
+  --surface-sidebar-strong: #f2f2f2;
+  --surface-raised: #ffffff;
+  --surface-overlay: rgb(255 255 255 / 96%);
+  --surface-hover: #ebebeb;
+  --surface-selected: #dcdcdc;
+  --surface-user: #f2f2f2;
+  --surface-code: #f2f2f2;
+  --surface-inset: #ebebeb;
+
+  --text-primary: #000000;
+  --text-secondary: #1a1a1a;
+  --text-tertiary: #3a3a3a;
+  --text-inverse: #ffffff;
+  --text-on-accent: #ffffff;
+
+  --border-subtle: #767676;
+  --border-strong: #4a4a4a;
+  --border-emphasis: #000000;
+
+  --signal: #0033cc;
+  --signal-strong: #002499;
+  --signal-soft: rgb(0 51 204 / 18%);
+  --signal-faint: rgb(0 51 204 / 9%);
+  --success: #005c33;
+  --success-soft: #d6ebe0;
+  --attention: #7a4000;
+  --attention-soft: #f2e4d2;
+  --danger: #a30012;
+  --danger-soft: #f7dcdf;
+
+  --shadow-soft: 0 0 0 1px #4a4a4a;
+  --shadow-float: 0 0 0 2px #000000;
+  --shadow-menu: 0 0 0 2px #000000;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 320px;
+  height: 100%;
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  background: var(--surface-shell);
+  color: var(--text-primary);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+/* Recolours the parts of a native control the page cannot reach — the filled
+   half of a range track, checkboxes, radios. Without it those render in the OS
+   accent (bright blue on macOS), which is the one colour in the app that
+   belongs to no theme. */
+:root {
+  accent-color: var(--signal);
+}
+
+/* Selects are the only control the app left entirely native, so they arrived
+   as macOS chrome in the middle of a custom surface — and there are nine of
+   them across Settings, MCP and Skills. Styling the element once here beats
+   nine module-local copies. */
+select {
+  /* No min-height here: the borderless inline selects in the composer and the
+     transcript picker set padding and border to zero but not height, so a
+     global floor would silently stretch them. Boxed selects state their own. */
+  padding: 0 30px 0 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  appearance: none;
+  background-color: var(--surface-raised);
+  /* A data: URI cannot read a custom property, so the chevron is one neutral
+     grey chosen to sit between the light and dark tertiary text values.
+     Percent-encoded rather than inlined raw: WebKit rejects the unescaped
+     angle brackets that Chromium accepts, and drops the image silently. */
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2012%2012'%20fill='none'%20stroke='%237d847f'%20stroke-width='1.6'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M2.5%204.75%206%208.25l3.5-3.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: var(--text-xs);
+}
+
+select:hover:not(:disabled) {
+  border-color: var(--border-emphasis);
+  background-color: var(--surface-hover);
+}
+
+select:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
+/* Deliberately left otherwise native: overriding the track would also discard
+   the filled half, which is the only thing showing where the value sits, and
+   nothing in CSS alone brings it back. accent-color above fixes the colour,
+   which was the actual defect. */
+input[type="range"] {
+  width: 100%;
+  cursor: pointer;
+}
+
+button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
+/* The default focus ring, for controls that have no focus treatment of their
+   own. `:where()` drops the element list to zero specificity, so any component
+   rule outranks it — which is the point.
+   Without that, this tied with `.composer textarea { outline: 0 }` at (0,1,1)
+   and won on source order alone, because main.tsx loads this file after the
+   modules. The composer then drew two rings at once: its own rounded
+   focus-within glow, plus a square outline around the textarea inside it.
+   Every component that zeroes `outline` supplies its own affordance, so
+   letting them win costs no accessibility. */
+:where(button, input, textarea, select, summary):focus-visible {
+  outline: 3px solid var(--signal-soft);
+  outline-offset: 1px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--signal) 28%, transparent);
+}
+
+* {
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 99px;
+  background: var(--border-strong);
+  background-clip: padding-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

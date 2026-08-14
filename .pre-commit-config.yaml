@@ -1,0 +1,30 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: requirements-txt-fixer
+
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.21
+    hooks:
+      - id: ruff
+        args: [--fix, --ignore=E402]
+      - id: ruff-format
+        # Keep byte-stable legacy client/kernel files outside the Desktop
+        # rebuild. New and actively modified architecture code is formatted.
+        exclude: >-
+          ^(cli/mcp_server\.py|tools/code_indexer\.py|workflows/agents/code_implementation_agent\.py|workflows/agents/memory_agent_concise\.py)$
+
+  - repo: https://github.com/mgedmin/check-manifest
+    rev: "0.49"
+    hooks:
+      - id: check-manifest
+        stages: [manual]
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint

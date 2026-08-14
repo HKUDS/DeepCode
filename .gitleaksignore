@@ -1,0 +1,22 @@
+# Historical mcp_agent.secrets.yaml findings. The file has long been removed
+# and current secret files are ignored. The exposed credentials must be
+# rotated/revoked before release; these fingerprints prevent acknowledged
+# history from masking new leaks in CI.
+b2dccbe6d37e74e98b8a57593c1a5bb4994fba59:mcp_agent.secrets.yaml:generic-api-key:9
+420d07580e83885cdf784115131aea884e704a8f:mcp_agent.secrets.yaml:generic-api-key:2
+225e344437173185f22f30cbac58fc82f9fbe3ed:mcp_agent.secrets.yaml:generic-api-key:2
+
+# Test fixture, not a credential: the literal "sk-secret123456" inside a
+# RuntimeError message, used to assert that error text is redacted before it
+# reaches the UI. It arrived with the #131 merge, which recorded the branch in
+# history without applying its tree — so the file does not exist on main and
+# the finding cannot be fixed by editing it.
+6421db9a2fb04589200f8883f950a329b7ced1cd:tests/ui_session_resume_test.py:generic-api-key:87
+
+# Test fixture, not a credential: the config-layer redaction test assigns a
+# placeholder to "apiKey", which the generic rule flags regardless of value
+# shape (the key name is the trigger). The working tree now carries an inline
+# gitleaks:allow; these fingerprints acknowledge the immutable historical
+# commits (the original fixture and its first, value-only fix attempt).
+86294aa61c2fc68dbbd51dbb8a594700fb38e3dc:tests/test_config_layers.py:generic-api-key:80
+46f1b7111706e58cd2b457c9483fda8fcbbb07eb:tests/test_config_layers.py:generic-api-key:82

@@ -1,0 +1,141 @@
+# Code Indexer Configuration File
+# Configure various aspects of the code indexing process
+
+# Paths Configuration
+paths:
+  code_base_path: "D:/Documents/GitHub/Code-Agent/examples/input/paper1/code_base"
+  output_dir: "D:/Documents/GitHub/Code-Agent/examples/input/paper1/indexes"
+
+# File Analysis Settings
+file_analysis:
+  # Supported file extensions for analysis
+  supported_extensions:
+    - ".py"      # Python
+    - ".js"      # JavaScript
+    - ".ts"      # TypeScript
+    - ".java"    # Java
+    - ".cpp"     # C++
+    - ".c"       # C
+    - ".h"       # C Header
+    - ".hpp"     # C++ Header
+    - ".cs"      # C#
+    - ".php"     # PHP
+    - ".rb"      # Ruby
+    - ".go"      # Go
+    - ".rs"      # Rust
+    - ".scala"   # Scala
+    - ".kt"      # Kotlin
+    - ".swift"   # Swift
+    - ".r"       # R
+    - ".sql"     # SQL
+    - ".sh"      # Shell Script
+    - ".bat"     # Batch File
+    - ".ps1"     # PowerShell
+    - ".yaml"    # YAML
+    - ".yml"     # YAML
+    - ".json"    # JSON
+    - ".xml"     # XML
+    - ".toml"    # TOML
+
+  # Directories to skip during traversal
+  skip_directories:
+    - "__pycache__"
+    - "node_modules"
+    - "target"
+    - "build"
+    - "dist"
+    - "venv"
+    - "env"
+    - ".git"
+    - ".svn"
+    - ".hg"
+    - "coverage"
+    - ".pytest_cache"
+    - ".mypy_cache"
+
+  # Maximum file size to analyze (in bytes)
+  max_file_size: 1048576  # 1MB
+
+  # Maximum content length to send to LLM (in characters)
+  max_content_length: 3000
+
+# LLM Configuration
+llm:
+  # Model selection: "anthropic" or "openai"
+  model_provider: "openai"
+
+  # Request parameters
+  max_tokens: 4000
+  temperature: 0.3
+
+  # System prompt for analysis
+  system_prompt: "You are a code analysis expert. Provide precise, structured analysis of code relationships and similarities."
+
+  # Rate limiting (seconds between requests)
+  request_delay: 0.1
+
+  # Retry configuration
+  max_retries: 3
+  retry_delay: 1.0
+
+# Relationship Analysis Settings
+relationships:
+  # Minimum confidence score to include a relationship
+  min_confidence_score: 0.3
+
+  # High confidence threshold for reporting
+  high_confidence_threshold: 0.7
+
+  # Relationship types and their priorities
+  relationship_types:
+    direct_match: 1.0      # Direct implementation match
+    partial_match: 0.8     # Partial functionality match
+    reference: 0.6         # Reference or utility function
+    utility: 0.4           # General utility or helper
+
+# Output Configuration
+output:
+  # JSON formatting options
+  json_indent: 2
+  ensure_ascii: false
+
+  # Generate additional report files
+  generate_summary: true
+  generate_statistics: true
+
+  # Include metadata in output
+  include_metadata: true
+
+  # File naming pattern (use {repo_name} placeholder)
+  index_filename_pattern: "{repo_name}_index.json"
+  summary_filename: "indexing_summary.json"
+  stats_filename: "indexing_statistics.json"
+
+# Logging Configuration
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  log_to_file: true
+  log_file: "indexer.log"
+  log_format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# Performance Settings
+performance:
+  # Enable concurrent processing of files within a repository
+  enable_concurrent_analysis: true
+  max_concurrent_files: 5
+
+  # Memory optimization
+  enable_content_caching: false
+  max_cache_size: 100
+
+# Debug and Development Settings
+debug:
+  # Save raw LLM responses for debugging
+  save_raw_responses: false
+  raw_responses_dir: "debug_responses"
+
+  # Verbose output during processing
+  verbose_output: false
+
+  # Skip LLM calls for testing (uses mock responses)
+  mock_llm_responses: false
