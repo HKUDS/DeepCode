@@ -174,6 +174,13 @@ Skills, permissions, Goals, and Automations. See the
   model sees — goal updates, recovery prompts, injected results — now lands
   in the canonical session log, so a resumed session rebuilds exactly the
   history the model saw.
+- **Open a session as a different agent.** Named agent presets bundle a
+  persona and a tool face — `deepcode exec --preset code-reader` or `/preset`
+  in the TUI — while the model route and permissions stay independent knobs.
+  A preset is one markdown agent file in the `.claude/agents`/`.agents`
+  dialect, so definitions written for other harnesses load unchanged; the
+  resolved composition is snapshotted into the session record and locked
+  once the conversation starts.
 
 **2026-08-13 · Desktop typography, themes, and native controls**
 
