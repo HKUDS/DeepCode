@@ -15,6 +15,8 @@ from typing import Any
 
 from core.private_storage import ensure_private_directory, open_private_file
 
+from core.agent_presets import METADATA_KEY as PRESET_METADATA_KEY
+from core.agent_presets import AgentPresetSnapshot
 from core.agent_runtime.goal_runtime import (
     GoalRuntimeContext,
     GoalRuntimeHandler,
@@ -125,12 +127,18 @@ class SessionRuntimeRegistry:
         if canonical is None:
             raise ThreadNotFoundError(f"session not found: {session_id}")
 
+        # The canonical Session carries its own resolved composition (the
+        # by-value preset snapshot) — no caller has to thread it through.
+        agent_preset = AgentPresetSnapshot.from_metadata(
+            canonical.metadata.get(PRESET_METADATA_KEY)
+        )
         runtime_key = self._runtime_key(
             workspace=workspace,
             model=model,
             execution_profile=execution_profile,
             execution_security_profile=execution_security_profile,
             permission_mode_override=permission_mode_override,
+            agent_preset=agent_preset,
         )
         runtime = self._runtimes.pop(session_id, None)
         if runtime is not None and runtime.active:
@@ -147,6 +155,7 @@ class SessionRuntimeRegistry:
                 execution_profile=execution_profile,
                 execution_security_profile=execution_security_profile,
                 permission_mode_override=permission_mode_override,
+                agent_preset=agent_preset,
                 runtime_key=runtime_key,
             )
         elif runtime.canonical_message_count != len(canonical.messages):
@@ -333,6 +342,7 @@ class SessionRuntimeRegistry:
         execution_security_profile: ExecutionSecurityProfile | None,
         permission_mode_override: ExecutionPermissionMode | None,
         runtime_key: object,
+        agent_preset: AgentPresetSnapshot | None = None,
     ) -> LiveSessionRuntime:
         approvals = ApprovalRouter()
         inputs = self._mailbox(canonical.session_id)
@@ -343,6 +353,8 @@ class SessionRuntimeRegistry:
             "model": model,
             "approval_callback": approvals,
         }
+        if agent_preset is not None and _accepts_keyword(create, "agent_preset"):
+            create_kwargs["agent_preset"] = agent_preset
         if _accepts_keyword(create, "execution_profile"):
             create_kwargs["execution_profile"] = execution_profile
         if _accepts_keyword(create, "execution_security_profile"):
@@ -425,6 +437,7 @@ class SessionRuntimeRegistry:
         execution_profile: ExecutionProfile | None,
         execution_security_profile: ExecutionSecurityProfile | None,
         permission_mode_override: ExecutionPermissionMode | None,
+        agent_preset: AgentPresetSnapshot | None = None,
     ) -> object:
         resolver = getattr(self.factory, "runtime_key", None)
         if callable(resolver):
@@ -435,6 +448,8 @@ class SessionRuntimeRegistry:
                 kwargs["execution_security_profile"] = execution_security_profile
             if _accepts_keyword(resolver, "permission_mode_override"):
                 kwargs["permission_mode_override"] = permission_mode_override
+            if _accepts_keyword(resolver, "agent_preset"):
+                kwargs["agent_preset"] = agent_preset
             factory_key = resolver(**kwargs)
         else:
             factory_key = (
@@ -454,6 +469,7 @@ class SessionRuntimeRegistry:
             )
         return (
             factory_key,
+            agent_preset.fingerprint() if agent_preset is not None else None,
             (
                 permission_mode_override.value
                 if permission_mode_override is not None

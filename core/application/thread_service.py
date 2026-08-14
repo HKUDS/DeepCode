@@ -8,6 +8,8 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+from core.agent_presets import METADATA_KEY as PRESET_METADATA_KEY
+from core.agent_presets import AgentPresetError, resolve_agent_preset
 from core.application.errors import (
     ConflictError,
     InvalidArgumentError,
@@ -99,6 +101,7 @@ class ThreadService:
         access_preset_override: ExecutionAccessPreset | None = None,
         workspace_path: str | None = None,
         parent_thread_id: str | None = None,
+        agent_preset: str | None = None,
     ) -> Thread:
         clean_title = title.strip()
         if not clean_title:
@@ -139,6 +142,18 @@ class ThreadService:
             raise TypeError(
                 "access_preset_override must be an ExecutionAccessPreset or None"
             )
+        preset_snapshot = None
+        if agent_preset is not None and agent_preset.strip():
+            # Resolve once and persist BY VALUE: editing the preset file later
+            # never changes what this Session means (dsh pins a composition
+            # generation; the canonical-JSONL equivalent is a snapshot).
+            try:
+                preset_snapshot = resolve_agent_preset(
+                    agent_preset.strip(),
+                    workspace,
+                )
+            except AgentPresetError as exc:
+                raise InvalidArgumentError(str(exc)) from exc
         metadata = {
             "kind": clean_session_kind,
             "workspace": str(workspace),
@@ -154,6 +169,8 @@ class ThreadService:
             ),
             "archived": False,
         }
+        if preset_snapshot is not None:
+            metadata[PRESET_METADATA_KEY] = preset_snapshot.to_metadata()
         if parent_thread_id is not None:
             metadata["parent_session_id"] = parent_thread_id
 
@@ -437,6 +454,42 @@ class ThreadService:
             thread_id,
             "thread.permission_changed",
         )
+
+    def set_agent_preset(self, thread_id: str, preset_id: str | None) -> Thread:
+        """Select or clear the agent preset — only while the Session is blank.
+
+        dsh's lock, for dsh's reason: once the conversation has started, its
+        history was produced under one composition; swapping personas or tool
+        faces mid-Session would make the record mean something it never
+        meant. A new Session is the way to change composition.
+        """
+
+        session = self.session_store.get_session(thread_id)
+        if session is None:
+            raise ThreadNotFoundError(f"thread not found: {thread_id}")
+        if session.messages:
+            raise ConflictError(
+                "agent preset is locked once the conversation has started",
+                user_message=(
+                    "This Session already has messages; start a new Session "
+                    "to use a different agent preset."
+                ),
+            )
+        snapshot_value = None
+        if preset_id is not None and preset_id.strip():
+            try:
+                snapshot_value = resolve_agent_preset(
+                    preset_id.strip(),
+                    session.metadata.get("workspace"),
+                ).to_metadata()
+            except AgentPresetError as exc:
+                raise InvalidArgumentError(str(exc)) from exc
+        if not self.session_store.update_metadata(
+            thread_id,
+            {PRESET_METADATA_KEY: snapshot_value},
+        ):
+            raise ThreadNotFoundError(f"thread not found: {thread_id}")
+        return self._project_updated_session(thread_id, "thread.reconciled")
 
     def archive(self, thread_id: str) -> Thread:
         now = utc_now()
