@@ -553,6 +553,40 @@ class AgentSession:
         """
         self._history = [dict(m) for m in messages]
 
+    async def compact(self) -> dict[str, Any]:
+        """Manually summarize older history (the `/compact` command, per dsh).
+
+        Operates on the RESIDENT model context only — the canonical Session
+        log is append-only and stays untouched, exactly like `/clear`'s
+        ``load_history([])``. Raises :class:`RuntimeError` with a stable
+        message when a Turn is active (the runner owns the history while it
+        runs) or when there is nothing worth compacting; on success the
+        report carries what changed so the caller can show it.
+        """
+        task = self._active_turn_task or self._current_task
+        if task is not None and not task.done():
+            raise RuntimeError("Compaction is unavailable while a Turn is active.")
+        spec = AgentRunSpec(
+            initial_messages=[],
+            tools=self._tools,
+            model=self._model,
+            max_iterations=1,
+            max_tool_result_chars=_DEFAULT_MAX_TOOL_RESULT_CHARS,
+            context_window_tokens=self._context_window_tokens,
+        )
+        before = list(self._history)
+        compacted, reason = await self._runner.compact_history(spec, before)
+        if compacted is None:
+            raise RuntimeError(reason)
+        self._history = compacted
+        return {
+            "replaced_messages": len(before) - len(compacted),
+            "messages_before": len(before),
+            "messages_after": len(compacted),
+            "chars_before": sum(len(str(m.get("content", ""))) for m in before),
+            "chars_after": sum(len(str(m.get("content", ""))) for m in compacted),
+        }
+
     # -- submission handling ----------------------------------------------
 
     async def submit(self, op: Op) -> None:
