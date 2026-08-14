@@ -1,37 +1,161 @@
 .picker {
-  display: inline-flex;
-  min-width: 0;
-  height: 25px;
+  position: relative;
+}
+
+.trigger {
+  display: flex;
+  max-width: 168px;
+  min-height: 34px;
   align-items: center;
-  gap: 4px;
-  padding: 0 7px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-pill);
+  gap: 7px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
   color: var(--text-tertiary);
+  text-align: left;
 }
 
-.picker:hover,
-.picker:focus-within {
-  border-color: var(--border-subtle);
+.trigger:hover:not(:disabled),
+.trigger[aria-expanded="true"] {
   background: var(--surface-hover);
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }
 
-.picker select {
-  max-width: 104px;
-  padding: 0;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: inherit;
-  font: var(--text-micro) var(--font-mono);
-}
-
-.picker select:disabled {
+.trigger:disabled {
   cursor: default;
-  opacity: 0.8;
+  opacity: 0.75;
 }
 
-.pickerError {
-  border-color: var(--danger);
+/* Flaticon "Robot" (Uicons by Flaticon), masked so the monochrome glyph
+   inherits the trigger's theme color. See ../../assets/flaticon/README.md. */
+.robotIcon {
+  display: block;
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  background: currentColor;
+  -webkit-mask-image: url("../../assets/flaticon/robot.png");
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-image: url("../../assets/flaticon/robot.png");
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+}
+
+.trigger > span:not(.robotIcon) {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.trigger small,
+.trigger strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trigger small {
+  color: var(--text-tertiary);
+  font: var(--text-micro)/1.1 var(--font-mono);
+}
+
+.trigger strong {
+  color: var(--text-secondary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+}
+
+.menu {
+  position: absolute;
+  z-index: 42;
+  bottom: calc(100% + 10px);
+  left: -24px;
+  display: grid;
+  width: min(320px, calc(100vw - 42px));
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-overlay);
+  box-shadow: var(--shadow-menu);
+  backdrop-filter: blur(18px);
+}
+
+.menu > header {
+  display: grid;
+  gap: 3px;
+  padding: 12px 15px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.menu > header > strong {
+  color: var(--text-primary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+}
+
+.menu > header > span {
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+}
+
+.options {
+  display: grid;
+  max-height: 264px;
+  gap: 2px;
+  padding: 6px 8px 9px;
+  overflow-y: auto;
+}
+
+.options > button {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+}
+
+.options > button:hover,
+.options > button[aria-selected="true"] {
+  background: var(--surface-hover);
+}
+
+.options > button > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.options strong,
+.options em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.options strong {
+  color: var(--text-primary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+}
+
+.options strong small {
+  color: var(--text-tertiary);
+  font: var(--text-micro) var(--font-mono);
+  font-weight: var(--weight-regular);
+}
+
+.options em {
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+  font-style: normal;
+}
+
+.options > button > svg {
+  flex: 0 0 auto;
+  color: var(--success);
 }

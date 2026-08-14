@@ -2557,18 +2557,21 @@ describe("desktop command center", () => {
     const runtime = new TestRuntime([project], [thread], []);
     render(<App runtime={runtime} />);
 
-    const picker = await screen.findByRole("combobox", {
+    const trigger = await screen.findByRole("button", {
       name: "Agent preset",
     });
-    expect((picker as HTMLSelectElement).value).toBe("");
-    expect(screen.getByRole("option", { name: "Code reader" })).toBeTruthy();
+    expect(trigger.textContent).toContain("Default");
+    fireEvent.click(trigger);
+    expect(
+      await screen.findByRole("option", { name: /Code reader/ }),
+    ).toBeTruthy();
     // A broken preset cannot compose a session, so it is never offered.
-    expect(screen.queryByRole("option", { name: "damaged" })).toBeNull();
+    expect(screen.queryByRole("option", { name: /damaged/ })).toBeNull();
 
-    fireEvent.change(picker, { target: { value: "code-reader" } });
+    fireEvent.click(screen.getByRole("option", { name: /Code reader/ }));
     await waitFor(() => {
-      expect((picker as HTMLSelectElement).value).toBe("code-reader");
       expect(runtime.calls).toContain("preset/select");
+      expect(trigger.textContent).toContain("Code reader");
     });
     expect(
       runtime.requests.find((request) => request.method === "preset/select")
@@ -2577,7 +2580,7 @@ describe("desktop command center", () => {
       threadId: thread.id,
       agentPreset: "code-reader",
     });
-    expect((picker as HTMLSelectElement).disabled).toBe(false);
+    expect((trigger as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("requires confirmation before enabling persistent Full access", async () => {
