@@ -144,7 +144,7 @@ Skills, permissions, Goals, and Automations. See the
 
 ## News
 
-**2026-08-15 · Credential hygiene, a real preset menu, and a grown-up chat TUI**
+**2026-08-15 · Settings grow up: a dsh-style dialog, declared models, and a safer config**
 
 - **A connection's key now reaches exactly the requests it was resolved
   for.** Building a provider no longer exports the key into the process
@@ -166,6 +166,20 @@ Skills, permissions, Goals, and Automations. See the
   transcript — brand-gradient banner, status-colored tool cards with result
   elbows, block spacing, word-boundary wrapping — plus streaming that
   survives the prompt redraw with real colors instead of `?[36m` litter.
+- **Desktop Settings became a dsh-style dialog.** General / Models /
+  Plugins / Agent presets in a left rail, with Open configuration file and
+  the write-scope picker in the header. General gains the five canonical
+  rows — default agent preset for new sessions (applied as a by-value
+  snapshot at creation, CLI and TUI included), permissions, language
+  (English/中文, first translated batch), Light/Dark/System appearance
+  cards, and a steer-or-queue busy-Enter preference.
+- **Models are declarations now.** `manualModels` entries can carry a
+  label, capacities, and the published reasoning ladder; declarations are
+  authoritative offline for execution profiles and every picker. Discovery
+  probes the editor form as shown — unsaved URL or key included — and
+  adopted picks land as accurate declaration rows. Config writes gained
+  optimistic concurrency (a changed file conflicts instead of being
+  clobbered) and a settings.changed push keeps an open dialog fresh.
 - **Session and model commands now hold up.** `/resume` and `/model` open
   an inline selector — type to filter by title, arrows move, Enter picks,
   Tab flips directory scope, Shift+Tab cycles the route's published
