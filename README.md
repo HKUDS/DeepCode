@@ -144,7 +144,7 @@ Skills, permissions, Goals, and Automations. See the
 
 ## News
 
-**2026-08-15 · Credential hygiene and a real preset menu**
+**2026-08-15 · Credential hygiene, a real preset menu, and a grown-up chat TUI**
 
 - **A connection's key now reaches exactly the requests it was resolved
   for.** Building a provider no longer exports the key into the process
@@ -162,6 +162,16 @@ Skills, permissions, Goals, and Automations. See the
   models as its manual list, an environment-provided key locks the paste
   field instead of silently outranking it, and connection rows show the
   discovered model count.
+- **`deepcode chat` reads like a terminal app, not a log.** A restyled
+  transcript — brand-gradient banner, status-colored tool cards with result
+  elbows, block spacing, word-boundary wrapping — plus streaming that
+  survives the prompt redraw with real colors instead of `?[36m` litter.
+- **Session and model commands now hold up.** `/resume` lists this
+  directory's sessions with ages and CJK-safe titles, resumes by id prefix,
+  and replays the conversation tail; `/model` shows the configured
+  connection catalog, resolves a bare model's connection, and rejects typos
+  without killing the REPL; `/compact` summarizes with the model you
+  actually selected.
 
 **2026-08-14 · Subagent runtime, compaction, and one-way persistence**
 
