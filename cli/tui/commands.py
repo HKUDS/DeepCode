@@ -20,6 +20,7 @@ from typing import Any
 from rich.cells import cell_len, set_cell_size
 
 from cli.transcript import TranscriptMode
+from cli.tui import theme
 from cli.tui.picker import Picker, PickerItem, PickerScope, PickerVariant
 
 Handler = Callable[[Any, str], Awaitable[str | None]]
@@ -273,76 +274,96 @@ async def _switch_model_report(
     return f"{status}\n{note}" if note else status
 
 
-def _effort_variants(
-    app,
-    connection_id: str,
-    model_id: str,
+def _effort_ladder(
+    efforts: list[str],
+    current: str | None,
 ) -> tuple[tuple[PickerVariant, ...], int]:
-    """The Shift+Tab ladder for one route: auto plus its published efforts.
-
-    Adapter-owned values only (the dsh rule) — models without published
-    reasoning controls get no ladder at all instead of invented levels.
-    """
-    efforts = app.reasoning_options(model_id, connection_id=connection_id)
+    """Shift+Tab ladder from published levels: auto plus the adapter's own
+    values (the dsh rule) — no ladder at all when nothing is published."""
     if not efforts:
         return (), 0
-    ladder = ("auto", *efforts)
+    ladder = ("auto", *dict.fromkeys(efforts))
     variants = tuple(PickerVariant(value=level, label=level) for level in ladder)
-    current = app.requested_reasoning_effort
     initial = ladder.index(current) if current in ladder else 0
     return variants, initial
 
 
-def _model_picker_item(app, connection_id: str, model_id: str, detail: str):
-    variants, initial = _effort_variants(app, connection_id, model_id)
+def _route_item(
+    connection_id: str,
+    model: dict,
+    *,
+    current_route: tuple[str | None, str],
+    requested_effort: str | None,
+) -> PickerItem:
+    """One picker row straight from a catalog entry — reasoning included,
+    so a 400-model directory costs no per-row resolution."""
+    model_id = str(model.get("id", ""))
+    current = (connection_id, model_id) == current_route
+    details: list[str] = []
+    if current:
+        details.append("current")
+    name = str(model.get("name") or "")
+    if name and name != model_id:
+        details.append(name)
+    context_window = model.get("contextWindow")
+    if isinstance(context_window, int) and context_window > 0:
+        details.append(f"{round(context_window / 1000)}K ctx")
+    reasoning = model.get("reasoning") or {}
+    efforts = [str(level) for level in reasoning.get("supportedEfforts") or []]
+    variants, initial = _effort_ladder(efforts, requested_effort)
     return PickerItem(
         value=(connection_id, model_id),
         title=f"{connection_id}/{model_id}",
-        detail=detail,
+        detail=" · ".join(details),
         variants=variants,
         initial_variant=initial,
     )
 
 
 async def _model_via_picker(app) -> str | None:
-    """Pick a route from the configured catalogs (advisory, dsh's rule:
-    the current route is shown even when no catalog lists it)."""
+    """The dsh model selector over the REAL directory: every configured
+    connection's catalog (remote snapshot or declarations), filterable,
+    with the current route pinned first and shown even when no catalog
+    advertises it (advisory catalogs never gate)."""
+    app.console.print(
+        f"[{theme.META_STYLE}]loading model directory…[/]",
+        highlight=False,
+    )
     profile = app.thread_client.execution_profile
+    current_route = (profile.connection_id, profile.model_id)
+    requested = app.requested_reasoning_effort
     items: list[PickerItem] = []
-    listed = False
-    for view in app.connection_views():
-        if not (view.get("configured") and view.get("enabled")):
-            continue
-        connection_id = str(view.get("id", ""))
-        for model in view.get("manualModels") or []:
-            model_id = str(model)
-            current = (
-                connection_id == profile.connection_id and model_id == profile.model_id
+    current_item: PickerItem | None = None
+    for connection_id, models in app.connection_model_catalog():
+        for model in models:
+            item = _route_item(
+                connection_id,
+                model,
+                current_route=current_route,
+                requested_effort=requested,
             )
-            listed = listed or current
-            items.append(
-                _model_picker_item(
-                    app,
-                    connection_id,
-                    model_id,
-                    "current" if current else "",
-                )
-            )
-    if not listed:
-        items.insert(
-            0,
-            _model_picker_item(
-                app,
-                profile.connection_id,
+            if item.value == current_route:
+                current_item = item
+            else:
+                items.append(item)
+    if current_item is None:
+        efforts = list(
+            app.reasoning_options(
                 profile.model_id,
-                "current · not in any catalog",
-            ),
+                connection_id=profile.connection_id,
+            )
         )
-    if len(items) < 2:
-        # Nothing to choose between — the text directory says why.
-        return app.model_overview()
+        variants, initial = _effort_ladder(efforts, requested)
+        current_item = PickerItem(
+            value=current_route,
+            title=f"{profile.connection_id}/{profile.model_id}",
+            detail="current · not in any catalog",
+            variants=variants,
+            initial_variant=initial,
+        )
+    items.insert(0, current_item)
     chosen = await Picker(
-        [PickerScope("configured models", items)],
+        [PickerScope("model directory", items)],
         title="Select model",
         variant_hint="effort",
     ).run()
@@ -374,9 +395,47 @@ async def _cmd_model(app, args: str) -> str | None:
     return await _switch_model_report(app, connection.strip() or None, model.strip())
 
 
+async def _effort_via_picker(app) -> str | None:
+    profile = app.thread_client.execution_profile
+    current = app.requested_reasoning_effort
+    levels = [
+        "auto",
+        "none",
+        *app.reasoning_options(
+            profile.model_id,
+            connection_id=profile.connection_id,
+        ),
+    ]
+    items = [
+        PickerItem(
+            value=level,
+            title=level,
+            detail="current" if level == current else "",
+        )
+        for level in dict.fromkeys(levels)
+    ]
+    chosen = await Picker(
+        [PickerScope(f"reasoning effort · {profile.model_id}", items)],
+        title="Reasoning effort",
+    ).run()
+    if chosen is None:
+        return None
+    try:
+        await app.switch_reasoning_effort(str(chosen.value))
+    except (OSError, RuntimeError, ValueError) as exc:
+        return f"effort switch failed: {exc}"
+    effective = app.thread_client.execution_profile.reasoning_effort
+    return (
+        f"effort switched to {app.requested_reasoning_effort} "
+        f"(effective: {effective or 'provider default'}; history preserved)"
+    )
+
+
 async def _cmd_effort(app, args: str) -> str | None:
     wanted = args.strip()
     if not wanted:
+        if app.reader.interactive:
+            return await _effort_via_picker(app)
         profile = app.thread_client.execution_profile
         effective = profile.reasoning_effort or "provider default"
         return f"effort: {app.requested_reasoning_effort} · effective: {effective}"
@@ -403,9 +462,43 @@ _PERMISSION_CHOICES: dict[str, str | None] = {
 }
 
 
+#: The picker's canonical spelling for each distinct permission choice.
+_PERMISSION_PICKER_ROWS: tuple[tuple[str, str], ...] = (
+    ("ask", "approvals required for sensitive tools"),
+    ("read-only", "no writes, no execution"),
+    ("full-access", "no approval gate — confirmed semantics"),
+    ("inherit", "use the configured default"),
+)
+
+
+async def _permissions_via_picker(app) -> str | None:
+    override = app.thread_client.access_preset_override
+    current = override.value.replace("_", "-") if override is not None else "inherit"
+    items = [
+        PickerItem(
+            value=name,
+            title=name,
+            detail=f"current · {description}" if name == current else description,
+        )
+        for name, description in _PERMISSION_PICKER_ROWS
+    ]
+    chosen = await Picker(
+        [PickerScope("session access", items)],
+        title="Permissions",
+    ).run()
+    if chosen is None:
+        return None
+    try:
+        return await app.set_access_preset(_PERMISSION_CHOICES[str(chosen.value)])
+    except (OSError, RuntimeError, ValueError) as exc:
+        return f"Session access update failed: {exc}"
+
+
 async def _cmd_permissions(app, args: str) -> str | None:
     wanted = args.strip().casefold()
     if not wanted:
+        if app.reader.interactive:
+            return await _permissions_via_picker(app)
         return app.access_status()
     if wanted not in _PERMISSION_CHOICES:
         return "usage: /permissions [ask|read-only|full-access|inherit]"
@@ -415,9 +508,54 @@ async def _cmd_permissions(app, args: str) -> str | None:
         return f"Session access update failed: {exc}"
 
 
+async def _preset_via_picker(app) -> str | None:
+    from core.agent_presets import list_agent_presets
+
+    current = app.thread_client.current_agent_preset_id()
+    items: list[PickerItem] = [
+        PickerItem(
+            value=None,
+            title="None · default composition",
+            detail="current" if current is None else "",
+        )
+    ]
+    for preset in list_agent_presets(app.thread_client.workspace):
+        if preset.broken is not None:
+            items.append(
+                PickerItem(
+                    value=preset.id,
+                    title=preset.id,
+                    detail=preset.broken,
+                    disabled_reason="broken",
+                )
+            )
+            continue
+        face = ", ".join(preset.tools) if preset.tools is not None else "all tools"
+        detail = (
+            f"[{preset.trust}] {preset.description or preset.display_name} ({face})"
+        )
+        if preset.id == current:
+            detail = f"current · {detail}"
+        items.append(PickerItem(value=preset.id, title=preset.id, detail=detail))
+    chosen = await Picker(
+        [PickerScope("agent presets", items)],
+        title="Agent preset",
+    ).run()
+    if chosen is None:
+        return None
+    try:
+        return app.set_agent_preset(
+            str(chosen.value) if chosen.value is not None else None
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        return str(exc)
+
+
 async def _cmd_preset(app, args: str) -> str | None:
     wanted = args.strip()
     if not wanted:
+        if app.reader.interactive:
+            return await _preset_via_picker(app)
         return app.agent_preset_overview()
     try:
         return app.set_agent_preset(None if wanted == "clear" else wanted)
@@ -425,9 +563,30 @@ async def _cmd_preset(app, args: str) -> str | None:
         return str(exc)
 
 
+async def _transcript_via_picker(app) -> str | None:
+    current = app.renderer.transcript_mode
+    items = [
+        PickerItem(
+            value=mode.value,
+            title=mode.value,
+            detail="current" if mode is current else "",
+        )
+        for mode in TranscriptMode
+    ]
+    chosen = await Picker(
+        [PickerScope("transcript detail", items)],
+        title="Transcript",
+    ).run()
+    if chosen is None:
+        return None
+    return app.set_transcript_mode(str(chosen.value))
+
+
 async def _cmd_transcript(app, args: str) -> str | None:
     wanted = args.strip()
     if not wanted:
+        if app.reader.interactive:
+            return await _transcript_via_picker(app)
         return f"transcript mode: {app.renderer.transcript_mode.value}"
     try:
         return app.set_transcript_mode(wanted)
@@ -498,9 +657,43 @@ async def _cmd_skills(app, args: str) -> str | None:
     return app.list_skills()
 
 
+async def _skill_via_picker(app) -> str | None:
+    try:
+        skills = app.thread_client.application.skills.list(
+            app.thread_client.project.id
+        ).skills
+    except (OSError, RuntimeError, ValueError) as exc:
+        return f"Skill listing failed: {exc}"
+    selected = set(app.selected_skill_ids)
+    items = [
+        PickerItem(
+            value=skill.id,
+            title=skill.name,
+            detail=(
+                f"selected · {skill.description}"
+                if skill.id in selected
+                else skill.description
+            ),
+        )
+        for skill in skills
+        if skill.status == "active"
+    ]
+    if not items:
+        return "no active Skills discovered"
+    chosen = await Picker(
+        [PickerScope("next-turn skills", items)],
+        title="Select Skill",
+    ).run()
+    if chosen is None:
+        return None
+    return app.select_skill(str(chosen.value))
+
+
 async def _cmd_skill(app, args: str) -> str | None:
     action, _, target = args.strip().partition(" ")
     if not action:
+        if app.reader.interactive:
+            return await _skill_via_picker(app)
         return "usage: /skill <id|name> | remove <id|name> | clear"
     if action.lower() == "clear":
         return app.clear_skills()

@@ -1110,7 +1110,7 @@ def test_picker_shift_tab_cycles_the_highlighted_variant():
     assert picker._variant_of(plain) is None
 
 
-def test_model_picker_offers_catalog_routes_and_switches(monkeypatch):
+def test_model_picker_offers_the_full_directory_and_switches(monkeypatch):
     from types import SimpleNamespace
 
     import cli.tui.commands as commands_mod
@@ -1132,17 +1132,25 @@ def test_model_picker_offers_catalog_routes_and_switches(monkeypatch):
     async def switch_model(model, *, connection_id=None, reasoning_effort=None):
         seen["switch"] = (connection_id, model, reasoning_effort)
 
+    directory = [
+        (
+            "openrouter",
+            [
+                {
+                    "id": "model-a",
+                    "name": "Model A",
+                    "contextWindow": 131072,
+                    "reasoning": {"supportedEfforts": ["high", "xhigh"]},
+                },
+                {"id": "model-b", "name": "model-b", "reasoning": None},
+            ],
+        ),
+        ("poe", [{"id": "gpt-x", "name": "GPT X", "reasoning": None}]),
+    ]
     app = SimpleNamespace(
         reader=SimpleNamespace(interactive=True),
-        connection_views=lambda: [
-            {
-                "id": "openrouter",
-                "configured": True,
-                "enabled": True,
-                "manualModels": ["model-a", "model-b"],
-            },
-            {"id": "unconfigured", "configured": False, "enabled": True},
-        ],
+        console=SimpleNamespace(print=lambda *a, **k: None),
+        connection_model_catalog=lambda: directory,
         thread_client=SimpleNamespace(
             execution_profile=SimpleNamespace(
                 connection_id="openrouter", model_id="model-a"
@@ -1151,19 +1159,30 @@ def test_model_picker_offers_catalog_routes_and_switches(monkeypatch):
         ),
         switch_model=switch_model,
         model="model-b",
-        requested_reasoning_effort="auto",
-        reasoning_options=lambda model_id, connection_id=None: ("high", "xhigh"),
+        requested_reasoning_effort="high",
+        reasoning_options=lambda model_id, connection_id=None: (),
         model_catalog_note=lambda: None,
     )
     status = asyncio.run(commands_mod._cmd_model(app, ""))
     assert seen["switch"] == ("openrouter", "model-b", "high")
     assert "model switched to model-b" in status
+
     items = list(seen["scopes"][0].items)
-    assert [item.title for item in items] == [
-        "openrouter/model-a",
-        "openrouter/model-b",
+    # The current route is pinned first with its published ladder.
+    assert items[0].value == ("openrouter", "model-a")
+    assert "current" in items[0].detail and "131K ctx" in items[0].detail
+    assert [variant.value for variant in items[0].variants] == [
+        "auto",
+        "high",
+        "xhigh",
     ]
-    assert items[0].detail == "current"
+    assert items[0].initial_variant == 1  # the session's requested effort
+    # Every connection's directory is offered; no invented ladders.
+    assert [item.value for item in items[1:]] == [
+        ("openrouter", "model-b"),
+        ("poe", "gpt-x"),
+    ]
+    assert items[1].variants == ()
 
 
 def test_resume_picker_marks_current_session_and_resumes_choice(monkeypatch):

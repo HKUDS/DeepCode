@@ -314,6 +314,36 @@ class TuiApp:
             lines.append(f"  {str(view.get('id', '')):<{width}}  {catalog}{marker}")
         return "\n".join(lines)
 
+    def connection_model_catalog(self) -> list[tuple[str, list[dict]]]:
+        """Every configured connection's model directory, cache-first.
+
+        Auto catalogs serve the remote snapshot (fetching once when the
+        cache is cold), manual catalogs serve the declarations — the same
+        ``model/list`` data the Desktop picker reads, so both surfaces
+        offer one directory. A connection whose catalog cannot be read
+        contributes nothing instead of failing the whole picker.
+        """
+        llm = self.thread_client.application.llm
+        catalog: list[tuple[str, list[dict]]] = []
+        for view in self.connection_views():
+            if not (view.get("configured") and view.get("enabled")):
+                continue
+            connection_id = str(view.get("id", ""))
+            try:
+                listing = llm.list_models(
+                    connection_id,
+                    project_id=self.thread_client.project.id,
+                )
+                models = [
+                    model
+                    for model in listing.get("models", [])
+                    if isinstance(model, dict)
+                ]
+            except (OSError, RuntimeError, ValueError):
+                models = []
+            catalog.append((connection_id, models))
+        return catalog
+
     def model_catalog_note(self) -> str | None:
         """Advisory catalog check after a switch — never gates routing."""
         profile = self.thread_client.execution_profile
