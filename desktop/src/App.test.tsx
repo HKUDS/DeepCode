@@ -28,6 +28,7 @@ import type {
   WorkflowRun,
 } from "./generated/app-server";
 import { App } from "./App";
+import { __resetComposerBehaviorForTests } from "./app/composerBehavior";
 import type {
   AnyRpcNotification,
   DesktopRuntime,
@@ -1474,7 +1475,10 @@ const workflowEvents: Event[] = [
 ];
 
 describe("desktop command center", () => {
-  beforeEach(() => localStorage.clear());
+  beforeEach(() => {
+    localStorage.clear();
+    __resetComposerBehaviorForTests();
+  });
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
@@ -1844,6 +1848,78 @@ describe("desktop command center", () => {
     await screen.findByRole("heading", { name: "Skills" });
     expect(screen.queryByRole("tab", { name: /Hooks/ })).toBeNull();
     expect(runtime.calls).not.toContain("hooks/list");
+  });
+
+  it("saves the default agent preset for new Sessions from Settings", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const dialog = await screen.findByRole("dialog", { name: "Settings" });
+    const picker = await within(dialog).findByRole("combobox", {
+      name: "Default for new Sessions",
+    });
+    await within(dialog).findByRole("option", {
+      name: "Code reader [system]",
+    });
+    fireEvent.change(picker, { target: { value: "code-reader" } });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Save preset default" }),
+    );
+
+    await waitFor(() =>
+      expect(
+        runtime.requests.find(
+          (request) =>
+            request.method === "settings/update" &&
+            (request.params as MethodParams["settings/update"]).patch.agents !==
+              undefined,
+        )?.params,
+      ).toMatchObject({
+        patch: { agents: { defaults: { defaultPreset: "code-reader" } } },
+      }),
+    );
+  });
+
+  it("switches the appearance mode from the tri-cards", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const dialog = await screen.findByRole("dialog", { name: "Settings" });
+    const dark = within(dialog).getByRole("button", { name: "Dark" });
+    expect(dark.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(dark);
+    expect(dark.getAttribute("aria-pressed")).toBe("true");
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    fireEvent.click(within(dialog).getByRole("button", { name: "System" }));
+    expect(document.documentElement.getAttribute("data-theme")).toBeNull();
+  });
+
+  it("lets plain Enter queue while busy when the preference says queue", async () => {
+    localStorage.setItem(
+      "deepcode.desktop.composer.v1",
+      JSON.stringify({ busyEnter: "queue" }),
+    );
+    __resetComposerBehaviorForTests();
+    const runningThread = { ...thread, status: "running" as const };
+    const runtime = new TestRuntime([project], [runningThread], runningEvents);
+    render(<App runtime={runtime} />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Task instruction",
+    });
+    fireEvent.change(composer, { target: { value: "run later" } });
+    fireEvent.keyDown(composer, { key: "Enter" });
+    await waitFor(() => expect(runtime.calls).toContain("turn/enqueue"));
+    expect(runtime.calls).not.toContain("turn/steer");
+
+    // Cmd/Ctrl+Enter performs the other verb: steer.
+    fireEvent.change(composer, { target: { value: "steer now" } });
+    fireEvent.keyDown(composer, { key: "Enter", metaKey: true });
+    await waitFor(() => expect(runtime.calls).toContain("turn/steer"));
   });
 
   it("opens Settings as a sectioned dialog and closes it again", async () => {

@@ -84,6 +84,10 @@ class AgentDefaults(_Base):
     max_tokens: int = 8192
     temperature: float = 0.1
     reasoning_effort: str | None = None
+    # Agent preset id applied to NEW Sessions that do not pick one
+    # explicitly. Resolved (and snapshotted by value) at Session creation;
+    # an unresolvable name is ignored rather than blocking creation.
+    default_preset: str | None = None
     # DeepCode-specific token policy fields used by retry logic.
     base_max_tokens: int | None = None
     retry_max_tokens: int | None = None

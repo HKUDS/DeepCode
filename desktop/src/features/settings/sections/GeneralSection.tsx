@@ -6,21 +6,18 @@
 
 import { AppearanceSettings } from "../AppearanceSettings";
 import type { SettingsSectionProps } from "../settingsSections";
+import { ComposerBehaviorCard } from "./ComposerBehaviorCard";
+import { DefaultPresetCard } from "./DefaultPresetCard";
 import { DiagnosticsCard } from "./DiagnosticsCard";
 import { PermissionCard } from "./PermissionCard";
 import { UpdatesCard } from "./UpdatesCard";
 import styles from "../../management/ManagementWorkspace.module.css";
 
-export function GeneralSection({
-  runtime,
-  project,
-  settings,
-  busy,
-  scope,
-  onUpdate,
-}: SettingsSectionProps) {
+export function GeneralSection(props: SettingsSectionProps) {
+  const { runtime, project, settings, busy, scope, onUpdate } = props;
   return (
     <div className={styles.settingsGrid}>
+      <DefaultPresetCard {...props} />
       <PermissionCard
         settings={settings}
         busy={busy}
@@ -28,6 +25,7 @@ export function GeneralSection({
         onUpdate={onUpdate}
       />
       <AppearanceSettings />
+      <ComposerBehaviorCard />
       <UpdatesCard runtime={runtime} />
       <DiagnosticsCard runtime={runtime} project={project} />
       <aside className={styles.credits} aria-label="Visual credits">

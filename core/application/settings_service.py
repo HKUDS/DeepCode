@@ -36,6 +36,7 @@ _AGENT_FIELDS = {
     "maxTokens",
     "temperature",
     "reasoningEffort",
+    "defaultPreset",
     "baseMaxTokens",
     "retryMaxTokens",
     "maxTokensPolicy",

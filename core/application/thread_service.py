@@ -10,6 +10,7 @@ from pathlib import Path
 
 from core.agent_presets import METADATA_KEY as PRESET_METADATA_KEY
 from core.agent_presets import AgentPresetError, resolve_agent_preset
+from core.config import ConfigError, load_config_for_workspace
 from core.application.errors import (
     ConflictError,
     InvalidArgumentError,
@@ -154,6 +155,13 @@ class ThreadService:
                 )
             except AgentPresetError as exc:
                 raise InvalidArgumentError(str(exc)) from exc
+        else:
+            # No explicit choice: fill the blank with the configured default
+            # for new Sessions (agents.defaults.defaultPreset), through the
+            # same by-value snapshot. The Session stays clearable/selectable
+            # while blank via set_agent_preset, exactly as if the user had
+            # picked the preset themselves.
+            preset_snapshot = self._configured_default_preset(workspace)
         metadata = {
             "kind": clean_session_kind,
             "workspace": str(workspace),
@@ -1533,3 +1541,30 @@ class ThreadService:
                 f"workspace is outside project boundary: {workspace}"
             )
         return workspace
+
+    @staticmethod
+    def _configured_default_preset(workspace: Path):
+        """The configured default composition for new Sessions, if usable.
+
+        Failures are deliberately swallowed: a stale preset name (or an
+        unreadable config) must never block creating a Session — it simply
+        starts with the default composition, and the roster view is where a
+        broken preset gets surfaced.
+        """
+        try:
+            configured = load_config_for_workspace(
+                workspace
+            ).agents.defaults.default_preset
+        except ConfigError:
+            return None
+        if configured is None or not configured.strip():
+            return None
+        try:
+            return resolve_agent_preset(configured.strip(), workspace)
+        except AgentPresetError:
+            logger.warning(
+                "configured default agent preset %r is not resolvable; "
+                "starting the Session without it",
+                configured,
+            )
+            return None

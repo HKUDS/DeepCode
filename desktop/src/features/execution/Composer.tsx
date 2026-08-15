@@ -20,6 +20,7 @@ import type {
 } from "../../generated/app-server";
 import type { GoalDefinitionInput } from "../../app/useWorkspaceController";
 import type { InteractiveDelivery } from "../../app/interactiveTurnRouter";
+import { useComposerBehavior } from "../../app/composerBehavior";
 import {
   ACCESS_PRESET_OPTIONS,
   settingsDefaultAccessLabel,
@@ -125,6 +126,7 @@ export function Composer({
   onLaunchIntentConsumed,
 }: ComposerProps) {
   const active = executingTurn !== null;
+  const { busyEnter } = useComposerBehavior();
   const initialLaunch =
     launchIntent && launchIntent.threadId === thread?.id ? launchIntent : null;
   const {
@@ -294,7 +296,15 @@ export function Composer({
       !event.nativeEvent.isComposing
     ) {
       event.preventDefault();
-      void submit();
+      // While a Turn runs, plain Enter follows the busy-Enter preference
+      // (steer or queue); Cmd/Ctrl+Enter always performs the other verb.
+      const inverted = event.metaKey || event.ctrlKey;
+      const queues = active && (busyEnter === "queue") !== inverted;
+      if (queues) {
+        void submitQueued();
+      } else {
+        void submit();
+      }
       return;
     }
     if (
@@ -656,7 +666,14 @@ export function Composer({
           deliveryNotice ??
           disabledReason ??
           "DeepCode may ask before sensitive tools run."}
-        <span>{active ? "↵ steer" : "↵ send"} · ⇧↵ newline</span>
+        <span>
+          {active
+            ? busyEnter === "queue"
+              ? "↵ queue · ⌘↵ steer"
+              : "↵ steer · ⌘↵ queue"
+            : "↵ send"}{" "}
+          · ⇧↵ newline
+        </span>
       </p>
     </footer>
   );

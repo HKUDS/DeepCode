@@ -1,3 +1,4 @@
+import { Monitor, Moon, Sun } from "lucide-react";
 import { useMemo, useId } from "react";
 
 import {
@@ -13,6 +14,21 @@ import {
 } from "../../app/fontCandidates";
 import { useAppearance } from "../../app/useAppearance";
 import styles from "../management/ManagementWorkspace.module.css";
+import modeStyles from "./AppearanceSettings.module.css";
+
+// The dsh tri-state: the three modes everyone reaches for, as cards. The
+// full palette list (Paper, Midnight, Claude, …) stays in the advanced
+// select below; picking a palette there simply means none of the three
+// cards is pressed.
+const MODE_CARDS = [
+  { value: "light", label: "Light", icon: Sun },
+  { value: "dark", label: "Dark", icon: Moon },
+  { value: "system", label: "System", icon: Monitor },
+] as const satisfies readonly {
+  value: ThemePreference;
+  label: string;
+  icon: typeof Sun;
+}[];
 
 // Record, not Partial — TypeScript fails the build if a palette is added to
 // THEME_PREFERENCES without a name to show for it.
@@ -53,6 +69,28 @@ export function AppearanceSettings() {
           <h2>Appearance</h2>
         </div>
       </header>
+
+      <div
+        className={modeStyles.modeRow}
+        role="group"
+        aria-label="Appearance mode"
+      >
+        {MODE_CARDS.map((mode) => {
+          const Icon = mode.icon;
+          return (
+            <button
+              key={mode.value}
+              type="button"
+              className={modeStyles.modeCard}
+              aria-pressed={appearance.theme === mode.value}
+              onClick={() => set("theme", mode.value)}
+            >
+              <Icon size={18} />
+              {mode.label}
+            </button>
+          );
+        })}
+      </div>
 
       <div className={styles.formGrid}>
         {APPEARANCE_SETTINGS.map((setting) => {
