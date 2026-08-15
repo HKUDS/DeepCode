@@ -20,6 +20,7 @@ from core.domain.execution_profile import ExecutionProfile, ExecutionSelection
 from core.providers.catalog_service import ModelCatalogService
 from core.providers.credentials import CredentialStore
 from core.providers.profiles import ConnectionResolver, validate_connection_id
+from core.providers.reasoning import infer_reasoning_capabilities
 from core.providers.registry import PROVIDERS, find_by_name
 
 _PROFILE_FIELDS = {
@@ -193,6 +194,32 @@ class LLMConfigurationService:
             "removed": removed or credential_removed,
             **self.list_connections(),
         }
+
+    def model_reasoning(
+        self,
+        connection_id: str,
+        model_id: str,
+        *,
+        project_id: str | None = None,
+    ):
+        """Last-known reasoning capabilities for one route, without I/O.
+
+        Catalog snapshot first (the provider's own published controls),
+        offline inference second — the same precedence
+        :meth:`resolve_phases` applies when building an execution profile.
+        """
+        try:
+            resolver = self._resolver(project_id=project_id)
+            connection = resolver.resolve_connection(connection_id)
+        except ValueError:
+            return infer_reasoning_capabilities(model_id)
+        cached = self.catalog.cached_model(connection, model_id)
+        if cached is not None and cached.reasoning is not None:
+            return cached.reasoning
+        return infer_reasoning_capabilities(
+            model_id,
+            provider_name=connection.provider_name,
+        )
 
     def list_models(
         self,

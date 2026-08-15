@@ -62,6 +62,8 @@ from core.providers.reasoning import normalize_reasoning_effort
 
 
 _MODEL_CATALOG_PREVIEW = 4  # models shown per connection in /model
+# Sentinel: switch_model keeps the session's effort unless told otherwise.
+_KEEP_EFFORT: object = object()
 _RESUME_TAIL_MESSAGES = 4  # messages replayed on /resume
 _RESUME_TAIL_LINES = 3  # lines shown per replayed message
 
@@ -116,6 +118,7 @@ class TuiApp:
             self.thread_client.set_access_preset(access_preset)
         self._sync_thread_state()
         self.reader.set_skill_provider(self._completion_skills)
+        self.reader.set_argument_provider(self._complete_command_argument)
         self.goal_controller = TuiGoalController(self)
 
     # -- shared Thread lifecycle -------------------------------------------
@@ -212,19 +215,51 @@ class TuiApp:
         model: str,
         *,
         connection_id: str | None = None,
+        reasoning_effort: object = _KEEP_EFFORT,
     ) -> None:
         # A bare model name resolves its connection (configured default,
         # else catalog match) — the Desktop semantics. Pinning the current
         # connection here made `/model <other-vendor-model>` resolve against
-        # the wrong provider.
+        # the wrong provider. The model picker commits model and effort as
+        # one pair (dsh's Shift+Tab pairing); the argument path keeps the
+        # session's effort by omitting ``reasoning_effort``.
+        effort = (
+            self._requested_reasoning_effort
+            if reasoning_effort is _KEEP_EFFORT
+            else normalize_reasoning_effort(
+                reasoning_effort if reasoning_effort is None else str(reasoning_effort)
+            )
+        )
         profile = self.thread_client.switch_execution(
             connection_id=connection_id,
             model=model,
-            reasoning_effort=self._requested_reasoning_effort,
+            reasoning_effort=effort,
         )
         self.model = profile.model_id
         self._requested_connection = profile.connection_id
         self._requested_model = profile.model_id
+        self._requested_reasoning_effort = effort
+
+    def reasoning_options(
+        self,
+        model_id: str,
+        *,
+        connection_id: str | None = None,
+    ) -> tuple[str, ...]:
+        """Published effort levels for one route, offline.
+
+        Snapshot-first through the LLM service — the same source an actual
+        Turn resolves its capabilities from, so the picker never advertises
+        a ladder the switch would reject.
+        """
+        capabilities = self.thread_client.application.llm.model_reasoning(
+            connection_id or self.thread_client.execution_profile.connection_id,
+            model_id,
+            project_id=self.thread_client.project.id,
+        )
+        if capabilities is None:
+            return ()
+        return tuple(capabilities.supported_efforts)
 
     async def switch_reasoning_effort(self, effort: str) -> None:
         """Change future turns while preserving this Session's history."""
@@ -238,7 +273,7 @@ class TuiApp:
         self.model = profile.model_id
         self._requested_reasoning_effort = requested
 
-    def _connection_views(self) -> list[dict]:
+    def connection_views(self) -> list[dict]:
         data = self.thread_client.application.llm.list_connections(
             self.thread_client.project.id
         )
@@ -257,7 +292,7 @@ class TuiApp:
         )
         views = [
             view
-            for view in self._connection_views()
+            for view in self.connection_views()
             if view.get("configured") and view.get("enabled")
         ]
         if not views:
@@ -283,7 +318,7 @@ class TuiApp:
         """Advisory catalog check after a switch — never gates routing."""
         profile = self.thread_client.execution_profile
         try:
-            views = self._connection_views()
+            views = self.connection_views()
         except (OSError, RuntimeError, ValueError):
             return None
         for view in views:
@@ -446,6 +481,15 @@ class TuiApp:
         return self.thread_client.application.skills.list(
             self.thread_client.project.id
         ).skills
+
+    def _complete_command_argument(self, name: str, prefix: str) -> tuple[str, ...]:
+        command = commands.REGISTRY.get(name)
+        if command is None or command.arguments is None:
+            return ()
+        try:
+            return tuple(command.arguments(self, prefix))
+        except Exception:  # noqa: BLE001 - completion must remain best effort
+            return ()
 
     def clear_skills(self) -> str:
         self.selected_skill_ids.clear()

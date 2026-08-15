@@ -72,6 +72,12 @@ DONE_ERR = "✗"
 APPROVAL_STYLE = WARNING
 APPROVAL_PROMPT = "y once · a session · n deny"
 
+# -- pickers (prompt_toolkit dialect; it has no dim attribute, so the
+# hierarchy is bold titles over plain detail, accent on the selection) ------
+PICKER_POINTER = "❯"
+PICKER_TITLE_STYLE_PTK = "bold"
+PICKER_SELECTED_STYLE_PTK = "bold fg:ansicyan"
+
 
 def supports_truecolor() -> bool:
     """True when the terminal advertises 24-bit color support."""

@@ -19,7 +19,12 @@ from typing import Any
 
 from rich.cells import cell_len, set_cell_size
 
+from cli.transcript import TranscriptMode
+from cli.tui.picker import Picker, PickerItem, PickerScope, PickerVariant
+
 Handler = Callable[[Any, str], Awaitable[str | None]]
+# Candidate first arguments for tab completion: (app, typed prefix) -> values.
+ArgumentProvider = Callable[[Any, str], "list[str]"]
 
 
 @dataclass(frozen=True)
@@ -28,6 +33,9 @@ class Command:
     usage: str
     help: str
     handler: Handler
+    # Optional tab completion for the command's first argument — declared
+    # per row so the input layer stays free of per-command knowledge.
+    arguments: ArgumentProvider | None = None
 
 
 _HELP_USAGE_COLUMN_CAP = 30
@@ -108,6 +116,28 @@ def _resume_row(listing, *, show_origin: bool) -> str:
     return line
 
 
+def _session_ids(app, prefix: str) -> list[str]:
+    """Stored session ids starting with ``prefix`` (any workspace)."""
+    rows = app.thread_client.list_recent(
+        limit=_PREFIX_SCAN_LIMIT,
+        include_all=True,
+    )
+    return [row.session_id for row in rows if row.session_id.startswith(prefix)]
+
+
+def _transcript_modes(app, prefix: str) -> list[str]:
+    return [m.value for m in TranscriptMode if m.value.startswith(prefix)]
+
+
+def _permission_presets(app, prefix: str) -> list[str]:
+    return [name for name in _PERMISSION_CHOICES if name.startswith(prefix)]
+
+
+def _effort_levels(app, prefix: str) -> list[str]:
+    levels = ("auto", "none", *app.reasoning_options(app.model))
+    return [level for level in levels if level.startswith(prefix)]
+
+
 def _resolve_session_prefix(app, target: str) -> str | list[str]:
     """Resolve an id prefix to a full session id.
 
@@ -115,14 +145,74 @@ def _resolve_session_prefix(app, target: str) -> str | list[str]:
     matches. The raw target is kept when nothing matches — the resume path
     reports unknown ids with the store's own error.
     """
-    rows = app.thread_client.list_recent(
-        limit=_PREFIX_SCAN_LIMIT,
-        include_all=True,
-    )
-    matches = [row.session_id for row in rows if row.session_id.startswith(target)]
+    matches = _session_ids(app, target)
     if len(matches) == 1:
         return matches[0]
     return matches
+
+
+def _resume_target(app, resolved: str) -> str:
+    """Resume one session id: the shared tail of every resume entry point."""
+    try:
+        turns = app.resume_conversation(resolved)
+    except (RuntimeError, ValueError) as exc:
+        return str(exc)
+    app.render_resume_tail()
+    status = f"resumed {resolved} ({turns} messages restored)"
+    origin = app.bridge.stored_workspace()
+    if origin and origin != app.workspace:
+        status += f"\nnote: this conversation was started in {origin}"
+    return status
+
+
+def _resume_picker_items(rows, *, show_origin: bool) -> list[PickerItem]:
+    items = []
+    for row in rows:
+        detail = f"{_age(row.updated_at)} · {row.message_count} msgs · {row.session_id}"
+        if show_origin:
+            detail += f" · {_short_path(row.workspace)}"
+        items.append(
+            PickerItem(
+                value=row.session_id,
+                title=row.title or "(untitled)",
+                detail=detail,
+                disabled_reason="current session" if row.is_current else None,
+            )
+        )
+    return items
+
+
+async def _resume_via_picker(app, *, prefer_all: bool) -> str | None:
+    """The dsh grammar: pick a session by TITLE, ids stay on the detail line."""
+    local = app.thread_client.list_recent(
+        limit=_PREFIX_SCAN_LIMIT,
+        include_all=False,
+    )
+    every = app.thread_client.list_recent(
+        limit=_PREFIX_SCAN_LIMIT,
+        include_all=True,
+    )
+    if not every:
+        return "no stored sessions yet"
+    scopes = [
+        PickerScope(
+            f"this directory {_short_path(app.workspace)}",
+            _resume_picker_items(local, show_origin=False),
+        ),
+        PickerScope(
+            "all directories",
+            _resume_picker_items(every, show_origin=True),
+        ),
+    ]
+    initial = 1 if prefer_all or not local else 0
+    chosen = await Picker(
+        scopes,
+        title="Resume session",
+        initial_scope=initial,
+    ).run()
+    if chosen is None:
+        return None
+    return _resume_target(app, str(chosen.value))
 
 
 async def _cmd_resume(app, args: str) -> str | None:
@@ -131,6 +221,8 @@ async def _cmd_resume(app, args: str) -> str | None:
         # Default view is scoped to the current directory (the Claude Code /
         # Codex convention); `all` lifts the filter and shows origins.
         show_all = target.lower() == "all"
+        if app.reader.interactive:
+            return await _resume_via_picker(app, prefer_all=show_all)
         rows = app.thread_client.list_recent(
             limit=_RESUME_ROWS,
             include_all=show_all,
@@ -151,31 +243,23 @@ async def _cmd_resume(app, args: str) -> str | None:
         if len(resolved) > 1:
             return f"ambiguous session id {target!r} — matches {', '.join(resolved)}"
         resolved = target  # no listed match; let the store answer for exact ids
-    try:
-        turns = app.resume_conversation(resolved)
-    except (RuntimeError, ValueError) as exc:
-        return str(exc)
-    app.render_resume_tail()
-    status = f"resumed {resolved} ({turns} messages restored)"
-    origin = app.bridge.stored_workspace()
-    if origin and origin != app.workspace:
-        status += f"\nnote: this conversation was started in {origin}"
-    return status
+    return _resume_target(app, resolved)
 
 
-async def _cmd_model(app, args: str) -> str | None:
-    wanted = args.strip()
-    if not wanted:
-        return app.model_overview()
-    connection, separator, model = wanted.partition(" ")
-    if not separator:
-        model = connection
-        connection = ""
+async def _switch_model_report(
+    app,
+    connection_id: str | None,
+    model: str,
+    *,
+    reasoning_effort: str | None = None,
+    change_effort: bool = False,
+) -> str:
+    """Switch and describe the outcome — shared by argument and picker paths."""
+    kwargs = {"connection_id": connection_id}
+    if change_effort:
+        kwargs["reasoning_effort"] = reasoning_effort
     try:
-        await app.switch_model(
-            model.strip(),
-            connection_id=connection.strip() or None,
-        )
+        await app.switch_model(model, **kwargs)
     except (OSError, RuntimeError, ValueError) as exc:
         return f"model switch failed: {exc}"
     status = (
@@ -187,6 +271,107 @@ async def _cmd_model(app, args: str) -> str | None:
         status += "\nnote: the active turn keeps its model — applies from the next turn"
     note = app.model_catalog_note()
     return f"{status}\n{note}" if note else status
+
+
+def _effort_variants(
+    app,
+    connection_id: str,
+    model_id: str,
+) -> tuple[tuple[PickerVariant, ...], int]:
+    """The Shift+Tab ladder for one route: auto plus its published efforts.
+
+    Adapter-owned values only (the dsh rule) — models without published
+    reasoning controls get no ladder at all instead of invented levels.
+    """
+    efforts = app.reasoning_options(model_id, connection_id=connection_id)
+    if not efforts:
+        return (), 0
+    ladder = ("auto", *efforts)
+    variants = tuple(PickerVariant(value=level, label=level) for level in ladder)
+    current = app.requested_reasoning_effort
+    initial = ladder.index(current) if current in ladder else 0
+    return variants, initial
+
+
+def _model_picker_item(app, connection_id: str, model_id: str, detail: str):
+    variants, initial = _effort_variants(app, connection_id, model_id)
+    return PickerItem(
+        value=(connection_id, model_id),
+        title=f"{connection_id}/{model_id}",
+        detail=detail,
+        variants=variants,
+        initial_variant=initial,
+    )
+
+
+async def _model_via_picker(app) -> str | None:
+    """Pick a route from the configured catalogs (advisory, dsh's rule:
+    the current route is shown even when no catalog lists it)."""
+    profile = app.thread_client.execution_profile
+    items: list[PickerItem] = []
+    listed = False
+    for view in app.connection_views():
+        if not (view.get("configured") and view.get("enabled")):
+            continue
+        connection_id = str(view.get("id", ""))
+        for model in view.get("manualModels") or []:
+            model_id = str(model)
+            current = (
+                connection_id == profile.connection_id and model_id == profile.model_id
+            )
+            listed = listed or current
+            items.append(
+                _model_picker_item(
+                    app,
+                    connection_id,
+                    model_id,
+                    "current" if current else "",
+                )
+            )
+    if not listed:
+        items.insert(
+            0,
+            _model_picker_item(
+                app,
+                profile.connection_id,
+                profile.model_id,
+                "current · not in any catalog",
+            ),
+        )
+    if len(items) < 2:
+        # Nothing to choose between — the text directory says why.
+        return app.model_overview()
+    chosen = await Picker(
+        [PickerScope("configured models", items)],
+        title="Select model",
+        variant_hint="effort",
+    ).run()
+    if chosen is None:
+        return None
+    connection_id, model_id = chosen.value
+    # Commit model and effort together (dsh's pairing). A route without a
+    # ladder resets to auto: carrying a named effort onto a model that
+    # rejects it would fail the switch.
+    return await _switch_model_report(
+        app,
+        connection_id or None,
+        model_id,
+        reasoning_effort=str(chosen.variant) if chosen.variant else "auto",
+        change_effort=True,
+    )
+
+
+async def _cmd_model(app, args: str) -> str | None:
+    wanted = args.strip()
+    if not wanted:
+        if app.reader.interactive:
+            return await _model_via_picker(app)
+        return app.model_overview()
+    connection, separator, model = wanted.partition(" ")
+    if not separator:
+        model = connection
+        connection = ""
+    return await _switch_model_report(app, connection.strip() or None, model.strip())
 
 
 async def _cmd_effort(app, args: str) -> str | None:
@@ -207,23 +392,25 @@ async def _cmd_effort(app, args: str) -> str | None:
     )
 
 
+_PERMISSION_CHOICES: dict[str, str | None] = {
+    "ask": "ask",
+    "read-only": "read_only",
+    "read_only": "read_only",
+    "full-access": "full_access",
+    "full_access": "full_access",
+    "inherit": None,
+    "default": None,
+}
+
+
 async def _cmd_permissions(app, args: str) -> str | None:
     wanted = args.strip().casefold()
     if not wanted:
         return app.access_status()
-    aliases = {
-        "ask": "ask",
-        "read-only": "read_only",
-        "read_only": "read_only",
-        "full-access": "full_access",
-        "full_access": "full_access",
-        "inherit": None,
-        "default": None,
-    }
-    if wanted not in aliases:
+    if wanted not in _PERMISSION_CHOICES:
         return "usage: /permissions [ask|read-only|full-access|inherit]"
     try:
-        return await app.set_access_preset(aliases[wanted])
+        return await app.set_access_preset(_PERMISSION_CHOICES[wanted])
     except (OSError, RuntimeError, ValueError) as exc:
         return f"Session access update failed: {exc}"
 
@@ -246,6 +433,48 @@ async def _cmd_transcript(app, args: str) -> str | None:
         return app.set_transcript_mode(wanted)
     except ValueError as exc:
         return str(exc)
+
+
+async def _cmd_rename(app, args: str) -> str | None:
+    title = args.strip()
+    if not title:
+        return "usage: /rename <new title>"
+    try:
+        thread = app.thread_client.rename_thread(title)
+    except (OSError, RuntimeError, ValueError) as exc:
+        return f"rename failed: {exc}"
+    return f"session renamed to {thread.title}"
+
+
+async def _cmd_delete(app, args: str) -> str | None:
+    target = args.strip()
+    if not target:
+        return "usage: /delete <full session id> (see /resume all)"
+    # Deletion is irreversible, so no prefix expansion here: the exact id
+    # must be typed (tab completion fills it in).
+    try:
+        app.thread_client.delete_session(target)
+    except (OSError, RuntimeError, ValueError) as exc:
+        return str(exc)
+    return f"deleted session {target}"
+
+
+async def _cmd_retry(app, args: str) -> str | None:
+    if args.strip():
+        return "usage: /retry (re-runs this Session's last finished Turn)"
+    turn = app.thread_client.last_terminal_turn()
+    if turn is None:
+        return "no finished Turn to retry"
+    try:
+        app.thread_client.retry_turn(turn.id)
+    except (OSError, RuntimeError, ValueError) as exc:
+        return f"retry failed: {exc}"
+    if not app.reader.interactive:
+        # Piped runs drain the retried Turn before the next stdin line —
+        # the same determinism plain messages get from the REPL loop.
+        await app.thread_client.wait_until_idle()
+    head = turn.prompt.strip().splitlines()[0] if turn.prompt.strip() else ""
+    return f"retrying: {_fit_cells(head, _RESUME_TITLE_CELLS)}"
 
 
 async def _cmd_clear(app, args: str) -> str | None:
@@ -320,8 +549,22 @@ REGISTRY: dict[str, Command] = {
         Command(
             "resume",
             "/resume [id|all]",
-            "list this directory's sessions / resume one",
+            "list this directory's sessions / resume one (id prefix ok)",
             _cmd_resume,
+            arguments=_session_ids,
+        ),
+        Command(
+            "rename",
+            "/rename <title>",
+            "rename this session",
+            _cmd_rename,
+        ),
+        Command(
+            "delete",
+            "/delete <id>",
+            "permanently delete a stored session",
+            _cmd_delete,
+            arguments=_session_ids,
         ),
         Command(
             "model",
@@ -334,18 +577,21 @@ REGISTRY: dict[str, Command] = {
             "/effort [auto|off|level]",
             "show or switch reasoning effort",
             _cmd_effort,
+            arguments=_effort_levels,
         ),
         Command(
             "permissions",
             "/permissions [preset]",
             "show or set this Session's tool access",
             _cmd_permissions,
+            arguments=_permission_presets,
         ),
         Command(
             "transcript",
             "/transcript [normal|verbose|summary]",
             "show or switch transcript detail (ctrl-o cycles)",
             _cmd_transcript,
+            arguments=_transcript_modes,
         ),
         Command(
             "preset",
@@ -380,6 +626,12 @@ REGISTRY: dict[str, Command] = {
             _cmd_queue,
         ),
         Command("stop", "/stop", "interrupt the active Turn", _cmd_stop),
+        Command(
+            "retry",
+            "/retry",
+            "re-run the last finished Turn with the current model",
+            _cmd_retry,
+        ),
         Command("clear", "/clear", "clear the conversation context", _cmd_clear),
         Command(
             "compact",

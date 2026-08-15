@@ -969,3 +969,252 @@ async def test_interactive_ctrl_c_becomes_a_turn_interrupt_request() -> None:
 
     with pytest.raises(InputInterrupted):
         await reader.read()
+
+
+def test_rename_command_updates_the_stored_session_title(monkeypatch, tmp_path, capsys):
+    rc, _provider = _run_tui(
+        monkeypatch,
+        tmp_path,
+        "hello\n/rename Renamed conversation\n/exit\n",
+        ["hi"],
+    )
+    assert rc == 0
+    assert "session renamed to Renamed conversation" in capsys.readouterr().out
+
+    from core.sessions.store import SessionStore
+
+    store = SessionStore(tmp_path / "sessions")
+    assert store.list_sessions()[0].title == "Renamed conversation"
+
+
+def test_delete_command_removes_a_stored_session_but_needs_an_id(
+    monkeypatch, tmp_path, capsys
+):
+    rc, _provider = _run_tui(
+        monkeypatch,
+        tmp_path,
+        "first conversation\n/exit\n",
+        ["reply"],
+    )
+    assert rc == 0
+
+    from core.sessions.store import SessionStore
+
+    store = SessionStore(tmp_path / "sessions")
+    victim = store.list_sessions()[0].session_id
+
+    rc, _provider = _run_tui(
+        monkeypatch,
+        tmp_path,
+        f"/delete\n/delete {victim}\n/exit\n",
+        [],
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "usage: /delete" in out
+    assert f"deleted session {victim}" in out
+
+    store = SessionStore(tmp_path / "sessions")
+    assert victim not in [s.session_id for s in store.list_sessions()]
+
+
+def test_retry_command_reruns_the_last_turn_as_a_new_turn(
+    monkeypatch, tmp_path, capsys
+):
+    rc, provider = _run_tui(
+        monkeypatch,
+        tmp_path,
+        "solve the task\n/retry\n/exit\n",
+        ["first answer", "second answer"],
+    )
+    assert rc == 0
+    assert provider.calls == 2
+    out = capsys.readouterr().out
+    assert "retrying: solve the task" in out
+
+    from core.sessions.store import SessionStore
+
+    store = SessionStore(tmp_path / "sessions")
+    stored = store.get_session(store.list_sessions()[0].session_id)
+    assert stored is not None
+    assert [message.content for message in stored.messages] == [
+        "solve the task",
+        "first answer",
+        "solve the task",
+        "second answer",
+    ]
+
+
+def test_command_argument_completion_comes_from_the_registry(tmp_path):
+    from prompt_toolkit.document import Document
+
+    from cli.tui.input import TuiCompleter
+
+    completer = TuiCompleter(str(tmp_path))
+    completer.set_argument_provider(
+        lambda name, prefix: ["86db0319"] if name == "resume" else []
+    )
+
+    def texts(line: str) -> list[str]:
+        return [
+            completion.text
+            for completion in completer.get_completions(Document(line), None)
+        ]
+
+    assert texts("/resume 86") == ["86db0319"]
+    assert texts("/resume 86db0319 extra") == []  # only the first argument
+    assert texts("/rename my title") == []  # no provider, no path noise
+
+
+def test_picker_filters_by_title_and_wraps_navigation():
+    from cli.tui.picker import Picker, PickerItem, PickerScope
+
+    picker = Picker(
+        [
+            PickerScope(
+                "scope",
+                [
+                    PickerItem(1, "Alpha task", "aa11"),
+                    PickerItem(2, "Beta task", "bb22"),
+                    PickerItem(3, "Gamma", "cc33", disabled_reason="current session"),
+                ],
+            )
+        ],
+        title="Pick",
+    )
+    picker._buffer.text = "beta"
+    assert [item.title for item in picker._filtered()] == ["Beta task"]
+    picker._buffer.text = "bb2"  # detail (id) matches too
+    assert [item.title for item in picker._filtered()] == ["Beta task"]
+    picker._buffer.text = ""
+    picker._move(-1)
+    assert picker._selected == 2  # wraps to the end
+    picker._move(1)
+    assert picker._selected == 0
+
+
+def test_picker_shift_tab_cycles_the_highlighted_variant():
+    from cli.tui.picker import Picker, PickerItem, PickerScope, PickerVariant
+
+    ladder = tuple(PickerVariant(value=v, label=v) for v in ("auto", "high", "xhigh"))
+    item = PickerItem(1, "route", variants=ladder, initial_variant=1)
+    plain = PickerItem(2, "no ladder")
+    picker = Picker([PickerScope("scope", [item, plain])], title="Pick")
+    assert picker._variant_of(item).value == "high"
+    picker._cycle_variant(item)
+    assert picker._variant_of(item).value == "xhigh"
+    picker._cycle_variant(item)
+    assert picker._variant_of(item).value == "auto"  # wraps
+    assert picker._variant_of(plain) is None
+    picker._cycle_variant(plain)  # no-op, no crash
+    assert picker._variant_of(plain) is None
+
+
+def test_model_picker_offers_catalog_routes_and_switches(monkeypatch):
+    from types import SimpleNamespace
+
+    import cli.tui.commands as commands_mod
+
+    seen: dict[str, Any] = {}
+
+    class FakePicker:
+        def __init__(self, scopes, *, title, initial_scope=0, variant_hint="variant"):
+            seen["scopes"] = scopes
+            seen["variant_hint"] = variant_hint
+
+        async def run(self):
+            from cli.tui.picker import PickerChoice
+
+            return PickerChoice(value=("openrouter", "model-b"), variant="high")
+
+    monkeypatch.setattr(commands_mod, "Picker", FakePicker)
+
+    async def switch_model(model, *, connection_id=None, reasoning_effort=None):
+        seen["switch"] = (connection_id, model, reasoning_effort)
+
+    app = SimpleNamespace(
+        reader=SimpleNamespace(interactive=True),
+        connection_views=lambda: [
+            {
+                "id": "openrouter",
+                "configured": True,
+                "enabled": True,
+                "manualModels": ["model-a", "model-b"],
+            },
+            {"id": "unconfigured", "configured": False, "enabled": True},
+        ],
+        thread_client=SimpleNamespace(
+            execution_profile=SimpleNamespace(
+                connection_id="openrouter", model_id="model-a"
+            ),
+            has_active_turn=lambda: False,
+        ),
+        switch_model=switch_model,
+        model="model-b",
+        requested_reasoning_effort="auto",
+        reasoning_options=lambda model_id, connection_id=None: ("high", "xhigh"),
+        model_catalog_note=lambda: None,
+    )
+    status = asyncio.run(commands_mod._cmd_model(app, ""))
+    assert seen["switch"] == ("openrouter", "model-b", "high")
+    assert "model switched to model-b" in status
+    items = list(seen["scopes"][0].items)
+    assert [item.title for item in items] == [
+        "openrouter/model-a",
+        "openrouter/model-b",
+    ]
+    assert items[0].detail == "current"
+
+
+def test_resume_picker_marks_current_session_and_resumes_choice(monkeypatch):
+    from types import SimpleNamespace
+
+    import cli.tui.commands as commands_mod
+
+    seen: dict[str, Any] = {}
+
+    class FakePicker:
+        def __init__(self, scopes, *, title, initial_scope=0):
+            seen["scopes"] = scopes
+            seen["initial_scope"] = initial_scope
+
+        async def run(self):
+            from cli.tui.picker import PickerChoice
+
+            return PickerChoice(value="bb22cc33")
+
+    monkeypatch.setattr(commands_mod, "Picker", FakePicker)
+
+    def listing(session_id, title, current=False):
+        from datetime import UTC, datetime
+
+        return SimpleNamespace(
+            session_id=session_id,
+            title=title,
+            message_count=2,
+            updated_at=datetime.now(UTC),
+            workspace="/ws",
+            is_current=current,
+        )
+
+    rows = [
+        listing("aa11bb22", "Current one", current=True),
+        listing("bb22cc33", "Older one"),
+    ]
+    app = SimpleNamespace(
+        reader=SimpleNamespace(interactive=True),
+        workspace="/ws",
+        thread_client=SimpleNamespace(
+            list_recent=lambda *, limit, include_all: rows,
+            session_id="aa11bb22",
+        ),
+        resume_conversation=lambda sid: seen.setdefault("resumed", sid) and 2 or 2,
+        render_resume_tail=lambda: None,
+        bridge=SimpleNamespace(stored_workspace=lambda: "/ws"),
+    )
+    status = asyncio.run(commands_mod._cmd_resume(app, ""))
+    assert seen["resumed"] == "bb22cc33"
+    assert "resumed bb22cc33" in status
+    local_items = list(seen["scopes"][0].items)
+    assert local_items[0].disabled_reason == "current session"
+    assert local_items[1].disabled_reason is None

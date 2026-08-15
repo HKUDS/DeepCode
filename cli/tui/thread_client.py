@@ -246,6 +246,37 @@ class TuiThreadClient:
     def has_active_turn(self) -> bool:
         return self.application.turns.active_for_thread(self.thread.id) is not None
 
+    def rename_thread(self, title: str) -> Thread:
+        self.thread = self.application.threads.rename(self.thread.id, title)
+        return self.thread
+
+    def delete_session(self, session_id: str) -> None:
+        """Permanently delete a stored session (never the one we are in).
+
+        The deletion service already refuses sessions leased by another
+        surface; the current session would trip that lease too, but with a
+        message blaming "another surface" — catch it here with an honest one.
+        """
+        if session_id == self.thread.id:
+            raise RuntimeError(
+                "cannot delete the session you are in — /new first, then delete it"
+            )
+        self.application.deletions.delete(session_id)
+
+    def last_terminal_turn(self) -> Turn | None:
+        turns = self.application.turns.list_for_thread(self.thread.id)
+        for turn in reversed(turns):
+            if turn.status.is_terminal:
+                return turn
+        return None
+
+    def retry_turn(self, turn_id: str) -> Turn:
+        # use_current_selection: the natural CLI flow is "the turn failed,
+        # I fixed /model or /effort, run it again" — replaying the old
+        # profile would silently undo that fix.
+        snapshot = self.application.turns.retry(turn_id, use_current_selection=True)
+        return snapshot.turn
+
     def interrupt(self) -> tuple[bool, Turn] | None:
         active = self.application.turns.active_for_thread(self.thread.id)
         if active is None:
