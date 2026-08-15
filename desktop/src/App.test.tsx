@@ -227,6 +227,7 @@ class TestRuntime implements DesktopRuntime {
   readonly calls: string[] = [];
   readonly requests: Array<{ method: string; params: unknown }> = [];
   readonly diagnosticsExports: DiagnosticsSnapshot[] = [];
+  readonly openedPaths: string[] = [];
   updateInstallCount = 0;
   private readonly threadState: Thread[];
   private settingsState: SettingsSnapshot = {
@@ -1023,6 +1024,10 @@ class TestRuntime implements DesktopRuntime {
   async exportDiagnostics(snapshot: DiagnosticsSnapshot) {
     this.diagnosticsExports.push(snapshot);
     return "/tmp/deepcode-diagnostics-test.json";
+  }
+
+  async openPath(path: string) {
+    this.openedPaths.push(path);
   }
 
   async checkForUpdate() {
@@ -1841,6 +1846,59 @@ describe("desktop command center", () => {
     expect(runtime.calls).not.toContain("hooks/list");
   });
 
+  it("opens Settings as a sectioned dialog and closes it again", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Settings" });
+    const nav = within(dialog).getByRole("navigation", {
+      name: "Settings sections",
+    });
+    expect(
+      within(nav)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["General", "Models", "Plugins", "Agent presets"]);
+
+    // General is active by default and carries the permission card.
+    expect(
+      within(dialog).getByRole("combobox", { name: "Default Session access" }),
+    ).toBeTruthy();
+
+    // Sections switch without leaving the dialog.
+    fireEvent.click(within(nav).getByRole("button", { name: "Agent presets" }));
+    expect(
+      await within(dialog).findByRole("heading", { name: "Agent presets" }),
+    ).toBeTruthy();
+
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Close settings" }),
+    );
+    expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
+  });
+
+  it("opens the configuration file from the dialog header", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const dialog = await screen.findByRole("dialog", { name: "Settings" });
+    const openButton = within(dialog).getByRole("button", {
+      name: "Open configuration file",
+    });
+    await waitFor(() =>
+      expect((openButton as HTMLButtonElement).disabled).toBe(false),
+    );
+    fireEvent.click(openButton);
+    await waitFor(() =>
+      expect(runtime.openedPaths).toEqual(["/tmp/deepcode_config.json"]),
+    );
+  });
+
   it("loads effective Settings and sanitized diagnostics for the selected project", async () => {
     const runtime = new TestRuntime([project], [thread], []);
     render(<App runtime={runtime} />);
@@ -1960,7 +2018,7 @@ describe("desktop command center", () => {
     await screen.findByRole("heading", { name: "Recovered task" });
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     const scope = await screen.findByRole("combobox", {
-      name: "Write changes to",
+      name: "Write to",
     });
     fireEvent.change(scope, { target: { value: "project" } });
     const access = screen.getByRole("combobox", {
@@ -2000,6 +2058,7 @@ describe("desktop command center", () => {
 
     await screen.findByRole("heading", { name: "Recovered task" });
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Models" }));
     await screen.findByRole("heading", { name: "AI providers" });
     fireEvent.click(screen.getByRole("button", { name: "Add provider" }));
     fireEvent.click(screen.getByRole("button", { name: /OpenRouter/ }));
@@ -2063,6 +2122,7 @@ describe("desktop command center", () => {
 
     await screen.findByRole("heading", { name: "Recovered task" });
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Models" }));
     await screen.findByRole("heading", { name: "AI providers" });
 
     // The stubbed openai connection resolves its key from the environment.
@@ -2090,6 +2150,7 @@ describe("desktop command center", () => {
 
     await screen.findByRole("heading", { name: "Recovered task" });
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Models" }));
     await screen.findByRole("heading", { name: "AI providers" });
 
     const strip = await screen.findByRole("list", {
@@ -2110,6 +2171,7 @@ describe("desktop command center", () => {
 
     await screen.findByRole("heading", { name: "Recovered task" });
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Models" }));
     await screen.findByRole("heading", { name: "AI providers" });
     const connectionName = await screen.findByText("OpenAI", {
       selector: "strong",
@@ -2144,6 +2206,7 @@ describe("desktop command center", () => {
 
     await screen.findByRole("heading", { name: "Recovered task" });
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Models" }));
     const providersHeading = await screen.findByRole("heading", {
       name: "AI providers",
     });

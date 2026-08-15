@@ -29,6 +29,11 @@ const ManagementWorkspace = lazy(() =>
     default: module.ManagementWorkspace,
   })),
 );
+const SettingsDialog = lazy(() =>
+  import("./features/settings/SettingsDialog").then((module) => ({
+    default: module.SettingsDialog,
+  })),
+);
 const ThreadConversation = lazy(() =>
   import("./features/thread/ThreadConversation").then((module) => ({
     default: module.ThreadConversation,
@@ -122,9 +127,11 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
         busy={state.busy}
         runtime={state.runtime}
         destination={ui.destination}
+        settingsOpen={ui.settingsOpen}
         onDestination={(destination) => {
           void ui.navigateTo(destination);
         }}
+        onOpenSettings={ui.openSettings}
         onQueryChange={ui.setSessionQuery}
         onOpenProject={() => {
           void (async () => {
@@ -374,10 +381,6 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
               destination={ui.destination}
               runtime={runtime}
               project={selectedProject}
-              settings={state.settings}
-              busy={state.busy}
-              onRefreshSettings={controller.refreshSettings}
-              onUpdateSettings={controller.updateSettings}
               onThreadCreated={controller.registerThread}
               onOpenThread={(threadId) => {
                 void (async () => {
@@ -426,6 +429,20 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
             />
           </Suspense>
         </section>
+      ) : null}
+
+      {ui.settingsOpen ? (
+        <Suspense fallback={null}>
+          <SettingsDialog
+            runtime={runtime}
+            project={selectedProject}
+            settings={state.settings}
+            busy={state.busy}
+            onRefresh={controller.refreshSettings}
+            onUpdate={controller.updateSettings}
+            onClose={ui.closeSettings}
+          />
+        </Suspense>
       ) : null}
     </main>
   );

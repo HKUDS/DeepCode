@@ -35,7 +35,9 @@ interface DesktopSidebarProps {
   busy: boolean;
   runtime: SidecarStatus;
   destination: DesktopDestination;
+  settingsOpen: boolean;
   onDestination(destination: DesktopDestination): void;
+  onOpenSettings(): void;
   onQueryChange(query: string): void;
   onOpenProject(): void;
   onSelectProject(projectId: string): void;
@@ -82,7 +84,9 @@ export function DesktopSidebar({
   busy,
   runtime,
   destination,
+  settingsOpen,
   onDestination,
+  onOpenSettings,
   onQueryChange,
   onOpenProject,
   onSelectProject,
@@ -266,8 +270,8 @@ export function DesktopSidebar({
         </button>
         <button
           type="button"
-          data-active={destination === "settings"}
-          onClick={() => onDestination("settings")}
+          data-active={settingsOpen}
+          onClick={onOpenSettings}
         >
           <Settings size={16} />
           Settings
