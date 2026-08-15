@@ -144,6 +144,22 @@ Skills, permissions, Goals, and Automations. See the
 
 ## News
 
+**2026-08-16 · The TUI answers every bare command with a selector**
+
+- **Type the command, pick from a list.** `/model` now opens the full model
+  directory — every configured connection's catalog (remote snapshot or
+  declared entries, near a thousand rows on OpenRouter) in one filterable
+  selector with the current route pinned first and each model's published
+  reasoning ladder on Shift+Tab; Enter commits model and effort together.
+  `/preset`, `/effort`, `/permissions`, `/transcript` and `/skill` join
+  `/resume`: a bare invocation opens a picker with the current choice
+  marked, while argument forms and piped runs keep their text paths.
+- **Background tracebacks can no longer shred the transcript.** Stdlib
+  logging is bridged into loguru with call-site fidelity, so file-only
+  transports really are file-only; and the durable event relay backs off
+  exponentially on persistent failure — one traceback per streak, one-line
+  repeats, a recovery notice.
+
 **2026-08-15 · Settings grow up: a dsh-style dialog, declared models, and a safer config**
 
 - **A connection's key now reaches exactly the requests it was resolved
