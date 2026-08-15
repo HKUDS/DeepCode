@@ -1236,6 +1236,10 @@
         "configPath": {
           "type": "string"
         },
+        "configRevision": {
+          "type": "string",
+          "minLength": 1
+        },
         "agents": {
           "$ref": "#/$defs/JsonObject"
         },
@@ -1293,6 +1297,7 @@
       },
       "required": [
         "configPath",
+        "configRevision",
         "agents",
         "security",
         "permissionModeExplicit",
@@ -1320,6 +1325,10 @@
         },
         "riskAcknowledged": {
           "type": "boolean"
+        },
+        "expectedRevision": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "required": [
@@ -1530,6 +1539,10 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "expectedRevision": {
+          "type": "string",
+          "minLength": 1
+        },
         "connection": {
           "type": "object",
           "additionalProperties": false,
@@ -1618,6 +1631,10 @@
       "additionalProperties": false,
       "properties": {
         "connectionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expectedRevision": {
           "type": "string",
           "minLength": 1
         }
@@ -6774,6 +6791,19 @@
           "additionalProperties": false,
           "properties": {}
         },
+        "settings.changed": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "configRevision": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "configRevision"
+          ]
+        },
         "mcp.changed": {
           "type": "object",
           "additionalProperties": false,
@@ -6824,6 +6854,7 @@
         "terminal.exit",
         "skills.changed",
         "plugins.changed",
+        "settings.changed",
         "mcp.changed",
         "server.warning"
       ]

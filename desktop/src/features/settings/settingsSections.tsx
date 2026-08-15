@@ -42,6 +42,8 @@ export interface SettingsSectionProps {
 export interface SettingsSection {
   id: SettingsSectionId;
   order: number;
+  /** i18n key; `label` is the English source of truth (the defaultValue). */
+  labelKey: string;
   label: string;
   icon: LucideIcon;
   component: ComponentType<SettingsSectionProps>;
@@ -51,6 +53,7 @@ const SECTIONS: readonly SettingsSection[] = [
   {
     id: "general",
     order: 0,
+    labelKey: "settings.section.general",
     label: "General",
     icon: SettingsIcon,
     component: GeneralSection,
@@ -58,6 +61,7 @@ const SECTIONS: readonly SettingsSection[] = [
   {
     id: "models",
     order: 10,
+    labelKey: "settings.section.models",
     label: "Models",
     icon: Database,
     component: ModelsSection,
@@ -65,6 +69,7 @@ const SECTIONS: readonly SettingsSection[] = [
   {
     id: "plugins",
     order: 15,
+    labelKey: "settings.section.plugins",
     label: "Plugins",
     icon: SlidersHorizontal,
     component: PluginsSection,
@@ -72,6 +77,7 @@ const SECTIONS: readonly SettingsSection[] = [
   {
     id: "agent-presets",
     order: 20,
+    labelKey: "settings.section.presets",
     label: "Agent presets",
     icon: Bot,
     component: PresetsSection,

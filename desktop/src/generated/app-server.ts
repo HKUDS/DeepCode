@@ -216,8 +216,10 @@ export interface SettingsUpdateParams {
   scope?: ConfigScope;
   projectId?: string;
   riskAcknowledged?: boolean;
+  expectedRevision?: string;
 }
 export interface ProviderUpsertParams {
+  expectedRevision?: string;
   connection: {
     id: string;
     label?: string;
@@ -242,6 +244,7 @@ export interface ManualModelEntry {
 }
 export interface ConnectionIdentityParams {
   connectionId: string;
+  expectedRevision?: string;
 }
 export interface ProviderTestParams {
   connectionId: string;
@@ -913,6 +916,7 @@ export interface Project {
 }
 export interface SettingsSnapshot {
   configPath: string;
+  configRevision: string;
   agents: JsonObject;
   security: JsonObject;
   permissionModeExplicit: boolean;
@@ -1616,6 +1620,9 @@ export interface Notifications {
     projectId: string;
   };
   "plugins.changed": {};
+  "settings.changed": {
+    configRevision: string;
+  };
   "mcp.changed": {};
   "server.warning": {
     code: string;

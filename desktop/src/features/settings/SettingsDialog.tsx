@@ -8,6 +8,7 @@
 
 import { FileText, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import type {
   ConfigScope,
@@ -45,6 +46,7 @@ export function SettingsDialog({
   onUpdate,
   onClose,
 }: SettingsDialogProps) {
+  const { t } = useTranslation();
   const [activeId, setActiveId] = useState<SettingsSectionId>(
     SETTINGS_SECTIONS[0].id,
   );
@@ -65,6 +67,27 @@ export function SettingsDialog({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
+
+  useEffect(() => {
+    // The server pushes settings.changed when the config file moves under
+    // us (another window, an external editor). Refreshing only while the
+    // dialog is mounted is the dsh refresh-if-loaded rule: an unopened
+    // surface never fetches on background invalidations.
+    let disposed = false;
+    let unsubscribe: (() => void) | null = null;
+    void runtime
+      .onNotification((note) => {
+        if (note.method === "settings.changed") void onRefresh();
+      })
+      .then((dispose) => {
+        if (disposed) dispose();
+        else unsubscribe = dispose;
+      });
+    return () => {
+      disposed = true;
+      unsubscribe?.();
+    };
+  }, [runtime, onRefresh]);
 
   const openConfigFile = async () => {
     if (!settings?.configPath) return;
@@ -90,19 +113,19 @@ export function SettingsDialog({
         aria-labelledby="settings-dialog-title"
       >
         <header className={styles.header}>
-          <h1 id="settings-dialog-title">Settings</h1>
+          <h1 id="settings-dialog-title">{t("settings.title", "Settings")}</h1>
           <div className={styles.headerActions}>
             <label className={styles.scope}>
-              Write to
+              {t("settings.writeTo", "Write to")}
               <select
                 value={effectiveScope}
                 onChange={(event) =>
                   setScope(event.target.value as ConfigScope)
                 }
               >
-                <option value="user">User config</option>
+                <option value="user">{t("settings.scope.user", "User config")}</option>
                 <option value="project" disabled={!canWriteProject}>
-                  Selected project
+                  {t("settings.scope.project", "Selected project")}
                 </option>
               </select>
             </label>
@@ -114,12 +137,12 @@ export function SettingsDialog({
               onClick={() => void openConfigFile()}
             >
               <FileText size={14} />
-              Open configuration file
+              {t("settings.openConfig", "Open configuration file")}
             </button>
             <button
               className={styles.close}
               type="button"
-              aria-label="Close settings"
+              aria-label={t("settings.close", "Close settings")}
               onClick={onClose}
             >
               <X size={16} />
@@ -140,7 +163,7 @@ export function SettingsDialog({
                   onClick={() => setActiveId(section.id)}
                 >
                   <Icon size={16} />
-                  {section.label}
+                  {t(section.labelKey, section.label)}
                 </button>
               );
             })}

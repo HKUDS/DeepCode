@@ -17,6 +17,7 @@ import {
   settingsDefaultAccessLabel,
 } from "../../../app/accessPreset";
 import { confirmAction } from "../../../platform/confirmAction";
+import { useTranslation } from "react-i18next";
 import styles from "../../management/ManagementWorkspace.module.css";
 
 interface PermissionCardProps {
@@ -36,6 +37,7 @@ export function PermissionCard({
   scope,
   onUpdate,
 }: PermissionCardProps) {
+  const { t } = useTranslation();
   const [accessPresetDraft, setAccessPresetDraft] = useState<
     ExecutionAccessPreset | null | undefined
   >(undefined);
@@ -74,8 +76,10 @@ export function PermissionCard({
     <section className={styles.formCard}>
       <header>
         <div>
-          <p className={styles.eyebrow}>Safety policy</p>
-          <h2>Permissions</h2>
+          <p className={styles.eyebrow}>
+            {t("settings.permissions.eyebrow", "Safety policy")}
+          </p>
+          <h2>{t("settings.permissions.title", "Permissions")}</h2>
         </div>
       </header>
       <div className={styles.formGrid}>

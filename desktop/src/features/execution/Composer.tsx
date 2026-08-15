@@ -21,6 +21,7 @@ import type {
 import type { GoalDefinitionInput } from "../../app/useWorkspaceController";
 import type { InteractiveDelivery } from "../../app/interactiveTurnRouter";
 import { useComposerBehavior } from "../../app/composerBehavior";
+import { useTranslation } from "react-i18next";
 import {
   ACCESS_PRESET_OPTIONS,
   settingsDefaultAccessLabel,
@@ -127,6 +128,7 @@ export function Composer({
 }: ComposerProps) {
   const active = executingTurn !== null;
   const { busyEnter } = useComposerBehavior();
+  const { t } = useTranslation();
   const initialLaunch =
     launchIntent && launchIntent.threadId === thread?.id ? launchIntent : null;
   const {
@@ -635,7 +637,7 @@ export function Composer({
                 onClick={() => void submitQueued()}
                 disabled={!canExecute || busy || !prompt.trim()}
               >
-                Queue next
+                {t("composer.queueNext", "Queue next")}
               </button>
               <button
                 className={styles.stopButton}
@@ -669,10 +671,10 @@ export function Composer({
         <span>
           {active
             ? busyEnter === "queue"
-              ? "↵ queue · ⌘↵ steer"
-              : "↵ steer · ⌘↵ queue"
-            : "↵ send"}{" "}
-          · ⇧↵ newline
+              ? t("composer.hint.queueSteer", "↵ queue · ⌘↵ steer")
+              : t("composer.hint.steerQueue", "↵ steer · ⌘↵ queue")
+            : t("composer.hint.send", "↵ send")}{" "}
+          · {t("composer.hint.newline", "⇧↵ newline")}
         </span>
       </p>
     </footer>

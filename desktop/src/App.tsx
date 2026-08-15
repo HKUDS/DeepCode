@@ -17,7 +17,11 @@ import { ThreadHeader } from "./features/thread/ThreadHeader";
 import { useTranscriptMode } from "./features/thread/transcriptMode";
 import type { DesktopRuntime } from "./rpc/contracts";
 import { tauriRuntime } from "./rpc/tauriRuntime";
+import { initI18n } from "./app/i18n";
 import styles from "./App.module.css";
+
+// Idempotent: tests render <App> directly without main.tsx.
+initI18n();
 
 const Inspector = lazy(() =>
   import("./features/inspector/Inspector").then((module) => ({

@@ -526,15 +526,21 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
       scope: ConfigScope = "user",
       riskAcknowledged = false,
     ) => {
+      // User-scoped writes carry the revision this UI last read, so a
+      // config changed elsewhere (another window, an external editor)
+      // surfaces as a conflict instead of being silently clobbered.
+      const expectedRevision =
+        scope === "user" ? state.settings?.configRevision : undefined;
       const result = await runtime.request("settings/update", {
         patch,
         scope,
         ...(selectedProject ? { projectId: selectedProject.id } : {}),
         ...(riskAcknowledged ? { riskAcknowledged: true } : {}),
+        ...(expectedRevision ? { expectedRevision } : {}),
       });
       dispatch({ type: "settings", settings: result.settings });
     },
-    [runtime, selectedProject],
+    [runtime, selectedProject, state.settings],
   );
 
   const setAccessPreset = useCallback(

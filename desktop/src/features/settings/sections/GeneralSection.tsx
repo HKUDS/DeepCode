@@ -7,6 +7,7 @@
 import { AppearanceSettings } from "../AppearanceSettings";
 import type { SettingsSectionProps } from "../settingsSections";
 import { ComposerBehaviorCard } from "./ComposerBehaviorCard";
+import { LanguageCard } from "./LanguageCard";
 import { DefaultPresetCard } from "./DefaultPresetCard";
 import { DiagnosticsCard } from "./DiagnosticsCard";
 import { PermissionCard } from "./PermissionCard";
@@ -24,6 +25,7 @@ export function GeneralSection(props: SettingsSectionProps) {
         scope={scope}
         onUpdate={onUpdate}
       />
+      <LanguageCard />
       <AppearanceSettings />
       <ComposerBehaviorCard />
       <UpdatesCard runtime={runtime} />

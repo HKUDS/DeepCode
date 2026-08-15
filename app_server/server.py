@@ -6,6 +6,7 @@ import logging
 import threading
 from typing import Any, BinaryIO
 
+from app_server.config_watch import ConfigFileWatcher
 from app_server.connection import ConnectionState
 from app_server.dispatcher import Dispatcher
 from app_server.errors import RpcError, from_application_error
@@ -92,6 +93,25 @@ class AppServer:
                 stop_pump.set()
 
         mcp_token = self.application.mcp.subscribe_changes(deliver_mcp_change)
+
+        def deliver_settings_change(config_revision: str) -> None:
+            try:
+                with delivery_lock:
+                    self._write_notification(
+                        sink,
+                        notification(
+                            rpc_notifications.SETTINGS_CHANGED,
+                            {"configRevision": config_revision},
+                        ),
+                    )
+            except (BrokenPipeError, OSError, ValueError):
+                stop_pump.set()
+
+        settings_watcher = ConfigFileWatcher(
+            self.application.settings.store,
+            deliver_settings_change,
+        )
+        settings_watcher.start()
         pump = threading.Thread(
             target=self._pump_events,
             args=(sink, connection, delivery_lock, stop_pump),
@@ -165,6 +185,7 @@ class AppServer:
             self.application.skills.unsubscribe_changes(skill_token)
             self.application.plugins.unsubscribe_changes(plugin_token)
             self.application.mcp.unsubscribe_changes(mcp_token)
+            settings_watcher.stop()
             connection.close()
             self.application.close()
         return 0

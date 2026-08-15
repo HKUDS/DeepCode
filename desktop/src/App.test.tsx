@@ -84,6 +84,7 @@ const readOnlySecurityProfile: ExecutionSecurityProfile = {
 
 const desktopSettings: SettingsSnapshot = {
   configPath: "/tmp/deepcode_config.json",
+  configRevision: "rev-test-1",
   agents: {
     defaults: {
       model: "gpt-5",
@@ -1944,6 +1945,41 @@ describe("desktop command center", () => {
     fireEvent.change(composer, { target: { value: "steer now" } });
     fireEvent.keyDown(composer, { key: "Enter", metaKey: true });
     await waitFor(() => expect(runtime.calls).toContain("turn/steer"));
+  });
+
+  it("renders the settings dialog in Chinese after switching the language", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const dialog = await screen.findByRole("dialog", { name: "Settings" });
+    fireEvent.change(
+      within(dialog).getByRole("combobox", { name: "Interface language" }),
+      { target: { value: "zh-CN" } },
+    );
+
+    // The shell, the section rail, and the sidebar all switch immediately.
+    expect(
+      await screen.findByRole("heading", { name: "设置" }),
+    ).toBeTruthy();
+    const nav = within(screen.getByRole("dialog", { name: "设置" })).getByRole(
+      "navigation",
+      { name: "Settings sections" },
+    );
+    expect(
+      within(nav)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["通用", "模型", "插件", "智能体预设"]);
+    expect(screen.getByRole("button", { name: "打开配置文件" })).toBeTruthy();
+
+    // Switching back restores English for the remaining tests' queries.
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "界面语言" }),
+      { target: { value: "en" } },
+    );
+    expect(await screen.findByRole("heading", { name: "Settings" })).toBeTruthy();
   });
 
   it("opens Settings as a sectioned dialog and closes it again", async () => {

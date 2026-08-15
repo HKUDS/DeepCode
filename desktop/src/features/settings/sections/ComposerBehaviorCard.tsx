@@ -9,6 +9,7 @@ import {
   useComposerBehavior,
   type BusyEnterBehavior,
 } from "../../../app/composerBehavior";
+import { useTranslation } from "react-i18next";
 import styles from "../../management/ManagementWorkspace.module.css";
 
 const BEHAVIOR_LABELS: Record<BusyEnterBehavior, string> = {
@@ -18,12 +19,15 @@ const BEHAVIOR_LABELS: Record<BusyEnterBehavior, string> = {
 
 export function ComposerBehaviorCard() {
   const { busyEnter, setBusyEnter } = useComposerBehavior();
+  const { t } = useTranslation();
   return (
     <section className={styles.formCard}>
       <header>
         <div>
-          <p className={styles.eyebrow}>Composer</p>
-          <h2>Enter behavior while busy</h2>
+          <p className={styles.eyebrow}>
+            {t("settings.composer.eyebrow", "Composer")}
+          </p>
+          <h2>{t("settings.composer.title", "Enter behavior while busy")}</h2>
         </div>
       </header>
       <div className={styles.formGrid}>

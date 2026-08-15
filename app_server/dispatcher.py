@@ -399,7 +399,9 @@ class Dispatcher:
         }
 
     def _settings_update(self, params: Params) -> dict[str, Any]:
-        params.only("patch", "scope", "projectId", "riskAcknowledged")
+        params.only(
+            "patch", "scope", "projectId", "riskAcknowledged", "expectedRevision"
+        )
         patch = dict(params.object("patch") or {})
         security = patch.get("security")
         if (
@@ -414,6 +416,7 @@ class Dispatcher:
             patch,
             scope=params.string("scope", required=False) or "user",
             project_id=params.string("projectId", required=False),
+            expected_revision=params.string("expectedRevision", required=False),
         )
         return {"settings": settings}
 
@@ -424,12 +427,18 @@ class Dispatcher:
         )
 
     def _provider_upsert(self, params: Params) -> dict[str, Any]:
-        params.only("connection")
-        return self.application.llm.upsert(dict(params.object("connection") or {}))
+        params.only("connection", "expectedRevision")
+        return self.application.llm.upsert(
+            dict(params.object("connection") or {}),
+            expected_revision=params.string("expectedRevision", required=False),
+        )
 
     def _provider_remove(self, params: Params) -> dict[str, Any]:
-        params.only("connectionId")
-        return self.application.llm.remove(str(params.string("connectionId")))
+        params.only("connectionId", "expectedRevision")
+        return self.application.llm.remove(
+            str(params.string("connectionId")),
+            expected_revision=params.string("expectedRevision", required=False),
+        )
 
     def _provider_test(self, params: Params) -> dict[str, Any]:
         params.only("connectionId", "projectId", "model")

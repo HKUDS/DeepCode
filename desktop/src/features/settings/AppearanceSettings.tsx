@@ -13,6 +13,7 @@ import {
   availableFontCandidates,
 } from "../../app/fontCandidates";
 import { useAppearance } from "../../app/useAppearance";
+import { useTranslation } from "react-i18next";
 import styles from "../management/ManagementWorkspace.module.css";
 import modeStyles from "./AppearanceSettings.module.css";
 
@@ -53,6 +54,7 @@ const THEME_LABELS: Record<ThemePreference, string> = {
  */
 export function AppearanceSettings() {
   const { appearance, set, reset } = useAppearance();
+  const { t } = useTranslation();
   const fieldId = useId();
   // Probed once per mount: the set of installed fonts does not change while
   // the settings page is open.
@@ -65,8 +67,10 @@ export function AppearanceSettings() {
     <section className={styles.formCard}>
       <header>
         <div>
-          <p className={styles.eyebrow}>Display</p>
-          <h2>Appearance</h2>
+          <p className={styles.eyebrow}>
+            {t("settings.appearance.eyebrow", "Display")}
+          </p>
+          <h2>{t("settings.appearance.title", "Appearance")}</h2>
         </div>
       </header>
 

@@ -8,8 +8,11 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from core.application.config_store import ConfigStore
-from core.application.errors import InvalidArgumentError
+from core.application.config_store import (
+    ConfigRevisionConflict,
+    ConfigStore,
+)
+from core.application.errors import ConflictError, InvalidArgumentError
 from core.application.project_service import ProjectService
 from core.config import (
     ConnectionProfileConfig,
@@ -109,7 +112,12 @@ class LLMConfigurationService:
         except ValueError:
             return None
 
-    def upsert(self, value: dict[str, Any]) -> dict[str, Any]:
+    def upsert(
+        self,
+        value: dict[str, Any],
+        *,
+        expected_revision: str | None = None,
+    ) -> dict[str, Any]:
         connection_id, api_key, clear_api_key = self._parse_mutation(value)
         config_fields_supplied = bool(set(value) - {"id", "apiKey", "clearApiKey"})
 
@@ -146,14 +154,19 @@ class LLMConfigurationService:
             and find_by_name(connection_id) is not None
         )
         if not credential_only_builtin:
-            self.config_store.mutate(transform)
+            self._mutate_config(transform, expected_revision)
         if clear_api_key:
             self.credentials.clear(connection_id)
         if api_key is not None:
             self.credentials.set(connection_id, api_key)
         return self.list_connections()
 
-    def remove(self, connection_id: str) -> dict[str, Any]:
+    def remove(
+        self,
+        connection_id: str,
+        *,
+        expected_revision: str | None = None,
+    ) -> dict[str, Any]:
         try:
             clean_id = validate_connection_id(connection_id)
         except ValueError as exc:
@@ -189,7 +202,7 @@ class LLMConfigurationService:
                 return {**current, "providers": providers}
             return {key: value for key, value in current.items() if key != "providers"}
 
-        self.config_store.mutate(transform)
+        self._mutate_config(transform, expected_revision)
         credential_removed = self.credentials.clear(clean_id)
         return {
             "removed": removed or credential_removed,
@@ -541,6 +554,12 @@ class LLMConfigurationService:
         project = self.projects.read(project_id)
         workspace = Path(project.canonical_path).resolve(strict=False)
         return load_config_for_workspace(workspace)
+
+    def _mutate_config(self, transform, expected_revision: str | None) -> None:
+        try:
+            self.config_store.mutate(transform, expected_revision=expected_revision)
+        except ConfigRevisionConflict as exc:
+            raise ConflictError(str(exc)) from exc
 
     @staticmethod
     def _parse_mutation(

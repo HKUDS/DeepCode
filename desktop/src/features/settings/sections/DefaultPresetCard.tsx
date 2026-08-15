@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 
 import type { AgentPresetEntry, SettingsSnapshot } from "../../../generated/app-server";
 import type { SettingsSectionProps } from "../settingsSections";
+import { useTranslation } from "react-i18next";
 import styles from "../../management/ManagementWorkspace.module.css";
 
 function configuredDefaultPreset(settings: SettingsSnapshot | null): string {
@@ -28,6 +29,7 @@ export function DefaultPresetCard({
   scope,
   onUpdate,
 }: SettingsSectionProps) {
+  const { t } = useTranslation();
   const projectId = project?.id ?? null;
   const [roster, setRoster] = useState<{
     projectId: string;
@@ -70,8 +72,10 @@ export function DefaultPresetCard({
     <section className={styles.formCard}>
       <header>
         <div>
-          <p className={styles.eyebrow}>Session defaults</p>
-          <h2>Agent preset</h2>
+          <p className={styles.eyebrow}>
+            {t("settings.preset.eyebrow", "Session defaults")}
+          </p>
+          <h2>{t("settings.preset.title", "Agent preset")}</h2>
         </div>
       </header>
       <div className={styles.formGrid}>
