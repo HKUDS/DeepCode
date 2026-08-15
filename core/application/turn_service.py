@@ -1119,7 +1119,25 @@ class TurnService:
         """
         if self.active_for_thread(thread_id) is not None:
             raise ConflictError("Compaction is unavailable while a Turn is active.")
-        return await self.session_runtimes.compact_live_history(thread_id)
+        with self.database.read() as connection:
+            thread = ThreadRepository(connection).get(thread_id)
+        if thread is None:
+            raise ThreadNotFoundError(f"thread not found: {thread_id}")
+        # Resolve the Thread's CURRENT selection exactly like a Turn does, so
+        # compaction summarizes with the model the user selected — not with
+        # whatever the resident runtime was built with before a switch.
+        execution_profile = self.llm_configuration.resolve(
+            thread.workspace_path,
+            ExecutionSelection(
+                connection_id=thread.connection_id,
+                model_id=thread.model,
+                reasoning_effort=thread.reasoning_effort,
+            ),
+        )
+        return await self.session_runtimes.compact_live_history(
+            thread_id,
+            execution_profile=execution_profile,
+        )
 
     def interrupt(
         self,

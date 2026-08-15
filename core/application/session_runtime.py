@@ -271,7 +271,12 @@ class SessionRuntimeRegistry:
         runtime.agent.load_history([])
         runtime.canonical_message_count = len(canonical.messages)
 
-    async def compact_live_history(self, session_id: str) -> dict[str, Any]:
+    async def compact_live_history(
+        self,
+        session_id: str,
+        *,
+        execution_profile: ExecutionProfile | None = None,
+    ) -> dict[str, Any]:
         """Summarize the resident model context in place (`/compact`).
 
         The canonical Session log stays untouched — the same contract as
@@ -279,6 +284,10 @@ class SessionRuntimeRegistry:
         summary instead of dropping everything. A Session with no resident
         runtime has nothing to compact: its context is rebuilt from
         canonical history on the next acquire anyway.
+
+        ``execution_profile`` is the Thread's *current* resolved selection;
+        when given, a stale idle runtime is rebuilt first (see
+        :meth:`_refresh_idle_runtime`).
         """
         runtime = self._runtimes.get(session_id)
         if runtime is None:
@@ -288,6 +297,8 @@ class SessionRuntimeRegistry:
             )
         if runtime.active:
             raise ConflictError(f"session runtime is active: {session_id}")
+        if execution_profile is not None:
+            runtime = await self._refresh_idle_runtime(runtime, execution_profile)
         compact = getattr(runtime.agent, "compact", None)
         if not callable(compact):
             raise ConflictError(
@@ -410,6 +421,49 @@ class SessionRuntimeRegistry:
             goals=goals,
             goals_enabled=goals_enabled,
         )
+
+    async def _refresh_idle_runtime(
+        self,
+        runtime: LiveSessionRuntime,
+        execution_profile: ExecutionProfile,
+    ) -> LiveSessionRuntime:
+        """Apply acquire's rebuild-on-config-change rule to an idle runtime.
+
+        Turns always pass through :meth:`acquire`, whose runtime-key gate
+        rebuilds the agent when the execution configuration changed.
+        On-demand maintenance (`/compact`) reuses the resident agent
+        directly, so it must honor the same rule — otherwise a model switch
+        would keep summarizing with the previous provider/model.
+        """
+        canonical = self.store.get_session(runtime.session_id)
+        if canonical is None:
+            raise ThreadNotFoundError(f"session not found: {runtime.session_id}")
+        agent_preset = AgentPresetSnapshot.from_metadata(
+            canonical.metadata.get(PRESET_METADATA_KEY)
+        )
+        runtime_key = self._runtime_key(
+            workspace=runtime.workspace,
+            model=execution_profile.model_id,
+            execution_profile=execution_profile,
+            execution_security_profile=runtime.execution_security_profile,
+            permission_mode_override=runtime.permission_mode_override,
+            agent_preset=agent_preset,
+        )
+        if runtime_key == runtime.runtime_key:
+            return runtime
+        await runtime.agent.aclose()
+        rebuilt = self._create(
+            canonical,
+            workspace=runtime.workspace,
+            model=execution_profile.model_id,
+            execution_profile=execution_profile,
+            execution_security_profile=runtime.execution_security_profile,
+            permission_mode_override=runtime.permission_mode_override,
+            agent_preset=agent_preset,
+            runtime_key=runtime_key,
+        )
+        self._runtimes[runtime.session_id] = rebuilt
+        return rebuilt
 
     def _mailbox(self, session_id: str) -> TurnInputMailbox:
         with self._mailbox_lock:

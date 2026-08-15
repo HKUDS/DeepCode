@@ -178,8 +178,14 @@ class InputReader:
         """Next input line, or ``None`` on EOF (ctrl-d / pipe end)."""
         if self._prompt_session is not None:
             try:
-                with patch_stdout():
-                    return await self._prompt_session.prompt_async(theme.PROMPT)
+                # raw=True: without it prompt_toolkit REPLACES every ESC
+                # byte written while the prompt is active with "?", so all
+                # rich color output printed mid-turn rendered as literal
+                # "?[36m" garbage on screen.
+                with patch_stdout(raw=True):
+                    return await self._prompt_session.prompt_async(
+                        theme.prompt_fragments()
+                    )
             except KeyboardInterrupt as exc:
                 raise InputInterrupted() from exc
             except EOFError:

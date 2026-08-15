@@ -27,9 +27,10 @@ sys.path.insert(
     0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
 
+from pathlib import Path
+
 from rich.console import Console
 from rich.markup import escape
-from rich.panel import Panel
 
 from cli.config_errors import format_config_error
 from cli.execution_options import (
@@ -58,6 +59,11 @@ from core.domain.execution_security import ExecutionAccessPreset
 from core.domain.project import TrustState
 from core.file_lock import FileLease
 from core.providers.reasoning import normalize_reasoning_effort
+
+
+_MODEL_CATALOG_PREVIEW = 4  # models shown per connection in /model
+_RESUME_TAIL_MESSAGES = 4  # messages replayed on /resume
+_RESUME_TAIL_LINES = 3  # lines shown per replayed message
 
 
 class TuiApp:
@@ -143,18 +149,63 @@ class TuiApp:
     # -- public surface used by slash commands -------------------------------
 
     def new_conversation(self, title: str = "") -> None:
+        # Switch the thread FIRST: if it fails (busy turn, untrusted
+        # project) the app must keep its previous session intact instead of
+        # having already dropped skills and goal state.
+        self.thread_client.new_thread(title=title)
         self.goal_controller.close()
         self.selected_skill_ids.clear()
-        self.thread_client.new_thread(title=title)
         self._sync_thread_state()
 
     def resume_conversation(self, session_id: str) -> int:
+        self.thread_client.resume(session_id)
         self.goal_controller.close()
         self.selected_skill_ids.clear()
-        self.thread_client.resume(session_id)
         self._sync_thread_state()
-        stored = self.bridge.store.get_session(session_id)
+        stored = self.bridge.store.get_session(self.thread_client.session_id)
         return len(stored.messages) if stored is not None else 0
+
+    def render_resume_tail(self) -> None:
+        """Print the resumed conversation's tail, dimmed, for context.
+
+        `/resume` used to report "N messages restored" to a blank screen:
+        the model's context was rehydrated, but the user had no way to see
+        what those messages were.
+        """
+        stored = self.bridge.store.get_session(self.thread_client.session_id)
+        if stored is None:
+            return
+        visible = [
+            message
+            for message in stored.messages
+            if message.role in ("user", "assistant") and message.content
+        ]
+        if not visible:
+            return
+        tail = visible[-_RESUME_TAIL_MESSAGES:]
+        hidden = len(visible) - len(tail)
+        self.console.print()
+        if hidden > 0:
+            self.console.print(
+                f"[{theme.META_STYLE}]… {hidden} earlier messages[/]",
+                highlight=False,
+            )
+        for message in tail:
+            lines = [
+                line for line in message.content.strip().splitlines() if line.strip()
+            ]
+            if not lines:
+                continue
+            shown = lines[:_RESUME_TAIL_LINES]
+            if message.role == "user":
+                shown[0] = f"{theme.PROMPT}{shown[0]}"
+            for line in shown:
+                self.console.print(
+                    f"[{theme.META_STYLE}]{escape(line)}[/]",
+                    highlight=False,
+                )
+            if len(lines) > len(shown):
+                self.console.print(f"[{theme.META_STYLE}]…[/]", highlight=False)
 
     async def switch_model(
         self,
@@ -162,10 +213,12 @@ class TuiApp:
         *,
         connection_id: str | None = None,
     ) -> None:
+        # A bare model name resolves its connection (configured default,
+        # else catalog match) — the Desktop semantics. Pinning the current
+        # connection here made `/model <other-vendor-model>` resolve against
+        # the wrong provider.
         profile = self.thread_client.switch_execution(
-            connection_id=(
-                connection_id or self.thread_client.execution_profile.connection_id
-            ),
+            connection_id=connection_id,
             model=model,
             reasoning_effort=self._requested_reasoning_effort,
         )
@@ -184,6 +237,67 @@ class TuiApp:
         )
         self.model = profile.model_id
         self._requested_reasoning_effort = requested
+
+    def _connection_views(self) -> list[dict]:
+        data = self.thread_client.application.llm.list_connections(
+            self.thread_client.project.id
+        )
+        return list(data.get("connections", []))
+
+    def model_overview(self) -> str:
+        """Current execution triple plus the configured connection catalog.
+
+        The same directory the Desktop's provider page reads — without it,
+        `/model` gave the user nothing to discover switch targets from.
+        """
+        profile = self.thread_client.execution_profile
+        current = (
+            f"connection: {profile.connection_id} · model: {self.model} · "
+            f"effort: {self.requested_reasoning_effort}"
+        )
+        views = [
+            view
+            for view in self._connection_views()
+            if view.get("configured") and view.get("enabled")
+        ]
+        if not views:
+            return current
+        lines = [
+            current,
+            "configured connections (switch with /model [connection] <model>):",
+        ]
+        width = max(len(str(view.get("id", ""))) for view in views)
+        for view in views:
+            models = [str(model) for model in view.get("manualModels") or []]
+            if models:
+                shown = ", ".join(models[:_MODEL_CATALOG_PREVIEW])
+                extra = len(models) - _MODEL_CATALOG_PREVIEW
+                catalog = shown + (f", +{extra} more" if extra > 0 else "")
+            else:
+                catalog = "no catalog configured — any model id accepted"
+            marker = " · current" if view.get("id") == profile.connection_id else ""
+            lines.append(f"  {str(view.get('id', '')):<{width}}  {catalog}{marker}")
+        return "\n".join(lines)
+
+    def model_catalog_note(self) -> str | None:
+        """Advisory catalog check after a switch — never gates routing."""
+        profile = self.thread_client.execution_profile
+        try:
+            views = self._connection_views()
+        except (OSError, RuntimeError, ValueError):
+            return None
+        for view in views:
+            if view.get("id") != profile.connection_id:
+                continue
+            models = [str(model) for model in view.get("manualModels") or []]
+            if models and profile.model_id not in models:
+                return (
+                    f"note: {profile.model_id} is not in "
+                    f"{profile.connection_id}'s configured catalog — if the "
+                    "provider rejects it, run /model to see the known options"
+                )
+            return None
+        return None
 
     def access_status(self) -> str:
         override = self.thread_client.access_preset_override
@@ -513,41 +627,48 @@ class TuiApp:
         await self.thread_client.wait_until_idle()
 
     def send_turn(self, text: str) -> str:
+        """Deliver one user message; the returned status is what the REPL
+        shows. The normal case — the turn started — says nothing: the turn's
+        own output follows immediately, so an ack line is pure noise. Only
+        the surprising outcomes (queued behind a running turn, steered into
+        one) deserve a line, and they name the situation, not a turn id."""
         delivery = self.thread_client.send(
             text,
             skill_ids=tuple(self.selected_skill_ids),
         )
         if delivery.kind == "started":
             self.selected_skill_ids.clear()
-            return f"Started Turn {delivery.turn.id}."
+            return ""
         if delivery.kind == "queued":
             self.selected_skill_ids.clear()
-            return f"Queued Turn {delivery.turn.id}."
+            return "Queued — runs after the active turn."
         suffix = (
             " Selected next-Turn Skills remain selected."
             if self.selected_skill_ids
             else ""
         )
-        return f"Steered Turn {delivery.turn.id}.{suffix}"
+        return f"Steered the active turn.{suffix}"
 
     def queue_turn(self, text: str) -> str:
-        delivery = self.thread_client.queue(
+        # Read busyness BEFORE enqueueing: an idle Session starts the
+        # queued Turn immediately, and claiming it will "run after the
+        # active turn" would be a lie.
+        busy = self.thread_client.has_active_turn()
+        self.thread_client.queue(
             text,
             skill_ids=tuple(self.selected_skill_ids),
         )
         self.selected_skill_ids.clear()
-        return f"Queued Turn {delivery.turn.id}."
+        return (
+            "Queued — runs after the active turn." if busy else "Queued — starting now."
+        )
 
     def stop_turn(self) -> str:
         result = self.thread_client.interrupt()
         if result is None:
             return "no active Turn"
-        accepted, turn = result
-        return (
-            f"Stopped Turn {turn.id}."
-            if accepted
-            else f"Turn {turn.id} had already stopped."
-        )
+        accepted, _turn = result
+        return "Interrupted the turn." if accepted else "The turn had already stopped."
 
     def _respond_to_pending_approval(self, text: str) -> str | None:
         approval = self.thread_client.pending_approval()
@@ -564,7 +685,12 @@ class TuiApp:
         if decision is None:
             return None
         resolved = self.thread_client.respond_to_approval(approval.id, decision)
-        return f"Approval {resolved.status.value}."
+        outcome = {
+            ApprovalStatus.APPROVED_ONCE: "approved once",
+            ApprovalStatus.APPROVED_SESSION: "approved for this Session",
+            ApprovalStatus.DENIED: "denied",
+        }.get(resolved.status, resolved.status.value.replace("_", " "))
+        return f"Approval {outcome}."
 
     def _on_domain_event(self, event: DomainEvent) -> None:
         if event.type != "approval.requested":
@@ -577,29 +703,41 @@ class TuiApp:
         tool = str(request.get("toolName") or "tool")
         reason = str(request.get("reason") or "sensitive operation")
         self.console.print(
-            f"[{theme.APPROVAL_STYLE}]approval needed[/] {escape(tool)}: "
-            f"{escape(reason)}\n"
-            f"[{theme.META_STYLE}]reply y = once · a = Session · n = deny[/]"
+            f"\n[bold {theme.APPROVAL_STYLE}]◆ approval needed[/] "
+            f"[bold]{escape(tool)}[/]\n"
+            f"  {escape(reason)}\n"
+            f"[{theme.META_STYLE}]{theme.TOOL_RESULT_ELBOW.strip()} "
+            f"reply {theme.APPROVAL_PROMPT}[/]"
         )
 
     # -- REPL -----------------------------------------------------------------
 
     def _banner(self) -> None:
+        """Borderless startup banner (the dsh rule: no box, one leading
+        space per line, brand line first, everything else recessed)."""
+        workspace = str(self.workspace)
+        home = str(Path.home())
+        if workspace.startswith(home):
+            workspace = "~" + workspace[len(home) :]
+        self.console.print()
+        self.console.print(f" {theme.brand_markup()}")
         self.console.print(
-            Panel.fit(
-                f"[bold {theme.ACCENT}]{theme.BRAND}[/]\n"
-                f"[{theme.META_STYLE}]model[/] {self.model}"
-                f"  [{theme.META_STYLE}]workspace[/] {self.workspace}\n"
-                f"[{theme.META_STYLE}]access[/] "
-                f"{self.thread_client.access_summary()}"
-                f"  [{theme.META_STYLE}]effort[/] {self.requested_reasoning_effort}"
-                f"  [{theme.META_STYLE}]session[/] {self.bridge.session_id}"
-                f"  [{theme.META_STYLE}]transcript[/] "
-                f"{self.renderer.transcript_mode.value}"
-                f"   [{theme.META_STYLE}]/help for commands[/]",
-                border_style=theme.DIM,
-            )
+            f" [{theme.META_STYLE}]{escape(self.model)} · {escape(workspace)}[/]",
+            soft_wrap=True,
+            highlight=False,
         )
+        self.console.print(
+            f" [{theme.META_STYLE}]session {escape(self.bridge.session_id)} · "
+            f"access {escape(self.thread_client.access_summary())} · "
+            f"effort {escape(self.requested_reasoning_effort)}[/]",
+            soft_wrap=True,
+            highlight=False,
+        )
+        self.console.print(
+            f" [{theme.META_STYLE}]/help for commands · {theme.INTERRUPT_HINT}[/]",
+            highlight=False,
+        )
+        self.console.print()
 
     async def repl(self) -> int:
         loop = asyncio.get_running_loop()
@@ -644,11 +782,12 @@ class TuiApp:
                     continue
                 expanded = expand_file_refs(text, self.workspace)
                 status = self.send_turn(expanded)
-                self.console.print(
-                    f"[{theme.META_STYLE}]{escape(status)}[/]",
-                    soft_wrap=True,
-                    highlight=False,
-                )
+                if status:
+                    self.console.print(
+                        f"[{theme.META_STYLE}]{escape(status)}[/]",
+                        soft_wrap=True,
+                        highlight=False,
+                    )
                 if not self.reader.interactive:
                     await self.thread_client.wait_until_idle()
             if self.reader.interactive:
@@ -703,7 +842,32 @@ def main(argv: list[str] | None = None) -> int:
     except ApplicationError as exc:
         print(exc.user_message, file=sys.stderr)
         return 1
+    if app.reader.interactive:
+        _silence_console_logging()
     return asyncio.run(app.repl())
+
+
+def _silence_console_logging() -> None:
+    """Route runtime logs to files while the TUI owns the terminal.
+
+    The interactive transcript is a rendered surface (the dsh rule: the TUI
+    owns the terminal); a loguru INFO line landing mid-stream shreds the
+    conversation and the prompt redraw. Keep the user's configured file
+    sinks (adding the global file as a fallback so diagnostics survive) and
+    drop only the console transport. Best effort: logging trouble must not
+    keep the TUI from starting.
+    """
+    try:
+        from core.config import load_config
+        from core.observability import setup_logging
+
+        config = load_config().logger.model_copy(deep=True)
+        config.transports = [t for t in config.transports if t != "console"]
+        if not config.transports:
+            config.transports = ["global_file"]
+        setup_logging(config, force=True)
+    except Exception:  # noqa: BLE001 - logging must never block the TUI
+        pass
 
 
 def _prepare_workspace_trust(workspace: str, *, grant: bool) -> bool:

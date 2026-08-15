@@ -35,6 +35,7 @@ from core.reasoning import ReasoningAvailability, ReasoningChannel
 
 _NORMAL_PREVIEW_CHARS = 240
 _STATUS_DETAIL_CHARS = 72
+_SUBJECT_CHARS = 88
 
 
 @dataclass(slots=True)
@@ -79,18 +80,49 @@ class EventRenderer:
         self.console = console or Console()
         self.transcript_mode = transcript_mode
         self._streamed = ""  # text already shown as deltas this turn
-        self._line_open = False  # a delta stream left the cursor mid-line
+        self._stream_tail = ""  # unterminated tail of the delta stream
         self._completed_message_id: str | None = None
         self._completed_message_text = ""
         self._reasoning: dict[str, _ReasoningState] = {}
         self._active_reasoning_id: str | None = None
+        # Presentation-only activity tracking for the status toolbar: the
+        # label of the tool currently running, if any, and when it started.
+        self._active_tool_label: str | None = None
+        self._active_tool_started_at: float = 0.0
+        # One blank line between blocks (tool card ↔ prose), owed lazily so
+        # a turn that ends right after a card does not trail blank lines.
+        self._gap_pending = False
+        # Subject tails remembered per call_id so elbows can name the call
+        # they close (concurrent tools complete out of order).
+        self._tool_subjects: dict[str, str | None] = {}
+        # Becomes True at the first visible streamed line of a segment;
+        # leading blank lines a model emits before its prose are dropped
+        # (block spacing is the renderer's job, via the gap).
+        self._stream_body_started = False
+        # The final message text already on screen this turn, kept for the
+        # duplicate-suppression check in ``_on_error``.
+        self._final_text_shown = ""
+
+    def _emit_gap(self) -> None:
+        if self._gap_pending:
+            self.console.print()
+            self._gap_pending = False
+
+    def _emit_stream_line(self, line: str) -> None:
+        if not self._stream_body_started and not line.strip():
+            return
+        self._stream_body_started = True
+        self._emit_gap()
+        # Default rich wrapping (word boundaries) instead of raw terminal
+        # wrap, which used to split words mid-letter at the margin.
+        self.console.print(line, highlight=False, markup=False)
 
     # -- helpers -------------------------------------------------------------
 
     def _close_line(self) -> None:
-        if self._line_open:
-            self.console.print()
-            self._line_open = False
+        if self._stream_tail:
+            self._emit_stream_line(self._stream_tail)
+            self._stream_tail = ""
 
     def set_transcript_mode(self, mode: str | TranscriptMode) -> TranscriptMode:
         self.transcript_mode = (
@@ -105,7 +137,15 @@ class EventRenderer:
     def status_line(self) -> str:
         reasoning_id = self._active_reasoning_id
         if reasoning_id is None:
-            return f" Transcript: {self.transcript_mode.value} · Ctrl+O changes detail "
+            if self._active_tool_label is not None:
+                # A long tool run is work too: keep the toolbar moving
+                # instead of looking idle for its whole duration.
+                elapsed = max(0, int(monotonic() - self._active_tool_started_at))
+                return f" Running {self._active_tool_label} · {elapsed}s "
+            return (
+                f" Transcript: {self.transcript_mode.value} · "
+                f"Ctrl+O changes detail · Esc interrupts "
+            )
         state = self._reasoning.get(reasoning_id)
         if state is None:
             return ""
@@ -130,11 +170,16 @@ class EventRenderer:
 
     def _on_turn_started(self, msg) -> None:
         self._streamed = ""
-        self._line_open = False
+        self._stream_tail = ""
         self._completed_message_id = None
         self._completed_message_text = ""
         self._reasoning.clear()
         self._active_reasoning_id = None
+        self._active_tool_label = None
+        self._gap_pending = False
+        self._tool_subjects.clear()
+        self._stream_body_started = False
+        self._final_text_shown = ""
 
     def _on_skill_loaded(self, msg) -> None:
         if self.transcript_mode is TranscriptMode.SUMMARY:
@@ -142,7 +187,7 @@ class EventRenderer:
         self._close_line()
         invocation = msg.invocation
         self.console.print(
-            f"[{theme.META_STYLE}]◇ Skill {escape(invocation.name)} "
+            f"[{theme.META_STYLE}]{theme.THINKING_MARK} Skill {escape(invocation.name)} "
             f"({invocation.kind.value})[/]"
         )
 
@@ -156,9 +201,17 @@ class EventRenderer:
         self._streamed += msg.delta
         if self.transcript_mode is TranscriptMode.SUMMARY:
             return
-        # Live typing: print the raw delta without a newline.
-        self.console.print(msg.delta, end="", soft_wrap=True, highlight=False)
-        self._line_open = True
+        # Whole lines only. prompt_toolkit's stdout proxy buffers an
+        # unterminated tail and interleaves it badly with prompt redraws —
+        # the first lines of a streamed reply used to be swallowed. Emitting
+        # complete lines atomically (tail held until its newline or the
+        # segment settles) is redraw-safe. ``markup=False`` because
+        # assistant text is content, not markup — bracketed spans like
+        # "[a-z]" used to be silently eaten by the markup parser.
+        self._stream_tail += msg.delta
+        while "\n" in self._stream_tail:
+            line, self._stream_tail = self._stream_tail.split("\n", 1)
+            self._emit_stream_line(line)
 
     def _on_agent_message_completed(self, msg) -> None:
         """Settle one streamed response segment without duplicating it later."""
@@ -168,10 +221,13 @@ class EventRenderer:
                 self._close_line()
             else:
                 self._close_line()
+                self._emit_gap()
                 self.console.print(Markdown(msg.text or ""))
         self._completed_message_id = msg.message_id
         self._completed_message_text = msg.text or ""
+        self._final_text_shown = msg.text or ""
         self._streamed = ""
+        self._stream_body_started = False
 
     def _on_agent_message(self, msg) -> None:
         text = msg.text or ""
@@ -190,9 +246,13 @@ class EventRenderer:
             self._close_line()
         else:
             self._close_line()
+            self._emit_gap()
             self.console.print(Markdown(text))
         self.console.print()
+        self._final_text_shown = text
         self._streamed = ""
+        self._gap_pending = False
+        self._stream_body_started = False
         self._completed_message_id = None
         self._completed_message_text = ""
 
@@ -202,7 +262,9 @@ class EventRenderer:
         if self.transcript_mode is TranscriptMode.SUMMARY:
             return
         self._close_line()
-        self.console.print(f"[{theme.META_STYLE}]◇ Thinking summary[/]")
+        self.console.print(
+            f"[{theme.META_STYLE}]{theme.THINKING_MARK} Thinking summary[/]"
+        )
         self.console.print(Markdown(msg.text), style=theme.META_STYLE)
 
     def _on_agent_reasoning_started(self, msg) -> None:
@@ -240,9 +302,15 @@ class EventRenderer:
             return
 
         self._close_line()
+        self._emit_gap()
         duration = _duration_label(msg.duration_ms)
         effort = (msg.effort or "auto").title()
-        label = f"◇ Thought for {duration}" if duration else "◇ Thinking completed"
+        mark = theme.THINKING_MARK
+        label = (
+            f"{mark} Thought for {duration}"
+            if duration
+            else f"{mark} Thinking completed"
+        )
         label += f" · {effort}"
         self.console.print(f"[{theme.META_STYLE}]{label}[/]")
         if msg.availability is ReasoningAvailability.OPAQUE:
@@ -273,46 +341,115 @@ class EventRenderer:
                 style=theme.THINKING_STYLE,
             )
 
+    @staticmethod
+    def _tool_heading(msg) -> tuple[str, str | None]:
+        """Presentation label + subject for one tool call.
+
+        Prefers the provider-neutral :class:`ToolActivity` descriptor the
+        kernel already computes (clean labels like ``Read`` / ``Run``), and
+        falls back to the raw tool name for older event shapes. Neither the
+        header nor the elbow may wrap: commands keep their HEAD (how they
+        start is the informative part), everything else — paths — keeps its
+        TAIL (the file name is the informative part).
+        """
+        activity = getattr(msg, "activity", None)
+        label = getattr(activity, "label", None) or msg.name
+        kind = getattr(getattr(activity, "kind", None), "value", None)
+        subject = getattr(activity, "subject", None) or getattr(msg, "detail", None)
+        if subject:
+            subject = str(subject)
+            if len(subject) > _SUBJECT_CHARS:
+                if kind == "run":
+                    subject = subject[: _SUBJECT_CHARS - 1] + "…"
+                else:
+                    subject = "…" + subject[-(_SUBJECT_CHARS - 1) :]
+        return str(label), (subject if subject else None)
+
+    @staticmethod
+    def _subject_tail(subject: str | None) -> str | None:
+        """Short recognizable tail of a subject (a file name, a command head)
+        so a settling elbow can say WHICH call it closes — with concurrent
+        same-tool calls the elbows were indistinguishable otherwise."""
+        if not subject:
+            return None
+        tail = subject.rstrip("/").rsplit("/", 1)[-1] or subject
+        if len(tail) > 32:
+            tail = tail[:31] + "…"
+        return tail
+
     def _on_tool_started(self, msg) -> None:
+        label, subject = self._tool_heading(msg)
+        self._active_tool_label = label
+        self._active_tool_started_at = monotonic()
+        call_id = getattr(msg, "call_id", None)
+        if call_id is not None:
+            self._tool_subjects[str(call_id)] = self._subject_tail(subject)
         if self.transcript_mode is TranscriptMode.SUMMARY:
             return
         self._close_line()
-        label = (
-            f"[{theme.TOOL_RUNNING_STYLE}]{theme.TOOL_BULLET}[/] [bold]{msg.name}[/]"
+        if self._streamed and not self._gap_pending:
+            # Prose ran straight into this card; give it breathing room.
+            self._gap_pending = True
+        self._emit_gap()
+        line = (
+            f"[{theme.TOOL_RUNNING_STYLE}]{theme.TOOL_BULLET}[/] "
+            f"[bold]{escape(label)}[/]"
         )
-        if msg.detail:
-            label += f"[{theme.TOOL_DETAIL_STYLE}]({msg.detail})[/]"
-        self.console.print(label, highlight=False)
+        if subject:
+            line += f" [{theme.TOOL_DETAIL_STYLE}]{escape(subject)}[/]"
+        self.console.print(line, highlight=False)
 
     def _on_tool_completed(self, msg) -> None:
+        self._active_tool_label = None
+        subject_tail = self._tool_subjects.pop(str(getattr(msg, "call_id", None)), None)
         if self.transcript_mode is TranscriptMode.SUMMARY:
             return
         self._close_line()
         if msg.is_error:
-            mark = f"[{theme.TOOL_ERR_STYLE}]{theme.DONE_ERR} {msg.name} failed[/]"
+            head = f"{theme.DONE_ERR} {msg.name} failed"
+            mark = f"[{theme.TOOL_ERR_STYLE}]{escape(head)}[/]"
         else:
+            head = f"{theme.DONE_OK} {msg.name}"
             mark = (
                 f"[{theme.TOOL_OK_STYLE}]{theme.DONE_OK}[/] "
-                f"[{theme.META_STYLE}]{msg.name}[/]"
+                f"[{theme.META_STYLE}]{escape(msg.name)}[/]"
             )
-        # First line of the result, dimmed, next to the mark (Claude Code's
-        # ⎿-result convention). getattr keeps older event shapes working.
+        if subject_tail:
+            head += f" {subject_tail}"
+            mark += f" [{theme.TOOL_DETAIL_STYLE}]{escape(subject_tail)}[/]"
+        # First line of the result, dimmed, next to the mark (the ⎿-result
+        # elbow — DeepCode's signature two-line tool rhythm). The elbow is a
+        # SINGLE line: the snippet is cut to the remaining terminal width, so
+        # a long error path can never wrap into an unindented mess below.
         preview = getattr(msg, "result_preview", "") or ""
         first_line = preview.splitlines()[0] if preview else ""
         if first_line:
-            snippet = first_line[:100] + ("…" if len(first_line) > 100 else "")
+            used = len(theme.TOOL_RESULT_ELBOW) + 1 + len(head) + 2
+            budget = max(24, self.console.width - used - 1)
+            snippet = first_line[:budget] + ("…" if len(first_line) > budget else "")
             mark += f"  [{theme.TOOL_DETAIL_STYLE}]{escape(snippet)}[/]"
         self.console.print(f"{theme.TOOL_RESULT_ELBOW} {mark}", highlight=False)
+        self._gap_pending = True
 
     def _on_error(self, msg) -> None:
         self._close_line()
-        self.console.print(f"[{theme.ERROR_STYLE}]error:[/] {msg.message}")
+        # Providers surface one failure through several events (assistant
+        # message, error, task_complete). If this exact text is already on
+        # screen as the turn's message, repeating it is noise — the
+        # "turn ended: error" meta line still closes the story.
+        text = (msg.message or "").strip()
+        if text and text in {self._final_text_shown.strip(), self._streamed.strip()}:
+            return
+        # The message is content: an error containing "[/]" used to CRASH
+        # the markup parser here.
+        self.console.print(f"[{theme.ERROR_STYLE}]error:[/] {escape(msg.message)}")
 
     def _on_task_complete(self, msg) -> None:
         self._close_line()
         if msg.stop_reason != "completed":
             self.console.print(
-                f"[{theme.META_STYLE}]· turn ended: {msg.stop_reason}[/]"
+                f"[{theme.META_STYLE}]· turn ended: {escape(str(msg.stop_reason))}[/]"
             )
         self._streamed = ""
         self._active_reasoning_id = None
+        self._active_tool_label = None

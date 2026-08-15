@@ -11,9 +11,13 @@ state (switch sessions, rebuild the agent) through the app's public methods.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
+
+from rich.cells import cell_len, set_cell_size
 
 Handler = Callable[[Any, str], Awaitable[str | None]]
 
@@ -26,11 +30,26 @@ class Command:
     handler: Handler
 
 
+_HELP_USAGE_COLUMN_CAP = 30
+
+
 async def _cmd_help(app, args: str) -> str | None:
+    """Aligned command table: the usage column fits the widest short usage,
+    and an over-long usage moves its description to a wrapped second line
+    instead of shattering the column for every row below it."""
+    rows = [(cmd.usage, cmd.help) for cmd in REGISTRY.values()]
+    rows.append(("@<path>", "attach a file's content to your message"))
+    column = max(
+        (len(usage) for usage, _ in rows if len(usage) <= _HELP_USAGE_COLUMN_CAP),
+        default=_HELP_USAGE_COLUMN_CAP,
+    )
     lines = ["", "commands:"]
-    for cmd in REGISTRY.values():
-        lines.append(f"  {cmd.usage:<18} {cmd.help}")
-    lines.append("  @<path>            attach a file's content to your message")
+    for usage, description in rows:
+        if len(usage) <= column:
+            lines.append(f"  {usage:<{column}}  {description}")
+        else:
+            lines.append(f"  {usage}")
+            lines.append(f"  {'':<{column}}  {description}")
     lines.append("")
     return "\n".join(lines)
 
@@ -43,13 +62,79 @@ async def _cmd_new(app, args: str) -> str | None:
     return "started a new conversation"
 
 
+_RESUME_ROWS = 15
+_RESUME_TITLE_CELLS = 44
+_PREFIX_SCAN_LIMIT = 500  # threads.list pagination ceiling
+
+
+def _age(moment: datetime) -> str:
+    """Compact relative age for listing rows ('now', '5m ago', '3d ago')."""
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    seconds = max(0, int((datetime.now(UTC) - moment).total_seconds()))
+    if seconds < 60:
+        return "now"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes}m ago"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours}h ago"
+    return f"{hours // 24}d ago"
+
+
+def _fit_cells(text: str, width: int) -> str:
+    """Truncate to a terminal-cell budget with an ellipsis, CJK-safe."""
+    if cell_len(text) <= width:
+        return text
+    return set_cell_size(text, width - 1).rstrip() + "…"
+
+
+def _short_path(path: str) -> str:
+    home = os.path.expanduser("~")
+    return f"~{path[len(home) :]}" if path.startswith(home + os.sep) else path
+
+
+def _resume_row(listing, *, show_origin: bool) -> str:
+    title = _fit_cells(listing.title or "(untitled)", _RESUME_TITLE_CELLS)
+    line = (
+        f"  {listing.session_id:<8}  {_age(listing.updated_at):>7}  "
+        f"{listing.message_count:>3} msgs  {title}"
+    )
+    if listing.is_current:
+        line += "  · current"
+    if show_origin:
+        line += f"  [{_short_path(listing.workspace)}]"
+    return line
+
+
+def _resolve_session_prefix(app, target: str) -> str | list[str]:
+    """Resolve an id prefix to a full session id.
+
+    Returns the unique match, or the (possibly empty) list of ambiguous
+    matches. The raw target is kept when nothing matches — the resume path
+    reports unknown ids with the store's own error.
+    """
+    rows = app.thread_client.list_recent(
+        limit=_PREFIX_SCAN_LIMIT,
+        include_all=True,
+    )
+    matches = [row.session_id for row in rows if row.session_id.startswith(target)]
+    if len(matches) == 1:
+        return matches[0]
+    return matches
+
+
 async def _cmd_resume(app, args: str) -> str | None:
     target = args.strip()
     if not target or target.lower() == "all":
         # Default view is scoped to the current directory (the Claude Code /
         # Codex convention); `all` lifts the filter and shows origins.
         show_all = target.lower() == "all"
-        rows = app.bridge.list_recent(limit=15, include_all=show_all)
+        rows = app.thread_client.list_recent(
+            limit=_RESUME_ROWS,
+            include_all=show_all,
+        )
         if not rows:
             return (
                 "no stored sessions yet"
@@ -57,21 +142,21 @@ async def _cmd_resume(app, args: str) -> str | None:
                 else "no sessions for this directory — try /resume all"
             )
         scope = "all sessions" if show_all else f"sessions in {app.workspace}"
-        lines = ["", f"recent {scope} (resume with /resume <id>):"]
-        for s in rows:
-            title = s.title or "(untitled)"
-            line = f"  {s.session_id}  {title[:40]:<40} {s.message_count:>3} msgs"
-            if show_all:
-                origin = app.bridge.workspace_of(s.session_id)
-                line += f"  [{origin or 'no workspace recorded'}]"
-            lines.append(line)
+        lines = ["", f"recent {scope} (resume with /resume <id or prefix>):"]
+        lines.extend(_resume_row(row, show_origin=show_all) for row in rows)
         lines.append("")
         return "\n".join(lines)
+    resolved = _resolve_session_prefix(app, target)
+    if isinstance(resolved, list):
+        if len(resolved) > 1:
+            return f"ambiguous session id {target!r} — matches {', '.join(resolved)}"
+        resolved = target  # no listed match; let the store answer for exact ids
     try:
-        turns = app.resume_conversation(target)
+        turns = app.resume_conversation(resolved)
     except (RuntimeError, ValueError) as exc:
         return str(exc)
-    status = f"resumed {target} ({turns} messages restored)"
+    app.render_resume_tail()
+    status = f"resumed {resolved} ({turns} messages restored)"
     origin = app.bridge.stored_workspace()
     if origin and origin != app.workspace:
         status += f"\nnote: this conversation was started in {origin}"
@@ -81,11 +166,7 @@ async def _cmd_resume(app, args: str) -> str | None:
 async def _cmd_model(app, args: str) -> str | None:
     wanted = args.strip()
     if not wanted:
-        profile = app.thread_client.execution_profile
-        return (
-            f"connection: {profile.connection_id} · model: {app.model} · "
-            f"effort: {app.requested_reasoning_effort}"
-        )
+        return app.model_overview()
     connection, separator, model = wanted.partition(" ")
     if not separator:
         model = connection
@@ -95,13 +176,17 @@ async def _cmd_model(app, args: str) -> str | None:
             model.strip(),
             connection_id=connection.strip() or None,
         )
-    except (OSError, ValueError) as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         return f"model switch failed: {exc}"
-    return (
+    status = (
         f"model switched to {app.model} on connection "
         f"{app.thread_client.execution_profile.connection_id} · effort "
         f"{app.requested_reasoning_effort} (history preserved)"
     )
+    if app.thread_client.has_active_turn():
+        status += "\nnote: the active turn keeps its model — applies from the next turn"
+    note = app.model_catalog_note()
+    return f"{status}\n{note}" if note else status
 
 
 async def _cmd_effort(app, args: str) -> str | None:
@@ -112,7 +197,7 @@ async def _cmd_effort(app, args: str) -> str | None:
         return f"effort: {app.requested_reasoning_effort} · effective: {effective}"
     try:
         await app.switch_reasoning_effort(wanted)
-    except (OSError, ValueError) as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         return f"effort switch failed: {exc}"
     profile = app.thread_client.execution_profile
     effective = profile.reasoning_effort or "provider default"
