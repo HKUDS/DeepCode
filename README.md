@@ -166,12 +166,14 @@ Skills, permissions, Goals, and Automations. See the
   transcript — brand-gradient banner, status-colored tool cards with result
   elbows, block spacing, word-boundary wrapping — plus streaming that
   survives the prompt redraw with real colors instead of `?[36m` litter.
-- **Session and model commands now hold up.** `/resume` lists this
-  directory's sessions with ages and CJK-safe titles, resumes by id prefix,
-  and replays the conversation tail; `/model` shows the configured
-  connection catalog, resolves a bare model's connection, and rejects typos
-  without killing the REPL; `/compact` summarizes with the model you
-  actually selected.
+- **Session and model commands now hold up.** `/resume` and `/model` open
+  an inline selector — type to filter by title, arrows move, Enter picks,
+  Tab flips directory scope, Shift+Tab cycles the route's published
+  reasoning effort — and resume replays the conversation tail. Bare model
+  names resolve their connection, typos no longer kill the REPL, and
+  `/compact` summarizes with the model you actually selected. New verbs:
+  `/rename`, `/delete`, `/retry`, with tab completion for session ids,
+  transcript modes, permission presets, and effort levels.
 
 **2026-08-14 · Subagent runtime, compaction, and one-way persistence**
 
