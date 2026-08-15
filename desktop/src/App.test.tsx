@@ -321,6 +321,15 @@ class TestRuntime implements DesktopRuntime {
               requiresApiBase: false,
               local: false,
             },
+            {
+              name: "anthropic",
+              label: "Anthropic",
+              adapter: "anthropic",
+              defaultApiBase: "https://api.anthropic.com",
+              apiKeyEnv: "ANTHROPIC_API_KEY",
+              requiresApiBase: false,
+              local: false,
+            },
           ],
           configPath: "/tmp/deepcode_config.json",
           credentialPath: "/tmp/credentials.json",
@@ -2136,8 +2145,10 @@ describe("desktop command center", () => {
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     fireEvent.click(await screen.findByRole("button", { name: "Models" }));
     await screen.findByRole("heading", { name: "AI providers" });
-    fireEvent.click(screen.getByRole("button", { name: "Add provider" }));
-    fireEvent.click(screen.getByRole("button", { name: /OpenRouter/ }));
+    fireEvent.change(
+      await screen.findByRole("combobox", { name: "Add provider" }),
+      { target: { value: "openrouter" } },
+    );
 
     fireEvent.change(screen.getByLabelText("Display name"), {
       target: { value: "Router Desktop" },
@@ -2162,9 +2173,8 @@ describe("desktop command center", () => {
       apiKey: "desktop-test-secret",
     });
 
-    fireEvent.click(
-      within(card as HTMLElement).getByRole("button", { name: "Check" }),
-    );
+    // Saving runs the staged check automatically; its result lands on the
+    // row card without a separate Check action.
     expect(
       await within(card as HTMLElement).findByText("Credential"),
     ).toBeTruthy();
@@ -2209,7 +2219,6 @@ describe("desktop command center", () => {
     fireEvent.click(
       within(card as HTMLElement).getByRole("button", { name: "Edit" }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Paste API key" }));
     expect(
       screen.getByText(/OPENAI_API_KEY currently provides this key/),
     ).toBeTruthy();
@@ -2220,7 +2229,7 @@ describe("desktop command center", () => {
     expect(keyInput.placeholder).toMatch(/launch environment/);
   });
 
-  it("lists dormant providers in the directory strip for one-click setup", async () => {
+  it("offers the provider directory through the Add provider dropdown", async () => {
     const runtime = new TestRuntime([project], [thread], []);
     render(<App runtime={runtime} />);
 
@@ -2229,16 +2238,19 @@ describe("desktop command center", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Models" }));
     await screen.findByRole("heading", { name: "AI providers" });
 
-    const strip = await screen.findByRole("list", {
-      name: "Available providers",
-    });
-    // The configured connection lives in the rail, not the directory.
-    expect(within(strip).queryByText("OpenAI")).toBeNull();
-    fireEvent.click(within(strip).getByText("Anthropic"));
-    // One click opens the editor prefilled from the template.
+    const picker = (await screen.findByRole("combobox", {
+      name: "Add provider",
+    })) as HTMLSelectElement;
+    const labels = Array.from(picker.options).map((option) => option.text);
+    expect(labels.some((label) => label.includes("Anthropic"))).toBe(true);
+    fireEvent.change(picker, { target: { value: "anthropic" } });
+    // One pick opens the editor prefilled from the template.
     expect(
       await screen.findByRole("dialog", { name: /Connect a provider/ }),
     ).toBeTruthy();
+    expect(
+      (screen.getByLabelText("Display name") as HTMLInputElement).placeholder,
+    ).toBe("Anthropic");
   });
 
   it("fetches a connection's live models and adopts picks into its manual list", async () => {
@@ -2312,6 +2324,42 @@ describe("desktop command center", () => {
     const methods = runtime.requests.map((request) => request.method);
     expect(methods.indexOf("settings/update")).toBeLessThan(
       methods.indexOf("provider/test"),
+    );
+  });
+
+  it("offers the default model's published effort ladder and saves the pick", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Models" }));
+    const effort = (await screen.findByRole("combobox", {
+      name: "Reasoning effort",
+    })) as HTMLSelectElement;
+
+    // Adapter-owned options: auto/off plus the model's published levels.
+    await waitFor(() => {
+      const values = Array.from(effort.options).map((option) => option.value);
+      expect(values).toEqual(["", "auto", "none", "low", "medium", "high"]);
+    });
+
+    fireEvent.change(effort, { target: { value: "high" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save defaults" }));
+
+    await waitFor(() =>
+      expect(
+        runtime.requests.find(
+          (request) =>
+            request.method === "settings/update" &&
+            (request.params as MethodParams["settings/update"]).patch.agents !==
+              undefined,
+        )?.params,
+      ).toMatchObject({
+        patch: {
+          agents: { defaults: { model: "gpt-5", reasoningEffort: "high" } },
+        },
+      }),
     );
   });
 

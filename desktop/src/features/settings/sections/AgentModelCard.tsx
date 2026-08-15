@@ -22,6 +22,7 @@ import styles from "../../management/ManagementWorkspace.module.css";
 interface AgentDraft {
   defaultConnection: string;
   defaultModel: string;
+  defaultReasoningEffort: string;
   planningConnection: string;
   planningModel: string;
   implementationConnection: string;
@@ -64,6 +65,7 @@ function agentDraft(settings: SettingsSnapshot | null): AgentDraft {
       text(defaults.provider) === "auto" ? "" : text(defaults.provider),
     ),
     defaultModel: text(defaults.model),
+    defaultReasoningEffort: text(defaults.reasoningEffort),
     planningConnection: text(planning.connection),
     planningModel: text(planning.model),
     implementationConnection: text(implementation.connection),
@@ -119,6 +121,7 @@ export function AgentModelCard({
             connection: agents.defaultConnection || null,
             provider: "auto",
             model: agents.defaultModel,
+            reasoningEffort: agents.defaultReasoningEffort || null,
             maxTokens,
           },
           planning: {
@@ -199,7 +202,18 @@ export function AgentModelCard({
           value={agents.defaultModel}
           fallbackModels={models.map((model) => model.id)}
           listModels={connections.models}
-          onChange={(defaultModel) => updateAgents({ defaultModel })}
+          onChange={(defaultModel) =>
+            updateAgents({ defaultModel, defaultReasoningEffort: "" })
+          }
+        />
+        <EffortField
+          connectionId={verificationConnection?.id ?? ""}
+          modelId={agents.defaultModel}
+          value={agents.defaultReasoningEffort}
+          listModels={connections.models}
+          onChange={(defaultReasoningEffort) =>
+            updateAgents({ defaultReasoningEffort })
+          }
         />
         <label>
           Max output tokens
@@ -324,6 +338,111 @@ export function AgentModelCard({
   );
 }
 
+interface ModelCatalogState {
+  catalog: ModelCatalogResult | null;
+  loading: boolean;
+  failed: boolean;
+}
+
+/** Load one connection's model catalog, keyed so a late response for a
+ * previously selected connection can never bleed into the current one. */
+function useModelCatalog(
+  connectionId: string,
+  listModels: ConnectionCatalogController["models"],
+): ModelCatalogState {
+  const [state, setState] = useState<{
+    connectionId: string;
+    catalog: ModelCatalogResult | null;
+    failed: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!connectionId) return;
+    let cancelled = false;
+    void listModels(connectionId)
+      .then((result) => {
+        if (!cancelled) {
+          setState({ connectionId, catalog: result, failed: false });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setState({ connectionId, catalog: null, failed: true });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [connectionId, listModels]);
+
+  return {
+    catalog: state?.connectionId === connectionId ? state.catalog : null,
+    loading: Boolean(connectionId && state?.connectionId !== connectionId),
+    failed: state?.connectionId === connectionId ? state.failed : false,
+  };
+}
+
+/**
+ * Reasoning effort for the default route — the dsh pairing: effort belongs
+ * to the MODEL, so the options are that model's published levels plus the
+ * universal auto/off, and a model without published controls offers no
+ * invented ladder.
+ */
+function EffortField({
+  connectionId,
+  modelId,
+  value,
+  listModels,
+  onChange,
+}: {
+  connectionId: string;
+  modelId: string;
+  value: string;
+  listModels: ConnectionCatalogController["models"];
+  onChange(value: string): void;
+}) {
+  const { catalog } = useModelCatalog(connectionId, listModels);
+  const model = catalog?.models.find(
+    (candidate) => candidate.id === modelId.trim(),
+  );
+  const reasoning = model?.reasoning ?? null;
+  const efforts = reasoning?.supportedEfforts ?? [];
+  const options = [
+    { value: "", label: "Inherit provider default" },
+    { value: "auto", label: "auto · model decides" },
+    ...(reasoning?.mandatory ? [] : [{ value: "none", label: "none · off" }]),
+    ...efforts.map((effort) => ({ value: effort, label: effort })),
+  ];
+  // A stored value the catalog no longer advertises stays selectable so the
+  // row shows the truth instead of silently blanking (advisory catalogs).
+  if (value && !options.some((option) => option.value === value)) {
+    options.push({ value, label: `${value} · not advertised` });
+  }
+  return (
+    <label>
+      Reasoning effort
+      <select
+        aria-label="Reasoning effort"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <small>
+        {model
+          ? efforts.length
+            ? `Published levels: ${efforts.join(", ")}`
+            : "This model publishes no named effort levels."
+          : "Pick a cataloged model to see its published levels."}
+      </small>
+    </label>
+  );
+}
+
 function ModelField({
   label,
   connectionId,
@@ -342,35 +461,9 @@ function ModelField({
   onChange(value: string): void;
 }) {
   const listId = useId();
-  const [catalogState, setCatalogState] = useState<{
-    connectionId: string;
-    catalog: ModelCatalogResult | null;
-    failed: boolean;
-  } | null>(null);
-
-  useEffect(() => {
-    if (!connectionId) return;
-    let cancelled = false;
-    void listModels(connectionId)
-      .then((result) => {
-        if (!cancelled) {
-          setCatalogState({ connectionId, catalog: result, failed: false });
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setCatalogState({ connectionId, catalog: null, failed: true });
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [connectionId, listModels]);
-
-  const catalog =
-    catalogState?.connectionId === connectionId ? catalogState.catalog : null;
-  const loading = Boolean(
-    connectionId && catalogState?.connectionId !== connectionId,
+  const { catalog, loading, failed } = useModelCatalog(
+    connectionId,
+    listModels,
   );
   const models =
     catalog?.connectionId === connectionId
@@ -393,7 +486,7 @@ function ModelField({
       <small>
         {loading
           ? "Loading models…"
-          : catalogState?.connectionId === connectionId && catalogState.failed
+          : failed
             ? "Catalog unavailable · enter an exact model ID"
             : catalog?.stale
               ? "Using the last available model list"

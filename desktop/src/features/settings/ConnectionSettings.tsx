@@ -1,6 +1,4 @@
 import {
-  ChevronLeft,
-  FlaskConical,
   KeyRound,
   Plus,
   Save,
@@ -33,9 +31,10 @@ interface Draft {
   template: string;
   adapter: "openai_compat" | "anthropic";
   apiBase: string;
+  /** Environment-variable reference — the advanced alternative to a
+   * stored key (the write-only input is the primary path, dsh style). */
   apiKeyEnv: string;
   apiKey: string;
-  credentialMode: "key" | "environment";
   clearApiKey: boolean;
   modelCatalog: "auto" | "openrouter" | "openai" | "anthropic" | "manual";
   manualModels: string;
@@ -54,7 +53,6 @@ const emptyDraft: Draft = {
   apiBase: "",
   apiKeyEnv: "",
   apiKey: "",
-  credentialMode: "key",
   clearApiKey: false,
   modelCatalog: "auto",
   manualModels: "",
@@ -119,7 +117,6 @@ export function ConnectionSettings({
       apiBase: connection.apiBase ?? "",
       apiKeyEnv: connection.apiKeyEnv ?? "",
       apiKey: "",
-      credentialMode: connection.apiKeyEnv ? "environment" : "key",
       clearApiKey: false,
       modelCatalog: connection.modelCatalog,
       manualModels: connection.manualModels.join("\n"),
@@ -160,10 +157,7 @@ export function ConnectionSettings({
         template: editing.template,
         adapter: editing.adapter,
         apiBase: editing.apiBase.trim() || null,
-        apiKeyEnv:
-          editing.credentialMode === "environment"
-            ? editing.apiKeyEnv.trim() || null
-            : null,
+        apiKeyEnv: editing.apiKeyEnv.trim() || null,
         modelCatalog: editing.modelCatalog,
         manualModels: editing.manualModels
           .split(/\r?\n|,/)
@@ -171,7 +165,7 @@ export function ConnectionSettings({
           .filter(Boolean),
         enabled: true,
       };
-      if (editing.credentialMode === "key" && editing.apiKey.trim()) {
+      if (editing.apiKey.trim()) {
         connection.apiKey = editing.apiKey.trim();
       }
       if (editing.clearApiKey) connection.clearApiKey = true;
@@ -188,18 +182,6 @@ export function ConnectionSettings({
       // The shared controller owns the sanitized user-facing error.
     } finally {
       setSaving(false);
-    }
-  };
-
-  const test = async (connectionId: string) => {
-    setTestingId(connectionId);
-    try {
-      const result = await controller.test(connectionId);
-      setTestResults((current) => ({ ...current, [connectionId]: result }));
-    } catch {
-      // The shared controller owns the sanitized user-facing error.
-    } finally {
-      setTestingId(null);
     }
   };
 
@@ -307,15 +289,28 @@ export function ConnectionSettings({
           </span>
         </div>
         <div className={styles.addActions}>
-          <button
-            type="button"
-            className={styles.addButton}
-            onClick={() => setEditing({ ...emptyDraft })}
-            disabled={busy || saving}
-          >
-            <Plus size={14} />
-            Add provider
-          </button>
+          <label className={styles.addSelect}>
+            <select
+              aria-label="Add provider"
+              value=""
+              disabled={busy || saving}
+              onChange={(event) => {
+                if (!event.target.value) return;
+                setEditing({ ...emptyDraft });
+                chooseTemplate(event.target.value);
+                event.target.value = "";
+              }}
+            >
+              <option value="">Add provider…</option>
+              {controller.catalog?.templates
+                .filter((template) => template.name !== "custom")
+                .map((template) => (
+                  <option key={template.name} value={template.name}>
+                    {template.label} · {template.local ? "local" : "cloud"}
+                  </option>
+                ))}
+            </select>
+          </label>
           <button
             type="button"
             className={styles.addButton}
@@ -326,7 +321,8 @@ export function ConnectionSettings({
             disabled={busy || saving}
             title="Declare an OpenAI-compatible or Anthropic endpoint DeepCode does not ship"
           >
-            Add custom
+            <Plus size={14} />
+            Add a custom provider
           </button>
         </div>
       </header>
@@ -359,7 +355,6 @@ export function ConnectionSettings({
                   </span>
                 </header>
                 <p>
-                  {connection.apiBase ?? "Provider default endpoint"}
                   <small>
                     <i
                       className={styles.credentialDot}
@@ -377,18 +372,11 @@ export function ConnectionSettings({
                 </p>
                 {result ? (
                   <ConnectionVerification result={result} compact />
+                ) : testingId === connection.id ? (
+                  <p className={styles.loading}>Checking…</p>
                 ) : null}
               </div>
               <div className={styles.actions}>
-                <button
-                  type="button"
-                  onClick={() => void test(connection.id)}
-                  disabled={busy || testingId === connection.id}
-                  title="Check credential and model catalog"
-                >
-                  <FlaskConical size={14} />
-                  {testingId === connection.id ? "Checking…" : "Check"}
-                </button>
                 <button
                   type="button"
                   onClick={() => beginEdit(connection)}
@@ -415,55 +403,16 @@ export function ConnectionSettings({
           <div className={styles.emptyState}>
             <Server size={18} />
             <strong>No provider connected</strong>
-            <span>Add an API provider or a local model service to begin.</span>
-            <button type="button" onClick={() => setEditing({ ...emptyDraft })}>
-              <Plus size={14} /> Add provider
-            </button>
+            <span>
+              Pick a provider from “Add provider…” above, or declare a custom
+              endpoint, to begin.
+            </span>
           </div>
         ) : null}
         {controller.loading ? (
           <p className={styles.loading}>Loading connections…</p>
         ) : null}
       </div>
-
-      {!controller.loading ? (
-        <div className={styles.directory}>
-          <p>
-            Available providers
-            <small>
-              Known services DeepCode can connect — pick one to set it up.
-            </small>
-          </p>
-          <div
-            className={styles.directoryStrip}
-            role="list"
-            aria-label="Available providers"
-          >
-            {connections
-              .filter((connection) => !isManagedConnection(connection))
-              .map((connection) => (
-                <button
-                  type="button"
-                  role="listitem"
-                  key={connection.id}
-                  onClick={() => {
-                    setEditing({ ...emptyDraft });
-                    chooseTemplate(connection.providerName);
-                  }}
-                  disabled={busy || saving}
-                  title={connection.apiBase ?? "Provider default endpoint"}
-                >
-                  <Server size={13} />
-                  <span>
-                    <strong>{connection.label}</strong>
-                    <small>{connection.local ? "local" : "cloud"}</small>
-                  </span>
-                  <Plus size={12} />
-                </button>
-              ))}
-          </div>
-        </div>
-      ) : null}
 
       {editing ? (
         <div className={styles.editorBackdrop} role="presentation">
@@ -491,33 +440,7 @@ export function ConnectionSettings({
                 <X size={16} />
               </button>
             </header>
-            {!editing.template ? (
-              <div className={styles.providerPicker}>
-                <div>
-                  <strong>Choose where your models come from</strong>
-                  <span>
-                    Provider defaults fill in the correct endpoint and protocol.
-                  </span>
-                </div>
-                <div className={styles.providerGrid}>
-                  {controller.catalog?.templates.map((template) => (
-                    <button
-                      type="button"
-                      key={template.name}
-                      onClick={() => chooseTemplate(template.name)}
-                    >
-                      <Server size={16} />
-                      <span>
-                        <strong>{template.label}</strong>
-                        <small>
-                          {template.local ? "Runs locally" : "Cloud provider"}
-                        </small>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : (
+            {editing.template ? (
               <div className={styles.form}>
                 {controller.error ? (
                   <p className={`${styles.error} ${styles.wide}`}>
@@ -534,14 +457,6 @@ export function ConnectionSettings({
                         : "API provider"}
                     </small>
                   </span>
-                  {!editingExisting ? (
-                    <button
-                      type="button"
-                      onClick={() => setEditing({ ...emptyDraft })}
-                    >
-                      <ChevronLeft size={12} /> Change
-                    </button>
-                  ) : null}
                 </div>
                 <label className={styles.wide}>
                   Display name
@@ -576,31 +491,7 @@ export function ConnectionSettings({
                 {!selectedTemplate?.local ? (
                   <fieldset className={`${styles.credentials} ${styles.wide}`}>
                     <legend>Credential</legend>
-                    <div className={styles.credentialTabs}>
-                      <button
-                        type="button"
-                        data-active={editing.credentialMode === "key"}
-                        onClick={() =>
-                          setEditing({ ...editing, credentialMode: "key" })
-                        }
-                      >
-                        Paste API key
-                      </button>
-                      <button
-                        type="button"
-                        data-active={editing.credentialMode === "environment"}
-                        onClick={() =>
-                          setEditing({
-                            ...editing,
-                            credentialMode: "environment",
-                          })
-                        }
-                      >
-                        Environment variable
-                      </button>
-                    </div>
-                    {editing.credentialMode === "key" &&
-                    editing.environmentShadows ? (
+                    {editing.environmentShadows ? (
                       <p className={styles.credentialShadowNote} role="note">
                         {editing.shadowingEnvName
                           ? `The launch environment variable ${editing.shadowingEnvName} currently provides this key and takes precedence. `
@@ -609,47 +500,33 @@ export function ConnectionSettings({
                         here.
                       </p>
                     ) : null}
-                    {editing.credentialMode === "key" ? (
-                      <input
-                        type="password"
-                        value={editing.apiKey}
-                        onChange={(event) =>
-                          setEditing({
-                            ...editing,
-                            apiKey: event.target.value,
-                            clearApiKey: false,
-                          })
-                        }
-                        placeholder={
-                          editing.environmentShadows
-                            ? "Provided by the launch environment (read-only)"
-                            : editingExisting
-                              ? "Leave blank to keep the saved key"
-                              : "Paste API key"
-                        }
-                        autoComplete="new-password"
-                        disabled={
-                          editing.clearApiKey || editing.environmentShadows
-                        }
-                        aria-label="API key"
-                      />
-                    ) : (
-                      <input
-                        value={editing.apiKeyEnv}
-                        onChange={(event) =>
-                          setEditing({
-                            ...editing,
-                            apiKeyEnv: event.target.value,
-                          })
-                        }
-                        placeholder={
-                          selectedTemplate?.apiKeyEnv ?? "PROVIDER_API_KEY"
-                        }
-                        aria-label="API key environment variable"
-                      />
-                    )}
+                    <input
+                      type="password"
+                      value={editing.apiKey}
+                      onChange={(event) =>
+                        setEditing({
+                          ...editing,
+                          apiKey: event.target.value,
+                          clearApiKey: false,
+                        })
+                      }
+                      placeholder={
+                        editing.environmentShadows
+                          ? "Provided by the launch environment (read-only)"
+                          : editingExisting
+                            ? "Leave blank to keep the saved key"
+                            : "Paste API key"
+                      }
+                      autoComplete="new-password"
+                      disabled={
+                        editing.clearApiKey || editing.environmentShadows
+                      }
+                      aria-label="API key"
+                    />
                     <small>
-                      Stored keys are private and never returned to the app UI.
+                      Write-only: stored keys are private and never returned to
+                      the app UI. Referencing an environment variable instead
+                      is available under Advanced.
                     </small>
                   </fieldset>
                 ) : null}
@@ -758,6 +635,27 @@ export function ConnectionSettings({
                         disabled={editingExisting}
                       />
                     </label>
+                    {!selectedTemplate?.local ? (
+                      <label>
+                        API key environment variable
+                        <input
+                          value={editing.apiKeyEnv}
+                          onChange={(event) =>
+                            setEditing({
+                              ...editing,
+                              apiKeyEnv: event.target.value,
+                            })
+                          }
+                          placeholder={
+                            selectedTemplate?.apiKeyEnv ?? "PROVIDER_API_KEY"
+                          }
+                        />
+                        <small>
+                          Reference a launch-environment variable instead of a
+                          stored key. Leave blank to use the pasted key.
+                        </small>
+                      </label>
+                    ) : null}
                     {!endpointRequired ? (
                       <label>
                         API base
@@ -854,7 +752,7 @@ export function ConnectionSettings({
                   </div>
                 </details>
               </div>
-            )}
+            ) : null}
             <footer>
               <span>
                 Saving checks credentials and model discovery. It does not send
