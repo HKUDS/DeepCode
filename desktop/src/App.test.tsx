@@ -280,6 +280,7 @@ class TestRuntime implements DesktopRuntime {
               apiKeyEnv: "OPENAI_API_KEY",
               modelCatalog: "openai",
               manualModels: [],
+              manualModelEntries: [],
               configured: true,
               credentialSource: "environment",
               local: false,
@@ -295,6 +296,7 @@ class TestRuntime implements DesktopRuntime {
               apiKeyEnv: "ANTHROPIC_API_KEY",
               modelCatalog: "anthropic",
               manualModels: [],
+              manualModelEntries: [],
               configured: false,
               credentialSource: "missing",
               local: false,
@@ -358,6 +360,18 @@ class TestRuntime implements DesktopRuntime {
           refreshedAt: 1_768_000_000,
         } as unknown as MethodResults[M];
       }
+      case "provider/discover":
+        return {
+          models: desktopSettings.models.map((model) => ({
+            id: model.id,
+            name: model.id,
+            contextWindow: model.contextWindow,
+            maxOutputTokens: model.maxOutputTokens,
+            supportedParameters: [],
+            reasoning: null,
+          })),
+          error: null,
+        } as unknown as MethodResults[M];
       case "provider/upsert": {
         const request = params as MethodParams["provider/upsert"];
         const connection = request.connection;
@@ -372,6 +386,7 @@ class TestRuntime implements DesktopRuntime {
               apiKeyEnv: "OPENAI_API_KEY",
               modelCatalog: "openai",
               manualModels: [],
+              manualModelEntries: [],
               configured: true,
               credentialSource: "environment",
               local: false,
@@ -2282,10 +2297,31 @@ describe("desktop command center", () => {
     fireEvent.click(
       screen.getByRole("button", { name: /Add 1 model to this connection/ }),
     );
-    // Adoption switches the connection to a manual list (the picked models
-    // REPLACE the provider catalog), visible in the summary line.
-    expect(screen.getByText(/Manual list: 1 model/)).toBeTruthy();
-    expect(runtime.calls).toContain("model/list");
+    // Adoption lands the pick as an editable declaration row carrying what
+    // discovery learned (capacities), and the fetch probed the form state
+    // through provider/discover — nothing was stored by the probe itself.
+    const idInputs = screen.getAllByLabelText("Model ID") as HTMLInputElement[];
+    expect(idInputs.map((input) => input.value)).toContain("gpt-5-mini");
+    expect(runtime.calls).toContain("provider/discover");
+    const discoverParams = runtime.requests.find(
+      (request) => request.method === "provider/discover",
+    )?.params as MethodParams["provider/discover"];
+    expect(discoverParams.connectionId).toBe("openai");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save and check" }));
+    await waitFor(() => {
+      const request = runtime.requests.find(
+        (candidate) => candidate.method === "provider/upsert",
+      )?.params as MethodParams["provider/upsert"];
+      expect(request.connection.modelCatalog).toBe("manual");
+      expect(request.connection.manualModels).toEqual([
+        {
+          id: "gpt-5-mini",
+          contextWindow: 400000,
+          maxOutputTokens: 128000,
+        },
+      ]);
+    });
   });
 
   it("saves and verifies the selected Agent model with the project context", async () => {

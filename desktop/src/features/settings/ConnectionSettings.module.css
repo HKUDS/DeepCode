@@ -712,3 +712,95 @@
   background: var(--success);
 }
 
+
+/* Model list editor — one bordered row per declared model (dsh grammar). */
+
+.modelRows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modelRow {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.modelRow > details > summary {
+  margin-top: 6px;
+  font-size: var(--text-micro);
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.modelRowMain {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.modelRowMain label,
+.modelRowCapacities label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--text-micro);
+  color: var(--text-tertiary);
+}
+
+.modelRowMain input,
+.modelRowCapacities input {
+  padding: 6px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+}
+
+.modelRowRemove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.modelRowRemove:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.modelRowCapacities {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.modelRowAdd {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 6px 10px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.modelRowAdd:hover {
+  color: var(--text-primary);
+  border-style: solid;
+}

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -194,6 +195,47 @@ class LLMConfigurationService:
             "removed": removed or credential_removed,
             **self.list_connections(),
         }
+
+    def discover_models(
+        self,
+        *,
+        connection_id: str | None = None,
+        template: str | None = None,
+        api_base: str | None = None,
+        api_key: str | None = None,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Probe an endpoint AS SHOWN in an editor form; writes nothing.
+
+        An existing connection supplies the baseline (its stored key stays
+        usable); a template covers create-before-first-save. An unsaved base
+        URL or freshly typed key overrides for this one probe only and never
+        leaves memory — discovery returns candidates, adopting writes
+        (the dsh rule).
+        """
+        resolver = self._resolver(project_id=project_id)
+        try:
+            if connection_id and connection_id.strip():
+                base = resolver.resolve_connection(connection_id.strip())
+            elif template and template.strip():
+                base = resolver.template_connection(template.strip())
+            else:
+                raise InvalidArgumentError(
+                    "provider discovery needs a connectionId or a template"
+                )
+        except ValueError as exc:
+            raise InvalidArgumentError(str(exc)) from exc
+        overrides: dict[str, Any] = {}
+        if api_base and api_base.strip():
+            overrides["api_base"] = api_base.strip()
+        if api_key and api_key.strip():
+            overrides["api_key"] = api_key.strip()
+        connection = replace(base, **overrides) if overrides else base
+        try:
+            models = self.catalog.probe(connection)
+        except Exception as exc:  # noqa: BLE001 - surfaced, never raised to UI
+            return {"models": [], "error": _safe_configuration_error(exc)}
+        return {"models": [model.to_dict() for model in models], "error": None}
 
     def model_reasoning(
         self,

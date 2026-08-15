@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 
 import type {
+  ProviderDiscoverParams,
+  ProviderDiscoverResult,
   ConnectionCatalogResult,
   ModelCatalogResult,
   ProviderTestResult,
@@ -17,6 +19,10 @@ export interface ConnectionCatalogController {
   remove(connectionId: string): Promise<void>;
   test(connectionId: string, model?: string): Promise<ProviderTestResult>;
   models(connectionId: string, refresh?: boolean): Promise<ModelCatalogResult>;
+  /** Probe an endpoint AS SHOWN in an editor form; nothing is stored. */
+  discover(
+    params: Omit<ProviderDiscoverParams, "projectId">,
+  ): Promise<ProviderDiscoverResult>;
 }
 
 export function useConnectionCatalog(
@@ -159,6 +165,15 @@ export function useConnectionCatalog(
     [projectId, runtime],
   );
 
+  const discover = useCallback(
+    (params: Omit<ProviderDiscoverParams, "projectId">) =>
+      runtime.request("provider/discover", {
+        ...params,
+        ...(projectId ? { projectId } : {}),
+      }),
+    [projectId, runtime],
+  );
+
   const currentProject = state.projectId === projectId;
   return {
     catalog: currentProject ? state.catalog : null,
@@ -169,6 +184,7 @@ export function useConnectionCatalog(
     remove,
     test,
     models,
+    discover,
   };
 }
 

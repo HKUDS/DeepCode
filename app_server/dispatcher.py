@@ -199,6 +199,7 @@ class Dispatcher:
             rpc_methods.PROVIDER_UPSERT: self._provider_upsert,
             rpc_methods.PROVIDER_REMOVE: self._provider_remove,
             rpc_methods.PROVIDER_TEST: self._provider_test,
+            rpc_methods.PROVIDER_DISCOVER: self._provider_discover,
             rpc_methods.MODEL_LIST: self._model_list,
             rpc_methods.PRESET_LIST: self._preset_list,
             rpc_methods.PRESET_CURRENT: self._preset_current,
@@ -436,6 +437,16 @@ class Dispatcher:
             str(params.string("connectionId")),
             project_id=params.string("projectId", required=False),
             model_id=params.string("model", required=False),
+        )
+
+    def _provider_discover(self, params: Params) -> dict[str, Any]:
+        params.only("connectionId", "template", "apiBase", "apiKey", "projectId")
+        return self.application.llm.discover_models(
+            connection_id=params.string("connectionId", required=False),
+            template=params.string("template", required=False),
+            api_base=params.string("apiBase", required=False),
+            api_key=params.string("apiKey", required=False),
+            project_id=params.string("projectId", required=False),
         )
 
     def _model_list(self, params: Params) -> dict[str, Any]:

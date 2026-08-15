@@ -12,7 +12,7 @@ from typing import Any
 
 import httpx
 
-from core.config import deepcode_home
+from core.config import ManualModelConfig, deepcode_home
 from core.file_lock import exclusive_file_lock
 from core.private_storage import ensure_private_directory, open_private_file
 from core.providers.catalog import known_model_ids, resolve_model_info
@@ -184,13 +184,37 @@ class ModelCatalogService:
         connection: ResolvedConnection,
         model_id: str,
     ) -> CatalogModel | None:
-        """Read last-known-good metadata without network I/O."""
+        """Read last-known-good metadata without network I/O.
 
+        A manual declaration that actually declares something (label,
+        capacities, efforts) outranks any remote snapshot: the user wrote it
+        down explicitly, and execution profiles must honor it offline.
+        """
+
+        declared = next(
+            (
+                entry
+                for entry in connection.manual_model_entries
+                if entry.id == model_id and _has_declarations(entry)
+            ),
+            None,
+        )
+        if declared is not None:
+            return _declared_model(declared)
         revision = ConnectionResolver.connection_revision(connection)
         cached = self._cached(connection.id, revision)
         if cached is None:
             return None
         return next((model for model in cached.models if model.id == model_id), None)
+
+    def probe(self, connection: ResolvedConnection) -> tuple[CatalogModel, ...]:
+        """One-shot discovery against exactly this connection value.
+
+        Nothing is cached and nothing is stored — discovery returns
+        candidates the caller may adopt (the dsh rule), and the connection
+        may be an unsaved editor form rather than a configured one.
+        """
+        return tuple(sorted(self._fetch(connection), key=lambda item: item.id.lower()))
 
     def _fetch(self, connection: ResolvedConnection) -> tuple[CatalogModel, ...]:
         url, headers = _catalog_request(connection)
@@ -215,16 +239,18 @@ class ModelCatalogService:
     def _fallback_models(
         self, connection: ResolvedConnection
     ) -> tuple[CatalogModel, ...]:
-        requested = list(connection.manual_models)
-        if not requested:
-            prefix = f"{connection.provider_name}/"
-            requested = [
-                model_id
-                for model_id in known_model_ids()
-                if connection.provider_name == "openrouter"
-                or model_id.startswith(prefix)
-                or _looks_native(model_id, connection.provider_name)
-            ]
+        if connection.manual_model_entries:
+            return tuple(
+                _declared_model(entry) for entry in connection.manual_model_entries
+            )
+        prefix = f"{connection.provider_name}/"
+        requested = [
+            model_id
+            for model_id in known_model_ids()
+            if connection.provider_name == "openrouter"
+            or model_id.startswith(prefix)
+            or _looks_native(model_id, connection.provider_name)
+        ]
         return tuple(_offline_model(model_id) for model_id in dict.fromkeys(requested))
 
     def _cached(
@@ -377,6 +403,48 @@ def _offline_model(model_id: str) -> CatalogModel:
         context_window=info.context_window,
         max_output_tokens=info.max_output_tokens,
         reasoning=infer_reasoning_capabilities(model_id),
+    )
+
+
+def _has_declarations(entry: ManualModelConfig) -> bool:
+    """True when the entry declares more than its id."""
+    return (
+        entry.label is not None
+        or entry.context_window is not None
+        or entry.max_output_tokens is not None
+        or entry.reasoning_efforts is not None
+    )
+
+
+def _declared_model(entry: "ManualModelConfig") -> CatalogModel:
+    """A manually declared model: the declaration wins field by field, and
+    anything it leaves unsaid falls through the built-in catalog cascade."""
+    base = _offline_model(entry.id)
+    if entry.reasoning_efforts is None:
+        reasoning = base.reasoning
+    elif entry.reasoning_efforts is False:
+        # Declared non-reasoning: block the inference fallback with an
+        # explicit "no controls" answer instead of an absent one.
+        reasoning = ModelReasoningCapabilities()
+    else:
+        levels = tuple(
+            dict.fromkeys(
+                level.strip().lower()
+                for level in entry.reasoning_efforts
+                if level.strip()
+            )
+        )
+        reasoning = ModelReasoningCapabilities(
+            supported_efforts=tuple(level for level in levels if level != "off"),
+            default_enabled=True,
+            mandatory="off" not in levels,
+        )
+    return CatalogModel(
+        id=entry.id,
+        name=entry.label or base.name,
+        context_window=entry.context_window or base.context_window,
+        max_output_tokens=entry.max_output_tokens or base.max_output_tokens,
+        reasoning=reasoning,
     )
 
 

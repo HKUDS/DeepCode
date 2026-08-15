@@ -96,6 +96,7 @@ export interface MethodParams {
   "provider/upsert": ProviderUpsertParams;
   "provider/remove": ConnectionIdentityParams;
   "provider/test": ProviderTestParams;
+  "provider/discover": ProviderDiscoverParams;
   "model/list": ModelListParams;
   "preset/list": PresetListParams;
   "preset/current": PresetCurrentParams;
@@ -228,9 +229,16 @@ export interface ProviderUpsertParams {
     clearApiKey?: boolean;
     extraHeaders?: JsonObject;
     modelCatalog?: "auto" | "openrouter" | "openai" | "anthropic" | "manual";
-    manualModels?: string[];
+    manualModels?: (string | ManualModelEntry)[];
     enabled?: boolean;
   };
+}
+export interface ManualModelEntry {
+  id: string;
+  label?: string | null;
+  contextWindow?: number | null;
+  maxOutputTokens?: number | null;
+  reasoningEfforts?: string[] | false | null;
 }
 export interface ConnectionIdentityParams {
   connectionId: string;
@@ -239,6 +247,13 @@ export interface ProviderTestParams {
   connectionId: string;
   projectId?: string;
   model?: string;
+}
+export interface ProviderDiscoverParams {
+  connectionId?: string;
+  template?: string;
+  apiBase?: string;
+  apiKey?: string;
+  projectId?: string;
 }
 export interface ModelListParams {
   connectionId: string;
@@ -568,6 +583,7 @@ export interface MethodResults {
   "provider/upsert": ConnectionCatalogResult;
   "provider/remove": ConnectionRemoveResult;
   "provider/test": ProviderTestResult;
+  "provider/discover": ProviderDiscoverResult;
   "model/list": ModelCatalogResult;
   "project/list": {
     projects: Project[];
@@ -814,6 +830,7 @@ export interface ConnectionInfo {
   apiKeyEnv: string | null;
   modelCatalog: "auto" | "openrouter" | "openai" | "anthropic" | "manual";
   manualModels: string[];
+  manualModelEntries: ManualModelEntry[];
   configured: boolean;
   credentialSource: "environment" | "credential_store" | "legacy_config" | "not_required" | "missing";
   local: boolean;
@@ -857,13 +874,9 @@ export interface ProviderVerificationStage {
   modelCount: number | null;
   modelId: string | null;
 }
-export interface ModelCatalogResult {
-  connectionId: string;
+export interface ProviderDiscoverResult {
   models: CatalogModel[];
-  source: string;
-  stale: boolean;
   error: string | null;
-  refreshedAt: number | null;
 }
 export interface CatalogModel {
   id: string;
@@ -879,6 +892,14 @@ export interface ReasoningCapabilities {
   defaultEnabled: boolean;
   mandatory: boolean;
   supportsSummary: boolean;
+}
+export interface ModelCatalogResult {
+  connectionId: string;
+  models: CatalogModel[];
+  source: string;
+  stale: boolean;
+  error: string | null;
+  refreshedAt: number | null;
 }
 export interface Project {
   id: string;

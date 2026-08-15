@@ -12,12 +12,14 @@ import { useMemo, useState } from "react";
 import type {
   CatalogModel,
   ConnectionInfo,
+  ManualModelEntry,
   ProviderTestResult,
   ProviderUpsertParams,
 } from "../../generated/app-server";
 import { confirmAction } from "../../platform/confirmAction";
 import type { ConnectionCatalogController } from "./useConnectionCatalog";
 import { ConnectionVerification } from "./ConnectionVerification";
+import { ModelListEditor } from "./ModelListEditor";
 import styles from "./ConnectionSettings.module.css";
 
 interface ConnectionSettingsProps {
@@ -37,7 +39,7 @@ interface Draft {
   apiKey: string;
   clearApiKey: boolean;
   modelCatalog: "auto" | "openrouter" | "openai" | "anthropic" | "manual";
-  manualModels: string;
+  manualModels: ManualModelEntry[];
   /** True when the launch environment currently provides this key: it
    * outranks a pasted key, so the form must say so instead of letting a
    * paste silently lose. */
@@ -55,7 +57,7 @@ const emptyDraft: Draft = {
   apiKey: "",
   clearApiKey: false,
   modelCatalog: "auto",
-  manualModels: "",
+  manualModels: [],
   environmentShadows: false,
   shadowingEnvName: "",
 };
@@ -119,7 +121,9 @@ export function ConnectionSettings({
       apiKey: "",
       clearApiKey: false,
       modelCatalog: connection.modelCatalog,
-      manualModels: connection.manualModels.join("\n"),
+      manualModels: (connection.manualModelEntries ?? []).map((entry) => ({
+        ...entry,
+      })),
       environmentShadows: connection.credentialSource === "environment",
       shadowingEnvName: connection.apiKeyEnv ?? "",
     });
@@ -142,7 +146,7 @@ export function ConnectionSettings({
       adapter: template.adapter === "anthropic" ? "anthropic" : "openai_compat",
       apiBase: template.defaultApiBase ?? "",
       modelCatalog: "auto",
-      manualModels: "",
+      manualModels: [],
     }));
   };
 
@@ -160,9 +164,9 @@ export function ConnectionSettings({
         apiKeyEnv: editing.apiKeyEnv.trim() || null,
         modelCatalog: editing.modelCatalog,
         manualModels: editing.manualModels
-          .split(/\r?\n|,/)
-          .map((value) => value.trim())
-          .filter(Boolean),
+          .map((entry) => ({ ...entry, id: entry.id.trim() }))
+          .filter((entry) => entry.id)
+          .map((entry) => (hasDeclarations(entry) ? entry : entry.id)),
         enabled: true,
       };
       if (editing.apiKey.trim()) {
@@ -199,9 +203,8 @@ export function ConnectionSettings({
   const manualModelIds = useMemo(
     () =>
       new Set(
-        (editing?.manualModels ?? "")
-          .split(/\r?\n|,/)
-          .map((value) => value.trim())
+        (editing?.manualModels ?? [])
+          .map((entry) => entry.id.trim())
           .filter(Boolean),
       ),
     [editing?.manualModels],
@@ -216,10 +219,15 @@ export function ConnectionSettings({
       models: null,
     });
     try {
-      const result = await controller.models(
-        editing.id.trim().toLocaleLowerCase(),
-        true,
-      );
+      // Probe THE FORM AS SHOWN (dsh's rule): an unsaved base URL or a key
+      // typed but not yet stored takes part; nothing is written.
+      const result = await controller.discover({
+        ...(editingExisting
+          ? { connectionId: editing.id.trim().toLocaleLowerCase() }
+          : { template: editing.template }),
+        ...(editing.apiBase.trim() ? { apiBase: editing.apiBase.trim() } : {}),
+        ...(editing.apiKey.trim() ? { apiKey: editing.apiKey.trim() } : {}),
+      });
       setModelFetchState({
         editorId: editingId,
         loading: false,
@@ -242,16 +250,33 @@ export function ConnectionSettings({
 
   const adoptPickedModels = () => {
     if (!editing || pickedModels.size === 0) return;
-    const merged = [
-      ...manualModelIds,
-      ...[...pickedModels].filter((id) => !manualModelIds.has(id)),
-    ];
+    const discovered = new Map(
+      (modelFetch.models ?? []).map((model) => [model.id, model]),
+    );
+    const added = [...pickedModels]
+      .filter((id) => !manualModelIds.has(id))
+      .map((id): ManualModelEntry => {
+        const model = discovered.get(id);
+        // Candidates adopt WITH what discovery learned (display name and
+        // capacities), so the declaration is born accurate; already-listed
+        // rows are untouched so a hand-corrected capacity never regresses.
+        return {
+          id,
+          ...(model && model.name && model.name !== id
+            ? { label: model.name }
+            : {}),
+          ...(model?.contextWindow ? { contextWindow: model.contextWindow } : {}),
+          ...(model?.maxOutputTokens
+            ? { maxOutputTokens: model.maxOutputTokens }
+            : {}),
+        };
+      });
     setEditing({
       ...editing,
       // A hand-picked list REPLACES the provider catalog for this
       // connection (the dsh rule), so adoption switches to manual mode.
       modelCatalog: "manual",
-      manualModels: merged.join("\n"),
+      manualModels: [...editing.manualModels, ...added],
     });
     setPickedModels(new Set());
   };
@@ -533,28 +558,21 @@ export function ConnectionSettings({
                 {editing.template ? (
                   <fieldset className={`${styles.modelsField} ${styles.wide}`}>
                     <legend>Models</legend>
-                    {editingExisting ? (
-                      <div className={styles.modelFetchRow}>
-                        <button
-                          type="button"
-                          onClick={() => void fetchModels()}
-                          disabled={modelFetch.loading || busy}
-                        >
-                          {modelFetch.loading
-                            ? "Fetching…"
-                            : "Fetch models from provider"}
-                        </button>
-                        <small>
-                          Lists what this connection's endpoint actually
-                          serves; picks become its manual model list.
-                        </small>
-                      </div>
-                    ) : (
+                    <div className={styles.modelFetchRow}>
+                      <button
+                        type="button"
+                        onClick={() => void fetchModels()}
+                        disabled={modelFetch.loading || busy}
+                      >
+                        {modelFetch.loading
+                          ? "Fetching…"
+                          : "Fetch models from provider"}
+                      </button>
                       <small>
-                        Save the connection first, then fetch its live model
-                        list here.
+                        Probes the endpoint as filled in above — an unsaved
+                        URL or key works; picks become the manual model list.
                       </small>
-                    )}
+                    </div>
                     {modelFetch.error ? (
                       <p className={styles.modelFetchError} role="alert">
                         {modelFetch.error}
@@ -610,13 +628,17 @@ export function ConnectionSettings({
                         </button>
                       </>
                     ) : null}
-                    {manualModelIds.size > 0 ? (
-                      <small>
-                        Manual list: {manualModelIds.size} model
-                        {manualModelIds.size === 1 ? "" : "s"} (editable under
-                        Advanced).
-                      </small>
-                    ) : null}
+                    <ModelListEditor
+                      entries={editing.manualModels}
+                      onChange={(manualModels) =>
+                        setEditing({ ...editing, manualModels })
+                      }
+                    />
+                    <small>
+                      Per-model reasoning declarations (`reasoningEfforts`)
+                      live in the configuration file — Open configuration
+                      file edits them directly.
+                    </small>
                   </fieldset>
                 ) : null}
                 <details className={`${styles.advanced} ${styles.wide}`}>
@@ -705,24 +727,7 @@ export function ConnectionSettings({
                         <option value="manual">Manual list</option>
                       </select>
                     </label>
-                    {editing.modelCatalog === "manual" ? (
-                      <label className={styles.wide}>
-                        Manual models
-                        <textarea
-                          value={editing.manualModels}
-                          onChange={(event) =>
-                            setEditing({
-                              ...editing,
-                              manualModels: event.target.value,
-                            })
-                          }
-                          placeholder={
-                            "One model ID per line\nmoonshotai/kimi-k2.5"
-                          }
-                          rows={3}
-                        />
-                      </label>
-                    ) : null}
+
                     {editingExisting ? (
                       <label
                         className={`${styles.credentialAction} ${styles.wide}`}
@@ -784,6 +789,15 @@ export function ConnectionSettings({
         </div>
       ) : null}
     </section>
+  );
+}
+
+function hasDeclarations(entry: ManualModelEntry): boolean {
+  return (
+    entry.label != null ||
+    entry.contextWindow != null ||
+    entry.maxOutputTokens != null ||
+    entry.reasoningEfforts != null
   );
 }
 
