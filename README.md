@@ -1110,11 +1110,11 @@ The empty product-image slots have a shared
 
 *Community growth trajectory*
 
-  <a href="https://star-history.com/#HKUDS/DeepCode&Date">
+  <a href="https://star-history.dera.page/#HKUDS/DeepCode&Date">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=HKUDS/DeepCode&type=Date&theme=dark" />
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=HKUDS/DeepCode&type=Date" />
-      <img src="https://api.star-history.com/svg?repos=HKUDS/DeepCode&type=Date" alt="DeepCode Star History chart" width="900" />
+      <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=HKUDS/DeepCode&type=Date&theme=dark" />
+      <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=HKUDS/DeepCode&type=Date" />
+      <img src="https://star-history.dera.page/svg?repos=HKUDS/DeepCode&type=Date" alt="DeepCode Star History chart" width="900" />
     </picture>
   </a>
 
