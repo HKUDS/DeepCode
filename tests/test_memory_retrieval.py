@@ -124,5 +124,27 @@ def test_compose_memory_injection_is_data_bounded_and_numbered():
     assert "untrusted reference data" in block  # P1-3 restrict clause rides along
 
 
+def test_compose_includes_created_at_for_traceability():
+    # P2-D3 (lessons 08/14): retrieved results carry locators — timestamp
+    # included so answers can be grounded and attributed.
+    entries = [
+        {
+            "content": "old fact",
+            "similarity": 0.9,
+            "source_key": "s1",
+            "created_at": "2026-08-01T10:00:00",
+        },
+        {
+            "content": "new fact",
+            "similarity": 0.8,
+            "source": "experience",
+            "timestamp": "2026-08-15T12:00:00",
+        },
+    ]
+    block = compose_memory_injection(entries)
+    assert "[1] (from s1, at 2026-08-01T10:00:00)" in block
+    assert "[2] (from experience, at 2026-08-15T12:00:00)" in block
+
+
 def test_compose_empty_when_nothing_clears_threshold():
     assert compose_memory_injection([{"content": "x", "similarity": 0.2}]) == ""

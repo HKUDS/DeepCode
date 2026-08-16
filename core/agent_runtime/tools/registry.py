@@ -82,13 +82,20 @@ class ToolRegistry:
 
         tool = self._tools.get(name)
         if not tool:
-            return (
-                None,
-                params,
-                (
-                    f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"
-                ),
-            )
+            # P2-A7: semantic candidates for a hallucinated/misremembered name
+            # (lesson 17 Taskweaver plugin discovery). Execution still requires
+            # the exact registered name + permission engine — the hint only
+            # helps the model recover.
+            try:
+                from core.agent_runtime.tools.semantic_hint import build_miss_message
+
+                message = build_miss_message(name, self.tool_names)
+            except Exception:  # noqa: BLE001 - hint must never break the call
+                message = (
+                    f"Error: Tool '{name}' not found. "
+                    f"Available: {', '.join(self.tool_names)}"
+                )
+            return (None, params, message)
 
         cast_params = tool.cast_params(params)
         errors = tool.validate_params(cast_params)
@@ -112,8 +119,8 @@ class ToolRegistry:
             if isinstance(result, str) and result.startswith("Error"):
                 return result + _HINT
             return result
-        except Exception as e:
-            return f"Error executing {name}: {str(e)}" + _HINT
+        except Exception as e:  # noqa: BLE001 - tool failures are errors-as-data
+            return f"Error executing {name}: {e!s}" + _HINT
 
     @property
     def tool_names(self) -> list[str]:
@@ -150,7 +157,7 @@ class ToolRegistry:
         for name, stack in list(self._owned_server_stacks.items()):
             try:
                 await asyncio.wait_for(stack.aclose(), timeout=timeout_s)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 errors.append(
                     TimeoutError(
                         f"MCP server '{name}' close timed out after {timeout_s:g}s"
@@ -162,7 +169,7 @@ class ToolRegistry:
                 self._owned_server_stacks.pop(name, None)
         try:
             await asyncio.wait_for(self._exit_stack.aclose(), timeout=timeout_s)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             errors.append(
                 TimeoutError(
                     f"ToolRegistry exit stack close timed out after {timeout_s:g}s"
