@@ -13,7 +13,7 @@ from core.agent_runtime.tools.base import Tool, ToolResult
 from core.agent_runtime.tools.registry import ToolRegistry
 from core.mcp.connection import CredentialResolver, McpConnection, OAuthProviderFactory
 from core.mcp.models import McpRuntimePlan, McpStartupError
-from core.mcp.naming import visible_tool_name
+from core.mcp.naming import server_allowed, visible_tool_name
 from core.mcp.tools import McpToolAdapter
 
 
@@ -248,7 +248,7 @@ class McpSessionRuntime:
             used = set(self.registry.tool_names)
             registered: list[str] = []
             for connection, definitions in ready:
-                registered.extend(
+registered.extend(
                     self._register_server_tools(connection, definitions, used=used)
                 )
             if deferred_ids:
