@@ -229,7 +229,13 @@ class EditTool(Tool):
         return (
             "Edit a file by replacing old_string with new_string. Matching is "
             "resilient to whitespace/indentation drift; provide enough context "
-            f"for old_string to be unique, or set replace_all.{scope}"
+            "for old_string to be unique, or set replace_all.\n"
+            "Example: file src/a.py contains 'def old(x): return 1'; call "
+            'edit(file_path="src/a.py", old_string="def old(x): return 1", '
+            'new_string="def new(x): return 2") to replace it. '
+            "Use replace_all=true when the same snippet appears multiple times "
+            "and all occurrences should change."
+            f"{scope}"
         )
 
     async def execute(self, **kwargs: Any) -> Any:
