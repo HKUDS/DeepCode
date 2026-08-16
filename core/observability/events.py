@@ -53,8 +53,6 @@ class EventName(str, Enum):
     MEMORY_DISTILL_OK = "memory.distill.ok"
     MEMORY_DISTILL_SKIP = "memory.distill.skip"
     MEMORY_DISTILL_ERROR = "memory.distill.error"
-    # Compaction-as-memory (P1-5, GenAI lesson 15)
-    MEMORY_COMPACTION_DEPOSITED = "memory.compaction.deposited"
     # Guard rails (REASONIX port)
     GUARD_PROGRESS_TRIP = "guard.progress.trip"
     GUARD_STORM_TRIP = "guard.storm.trip"
