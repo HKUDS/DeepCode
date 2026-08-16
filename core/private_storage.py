@@ -100,10 +100,10 @@ def ensure_private_directory(path: Path | str) -> Path:
 
     for component in reversed(missing):
         component.mkdir(mode=PRIVATE_DIRECTORY_MODE, exist_ok=True)
-        _chmod(component, PRIVATE_DIRECTORY_MODE)
+        _chmod(component, PRIVATE_DIRECTORY_MODE, force=True)
 
     directory.mkdir(parents=True, exist_ok=True, mode=PRIVATE_DIRECTORY_MODE)
-    _chmod(directory, PRIVATE_DIRECTORY_MODE)
+    _chmod(directory, PRIVATE_DIRECTORY_MODE, force=True)
     return directory
 
 
@@ -111,6 +111,11 @@ def open_private_file(path: Path | str, flags: int) -> int:
     """Open a private regular file without following a final symlink."""
 
     target = Path(path)
+    # Only restrict a *newly created* file. An existing file was already
+    # restricted at creation; re-running icacls on every open costs two
+    # subprocesses per call (and a full tree walk many times over) without
+    # changing the ACL (maintainer feedback on the earlier ACL PR).
+    created = not target.exists()
     ensure_private_directory(target.parent)
     descriptor = os.open(
         target,
@@ -128,7 +133,7 @@ def open_private_file(path: Path | str, flags: int) -> int:
             )
         if os.name != "nt":
             os.fchmod(descriptor, PRIVATE_FILE_MODE)
-        else:
+        elif created:
             _restrict_windows_acl(target)
         return descriptor
     except BaseException:
@@ -200,8 +205,12 @@ def harden_private_tree(root: Path | str) -> Path:
     return base
 
 
-def _chmod(path: Path, mode: int) -> None:
+def _chmod(path: Path, mode: int, *, force: bool = False) -> None:
     if os.name == "nt":
+        # harden_private_tree deliberately re-applies the restriction even to
+        # existing paths (it repairs legacy trees whose ACLs may be absent or
+        # permissive), so _chmod restricts unconditionally. The per-open cost
+        # is avoided in open_private_file by only restricting new files.
         _restrict_windows_acl(path)
         return
     try:

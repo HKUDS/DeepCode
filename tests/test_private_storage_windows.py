@@ -120,3 +120,36 @@ def test_windows_harden_private_tree_restricts_every_entry(tmp_path: Path) -> No
     for path in (root, session, session / "session.jsonl", root / "settings.json"):
         _assert_no_dangerous_aces(path)
         _assert_current_user_has_full_control(path)
+
+
+def test_windows_open_existing_file_does_not_rerun_acl(monkeypatch, tmp_path: Path) -> None:
+    """The per-open ACL re-run is gone: opening an existing private file does
+    not call _restrict_windows_acl again (the ACL was applied at creation)."""
+    import core.private_storage as ps
+
+    calls = []
+    monkeypatch.setattr(ps, "_restrict_windows_acl", lambda p: calls.append(p))
+
+    target = tmp_path / "existing.jsonl"
+    # First open: file does not exist → new → restrict once.
+    fd = ps.open_private_file(target, os.O_CREAT | os.O_RDWR)
+    os.close(fd)
+    assert len(calls) == 1, "new file must be restricted exactly once"
+
+    # Second open: file exists → must NOT re-run the ACL restriction.
+    fd = ps.open_private_file(target, os.O_RDWR)
+    os.close(fd)
+    assert len(calls) == 1, "existing file must not re-run the ACL restriction"
+
+
+def test_windows_open_created_file_restricts_once(monkeypatch, tmp_path: Path) -> None:
+    """A file created via open_private_file is restricted exactly once."""
+    import core.private_storage as ps
+
+    calls = []
+    monkeypatch.setattr(ps, "_restrict_windows_acl", lambda p: calls.append(p))
+
+    for _ in range(3):
+        fd = ps.open_private_file(tmp_path / "fresh.jsonl", os.O_CREAT | os.O_RDWR)
+        os.close(fd)
+    assert len(calls) == 1, "created once, restricted once, never again"
