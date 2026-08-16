@@ -70,8 +70,11 @@ def compose_memory_injection(
     """Render accepted entries as a numbered, data-bounded injection block.
 
     Each entry becomes one ``<untrusted-data>`` block carrying the P1-3
-    restrict clause (reference only, never instructions) plus its source
-    metadata (``source_key`` / ``source`` when present) for traceability.
+    restrict clause (reference only, never instructions) plus traceable
+    metadata — source key, source layer, and creation timestamp when present
+    (P2-D3, lessons 08/14: retrieved results carry locators so answers can be
+    grounded and attributed). Entries are numbered ``[n]``; the model may cite
+    ``[n]`` to attribute a claim to a specific memory.
     Empty when nothing clears the threshold — the caller then uses
     :func:`no_memory_statement` instead of injecting weak matches.
     """
@@ -82,7 +85,11 @@ def compose_memory_injection(
         if not content:
             continue
         source = entry.get("source_key") or entry.get("source") or "memory"
-        header = f"[{index}] (from {source})"
+        created_at = entry.get("created_at") or entry.get("timestamp")
+        header = f"[{index}] (from {source}"
+        if created_at:
+            header += f", at {created_at}"
+        header += ")"
         blocks.append(f"{header}\n{render_data_block(content)}")
     return "\n\n".join(blocks)
 
