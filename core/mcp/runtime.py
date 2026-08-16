@@ -12,7 +12,7 @@ from loguru import logger
 from core.agent_runtime.tools.registry import ToolRegistry
 from core.mcp.connection import CredentialResolver, McpConnection, OAuthProviderFactory
 from core.mcp.models import McpRuntimePlan, McpStartupError
-from core.mcp.naming import visible_tool_name
+from core.mcp.naming import server_allowed, visible_tool_name
 from core.mcp.tools import McpToolAdapter
 
 
@@ -180,6 +180,11 @@ class McpSessionRuntime:
                         continue
                     seen_raw.add(raw_name)
                     if not server.definition.exposes(raw_name):
+                        continue
+                    # P1-9 (lesson 13): supply-chain allowlist — a server that
+                    # is not on DEEPCODE_MCP_SERVER_ALLOWLIST registers no
+                    # tools (remote MCP is the widest third-party surface).
+                    if not server_allowed(server.server_id, server.name):
                         continue
                     name = visible_tool_name(server.server_id, raw_name, used=used)
                     adapter = McpToolAdapter(
