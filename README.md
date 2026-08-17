@@ -154,6 +154,13 @@ Skills, permissions, Goals, and Automations. See the
   `/preset`, `/effort`, `/permissions`, `/transcript` and `/skill` join
   `/resume`: a bare invocation opens a picker with the current choice
   marked, while argument forms and piped runs keep their text paths.
+- **Review pass on the batch.** Model declarations now shape the listing a
+  picker shows, not only what a Turn executes with; the catalog cache is
+  keyed on the settings that shape it, so adopting fetched models no longer
+  serves a stale list; Escape closes the innermost layer instead of
+  discarding a half-typed provider draft; a removed model row takes its own
+  capacities with it; and a default agent preset chosen for interactive
+  chatting no longer narrows `deepcode exec` and goal runs behind your back.
 - **Background tracebacks can no longer shred the transcript.** Stdlib
   logging is bridged into loguru with call-site fidelity, so file-only
   transports really are file-only; and the durable event relay backs off
