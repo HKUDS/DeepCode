@@ -104,6 +104,11 @@ class McpSessionRuntime:
             if not self.plan.servers:
                 self._started = True
                 return
+            deferred_ids = {
+                server.server_id
+                for server in self.plan.servers
+                if server.definition.defer_loading
+            }
             connections = {
                 server.server_id: McpConnection(
                     server,
@@ -111,13 +116,14 @@ class McpSessionRuntime:
                     oauth_provider_factory=self._oauth_provider_factory,
                 )
                 for server in self.plan.servers
+                if server.server_id not in deferred_ids
             }
             for server_id, status in tuple(self._statuses.items()):
                 self._statuses[server_id] = McpServerRuntimeStatus(
                     status.server_id,
                     status.name,
                     status.source,
-                    "starting",
+                    "deferred" if server_id in deferred_ids else "starting",
                     0,
                 )
             self._publish_statuses()
@@ -165,54 +171,129 @@ class McpSessionRuntime:
             used = set(self.registry.tool_names)
             registered: list[str] = []
             for connection, definitions in ready:
-                server = connection.server
-                seen_raw: set[str] = set()
-                exposed_count = 0
-                server_tools: list[str] = []
-                for definition in sorted(definitions, key=lambda item: str(item.name)):
-                    raw_name = str(definition.name)
-                    if raw_name in seen_raw:
-                        logger.warning(
-                            "MCP server '{}' returned duplicate tool name '{}'",
-                            server.name,
-                            raw_name,
-                        )
-                        continue
-                    seen_raw.add(raw_name)
-                    if not server.definition.exposes(raw_name):
-                        continue
-                    name = visible_tool_name(server.server_id, raw_name, used=used)
-                    adapter = McpToolAdapter(
-                        connection,
-                        definition,
-                        visible_name=name,
-                    )
-                    self.registry.register(adapter)
-                    registered.append(name)
-                    server_tools.append(name)
-                    exposed_count += 1
-                self._warn_unmatched_filters(server, seen_raw)
-                tools = tuple(server_tools)
-                self._capabilities[server.server_id] = tools
-                if server.policy_key is not None:
-                    self._capabilities[server.policy_key] = tools
-                    if (
-                        server.plugin_id is not None
-                        and server.plugin_server_name is not None
-                    ):
-                        self._capabilities[
-                            f"{server.plugin_id}:{server.plugin_server_name}"
-                        ] = tools
-                self._statuses[server.server_id] = McpServerRuntimeStatus(
-                    server.server_id,
-                    server.name,
-                    server.source.value,
-                    "ready",
-                    exposed_count,
+                registered.extend(
+                    self._register_server_tools(connection, definitions, used=used)
                 )
             self._registered_tools = tuple(registered)
             self._started = True
             self._publish_statuses()
+
+    async def activate_server(self, server_id: str) -> bool:
+        """Start one MCP server on demand and register its tools.
+
+        Deferred servers (``deferLoading: true``) are skipped by
+        :meth:`ensure_started`; call this to bring one up when it is actually
+        needed. Idempotent: returns ``True`` immediately when the server is
+        already ready. Returns ``False`` for unknown servers or when startup
+        fails (status is set to ``failed``).
+        """
+        if not self._started:
+            await self.ensure_started()
+        async with self._lock:
+            if self._closed:
+                return False
+            existing = self._connections.get(server_id)
+            if existing is not None and existing.ready:
+                return True
+            server = next(
+                (s for s in self.plan.servers if s.server_id == server_id),
+                None,
+            )
+            if server is None:
+                return False
+            self._statuses[server_id] = McpServerRuntimeStatus(
+                server.server_id,
+                server.name,
+                server.source.value,
+                "starting",
+                0,
+            )
+            connection = McpConnection(
+                server,
+                credential_resolver=self._credential_resolver,
+                oauth_provider_factory=self._oauth_provider_factory,
+            )
+            try:
+                definitions = await connection.start()
+            except BaseException as exc:  # noqa: BLE001 - startup boundary
+                error = f"{type(exc).__name__}: {exc}"
+                self._statuses[server_id] = McpServerRuntimeStatus(
+                    server.server_id,
+                    server.name,
+                    server.source.value,
+                    "failed",
+                    0,
+                    error,
+                )
+                logger.warning(
+                    "MCP server '{}' activation failed: {}", server.name, error
+                )
+                await connection.close()
+                self._publish_statuses()
+                return False
+            self._connections[server_id] = connection
+            registered = self._register_server_tools(
+                connection,
+                definitions,
+                used=set(self.registry.tool_names),
+            )
+            self._registered_tools = (*self._registered_tools, *registered)
+            self._publish_statuses()
+            return True
+
+    def _register_server_tools(
+        self,
+        connection: McpConnection,
+        definitions: tuple[Any, ...],
+        *,
+        used: set[str],
+    ) -> list[str]:
+        """Register one ready server's tools; returns the visible names."""
+        server = connection.server
+        seen_raw: set[str] = set()
+        exposed_count = 0
+        server_tools: list[str] = []
+        for definition in sorted(definitions, key=lambda item: str(item.name)):
+            raw_name = str(definition.name)
+            if raw_name in seen_raw:
+                logger.warning(
+                    "MCP server '{}' returned duplicate tool name '{}'",
+                    server.name,
+                    raw_name,
+                )
+                continue
+            seen_raw.add(raw_name)
+            if not server.definition.exposes(raw_name):
+                continue
+            name = visible_tool_name(server.server_id, raw_name, used=used)
+            adapter = McpToolAdapter(
+                connection,
+                definition,
+                visible_name=name,
+            )
+            self.registry.register(adapter)
+            server_tools.append(name)
+            exposed_count += 1
+        self._warn_unmatched_filters(server, seen_raw)
+        tools = tuple(server_tools)
+        self._capabilities[server.server_id] = tools
+        if server.policy_key is not None:
+            self._capabilities[server.policy_key] = tools
+            if (
+                server.plugin_id is not None
+                and server.plugin_server_name is not None
+            ):
+                self._capabilities[
+                    f"{server.plugin_id}:{server.plugin_server_name}"
+                ] = tools
+        self._statuses[server.server_id] = McpServerRuntimeStatus(
+            server.server_id,
+            server.name,
+            server.source.value,
+            "ready",
+            exposed_count,
+        )
+        return server_tools
 
     async def aclose(self) -> None:
         async with self._lock:
