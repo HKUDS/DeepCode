@@ -58,8 +58,12 @@ class _StdlibBridgeHandler(logging.Handler):
             level = record.levelno
         # Climb past this handler's own frame and every frame inside the
         # logging package; what remains is the record's real call site, and
-        # the climb count is exactly loguru's ``depth``.
-        frame, depth = logging.currentframe(), 0
+        # the climb count is exactly loguru's ``depth``. The walk starts at
+        # THIS frame rather than ``logging.currentframe()``, whose internal
+        # offset is a CPython implementation detail — the supported matrix
+        # spans 3.12 to 3.14, and a wrong start would misattribute every
+        # bridged record.
+        frame, depth = sys._getframe(), 0
         while frame is not None and (
             depth == 0 or frame.f_code.co_filename == logging.__file__
         ):
