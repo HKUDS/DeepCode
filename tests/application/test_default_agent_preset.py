@@ -103,3 +103,40 @@ def test_no_configured_default_keeps_sessions_preset_free(
     thread = application.threads.start(project.id, title="Plain")
 
     assert _stored_preset(application, thread.id) is None
+
+
+def test_non_interactive_runs_do_not_inherit_the_interactive_default(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """`deepcode exec` and goal runs opt out.
+
+    A default chosen for safe interactive chatting (a read-only
+    composition, say) must not silently strip an automated run's tools —
+    the run would simply refuse to edit anything, with nothing on screen
+    explaining why. An explicit choice still wins over the opt-out.
+    """
+    monkeypatch.setenv("DEEPCODE_HOME", str(tmp_path / "home"))
+    workspace = _workspace_with_preset(tmp_path, configured="reviewer")
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    project = application.projects.add(str(workspace), trust_state=TrustState.TRUSTED)
+
+    inherited = application.threads.start(project.id, title="Interactive")
+    assert _stored_preset(application, inherited.id) is not None
+
+    headless = application.threads.start(
+        project.id,
+        title="Headless",
+        session_kind="headless",
+        inherit_default_preset=False,
+    )
+    assert _stored_preset(application, headless.id) is None
+
+    explicit = application.threads.start(
+        project.id,
+        title="Explicit in a headless run",
+        session_kind="headless",
+        agent_preset="reviewer",
+        inherit_default_preset=False,
+    )
+    stored = _stored_preset(application, explicit.id)
+    assert stored is not None and stored["id"] == "reviewer"

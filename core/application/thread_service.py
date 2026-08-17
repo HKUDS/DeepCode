@@ -103,6 +103,7 @@ class ThreadService:
         workspace_path: str | None = None,
         parent_thread_id: str | None = None,
         agent_preset: str | None = None,
+        inherit_default_preset: bool = True,
     ) -> Thread:
         clean_title = title.strip()
         if not clean_title:
@@ -155,13 +156,23 @@ class ThreadService:
                 )
             except AgentPresetError as exc:
                 raise InvalidArgumentError(str(exc)) from exc
-        else:
+        elif inherit_default_preset:
             # No explicit choice: fill the blank with the configured default
             # for new Sessions (agents.defaults.defaultPreset), through the
             # same by-value snapshot. The Session stays clearable/selectable
             # while blank via set_agent_preset, exactly as if the user had
             # picked the preset themselves.
+            #
+            # Callers that are not a human starting a session opt out: a
+            # default chosen for safe interactive chatting (say, a read-only
+            # composition) must not silently strip an automated run's tools
+            # in a way nothing announces.
             preset_snapshot = self._configured_default_preset(workspace)
+            if preset_snapshot is not None:
+                logger.info(
+                    "applying configured default agent preset %r to new session",
+                    preset_snapshot.id,
+                )
         metadata = {
             "kind": clean_session_kind,
             "workspace": str(workspace),

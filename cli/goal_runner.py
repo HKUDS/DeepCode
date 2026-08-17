@@ -108,6 +108,9 @@ async def run_goal(
         thread = application.threads.start(
             project.id,
             title=objective.splitlines()[0][:60],
+            # Automated goal runs choose their own composition; an
+            # interactive default must not narrow them silently.
+            inherit_default_preset=False,
             connection_id=options.connection_id,
             model=options.model,
             reasoning_effort=options.reasoning_effort,
