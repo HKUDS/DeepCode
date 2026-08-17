@@ -144,6 +144,24 @@ Skills, permissions, Goals, and Automations. See the
 
 ## News
 
+**2026-08-17 · Fixes from a review pass over the new settings and TUI work**
+
+- **A declared model reads the same everywhere.** Per-model declarations now
+  shape the catalog a picker shows, not only what a Turn executes with, so a
+  context window you set to avoid overflow is the number you see.
+- **Adopting fetched models shows them immediately.** The catalog cache is
+  keyed on the settings that shape it, instead of serving the previous remote
+  listing for up to an hour.
+- **Escape closes one thing.** Dismissing the provider editor no longer tears
+  down the settings dialog around it and discards a half-typed key.
+- **A removed model row takes its own capacities with it** rather than leaving
+  them on the row that survived — which then saved them onto the wrong model.
+- **Automated runs keep their tools.** A default agent preset chosen for
+  interactive chatting no longer narrows `deepcode exec` and goal runs behind
+  your back.
+- **The provider section says it is user-scoped**, instead of letting the
+  dialog's project write scope imply otherwise.
+
 **2026-08-16 · The TUI answers every bare command with a selector**
 
 - **Type the command, pick from a list.** `/model` now opens the full model
@@ -154,13 +172,6 @@ Skills, permissions, Goals, and Automations. See the
   `/preset`, `/effort`, `/permissions`, `/transcript` and `/skill` join
   `/resume`: a bare invocation opens a picker with the current choice
   marked, while argument forms and piped runs keep their text paths.
-- **Review pass on the batch.** Model declarations now shape the listing a
-  picker shows, not only what a Turn executes with; the catalog cache is
-  keyed on the settings that shape it, so adopting fetched models no longer
-  serves a stale list; Escape closes the innermost layer instead of
-  discarding a half-typed provider draft; a removed model row takes its own
-  capacities with it; and a default agent preset chosen for interactive
-  chatting no longer narrows `deepcode exec` and goal runs behind your back.
 - **Background tracebacks can no longer shred the transcript.** Stdlib
   logging is bridged into loguru with call-site fidelity, so file-only
   transports really are file-only; and the durable event relay backs off
@@ -211,6 +222,9 @@ Skills, permissions, Goals, and Automations. See the
   `/compact` summarizes with the model you actually selected. New verbs:
   `/rename`, `/delete`, `/retry`, with tab completion for session ids,
   transcript modes, permission presets, and effort levels.
+
+<details>
+<summary><strong>Earlier August 2026 updates</strong></summary>
 
 **2026-08-14 · Subagent runtime, compaction, and one-way persistence**
 
@@ -406,6 +420,8 @@ building, fixing, understanding, and improving real software projects.
 DeepCode v2.0 is built to help you spend less time supervising every step and
 more time shipping software you are proud of. We cannot wait to see what you
 build! 🚀
+
+</details>
 
 <details>
 <summary><strong>Earlier 2026 milestones</strong></summary>
