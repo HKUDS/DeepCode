@@ -21,7 +21,7 @@ export function ModelsSection({
   const connections = useConnectionCatalog(runtime, project?.id ?? null);
   return (
     <div className={styles.settingsGrid}>
-      <ConnectionSettings controller={connections} busy={busy} />
+      <ConnectionSettings controller={connections} busy={busy} scope={scope} />
       <AgentModelCard
         settings={settings}
         busy={busy}

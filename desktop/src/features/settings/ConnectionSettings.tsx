@@ -11,6 +11,7 @@ import { useMemo, useState } from "react";
 
 import type {
   CatalogModel,
+  ConfigScope,
   ConnectionInfo,
   ManualModelEntry,
   ProviderTestResult,
@@ -26,6 +27,10 @@ import styles from "./ConnectionSettings.module.css";
 interface ConnectionSettingsProps {
   controller: ConnectionCatalogController;
   busy: boolean;
+  /** The dialog's write scope, so this section can say plainly that it
+   * does not follow it: connections and credentials are user-scoped by
+   * design, and the service refuses to write them into a project. */
+  scope: ConfigScope;
 }
 
 interface Draft {
@@ -66,6 +71,7 @@ const emptyDraft: Draft = {
 export function ConnectionSettings({
   controller,
   busy,
+  scope,
 }: ConnectionSettingsProps) {
   const [editing, setEditing] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
@@ -316,6 +322,13 @@ export function ConnectionSettings({
             in user-private storage and shares the connection with CLI and
             Desktop.
           </span>
+          {scope === "project" ? (
+            <span className={styles.scopeNote} role="note">
+              Connections and credentials are always user-scoped: they are
+              shared with the CLI and every project, so this section ignores
+              the “Selected project” write scope.
+            </span>
+          ) : null}
         </div>
         <div className={styles.addActions}>
           <label className={styles.addSelect}>

@@ -804,3 +804,9 @@
   color: var(--text-primary);
   border-style: solid;
 }
+
+/* Says plainly that this section does not follow the dialog's project
+ * write scope — connections are user-scoped by design. */
+.scopeNote {
+  color: var(--attention);
+}

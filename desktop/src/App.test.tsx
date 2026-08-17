@@ -2018,6 +2018,24 @@ describe("desktop command center", () => {
     expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
   });
 
+  it("says provider connections ignore the project write scope", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Models" }));
+    await screen.findByRole("heading", { name: "AI providers" });
+    expect(screen.queryByRole("note")).toBeNull();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Write to" }), {
+      target: { value: "project" },
+    });
+    expect(
+      await screen.findByText(/always user-scoped/, { selector: "span" }),
+    ).toBeTruthy();
+  });
+
   it("Escape closes the provider editor before the settings dialog", async () => {
     const runtime = new TestRuntime([project], [thread], []);
     render(<App runtime={runtime} />);
