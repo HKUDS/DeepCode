@@ -169,7 +169,12 @@ class ModelCatalogService:
                 raise ValueError("provider returned an empty model catalog")
             result = ModelCatalog(
                 connection.id,
-                tuple(sorted(models, key=lambda item: item.id.lower())),
+                tuple(
+                    sorted(
+                        self._apply_declarations(connection, models),
+                        key=lambda item: item.id.lower(),
+                    )
+                ),
                 "remote",
                 refreshed_at=now,
             )
@@ -262,6 +267,33 @@ class ModelCatalogService:
             if model is not None
         )
         return parsed
+
+    @staticmethod
+    def _apply_declarations(
+        connection: ResolvedConnection,
+        models: tuple[CatalogModel, ...],
+    ) -> tuple[CatalogModel, ...]:
+        """Overlay per-model declarations onto a discovered catalog.
+
+        A declaration is what the user wrote down about a model, so it wins
+        wherever it speaks — and it must win in the LISTING too, not only in
+        ``cached_model``. Otherwise the picker advertises a remote context
+        window while the Turn runs with the declared one, and the number the
+        user set to avoid overflow never appears anywhere they can see it.
+        """
+        declared = {
+            entry.id: entry
+            for entry in connection.manual_model_entries
+            if _has_declarations(entry)
+        }
+        if not declared:
+            return models
+        return tuple(
+            _declared_model(declared[model.id], base=model)
+            if model.id in declared
+            else model
+            for model in models
+        )
 
     def _fallback_models(
         self, connection: ResolvedConnection
@@ -443,10 +475,15 @@ def _has_declarations(entry: ManualModelConfig) -> bool:
     )
 
 
-def _declared_model(entry: "ManualModelConfig") -> CatalogModel:
+def _declared_model(
+    entry: "ManualModelConfig",
+    *,
+    base: CatalogModel | None = None,
+) -> CatalogModel:
     """A manually declared model: the declaration wins field by field, and
-    anything it leaves unsaid falls through the built-in catalog cascade."""
-    base = _offline_model(entry.id)
+    anything it leaves unsaid falls through — to the discovered row when
+    overlaying a remote catalog, otherwise to the built-in cascade."""
+    base = base if base is not None else _offline_model(entry.id)
     if entry.reasoning_efforts is None:
         reasoning = base.reasoning
     elif entry.reasoning_efforts is False:

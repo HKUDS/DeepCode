@@ -187,3 +187,54 @@ def test_catalog_cache_is_keyed_by_the_settings_that_shape_it(
         [{"id": "acme-think", "label": "Renamed", "contextWindow": 65536}],
     )
     assert edited.list_models("acme")["models"][0]["name"] == "Renamed"
+
+
+def test_declarations_overlay_a_remote_catalog_so_the_listing_matches_execution(
+    tmp_path: Path,
+) -> None:
+    """What the picker shows and what a Turn runs with must be one answer.
+
+    ``cached_model`` treats a declaration as authoritative, so a listing
+    that ignored declarations advertised a remote context window while the
+    Turn used the declared one — the number a user set to avoid overflow
+    appeared nowhere they could see it.
+    """
+    from unittest.mock import patch
+
+    from core.providers.catalog_service import CatalogModel
+
+    remote = (
+        CatalogModel(
+            id="acme-think",
+            name="Remote Name",
+            context_window=999_999,
+            max_output_tokens=8192,
+        ),
+        CatalogModel(
+            id="acme-other",
+            name="Other",
+            context_window=32_000,
+            max_output_tokens=4096,
+        ),
+    )
+    service = _service(
+        tmp_path,
+        [{"id": "acme-think", "label": "Declared Name", "contextWindow": 65536}],
+        model_catalog="auto",
+    )
+    with patch.object(ModelCatalogService, "_fetch", return_value=remote):
+        listing = service.list_models("acme", refresh=True)
+    rows = {model["id"]: model for model in listing["models"]}
+
+    declared = rows["acme-think"]
+    assert (declared["name"], declared["contextWindow"]) == ("Declared Name", 65536)
+    # What the declaration leaves unsaid still comes from discovery.
+    assert declared["maxOutputTokens"] == 8192
+    # Undeclared models are untouched.
+    assert (rows["acme-other"]["name"], rows["acme-other"]["contextWindow"]) == (
+        "Other",
+        32_000,
+    )
+
+    capabilities = service.model_reasoning("acme", "acme-think")
+    assert capabilities is None or capabilities.supported_efforts == ()
