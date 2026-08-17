@@ -16,6 +16,7 @@ import type {
   Project,
   SettingsSnapshot,
 } from "../../generated/app-server";
+import { useEscapeLayer } from "../../app/escapeLayer";
 import type { DesktopRuntime } from "../../rpc/contracts";
 import {
   SETTINGS_SECTIONS,
@@ -60,13 +61,10 @@ export function SettingsDialog({
     SETTINGS_SECTIONS[0];
   const ActiveSection = active.component;
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+  // The dialog is the outermost Escape layer: a nested editor that opens
+  // later takes the key first, so dismissing it never tears down the
+  // dialog around it.
+  useEscapeLayer(onClose);
 
   useEffect(() => {
     // The server pushes settings.changed when the config file moves under

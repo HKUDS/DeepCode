@@ -16,6 +16,7 @@ import type {
   ProviderTestResult,
   ProviderUpsertParams,
 } from "../../generated/app-server";
+import { useEscapeLayer } from "../../app/escapeLayer";
 import { confirmAction } from "../../platform/confirmAction";
 import type { ConnectionCatalogController } from "./useConnectionCatalog";
 import { ConnectionVerification } from "./ConnectionVerification";
@@ -109,6 +110,9 @@ export function ConnectionSettings({
     ),
   );
   const endpointRequired = Boolean(selectedTemplate?.requiresApiBase);
+  // While the provider editor is open it owns Escape — closing the form,
+  // not the settings dialog behind it.
+  useEscapeLayer(() => setEditing(null), editing !== null);
 
   const beginEdit = (connection: ConnectionInfo) => {
     setEditing({

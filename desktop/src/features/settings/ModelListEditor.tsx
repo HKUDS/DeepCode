@@ -10,9 +10,16 @@
  * Effort declarations (`reasoningEfforts`) are config-file-only, exactly
  * as in dsh: a per-model ladder is a capability statement, not a form
  * field, and the editor's footer says where it lives.
+ *
+ * Every field is CONTROLLED by the entry it renders. An uncontrolled
+ * capacity input kept the DOM's own text when a row was removed, so the
+ * surviving row displayed — and then saved — the deleted model's
+ * capacities. Deriving each input from props makes a row's display follow
+ * its data by construction.
  */
 
 import { Plus, Trash2 } from "lucide-react";
+import { useState } from "react";
 
 import type { ManualModelEntry } from "../../generated/app-server";
 import { capacityText, parseCapacity } from "./modelCapacity";
@@ -26,9 +33,7 @@ interface ModelListEditorProps {
 export function ModelListEditor({ entries, onChange }: ModelListEditorProps) {
   const update = (index: number, patch: Partial<ManualModelEntry>) => {
     onChange(
-      entries.map((entry, at) =>
-        at === index ? { ...entry, ...patch } : entry,
-      ),
+      entries.map((entry, at) => (at === index ? { ...entry, ...patch } : entry)),
     );
   };
 
@@ -105,18 +110,25 @@ function CapacityField({
   value: number | null | undefined;
   onChange(value: number | null): void;
 }) {
+  // Controlled by the stored value, with a local draft only while the text
+  // does not parse — so a value that WAS accepted can never linger on
+  // screen after the row it belonged to is gone.
+  const [draft, setDraft] = useState<string | null>(null);
   return (
     <label>
       {label}
       <input
-        defaultValue={capacityText(value)}
+        value={draft ?? capacityText(value)}
         placeholder="Inherit · e.g. 128K or 1M"
-        onBlur={(event) => {
-          const parsed = parseCapacity(event.target.value);
-          if (Number.isNaN(parsed)) return; // stays visible; save rejects
-          onChange(parsed);
-          event.target.value = capacityText(parsed);
+        onChange={(event) => {
+          const text = event.target.value;
+          setDraft(text);
+          const parsed = parseCapacity(text);
+          // Unparseable text stays on screen; the stored value only moves
+          // when the text is a real capacity.
+          if (!Number.isNaN(parsed)) onChange(parsed);
         }}
+        onBlur={() => setDraft(null)}
       />
     </label>
   );

@@ -29,6 +29,7 @@ import type {
 } from "./generated/app-server";
 import { App } from "./App";
 import { __resetComposerBehaviorForTests } from "./app/composerBehavior";
+import { __resetEscapeLayersForTests } from "./app/escapeLayer";
 import type {
   AnyRpcNotification,
   DesktopRuntime,
@@ -1503,6 +1504,7 @@ describe("desktop command center", () => {
   beforeEach(() => {
     localStorage.clear();
     __resetComposerBehaviorForTests();
+    __resetEscapeLayersForTests();
   });
   afterEach(() => {
     cleanup();
@@ -2014,6 +2016,40 @@ describe("desktop command center", () => {
       within(dialog).getByRole("button", { name: "Close settings" }),
     );
     expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
+  });
+
+  it("Escape closes the provider editor before the settings dialog", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Models" }));
+    await screen.findByRole("heading", { name: "AI providers" });
+    const connectionName = await screen.findByText("OpenAI", {
+      selector: "strong",
+    });
+    fireEvent.click(
+      within(connectionName.closest("article") as HTMLElement).getByRole(
+        "button",
+        { name: "Edit" },
+      ),
+    );
+    const editor = await screen.findByRole("dialog", { name: /Edit provider/ });
+    fireEvent.change(within(editor).getByLabelText("API key"), {
+      target: { value: "half-typed-secret" },
+    });
+
+    // The innermost layer owns Escape: the draft closes, the dialog stays.
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: /Edit provider/ })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
+
+    // The next Escape closes the dialog behind it.
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull(),
+    );
   });
 
   it("opens the configuration file from the dialog header", async () => {
