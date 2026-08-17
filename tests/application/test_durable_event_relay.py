@@ -191,3 +191,72 @@ def test_relay_rejects_invalid_polling_configuration(
 
     with pytest.raises(ValueError):
         DurableEventRelay(database, EventBroker(), **options)
+
+
+def test_relay_backs_off_on_persistent_failure_and_recovers(
+    tmp_path: Path, monkeypatch, caplog
+) -> None:
+    """A failing poll must not flood: one traceback, then one-line warnings
+    with growing delays, then a recovery notice — and each retry opens a
+    fresh connection, so the loop itself is the healing mechanism."""
+    import logging as stdlib_logging
+    import threading
+
+    from core.application import event_service as module
+
+    database = Database(tmp_path / "state.sqlite3")
+    broker = EventBroker()
+    relay = DurableEventRelay(database, broker, poll_interval=0.01)
+
+    outcomes = iter([Exception, Exception, Exception, None, StopIteration])
+    waits: list[float] = []
+
+    def fake_poll() -> int:
+        outcome = next(outcomes)
+        if outcome is StopIteration:
+            relay._stop.set()
+            return 0
+        if outcome is Exception:
+            raise sqlite_error()
+        return 0
+
+    def sqlite_error() -> Exception:
+        import sqlite3
+
+        return sqlite3.OperationalError("disk I/O error")
+
+    real_wait = relay._stop.wait
+
+    def recording_wait(timeout: float | None = None) -> bool:
+        waits.append(timeout or 0)
+        return real_wait(0)  # no real sleeping in tests
+
+    monkeypatch.setattr(relay, "poll_once", fake_poll)
+    monkeypatch.setattr(relay._stop, "wait", recording_wait)
+
+    with caplog.at_level(stdlib_logging.INFO, logger=module.logger.name):
+        thread = threading.Thread(target=relay._run)
+        thread.start()
+        thread.join(timeout=5)
+    assert not thread.is_alive()
+
+    exception_records = [
+        record for record in caplog.records if record.exc_info is not None
+    ]
+    warning_records = [
+        record
+        for record in caplog.records
+        if record.levelno == stdlib_logging.WARNING and record.exc_info is None
+    ]
+    recovery_records = [
+        record for record in caplog.records if "recovered" in record.getMessage()
+    ]
+    assert len(exception_records) == 1  # only the streak's first failure
+    assert len(warning_records) == 2  # the repeats, one line each
+    assert len(recovery_records) == 1
+
+    # Backoff doubles per failure and resets after the successful poll.
+    assert waits[0] == pytest.approx(0.02)
+    assert waits[1] == pytest.approx(0.04)
+    assert waits[2] == pytest.approx(0.08)
+    assert waits[3] == pytest.approx(0.01)

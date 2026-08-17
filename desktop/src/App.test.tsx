@@ -28,6 +28,8 @@ import type {
   WorkflowRun,
 } from "./generated/app-server";
 import { App } from "./App";
+import { __resetComposerBehaviorForTests } from "./app/composerBehavior";
+import { __resetEscapeLayersForTests } from "./app/escapeLayer";
 import type {
   AnyRpcNotification,
   DesktopRuntime,
@@ -83,6 +85,7 @@ const readOnlySecurityProfile: ExecutionSecurityProfile = {
 
 const desktopSettings: SettingsSnapshot = {
   configPath: "/tmp/deepcode_config.json",
+  configRevision: "rev-test-1",
   agents: {
     defaults: {
       model: "gpt-5",
@@ -227,6 +230,7 @@ class TestRuntime implements DesktopRuntime {
   readonly calls: string[] = [];
   readonly requests: Array<{ method: string; params: unknown }> = [];
   readonly diagnosticsExports: DiagnosticsSnapshot[] = [];
+  readonly openedPaths: string[] = [];
   updateInstallCount = 0;
   private readonly threadState: Thread[];
   private settingsState: SettingsSnapshot = {
@@ -278,6 +282,7 @@ class TestRuntime implements DesktopRuntime {
               apiKeyEnv: "OPENAI_API_KEY",
               modelCatalog: "openai",
               manualModels: [],
+              manualModelEntries: [],
               configured: true,
               credentialSource: "environment",
               local: false,
@@ -293,6 +298,7 @@ class TestRuntime implements DesktopRuntime {
               apiKeyEnv: "ANTHROPIC_API_KEY",
               modelCatalog: "anthropic",
               manualModels: [],
+              manualModelEntries: [],
               configured: false,
               credentialSource: "missing",
               local: false,
@@ -316,6 +322,15 @@ class TestRuntime implements DesktopRuntime {
               adapter: "openai_compat",
               defaultApiBase: "https://openrouter.ai/api/v1",
               apiKeyEnv: "OPENROUTER_API_KEY",
+              requiresApiBase: false,
+              local: false,
+            },
+            {
+              name: "anthropic",
+              label: "Anthropic",
+              adapter: "anthropic",
+              defaultApiBase: "https://api.anthropic.com",
+              apiKeyEnv: "ANTHROPIC_API_KEY",
               requiresApiBase: false,
               local: false,
             },
@@ -347,6 +362,18 @@ class TestRuntime implements DesktopRuntime {
           refreshedAt: 1_768_000_000,
         } as unknown as MethodResults[M];
       }
+      case "provider/discover":
+        return {
+          models: desktopSettings.models.map((model) => ({
+            id: model.id,
+            name: model.id,
+            contextWindow: model.contextWindow,
+            maxOutputTokens: model.maxOutputTokens,
+            supportedParameters: [],
+            reasoning: null,
+          })),
+          error: null,
+        } as unknown as MethodResults[M];
       case "provider/upsert": {
         const request = params as MethodParams["provider/upsert"];
         const connection = request.connection;
@@ -361,6 +388,7 @@ class TestRuntime implements DesktopRuntime {
               apiKeyEnv: "OPENAI_API_KEY",
               modelCatalog: "openai",
               manualModels: [],
+              manualModelEntries: [],
               configured: true,
               credentialSource: "environment",
               local: false,
@@ -1025,6 +1053,10 @@ class TestRuntime implements DesktopRuntime {
     return "/tmp/deepcode-diagnostics-test.json";
   }
 
+  async openPath(path: string) {
+    this.openedPaths.push(path);
+  }
+
   async checkForUpdate() {
     return this.availableUpdate;
   }
@@ -1469,7 +1501,11 @@ const workflowEvents: Event[] = [
 ];
 
 describe("desktop command center", () => {
-  beforeEach(() => localStorage.clear());
+  beforeEach(() => {
+    localStorage.clear();
+    __resetComposerBehaviorForTests();
+    __resetEscapeLayersForTests();
+  });
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
@@ -1841,6 +1877,218 @@ describe("desktop command center", () => {
     expect(runtime.calls).not.toContain("hooks/list");
   });
 
+  it("saves the default agent preset for new Sessions from Settings", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const dialog = await screen.findByRole("dialog", { name: "Settings" });
+    const picker = await within(dialog).findByRole("combobox", {
+      name: "Default for new Sessions",
+    });
+    await within(dialog).findByRole("option", {
+      name: "Code reader [system]",
+    });
+    fireEvent.change(picker, { target: { value: "code-reader" } });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Save preset default" }),
+    );
+
+    await waitFor(() =>
+      expect(
+        runtime.requests.find(
+          (request) =>
+            request.method === "settings/update" &&
+            (request.params as MethodParams["settings/update"]).patch.agents !==
+              undefined,
+        )?.params,
+      ).toMatchObject({
+        patch: { agents: { defaults: { defaultPreset: "code-reader" } } },
+      }),
+    );
+  });
+
+  it("switches the appearance mode from the tri-cards", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const dialog = await screen.findByRole("dialog", { name: "Settings" });
+    const dark = within(dialog).getByRole("button", { name: "Dark" });
+    expect(dark.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(dark);
+    expect(dark.getAttribute("aria-pressed")).toBe("true");
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    fireEvent.click(within(dialog).getByRole("button", { name: "System" }));
+    expect(document.documentElement.getAttribute("data-theme")).toBeNull();
+  });
+
+  it("lets plain Enter queue while busy when the preference says queue", async () => {
+    localStorage.setItem(
+      "deepcode.desktop.composer.v1",
+      JSON.stringify({ busyEnter: "queue" }),
+    );
+    __resetComposerBehaviorForTests();
+    const runningThread = { ...thread, status: "running" as const };
+    const runtime = new TestRuntime([project], [runningThread], runningEvents);
+    render(<App runtime={runtime} />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Task instruction",
+    });
+    fireEvent.change(composer, { target: { value: "run later" } });
+    fireEvent.keyDown(composer, { key: "Enter" });
+    await waitFor(() => expect(runtime.calls).toContain("turn/enqueue"));
+    expect(runtime.calls).not.toContain("turn/steer");
+
+    // Cmd/Ctrl+Enter performs the other verb: steer.
+    fireEvent.change(composer, { target: { value: "steer now" } });
+    fireEvent.keyDown(composer, { key: "Enter", metaKey: true });
+    await waitFor(() => expect(runtime.calls).toContain("turn/steer"));
+  });
+
+  it("renders the settings dialog in Chinese after switching the language", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const dialog = await screen.findByRole("dialog", { name: "Settings" });
+    fireEvent.change(
+      within(dialog).getByRole("combobox", { name: "Interface language" }),
+      { target: { value: "zh-CN" } },
+    );
+
+    // The shell, the section rail, and the sidebar all switch immediately.
+    expect(
+      await screen.findByRole("heading", { name: "设置" }),
+    ).toBeTruthy();
+    const nav = within(screen.getByRole("dialog", { name: "设置" })).getByRole(
+      "navigation",
+      { name: "Settings sections" },
+    );
+    expect(
+      within(nav)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["通用", "模型", "插件", "智能体预设"]);
+    expect(screen.getByRole("button", { name: "打开配置文件" })).toBeTruthy();
+
+    // Switching back restores English for the remaining tests' queries.
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "界面语言" }),
+      { target: { value: "en" } },
+    );
+    expect(await screen.findByRole("heading", { name: "Settings" })).toBeTruthy();
+  });
+
+  it("opens Settings as a sectioned dialog and closes it again", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Settings" });
+    const nav = within(dialog).getByRole("navigation", {
+      name: "Settings sections",
+    });
+    expect(
+      within(nav)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["General", "Models", "Plugins", "Agent presets"]);
+
+    // General is active by default and carries the permission card.
+    expect(
+      within(dialog).getByRole("combobox", { name: "Default Session access" }),
+    ).toBeTruthy();
+
+    // Sections switch without leaving the dialog.
+    fireEvent.click(within(nav).getByRole("button", { name: "Agent presets" }));
+    expect(
+      await within(dialog).findByRole("heading", { name: "Agent presets" }),
+    ).toBeTruthy();
+
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Close settings" }),
+    );
+    expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
+  });
+
+  it("says provider connections ignore the project write scope", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Models" }));
+    await screen.findByRole("heading", { name: "AI providers" });
+    expect(screen.queryByRole("note")).toBeNull();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Write to" }), {
+      target: { value: "project" },
+    });
+    expect(
+      await screen.findByText(/always user-scoped/, { selector: "span" }),
+    ).toBeTruthy();
+  });
+
+  it("Escape closes the provider editor before the settings dialog", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Models" }));
+    await screen.findByRole("heading", { name: "AI providers" });
+    const connectionName = await screen.findByText("OpenAI", {
+      selector: "strong",
+    });
+    fireEvent.click(
+      within(connectionName.closest("article") as HTMLElement).getByRole(
+        "button",
+        { name: "Edit" },
+      ),
+    );
+    const editor = await screen.findByRole("dialog", { name: /Edit provider/ });
+    fireEvent.change(within(editor).getByLabelText("API key"), {
+      target: { value: "half-typed-secret" },
+    });
+
+    // The innermost layer owns Escape: the draft closes, the dialog stays.
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: /Edit provider/ })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
+
+    // The next Escape closes the dialog behind it.
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull(),
+    );
+  });
+
+  it("opens the configuration file from the dialog header", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const dialog = await screen.findByRole("dialog", { name: "Settings" });
+    const openButton = within(dialog).getByRole("button", {
+      name: "Open configuration file",
+    });
+    await waitFor(() =>
+      expect((openButton as HTMLButtonElement).disabled).toBe(false),
+    );
+    fireEvent.click(openButton);
+    await waitFor(() =>
+      expect(runtime.openedPaths).toEqual(["/tmp/deepcode_config.json"]),
+    );
+  });
+
   it("loads effective Settings and sanitized diagnostics for the selected project", async () => {
     const runtime = new TestRuntime([project], [thread], []);
     render(<App runtime={runtime} />);
@@ -1960,7 +2208,7 @@ describe("desktop command center", () => {
     await screen.findByRole("heading", { name: "Recovered task" });
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     const scope = await screen.findByRole("combobox", {
-      name: "Write changes to",
+      name: "Write to",
     });
     fireEvent.change(scope, { target: { value: "project" } });
     const access = screen.getByRole("combobox", {
@@ -2000,9 +2248,12 @@ describe("desktop command center", () => {
 
     await screen.findByRole("heading", { name: "Recovered task" });
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Models" }));
     await screen.findByRole("heading", { name: "AI providers" });
-    fireEvent.click(screen.getByRole("button", { name: "Add provider" }));
-    fireEvent.click(screen.getByRole("button", { name: /OpenRouter/ }));
+    fireEvent.change(
+      await screen.findByRole("combobox", { name: "Add provider" }),
+      { target: { value: "openrouter" } },
+    );
 
     fireEvent.change(screen.getByLabelText("Display name"), {
       target: { value: "Router Desktop" },
@@ -2027,9 +2278,8 @@ describe("desktop command center", () => {
       apiKey: "desktop-test-secret",
     });
 
-    fireEvent.click(
-      within(card as HTMLElement).getByRole("button", { name: "Check" }),
-    );
+    // Saving runs the staged check automatically; its result lands on the
+    // row card without a separate Check action.
     expect(
       await within(card as HTMLElement).findByText("Credential"),
     ).toBeTruthy();
@@ -2063,6 +2313,7 @@ describe("desktop command center", () => {
 
     await screen.findByRole("heading", { name: "Recovered task" });
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Models" }));
     await screen.findByRole("heading", { name: "AI providers" });
 
     // The stubbed openai connection resolves its key from the environment.
@@ -2073,7 +2324,6 @@ describe("desktop command center", () => {
     fireEvent.click(
       within(card as HTMLElement).getByRole("button", { name: "Edit" }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Paste API key" }));
     expect(
       screen.getByText(/OPENAI_API_KEY currently provides this key/),
     ).toBeTruthy();
@@ -2084,24 +2334,28 @@ describe("desktop command center", () => {
     expect(keyInput.placeholder).toMatch(/launch environment/);
   });
 
-  it("lists dormant providers in the directory strip for one-click setup", async () => {
+  it("offers the provider directory through the Add provider dropdown", async () => {
     const runtime = new TestRuntime([project], [thread], []);
     render(<App runtime={runtime} />);
 
     await screen.findByRole("heading", { name: "Recovered task" });
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Models" }));
     await screen.findByRole("heading", { name: "AI providers" });
 
-    const strip = await screen.findByRole("list", {
-      name: "Available providers",
-    });
-    // The configured connection lives in the rail, not the directory.
-    expect(within(strip).queryByText("OpenAI")).toBeNull();
-    fireEvent.click(within(strip).getByText("Anthropic"));
-    // One click opens the editor prefilled from the template.
+    const picker = (await screen.findByRole("combobox", {
+      name: "Add provider",
+    })) as HTMLSelectElement;
+    const labels = Array.from(picker.options).map((option) => option.text);
+    expect(labels.some((label) => label.includes("Anthropic"))).toBe(true);
+    fireEvent.change(picker, { target: { value: "anthropic" } });
+    // One pick opens the editor prefilled from the template.
     expect(
       await screen.findByRole("dialog", { name: /Connect a provider/ }),
     ).toBeTruthy();
+    expect(
+      (screen.getByLabelText("Display name") as HTMLInputElement).placeholder,
+    ).toBe("Anthropic");
   });
 
   it("fetches a connection's live models and adopts picks into its manual list", async () => {
@@ -2110,6 +2364,7 @@ describe("desktop command center", () => {
 
     await screen.findByRole("heading", { name: "Recovered task" });
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Models" }));
     await screen.findByRole("heading", { name: "AI providers" });
     const connectionName = await screen.findByText("OpenAI", {
       selector: "strong",
@@ -2132,10 +2387,31 @@ describe("desktop command center", () => {
     fireEvent.click(
       screen.getByRole("button", { name: /Add 1 model to this connection/ }),
     );
-    // Adoption switches the connection to a manual list (the picked models
-    // REPLACE the provider catalog), visible in the summary line.
-    expect(screen.getByText(/Manual list: 1 model/)).toBeTruthy();
-    expect(runtime.calls).toContain("model/list");
+    // Adoption lands the pick as an editable declaration row carrying what
+    // discovery learned (capacities), and the fetch probed the form state
+    // through provider/discover — nothing was stored by the probe itself.
+    const idInputs = screen.getAllByLabelText("Model ID") as HTMLInputElement[];
+    expect(idInputs.map((input) => input.value)).toContain("gpt-5-mini");
+    expect(runtime.calls).toContain("provider/discover");
+    const discoverParams = runtime.requests.find(
+      (request) => request.method === "provider/discover",
+    )?.params as MethodParams["provider/discover"];
+    expect(discoverParams.connectionId).toBe("openai");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save and check" }));
+    await waitFor(() => {
+      const request = runtime.requests.find(
+        (candidate) => candidate.method === "provider/upsert",
+      )?.params as MethodParams["provider/upsert"];
+      expect(request.connection.modelCatalog).toBe("manual");
+      expect(request.connection.manualModels).toEqual([
+        {
+          id: "gpt-5-mini",
+          contextWindow: 400000,
+          maxOutputTokens: 128000,
+        },
+      ]);
+    });
   });
 
   it("saves and verifies the selected Agent model with the project context", async () => {
@@ -2144,6 +2420,7 @@ describe("desktop command center", () => {
 
     await screen.findByRole("heading", { name: "Recovered task" });
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Models" }));
     const providersHeading = await screen.findByRole("heading", {
       name: "AI providers",
     });
@@ -2173,6 +2450,42 @@ describe("desktop command center", () => {
     const methods = runtime.requests.map((request) => request.method);
     expect(methods.indexOf("settings/update")).toBeLessThan(
       methods.indexOf("provider/test"),
+    );
+  });
+
+  it("offers the default model's published effort ladder and saves the pick", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Models" }));
+    const effort = (await screen.findByRole("combobox", {
+      name: "Reasoning effort",
+    })) as HTMLSelectElement;
+
+    // Adapter-owned options: auto/off plus the model's published levels.
+    await waitFor(() => {
+      const values = Array.from(effort.options).map((option) => option.value);
+      expect(values).toEqual(["", "auto", "none", "low", "medium", "high"]);
+    });
+
+    fireEvent.change(effort, { target: { value: "high" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save defaults" }));
+
+    await waitFor(() =>
+      expect(
+        runtime.requests.find(
+          (request) =>
+            request.method === "settings/update" &&
+            (request.params as MethodParams["settings/update"]).patch.agents !==
+              undefined,
+        )?.params,
+      ).toMatchObject({
+        patch: {
+          agents: { defaults: { model: "gpt-5", reasoningEffort: "high" } },
+        },
+      }),
     );
   });
 

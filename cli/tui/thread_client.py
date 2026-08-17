@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 
 from cli.project_trust import (
     open_workspace_project,
@@ -41,6 +42,18 @@ from core.sessions import SessionStore, get_default_store
 class TuiDelivery:
     kind: str
     turn: Turn
+
+
+@dataclass(frozen=True, slots=True)
+class ThreadListing:
+    """One row of the resume picker — display data only."""
+
+    session_id: str
+    title: str
+    message_count: int
+    updated_at: datetime
+    workspace: str
+    is_current: bool
 
 
 class TuiThreadClient:
@@ -230,6 +243,40 @@ class TuiThreadClient:
         self._title_from_first_prompt(prompt)
         return TuiDelivery("queued", snapshot.turn)
 
+    def has_active_turn(self) -> bool:
+        return self.application.turns.active_for_thread(self.thread.id) is not None
+
+    def rename_thread(self, title: str) -> Thread:
+        self.thread = self.application.threads.rename(self.thread.id, title)
+        return self.thread
+
+    def delete_session(self, session_id: str) -> None:
+        """Permanently delete a stored session (never the one we are in).
+
+        The deletion service already refuses sessions leased by another
+        surface; the current session would trip that lease too, but with a
+        message blaming "another surface" — catch it here with an honest one.
+        """
+        if session_id == self.thread.id:
+            raise RuntimeError(
+                "cannot delete the session you are in — /new first, then delete it"
+            )
+        self.application.deletions.delete(session_id)
+
+    def last_terminal_turn(self) -> Turn | None:
+        turns = self.application.turns.list_for_thread(self.thread.id)
+        for turn in reversed(turns):
+            if turn.status.is_terminal:
+                return turn
+        return None
+
+    def retry_turn(self, turn_id: str) -> Turn:
+        # use_current_selection: the natural CLI flow is "the turn failed,
+        # I fixed /model or /effort, run it again" — replaying the old
+        # profile would silently undo that fix.
+        snapshot = self.application.turns.retry(turn_id, use_current_selection=True)
+        return snapshot.turn
+
     def interrupt(self) -> tuple[bool, Turn] | None:
         active = self.application.turns.active_for_thread(self.thread.id)
         if active is None:
@@ -293,9 +340,50 @@ class TuiThreadClient:
             workspace_path=self.workspace,
         )
         self._replace_thread(thread)
-        self.project = project
+        # Resuming into this directory may re-home the thread onto this
+        # directory's project — re-read it from the thread, exactly like the
+        # constructor does. Keeping the pre-resume project made every later
+        # ``threads.start`` fail its workspace-scope check and pointed
+        # skills/plugins/MCP at the wrong project.
+        self.project = self.application.projects.read(thread.project_id)
         self.execution_profile = self._resolve_selection(self.thread)
         return self.thread
+
+    def list_recent(
+        self,
+        *,
+        limit: int,
+        include_all: bool,
+    ) -> list[ThreadListing]:
+        """Recent resumable Threads, newest first.
+
+        Delegates scoping to ``threads.list`` — the same service the Desktop
+        uses — so directory filtering happens on resolved paths *before* the
+        limit is applied. (The previous store-level listing truncated
+        globally first, which silently dropped this directory's sessions,
+        and compared unresolved paths, which never matched through
+        symlinks.) Sessions without any message yet are noise, not history.
+        """
+        threads = self.application.threads.list(
+            cwd=None if include_all else self.workspace,
+            limit=limit,
+        )
+        listings = []
+        for thread in threads:
+            session = self.application.session_store.get_session(thread.id)
+            if session is None or not session.messages:
+                continue
+            listings.append(
+                ThreadListing(
+                    session_id=thread.id,
+                    title=thread.title,
+                    message_count=len(session.messages),
+                    updated_at=thread.updated_at,
+                    workspace=thread.workspace_path,
+                    is_current=thread.id == self.thread.id,
+                )
+            )
+        return listings
 
     def switch_execution(
         self,
@@ -399,14 +487,14 @@ class TuiThreadClient:
         )
 
     def _resolve_selection(self, thread: Thread) -> ExecutionProfile:
+        # The Thread's stored selection is the single source of truth — the
+        # same values a Turn resolves. Falling back to the previously
+        # requested selection made the displayed effort/model contradict
+        # what the next Turn would actually run with after a resume.
         selection = ExecutionSelection(
-            connection_id=thread.connection_id or self._requested.connection_id,
-            model_id=thread.model or self._requested.model_id,
-            reasoning_effort=(
-                thread.reasoning_effort
-                if thread.reasoning_effort is not None
-                else self._requested.reasoning_effort
-            ),
+            connection_id=thread.connection_id,
+            model_id=thread.model,
+            reasoning_effort=thread.reasoning_effort,
         )
         self._requested = selection
         return self.application.llm.resolve(self.workspace, selection)

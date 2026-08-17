@@ -144,7 +144,30 @@ Skills, permissions, Goals, and Automations. See the
 
 ## News
 
-**2026-08-15 · Credential hygiene and a real preset menu**
+**2026-08-16 · The TUI answers every bare command with a selector**
+
+- **Type the command, pick from a list.** `/model` now opens the full model
+  directory — every configured connection's catalog (remote snapshot or
+  declared entries, near a thousand rows on OpenRouter) in one filterable
+  selector with the current route pinned first and each model's published
+  reasoning ladder on Shift+Tab; Enter commits model and effort together.
+  `/preset`, `/effort`, `/permissions`, `/transcript` and `/skill` join
+  `/resume`: a bare invocation opens a picker with the current choice
+  marked, while argument forms and piped runs keep their text paths.
+- **Review pass on the batch.** Model declarations now shape the listing a
+  picker shows, not only what a Turn executes with; the catalog cache is
+  keyed on the settings that shape it, so adopting fetched models no longer
+  serves a stale list; Escape closes the innermost layer instead of
+  discarding a half-typed provider draft; a removed model row takes its own
+  capacities with it; and a default agent preset chosen for interactive
+  chatting no longer narrows `deepcode exec` and goal runs behind your back.
+- **Background tracebacks can no longer shred the transcript.** Stdlib
+  logging is bridged into loguru with call-site fidelity, so file-only
+  transports really are file-only; and the durable event relay backs off
+  exponentially on persistent failure — one traceback per streak, one-line
+  repeats, a recovery notice.
+
+**2026-08-15 · Settings grow up: a dsh-style dialog, declared models, and a safer config**
 
 - **A connection's key now reaches exactly the requests it was resolved
   for.** Building a provider no longer exports the key into the process
@@ -162,6 +185,32 @@ Skills, permissions, Goals, and Automations. See the
   models as its manual list, an environment-provided key locks the paste
   field instead of silently outranking it, and connection rows show the
   discovered model count.
+- **`deepcode chat` reads like a terminal app, not a log.** A restyled
+  transcript — brand-gradient banner, status-colored tool cards with result
+  elbows, block spacing, word-boundary wrapping — plus streaming that
+  survives the prompt redraw with real colors instead of `?[36m` litter.
+- **Desktop Settings became a dsh-style dialog.** General / Models /
+  Plugins / Agent presets in a left rail, with Open configuration file and
+  the write-scope picker in the header. General gains the five canonical
+  rows — default agent preset for new sessions (applied as a by-value
+  snapshot at creation, CLI and TUI included), permissions, language
+  (English/中文, first translated batch), Light/Dark/System appearance
+  cards, and a steer-or-queue busy-Enter preference.
+- **Models are declarations now.** `manualModels` entries can carry a
+  label, capacities, and the published reasoning ladder; declarations are
+  authoritative offline for execution profiles and every picker. Discovery
+  probes the editor form as shown — unsaved URL or key included — and
+  adopted picks land as accurate declaration rows. Config writes gained
+  optimistic concurrency (a changed file conflicts instead of being
+  clobbered) and a settings.changed push keeps an open dialog fresh.
+- **Session and model commands now hold up.** `/resume` and `/model` open
+  an inline selector — type to filter by title, arrows move, Enter picks,
+  Tab flips directory scope, Shift+Tab cycles the route's published
+  reasoning effort — and resume replays the conversation tail. Bare model
+  names resolve their connection, typos no longer kill the REPL, and
+  `/compact` summarizes with the model you actually selected. New verbs:
+  `/rename`, `/delete`, `/retry`, with tab completion for session ids,
+  transcript modes, permission presets, and effort levels.
 
 **2026-08-14 · Subagent runtime, compaction, and one-way persistence**
 

@@ -97,6 +97,8 @@ export interface DesktopRuntime extends RpcTransport {
   exportDiagnostics(
     diagnostics: DiagnosticsSnapshot,
   ): Promise<string | null>;
+  /** Open a local file in the platform's default application. */
+  openPath(path: string): Promise<void>;
   checkForUpdate(): Promise<DesktopUpdateInfo | null>;
   installUpdate(
     listener: (progress: DesktopUpdateProgress) => void,

@@ -53,6 +53,18 @@ async fn export_diagnostics(
     export_report(app, bridge.status(), diagnostics).await
 }
 
+#[tauri::command]
+async fn open_path(app: tauri::AppHandle, path: String) -> Result<(), BridgeError> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener().open_path(path, None::<&str>).map_err(|error| {
+        BridgeError::new(
+            "OPEN_PATH_FAILED",
+            format!("could not open the file: {error}"),
+            false,
+        )
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
@@ -64,7 +76,8 @@ pub fn run() {
             rpc_request,
             sidecar_status,
             sidecar_restart,
-            export_diagnostics
+            export_diagnostics,
+            open_path
         ])
         .setup(|app| {
             let bridge = Arc::new(RpcBridge::new(app.handle().clone()));

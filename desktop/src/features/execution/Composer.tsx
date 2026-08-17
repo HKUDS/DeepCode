@@ -20,6 +20,8 @@ import type {
 } from "../../generated/app-server";
 import type { GoalDefinitionInput } from "../../app/useWorkspaceController";
 import type { InteractiveDelivery } from "../../app/interactiveTurnRouter";
+import { useComposerBehavior } from "../../app/composerBehavior";
+import { useTranslation } from "react-i18next";
 import {
   ACCESS_PRESET_OPTIONS,
   settingsDefaultAccessLabel,
@@ -125,6 +127,8 @@ export function Composer({
   onLaunchIntentConsumed,
 }: ComposerProps) {
   const active = executingTurn !== null;
+  const { busyEnter } = useComposerBehavior();
+  const { t } = useTranslation();
   const initialLaunch =
     launchIntent && launchIntent.threadId === thread?.id ? launchIntent : null;
   const {
@@ -294,7 +298,15 @@ export function Composer({
       !event.nativeEvent.isComposing
     ) {
       event.preventDefault();
-      void submit();
+      // While a Turn runs, plain Enter follows the busy-Enter preference
+      // (steer or queue); Cmd/Ctrl+Enter always performs the other verb.
+      const inverted = event.metaKey || event.ctrlKey;
+      const queues = active && (busyEnter === "queue") !== inverted;
+      if (queues) {
+        void submitQueued();
+      } else {
+        void submit();
+      }
       return;
     }
     if (
@@ -625,7 +637,7 @@ export function Composer({
                 onClick={() => void submitQueued()}
                 disabled={!canExecute || busy || !prompt.trim()}
               >
-                Queue next
+                {t("composer.queueNext", "Queue next")}
               </button>
               <button
                 className={styles.stopButton}
@@ -656,7 +668,14 @@ export function Composer({
           deliveryNotice ??
           disabledReason ??
           "DeepCode may ask before sensitive tools run."}
-        <span>{active ? "↵ steer" : "↵ send"} · ⇧↵ newline</span>
+        <span>
+          {active
+            ? busyEnter === "queue"
+              ? t("composer.hint.queueSteer", "↵ queue · ⌘↵ steer")
+              : t("composer.hint.steerQueue", "↵ steer · ⌘↵ queue")
+            : t("composer.hint.send", "↵ send")}{" "}
+          · {t("composer.hint.newline", "⇧↵ newline")}
+        </span>
       </p>
     </footer>
   );

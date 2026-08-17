@@ -574,3 +574,34 @@ def test_diagnostics_reports_local_health_without_provider_secrets(
         assert "never-expose-this" not in serialized
     finally:
         application.close()
+
+
+def test_settings_update_refuses_a_stale_config_revision(tmp_path, monkeypatch):
+    monkeypatch.setenv("DEEPCODE_HOME", str(tmp_path / "home"))
+    from core.application.config_store import ConfigStore
+    from core.application.errors import ConflictError
+    from core.application.settings_service import SettingsService
+
+    store = ConfigStore(tmp_path / "deepcode_config.json")
+    service = SettingsService(store=store)
+
+    first = service.read()
+    revision = first["configRevision"]
+    # A matching revision writes; the returned snapshot moves the revision.
+    updated = service.update(
+        {"agents": {"defaults": {"model": "gpt-5"}}},
+        expected_revision=revision,
+    )
+    assert updated["configRevision"] != revision
+
+    # Writing with the OLD revision now refuses instead of clobbering.
+    import pytest
+
+    with pytest.raises(ConflictError):
+        service.update(
+            {"agents": {"defaults": {"model": "gpt-5-mini"}}},
+            expected_revision=revision,
+        )
+
+    # Omitting the revision keeps the historical last-write-wins behavior.
+    service.update({"agents": {"defaults": {"model": "gpt-5-mini"}}})

@@ -57,12 +57,21 @@ class TuiCompleter(Completer):
     ) -> None:
         self.workspace = Path(workspace)
         self._skill_provider = skill_provider
+        # (command name, typed prefix) -> candidate first arguments; wired by
+        # the app so command knowledge stays in the registry, not here.
+        self._argument_provider: Callable[[str, str], Iterable[str]] | None = None
 
     def set_skill_provider(
         self,
         provider: Callable[[], Iterable[SkillCompletionItem]],
     ) -> None:
         self._skill_provider = provider
+
+    def set_argument_provider(
+        self,
+        provider: Callable[[str, str], Iterable[str]],
+    ) -> None:
+        self._argument_provider = provider
 
     def get_completions(self, document, complete_event):
         text = document.text_before_cursor
@@ -72,6 +81,18 @@ class TuiCompleter(Completer):
                 if name.startswith(prefix):
                     yield Completion(name, start_position=-len(prefix))
             return
+        if text.startswith("/"):
+            name, _, argument = text[1:].partition(" ")
+            provider = self._argument_provider
+            if provider is not None and " " not in argument:
+                emitted = False
+                for value in provider(name.lower(), argument):
+                    emitted = True
+                    yield Completion(value, start_position=-len(argument))
+                if emitted:
+                    return
+            # Commands without argument candidates keep @path / $skill
+            # completion for free-form arguments below.
         dollar = text.rfind("$")
         if dollar >= 0 and (dollar == 0 or text[dollar - 1].isspace()):
             fragment = text[dollar + 1 :]
@@ -174,12 +195,24 @@ class InputReader:
     ) -> None:
         self._completer.set_skill_provider(provider)
 
+    def set_argument_provider(
+        self,
+        provider: Callable[[str, str], Iterable[str]],
+    ) -> None:
+        self._completer.set_argument_provider(provider)
+
     async def read(self) -> str | None:
         """Next input line, or ``None`` on EOF (ctrl-d / pipe end)."""
         if self._prompt_session is not None:
             try:
-                with patch_stdout():
-                    return await self._prompt_session.prompt_async(theme.PROMPT)
+                # raw=True: without it prompt_toolkit REPLACES every ESC
+                # byte written while the prompt is active with "?", so all
+                # rich color output printed mid-turn rendered as literal
+                # "?[36m" garbage on screen.
+                with patch_stdout(raw=True):
+                    return await self._prompt_session.prompt_async(
+                        theme.prompt_fragments()
+                    )
             except KeyboardInterrupt as exc:
                 raise InputInterrupted() from exc
             except EOFError:
