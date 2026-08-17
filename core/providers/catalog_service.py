@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
@@ -114,14 +115,41 @@ class ModelCatalogService:
         self.ttl_seconds = ttl_seconds
         self.timeout_seconds = timeout_seconds
 
+    @staticmethod
+    def catalog_revision(connection: ResolvedConnection) -> str:
+        """Cache key for a connection's model catalog.
+
+        ``connection_revision`` deliberately fingerprints only executable
+        settings: it gates admitted Turns, so editing a model list must not
+        abort work in flight. But the catalog's CONTENT also depends on the
+        catalog mode and the declared entries — keying the cache on the
+        executable fingerprint alone served a stale listing (up to the TTL)
+        after switching a connection to a manual list or editing a
+        declaration. This key covers both, and nothing else.
+        """
+        payload = json.dumps(
+            {
+                "connection": ConnectionResolver.connection_revision(connection),
+                "modelCatalog": connection.model_catalog_setting,
+                "entries": [
+                    entry.model_dump(by_alias=True, exclude_none=True)
+                    for entry in connection.manual_model_entries
+                ],
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode()
+        return hashlib.sha256(payload).hexdigest()[:16]
+
     def list_models(
         self,
         connection: ResolvedConnection,
         *,
         refresh: bool = False,
     ) -> ModelCatalog:
-        connection_revision = ConnectionResolver.connection_revision(connection)
-        cached = self._cached(connection.id, connection_revision)
+        catalog_revision = self.catalog_revision(connection)
+        cached = self._cached(connection.id, catalog_revision)
         now = time.time()
         if (
             cached is not None
@@ -145,7 +173,7 @@ class ModelCatalogService:
                 "remote",
                 refreshed_at=now,
             )
-            self._store(result, connection_revision)
+            self._store(result, catalog_revision)
             return result
         except Exception as exc:  # noqa: BLE001 - stale cache is deliberate UX
             detail = _safe_error(exc)
@@ -201,8 +229,7 @@ class ModelCatalogService:
         )
         if declared is not None:
             return _declared_model(declared)
-        revision = ConnectionResolver.connection_revision(connection)
-        cached = self._cached(connection.id, revision)
+        cached = self._cached(connection.id, self.catalog_revision(connection))
         if cached is None:
             return None
         return next((model for model in cached.models if model.id == model_id), None)

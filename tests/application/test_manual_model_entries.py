@@ -17,7 +17,12 @@ from core.config import load_config
 from core.providers.credentials import CredentialStore
 
 
-def _service(tmp_path: Path, manual_models: list) -> LLMConfigurationService:
+def _service(
+    tmp_path: Path,
+    manual_models: list,
+    *,
+    model_catalog: str = "manual",
+) -> LLMConfigurationService:
     config_path = tmp_path / "deepcode_config.json"
     config_path.write_text(
         json.dumps(
@@ -28,7 +33,7 @@ def _service(tmp_path: Path, manual_models: list) -> LLMConfigurationService:
                             "template": "custom",
                             "adapter": "openai_compat",
                             "apiBase": "https://acme.example/v1",
-                            "modelCatalog": "manual",
+                            "modelCatalog": model_catalog,
                             "manualModels": manual_models,
                         }
                     },
@@ -140,3 +145,45 @@ def test_declaration_outranks_a_remote_snapshot_for_cached_model(
     catalog = ModelCatalogService(tmp_path / "catalog_cache.json")
     model = catalog.cached_model(connection, "acme-think")
     assert model is not None and model.context_window == 1234
+
+
+def test_catalog_cache_is_keyed_by_the_settings_that_shape_it(
+    tmp_path: Path,
+) -> None:
+    """Switching a connection to a manual list (or editing a declaration)
+    must invalidate the cached listing. The executable fingerprint alone
+    deliberately ignores model lists — it gates admitted Turns — so the
+    catalog needs its own key, or a stale remote listing wins for a whole
+    TTL after the user adopts models."""
+    from unittest.mock import patch
+
+    from core.providers.catalog_service import CatalogModel
+
+    remote = (
+        CatalogModel(
+            id="acme-think",
+            name="Remote Name",
+            context_window=999_999,
+            max_output_tokens=8192,
+        ),
+    )
+    auto = _service(tmp_path, [], model_catalog="auto")
+    with patch.object(ModelCatalogService, "_fetch", return_value=remote):
+        assert auto.list_models("acme", refresh=True)["source"] == "remote"
+
+    # Same connection identity, now serving declarations from a manual list.
+    declared = _service(
+        tmp_path,
+        [{"id": "acme-think", "label": "Declared Name", "contextWindow": 65536}],
+    )
+    listing = declared.list_models("acme")
+    row = listing["models"][0]
+    assert listing["source"] == "manual"
+    assert (row["name"], row["contextWindow"]) == ("Declared Name", 65536)
+
+    # Editing the declaration moves the key again — no stale hit.
+    edited = _service(
+        tmp_path,
+        [{"id": "acme-think", "label": "Renamed", "contextWindow": 65536}],
+    )
+    assert edited.list_models("acme")["models"][0]["name"] == "Renamed"
