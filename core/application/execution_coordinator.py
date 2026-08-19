@@ -222,8 +222,9 @@ class ExecutionCoordinator:
         of a FOREIGN KEY failure at this worker's first turn submit, minutes
         later and naming nothing. Verifying here converts that into either a
         silent self-heal (one retry) or a startup error that says what
-        actually happened. See
-        docs/investigations/2026-08-19-concurrent-turn-submit.md.
+        actually happened. (Root cause investigated 2026-08-19: the row
+        vanished under concurrent worker startup; the write itself raised
+        nothing.)
         """
         for attempt in (1, 2):
             with self.database.transaction() as connection:

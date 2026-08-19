@@ -80,5 +80,4 @@ that — do X"), ask it to remember, and the correction is there next session.
 
 > **In development — DeepCode Evolve:** an opt-in loop that distills your own
 > sessions into project skills automatically, each with provenance, a
-> guardrail check, and one-click rollback. Design:
-> [`docs/EVOLVE_POPULATION_PLAN.md`](../EVOLVE_POPULATION_PLAN.md).
+> guardrail check, and one-click rollback.

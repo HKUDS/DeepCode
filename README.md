@@ -179,9 +179,8 @@ Skills, permissions, Goals, and Automations. See the
   time and token usage. An idle TUI costs nothing to animate.
 - **A source-level comparison against dsh became a plan.** Where the message
   list the model sees comes from, what compaction should keep, and what the
-  session record must contain — measured, written down as
-  `docs/AGENT_RUNTIME_DSH_ALIGNMENT_PLAN.md`, and four unreferenced documents
-  retired.
+  session record must contain — measured and written down, and four
+  unreferenced documents retired.
 
 **2026-08-17 · Fixes from a review pass over the new settings and TUI work**
 

@@ -127,8 +127,8 @@ def test_submitting_into_anothers_running_turn_is_refused_politely(
     )
     # A pre-existing, documented crash can kill B at STARTUP — a WAL
     # "disk I/O error" while opening the shared database mid-turn of the
-    # other process (docs/investigations/2026-08-19-concurrent-turn-submit.md;
-    # reproduced on ubuntu CI runners at resume-time projection reads). That
+    # other process (investigated 2026-08-19; reproduced on ubuntu CI
+    # runners at resume-time projection reads). That
     # failure happens before the collision under test here, so B retries a
     # bounded number of times on exactly that signature. Any other death is
     # a real failure of this test's subject.
