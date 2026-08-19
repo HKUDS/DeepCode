@@ -47,7 +47,9 @@ def _price_table() -> dict[str, tuple[float, float]]:
     return table
 
 
-def _prices_for(model: str | None, table: dict[str, tuple[float, float]]) -> tuple[float, float]:
+def _prices_for(
+    model: str | None, table: dict[str, tuple[float, float]]
+) -> tuple[float, float]:
     if model and model in table:
         return table[model]
     try:
@@ -123,11 +125,7 @@ def aggregate_llmops(
     quality = _mean(judged, "quality")
     honesty = _mean(judged, "honesty")
     harm_count = sum(1 for v in judged if v.get("harm"))
-    harm = (
-        {"flagged": harm_count, "sampled": len(judged)}
-        if judged
-        else None
-    )
+    harm = {"flagged": harm_count, "sampled": len(judged)} if judged else None
 
     return {
         "quality": quality,

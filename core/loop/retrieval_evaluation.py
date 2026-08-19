@@ -163,9 +163,7 @@ def evaluate_retrieval(
                 continue
             if embed_fn is not None:
                 try:
-                    sim = _cosine_similarity(
-                        gold_vectors[index], embed_fn(content)
-                    )
+                    sim = _cosine_similarity(gold_vectors[index], embed_fn(content))
                 except Exception:  # noqa: BLE001
                     sim = 0.0
                 if sim >= similarity_threshold:

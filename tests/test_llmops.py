@@ -48,14 +48,14 @@ def test_cost_from_tokens_with_default_prices(monkeypatch):
 
 
 def test_cost_honors_custom_price_table(monkeypatch):
-    monkeypatch.setenv(
-        "DEEPCODE_LLM_PRICES", "m1=0.01,0.02;m2=0.1,0.2"
-    )
+    monkeypatch.setenv("DEEPCODE_LLM_PRICES", "m1=0.01,0.02;m2=0.1,0.2")
     report = aggregate_llmops(_RECORDS)
     cost = report["cost"]
     expected = (
-        3000 / 1000 * 0.01 + 1500 / 1000 * 0.02  # m1
-        + 100 / 1000 * 0.1 + 50 / 1000 * 0.2  # m2
+        3000 / 1000 * 0.01
+        + 1500 / 1000 * 0.02  # m1
+        + 100 / 1000 * 0.1
+        + 50 / 1000 * 0.2  # m2
     )
     assert abs(cost["usd"] - expected) < 1e-6
 
