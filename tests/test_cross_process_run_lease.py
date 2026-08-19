@@ -33,7 +33,7 @@ class _Profile:
 
 
 MARKER = os.environ.get("MARKER")
-SLEEP = float(os.environ.get("PROVIDER_SLEEP", "0"))
+HOLD = os.environ.get("HOLD")
 
 
 class _Provider:
@@ -43,8 +43,12 @@ class _Provider:
     async def chat_with_retry(self, **_kwargs):
         if MARKER:
             open(MARKER, "w").write("turn-started")
-        if SLEEP:
-            time.sleep(SLEEP)
+        if HOLD:
+            # Deterministic collision window: the turn stays mid-flight until
+            # the test deletes the hold file. No timing assumptions.
+            deadline = time.monotonic() + 60
+            while os.path.exists(HOLD) and time.monotonic() < deadline:
+                time.sleep(0.1)
         return LLMResponse(
             content=os.environ["TAG"] + " done", finish_reason="stop"
         )
@@ -107,6 +111,8 @@ def test_submitting_into_anothers_running_turn_is_refused_politely(
     # A executes with a provider that sleeps; the marker file tells us the
     # turn is genuinely mid-flight before B submits.
     marker = tmp_path / "turn-started.marker"
+    hold = tmp_path / "hold-the-turn"
+    hold.write_text("held")
     proc_a = _run(
         script,
         {
@@ -115,26 +121,42 @@ def test_submitting_into_anothers_running_turn_is_refused_politely(
             "SCRIPT": "long job\n/exit\n",
             "ARGV": json.dumps([*argv, "--resume", session_id]),
             "MARKER": str(marker),
-            "PROVIDER_SLEEP": "5",
+            "HOLD": str(hold),
         },
         wait=False,
     )
+    # A pre-existing, documented crash can kill B at STARTUP — a WAL
+    # "disk I/O error" while opening the shared database mid-turn of the
+    # other process (docs/investigations/2026-08-19-concurrent-turn-submit.md;
+    # reproduced on ubuntu CI runners at resume-time projection reads). That
+    # failure happens before the collision under test here, so B retries a
+    # bounded number of times on exactly that signature. Any other death is
+    # a real failure of this test's subject.
+    _PREEXISTING = ("disk I/O error", "FOREIGN KEY constraint failed")
     try:
         deadline = time.monotonic() + 20
         while not marker.exists():
             assert time.monotonic() < deadline, "A's turn never started"
             time.sleep(0.1)
 
-        rc_b, out_b, err_b = _run(
-            script,
-            {
-                **base_env,
-                "TAG": "B",
-                "SCRIPT": "quick question\n/exit\n",
-                "ARGV": json.dumps([*argv, "--resume", session_id]),
-            },
-        )
+        for attempt in range(3):
+            rc_b, out_b, err_b = _run(
+                script,
+                {
+                    **base_env,
+                    "TAG": "B",
+                    "SCRIPT": "quick question\n/exit\n",
+                    "ARGV": json.dumps([*argv, "--resume", session_id]),
+                },
+            )
+            startup_crash = rc_b != 0 and any(
+                signature in err_b for signature in _PREEXISTING
+            )
+            if not startup_crash:
+                break
     finally:
+        # Only after B's outcome is decided does A's turn get to finish.
+        hold.unlink(missing_ok=True)
         out_a, err_a = proc_a.communicate(timeout=90)
 
     assert rc_b == 0, f"B must exit cleanly, not crash:\n{err_b[-800:]}"

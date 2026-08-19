@@ -94,6 +94,7 @@ class TuiApp:
             activity_probe=self.renderer.is_working,
         )
         self._exit_requested = False
+        self._last_send_delivered = True
         self._requested_model = model
         self._requested_connection = connection_id
         self._requested_reasoning_effort = (
@@ -717,7 +718,9 @@ class TuiApp:
             # process is executing a turn on this Session right now. A
             # sentence, not a traceback; the message is kept and nothing is
             # consumed, so the user can simply try again in a moment.
+            self._last_send_delivered = False
             return exc.user_message
+        self._last_send_delivered = True
         if delivery.kind == "started":
             self.selected_skill_ids.clear()
             return ""
@@ -893,7 +896,12 @@ class TuiApp:
                         soft_wrap=True,
                         highlight=False,
                     )
-                if not self.reader.interactive:
+                if not self.reader.interactive and self._last_send_delivered:
+                    # "Idle" is a property of the shared Thread, which another
+                    # process's turn keeps busy. A refused submission started
+                    # nothing here, so there is nothing of ours to wait for —
+                    # waiting would make a piped run stand guard over the
+                    # other process's work.
                     await self.thread_client.wait_until_idle()
             if self.reader.interactive:
                 self.console.print(f"[{theme.META_STYLE}]bye[/]")
