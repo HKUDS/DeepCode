@@ -11,8 +11,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from core.harness.memory import (  # noqa: E402
+    _INSTRUCTION_EXCLUDE_ENV,
     _MAX_INJECT_CHARS,
     MemoryTool,
+    _instruction_excluded,
     memory_dir,
     project_instructions,
     system_preamble,
@@ -34,6 +36,38 @@ def test_project_instructions_prefers_agents_md(tmp_path):
     assert "Always use tabs." in out
     assert "AGENTS.md" in out
     assert "spaces" not in out  # AGENTS.md wins over CLAUDE.md
+
+
+def test_instruction_excluded_matches_globs(monkeypatch):
+    monkeypatch.setenv(
+        _INSTRUCTION_EXCLUDE_ENV, "**/code/CLAUDE.md,**/vendor/**"
+    )
+    # 匹配: 任意层级前缀 + 目录段精确匹配
+    assert _instruction_excluded(Path("repo/code/CLAUDE.md"))
+    assert _instruction_excluded(Path("repo/vendor/x/AGENTS.md"))
+    assert _instruction_excluded(Path("repo/vendor/AGENTS.md"))
+    assert _instruction_excluded(Path("code/CLAUDE.md"))  # 零层前缀
+    # 反例: 前缀同名目录不误匹配 (vendorized ≠ vendor/)
+    assert not _instruction_excluded(Path("repo/CLAUDE.md"))
+    assert not _instruction_excluded(Path("repo/vendorized/AGENTS.md"))
+    assert not _instruction_excluded(Path("repo/vendorized/x/CLAUDE.md"))
+
+
+def test_project_instructions_skips_excluded_file(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / "code").mkdir()
+    (repo / "CLAUDE.md").write_text("root instructions")
+    (repo / "code" / "CLAUDE.md").write_text("subdir instructions")
+    monkeypatch.setenv(_INSTRUCTION_EXCLUDE_ENV, "**/code/CLAUDE.md")
+    out = project_instructions(repo / "code")
+    assert "root instructions" in out
+    assert "subdir instructions" not in out
+
+
+def test_instruction_excluded_ignores_invalid_patterns(monkeypatch):
+    monkeypatch.setenv(_INSTRUCTION_EXCLUDE_ENV, "**/[code/CLAUDE.md")  # 非法 glob
+    assert not _instruction_excluded(Path("code/CLAUDE.md"))
 
 
 def test_project_instructions_absent(tmp_path):

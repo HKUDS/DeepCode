@@ -11,11 +11,18 @@ from core.domain.execution_permission import ExecutionPermissionMode
 
 
 class ExecutionAccessPreset(StrEnum):
-    """User-facing access choices shared by every DeepCode client."""
+    """User-facing access choices shared by every DeepCode client.
+
+    借鉴 Claude Code ``--allow-dangerously-skip-permissions`` (2026-08-19):
+    危险操作必须"显式命名危险" —— 跳过全部权限校验的逃生通道叫
+    ``dangerous_skip`` 而不是沉默的 full_access, 让使用者与审计日志
+    都能一眼看到这是危险选择。
+    """
 
     ASK = "ask"
     READ_ONLY = "read_only"
     FULL_ACCESS = "full_access"
+    DANGEROUS_SKIP = "dangerous_skip"
 
 
 class FilesystemScope(StrEnum):
@@ -173,6 +180,15 @@ _PRESET_PROFILES: dict[
         ApprovalPolicy.NEVER,
     ),
     ExecutionAccessPreset.FULL_ACCESS: (
+        ExecutionPermissionMode.FULL_AUTO,
+        False,
+        FilesystemScope.UNRESTRICTED,
+        ApprovalPolicy.NEVER,
+    ),
+    # 危险逃生通道: 显式命名 (借鉴 Claude Code --allow-dangerously-skip-permissions)。
+    # 与 FULL_ACCESS 同强度, 但名字自带"危险"警示, 供日志/UI 明确区分;
+    # 选择它等于明确声明"我知道这很危险, 仍要跳过全部权限校验"。
+    ExecutionAccessPreset.DANGEROUS_SKIP: (
         ExecutionPermissionMode.FULL_AUTO,
         False,
         FilesystemScope.UNRESTRICTED,
