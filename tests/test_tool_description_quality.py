@@ -54,14 +54,16 @@ def test_overlong_description_flagged():
 
 
 def test_sanitize_empty_falls_back_to_name():
-    assert sanitize_description("", name="read") == "read tool (no description provided)"
+    assert (
+        sanitize_description("", name="read") == "read tool (no description provided)"
+    )
     assert sanitize_description(None, name="write") == (
         "write tool (no description provided)"
     )
 
 
 def test_sanitize_truncates_overlong_at_sentence_boundary():
-    long = ("One complete sentence with enough length to be cut here. " + "y" * 5_000)
+    long = "One complete sentence with enough length to be cut here. " + "y" * 5_000
     out = sanitize_description(long, name="tool")
     assert len(out) <= _DESCRIPTION_MAX_CHARS + 32  # cap + truncation marker slack
     assert out.endswith("…[truncated]")

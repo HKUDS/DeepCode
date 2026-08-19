@@ -85,9 +85,7 @@ def test_semantic_hit_counts_paraphrase():
     # Gold and hit differ in wording but share tokens 鈫?cosine 鈮?threshold.
     qa = [{"query": "tell me about alpha facts", "gold": "alpha fact details"}]
     search = _search_returning(["the alpha facts explained", "unrelated doc"])
-    metrics = re.evaluate_retrieval(
-        qa, search_fn=search, embed_fn=_fake_embed, top_k=5
-    )
+    metrics = re.evaluate_retrieval(qa, search_fn=search, embed_fn=_fake_embed, top_k=5)
     assert metrics["recall@1"] == 1.0
     assert metrics["mrr"] == 1.0
     assert metrics["weak"] is False
@@ -97,9 +95,7 @@ def test_semantic_hit_counts_paraphrase():
 def test_semantic_hit_at_second_position_ranked():
     qa = [{"query": "tell me about alpha facts", "gold": "alpha fact details"}]
     search = _search_returning(["unrelated doc", "the alpha facts explained"])
-    metrics = re.evaluate_retrieval(
-        qa, search_fn=search, embed_fn=_fake_embed, top_k=5
-    )
+    metrics = re.evaluate_retrieval(qa, search_fn=search, embed_fn=_fake_embed, top_k=5)
     assert metrics["recall@1"] == 0.0
     assert metrics[f"recall@{metrics['top_k']}"] == 1.0
     assert metrics["per_query"][0]["rank"] == 2

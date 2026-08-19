@@ -508,9 +508,7 @@ class AgentSession:
                 try:
                     from core.harness.memory import write_compaction_summary
 
-                    write_compaction_summary(
-                        self._workspace, summary, anchor
-                    )
+                    write_compaction_summary(self._workspace, summary, anchor)
                     try:
                         from core.observability.events import emit_event
 

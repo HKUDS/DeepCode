@@ -212,9 +212,7 @@ def write_compaction_summary(
 
         entry = f"\n\n## Compaction{anchor_text}\n{text}"
         existing = (
-            note.read_text(encoding="utf-8", errors="replace")
-            if note.is_file()
-            else ""
+            note.read_text(encoding="utf-8", errors="replace") if note.is_file() else ""
         )
         combined = existing + entry
         if len(combined) > _MAX_COMPACTION_CHARS:
