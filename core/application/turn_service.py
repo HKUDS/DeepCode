@@ -1361,33 +1361,68 @@ class TurnService:
             raw_usage = getattr(session, "last_usage", {})
             if not projection.usage:
                 turn_usage = normalize_usage(raw_usage)
+            self.session_runtimes.persist_kernel_history(
+                turn.thread_id,
+                getattr(session, "history", ()),
+                extra_metadata={
+                    "schemaVersion": 3,
+                    "client": turn_client,
+                    "turnId": turn.id,
+                    "executionProfile": execution_profile.to_dict(),
+                    "executionSecurityProfile": (
+                        turn.execution_security_profile.to_dict()
+                        if turn.execution_security_profile is not None
+                        else None
+                    ),
+                    **turn_identity_metadata,
+                    # Turn-level facts belong on every record this Turn
+                    # persists. Leaving them only on the fallback append lost
+                    # them entirely once the history path started writing the
+                    # assistant record itself.
+                    "skillInvocations": [
+                        invocation.to_metadata()
+                        for invocation in skill_invocations.values()
+                    ],
+                },
+            )
             if projection.saw_terminal:
                 if projection.final_text:
+                    canonical = self.session_store.get_session(turn.thread_id)
+                    already_stored = (
+                        canonical is not None
+                        and canonical.messages
+                        and canonical.messages[-1].role == "assistant"
+                        and canonical.messages[-1].content == projection.final_text
+                    )
                     continuation_metadata = assistant_continuation_metadata(
                         getattr(session, "history", ())
                     )
-                    stored_assistant = self.session_store.append_message(
-                        turn.thread_id,
-                        "assistant",
-                        projection.final_text,
-                        metadata={
-                            "schemaVersion": 3,
-                            "client": turn_client,
-                            "turnId": turn.id,
-                            "executionProfile": execution_profile.to_dict(),
-                            "executionSecurityProfile": (
-                                turn.execution_security_profile.to_dict()
-                                if turn.execution_security_profile is not None
-                                else None
-                            ),
-                            **continuation_metadata,
-                            **turn_identity_metadata,
-                            "skillInvocations": [
-                                invocation.to_metadata()
-                                for invocation in skill_invocations.values()
-                            ],
-                        },
-                    )
+                    stored_assistant = True
+                    if already_stored:
+                        self.session_runtimes.mark_persisted(turn.thread_id)
+                    else:
+                        stored_assistant = self.session_store.append_message(
+                            turn.thread_id,
+                            "assistant",
+                            projection.final_text,
+                            metadata={
+                                "schemaVersion": 3,
+                                "client": turn_client,
+                                "turnId": turn.id,
+                                "executionProfile": execution_profile.to_dict(),
+                                "executionSecurityProfile": (
+                                    turn.execution_security_profile.to_dict()
+                                    if turn.execution_security_profile is not None
+                                    else None
+                                ),
+                                **continuation_metadata,
+                                **turn_identity_metadata,
+                                "skillInvocations": [
+                                    invocation.to_metadata()
+                                    for invocation in skill_invocations.values()
+                                ],
+                            },
+                        )
                     if stored_assistant is None:
                         raise RuntimeError(
                             f"canonical session disappeared: {turn.thread_id}"

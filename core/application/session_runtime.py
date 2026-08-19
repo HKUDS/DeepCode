@@ -37,7 +37,10 @@ from core.domain.execution_permission import ExecutionPermissionMode
 from core.domain.execution_profile import ExecutionProfile
 from core.domain.execution_security import ExecutionSecurityProfile
 from core.sessions import Session, SessionStore
-from core.sessions.continuation import session_message_history_entry
+from core.sessions.transcript import (
+    new_records_from_history,
+    visible_kernel_history,
+)
 from core.skills.host import SkillWorkspaceRegistry
 
 
@@ -279,11 +282,9 @@ class SessionRuntimeRegistry:
     ) -> dict[str, Any]:
         """Summarize the resident model context in place (`/compact`).
 
-        The canonical Session log stays untouched — the same contract as
-        :meth:`clear_live_history`, but replacing older turns with a model
-        summary instead of dropping everything. A Session with no resident
-        runtime has nothing to compact: its context is rebuilt from
-        canonical history on the next acquire anyway.
+        After replacing the resident history, a compaction checkpoint is
+        appended to the canonical file so resume rebuilds the compacted
+        shape instead of the pre-compact giant.
 
         ``execution_profile`` is the Thread's *current* resolved selection;
         when given, a stale idle runtime is rebuilt first (see
@@ -304,7 +305,9 @@ class SessionRuntimeRegistry:
             raise ConflictError(
                 "This Session's runtime does not support manual compaction."
             )
-        return await compact()
+        report = await compact()
+        self.persist_kernel_history(session_id, runtime.agent.history)
+        return report
 
     async def discard(self, session_id: str) -> None:
         """Close and forget one idle runtime after permanent Session deletion."""
@@ -634,13 +637,32 @@ class SessionRuntimeRegistry:
 
         return note
 
+    def persist_kernel_history(
+        self,
+        session_id: str,
+        history: object,
+        extra_metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Append model-visible history that is not yet in the canonical file."""
+        canonical = self.store.get_session(session_id)
+        if canonical is None:
+            return
+        extra = extra_metadata or {}
+        for record in new_records_from_history(history or (), canonical.messages):
+            metadata = {**(record.metadata or {}), **extra}
+            stored = self.store.append_message(
+                session_id,
+                record.role,
+                record.content,
+                metadata=metadata or None,
+            )
+            if stored is None:
+                return
+        self.mark_persisted(session_id)
+
     @staticmethod
     def _visible_history(session: Session) -> list[dict[str, Any]]:
-        return [
-            session_message_history_entry(message)
-            for message in session.messages
-            if message.role in {"user", "assistant"} and message.content
-        ]
+        return visible_kernel_history(session.messages)
 
 
 def _accepts_keyword(callable_object, name: str) -> bool:
