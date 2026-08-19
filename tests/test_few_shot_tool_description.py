@@ -26,8 +26,8 @@ def test_edit_description_has_example():
     tool = EditTool(str(ROOT))
     desc = tool.description
     assert "Example:" in desc
-    assert 'edit(file_path=' in desc
-    assert 'old_string=' in desc and 'new_string=' in desc
+    assert "edit(file_path=" in desc
+    assert "old_string=" in desc and "new_string=" in desc
 
 
 def test_edit_description_within_length_budget():

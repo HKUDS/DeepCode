@@ -39,9 +39,7 @@ def test_chain_executes_in_order():
 def test_previous_result_flows_forward():
     chain = SequentialChain(name="p")
     chain.add(ChainStage(name="first", task="produce a number"))
-    chain.add(
-        ChainStage(name="second", task="use {previous_result} to continue")
-    )
+    chain.add(ChainStage(name="second", task="use {previous_result} to continue"))
 
     seen: list[str] = []
 

@@ -16,7 +16,14 @@ from core.observability.trace import TraceChain, render_chain_text
 def test_chain_serialises_jsonl_with_spans():
     chain = TraceChain(session_key="s1", turn_id="t1", model="m")
     chain.add("read", "ok", 12, arguments={"path": "a.py"}, result="def foo")
-    chain.add("bash", "error", 800, arguments="pytest", error="exit 1", reasoning="verify tests")
+    chain.add(
+        "bash",
+        "error",
+        800,
+        arguments="pytest",
+        error="exit 1",
+        reasoning="verify tests",
+    )
     line = chain.to_jsonl()
     payload = json.loads(line)
     assert payload["session_key"] == "s1"
