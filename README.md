@@ -163,6 +163,11 @@ Skills, permissions, Goals, and Automations. See the
   size the provider itself reports. The built-in estimator prices Chinese
   prose at more than twice its real cost, which was compacting Chinese
   conversations at roughly half the context they could hold.
+- **Two windows on one Session no longer crash each other.** Each Session
+  now has one live writer, enforced by an OS lock held around a turn: the
+  second window gets a sentence naming who is running it, instead of a
+  process dying to a database constraint about half the time. Alternate
+  freely between Desktop and the terminal — just not mid-turn.
 - **The TUI has a logo, a live status line, and tool cards that read.** A
   spinner and a sweep while work runs, paths written the way you would type
   them, the plan tool's checklist visible at last, and a turn footer with its
