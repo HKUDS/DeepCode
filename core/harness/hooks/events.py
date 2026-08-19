@@ -31,14 +31,18 @@ HOOK_EVENT_NAMES: tuple[str, ...] = (
     "PreCompact",
     "PostCompact",
     "SessionStart",
+    "SessionEnd",
     "UserPromptSubmit",
     "SubagentStart",
     "SubagentStop",
     "Stop",
 )
 
-# Events whose ``matcher`` field is meaningful. ``UserPromptSubmit`` and ``Stop``
-# fire unconditionally, so their matchers are ignored (mirrors the reference).
+# Events whose ``matcher`` field is meaningful. ``UserPromptSubmit`` and
+# ``Stop`` fire unconditionally, so their matchers are ignored (mirrors the
+# reference). ``SessionEnd`` DOES honour its matcher: the session-exit reason
+# (``shutdown`` / ``interrupted`` / ``error``) is matched against the
+# ``matcher`` field so hooks can target a specific exit path.
 _EVENTS_WITHOUT_MATCHER: frozenset[str] = frozenset({"UserPromptSubmit", "Stop"})
 
 

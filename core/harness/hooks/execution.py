@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -56,6 +57,13 @@ class HandlerDecision:
 
 def _default_shell() -> list[str]:
     if os.name == "nt":  # pragma: no cover - posix CI
+        # Hook commands follow the Claude-Code POSIX shell contract (`;`
+        # separators, single-quoted JSON, `cat` redirection). Prefer a POSIX
+        # shell (e.g. Git Bash) on Windows so those commands actually run;
+        # fall back to cmd.exe only when no POSIX shell is available.
+        sh = shutil.which("sh")
+        if sh:
+            return [sh, "-lc"]
         comspec = os.environ.get("COMSPEC", "cmd.exe")
         return [comspec, "/C"]
     shell = os.environ.get("SHELL", "/bin/sh")
@@ -250,7 +258,9 @@ _DECODERS = {
     "Stop": lambda o: _block_from_decision(o, "Stop"),
     "SubagentStop": lambda o: _block_from_decision(o, "SubagentStop"),
     "SessionStart": _decode_additional_context_only,
+    "SessionEnd": _decode_additional_context_only,
     "SubagentStart": _decode_additional_context_only,
+    "PreCompact": lambda o: _block_from_decision(o, "PreCompact"),
     "PermissionRequest": _decode_permission_request,
 }
 

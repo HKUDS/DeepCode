@@ -93,6 +93,42 @@ _SUMMARY_PREFIX = (
 )
 _BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
 
+# PreCompact checkpoint re-injection (bounded, provider-safe). A PreCompact
+# hook may attach ``additional_contexts`` that must survive a successful
+# compaction so the post-compaction model can restore working context. The
+# re-injection is a plain ``role: user`` message (provider-agnostic) carrying a
+# clearly delimited prefix, with hard limits per context and in total — a
+# runaway hook can never blow the post-compaction window back open.
+_PRECOMPACT_CHECKPOINT_PREFIX = "[PreCompact checkpoint]"
+_PRECOMPACT_CONTEXT_LIMIT = 2000  # chars per additional context
+_PRECOMPACT_TOTAL_LIMIT = 8000  # chars for the whole checkpoint block
+
+
+def _build_precompact_checkpoint(contexts: list[str]) -> str | None:
+    """Bounded, delimited representation of PreCompact hook context.
+
+    Each context is stripped, truncated to ``_PRECOMPACT_CONTEXT_LIMIT`` chars
+    and the combined block capped at ``_PRECOMPACT_TOTAL_LIMIT``. Returns
+    ``None`` when nothing survives (empty input or all contexts blank).
+    """
+    if not contexts:
+        return None
+    parts: list[str] = []
+    used = 0
+    for ctx in contexts:
+        text = (ctx or "").strip()
+        if not text:
+            continue
+        text = text[:_PRECOMPACT_CONTEXT_LIMIT]
+        room = _PRECOMPACT_TOTAL_LIMIT - used
+        if room <= 0:
+            break
+        parts.append(text[:room])
+        used += min(len(text), room) + 1  # +1 for the newline separator
+    if not parts:
+        return None
+    return _PRECOMPACT_CHECKPOINT_PREFIX + "\n" + "\n".join(parts)
+
 
 @dataclass(slots=True)
 class AgentRunSpec:
@@ -1662,10 +1698,12 @@ class AgentRunner:
                 if estimate is None or estimate <= trigger:
                     return messages
 
+        pre_contexts: list[str] = []
         if spec.pre_compact_hook is not None:
             pre = await self._call_tool_hook(spec.pre_compact_hook, "auto")
             if pre is not None and getattr(pre, "block", False):
                 return messages  # a PreCompact hook aborted compaction this turn
+            pre_contexts = list(getattr(pre, "additional_contexts", None) or [])
 
         summary = await self._summarize(
             spec,
@@ -1685,6 +1723,16 @@ class AgentRunner:
                 spec.session_key or "default",
             )
             return messages
+        # Bounded checkpoint re-injection: the PreCompact hook's
+        # ``additional_contexts`` survive a successful compaction as a single
+        # provider-agnostic user message. ``_build_precompact_checkpoint``
+        # caps each context and the total block, so a runaway hook can never
+        # blow the post-compaction window back open. When the hook blocks or
+        # summarization fails we returned above — the checkpoint only ever
+        # appears after a successful compaction.
+        checkpoint = _build_precompact_checkpoint(pre_contexts)
+        if checkpoint:
+            compacted = compacted + [{"role": "user", "content": checkpoint}]
         if spec.post_compact_hook is not None:
             await self._call_tool_hook(spec.post_compact_hook, "auto")
         logger.info(

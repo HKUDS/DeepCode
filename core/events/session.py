@@ -598,6 +598,10 @@ class AgentSession:
             if task is not None and not task.done() and task.cancelling() == 0:
                 task.cancel()
         elif isinstance(op, Shutdown):
+            # SessionEnd fires exactly once, here — at the real session
+            # termination boundary — never per turn. Per-turn notifications
+            # are the Stop event's job (see _EVENTS_WITHOUT_MATCHER).
+            await self._run_end_hook(reason="shutdown")
             self._emit(ShutdownComplete())
         else:  # pragma: no cover - exhaustive guard
             self._emit(ErrorEvent(message=f"unknown op: {op!r}"))
@@ -665,6 +669,22 @@ class AgentSession:
         except Exception:
             logger.exception("start hook failed")
             return None
+
+    async def _run_end_hook(self, reason: str = "shutdown") -> None:
+        """Run SessionEnd hooks when the session itself terminates.
+
+        Notification-only: a failure is logged and never crashes the
+        shutdown. Fired exactly once per session from ``submit(Shutdown)``
+        with a documented session-exit reason (``shutdown``); per-turn
+        notifications belong to the Stop event, not SessionEnd.
+        """
+        engine = self._hooks_engine
+        if engine is None or not engine.has_event("SessionEnd"):
+            return
+        try:
+            await engine.run_session_end(reason=reason)
+        except Exception:  # noqa: BLE001 - hooks never crash a shutdown
+            logger.exception("session end hook failed")
 
     async def _run_prompt_hooks(
         self, text: str, hook_contexts: list[str]
@@ -786,6 +806,10 @@ class AgentSession:
             self._active_turn_task = None
             if terminal is not None:
                 self._emit(terminal)
+            # SessionEnd is NOT fired here: this finally block runs after
+            # every turn, and SessionEnd must fire exactly once at session
+            # termination (submit(Shutdown)), not per turn. Per-turn
+            # notifications are the Stop event's responsibility.
 
     async def _execute_turn(
         self,
