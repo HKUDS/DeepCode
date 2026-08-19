@@ -11,17 +11,15 @@ state (switch sessions, rebuild the agent) through the app's public methods.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from rich.cells import cell_len, set_cell_size
-
 from cli.transcript import TranscriptMode
 from cli.tui import theme
 from cli.tui.picker import Picker, PickerItem, PickerScope, PickerVariant
+from cli.tui.text import fit_head, short_path
 
 Handler = Callable[[Any, str], Awaitable[str | None]]
 # Candidate first arguments for tab completion: (app, typed prefix) -> values.
@@ -92,16 +90,11 @@ def _age(moment: datetime) -> str:
     return f"{hours // 24}d ago"
 
 
-def _fit_cells(text: str, width: int) -> str:
-    """Truncate to a terminal-cell budget with an ellipsis, CJK-safe."""
-    if cell_len(text) <= width:
-        return text
-    return set_cell_size(text, width - 1).rstrip() + "…"
-
-
-def _short_path(path: str) -> str:
-    home = os.path.expanduser("~")
-    return f"~{path[len(home) :]}" if path.startswith(home + os.sep) else path
+# Cell fitting and ``~``-folding are shared with the event renderer
+# (``cli.tui.text``): two copies of the same truncation drift, and a picker
+# row that wraps is the same defect as a tool card that wraps.
+_fit_cells = fit_head
+_short_path = short_path
 
 
 def _resume_row(listing, *, show_origin: bool) -> str:

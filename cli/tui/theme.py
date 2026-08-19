@@ -29,6 +29,23 @@ BRAND = f"{BRAND_MARK} {BRAND_NAME}"
 # logo palette). Only the banner may use these; everything else is ANSI.
 BRAND_GRADIENT = ((14, 165, 233), (6, 182, 212), (78, 205, 196))
 
+# The product logo as a terminal mark: the thick bracket "C" whose open side
+# dissolves into circuit traces (assets/logo.png), at the one size a
+# scrollback can afford. Rows are printed independently and left-aligned —
+# nothing below depends on a column matching a row above, so a terminal that
+# renders block glyphs double-wide (an East Asian "ambiguous = wide" setting)
+# shifts the traces without ever breaking a frame. There is no frame: the
+# banner is borderless, as in dsh.
+# Each row is ``(bracket, traces)``: the bracket carries the brand ramp top
+# to bottom, the traces are recessed, exactly as the artwork reads.
+BRAND_ART = (
+    ("██████", "  ·──○"),
+    ("██", "       ○──·"),
+    ("██████", "  ·──○"),
+)
+BRAND_ART_WIDTH = 16  # narrower terminals fall back to the one-line wordmark
+BRAND_TAGLINE = "open agentic coding"
+
 # -- color roles ------------------------------------------------------------
 ACCENT = "cyan"
 DIM = "dim"  # SGR 2: fades relative to the terminal's own foreground
@@ -61,6 +78,15 @@ TOOL_OK_STYLE = SUCCESS
 TOOL_ERR_STYLE = ERROR
 TOOL_DETAIL_STYLE = DIM
 
+# -- plan cards -------------------------------------------------------------
+# The plan tool's checklist (dsh's todo row): one glyph per step status, all
+# line-leading so a width surprise costs alignment, never structure.
+PLAN_LABEL = "Plan"
+PLAN_STEP_DONE = "✓"
+PLAN_STEP_ACTIVE = "▸"
+PLAN_STEP_PENDING = "◦"
+PLAN_ACTIVE_STYLE = ACCENT
+
 # -- status / meta ----------------------------------------------------------
 META_STYLE = DIM
 ERROR_STYLE = f"bold {ERROR}"
@@ -77,6 +103,31 @@ APPROVAL_PROMPT = "y once · a session · n deny"
 PICKER_POINTER = "❯"
 PICKER_TITLE_STYLE_PTK = "bold"
 PICKER_SELECTED_STYLE_PTK = "bold fg:ansicyan"
+
+# -- status line (prompt_toolkit dialect) -----------------------------------
+# The status line is the one animated surface: a spinner, the activity's own
+# word under dsh's glare sweep, then recessed detail. Rules live here as
+# data so ``input`` can hand them to prompt_toolkit without knowing what any
+# of them mean.
+#
+# ``bottom-toolbar`` ships as ``reverse`` — a solid inverted bar across the
+# terminal. That is the opposite of the borderless look everything else
+# follows, and it swallows the sweep (an inverted bright band reads as a
+# hole), so the class is reset here and the line carries its own colour.
+STATUS_STYLE_RULES = {
+    "bottom-toolbar": "noreverse",
+    "bottom-toolbar.text": "noreverse",
+    "status": "fg:ansibrightblack",
+    "status.spinner": "fg:ansicyan",
+    "status.label": "fg:ansicyan bold",
+    "status.glare": "fg:ansiwhite bold",
+    "status.detail": "fg:ansibrightblack",
+}
+STATUS_BASE_PTK = "class:status"
+STATUS_SPINNER_PTK = "class:status.spinner"
+STATUS_LABEL_PTK = "class:status.label"
+STATUS_GLARE_PTK = "class:status.glare"
+STATUS_DETAIL_PTK = "class:status.detail"
 
 
 def supports_truecolor() -> bool:
@@ -118,3 +169,32 @@ def brand_markup() -> str:
     if supports_truecolor():
         return f"[bold]{gradient_markup(BRAND)}[/bold]"
     return f"[bold {ACCENT}]{BRAND}[/]"
+
+
+def wordmark_markup() -> str:
+    """``DeepCode`` alone — the mark above the logo art already says ``✳``."""
+    if supports_truecolor():
+        return f"[bold]{gradient_markup(BRAND_NAME)}[/bold]"
+    return f"[bold {ACCENT}]{BRAND_NAME}[/]"
+
+
+def brand_art_markup() -> list[str]:
+    """The logo as rich markup, one string per row.
+
+    The ramp runs down the rows rather than across each one: the bracket is
+    a single shape, and a per-row horizontal gradient would restart the
+    ramp three times and read as stripes. Without truecolor every row is
+    flat ``ACCENT`` — the shape carries the brand, the colour only dresses
+    it.
+    """
+    truecolor = supports_truecolor()
+    stops = BRAND_GRADIENT
+    rows: list[str] = []
+    for index, (bracket, traces) in enumerate(BRAND_ART):
+        if truecolor:
+            red, green, blue = stops[min(index, len(stops) - 1)]
+            bracket_style = f"#{red:02x}{green:02x}{blue:02x}"
+        else:
+            bracket_style = ACCENT
+        rows.append(f"[{bracket_style}]{bracket}[/][{DIM}]{traces}[/]")
+    return rows

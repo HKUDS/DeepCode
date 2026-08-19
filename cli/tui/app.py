@@ -86,11 +86,12 @@ class TuiApp:
         self.workspace = os.path.abspath(workspace)
         self.max_iterations = max_iterations
         self.console = Console()
-        self.renderer = EventRenderer(self.console)
+        self.renderer = EventRenderer(self.console, workspace=self.workspace)
         self.reader = InputReader(
             self.workspace,
-            status_provider=self.renderer.status_line,
+            status_provider=self.renderer.status_fragments,
             toggle_transcript=self.renderer.cycle_transcript_mode,
+            activity_probe=self.renderer.is_working,
         )
         self._exit_requested = False
         self._requested_model = model
@@ -740,8 +741,15 @@ class TuiApp:
     def stop_turn(self) -> str:
         result = self.thread_client.interrupt()
         if result is None:
+            self.renderer.settle_turn()
             return "no active Turn"
-        accepted, _turn = result
+        accepted, turn = result
+        # A cancelled Turn reaches its terminal state in the durable record
+        # without emitting a terminal event, so the renderer would keep
+        # reporting a turn that is already over. This call is the only place
+        # that learns the truth.
+        if turn.status.is_terminal:
+            self.renderer.settle_turn()
         return "Interrupted the turn." if accepted else "The turn had already stopped."
 
     def _respond_to_pending_approval(self, text: str) -> str | None:
@@ -788,13 +796,29 @@ class TuiApp:
 
     def _banner(self) -> None:
         """Borderless startup banner (the dsh rule: no box, one leading
-        space per line, brand line first, everything else recessed)."""
+        space per line, brand first, everything else recessed).
+
+        The brand is the product logo drawn as a terminal mark — the thick
+        bracket whose open side dissolves into circuit traces. Rows print
+        independently, so nothing here can misalign into a broken frame;
+        a terminal too narrow for the art falls back to the one-line
+        wordmark, which is the same brand at a smaller size.
+        """
         workspace = str(self.workspace)
         home = str(Path.home())
         if workspace.startswith(home):
             workspace = "~" + workspace[len(home) :]
         self.console.print()
-        self.console.print(f" {theme.brand_markup()}")
+        if self.console.width >= theme.BRAND_ART_WIDTH:
+            for row in theme.brand_art_markup():
+                self.console.print(f" {row}", highlight=False)
+            self.console.print(
+                f" {theme.wordmark_markup()} "
+                f"[{theme.META_STYLE}]· {theme.BRAND_TAGLINE}[/]",
+                highlight=False,
+            )
+        else:
+            self.console.print(f" {theme.brand_markup()}")
         self.console.print(
             f" [{theme.META_STYLE}]{escape(self.model)} · {escape(workspace)}[/]",
             soft_wrap=True,
@@ -895,6 +919,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Optional model-sampling limit for diagnostics (unlimited by default).",
     )
     args = parser.parse_args(argv)
+    _bootstrap_quiet_logging()
 
     if not _prepare_workspace_trust(args.workspace, grant=args.trust):
         return 1
@@ -919,6 +944,31 @@ def main(argv: list[str] | None = None) -> int:
     if app.reader.interactive:
         _silence_console_logging()
     return asyncio.run(app.repl())
+
+
+def _bootstrap_quiet_logging() -> None:
+    """Install a quiet console sink before anything can log (#167's rule).
+
+    ``deepcode`` does this for every subcommand it dispatches, but
+    ``python -m cli.tui`` — the invocation this module's own docstring
+    documents — reaches ``main`` without passing through it, so loguru
+    keeps its built-in DEBUG sink and the config loader's "layer absent"
+    lines land on the terminal *above the banner*, before the TUI owns the
+    screen. ``setup_logging`` is idempotent without ``force``, so this is a
+    no-op when the entrypoint already installed the user's real sinks.
+    """
+    try:
+        from core.config import LoggerConfig
+        from core.observability import setup_logging
+
+        setup_logging(
+            LoggerConfig(
+                level=os.environ.get("DEEPCODE_LOG_LEVEL") or "INFO",
+                transports=["console"],
+            )
+        )
+    except Exception:  # noqa: BLE001 - logging must never block the TUI
+        pass
 
 
 def _silence_console_logging() -> None:

@@ -19,9 +19,11 @@ from typing import Protocol
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.formatted_text import StyleAndTextTuples
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.patch_stdout import patch_stdout
+from prompt_toolkit.styles import Style
 
 from cli.tui import theme
 from cli.tui.commands import REGISTRY
@@ -35,6 +37,14 @@ from core.private_storage import (
 _HISTORY_PATH: Path | None = None
 _SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv"}
 _MAX_COMPLETIONS = 30
+# The status line is animated (spinner ~11fps, dsh's 2.6s glare sweep), so
+# while work runs the prompt has to repaint faster than the eye notices.
+# It is driven by an activity probe rather than prompt_toolkit's
+# ``refresh_interval``, which is a fixed metronome for the whole prompt: at
+# 10Hz an *idle* TUI burned ~10% of a core doing layout passes for a line
+# that never changes. Motion costs only while there is motion.
+_ANIMATION_INTERVAL_SECONDS = 0.1
+_IDLE_PROBE_SECONDS = 0.25
 
 
 class InputInterrupted(Exception):
@@ -152,12 +162,19 @@ class InputReader:
         self,
         workspace: str,
         *,
-        status_provider: Callable[[], str] | None = None,
+        # Formatted text (prompt_toolkit ``(style, text)`` fragments) or a
+        # plain string: the status line paints its own colour and motion, so
+        # the reader only has to call it on every repaint.
+        status_provider: Callable[[], StyleAndTextTuples | str] | None = None,
         toggle_transcript: Callable[[], str] | None = None,
+        # "Is there anything moving right now?" — the only question the
+        # animation loop asks, several times a second.
+        activity_probe: Callable[[], bool] | None = None,
     ) -> None:
         self.interactive = sys.stdin.isatty()
         self._prompt_session: PromptSession | None = None
         self._completer = TuiCompleter(workspace)
+        self._activity_probe = activity_probe
         if self.interactive:
             history_path = _HISTORY_PATH or deepcode_home() / "tui_history"
             ensure_private_directory(history_path.parent)
@@ -186,7 +203,7 @@ class InputReader:
                 complete_while_typing=True,
                 key_bindings=bindings,
                 bottom_toolbar=status_provider,
-                refresh_interval=0.5 if status_provider is not None else None,
+                style=Style.from_dict(theme.STATUS_STYLE_RULES),
             )
 
     def set_skill_provider(
@@ -201,9 +218,35 @@ class InputReader:
     ) -> None:
         self._completer.set_argument_provider(provider)
 
+    async def _animate(self) -> None:
+        """Repaint the prompt while the status line has something moving.
+
+        The spinner and the sweep are pure functions of elapsed time, so
+        motion is entirely a matter of *when* the prompt redraws. This
+        polls the probe cheaply, redraws at animation speed only while work
+        runs, and spends one final redraw on the way back to idle so the
+        line settles instead of freezing on its last frame.
+        """
+        session = self._prompt_session
+        if session is None or self._activity_probe is None:
+            return
+        moving = False
+        while True:
+            try:
+                active = bool(self._activity_probe())
+            except Exception:  # noqa: BLE001 - a probe must never kill the prompt
+                active = False
+            if active or moving:
+                session.app.invalidate()
+            moving = active
+            await asyncio.sleep(
+                _ANIMATION_INTERVAL_SECONDS if active else _IDLE_PROBE_SECONDS
+            )
+
     async def read(self) -> str | None:
         """Next input line, or ``None`` on EOF (ctrl-d / pipe end)."""
         if self._prompt_session is not None:
+            animator = asyncio.create_task(self._animate())
             try:
                 # raw=True: without it prompt_toolkit REPLACES every ESC
                 # byte written while the prompt is active with "?", so all
@@ -217,6 +260,8 @@ class InputReader:
                 raise InputInterrupted() from exc
             except EOFError:
                 return None
+            finally:
+                animator.cancel()
         loop = asyncio.get_running_loop()
         line = await loop.run_in_executor(None, sys.stdin.readline)
         if line == "":

@@ -533,3 +533,52 @@ async def test_goal_commands_reuse_the_cli_application(
         await app.thread_client.close()
         if app._session_activity is not None:
             app._session_activity.close()
+
+
+@pytest.mark.asyncio
+async def test_interrupting_a_turn_settles_the_animated_status_line(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Esc has to stop the spinner, not just the work.
+
+    An interrupted Turn reaches its terminal state in the durable record,
+    but the cancelled task never emits a terminal EVENT — the renderer's
+    sink sees ``turn_started`` and nothing else. Without the interrupt path
+    settling it, the status line reports a Turn that ended minutes ago.
+    """
+    provider = _BlockingProvider()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("DEEPCODE_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("DEEPCODE_SESSIONS_DIR", str(tmp_path / "sessions"))
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    _patch_provider(monkeypatch, provider)
+
+    app = TuiApp(
+        workspace=str(workspace),
+        model=None,
+        max_iterations=20,
+        trust_workspace=True,
+    )
+    try:
+        app.thread_client.set_event_loop(asyncio.get_running_loop())
+        app.send_turn("begin the long task")
+        await asyncio.wait_for(
+            asyncio.to_thread(provider.first_call_started.wait),
+            timeout=5,
+        )
+        await asyncio.sleep(0.1)
+        assert "Working" in app.renderer.status_line()
+
+        assert app.stop_turn() == "Interrupted the turn."
+        # No terminal event will ever arrive; the status must settle anyway.
+        for _ in range(25):
+            await asyncio.sleep(0.02)
+        assert "Transcript" in app.renderer.status_line()
+    finally:
+        provider.release_first_call.set()
+        app.goal_controller.close()
+        await app.thread_client.close()
+        if app._session_activity is not None:
+            app._session_activity.close()

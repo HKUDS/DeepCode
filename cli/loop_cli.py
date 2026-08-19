@@ -52,7 +52,6 @@ _STATUS_STYLE = {
 
 def _run(args: argparse.Namespace) -> int:
     console = Console()
-    renderer = EventRenderer(console)
     resuming = args.resume is not None
     workspace = (
         os.path.abspath(args.workspace or os.getcwd())
@@ -61,6 +60,9 @@ def _run(args: argparse.Namespace) -> int:
         if args.workspace
         else None
     )
+    # Tool cards name paths relative to the workspace; a resumed run learns
+    # its own from the stored Session, so it keeps absolute ones.
+    renderer = EventRenderer(console, workspace=workspace)
     if not resuming:
         assert workspace is not None
         os.makedirs(workspace, exist_ok=True)

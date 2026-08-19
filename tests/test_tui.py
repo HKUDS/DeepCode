@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
+from rich.cells import cell_len
 from rich.console import Console
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +25,8 @@ if str(ROOT) not in sys.path:
 
 import cli.tui.app as tui_app
 from cli.transcript import TranscriptMode
+from cli.tui import animation, theme
+from cli.tui import text as text_fitting
 from cli.tui.input import InputInterrupted, InputReader, expand_file_refs
 from cli.tui.renderer import EventRenderer
 from core import agent_setup
@@ -35,7 +38,16 @@ from core.events import (
     AgentReasoningDelta,
     AgentReasoningStarted,
     Event,
+    ModelUsageRecorded,
+    PlanStep,
+    PlanStepStatus,
+    PlanUpdated,
+    TaskComplete,
+    ToolActivity,
+    ToolActivityKind,
     ToolCompleted,
+    ToolStarted,
+    TurnStarted,
 )
 from core.providers.base import LLMResponse, ToolCallRequest
 from core.reasoning import ReasoningAvailability, ReasoningChannel
@@ -402,9 +414,470 @@ def test_cli_status_line_tracks_live_reasoning_without_printing_deltas():
     renderer.on_event(events[1])
 
     status = renderer.status_line()
-    assert "Thinking · High" in status
-    assert "Checked inputs." in status
+    assert "Thinking" in status
+    assert "High" in status
+    # A RUNNING block is summarised by its newest line, dsh's live Think row.
+    # Pinning the first line froze this detail on the opening sentence for the
+    # whole turn, which read as a hung UI.
+    assert "Additional summary detail." in status
+    assert "Checked inputs." not in status
     assert output.getvalue() == ""
+
+
+def test_cli_status_fragments_animate_while_work_runs_and_settle_when_idle():
+    """The status line is the TUI's only animated surface.
+
+    Motion is a pure function of elapsed time (spinner phase + dsh's glare
+    sweep), so a repaint mid-turn must produce fragments that differ from
+    the still, single-fragment idle line — and never print anything.
+    """
+    output = io.StringIO()
+    renderer = EventRenderer(Console(file=output, color_system=None, width=120))
+
+    idle = renderer.status_fragments()
+    assert len(idle) == 1
+    assert "Transcript" in idle[0][1]
+
+    renderer.on_event(Event("1", AgentReasoningStarted("reasoning-1", effort="high")))
+    running = renderer.status_fragments()
+
+    assert running[0][1].strip() in animation.SPINNER_FRAMES
+    assert "".join(text for _style, text in running[1:]).startswith("Thinking")
+    assert output.getvalue() == ""
+
+
+def test_status_reports_the_turn_itself_while_the_provider_is_silent():
+    """The commonest state has no tool and no reasoning to name.
+
+    A turn spends most of its life waiting for the first token. Reporting
+    nothing there left the status line reading "Transcript: normal" for
+    ten seconds at a time, which is indistinguishable from a hung UI.
+    """
+    output = io.StringIO()
+    renderer = EventRenderer(Console(file=output, color_system=None, width=100))
+
+    assert "Transcript" in renderer.status_line()
+
+    renderer.on_event(Event("1", TurnStarted()))
+    assert "Working" in renderer.status_line()
+
+    renderer.on_event(Event("2", AgentMessageDelta("half an ans", "m1")))
+    assert "Responding" in renderer.status_line()
+
+    # A tool outranks both: it is what the user is actually waiting on.
+    renderer.on_event(
+        Event(
+            "3",
+            ToolStarted(
+                "call-1",
+                "bash",
+                activity=ToolActivity(ToolActivityKind.RUN, "Run", "pytest -q"),
+            ),
+        )
+    )
+    assert "Run" in renderer.status_line()
+    renderer.on_event(Event("4", ToolCompleted("call-1", "bash", False, "ok")))
+
+    renderer.on_event(Event("5", TaskComplete("done", "completed")))
+    assert "Transcript" in renderer.status_line()
+
+
+def test_status_settles_when_a_turn_is_interrupted():
+    output = io.StringIO()
+    renderer = EventRenderer(Console(file=output, color_system=None, width=100))
+    renderer.on_event(Event("1", TurnStarted()))
+    renderer.on_event(
+        Event(
+            "2",
+            ToolStarted(
+                "call-1",
+                "bash",
+                activity=ToolActivity(ToolActivityKind.RUN, "Run", "sleep 60"),
+            ),
+        )
+    )
+    assert "Run" in renderer.status_line()
+
+    # Esc cancels the turn task. No terminal EVENT follows a cancellation —
+    # the task that would emit it is the one that was cancelled — so the
+    # interrupt path settles the status itself.
+    renderer.settle_turn()
+    assert "Transcript" in renderer.status_line()
+
+    # And the ordinary path still settles on the kernel's own terminal event.
+    renderer.on_event(Event("4", TurnStarted()))
+    assert "Working" in renderer.status_line()
+    renderer.on_event(Event("5", TaskComplete(None, "completed")))
+    assert "Transcript" in renderer.status_line()
+
+
+def test_status_line_reports_the_newest_tool_and_counts_the_rest():
+    output = io.StringIO()
+    renderer = EventRenderer(
+        Console(file=output, color_system=None, width=120),
+        workspace="/repo",
+    )
+
+    renderer.on_event(
+        Event(
+            "1",
+            ToolStarted(
+                "call-1",
+                "grep",
+                activity=ToolActivity(ToolActivityKind.SEARCH, "Search", "def resolve"),
+            ),
+        )
+    )
+    renderer.on_event(
+        Event(
+            "2",
+            ToolStarted(
+                "call-2",
+                "read",
+                activity=ToolActivity(
+                    ToolActivityKind.READ, "Read", "/repo/core/app.py"
+                ),
+            ),
+        )
+    )
+
+    status = renderer.status_line()
+    assert "Read" in status
+    assert "core/app.py" in status
+    assert "+1 running" in status
+
+
+@pytest.mark.asyncio
+async def test_the_prompt_repaints_only_while_something_is_moving(
+    monkeypatch, tmp_path
+):
+    """An idle TUI must cost nothing.
+
+    prompt_toolkit's own ``refresh_interval`` is a metronome: at animation
+    speed it repaints a line that never changes, all day, for ~10% of a
+    core. The animation loop asks the renderer instead, and settles with
+    one last repaint so the line does not freeze mid-spinner.
+    """
+
+    class InteractiveInput(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    repaints: list[int] = []
+
+    class FakeApp:
+        def invalidate(self) -> None:
+            repaints.append(1)
+
+    class FakePromptSession:
+        def __init__(self, **kwargs: Any) -> None:
+            self.app = FakeApp()
+
+    monkeypatch.setattr("sys.stdin", InteractiveInput())
+    monkeypatch.setattr("cli.tui.input.PromptSession", FakePromptSession)
+    monkeypatch.setattr("cli.tui.input._HISTORY_PATH", tmp_path / "history")
+
+    working = False
+    reader = InputReader(
+        str(tmp_path),
+        status_provider=lambda: [("", "status")],
+        activity_probe=lambda: working,
+    )
+
+    task = asyncio.create_task(reader._animate())
+    try:
+        await asyncio.sleep(0.4)
+        assert repaints == [], "an idle prompt is never repainted"
+
+        working = True
+        await asyncio.sleep(0.45)
+        during = len(repaints)
+        assert during >= 3, f"animation should repaint ~10x/s, saw {during}"
+
+        working = False
+        await asyncio.sleep(0.45)
+        # Exactly one trailing repaint: the line settles, then stays still.
+        assert len(repaints) == during + 1
+    finally:
+        task.cancel()
+
+
+def test_banner_draws_the_logo_and_falls_back_on_a_narrow_terminal(
+    monkeypatch,
+    tmp_path,
+):
+    """The brand is the logo; a terminal too narrow for it still gets one.
+
+    The art's rows print independently (nothing aligns across them), so the
+    only width question is whether the mark fits at all.
+    """
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    _patch_provider(monkeypatch, _ScriptedProvider(["unused"]))
+    monkeypatch.setenv("DEEPCODE_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("DEEPCODE_SESSIONS_DIR", str(tmp_path / "sessions"))
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    import core.sessions.store as store_mod
+
+    monkeypatch.setattr(store_mod, "_DEFAULT_STORE", None)
+
+    app = tui_app.TuiApp(
+        workspace=str(workspace),
+        model=None,
+        max_iterations=20,
+        trust_workspace=True,
+    )
+    try:
+        wide = io.StringIO()
+        app.console = Console(file=wide, color_system=None, width=100)
+        app._banner()
+        rendered = wide.getvalue()
+        assert theme.BRAND_ART[0][0] in rendered
+        assert "DeepCode" in rendered
+        assert theme.BRAND_TAGLINE in rendered
+
+        narrow = io.StringIO()
+        app.console = Console(file=narrow, color_system=None, width=12)
+        app._banner()
+        squeezed = narrow.getvalue()
+        assert theme.BRAND_ART[0][0] not in squeezed
+        assert theme.BRAND_MARK in squeezed
+        assert "DeepCode" in squeezed
+    finally:
+        app.goal_controller.close()
+        asyncio.run(app.thread_client.close())
+        if app._session_activity is not None:
+            app._session_activity.close()
+
+
+def test_text_fits_to_terminal_cells_not_characters():
+    """A CJK glyph is two columns; ``len`` says one, and the row wraps."""
+    wide = "读取文件内容并总结"  # 9 glyphs, 18 cells
+
+    head = text_fitting.fit_head(wide, 10)
+    assert cell_len(head) <= 10
+    assert head.startswith("读取")
+
+    tail = text_fitting.fit_tail(wide, 10)
+    assert cell_len(tail) <= 10
+    assert tail.endswith("总结")
+
+    # Something already inside the budget comes back untouched.
+    assert text_fitting.fit_head("short", 40) == "short"
+    assert text_fitting.fit_tail("short", 40) == "short"
+
+
+def test_workspace_paths_shorten_only_when_they_are_paths():
+    assert text_fitting.workspace_path("/repo/core/app.py", "/repo") == "core/app.py"
+    # Outside the workspace it stays absolute (home-folded), and a value that
+    # is not a path — a command, a search pattern — is never touched.
+    assert text_fitting.workspace_path("/etc/hosts", "/repo") == "/etc/hosts"
+    assert text_fitting.workspace_path("ls -la /repo", "/repo") == "ls -la /repo"
+    # A relative argument keeps its shape, minus the "./" tools carry around.
+    assert text_fitting.workspace_path("./core/app.py", "/repo") == "core/app.py"
+    assert text_fitting.workspace_path("core/app.py", "/repo") == "core/app.py"
+
+
+def test_sweep_crosses_the_label_then_holds_off_it_for_the_rest_of_the_cycle():
+    """dsh's keyframes: travel to the far edge by 90%, then a beat.
+
+    Without the hold the band re-enters the moment it leaves and the label
+    strobes; the beat is what makes it read as a sweep.
+    """
+    width = 12
+    starts = [animation.sweep_span(width, t / 20)[0] for t in range(0, 47)]
+    assert starts == sorted(starts), "the band never moves backwards mid-cycle"
+
+    # Inside the hold (the last 10% of the cycle) nothing is lit.
+    hold = animation.SWEEP_SECONDS * animation.SWEEP_HOLD
+    start, end = animation.sweep_span(width, hold + 0.01)
+    assert start == end
+
+    # And the next cycle starts over.
+    assert animation.sweep_span(width, animation.SWEEP_SECONDS + 0.01)[0] == 0
+
+
+def test_shimmer_and_spinner_are_pure_functions_that_lose_nothing():
+    label = "Thinking"
+    for tick in range(0, 60):
+        elapsed = tick / 20
+        fragments = animation.shimmer(label, elapsed, base_style="a", glare_style="b")
+        assert "".join(text for _style, text in fragments) == label
+        assert animation.spinner_frame(elapsed) in animation.SPINNER_FRAMES
+    # Pure: the same instant renders the same frame, always.
+    assert animation.spinner_frame(1.5) == animation.spinner_frame(1.5)
+    assert animation.spinner_frame(0.0) == animation.SPINNER_FRAMES[0]
+
+
+def test_tool_cards_name_paths_the_way_the_user_would_type_them():
+    output = io.StringIO()
+    renderer = EventRenderer(
+        Console(file=output, color_system=None, width=100),
+        workspace="/repo",
+    )
+
+    renderer.on_event(
+        Event(
+            "1",
+            ToolStarted(
+                "call-1",
+                "read",
+                activity=ToolActivity(
+                    ToolActivityKind.READ,
+                    "Read",
+                    "/repo/core/tui/renderer.py",
+                ),
+            ),
+        )
+    )
+
+    rendered = output.getvalue()
+    assert "core/tui/renderer.py" in rendered
+    assert "/repo/core" not in rendered
+
+
+def test_elbow_names_its_card_only_while_calls_overlap():
+    output = io.StringIO()
+    renderer = EventRenderer(
+        Console(file=output, color_system=None, width=100),
+        workspace="/repo",
+    )
+
+    def start(call_id: str, subject: str) -> None:
+        renderer.on_event(
+            Event(
+                call_id,
+                ToolStarted(
+                    call_id,
+                    "read",
+                    activity=ToolActivity(ToolActivityKind.READ, "Read", subject),
+                ),
+            )
+        )
+
+    # One call at a time: the elbow sits under its own card, so repeating
+    # the subject would be noise.
+    start("solo", "/repo/a.py")
+    renderer.on_event(Event("2", ToolCompleted("solo", "read", False, "ok")))
+    solo_elbow = output.getvalue().splitlines()[-1]
+    assert "a.py" not in solo_elbow
+
+    # Two in flight settle out of order, so each elbow has to say which.
+    start("first", "/repo/first.py")
+    start("second", "/repo/second.py")
+    renderer.on_event(Event("3", ToolCompleted("second", "read", False, "ok")))
+    renderer.on_event(Event("4", ToolCompleted("first", "read", False, "ok")))
+    elbows = output.getvalue().splitlines()[-2:]
+    assert "second.py" in elbows[0]
+    assert "first.py" in elbows[1]
+
+
+def test_plan_card_draws_the_checklist_once_per_change():
+    output = io.StringIO()
+    renderer = EventRenderer(Console(file=output, color_system=None, width=100))
+    plan = PlanUpdated(
+        plan=(
+            PlanStep("survey the workspace", PlanStepStatus.COMPLETED),
+            PlanStep("read the largest file", PlanStepStatus.IN_PROGRESS),
+            PlanStep("summarise it", PlanStepStatus.PENDING),
+        )
+    )
+
+    renderer.on_event(Event("1", plan))
+    renderer.on_event(Event("2", plan))  # unchanged: nothing new to say
+
+    rendered = output.getvalue()
+    assert rendered.count("survey the workspace") == 1
+    assert "1/3" in rendered
+    assert "read the largest file" in rendered
+    assert "summarise it" in rendered
+
+
+def test_plan_card_replaces_the_generic_card_for_the_plan_tool():
+    """dsh's rule: a keyed tool view REPLACES the generic row.
+
+    The kernel emits ToolStarted(update_plan) → PlanUpdated →
+    ToolCompleted(update_plan). Rendering all three would announce the same
+    act three times.
+    """
+    output = io.StringIO()
+    renderer = EventRenderer(Console(file=output, color_system=None, width=100))
+
+    renderer.on_event(
+        Event(
+            "1",
+            ToolStarted(
+                "plan-1",
+                "update_plan",
+                activity=ToolActivity(ToolActivityKind.PLAN, "Update plan", ""),
+            ),
+        )
+    )
+    renderer.on_event(
+        Event(
+            "2",
+            PlanUpdated(plan=(PlanStep("read the repo", PlanStepStatus.IN_PROGRESS),)),
+        )
+    )
+    renderer.on_event(
+        Event("3", ToolCompleted("plan-1", "update_plan", False, "☐ read the repo"))
+    )
+
+    rendered = output.getvalue()
+    assert "Update plan" not in rendered
+    assert rendered.count("read the repo") == 1
+    assert "Plan" in rendered
+
+
+def test_a_failed_plan_call_still_reports_itself():
+    output = io.StringIO()
+    renderer = EventRenderer(Console(file=output, color_system=None, width=100))
+
+    renderer.on_event(
+        Event(
+            "1",
+            ToolStarted(
+                "plan-1",
+                "update_plan",
+                activity=ToolActivity(ToolActivityKind.PLAN, "Update plan", ""),
+            ),
+        )
+    )
+    # No PlanUpdated: the kernel only projects one on success.
+    renderer.on_event(
+        Event(
+            "2",
+            ToolCompleted("plan-1", "update_plan", True, "two steps are in_progress"),
+        )
+    )
+
+    rendered = output.getvalue()
+    assert "update_plan failed" in rendered
+    assert "two steps are in_progress" in rendered
+
+
+def test_turn_footer_reports_usage_and_stays_silent_without_it():
+    def run(with_usage: bool) -> str:
+        output = io.StringIO()
+        renderer = EventRenderer(Console(file=output, color_system=None, width=100))
+        renderer.on_event(Event("1", TurnStarted()))
+        if with_usage:
+            renderer.on_event(
+                Event(
+                    "2",
+                    ModelUsageRecorded(
+                        1, {"prompt_tokens": 12480, "completion_tokens": 842}
+                    ),
+                )
+            )
+        renderer.on_event(Event("3", TaskComplete("done", "completed")))
+        return output.getvalue()
+
+    settled = run(True)
+    assert "12.5k in" in settled
+    assert "842 out" in settled
+    # A stopwatch reading alone is not worth a line.
+    assert run(False).strip() == ""
 
 
 def test_summary_mode_suppresses_stream_but_keeps_final_answer():
@@ -461,7 +934,13 @@ def test_interactive_input_accepts_status_and_transcript_callbacks(
 
     assert reader.interactive is True
     assert captured["bottom_toolbar"] is status_provider
-    assert captured["refresh_interval"] == 0.5
+    # No metronome: prompt_toolkit's refresh_interval repaints at a fixed
+    # rate whether or not anything moves, and at animation speed that cost
+    # ~10% of a core on an idle TUI. Repaints are driven by the activity
+    # probe instead (see `_animate`).
+    assert "refresh_interval" not in captured
+    # `bottom-toolbar` ships as a solid reversed bar; the TUI is borderless.
+    assert "noreverse" in captured["style"].style_rules[0][1]
 
 
 def test_skill_command_is_one_turn_only_and_persists_invocation_metadata(
@@ -588,8 +1067,10 @@ def test_goal_command_uses_shared_goal_ledger_and_selected_skill(
     output = capsys.readouterr().out
     assert "Goal complete" in output
     assert "The requested work is complete." in output
-    assert "get_goal" in output
-    assert "update_goal" in output
+    # The card's title is the identity a reader gets (dsh's rule); the wire
+    # name only reaches the transcript through that humanised label.
+    assert "Get Goal" in output
+    assert "Update Goal" in output
 
     store = SessionStore(tmp_path / "sessions")
     summary = store.list_sessions()[0]
@@ -637,7 +1118,7 @@ def test_goal_command_renders_tools_from_an_automatic_continuation(
     assert rc == 0
     assert provider.calls == 3
     output = capsys.readouterr().out
-    assert "update_goal" in output
+    assert "Update Goal" in output
     assert "The continuation finished the work." in output
 
 
