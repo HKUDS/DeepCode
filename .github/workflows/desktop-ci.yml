@@ -18,6 +18,7 @@ jobs:
   quality:
     name: Desktop quality gates
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     outputs:
       desktop_changed: ${{ steps.scope.outputs.desktop_changed }}
 
@@ -144,6 +145,7 @@ jobs:
             runner: ubuntu-22.04
             bundle: deb
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
 
     steps:
       - name: Check out repository

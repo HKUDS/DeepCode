@@ -20,6 +20,7 @@ jobs:
   secret-scan:
     name: Secret history scan
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
 
     steps:
       - name: Check out full history
@@ -40,6 +41,7 @@ jobs:
   dependency-audit:
     name: Dependency and license audit
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
 
     steps:
       - name: Check out repository
@@ -116,6 +118,7 @@ jobs:
     name: Pull request dependency review
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       contents: read
       pull-requests: write

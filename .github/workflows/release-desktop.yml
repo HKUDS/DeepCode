@@ -25,6 +25,7 @@ jobs:
   verify-tag:
     name: Verify release identity
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
 
     steps:
       - name: Check out release tag
@@ -70,6 +71,7 @@ jobs:
             bundles: deb,appimage
             verify: appimage
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
 
     steps:
       - name: Check out release tag
