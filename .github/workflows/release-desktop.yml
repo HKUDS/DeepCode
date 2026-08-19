@@ -102,6 +102,13 @@ jobs:
             libfuse2
           )
           for attempt in 1 2 3; do
+            if [ "$attempt" -gt 1 ]; then
+              # The Azure-local mirror goes fully unresponsive at times
+              # (every fetch "Ign:" until timeout); retrying it is useless,
+              # so fall back to the global archive for later attempts.
+              sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' \
+                /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+            fi
             if timeout 180 sudo -E apt-get update -o Acquire::ForceIPv4=true &&
                timeout 480 sudo -E apt-get install -y -o Acquire::ForceIPv4=true \
                  -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
