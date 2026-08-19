@@ -144,6 +144,30 @@ Skills, permissions, Goals, and Automations. See the
 
 ## News
 
+**2026-08-19 · The context the model sees, and a TUI that shows it**
+
+- **A new turn no longer throws away the prompt cache.** The environment
+  block used to be re-inserted before your newest message every turn, so each
+  turn diverged from the previous request right where that block had been:
+  7,420 prompt tokens recomputed at every turn boundary, now 28.
+- **Resuming a session restores what the agent did, not only what it said.**
+  Tool calls and their results are part of the canonical record now, so a
+  resumed agent can answer "what did you just run?". A test makes the rule
+  executable: every request a run sends must be rebuildable from the session
+  file alone.
+- **Compaction keeps the recent tail.** The checkpoint replaces the older
+  range and everything recent survives verbatim — assistant messages and tool
+  results included — instead of dropping them and putting the summary last.
+  Manual `/compact` used to refuse almost every real conversation; it works.
+- **Context pressure is measured, not guessed.** The gate now anchors on the
+  size the provider itself reports. The built-in estimator prices Chinese
+  prose at more than twice its real cost, which was compacting Chinese
+  conversations at roughly half the context they could hold.
+- **The TUI has a logo, a live status line, and tool cards that read.** A
+  spinner and a sweep while work runs, paths written the way you would type
+  them, the plan tool's checklist visible at last, and a turn footer with its
+  time and token usage. An idle TUI costs nothing to animate.
+
 **2026-08-17 · Fixes from a review pass over the new settings and TUI work**
 
 - **A declared model reads the same everywhere.** Per-model declarations now
