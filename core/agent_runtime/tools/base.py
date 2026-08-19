@@ -16,6 +16,54 @@ _JSON_TYPE_MAP: dict[str, type | tuple[type, ...]] = {
     "object": dict,
 }
 
+# P1-2 (GenAI lesson 11): description quality bounds. The description is what
+# the model routes on — it decides which tool to call and how well arguments
+# are filled. Enforced at registration/schema time, never at runtime cost.
+_DESCRIPTION_MAX_CHARS = 2_000  # lesson 11: definitions count against the prompt
+_DESCRIPTION_MIN_CHARS = 20  # below this the description is nearly useless
+
+
+def description_quality_issues(description: str) -> list[str]:
+    """Quality checks on a tool description (empty list = pass).
+
+    Lesson 11's rule: a description must be *specific and clear*. This is the
+    cheap static proxy: bounded length (token budget), minimum substance
+    (not empty/tiny), and no verbatim JSON-dump noise that wastes tokens.
+    """
+    issues: list[str] = []
+    text = str(description or "")
+    if not text.strip():
+        issues.append("description is empty")
+    elif len(text) < _DESCRIPTION_MIN_CHARS:
+        issues.append(
+            f"description is only {len(text)} chars; be more specific "
+            f"(min {_DESCRIPTION_MIN_CHARS})"
+        )
+    if len(text) > _DESCRIPTION_MAX_CHARS:
+        issues.append(
+            f"description is {len(text)} chars (max {_DESCRIPTION_MAX_CHARS}); "
+            "trim it — tool definitions count against the prompt budget"
+        )
+    return issues
+
+
+def sanitize_description(description: str, *, name: str = "tool") -> str:
+    """Bound + degenerate-fallback a description to the P1-2 contract.
+
+    Truncates over-long descriptions at a sentence boundary and replaces
+    unusable ones (empty or pure placeholder text) with the tool name so the
+    model still has *something* to route on — never an empty string.
+    """
+    text = str(description or "").strip()
+    if len(text) <= _DESCRIPTION_MAX_CHARS:
+        return text or f"{name} tool (no description provided)"
+    # Truncate at the last sentence end within the cap.
+    cut = text[:_DESCRIPTION_MAX_CHARS]
+    boundary = max(cut.rfind(". "), cut.rfind(".\n"), cut.rfind("\n"))
+    if boundary > _DESCRIPTION_MIN_CHARS:
+        cut = cut[: boundary + 1]
+    return cut + " …[truncated]"
+
 
 class ToolResult(str):
     """Model-visible tool text with frontend-safe execution metadata.

@@ -189,6 +189,13 @@ class AgentRunSpec:
     # follow-up prompt and the loop keeps going. ``stop_hook_active`` is passed
     # so a well-behaved hook stops blocking after its first continuation.
     stop_hook: Any | None = None
+    # P1-5 (GenAI lesson 15): compaction-as-memory. Called with the handoff
+    # summary + anchor metadata (session key, phase, timestamp, replaced
+    # message count) after a compaction successfully shrinks the history, so
+    # the host can deposit the summary into the memory vault — compressed
+    # sessions stay retrievable instead of vanishing. Must never raise; a
+    # failing sink is logged and swallowed.
+    compaction_summary_sink: Any | None = None
 
     def allowed_tool_names(self) -> frozenset[str] | None:
         if self.tool_filter is None:
@@ -1696,6 +1703,7 @@ class AgentRunner:
             budget,
             _COMPACT_TRIGGER_FRACTION,
         )
+        self._notify_compaction_summary(spec, summary, messages, compacted, "auto")
         return compacted
 
     def _estimate_prompt(
@@ -1797,7 +1805,41 @@ class AgentRunner:
                 "Compaction would not shrink the conversation. "
                 "The conversation is unchanged."
             )
+        self._notify_compaction_summary(spec, summary, messages, compacted, "manual")
         return compacted, "compacted"
+
+    def _notify_compaction_summary(
+        self,
+        spec: AgentRunSpec,
+        summary: str,
+        before: list[dict[str, Any]],
+        after: list[dict[str, Any]],
+        phase: str,
+    ) -> None:
+        """Deposit the handoff summary + anchors into the memory sink (P1-5).
+
+        Pure fire-and-forget: a failing or absent sink never affects the
+        compaction result. Anchors keep the summary retrievable and
+        attributable (lesson 15: compressed summaries must carry session id,
+        phase, and timestamps rather than vanishing into the vault).
+        """
+        if spec.compaction_summary_sink is None:
+            return
+        import time as _time
+
+        anchor = {
+            "session_key": spec.session_key or "default",
+            "phase": phase,
+            "at": _time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "messages_before": len(before),
+            "messages_after": len(after),
+            "chars_before": self._history_chars(before),
+            "chars_after": self._history_chars(after),
+        }
+        try:
+            spec.compaction_summary_sink(summary, anchor)
+        except Exception:  # noqa: BLE001 - memory work must never break the turn
+            logger.debug("compaction summary sink failed", exc_info=True)
 
     @staticmethod
     def _build_compacted_history(

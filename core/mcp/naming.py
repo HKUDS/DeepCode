@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 
 MAX_TOOL_NAME_LENGTH = 64
@@ -40,4 +41,36 @@ def _segment(value: str) -> str:
     return cleaned or "unnamed"
 
 
-__all__ = ["MAX_TOOL_NAME_LENGTH", "visible_tool_name"]
+def server_allowed(server_id: str, server_name: str | None = None) -> bool:
+    """P1-9 (GenAI lesson 13): MCP server allowlist (supply-chain hardening).
+
+    Remote MCP servers are the harness's widest third-party exposure surface
+    (lesson 13: supply-chain vulnerabilities — a compromised server can
+    register arbitrary tools). ``DEEPCODE_MCP_SERVER_ALLOWLIST`` is a
+    comma-separated list of server ids *or* names; only matching servers are
+    registered. Empty/unset = all servers allowed (the default, preserving
+    current behavior). ``server_name`` is checked as an alias so users can
+    allowlist by the name they configured, not just the generated id.
+    """
+    raw = os.environ.get("DEEPCODE_MCP_SERVER_ALLOWLIST", "").strip()
+    if not raw:
+        return True
+    allowed = {item.strip() for item in raw.split(",") if item.strip()}
+    if not allowed:
+        return True
+    if server_id in allowed:
+        return True
+    return bool(server_name) and server_name in allowed
+
+
+def allowlist_env() -> str:
+    """The raw allowlist env value (for tests / diagnostics)."""
+    return os.environ.get("DEEPCODE_MCP_SERVER_ALLOWLIST", "").strip()
+
+
+__all__ = [
+    "MAX_TOOL_NAME_LENGTH",
+    "allowlist_env",
+    "server_allowed",
+    "visible_tool_name",
+]
