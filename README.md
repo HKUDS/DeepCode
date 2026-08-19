@@ -824,6 +824,10 @@ Open **Settings → AI providers** after Desktop starts.
 
 ## Using DeepCode
 
+Prefer a guided walkthrough? The [teaching guides](docs/guide/README.md) cover
+the same ground page by page — first session, the TUI, sessions, models,
+skills and memory, and headless automation — with worked examples.
+
 ### Sessions
 
 Every task lives in a durable Session attached to its original Project. Open a
@@ -843,10 +847,17 @@ and CLI without export or conversion.
 | Load Skills for the next Turn | Composer Skills control | `/skill <name>` |
 | Create a reusable Skill | **Skills → Create Skill** | `$skill-creator` |
 | Set or revise a durable Goal | Goal panel | `/goal` |
+| Queue the next instruction | Composer while a Turn runs | `/queue <text>` |
 | Stop the active Turn | Use the stop control | `/stop` |
+| Re-run the last Turn | Retry control on the Turn | `/retry` |
+| Compact a long conversation | Automatic under pressure | `/compact` (also automatic) |
+| Change transcript detail | — | `/transcript` or `Ctrl+O` |
+| Rename or delete a Session | Session context menu | `/rename <title>` · `/delete <id>` |
 
 Session history, tool activity, approvals, Goal state, and verification evidence
-remain together. Archiving hides a Session without deleting its history;
+remain together. A Session has one live writer at a time: Desktop and the CLI
+may hold it open together, but if one is mid-Turn the other refuses new input
+with a message naming the holder instead of corrupting shared history. Archiving hides a Session without deleting its history;
 permanent deletion removes the Session records but never repository files.
 
 ### Connections and models
