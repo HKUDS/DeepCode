@@ -4,8 +4,13 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 
+// GitHub Pages serves project sites under /<repo>/ — the deploy workflow
+// sets WEBSITE_BASE=/DeepCode; local dev and root-domain hosts use "/".
+const base = process.env.WEBSITE_BASE || "/";
+
 export default defineConfig({
   site: "https://hkuds.github.io",
+  base,
   integrations: [
     starlight({
       title: "DeepCode",

@@ -17,14 +17,6 @@ function transform(name, raw) {
   const title = match[1];
   let body = raw.slice(match[0].length);
 
-  // Sibling guides: (sessions.md) or (sessions.md#anchor) → site routes.
-  body = body.replace(
-    /\(([a-z-]+)\.md(#[a-z-]+)?\)/g,
-    (_, slug, anchor) =>
-      slug === "README"
-        ? `(/guide/${anchor ?? ""})`
-        : `(/guide/${slug}/${anchor ?? ""})`,
-  );
   // The bare directory link (../) → the docs tree on GitHub.
   body = body.replace(/\(\.\.\/\)/g, `(${repoBlob}/docs/)`);
   // Repo docs one level up: (../LOCAL_PLUGINS.md) → GitHub.
@@ -37,6 +29,19 @@ function transform(name, raw) {
   body = body.replace(
     new RegExp(`\\(${repoBlob}/docs/\\.\\./README\\.md(#[a-z0-9-]+)?\\)`, "g"),
     (_, anchor) => `(${repoBlob}/README.md${anchor ?? ""})`,
+  );
+  // Sibling guides (runs LAST — after every ../ form is already
+  // resolved, so the relative output cannot be re-matched): (sessions.md) or (sessions.md#anchor) → relative site
+  // routes, so they hold under any deployment base path. The index page
+  // lives at /guide/, siblings at /guide/<slug>/ — one level deeper.
+  const fromIndex = name === "README.md";
+  body = body.replace(
+    /\(([a-z-]+)\.md(#[a-z-]+)?\)/gi,
+    (_, slug, anchor) => {
+      if (slug.toLowerCase() === "readme")
+        return `(${fromIndex ? "./" : "../"}${anchor ?? ""})`;
+      return `(${fromIndex ? "" : "../"}${slug}/${anchor ?? ""})`;
+    },
   );
 
   const front = ["---", `title: ${JSON.stringify(title)}`];
