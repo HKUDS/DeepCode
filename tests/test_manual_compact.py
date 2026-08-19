@@ -71,8 +71,8 @@ def test_compact_history_replaces_old_turns_with_a_summary() -> None:
     assert reason == "compacted"
     assert compacted is not None and len(compacted) < len(before)
     assert provider.calls == 1
-    # The summary rides the final message; recent user input survives verbatim.
-    assert "condensed" in compacted[-1]["content"]
+    # Checkpoint leads; the most recent user turn stays in the tail.
+    assert any("condensed" in m.get("content", "") for m in compacted)
     assert any("question 5" in m.get("content", "") for m in compacted)
 
 
@@ -111,7 +111,7 @@ def test_agent_session_compact_rewrites_resident_history() -> None:
     assert report["messages_after"] < report["messages_before"]
     assert report["replaced_messages"] > 0
     assert len(session.history) == report["messages_after"]
-    assert "condensed" in session.history[-1]["content"]
+    assert any("condensed" in item.get("content", "") for item in session.history)
 
 
 def test_agent_session_compact_refuses_while_a_turn_is_active() -> None:

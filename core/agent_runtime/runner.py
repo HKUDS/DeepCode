@@ -25,13 +25,23 @@ from core.agent_runtime.injections import (
     UserSteer,
     runtime_input_to_provider_message,
 )
+from core.agent_runtime.compaction import (
+    COMPACT_TRIGGER_FRACTION as _COMPACT_TRIGGER_FRACTION,
+    DEFAULT_COMPACTION_STRATEGY,
+    SUMMARIZATION_PROMPT as _SUMMARIZATION_PROMPT,
+    CompactionStrategy,
+)
 from core.agent_runtime.helpers import (
     build_assistant_message,
+    history_signature,
     estimate_message_tokens,
-    estimate_prompt_tokens_chain,
     find_legal_message_start,
     maybe_persist_tool_result,
     truncate_text,
+)
+from core.agent_runtime.token_meter import (
+    DEFAULT_TOKEN_METER_FACTORY,
+    TokenMeter,
 )
 from core.agent_runtime.hook import AgentHook, AgentHookContext
 from core.agent_runtime.pruner import ToolResultPruner
@@ -49,7 +59,12 @@ from core.agent_runtime.runtime import (
 )
 from core.agent_runtime.tools.base import ToolResult
 from core.agent_runtime.tools.registry import ToolRegistry
-from core.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from core.providers.base import (
+    LLMProvider,
+    LLMResponse,
+    ToolCallRequest,
+    is_context_window_error,
+)
 from core.providers.timeouts import (
     resolve_request_timeout_s,
     resolve_stream_max_runtime_s,
@@ -71,26 +86,6 @@ _SNIP_SAFETY_BUFFER = 1024
 # replaces old turns — semantic compaction, unlike the drop-based _snip_history
 # fallback. The compacted history is returned and persisted by the session, so
 # it survives across turns and is not re-summarized every step.
-_COMPACT_TRIGGER_FRACTION = 0.9  # summarize once the prompt exceeds 90% of budget
-_COMPACT_KEEP_USER_CHARS = (
-    60_000  # recent user messages kept verbatim before the summary
-)
-_SUMMARIZATION_PROMPT = (
-    "You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff "
-    "summary for another agent that will resume this task.\n\n"
-    "Include:\n"
-    "- Current progress and key decisions made\n"
-    "- Important context, constraints, or user preferences\n"
-    "- What remains to be done (clear next steps)\n"
-    "- Any critical data, examples, file paths, or references needed to continue\n\n"
-    "Be concise, structured, and focused on helping the next agent seamlessly "
-    "continue the work. Respond with the summary text only; do not call tools."
-)
-_SUMMARY_PREFIX = (
-    "An earlier agent worked on this task and produced the summary below of its "
-    "progress and the state of the tools it used. Build on this work and avoid "
-    "duplicating it. Here is the summary:"
-)
 _BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
 
 
@@ -184,6 +179,10 @@ class AgentRunSpec:
     tool_result_pruner: ToolResultPruner | None = field(
         default_factory=ToolResultPruner
     )
+    compaction_strategy: CompactionStrategy = DEFAULT_COMPACTION_STRATEGY
+    # Per-run: the anchored meter carries this conversation's last
+    # reported prompt size, which must not leak into another Session.
+    token_meter: TokenMeter = field(default_factory=DEFAULT_TOKEN_METER_FACTORY)
     # Stop hook (C3.1): fires when the turn would end cleanly. If it asks to
     # continue (``.block`` with ``.block_reason``), the reason is injected as a
     # follow-up prompt and the loop keeps going. ``stop_hook_active`` is passed
@@ -259,6 +258,13 @@ class AgentRunner:
 
     def __init__(self, provider: LLMProvider):
         self.provider = provider
+        # The signature of a history whose automatic compaction was already
+        # refused. Under sustained pressure the gate fires on every step, and
+        # a history with nothing older to replace — one long turn — gets the
+        # same summary refused every time by the convergence rule. Paying a
+        # model round-trip per step to relearn that is pure waste; the memo
+        # clears itself the moment the history actually changes.
+        self._refused_compaction: tuple[tuple[str, int], ...] | None = None
 
     @staticmethod
     def _merge_message_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
@@ -416,6 +422,7 @@ class AgentRunner:
         )
         empty_content_retries = 0
         length_recovery_count = 0
+        overflow_recoveries = 0
         had_injections = False
         stop_hook_active = False  # C3.1: set once a Stop hook has forced a continuation
         skip_stop_check_once = False
@@ -431,6 +438,9 @@ class AgentRunner:
             response_ordinal += 1
             raw_usage = self._usage_dict(response.usage)
             self._accumulate_usage(usage, raw_usage)
+            # The provider just priced this exact history; that number is a
+            # better anchor than any estimate of it (§9.1).
+            spec.token_meter.observe(raw_usage, messages)
             context.response_ordinal = response_ordinal
             context.response = response
             context.usage = dict(raw_usage)
@@ -761,6 +771,22 @@ class AgentRunner:
                 continue
 
             if response.finish_reason == "error":
+                if overflow_recoveries < 1 and is_context_window_error(
+                    response, message=clean
+                ):
+                    overflow_recoveries += 1
+                    logger.info(
+                        "Context-window overflow on turn {} for {}; recovering once",
+                        current_iteration,
+                        spec.session_key or "default",
+                    )
+                    if spec.tool_result_pruner is not None:
+                        pruned, _ = spec.tool_result_pruner.prune_messages(messages)
+                        messages[:] = pruned
+                    messages[:] = self._overflow_reduce(spec, messages)
+                    sampling_limit.reset()
+                    await hook.after_iteration(context)
+                    continue
                 final_content = clean or spec.error_message or _DEFAULT_ERROR_MESSAGE
                 stop_reason = "error"
                 error = final_content
@@ -1662,6 +1688,11 @@ class AgentRunner:
                 if estimate is None or estimate <= trigger:
                     return messages
 
+        signature = history_signature(messages)
+        if signature == self._refused_compaction:
+            # Already tried on exactly this history and it did not shrink.
+            return messages
+
         if spec.pre_compact_hook is not None:
             pre = await self._call_tool_hook(spec.pre_compact_hook, "auto")
             if pre is not None and getattr(pre, "block", False):
@@ -1673,18 +1704,26 @@ class AgentRunner:
             response_observer=response_observer,
         )
         if not summary:
+            self._refused_compaction = signature
             return messages  # summarization failed → leave it to _snip_history
 
-        compacted = self._build_compacted_history(messages, summary)
+        compacted = spec.compaction_strategy.build_history(
+            messages,
+            summary,
+            context_window_tokens=spec.context_window_tokens,
+        )
         # dsh's convergence rule, applied to the AUTO path too: a summary that
         # does not shrink its source by volume is growth wearing a summary's
         # clothes — keep the original and let _snip_history bound the prompt.
         if self._history_chars(compacted) >= self._history_chars(messages):
+            self._refused_compaction = signature
             logger.info(
-                "Compaction summary for {} did not shrink the history; keeping it",
+                "Compaction summary for {} did not shrink the history; keeping it "
+                "(not retried until the history changes)",
                 spec.session_key or "default",
             )
             return messages
+        self._refused_compaction = None
         if spec.post_compact_hook is not None:
             await self._call_tool_hook(spec.post_compact_hook, "auto")
         logger.info(
@@ -1704,19 +1743,15 @@ class AgentRunner:
         messages: list[dict[str, Any]],
     ) -> int | None:
         """Estimate the routed-request token size of ``messages``, or ``None``."""
-        try:
-            estimate, _ = estimate_prompt_tokens_chain(
-                self.provider,
-                spec.model,
-                self._with_transient_context(
-                    messages,
-                    spec.transient_context_messages,
-                ),
-                spec.tool_definitions(),
-            )
-        except Exception:
-            return None
-        return estimate
+        return spec.token_meter.measure(
+            self.provider,
+            spec.model,
+            self._with_transient_context(
+                messages,
+                spec.transient_context_messages,
+            ),
+            spec.tool_definitions(),
+        )
 
     async def _summarize(
         self,
@@ -1786,7 +1821,11 @@ class AgentRunner:
                 "Compaction could not produce a useful summary. "
                 "The conversation is unchanged."
             )
-        compacted = self._build_compacted_history(messages, summary)
+        compacted = spec.compaction_strategy.build_history(
+            messages,
+            summary,
+            context_window_tokens=spec.context_window_tokens,
+        )
         # Shrinkage is judged by VOLUME, not message count: replacing four
         # short turns with three longer ones is growth wearing a summary's
         # clothes (dsh's convergence rule — reject a summary that does not
@@ -1799,32 +1838,28 @@ class AgentRunner:
             )
         return compacted, "compacted"
 
+    def _overflow_reduce(
+        self,
+        spec: AgentRunSpec,
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """One maximal head reduction that keeps a legal recent tail."""
+        reduced = self._snip_history(spec, messages)
+        if reduced != messages:
+            return reduced
+        system = [dict(item) for item in messages if item.get("role") == "system"]
+        non_system = [dict(item) for item in messages if item.get("role") != "system"]
+        if len(non_system) <= 1:
+            return messages
+        start = find_legal_message_start(non_system[1:])
+        return system + non_system[1:][start:]
+
     @staticmethod
     def _build_compacted_history(
         messages: list[dict[str, Any]], summary: str
     ) -> list[dict[str, Any]]:
-        """Replacement history: system messages + recent user messages (verbatim,
-        within a char budget) + the summary as a final user message. Assistant
-        and tool turns are dropped — the summary stands in for them."""
-        system = [dict(m) for m in messages if m.get("role") == "system"]
-        non_system = [m for m in messages if m.get("role") != "system"]
-        kept_users: list[dict[str, Any]] = []
-        remaining = _COMPACT_KEEP_USER_CHARS
-        for message in reversed(non_system):
-            if message.get("role") != "user":
-                continue
-            content = message.get("content")
-            if not isinstance(content, str):
-                continue
-            if len(content) > remaining:
-                if remaining > 0:
-                    kept_users.append({"role": "user", "content": content[-remaining:]})
-                break
-            kept_users.append({"role": "user", "content": content})
-            remaining -= len(content)
-        kept_users.reverse()
-        summary_message = {"role": "user", "content": f"{_SUMMARY_PREFIX}\n{summary}"}
-        return system + kept_users + [summary_message]
+        """Replacement history via the default strategy (tests call this)."""
+        return DEFAULT_COMPACTION_STRATEGY.build_history(messages, summary)
 
     def _snip_history(
         self,
@@ -1838,13 +1873,13 @@ class AgentRunner:
         if budget is None:
             return messages
 
-        estimate, _ = estimate_prompt_tokens_chain(
+        estimate = spec.token_meter.measure(
             self.provider,
             spec.model,
             messages,
             spec.tool_definitions(),
         )
-        if estimate <= budget:
+        if estimate is None or estimate <= budget:
             return messages
 
         system_messages = [dict(msg) for msg in messages if msg.get("role") == "system"]

@@ -104,27 +104,45 @@ def test_short_history_is_untouched():
 
 # -- C4a: summarization-based compaction ------------------------------------
 
+from core.agent_runtime.compaction import SUMMARY_PREFIX as _SUMMARY_PREFIX  # noqa: E402
 from core.agent_runtime.runner import (  # noqa: E402
     AgentRunner,
     AgentRunSpec,
-    _SUMMARY_PREFIX,
 )
 
 
-def test_build_compacted_history_keeps_system_recent_users_and_summary():
+def test_build_compacted_history_keeps_recent_tail_and_checkpoint():
+    # The tool pair belongs to the NEWEST turn: that is what "retain a
+    # tool-bearing tail" has to mean. A pair from an older turn is exactly
+    # what the checkpoint is supposed to replace.
     messages = [
         {"role": "system", "content": "sys"},
         {"role": "user", "content": "u1"},
         {"role": "assistant", "content": "a1"},
-        {"role": "tool", "content": "t1"},
         {"role": "user", "content": "u2"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "c1", "function": {"name": "read"}}],
+        },
+        {"role": "tool", "content": "t1", "tool_call_id": "c1"},
         {"role": "assistant", "content": "a2"},
     ]
     out = AgentRunner._build_compacted_history(messages, "THE SUMMARY")
-    assert [m["role"] for m in out] == ["system", "user", "user", "user"]
-    assert out[1]["content"] == "u1" and out[2]["content"] == "u2"
-    assert out[-1]["content"] == f"{_SUMMARY_PREFIX}\nTHE SUMMARY"
-    assert not any(m["content"] in ("a1", "a2", "t1") for m in out)  # dropped
+    assert out[0]["role"] == "system"
+    assert out[1]["content"] == f"{_SUMMARY_PREFIX}\nTHE SUMMARY"
+    assert out[1].get("compaction", {}).get("reset") is True
+    # The newest user turn and everything it produced survive verbatim.
+    assert [m.get("role") for m in out[2:]] == [
+        "user",
+        "assistant",
+        "tool",
+        "assistant",
+    ]
+    assert any(m.get("content") == "a2" for m in out)
+    assert any(m.get("role") == "tool" for m in out)
+    # The older turn is what the checkpoint stands in for.
+    assert not any(m.get("content") in {"u1", "a1"} for m in out)
 
 
 class _CompactProvider:

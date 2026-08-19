@@ -31,6 +31,7 @@ from loguru import logger
 from core.agent_runtime.context import EnvironmentContext
 from core.agent_runtime.hook import AgentHook, AgentHookContext
 from core.agent_runtime.runner import AgentRunner, AgentRunSpec
+from core.agent_runtime.token_meter import ProviderAnchoredTokenMeter
 from core.agent_runtime.tools.base import ToolResult
 from core.agent_runtime.tools.registry import ToolRegistry
 from core.events.protocol import (
@@ -465,6 +466,11 @@ class AgentSession:
         self._seq = 0
         self._busy = False
         self._last_usage: dict[str, int] = {}
+        # One meter for the whole conversation. The spec is rebuilt every
+        # Turn, so a per-spec meter would lose its anchor at exactly the
+        # boundary where an accurate one matters most: the first request of
+        # a new Turn over a long history.
+        self._token_meter = ProviderAnchoredTokenMeter()
         self._current_task: asyncio.Task | None = None
         self._active_turn_task: asyncio.Task | None = None
         self._submission_id: ContextVar[str | None] = ContextVar(
@@ -553,6 +559,23 @@ class AgentSession:
         """
         self._history = [dict(m) for m in messages]
 
+    def _sync_environment_context(self) -> None:
+        """Keep one durable environment slot at the front of history.
+
+        Rewritten only when cwd, shell, or calendar date actually change so
+        later turns stay append-only. Missing from a resumed excerpt, it is
+        inserted once at index 0.
+        """
+        if self._workspace is None:
+            return
+        current = EnvironmentContext.for_workspace(self._workspace)
+        for index, message in enumerate(self._history):
+            if EnvironmentContext.is_history_message(message):
+                if not current.matches_message(message):
+                    self._history[index] = current.message()
+                return
+        self._history.insert(0, current.message())
+
     async def compact(self) -> dict[str, Any]:
         """Manually summarize older history (the `/compact` command, per dsh).
 
@@ -573,6 +596,7 @@ class AgentSession:
             max_iterations=1,
             max_tool_result_chars=_DEFAULT_MAX_TOOL_RESULT_CHARS,
             context_window_tokens=self._context_window_tokens,
+            token_meter=self._token_meter,
         )
         before = list(self._history)
         compacted, reason = await self._runner.compact_history(spec, before)
@@ -806,12 +830,14 @@ class AgentSession:
                     stop_reason="interrupted",
                 )
             if blocked is not None:
+                self._sync_environment_context()
                 self._history.append({"role": "user", "content": text})
                 return TaskComplete(
                     final_text=blocked,
                     stop_reason="blocked_by_hook",
                 )
 
+        self._sync_environment_context()
         self._history.append({"role": "user", "content": text})
 
         initial: list[dict[str, Any]] = []
@@ -822,10 +848,6 @@ class AgentSession:
         initial.extend(self._history)
 
         turn_context_messages: list[dict[str, Any]] = []
-        if self._workspace is not None:
-            turn_context_messages.append(
-                EnvironmentContext.for_workspace(self._workspace).message()
-            )
         if self._skill_runtime is not None and skill_context is not None:
             turn_context_messages.extend(
                 self._skill_runtime.prompt_bundle(
@@ -917,6 +939,7 @@ class AgentSession:
             model=self._model,
             max_iterations=self._max_iterations,
             max_tool_result_chars=_DEFAULT_MAX_TOOL_RESULT_CHARS,
+            token_meter=self._token_meter,
             transient_context_messages=tuple(turn_context_messages),
             workspace=self._workspace,
             context_window_tokens=self._context_window_tokens,

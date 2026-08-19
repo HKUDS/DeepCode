@@ -17,6 +17,39 @@ from core.reasoning import ReasoningChannel
 
 ReasoningDeltaCallback = Callable[[str, ReasoningChannel], Awaitable[None]]
 
+_CONTEXT_WINDOW_MARKERS = (
+    "context_length_exceeded",
+    "context length",
+    "context window",
+    "maximum context",
+    "prompt is too long",
+    "too many tokens",
+    "token limit exceeded",
+    "input is too long",
+)
+
+
+def is_context_window_error(
+    response: "LLMResponse | None" = None,
+    *,
+    message: str | None = None,
+) -> bool:
+    """True when a provider rejected the request for overflowing the window."""
+    parts: list[str] = []
+    if message:
+        parts.append(message)
+    if response is not None:
+        for value in (
+            response.content,
+            response.error_kind,
+            response.error_type,
+            response.error_code,
+        ):
+            if value:
+                parts.append(str(value))
+    haystack = " ".join(parts).lower()
+    return any(marker in haystack for marker in _CONTEXT_WINDOW_MARKERS)
+
 
 def image_placeholder_text(path: str | None, *, empty: str = "[image]") -> str:
     """Return a textual placeholder for an image block.
