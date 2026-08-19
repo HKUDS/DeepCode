@@ -279,7 +279,7 @@ Skills, permissions, Goals, and Automations. See the
   context; every refusal is a stable, readable reason (busy Turn, too little
   history, a failed or non-shrinking summary) and canonical session data is
   never touched.
-- **See which file set every configuration value.** Diagnostics report each
+- **See which file sets every configuration value.** Diagnostics report each
   configured leaf with its providing layer and a bounded preview;
   credential-shaped subtrees are redacted whole. A verbatim deepseek-harness
   Skill also loads unchanged from `.agents/skills`.
