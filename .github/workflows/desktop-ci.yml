@@ -66,7 +66,7 @@ jobs:
 
       - name: Install Tauri Linux dependencies
         if: steps.scope.outputs.desktop_changed == 'true'
-        timeout-minutes: 20
+        timeout-minutes: 30
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
@@ -86,14 +86,23 @@ jobs:
           )
           for attempt in 1 2 3; do
             if [ "$attempt" -gt 1 ]; then
-              # The Azure-local mirror goes fully unresponsive at times
-              # (every fetch "Ign:" until timeout); retrying it is useless,
-              # so fall back to the global archive for later attempts.
+              # The Azure-local mirror goes fully unresponsive at times;
+              # retrying it is useless. Runner images configure apt through
+              # different mechanisms — a mirrorlist on some, sources lists
+              # on others — so point every one of them at the global archive.
+              if [ -f /etc/apt/apt-mirrors.txt ]; then
+                echo 'https://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+              fi
               sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' \
                 /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
             fi
-            if timeout 180 sudo -E apt-get update -o Acquire::ForceIPv4=true &&
-               timeout 480 sudo -E apt-get install -y -o Acquire::ForceIPv4=true \
+            # timeout sits inside sudo so its KILL reaches apt itself (a
+            # TERM relayed through sudo dies unanswered when apt is wedged
+            # on a stalled socket); the Acquire options make apt abandon
+            # such sockets on its own instead of waiting forever.
+            APT_OPTS='-o Acquire::ForceIPv4=true -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2'
+            if sudo -E timeout -k 30 180 apt-get update $APT_OPTS &&
+               sudo -E timeout -k 30 480 apt-get install -y $APT_OPTS \
                  -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
                  "${packages[@]}"; then
               exit 0
@@ -178,7 +187,7 @@ jobs:
 
       - name: Install Tauri Linux dependencies
         if: runner.os == 'Linux'
-        timeout-minutes: 20
+        timeout-minutes: 30
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
@@ -199,14 +208,23 @@ jobs:
           )
           for attempt in 1 2 3; do
             if [ "$attempt" -gt 1 ]; then
-              # The Azure-local mirror goes fully unresponsive at times
-              # (every fetch "Ign:" until timeout); retrying it is useless,
-              # so fall back to the global archive for later attempts.
+              # The Azure-local mirror goes fully unresponsive at times;
+              # retrying it is useless. Runner images configure apt through
+              # different mechanisms — a mirrorlist on some, sources lists
+              # on others — so point every one of them at the global archive.
+              if [ -f /etc/apt/apt-mirrors.txt ]; then
+                echo 'https://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+              fi
               sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' \
                 /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
             fi
-            if timeout 180 sudo -E apt-get update -o Acquire::ForceIPv4=true &&
-               timeout 480 sudo -E apt-get install -y -o Acquire::ForceIPv4=true \
+            # timeout sits inside sudo so its KILL reaches apt itself (a
+            # TERM relayed through sudo dies unanswered when apt is wedged
+            # on a stalled socket); the Acquire options make apt abandon
+            # such sockets on its own instead of waiting forever.
+            APT_OPTS='-o Acquire::ForceIPv4=true -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2'
+            if sudo -E timeout -k 30 180 apt-get update $APT_OPTS &&
+               sudo -E timeout -k 30 480 apt-get install -y $APT_OPTS \
                  -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
                  "${packages[@]}"; then
               exit 0
