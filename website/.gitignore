@@ -1,0 +1,5 @@
+node_modules/
+dist/
+.astro/
+# generated from ../docs/guide by scripts/sync-guides.mjs — never edit by hand
+src/content/docs/guide/

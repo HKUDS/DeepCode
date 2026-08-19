@@ -1,0 +1,16 @@
+{
+  "name": "deepcode-website",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sync": "node scripts/sync-guides.mjs",
+    "dev": "npm run sync && astro dev",
+    "build": "npm run sync && astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.39.0",
+    "astro": "^6.0.0",
+    "sharp": "^0.34.0"
+  }
+}
