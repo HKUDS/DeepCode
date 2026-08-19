@@ -36,6 +36,7 @@ from core.application.errors import ConflictError, ThreadNotFoundError
 from core.domain.execution_permission import ExecutionPermissionMode
 from core.domain.execution_profile import ExecutionProfile
 from core.domain.execution_security import ExecutionSecurityProfile
+from core.file_lock import FileLease
 from core.sessions import Session, SessionStore
 from core.sessions.transcript import (
     new_records_from_history,
@@ -82,6 +83,9 @@ class LiveSessionRuntime:
     goals: GoalRuntimeRouter
     goals_enabled: bool
     active: bool = False
+    # Held for the duration of one execution window: the cross-process
+    # guarantee that only one process runs this Session at a time.
+    run_lease: FileLease | None = None
 
 
 class SessionRuntimeRegistry:
@@ -93,6 +97,7 @@ class SessionRuntimeRegistry:
         factory: AgentSessionFactory,
         *,
         max_live_sessions: int = 16,
+        holder_label: str | None = None,
         skill_hosts: SkillWorkspaceRegistry | None = None,
     ) -> None:
         if max_live_sessions < 1:
@@ -100,6 +105,10 @@ class SessionRuntimeRegistry:
         self.store = store
         self.factory = factory
         self.max_live_sessions = max_live_sessions
+        # Names this process in the refusal another process sees.
+        self.holder_label = (
+            holder_label or f"another DeepCode process (pid {os.getpid()})"
+        )
         self.skill_hosts = skill_hosts
         self._runtimes: OrderedDict[str, LiveSessionRuntime] = OrderedDict()
         self._mailbox_lock = threading.Lock()
@@ -167,6 +176,24 @@ class SessionRuntimeRegistry:
             runtime.agent.load_history(self._visible_history(canonical))
             runtime.canonical_message_count = len(canonical.messages)
 
+        # Cross-process gate (the dsh rule, enforced): one live writer per
+        # Session. Taken only around an execution window, so another process
+        # may hold the Session OPEN and take the next turn once this one
+        # settles; what is refused is running at the same time — the case
+        # that races the SQLite coordination layer. The OS releases the lock
+        # if this process dies, so a crash never wedges the Session.
+        run_lease = self.store.acquire_run_lease(session_id, holder=self.holder_label)
+        if run_lease is None:
+            self._runtimes[session_id] = runtime
+            holder = self.store.run_holder(session_id) or "another process"
+            raise ConflictError(
+                f"session is being run by {holder}: {session_id}",
+                user_message=(
+                    f"This Session is currently running a turn in {holder}. "
+                    "Wait for it to finish there, or continue in that window."
+                ),
+            )
+        runtime.run_lease = run_lease
         runtime.approvals.current = approval_callback
         runtime.active = True
         self._runtimes[session_id] = runtime
@@ -221,6 +248,9 @@ class SessionRuntimeRegistry:
             return
         runtime.approvals.current = None
         runtime.active = False
+        if runtime.run_lease is not None:
+            runtime.run_lease.close()
+            runtime.run_lease = None
 
     def reserve_input(
         self,
@@ -332,6 +362,10 @@ class SessionRuntimeRegistry:
         self._runtimes.clear()
         for runtime in runtimes:
             runtime.approvals.current = None
+            if runtime.run_lease is not None:
+                # Shutdown can arrive mid-turn; hand the Session back.
+                runtime.run_lease.close()
+                runtime.run_lease = None
             try:
                 await runtime.agent.aclose()
             except Exception:

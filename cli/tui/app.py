@@ -707,10 +707,17 @@ class TuiApp:
         own output follows immediately, so an ack line is pure noise. Only
         the surprising outcomes (queued behind a running turn, steered into
         one) deserve a line, and they name the situation, not a turn id."""
-        delivery = self.thread_client.send(
-            text,
-            skill_ids=tuple(self.selected_skill_ids),
-        )
+        try:
+            delivery = self.thread_client.send(
+                text,
+                skill_ids=tuple(self.selected_skill_ids),
+            )
+        except ApplicationError as exc:
+            # The cross-process run lease refusing, most commonly: another
+            # process is executing a turn on this Session right now. A
+            # sentence, not a traceback; the message is kept and nothing is
+            # consumed, so the user can simply try again in a moment.
+            return exc.user_message
         if delivery.kind == "started":
             self.selected_skill_ids.clear()
             return ""

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import logging
 import sqlite3
 import threading
@@ -196,6 +197,7 @@ class TurnService:
         *,
         session_factory: AgentSessionFactory | None = None,
         session_store: SessionStore,
+        holder_label: str | None = None,
         llm_configuration: LLMConfigurationService | None = None,
         execution_security_policy: ExecutionSecurityPolicy | None = None,
         skill_hosts: SkillWorkspaceRegistry | None = None,
@@ -210,10 +212,16 @@ class TurnService:
         self.execution_security_policy = (
             execution_security_policy or ExecutionSecurityPolicy()
         )
+        # One string shared with the registry, so "is that holder me?" is
+        # exact equality rather than pid parsing.
+        self.holder_label = holder_label or (
+            f"another DeepCode process (pid {os.getpid()})"
+        )
         self.session_runtimes = SessionRuntimeRegistry(
             session_store,
             self.session_factory,
             skill_hosts=skill_hosts,
+            holder_label=self.holder_label,
         )
         self.turn_inputs = TurnInputService(
             database,
@@ -541,6 +549,7 @@ class TurnService:
                 raise ProjectNotTrustedError(
                     "project must be trusted before agent execution"
                 )
+            self._refuse_if_running_elsewhere(thread_id)
             self._validate_workspace(thread, project.canonical_path)
             turns = TurnRepository(connection)
             items = ItemRepository(connection)
@@ -978,6 +987,35 @@ class TurnService:
             ensure_completion=True,
             recover_active=True,
             terminal_event_type="turn.recovered",
+        )
+
+    def _refuse_if_running_elsewhere(self, thread_id: str) -> None:
+        """Fail a submission fast when another PROCESS is executing here.
+
+        The authoritative gate is the run lease taken around execution
+        (`SessionRuntimeRegistry.acquire`), but by then the Turn is already
+        created and marked running, so a refusal there surfaces as a failed
+        Turn. Probing at submission turns the common case into a clean
+        refusal before anything exists. Our own process holding the lease is
+        not a refusal: that is an active local Turn, and queueing behind it
+        is exactly what submission is for.
+        """
+        probe = self.session_store.acquire_run_lease(
+            thread_id, holder=self.holder_label
+        )
+        if probe is not None:
+            probe.close()
+            return
+        holder = self.session_store.run_holder(thread_id)
+        if holder == self.holder_label:
+            return
+        raise ConflictError(
+            f"session is being run by {holder or 'another process'}: {thread_id}",
+            user_message=(
+                "This Session is currently running a turn in "
+                f"{holder or 'another DeepCode process'}. Wait for it to "
+                "finish there, or continue in that window."
+            ),
         )
 
     def _submitting_worker_id(self) -> str | None:

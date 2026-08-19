@@ -716,10 +716,12 @@ Known limits observed, not defects of the shape:
   whatever each generated summary chose to carry, and no framing recovers
   what an earlier summary already dropped.
 
-Not started: 8.2 (shadowing). Pre-existing and untouched: the Desktop
-transcript still drops tool records when rebuilt from JSONL
-(`thread_service._reconcile_transcript` filters to user/assistant), and the
-concurrent-process SQLite crash above.
+Not started: 8.2 (shadowing). The Desktop rebuild now projects tool records
+(see above). The concurrent-process crash is mitigated by a per-Session run
+lease (one live writer, the dsh contract enforced; deterministic collision
+test with negative control) plus worker-registration read-back with one
+retry — stress rate 4/8 → 0/8 with the full mitigation, details in
+`docs/investigations/2026-08-19-concurrent-turn-submit.md`.
 
 ## Appendix A — Reproduction harnesses
 

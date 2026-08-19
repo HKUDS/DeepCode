@@ -1,6 +1,6 @@
 # Concurrent turn submit crashes on a dangling worker reference
 
-Status: **diagnosed, not fixed.** Pre-existing — reproduced identically on
+Status: **mitigated** (run lease + registration read-back; residual under stress, see the update at the end). Originally: diagnosed, not fixed. Pre-existing — reproduced identically on
 `e01fa5c`, before any of the runtime work. Reproduction:
 `docs/investigations/concurrent_turn_submit_repro.py`.
 
@@ -92,3 +92,42 @@ Two mitigations were considered and rejected for now: submitting with
 attribution `interrupt_unclaimed_queued_for_worker` needs to recover queued
 work after a restart), and retrying the insert (the row never appears, so the
 retry only delays the same failure).
+
+
+## Update (same day): mitigation landed
+
+Two measures, both verified end to end:
+
+1. **A per-Session run lease around execution** (`SessionStore.acquire_run_lease`,
+   gated in `SessionRuntimeRegistry.acquire`, fast-checked at submission in
+   `TurnService._refuse_if_running_elsewhere`). Submitting into another
+   process's mid-flight turn now yields, in the other window:
+
+   > This Session is currently running a turn in cli (pid 24885). Wait for it
+   > to finish there, or continue in that window.
+
+   Verified by a deterministic collision test
+   (`tests/test_cross_process_run_lease.py`): process A executes with a
+   sleeping provider, process B submits mid-flight, B exits cleanly with the
+   message, A finishes undisturbed, the canonical record holds exactly A's
+   work. Negative control: removing the submission check turns B's outcome
+   into cross-process queue-behind — which the router already half-supported,
+   and which was **deliberately traded away**: its reliability depends on the
+   same undiagnosed coordination layer this note documents, and a refusal is
+   a predictable contract. In-process queueing and steering are unaffected
+   (full suite).
+
+2. **Worker registration read-back with one retry**
+   (`ExecutionCoordinator._register_worker_verified`). The lost-registration
+   mechanism is now confirmed live: under concurrent startup the retry has
+   been observed firing and healing ("required a retry to become durable").
+   If both attempts fail, startup errors naming the cause instead of a
+   FOREIGN KEY failure minutes later.
+
+Stress, 8 concurrent rounds per configuration: unmitigated **4 crashes**;
+with the execution gate and read-back only, **1**; with the submission
+refusal added, **0**, and the canonical record stayed intact and legal in
+every round throughout. Zero-in-eight is evidence, not proof — the
+reproduction script remains the stress tool, and the underlying
+lost-registration mechanism in the coordination layer is still only
+mitigated (self-healing retry), not explained.

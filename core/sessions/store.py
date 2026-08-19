@@ -147,6 +147,47 @@ class SessionStore:
         with self._lock, exclusive_file_lock(self._session_lock(safe_id)):
             yield SessionDeletionGuard(self, safe_id)
 
+    def _run_lock(self, session_id: str) -> Path:
+        safe_id = self._validated_session_id(session_id)
+        return self.root / ".running" / f"{safe_id}.lock"
+
+    def acquire_run_lease(self, session_id: str, *, holder: str) -> FileLease | None:
+        """Claim the exclusive right to EXECUTE a turn on this Session.
+
+        The dsh session contract made executable: one live writer per
+        session. Held only for the duration of an execution window, so two
+        processes may keep the same Session open and alternate turns — what
+        this refuses is simultaneous execution, the case that races the
+        SQLite coordination layer. ``None`` means another process holds it;
+        :meth:`run_holder` names that process for the refusal message. The
+        lock dies with its process, so a crashed holder never needs
+        cleaning up.
+        """
+        safe_id = self._validated_session_id(session_id)
+        lease = FileLease.acquire(self._run_lock(safe_id), shared=False, blocking=False)
+        if lease is None:
+            return None
+        try:
+            # Best-effort holder note for the other side's error message.
+            # We hold the exclusive lock, so this write cannot race another
+            # holder; readers only ever see it advisorily.
+            self._run_lock(safe_id).write_text(holder[:256], encoding="utf-8")
+        except OSError:
+            pass
+        return lease
+
+    def run_holder(self, session_id: str) -> str:
+        """Best-effort name of the process holding the run lease."""
+        try:
+            text = (
+                self._run_lock(session_id)
+                .read_text(encoding="utf-8", errors="replace")
+                .strip()
+            )
+        except OSError:
+            return ""
+        return text[:256]
+
     def acquire_activity_lease(self, session_id: str) -> FileLease | None:
         """Keep a Session alive while a CLI or workspace resource owns it."""
 
