@@ -27,6 +27,10 @@
 
 ### *Advancing Code Generation with Multi-Agent Systems*
 
+<p align="center">
+  <a href="https://hkuds.github.io/DeepCode/" target="_blank"><img alt="Website — hkuds.github.io/DeepCode" src="https://img.shields.io/badge/Website-hkuds.github.io%2FDeepCode%20%E2%86%97-06B6D4?style=for-the-badge&labelColor=0B1116" height="36"></a>
+</p>
+
 <!-- <p align="center">
   <img src="https://img.shields.io/badge/Version-1.0.0-00d4ff?style=for-the-badge&logo=rocket&logoColor=white" alt="Version">
 
