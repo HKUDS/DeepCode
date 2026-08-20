@@ -1,0 +1,10 @@
+{
+  "plugins": {
+    "claude-core-features": {
+      "source": "C:\\Users\\raymo\\AppData\\Local\\Temp\\tmpdmf3jt_d\\claude-core-features",
+      "type": "directory",
+      "installed_at": "2026-07-23T22:17:31.605217",
+      "version": "1.0.0"
+    }
+  }
+}
