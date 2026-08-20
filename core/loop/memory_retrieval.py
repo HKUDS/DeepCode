@@ -91,6 +91,16 @@ def compose_memory_injection(
             header += f", at {created_at}"
         header += ")"
         blocks.append(f"{header}\n{render_data_block(content)}")
+    if not blocks:
+        return ""
+    # P3-C (GenAI lessons 08/15): explicit citation guidance. The numbered
+    # [n] labels are only useful if the model is told it may cite them —
+    # without this line it may restate a memory verbatim without attribution,
+    # losing the grounding the labels exist to provide.
+    blocks.append(
+        "When you rely on any numbered memory above, cite it as [n] so the "
+        "answer stays attributable to its source."
+    )
     return "\n\n".join(blocks)
 
 

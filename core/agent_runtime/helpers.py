@@ -197,6 +197,17 @@ def maybe_persist_tool_result(
             _write_text_atomic(path, text_payload)
 
     preview = text_payload[:_TOOL_RESULT_PREVIEW_CHARS]
+    # P3-B (GenAI lesson 19): when the SLM subtask router classifies tool-result
+    # cleanup as an SLM-grade task, shape the preview as a dense noise-stripped
+    # digest instead of the raw head (still zero network; decision-only).
+    try:
+        from core.loop.slm_tasks import choose_tool_result_preview
+
+        preview = choose_tool_result_preview(
+            text_payload, default_preview=preview
+        )
+    except Exception:
+        pass
     return _render_tool_result_reference(
         path,
         original_size=len(text_payload),
