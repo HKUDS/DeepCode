@@ -39,6 +39,15 @@ from core.domain.execution_security import (
             FilesystemScope.UNRESTRICTED,
             ApprovalPolicy.NEVER,
         ),
+        # 危险逃生通道 (借鉴 Claude Code --allow-dangerously-skip-permissions):
+        # 与 FULL_ACCESS 同强度, 但名字显式带"危险"警示, 供日志/UI 区分。
+        (
+            ExecutionAccessPreset.DANGEROUS_SKIP,
+            ExecutionPermissionMode.FULL_AUTO,
+            False,
+            FilesystemScope.UNRESTRICTED,
+            ApprovalPolicy.NEVER,
+        ),
     ],
 )
 def test_access_presets_resolve_to_canonical_security_facts(
@@ -68,6 +77,27 @@ def test_legacy_profile_preserves_facts_without_claiming_full_access() -> None:
     assert profile.permission_mode is ExecutionPermissionMode.FULL_AUTO
     assert profile.command_sandbox is True
     assert ExecutionSecurityProfile.from_dict(profile.to_dict()) == profile
+
+
+def test_dangerous_skip_is_named_escape_hatch_not_masked_full_access() -> None:
+    dangerous = ExecutionSecurityProfile.for_preset(
+        ExecutionAccessPreset.DANGEROUS_SKIP
+    )
+    full = ExecutionSecurityProfile.for_preset(ExecutionAccessPreset.FULL_ACCESS)
+
+    # 同强度: 解析到与 FULL_ACCESS 相同的 security facts
+    assert dangerous.permission_mode is full.permission_mode
+    assert dangerous.command_sandbox is full.command_sandbox
+    assert dangerous.filesystem_scope is full.filesystem_scope
+    assert dangerous.approval_policy is full.approval_policy
+
+    # 但名字显式带"危险": 序列化 roundtrip 保留 dangerous_skip, 不冒充 full_access
+    assert dangerous.access_preset is ExecutionAccessPreset.DANGEROUS_SKIP
+    assert dangerous.to_dict()["accessPreset"] == "dangerous_skip"
+    assert (
+        ExecutionSecurityProfile.from_dict(dangerous.to_dict()).access_preset
+        is ExecutionAccessPreset.DANGEROUS_SKIP
+    )
 
 
 def test_session_access_override_parser_is_canonical_and_fail_closed() -> None:
