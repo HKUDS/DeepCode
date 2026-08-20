@@ -25,6 +25,12 @@ def _isolate_session_store(tmp_path, monkeypatch):
     }
     for name in credential_environment_names:
         monkeypatch.delenv(name, raising=False)
+    # The project deepcode_config.json references ${DEEPSEEK_API_KEY}; loading
+    # it (e.g. CodeIndexer.__init__ -> get_default_models) raises ValueError
+    # when the env var is absent. Restore a placeholder so config-driven
+    # construction stays side-effect free while the other credentials remain
+    # stripped for hygiene.
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-placeholder-key")
     import core.compat.runtime as runtime_module
     import core.sessions.store as store_module
 
