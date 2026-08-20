@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   ShieldAlert,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { isRecoveredHistoryProject } from "../../app/projectPresentation";
 import type { Project, Thread } from "../../generated/app-server";
@@ -27,10 +28,10 @@ interface ThreadHeaderProps {
   onToggleInspector(): void;
 }
 
-function workspaceLabel(thread: Thread | null, project: Project | null): string {
-  if (isRecoveredHistoryProject(project)) return "Folder unavailable";
+function workspaceLabel(thread: Thread | null, project: Project | null, t: (key: string, defaultValue: string) => string): string {
+  if (isRecoveredHistoryProject(project)) return t("thread.folderUnavailable", "Folder unavailable");
   const path = thread?.workspacePath ?? project?.canonicalPath;
-  if (!path) return "No local folder";
+  if (!path) return t("thread.noLocalFolder", "No local folder");
   const parts = path.split("/").filter(Boolean);
   return parts.at(-1) ?? path;
 }
@@ -47,12 +48,13 @@ export function ThreadHeader({
   onCreatePaperThread,
   onToggleInspector,
 }: ThreadHeaderProps) {
+  const { t } = useTranslation();
   const recoveredHistory = isRecoveredHistoryProject(project);
-  const title = thread?.title ?? "Start a local coding thread";
+  const title = thread?.title ?? t("thread.startThread", "Start a local coding thread");
   const root = recoveredHistory
-    ? "Previous sessions"
+    ? t("thread.previousSessions", "Previous sessions")
     : (project?.displayName ?? "DeepCode");
-  const workspace = thread ? workspaceLabel(thread, project) : null;
+  const workspace = thread ? workspaceLabel(thread, project, t) : null;
   return (
     <header className={styles.header}>
       <div className={styles.identity}>
@@ -85,10 +87,10 @@ export function ThreadHeader({
         {recoveredHistory ? (
           <span
             className={styles.unavailableState}
-            title="The original Session folder is no longer available"
+            title={t("thread.folderUnavailableTooltip", "The original Session folder is no longer available")}
           >
             <FolderX size={14} />
-            Folder unavailable
+            {t("thread.folderUnavailable", "Folder unavailable")}
           </span>
         ) : project?.trustState === "untrusted" ? (
           <button
@@ -98,12 +100,12 @@ export function ThreadHeader({
             disabled={busy}
           >
             <ShieldAlert size={16} />
-            Trust folder
+            {t("thread.trustFolder", "Trust folder")}
           </button>
         ) : project ? (
-          <span className={styles.trustState} title="Execution is allowed in this folder">
+          <span className={styles.trustState} title={t("thread.trustedTooltip", "Execution is allowed in this folder")}>
             <ShieldCheck size={14} />
-            Trusted
+            {t("thread.trusted", "Trusted")}
           </span>
         ) : null}
 
@@ -114,20 +116,20 @@ export function ThreadHeader({
                 type="button"
                 onClick={onCreatePaperThread}
                 disabled={busy || hasActiveWork}
-                title="Create a Paper2Code thread"
+                title={t("thread.paperTooltip", "Create a Paper2Code thread")}
               >
                 <ScrollText size={16} />
-                Paper
+                {t("thread.paper", "Paper")}
               </button>
             ) : null}
             <button
               type="button"
               onClick={onForkThread}
               disabled={busy || hasActiveWork}
-              title="Fork into an isolated worktree"
+              title={t("thread.forkTooltip", "Fork into an isolated worktree")}
             >
               <GitFork size={16} />
-              Fork
+              {t("thread.fork", "Fork")}
             </button>
           </>
         ) : null}
@@ -139,10 +141,10 @@ export function ThreadHeader({
             data-active={inspectorOpen}
             onClick={onToggleInspector}
             aria-pressed={inspectorOpen}
-            title={inspectorOpen ? "Close review panel" : "Open review panel"}
+            title={inspectorOpen ? t("thread.closeReview", "Close review panel") : t("thread.openReview", "Open review panel")}
           >
             <Files size={16} />
-            Review
+            {t("thread.review", "Review")}
             {inspectorOpen ? <PanelRightClose size={14} /> : <PanelRight size={14} />}
           </button>
         ) : null}

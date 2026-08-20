@@ -5,6 +5,7 @@ import {
   TerminalSquare,
   Wrench,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import type { Approval, ApprovalDecision } from "../../generated/app-server";
 import styles from "./ApprovalCard.module.css";
@@ -15,17 +16,17 @@ interface ApprovalCardProps {
   onRespond(approvalId: string, decision: ApprovalDecision): void;
 }
 
-function requestDetail(approval: Approval): string {
+function requestDetail(approval: Approval, t: (key: string, defaultValue: string, options?: Record<string, string>) => string): string {
   const tool = approval.request.toolName;
   const reason = approval.request.reason;
   if (typeof reason === "string" && reason) return reason;
-  if (typeof tool === "string" && tool) return `Allow ${tool} to continue?`;
-  return "Review this operation before the agent continues.";
+  if (typeof tool === "string" && tool) return t("approval.allowContinue", "Allow {{tool}} to continue?", { tool });
+  return t("approval.reviewOperation", "Review this operation before the agent continues.");
 }
 
-function requestTool(approval: Approval): string {
+function requestTool(approval: Approval, t: (key: string, defaultValue: string) => string): string {
   const tool = approval.request.toolName;
-  return typeof tool === "string" && tool.trim() ? tool : "Sensitive operation";
+  return typeof tool === "string" && tool.trim() ? tool : t("approval.sensitiveOperation", "Sensitive operation");
 }
 
 function requestArguments(approval: Approval): string | null {
@@ -61,27 +62,28 @@ function CategoryIcon({ category }: { category: Approval["category"] }) {
 }
 
 export function ApprovalCard({ approval, busy, onRespond }: ApprovalCardProps) {
+  const { t } = useTranslation();
   if (approval.status !== "pending") {
     return (
       <p className={styles.resolution}>
-        Decision: {approval.status.replaceAll("_", " ")}
+        {t("approval.decision", "Decision: {{status}}", { status: approval.status.replaceAll("_", " ") })}
       </p>
     );
   }
   const argumentsPreview = requestArguments(approval);
   return (
-    <div className={styles.card} aria-label="Approval required">
+    <div className={styles.card} aria-label={t("approval.label", "Approval required")}>
       <div className={styles.operation}>
         <CategoryIcon category={approval.category} />
         <span>
-          <strong>{requestTool(approval)}</strong>
+          <strong>{requestTool(approval, t)}</strong>
           <small>{approval.category.replaceAll("_", " ")}</small>
         </span>
       </div>
-      <p>{requestDetail(approval)}</p>
+      <p>{requestDetail(approval, t)}</p>
       {argumentsPreview ? (
         <details className={styles.arguments}>
-          <summary>Review arguments</summary>
+          <summary>{t("approval.reviewArguments", "Review arguments")}</summary>
           <pre>{argumentsPreview}</pre>
         </details>
       ) : null}
@@ -91,14 +93,14 @@ export function ApprovalCard({ approval, busy, onRespond }: ApprovalCardProps) {
           onClick={() => onRespond(approval.id, "approved_once")}
           disabled={busy}
         >
-          Allow once
+          {t("approval.allowOnce", "Allow once")}
         </button>
         <button
           type="button"
           onClick={() => onRespond(approval.id, "approved_session")}
           disabled={busy}
         >
-          Allow for Session
+          {t("approval.allowSession", "Allow for Session")}
         </button>
         <button
           className={styles.danger}
@@ -106,7 +108,7 @@ export function ApprovalCard({ approval, busy, onRespond }: ApprovalCardProps) {
           onClick={() => onRespond(approval.id, "denied")}
           disabled={busy}
         >
-          Deny
+          {t("approval.deny", "Deny")}
         </button>
       </div>
     </div>

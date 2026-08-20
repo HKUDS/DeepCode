@@ -30,6 +30,7 @@ import type {
 import { App } from "./App";
 import { __resetComposerBehaviorForTests } from "./app/composerBehavior";
 import { __resetEscapeLayersForTests } from "./app/escapeLayer";
+import { __setLocaleForTests } from "./app/i18n";
 import type {
   AnyRpcNotification,
   DesktopRuntime,
@@ -1505,6 +1506,7 @@ describe("desktop command center", () => {
     localStorage.clear();
     __resetComposerBehaviorForTests();
     __resetEscapeLayersForTests();
+    __setLocaleForTests("en");
   });
   afterEach(() => {
     cleanup();
