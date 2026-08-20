@@ -1,0 +1,13 @@
+{
+  "name": "deepcode-knowledge",
+  "version": "1.0.0",
+  "description": "DeepCode Knowledge Base — Obsidian 风格笔记 + KV 记忆系统",
+  "author": "DeepCode + Ghidra RE (Claude Code v2.1.216)",
+  "entry": "SKILL.md",
+  "dependencies": [],
+  "modules": [
+    "knowledge_server.py",
+    "memory_manager.py",
+    "rebuild_vault_index.py"
+  ]
+}
