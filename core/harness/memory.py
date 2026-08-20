@@ -23,6 +23,8 @@ escapes the memory directory.
 
 from __future__ import annotations
 
+import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +43,65 @@ _MAX_INJECT_CHARS = 8000  # keep the preamble bounded; the tool reads the rest
 _REMINDER_OPEN = "<system-reminder>"
 _REMINDER_CLOSE = "</system-reminder>"
 _REMINDER_CLOSE_ESCAPED = "&lt;/system-reminder&gt;"
+# 借鉴 Claude Code 的 CLAUDE.md 排除模式 (ignore 配置): 逗号分隔的 glob 模式
+# (如 "**/code/CLAUDE.md,**/vendor/**")。命中的指令文件跳过不注入 —— 避免
+# monorepo 子目录/第三方代码的指令污染主提示词。
+_INSTRUCTION_EXCLUDE_ENV = "DEEPCODE_INSTRUCTION_EXCLUDES"
+_EXCLUDE_RE_CACHE: dict[str, Any] = {}  # pattern -> compiled regex
+
+
+def _glob_to_re(pattern: str):
+    """glob → regex: ** 匹配任意层级 (含零层), * / ? 不跨路径分隔符。"""
+    compiled = _EXCLUDE_RE_CACHE.get(pattern)
+    if compiled is not None:
+        return compiled
+    parts = []
+    i, n = 0, len(pattern)
+    while i < n:
+        c = pattern[i]
+        if c == "*":
+            if i + 1 < n and pattern[i + 1] == "*":
+                if i + 2 < n and pattern[i + 2] in "/\\":
+                    # **/ → (?:.*/)? : 任意层级前缀(可选)。不能用 .* —— 那会让
+                    # "**/vendor/**" 误匹配 "vendorized/..." 这类前缀同名的路径。
+                    parts.append(r"(?:.*/)?")
+                    i += 3
+                else:
+                    # 尾部 ** → 任意剩余(含层级)
+                    parts.append(".*")
+                    i += 2
+            else:
+                parts.append(r"[^/\\]*")
+                i += 1
+        elif c == "?":
+            parts.append(r"[^/\\]")
+            i += 1
+        else:
+            parts.append(re.escape(c))
+            i += 1
+    compiled = re.compile("^" + "".join(parts) + "$", re.IGNORECASE)
+    _EXCLUDE_RE_CACHE[pattern] = compiled
+    return compiled
+
+
+def _instruction_excluded(candidate: Path) -> bool:
+    """Whether the candidate instruction file is excluded by pattern.
+
+    逗号分隔 glob, 如 ``**/code/CLAUDE.md,**/vendor/**``; 用正斜杠规范化
+    路径后匹配, 兼容 Windows 反斜杠路径。非法模式被忽略, 不阻断加载。
+    """
+    patterns = [p.strip() for p in
+                os.environ.get(_INSTRUCTION_EXCLUDE_ENV, "").split(",") if p.strip()]
+    if not patterns:
+        return False
+    cand = str(candidate).replace("\\", "/")
+    for pat in patterns:
+        try:
+            if _glob_to_re(pat.replace("\\", "/")).match(cand):
+                return True
+        except (re.error, ValueError):
+            continue  # 非法 glob 模式忽略, 不阻断加载
+    return False
 
 
 def memory_dir(workspace: str | Path) -> Path:
@@ -135,7 +196,7 @@ def project_instructions(workspace: str | Path) -> str:
     for directory in search_dirs:
         for name in _PROJECT_FILES:
             candidate = directory / name
-            if candidate.is_file():
+            if candidate.is_file() and not _instruction_excluded(candidate):
                 try:
                     body = candidate.read_text(
                         encoding="utf-8", errors="replace"
