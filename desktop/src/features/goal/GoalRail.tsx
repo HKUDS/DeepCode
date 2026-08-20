@@ -10,6 +10,7 @@ import {
   X,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import type {
   Goal,
@@ -58,6 +59,7 @@ export function GoalRail({
   const [objective, setObjective] = useState("");
   const [tokenBudget, setTokenBudget] = useState("");
   const [skillIds, setSkillIds] = useState<string[]>([]);
+  const { t } = useTranslation();
   const selectableSkills = useMemo(
     () => skills.filter((skill) => skill.selectable && skill.enabled),
     [skills],
@@ -110,8 +112,8 @@ export function GoalRail({
         disabled={!enabled || busy}
       >
         <Target size={14} />
-        <span>Set a Goal</span>
-        <small>Keep a durable outcome across ordinary Turns</small>
+        <span>{t("goal.setGoal", "Set a Goal")}</span>
+        <small>{t("goal.setGoalHint", "Keep a durable outcome across ordinary Turns")}</small>
       </button>
     );
   }
@@ -120,7 +122,7 @@ export function GoalRail({
     <section
       className={styles.rail}
       data-status={presentation?.status ?? "draft"}
-      aria-label="Session Goal"
+      aria-label={t("goal.sessionGoal", "Session Goal")}
     >
       {goal ? (
         <>
@@ -139,11 +141,11 @@ export function GoalRail({
                 <span>{presentation?.label}</span>
                 <i>·</i>
                 {presentation?.linkedTurnCount ?? 0}{" "}
-                {presentation?.linkedTurnCount === 1 ? "Turn" : "Turns"}
+                {presentation?.linkedTurnCount === 1 ? t("goal.turn", "Turn") : t("goal.turns", "Turns")}
                 {goal.tokensUsed > 0 ? (
                   <>
                     <i>·</i>
-                    {compactNumber(goal.tokensUsed)} tokens
+                    {compactNumber(goal.tokensUsed)} {t("goal.tokens", "tokens")}
                   </>
                 ) : null}
               </small>
@@ -169,7 +171,7 @@ export function GoalRail({
                     disabled={!enabled || busy}
                   >
                     <Play size={12} />
-                    Continue
+                    {t("goal.continue", "Continue")}
                   </button>
                 ) : null}
                 <button
@@ -177,16 +179,16 @@ export function GoalRail({
                   onClick={() => openEditor()}
                   disabled={!enabled || busy}
                 >
-                  Edit Goal
+                  {t("goal.editGoal", "Edit Goal")}
                 </button>
                 <button
                   type="button"
                   onClick={() => void onPause()}
                   disabled={busy}
-                  title="Pause automatic continuation; the current Turn is not interrupted"
+                  title={t("goal.pauseTooltip", "Pause automatic continuation; the current Turn is not interrupted")}
                 >
                   <Pause size={12} />
-                  Pause
+                  {t("goal.pause", "Pause")}
                 </button>
               </>
             ) : goal.status === "complete" ? (
@@ -195,7 +197,7 @@ export function GoalRail({
                 onClick={() => openEditor(true)}
                 disabled={!enabled || busy}
               >
-                Edit & reopen
+                {t("goal.editReopen", "Edit & reopen")}
               </button>
             ) : (
               <>
@@ -205,14 +207,14 @@ export function GoalRail({
                   disabled={!enabled || busy}
                 >
                   <Play size={12} />
-                  Resume
+                  {t("goal.resume", "Resume")}
                 </button>
                 <button
                   type="button"
                   onClick={() => openEditor(goal.status === "complete")}
                   disabled={!enabled || busy}
                 >
-                  Edit
+                  {t("goal.edit", "Edit")}
                 </button>
               </>
             )}
@@ -220,25 +222,23 @@ export function GoalRail({
           {expanded ? (
             <div className={styles.details}>
               <p>
-                Goal <code>{shortId(goal.id)}</code> stays attached to this
-                Session. Normal follow-ups steer the work without rewriting the
-                objective.
+                {t("goal.goalDescription", "Goal {{id}} stays attached to this Session. Normal follow-ups steer the work without rewriting the objective.", { id: shortId(goal.id) })}
               </p>
               <p>
                 {goal.timeUsedSeconds > 0
-                  ? `${formatDuration(goal.timeUsedSeconds)} active time`
-                  : "No completed Goal Turn usage yet"}
+                  ? t("goal.activeTime", "{{duration}} active time", { duration: formatDuration(goal.timeUsedSeconds) })
+                  : t("goal.noUsage", "No completed Goal Turn usage yet")}
                 {goal.tokenBudget
-                  ? ` · ${compactNumber(goal.tokenBudget)} token budget`
-                  : " · no token budget"}
+                  ? ` · ${t("goal.tokenBudgetLabel", "{{budget}} token budget", { budget: compactNumber(goal.tokenBudget) })}`
+                  : ` · ${t("goal.noTokenBudget", "no token budget")}`}
               </p>
               {outcome ? (
-                <section className={styles.outcome} aria-label="Goal outcome">
+                <section className={styles.outcome} aria-label={t("goal.outcome", "Goal outcome")}>
                   <header>
                     <strong>
                       {outcome.status === "complete"
-                        ? "Completion outcome"
-                        : "Blocked outcome"}
+                        ? t("goal.completionOutcome", "Completion outcome")
+                        : t("goal.blockedOutcome", "Blocked outcome")}
                     </strong>
                     <small>
                       {outcome.source}
@@ -249,12 +249,12 @@ export function GoalRail({
                   <p>{outcome.reason}</p>
                   {outcome.decidedByTurnId ? (
                     <small>
-                      Deciding Turn <code>{shortId(outcome.decidedByTurnId)}</code>
+                      {t("goal.decidingTurn", "Deciding Turn")} <code>{shortId(outcome.decidedByTurnId)}</code>
                     </small>
                   ) : null}
                   {outcome.evidenceRefs.length ? (
                     <div className={styles.evidence}>
-                      <span>Related activity</span>
+                      <span>{t("goal.relatedActivity", "Related activity")}</span>
                       {outcome.evidenceRefs.map((evidence) => (
                         <button
                           type="button"
@@ -283,20 +283,20 @@ export function GoalRail({
                   })}
                 </ul>
               ) : (
-                <p>No Goal-specific Skills selected.</p>
+                <p>{t("goal.noSkills", "No Goal-specific Skills selected.")}</p>
               )}
               <button
                 className={styles.clearButton}
                 type="button"
                 onClick={() => {
-                  if (window.confirm("Clear this Session Goal?")) {
+                  if (window.confirm(t("goal.clearConfirm", "Clear this Session Goal?"))) {
                     void onClear();
                   }
                 }}
                 disabled={busy}
               >
                 <Trash2 size={12} />
-                Clear Goal
+                {t("goal.clearGoal", "Clear Goal")}
               </button>
             </div>
           ) : null}
@@ -313,46 +313,45 @@ export function GoalRail({
         >
           <header>
             <div>
-              <strong>{goal ? "Edit Goal" : "New Goal"}</strong>
+              <strong>{goal ? t("goal.editGoal", "Edit Goal") : t("goal.newGoal", "New Goal")}</strong>
               <span>
-                Objective edits keep the same Goal identity and reach the active
-                Turn.
+                {t("goal.objectiveHint", "Objective edits keep the same Goal identity and reach the active Turn.")}
               </span>
             </div>
             <button
               type="button"
               onClick={() => setEditorOpen(false)}
-              aria-label="Close Goal editor"
+              aria-label={t("goal.closeEditor", "Close Goal editor")}
             >
               <X size={14} />
             </button>
           </header>
           <label>
-            <span>Outcome</span>
+            <span>{t("goal.outcome", "Outcome")}</span>
             <textarea
               value={objective}
               onChange={(event) => setObjective(event.target.value)}
-              placeholder="Describe the complete outcome DeepCode should achieve."
+              placeholder={t("goal.describeOutcome", "Describe the complete outcome DeepCode should achieve.")}
               rows={4}
               autoFocus
             />
           </label>
           <label>
-            <span>Token budget <small>optional</small></span>
+            <span>{t("goal.tokenBudget", "Token budget")} <small>{t("goal.tokenBudgetOptional", "optional")}</small></span>
             <input
               type="number"
               min={1}
               step={1}
               value={tokenBudget}
               onChange={(event) => setTokenBudget(event.target.value)}
-              placeholder="No limit"
+              placeholder={t("goal.noLimit", "No limit")}
             />
           </label>
           {selectableSkills.length ? (
             <fieldset>
               <legend>
                 <Sparkles size={12} />
-                Skills
+                {t("goal.skills", "Skills")}
                 <small>
                   {skillIds.length}/{MAX_GOAL_SKILLS}
                 </small>
@@ -386,7 +385,7 @@ export function GoalRail({
           ) : null}
           <footer>
             <button type="button" onClick={() => setEditorOpen(false)}>
-              Cancel
+              {t("goal.cancel", "Cancel")}
             </button>
             <button
               className={styles.primary}
@@ -394,7 +393,7 @@ export function GoalRail({
               disabled={!enabled || busy || !objective.trim()}
             >
               <Target size={12} />
-              {goal ? (resumeAfterSave ? "Save & resume" : "Save Goal") : "Start Goal"}
+              {goal ? (resumeAfterSave ? t("goal.saveResume", "Save & resume") : t("goal.saveGoal", "Save Goal")) : t("goal.startGoal", "Start Goal")}
             </button>
           </footer>
         </form>
