@@ -154,6 +154,10 @@ class McpServerDefinition(_ConfigModel):
 
     enabled: bool = True
     required: bool = False
+    defer_loading: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("deferLoading", "defer_loading"),
+    )
     supports_parallel_tool_calls: bool = False
     startup_timeout_seconds: Annotated[float, Field(gt=0, le=300)] = Field(
         default=10.0,
