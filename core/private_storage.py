@@ -5,14 +5,17 @@ under its user data directory.  Callers use these helpers instead of relying on
 the process umask, which is commonly permissive on desktop systems.
 
 POSIX permissions are repaired to ``0700`` for directories and ``0600`` for
-regular files.  Windows access control is inherited from the user's profile;
-the mode arguments are still supplied at creation time where supported.
+regular files.  On Windows the current user is granted full control and the
+inherited access entries are then stripped; the restriction is applied in a
+fail-safe order so a failed grant leaves the inherited ACLs untouched and the
+path stays accessible.
 """
 
 from __future__ import annotations
 
 import os
 import stat
+import subprocess
 from pathlib import Path
 
 PRIVATE_DIRECTORY_MODE = 0o700
@@ -21,6 +24,68 @@ PRIVATE_FILE_MODE = 0o600
 
 class UnsafePrivateFileError(OSError):
     """A private-state path is not a regular file owned by this path entry."""
+
+
+def _windows_identity() -> str | None:
+    """Return the fully-qualified current user (``DOMAIN\\user``) on Windows."""
+
+    if os.name != "nt":
+        return None
+    try:
+        completed = subprocess.run(
+            ["whoami"],
+            capture_output=True,
+            text=True,
+            encoding="mbcs",
+            errors="replace",
+            timeout=5,
+            check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    principal = (completed.stdout or "").strip()
+    return principal or None
+
+
+def _restrict_windows_acl(path: Path) -> None:
+    """Restrict ``path`` to the current user, failing safe.
+
+    The current user is granted full control **before** inherited access
+    entries are stripped.  If the grant fails (service account, transient
+    timeout, ...) the inherited ACLs are left untouched so the path stays
+    accessible to the caller; the previous strip-first order could leave a
+    path with no usable ACE and make it unopenable.
+    """
+
+    identity = _windows_identity()
+    if identity is None:
+        return
+    try:
+        subprocess.run(
+            ["icacls", os.fspath(path), "/grant:r", f"{identity}:F"],
+            capture_output=True,
+            text=True,
+            encoding="mbcs",
+            errors="replace",
+            timeout=15,
+            check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        # Fail safe: keep the inherited ACLs; the path stays accessible.
+        return
+    try:
+        subprocess.run(
+            ["icacls", os.fspath(path), "/inheritance:r"],
+            capture_output=True,
+            text=True,
+            encoding="mbcs",
+            errors="replace",
+            timeout=15,
+            check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        # Strip failed: the path is merely less restricted, still usable.
+        pass
 
 
 def ensure_private_directory(path: Path | str) -> Path:
@@ -35,10 +100,10 @@ def ensure_private_directory(path: Path | str) -> Path:
 
     for component in reversed(missing):
         component.mkdir(mode=PRIVATE_DIRECTORY_MODE, exist_ok=True)
-        _chmod(component, PRIVATE_DIRECTORY_MODE)
+        _chmod(component, PRIVATE_DIRECTORY_MODE, force=True)
 
     directory.mkdir(parents=True, exist_ok=True, mode=PRIVATE_DIRECTORY_MODE)
-    _chmod(directory, PRIVATE_DIRECTORY_MODE)
+    _chmod(directory, PRIVATE_DIRECTORY_MODE, force=True)
     return directory
 
 
@@ -46,6 +111,11 @@ def open_private_file(path: Path | str, flags: int) -> int:
     """Open a private regular file without following a final symlink."""
 
     target = Path(path)
+    # Only restrict a *newly created* file. An existing file was already
+    # restricted at creation; re-running icacls on every open costs two
+    # subprocesses per call (and a full tree walk many times over) without
+    # changing the ACL (maintainer feedback on the earlier ACL PR).
+    created = not target.exists()
     ensure_private_directory(target.parent)
     descriptor = os.open(
         target,
@@ -63,6 +133,8 @@ def open_private_file(path: Path | str, flags: int) -> int:
             )
         if os.name != "nt":
             os.fchmod(descriptor, PRIVATE_FILE_MODE)
+        elif created:
+            _restrict_windows_acl(target)
         return descriptor
     except BaseException:
         os.close(descriptor)
@@ -119,8 +191,6 @@ def harden_private_tree(root: Path | str) -> Path:
     """Repair a DeepCode-owned tree while refusing to traverse symlinks."""
 
     base = ensure_private_directory(root)
-    if os.name == "nt":
-        return base
 
     for current, directories, files in os.walk(base, followlinks=False):
         current_path = Path(current)
@@ -135,8 +205,13 @@ def harden_private_tree(root: Path | str) -> Path:
     return base
 
 
-def _chmod(path: Path, mode: int) -> None:
+def _chmod(path: Path, mode: int, *, force: bool = False) -> None:
     if os.name == "nt":
+        # harden_private_tree deliberately re-applies the restriction even to
+        # existing paths (it repairs legacy trees whose ACLs may be absent or
+        # permissive), so _chmod restricts unconditionally. The per-open cost
+        # is avoided in open_private_file by only restricting new files.
+        _restrict_windows_acl(path)
         return
     try:
         os.chmod(path, mode, follow_symlinks=False)
