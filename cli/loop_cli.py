@@ -22,7 +22,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rich.console import Console
-from rich.panel import Panel
+
+from cli.tui import theme
 
 from cli.execution_options import (
     add_access_preset_argument,
@@ -51,7 +52,6 @@ _STATUS_STYLE = {
 
 def _run(args: argparse.Namespace) -> int:
     console = Console()
-    renderer = EventRenderer(console)
     resuming = args.resume is not None
     workspace = (
         os.path.abspath(args.workspace or os.getcwd())
@@ -60,21 +60,23 @@ def _run(args: argparse.Namespace) -> int:
         if args.workspace
         else None
     )
+    # Tool cards name paths relative to the workspace; a resumed run learns
+    # its own from the stored Session, so it keeps absolute ones.
+    renderer = EventRenderer(console, workspace=workspace)
     if not resuming:
         assert workspace is not None
         os.makedirs(workspace, exist_ok=True)
     goal_label = f"resume Session {args.resume}" if resuming else str(args.goal)
 
+    console.print()
+    console.print(f" {theme.brand_markup()} [bold]loop[/]")
+    console.print(f" [{theme.META_STYLE}]goal[/] {goal_label}")
     console.print(
-        Panel.fit(
-            "[bold cyan]✳ DeepCode loop[/]\n"
-            f"[grey58]goal[/] {goal_label}\n"
-            f"[grey58]test[/] {args.test_cmd or '(none)'}"
-            f"  [grey58]workspace[/] {workspace or '(stored Session workspace)'}"
-            f"  [grey58]token budget[/] {args.token_budget or 'none'}",
-            border_style="grey58",
-        )
+        f" [{theme.META_STYLE}]test {args.test_cmd or '(none)'} · "
+        f"workspace {workspace or '(stored Session workspace)'} · "
+        f"token budget {args.token_budget or 'none'}[/]"
     )
+    console.print()
 
     def on_progress(goal) -> None:
         console.print(

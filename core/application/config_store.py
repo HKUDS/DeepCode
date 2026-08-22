@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import threading
@@ -13,6 +14,14 @@ from typing import Any
 
 from core.config import DeepCodeConfig, home_config_path
 from core.private_storage import ensure_private_directory, open_private_file
+
+
+class ConfigRevisionConflict(RuntimeError):
+    """The config changed after the caller read the revision it is editing."""
+
+
+#: Revision of a config file that does not exist yet.
+ABSENT_CONFIG_REVISION = "absent"
 
 
 class ConfigStore:
@@ -39,11 +48,34 @@ class ConfigStore:
             raise TypeError("DeepCode config must contain a JSON object")
         return value
 
+    def revision(self) -> str:
+        """Content fingerprint for optimistic concurrency on writes.
+
+        Byte-level on purpose: an external editor touching only formatting
+        still moves the revision, which is the honest answer — the caller's
+        view of the file is stale either way.
+        """
+        try:
+            payload = self.path.read_bytes()
+        except FileNotFoundError:
+            return ABSENT_CONFIG_REVISION
+        return hashlib.sha256(payload).hexdigest()[:16]
+
     def mutate(
         self,
         transform: Callable[[dict[str, Any]], dict[str, Any]],
+        *,
+        expected_revision: str | None = None,
     ) -> dict[str, Any]:
         with self._thread_lock, _file_lock(self.lock_path):
+            if expected_revision is not None and self.revision() != expected_revision:
+                # Checked under the lock so the answer cannot race a
+                # concurrent writer. Omitting the revision keeps the
+                # historical last-write-wins behavior.
+                raise ConfigRevisionConflict(
+                    "the configuration changed since it was read — reload "
+                    "settings and retry"
+                )
             current = self.read()
             updated = transform(_json_copy(current))
             if not isinstance(updated, dict):

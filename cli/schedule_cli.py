@@ -25,6 +25,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rich.console import Console
 
+from cli.tui import theme
+
 from cli.goal_runner import GoalRunOptions, run_goal
 from cli.execution_options import add_reasoning_effort_argument
 from core.domain.thread_goal import ThreadGoalStatus
@@ -101,8 +103,9 @@ def _run(args: argparse.Namespace) -> int:
         task = _loop_task(args)
 
     _console.print(
-        f"[bold cyan]✳ DeepCode schedule[/] [grey58]job[/] {args.job} "
-        f"[grey58]every[/] {interval:g}s [grey58]max runs[/] {max_runs}"
+        f"{theme.brand_markup()} [bold]schedule[/] "
+        f"[{theme.META_STYLE}]job {args.job} · every {interval:g}s · "
+        f"max runs {max_runs}[/]"
     )
 
     def on_run(n: int, outcome: RunOutcome) -> None:

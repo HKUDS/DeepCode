@@ -24,6 +24,8 @@ import type { DesktopDestination } from "../../app/useDesktopUi";
 import type { SidecarStatus } from "../../rpc/contracts";
 import { SessionRow } from "./SessionRow";
 import { useProjectDisclosure } from "./useProjectDisclosure";
+import { useTranslation } from "react-i18next";
+
 import styles from "./DesktopSidebar.module.css";
 
 interface DesktopSidebarProps {
@@ -35,7 +37,9 @@ interface DesktopSidebarProps {
   busy: boolean;
   runtime: SidecarStatus;
   destination: DesktopDestination;
+  settingsOpen: boolean;
   onDestination(destination: DesktopDestination): void;
+  onOpenSettings(): void;
   onQueryChange(query: string): void;
   onOpenProject(): void;
   onSelectProject(projectId: string): void;
@@ -82,7 +86,9 @@ export function DesktopSidebar({
   busy,
   runtime,
   destination,
+  settingsOpen,
   onDestination,
+  onOpenSettings,
   onQueryChange,
   onOpenProject,
   onSelectProject,
@@ -92,6 +98,7 @@ export function DesktopSidebar({
   onArchiveThread,
   onDeleteThread,
 }: DesktopSidebarProps) {
+  const { t } = useTranslation();
   const searchRef = useRef<HTMLInputElement | null>(null);
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const selectedProject =
@@ -230,7 +237,7 @@ export function DesktopSidebar({
           onClick={() => onDestination("threads")}
         >
           <MessageSquare size={16} />
-          Threads
+          {t("sidebar.threads", "Threads")}
         </button>
         <button
           type="button"
@@ -238,7 +245,7 @@ export function DesktopSidebar({
           onClick={() => onDestination("automations")}
         >
           <Sparkles size={16} />
-          Automations
+          {t("sidebar.automations", "Automations")}
         </button>
         <button
           type="button"
@@ -246,7 +253,7 @@ export function DesktopSidebar({
           onClick={() => onDestination("skills")}
         >
           <WandSparkles size={16} />
-          Skills
+          {t("sidebar.skills", "Skills")}
         </button>
         <button
           type="button"
@@ -254,7 +261,7 @@ export function DesktopSidebar({
           onClick={() => onDestination("plugins")}
         >
           <Puzzle size={16} />
-          Plugins
+          {t("sidebar.plugins", "Plugins")}
         </button>
         <button
           type="button"
@@ -262,20 +269,20 @@ export function DesktopSidebar({
           onClick={() => onDestination("mcp")}
         >
           <Cable size={16} />
-          MCP
+          {t("sidebar.mcp", "MCP")}
         </button>
         <button
           type="button"
-          data-active={destination === "settings"}
-          onClick={() => onDestination("settings")}
+          data-active={settingsOpen}
+          onClick={onOpenSettings}
         >
           <Settings size={16} />
-          Settings
+          {t("sidebar.settings", "Settings")}
         </button>
       </nav>
 
       <div className={styles.sectionHeading}>
-        <span>Projects</span>
+        <span>{t("sidebar.projects", "Projects")}</span>
         <button
           type="button"
           onClick={onOpenProject}

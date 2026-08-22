@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from pathlib import Path
 
 from core.application.agent_adapter import (
@@ -147,6 +149,7 @@ class DeepCodeApplication:
             session_store=self.session_store,
             llm_configuration=self.llm,
             skill_hosts=self.skill_hosts,
+            holder_label=f"{host_surface} (pid {os.getpid()})",
         )
         self.workflows = WorkflowService(
             database,

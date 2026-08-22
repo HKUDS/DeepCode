@@ -6,8 +6,13 @@ import os
 from pathlib import Path
 from typing import Any
 
-from core.application.config_store import ConfigStore, deep_merge
+from core.application.config_store import (
+    ConfigRevisionConflict,
+    ConfigStore,
+    deep_merge,
+)
 from core.application.errors import (
+    ConflictError,
     InvalidArgumentError,
     ProjectNotTrustedError,
 )
@@ -36,6 +41,7 @@ _AGENT_FIELDS = {
     "maxTokens",
     "temperature",
     "reasoningEffort",
+    "defaultPreset",
     "baseMaxTokens",
     "retryMaxTokens",
     "maxTokensPolicy",
@@ -67,7 +73,12 @@ class SettingsService:
             if workspace is not None and workspace.is_dir()
             else load_config(config_path=self.store.path)
         )
-        return self._view(config, workspace=workspace)
+        view = self._view(config, workspace=workspace)
+        # User-layer revision for optimistic concurrency: pass it back as
+        # expectedRevision on a user-scoped update to refuse clobbering a
+        # config that changed since this read.
+        view["configRevision"] = self.store.revision()
+        return view
 
     def update(
         self,
@@ -75,6 +86,7 @@ class SettingsService:
         *,
         scope: str = "user",
         project_id: str | None = None,
+        expected_revision: str | None = None,
     ) -> dict[str, Any]:
         self._validate_patch(patch)
         if scope == "project" and "providers" in patch:
@@ -82,7 +94,13 @@ class SettingsService:
                 "provider connections and credentials are user-scoped only"
             )
         store = self._store(scope, project_id)
-        store.mutate(lambda current: _merge_settings_patch(current, patch))
+        try:
+            store.mutate(
+                lambda current: _merge_settings_patch(current, patch),
+                expected_revision=expected_revision,
+            )
+        except ConfigRevisionConflict as exc:
+            raise ConflictError(str(exc)) from exc
         return self.read(project_id)
 
     def _workspace(self, project_id: str | None) -> Path | None:

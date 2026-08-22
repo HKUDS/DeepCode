@@ -1,153 +1,44 @@
-"""Bridge between the live AgentSession and the persistent session store.
+"""Small read-side helper over the persistent session store for the TUI.
 
-Responsibilities (and nothing else):
+Turn persistence and resume rehydration live in the application layer
+(``turn_service`` records turns; ``session_runtime`` reloads canonical
+history into the agent) — this module deliberately does *not* duplicate
+them. What remains here is the store-backed metadata the REPL itself
+needs:
 
-- record each completed turn (user text + assistant reply) into
-  :mod:`core.sessions` — JSONL on disk, listed via the SQLite index;
-- resume: load a stored transcript back into an
-  :class:`~core.events.session.AgentSession` as chat history;
-- scope the resume picker to the current directory.
+- the identity of the current session (validated against the store);
+- its recorded origin workspace, for cross-directory resume hints;
+- first-message titling for flows that bypass the Thread rename path.
 
-Directory scoping follows the convention Claude Code and Codex converged on
-(DEEPCODE_V2_MASTER_PLAN.md P2-L5c): storage stays *central* under
-``~/.deepcode/sessions`` (never files dropped into the project), but the
-*view* is per-directory — a new session records its ``workspace`` in
-metadata, and the default listing shows only sessions born in the current
-workspace. ``include_all`` lifts the filter (legacy sessions without a
-recorded workspace, and other frontends' sessions, appear only there).
-
-Resume fidelity: the store keeps the visible conversation plus opaque,
-provider-authored continuation state. Raw chain-of-thought is never promoted
-to visible history; signed/encrypted provider state is replayed only to the
-provider that produced it.
+Session *listing* is not here either: the resume picker goes through
+``application.threads.list`` (the same service the Desktop uses), which
+scopes by directory with resolved paths instead of re-implementing the
+filter over raw store rows.
 """
 
 from __future__ import annotations
 
 import os
 
-from core.events.session import AgentSession
-from core.sessions import SessionStore, SessionSummary, get_default_store
-from core.sessions.continuation import (
-    assistant_continuation_metadata,
-    session_message_history_entry,
-)
-from core.skills.models import SkillInvocation
-from core.domain.execution_profile import ExecutionProfile
-
-_KIND = "tui"
+from core.sessions import SessionStore, get_default_store
 
 
 class SessionBridge:
-    """Persist turns of one TUI conversation and support scoped resume."""
+    """Store-backed metadata for one TUI conversation."""
 
     def __init__(
         self,
         store: SessionStore | None = None,
         *,
-        session_id: str | None = None,
-        title: str = "",
+        session_id: str,
         workspace: str | None = None,
-        connection_id: str | None = None,
-        model: str | None = None,
-        reasoning_effort: str | None = None,
     ) -> None:
         self.store = store or get_default_store()
         self.workspace = os.path.abspath(workspace) if workspace else None
-        if session_id is not None:
-            existing = self.store.get_session(session_id)
-            if existing is None:
-                raise ValueError(f"no such session: {session_id}")
-            self.session_id = existing.session_id
-        else:
-            metadata: dict = {"kind": _KIND}
-            if self.workspace:
-                metadata["workspace"] = self.workspace
-            if connection_id:
-                metadata["connection_id"] = connection_id
-            if model:
-                metadata["model"] = model
-            if reasoning_effort:
-                metadata["reasoning_effort"] = reasoning_effort
-            self.session_id = self.store.create_session(
-                title=title, metadata=metadata
-            ).session_id
-
-    # -- write path ----------------------------------------------------------
-
-    def record_turn(
-        self,
-        user_text: str,
-        assistant_text: str | None,
-        *,
-        skill_invocations: tuple[SkillInvocation, ...] = (),
-        execution_profile: ExecutionProfile | None = None,
-        assistant_message: dict | None = None,
-    ) -> None:
-        """Persist one completed turn. Errors here must never kill the REPL."""
-        try:
-            metadata = {
-                "schemaVersion": 3,
-                "client": "cli",
-                "executionProfile": (
-                    execution_profile.to_dict()
-                    if execution_profile is not None
-                    else None
-                ),
-                "skillInvocations": [
-                    invocation.to_metadata() for invocation in skill_invocations
-                ],
-            }
-            self.store.append_message(
-                self.session_id,
-                "user",
-                user_text,
-                metadata=metadata,
-            )
-            if assistant_text:
-                self.store.append_message(
-                    self.session_id,
-                    "assistant",
-                    assistant_text,
-                    metadata={
-                        **metadata,
-                        **assistant_continuation_metadata(
-                            [assistant_message] if assistant_message is not None else []
-                        ),
-                    },
-                )
-        except Exception:  # noqa: BLE001 - persistence is best-effort
-            pass
-
-    def execution_selection(self) -> tuple[str | None, str | None, str | None]:
-        stored = self.store.get_session(self.session_id)
-        metadata = stored.metadata if stored is not None else {}
-        connection = metadata.get("connection_id") or metadata.get("connectionId")
-        model = metadata.get("model")
-        reasoning_effort = metadata.get("reasoning_effort") or metadata.get(
-            "reasoningEffort"
-        )
-        return (
-            str(connection).strip().lower() if connection else None,
-            str(model).strip() if model else None,
-            str(reasoning_effort).strip().lower() if reasoning_effort else None,
-        )
-
-    def update_execution_selection(
-        self,
-        *,
-        connection_id: str | None,
-        model: str | None,
-        reasoning_effort: str | None,
-    ) -> None:
-        self.store.update_metadata(
-            self.session_id,
-            {
-                "connection_id": connection_id,
-                "model": model,
-                "reasoning_effort": reasoning_effort,
-            },
-        )
+        existing = self.store.get_session(session_id)
+        if existing is None:
+            raise ValueError(f"no such session: {session_id}")
+        self.session_id = existing.session_id
 
     def set_title_from(self, first_message: str) -> None:
         """Title the session after its first message (like Claude Code)."""
@@ -159,53 +50,9 @@ class SessionBridge:
         except Exception:  # noqa: BLE001 - persistence is best-effort
             pass
 
-    # -- read path -----------------------------------------------------------
-
-    def load_into(self, agent: AgentSession) -> int:
-        """Load this session's transcript into ``agent``; return turn count."""
+    def stored_workspace(self) -> str | None:
+        """This session's recorded workspace (for cross-directory hints)."""
         stored = self.store.get_session(self.session_id)
-        if stored is None:
-            return 0
-        history = [
-            session_message_history_entry(m)
-            for m in stored.messages
-            if m.role in ("user", "assistant") and m.content
-        ]
-        agent.load_history(history)
-        return len(history)
-
-    def workspace_of(self, session_id: str) -> str | None:
-        """The workspace a stored session was created in, if recorded."""
-        stored = self.store.get_session(session_id)
         if stored is None:
             return None
         return (stored.metadata or {}).get("workspace") or None
-
-    def stored_workspace(self) -> str | None:
-        """This session's recorded workspace (for cross-directory hints)."""
-        return self.workspace_of(self.session_id)
-
-    def list_recent(
-        self, limit: int = 20, *, include_all: bool = False
-    ) -> list[SessionSummary]:
-        """Recent *resumable* sessions, scoped to this bridge's workspace.
-
-        Default view lists only sessions whose recorded workspace matches
-        (the per-directory picker). ``include_all=True`` lists every
-        non-empty session regardless of origin. Empty sessions are noise,
-        not history, and never appear.
-
-        The workspace lives in each session's metadata line, so scoping
-        reads sessions through the store's cache — same pattern the web
-        chat listing uses; fine at CLI session counts.
-        """
-        rows = [
-            s
-            for s in self.store.list_sessions(limit=max(limit * 4, 60))
-            if s.message_count > 0
-        ]
-        if include_all or self.workspace is None:
-            return rows[:limit]
-        return [s for s in rows if self.workspace_of(s.session_id) == self.workspace][
-            :limit
-        ]

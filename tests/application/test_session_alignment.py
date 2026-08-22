@@ -68,6 +68,102 @@ def test_desktop_projects_existing_cli_session_without_copying_it(
         application.close()
 
 
+def test_rebuild_from_jsonl_shows_tool_activity_and_stays_idempotent(
+    tmp_path: Path,
+) -> None:
+    """Phase 1 persisted the agent's actions; the rebuild has to render them.
+
+    The canonical file now carries tool calls and results. A session rebuilt
+    from it used to show only what the agent SAID. It must also show what it
+    DID — and projecting twice must not duplicate anything, because this path
+    reconciles against items the live stream may also have written.
+    """
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = SessionStore(tmp_path / "sessions")
+    session = store.create_session(
+        title="tool work",
+        metadata={"kind": "tui", "workspace": str(workspace)},
+    )
+    sid = session.session_id
+    store.append_message(sid, "user", "list the files")
+    store.append_message(sid, "assistant", "", metadata={"toolCalls": [{"id": "c1"}]})
+    store.append_message(
+        sid, "tool", "total 0", metadata={"toolCallId": "c1", "name": "bash"}
+    )
+    store.append_message(sid, "assistant", "the directory is empty")
+
+    application = DeepCodeApplication.open(
+        tmp_path / "state.sqlite3",
+        session_store=store,
+    )
+    try:
+        application.threads.list()
+        with application.database.read() as connection:
+            first = [
+                item
+                for turn in TurnRepository(connection).list_for_thread(sid)
+                for item in ItemRepository(connection).list_for_turn(turn.id)
+            ]
+        # A second pass over an unchanged file must be a no-op.
+        application.threads.list()
+        with application.database.read() as connection:
+            second = [
+                item
+                for turn in TurnRepository(connection).list_for_thread(sid)
+                for item in ItemRepository(connection).list_for_turn(turn.id)
+            ]
+    finally:
+        application.close()
+
+    kinds = [item.kind.value for item in first]
+    assert "command_execution" in kinds, kinds
+    assert kinds == [item.kind.value for item in second], "projected twice"
+    assert len(first) == len(second), f"{len(first)} → {len(second)}: duplicated"
+    command = next(item for item in first if item.kind is ItemKind.COMMAND_EXECUTION)
+    assert command.payload["name"] == "bash"
+    assert command.payload["callId"] == "c1"
+
+
+def test_compaction_checkpoint_does_not_open_a_desktop_turn(
+    tmp_path: Path,
+) -> None:
+    """A checkpoint rides a user-role record but is not a prompt.
+
+    Grouping on role alone opened an extra Turn whose title was the summary
+    preamble, so a session compacted in the CLI grew a phantom turn the
+    moment Desktop projected it.
+    """
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = SessionStore(tmp_path / "sessions")
+    session = _seed_cli_session(store, workspace)
+    store.append_message(
+        session.session_id,
+        "user",
+        "An earlier agent worked on this task and produced the summary below:"
+        "\nEARLIER WORK",
+        metadata={"compaction": {"reset": True, "retain": 2}},
+    )
+    store.append_message(session.session_id, "user", "carry on")
+    store.append_message(session.session_id, "assistant", "carrying on")
+
+    application = DeepCodeApplication.open(
+        tmp_path / "state.sqlite3",
+        session_store=store,
+    )
+    try:
+        application.threads.list()
+        with application.database.read() as connection:
+            turns = TurnRepository(connection).list_for_thread(session.session_id)
+        prompts = [turn.prompt for turn in turns]
+    finally:
+        application.close()
+
+    assert prompts == ["remember this", "carry on"], prompts
+    assert not any("EARLIER WORK" in prompt for prompt in prompts)
+
+
 def test_projection_database_can_be_deleted_and_rebuilt_from_jsonl(
     tmp_path: Path,
 ) -> None:

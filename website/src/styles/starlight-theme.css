@@ -1,0 +1,56 @@
+/* DeepCode brand over Starlight's token system — the same palette as the
+   landing (sky→cyan→teal on a deep blue-grey ground), both themes tuned. */
+
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;450;500;600&display=swap");
+
+:root {
+  --sl-font: "IBM Plex Sans", -apple-system, "Segoe UI", "PingFang SC", sans-serif;
+  --sl-font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* dark (Starlight's default scheme) */
+  --sl-color-accent-low: #0b2d3b;
+  --sl-color-accent: #06b6d4;
+  --sl-color-accent-high: #7ee3ef;
+  --sl-color-white: #e9f1f3;
+  --sl-color-gray-1: #d3dee2;
+  --sl-color-gray-2: #94a8b2;
+  --sl-color-gray-3: #6d838f;
+  --sl-color-gray-4: #3d4f59;
+  --sl-color-gray-5: #223039;
+  --sl-color-gray-6: #131e26;
+  --sl-color-black: #0b1116;
+}
+
+:root[data-theme="light"] {
+  --sl-color-accent-low: #d0f0f7;
+  --sl-color-accent: #0891b2;
+  --sl-color-accent-high: #155e6e;
+  --sl-color-white: #17252c;
+  --sl-color-gray-1: #243541;
+  --sl-color-gray-2: #3d525e;
+  --sl-color-gray-3: #5b7280;
+  --sl-color-gray-4: #93a7b0;
+  --sl-color-gray-5: #c8d4d9;
+  --sl-color-gray-6: #eef3f5;
+  --sl-color-black: #fafcfc;
+}
+
+/* Headings carry the terminal voice, like the landing. */
+.sl-markdown-content h1,
+.sl-markdown-content h2,
+.sl-markdown-content h3,
+.site-title {
+  font-family: var(--sl-font-mono);
+  letter-spacing: -0.02em;
+}
+
+.sl-markdown-content h2::before {
+  content: "● ";
+  color: var(--sl-color-accent);
+}
+
+/* Code blocks sit on the deepest ground, like the TUI itself. */
+.sl-markdown-content pre {
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 10px;
+}

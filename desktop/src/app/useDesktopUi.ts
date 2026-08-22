@@ -7,8 +7,7 @@ export type DesktopDestination =
   | "automations"
   | "skills"
   | "plugins"
-  | "mcp"
-  | "settings";
+  | "mcp";
 export type DesktopInspectorTab =
   | "changes"
   | "files"
@@ -23,12 +22,16 @@ export interface DesktopUiState {
   inspectorOpen: boolean;
   inspectorTab: DesktopInspectorTab;
   inspectorDirty: boolean;
+  /** The settings dialog overlays the current destination (dsh style). */
+  settingsOpen: boolean;
 }
 
 export interface DesktopUiController extends DesktopUiState {
   setDestination(destination: DesktopDestination): void;
   navigateTo(destination: DesktopDestination): Promise<boolean>;
   setSessionQuery(query: string): void;
+  openSettings(): void;
+  closeSettings(): void;
   openInspector(tab?: DesktopInspectorTab): void;
   closeInspector(): Promise<void>;
   toggleInspector(): Promise<void>;
@@ -44,6 +47,9 @@ export function useDesktopUi(): DesktopUiController {
   const [inspectorTab, setInspectorTab] =
     useState<DesktopInspectorTab>("changes");
   const [inspectorDirty, setInspectorDirty] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const openSettings = useCallback(() => setSettingsOpen(true), []);
+  const closeSettings = useCallback(() => setSettingsOpen(false), []);
 
   const confirmDiscardInspectorDraft = useCallback(async () => {
     if (
@@ -92,9 +98,12 @@ export function useDesktopUi(): DesktopUiController {
       inspectorOpen,
       inspectorTab,
       inspectorDirty,
+      settingsOpen,
       setDestination,
       navigateTo,
       setSessionQuery,
+      openSettings,
+      closeSettings,
       openInspector,
       closeInspector,
       toggleInspector,
@@ -104,13 +113,16 @@ export function useDesktopUi(): DesktopUiController {
     }),
     [
       closeInspector,
+      closeSettings,
       destination,
       inspectorOpen,
       inspectorTab,
       inspectorDirty,
       navigateTo,
       openInspector,
+      openSettings,
       sessionQuery,
+      settingsOpen,
       toggleInspector,
       confirmDiscardInspectorDraft,
     ],

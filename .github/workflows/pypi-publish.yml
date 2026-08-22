@@ -17,6 +17,7 @@ env:
 jobs:
   release-build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Check out release tag
@@ -52,6 +53,7 @@ jobs:
 
   pypi-publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs:
       - release-build
     permissions:

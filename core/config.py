@@ -84,6 +84,10 @@ class AgentDefaults(_Base):
     max_tokens: int = 8192
     temperature: float = 0.1
     reasoning_effort: str | None = None
+    # Agent preset id applied to NEW Sessions that do not pick one
+    # explicitly. Resolved (and snapshotted by value) at Session creation;
+    # an unresolvable name is ignored rather than blocking creation.
+    default_preset: str | None = None
     # DeepCode-specific token policy fields used by retry logic.
     base_max_tokens: int | None = None
     retry_max_tokens: int | None = None
@@ -143,6 +147,28 @@ class ProviderConfig(_Base):
     extra_headers: dict[str, str] | None = None
 
 
+class ManualModelConfig(_Base):
+    """One declared model on a connection (dsh's per-model declaration).
+
+    A plain string in ``manualModels`` remains just an id; this object form
+    additionally declares a display label, capacity overrides, and the
+    published reasoning ladder. Absent fields fall through the built-in
+    catalog cascade, so a declaration only ever narrows or corrects — it
+    never has to restate what the catalog already knows.
+
+    ``reasoningEfforts`` follows DeepCode's capability model: a list of
+    canonical levels (include ``"off"`` to allow disabling; omitting it
+    declares reasoning mandatory), ``false`` to declare a non-reasoning
+    model, or absent to inherit the catalog's answer.
+    """
+
+    id: str
+    label: str | None = None
+    context_window: int | None = None
+    max_output_tokens: int | None = None
+    reasoning_efforts: list[str] | Literal[False] | None = None
+
+
 class ConnectionProfileConfig(_Base):
     """One named connection instance backed by a registry provider template.
 
@@ -159,7 +185,7 @@ class ConnectionProfileConfig(_Base):
     model_catalog: Literal["auto", "openrouter", "openai", "anthropic", "manual"] = (
         "auto"
     )
-    manual_models: list[str] = Field(default_factory=list)
+    manual_models: list[str | ManualModelConfig] = Field(default_factory=list)
     enabled: bool = True
 
 
@@ -906,6 +932,7 @@ __all__ = [
     "AgentsConfig",
     "ConfigError",
     "ConnectionProfileConfig",
+    "ManualModelConfig",
     "DeepCodeConfig",
     "DocumentSegmentationConfig",
     "LLMLoggerConfig",

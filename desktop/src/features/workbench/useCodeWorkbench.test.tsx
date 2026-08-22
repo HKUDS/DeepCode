@@ -154,6 +154,8 @@ class WorkbenchRuntime implements DesktopRuntime {
     return [];
   }
 
+  async openPath() {}
+
   async exportDiagnostics() {
     return null;
   }
@@ -203,6 +205,8 @@ class MutationRuntime implements DesktopRuntime {
   readonly calls: Array<{ method: RpcMethod; params: unknown }> = [];
   readonly writeResult = deferred<MethodResults["file/write"]>();
   fileListCount = 0;
+
+  async openPath() {}
 
   async request<M extends RpcMethod>(
     method: M,

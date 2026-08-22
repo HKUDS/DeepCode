@@ -27,6 +27,10 @@
 
 ### *Advancing Code Generation with Multi-Agent Systems*
 
+<p align="center">
+  <a href="https://hkuds.github.io/DeepCode/" target="_blank"><img alt="Website — hkuds.github.io/DeepCode" src="https://img.shields.io/badge/Website-hkuds.github.io%2FDeepCode%20%E2%86%97-06B6D4?style=for-the-badge&labelColor=0B1116" height="36"></a>
+</p>
+
 <!-- <p align="center">
   <img src="https://img.shields.io/badge/Version-1.0.0-00d4ff?style=for-the-badge&logo=rocket&logoColor=white" alt="Version">
 
@@ -144,7 +148,79 @@ Skills, permissions, Goals, and Automations. See the
 
 ## News
 
-**2026-08-15 · Credential hygiene and a real preset menu**
+**2026-08-19 · Sessions that survive resume, compaction, and a second window**
+
+- **Resuming a session restores what the agent did, not only what it said.**
+  Tool calls and their results are part of the canonical record now, so a
+  resumed agent can answer "what did you just run?". A test makes the rule
+  executable: every request a run sends must be rebuildable from the session
+  file alone.
+- **Compaction keeps the recent tail.** The checkpoint replaces the older
+  range and everything recent survives verbatim — assistant messages and tool
+  results included — instead of dropping them and putting the summary last.
+  Manual `/compact` used to refuse almost every real conversation; it works,
+  and the checkpoint speaks as the model's own history, so it stops being
+  discounted as someone else's report.
+- **Context pressure is measured, not guessed.** The gate now anchors on the
+  size the provider itself reports. The built-in estimator prices Chinese
+  prose at more than twice its real cost, which was compacting Chinese
+  conversations at roughly half the context they could hold.
+- **Two windows on one Session no longer crash each other.** Each Session
+  now has one live writer, enforced by an OS lock held around a turn: the
+  second window gets a sentence naming who is running it, instead of a
+  process dying to a database constraint about half the time. Alternate
+  freely between Desktop and the terminal — just not mid-turn.
+
+**2026-08-18 · The runtime learns dsh's context discipline, and the TUI gets a face**
+
+- **A new turn no longer throws away the prompt cache.** The environment
+  block used to be re-inserted before your newest message every turn, so each
+  turn diverged from the previous request right where that block had been:
+  7,420 prompt tokens recomputed at every turn boundary, now 28.
+- **The TUI has a logo, a live status line, and tool cards that read.** A
+  spinner and a sweep while work runs, paths written the way you would type
+  them, the plan tool's checklist visible at last, and a turn footer with its
+  time and token usage. An idle TUI costs nothing to animate.
+- **A source-level comparison against dsh became a plan.** Where the message
+  list the model sees comes from, what compaction should keep, and what the
+  session record must contain — measured and written down, and four
+  unreferenced documents retired.
+
+**2026-08-17 · Fixes from a review pass over the new settings and TUI work**
+
+- **A declared model reads the same everywhere.** Per-model declarations now
+  shape the catalog a picker shows, not only what a Turn executes with, so a
+  context window you set to avoid overflow is the number you see.
+- **Adopting fetched models shows them immediately.** The catalog cache is
+  keyed on the settings that shape it, instead of serving the previous remote
+  listing for up to an hour.
+- **Escape closes one thing.** Dismissing the provider editor no longer tears
+  down the settings dialog around it and discards a half-typed key.
+- **A removed model row takes its own capacities with it** rather than leaving
+  them on the row that survived — which then saved them onto the wrong model.
+- **Automated runs keep their tools.** A default agent preset chosen for
+  interactive chatting no longer narrows `deepcode exec` and goal runs behind
+  your back.
+- **The provider section says it is user-scoped**, instead of letting the
+  dialog's project write scope imply otherwise.
+
+**2026-08-16 · The TUI answers every bare command with a selector**
+
+- **Type the command, pick from a list.** `/model` now opens the full model
+  directory — every configured connection's catalog (remote snapshot or
+  declared entries, near a thousand rows on OpenRouter) in one filterable
+  selector with the current route pinned first and each model's published
+  reasoning ladder on Shift+Tab; Enter commits model and effort together.
+  `/preset`, `/effort`, `/permissions`, `/transcript` and `/skill` join
+  `/resume`: a bare invocation opens a picker with the current choice
+  marked, while argument forms and piped runs keep their text paths.
+- **Background tracebacks can no longer shred the transcript.** Stdlib
+  logging is bridged into loguru with call-site fidelity, so file-only
+  transports really are file-only; and the durable event relay backs off
+  exponentially on persistent failure — one traceback per streak, one-line
+  repeats, a recovery notice.
+
+**2026-08-15 · Settings grow up: a dsh-style dialog, declared models, and a safer config**
 
 - **A connection's key now reaches exactly the requests it was resolved
   for.** Building a provider no longer exports the key into the process
@@ -162,6 +238,35 @@ Skills, permissions, Goals, and Automations. See the
   models as its manual list, an environment-provided key locks the paste
   field instead of silently outranking it, and connection rows show the
   discovered model count.
+- **`deepcode chat` reads like a terminal app, not a log.** A restyled
+  transcript — brand-gradient banner, status-colored tool cards with result
+  elbows, block spacing, word-boundary wrapping — plus streaming that
+  survives the prompt redraw with real colors instead of `?[36m` litter.
+- **Desktop Settings became a dsh-style dialog.** General / Models /
+  Plugins / Agent presets in a left rail, with Open configuration file and
+  the write-scope picker in the header. General gains the five canonical
+  rows — default agent preset for new sessions (applied as a by-value
+  snapshot at creation, CLI and TUI included), permissions, language
+  (English/中文, first translated batch), Light/Dark/System appearance
+  cards, and a steer-or-queue busy-Enter preference.
+- **Models are declarations now.** `manualModels` entries can carry a
+  label, capacities, and the published reasoning ladder; declarations are
+  authoritative offline for execution profiles and every picker. Discovery
+  probes the editor form as shown — unsaved URL or key included — and
+  adopted picks land as accurate declaration rows. Config writes gained
+  optimistic concurrency (a changed file conflicts instead of being
+  clobbered) and a settings.changed push keeps an open dialog fresh.
+- **Session and model commands now hold up.** `/resume` and `/model` open
+  an inline selector — type to filter by title, arrows move, Enter picks,
+  Tab flips directory scope, Shift+Tab cycles the route's published
+  reasoning effort — and resume replays the conversation tail. Bare model
+  names resolve their connection, typos no longer kill the REPL, and
+  `/compact` summarizes with the model you actually selected. New verbs:
+  `/rename`, `/delete`, `/retry`, with tab completion for session ids,
+  transcript modes, permission presets, and effort levels.
+
+<details>
+<summary><strong>Earlier August 2026 updates</strong></summary>
 
 **2026-08-14 · Subagent runtime, compaction, and one-way persistence**
 
@@ -357,6 +462,8 @@ building, fixing, understanding, and improving real software projects.
 DeepCode v2.0 is built to help you spend less time supervising every step and
 more time shipping software you are proud of. We cannot wait to see what you
 build! 🚀
+
+</details>
 
 <details>
 <summary><strong>Earlier 2026 milestones</strong></summary>
@@ -720,6 +827,10 @@ Open **Settings → AI providers** after Desktop starts.
 
 ## Using DeepCode
 
+Prefer a guided walkthrough? The [teaching guides](docs/guide/README.md) cover
+the same ground page by page — first session, the TUI, sessions, models,
+skills and memory, and headless automation — with worked examples.
+
 ### Sessions
 
 Every task lives in a durable Session attached to its original Project. Open a
@@ -739,10 +850,17 @@ and CLI without export or conversion.
 | Load Skills for the next Turn | Composer Skills control | `/skill <name>` |
 | Create a reusable Skill | **Skills → Create Skill** | `$skill-creator` |
 | Set or revise a durable Goal | Goal panel | `/goal` |
+| Queue the next instruction | Composer while a Turn runs | `/queue <text>` |
 | Stop the active Turn | Use the stop control | `/stop` |
+| Re-run the last Turn | Retry control on the Turn | `/retry` |
+| Compact a long conversation | Automatic under pressure | `/compact` (also automatic) |
+| Change transcript detail | — | `/transcript` or `Ctrl+O` |
+| Rename or delete a Session | Session context menu | `/rename <title>` · `/delete <id>` |
 
 Session history, tool activity, approvals, Goal state, and verification evidence
-remain together. Archiving hides a Session without deleting its history;
+remain together. A Session has one live writer at a time: Desktop and the CLI
+may hold it open together, but if one is mid-Turn the other refuses new input
+with a message naming the holder instead of corrupting shared history. Archiving hides a Session without deleting its history;
 permanent deletion removes the Session records but never repository files.
 
 ### Connections and models

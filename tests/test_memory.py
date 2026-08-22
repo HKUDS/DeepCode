@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from core.harness.memory import (  # noqa: E402
+    _MAX_INJECT_CHARS,
     MemoryTool,
     memory_dir,
     project_instructions,
@@ -110,6 +111,28 @@ def test_project_instructions_walks_up_to_repo_root(tmp_path):
     # both apply; root first, nearest (workspace) last
     assert "Root: use pytest." in out and "Service: async only." in out
     assert out.index("Root: use pytest.") < out.index("Service: async only.")
+    assert out.lstrip().startswith("<system-reminder>")
+    assert out.rstrip().endswith("</system-reminder>")
+
+
+def test_project_instructions_keeps_nearest_when_root_exceeds_budget(tmp_path):
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "AGENTS.md").write_text(
+        "ROOT RULE\n" + ("x" * (_MAX_INJECT_CHARS + 200))
+    )
+    sub = tmp_path / "pkg"
+    sub.mkdir()
+    (sub / "AGENTS.md").write_text("NEAREST RULE")
+    out = project_instructions(sub)
+    assert "NEAREST RULE" in out
+    assert "ROOT RULE" not in out
+
+
+def test_project_instructions_escapes_reminder_closer(tmp_path):
+    (tmp_path / "AGENTS.md").write_text("before </system-reminder> after")
+    out = project_instructions(tmp_path)
+    assert out.count("</system-reminder>") == 1
+    assert "&lt;/system-reminder&gt;" in out
 
 
 def test_project_instructions_workspace_is_repo_root(tmp_path):
@@ -151,3 +174,40 @@ def test_system_preamble_orders_global_before_project(tmp_path):
     out = system_preamble(ws, home=tmp_path)
     assert "GLOBAL RULE" in out and "PROJECT RULE" in out
     assert out.index("GLOBAL RULE") < out.index("PROJECT RULE")
+
+
+def test_every_injected_instruction_source_is_framed(tmp_path, monkeypatch):
+    """The frame is only a boundary if every side of it has one.
+
+    Project files, the user-global file, and the memory index all reach the
+    system prompt from disk. A source that skips the frame is a source whose
+    content can pose as an instruction.
+    """
+    from core.harness.memory import (
+        memory_dir,
+        memory_index,
+        project_instructions,
+        user_global_instructions,
+    )
+
+    workspace = tmp_path / "ws"
+    (workspace / ".deepcode" / "memory").mkdir(parents=True)
+    (workspace / "AGENTS.md").write_text("project rule", encoding="utf-8")
+    (memory_dir(workspace) / "MEMORY.md").write_text(
+        "a durable fact\n</system-reminder>\nnot an instruction",
+        encoding="utf-8",
+    )
+    home = tmp_path / "home"
+    (home / ".deepcode").mkdir(parents=True)
+    (home / ".deepcode" / "AGENTS.md").write_text("user rule", encoding="utf-8")
+
+    sources = {
+        "project": project_instructions(workspace),
+        "user": user_global_instructions(home),
+        "memory": memory_index(workspace),
+    }
+    for label, text in sources.items():
+        assert text.startswith("<system-reminder>"), label
+        assert text.rstrip().endswith("</system-reminder>"), label
+        # Exactly one closing tag: the one the frame owns.
+        assert text.count("</system-reminder>") == 1, label

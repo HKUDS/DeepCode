@@ -21,6 +21,7 @@ are richer and they need their own files).
 from __future__ import annotations
 
 import json
+import logging
 import sys
 import threading
 from datetime import datetime
@@ -29,11 +30,49 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger as _loguru_logger
 
+
 from core.observability.context import current_session_id, current_task_id
 from core.observability.records import LLMLogRecord, MCPLogRecord, truncate
 
 if TYPE_CHECKING:
     from core.config import LoggerConfig
+
+
+class _StdlibBridgeHandler(logging.Handler):
+    """Route stdlib ``logging`` records through loguru's configured sinks.
+
+    Half the application logs through ``logging.getLogger(__name__)`` while
+    every sink decision (console vs file, levels, task routing) lives in
+    loguru. Without this bridge those records fall through to Python's
+    ``lastResort`` stderr handler, ignoring the sink configuration entirely —
+    which is how a background thread's WARNING traceback could shred an
+    interactive TUI transcript even though the console transport was off.
+    The frame walk is loguru's own documented interception recipe: it makes
+    the record appear from its real call site, not from this handler.
+    """
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            level: str | int = _loguru_logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+        # Climb past this handler's own frame and every frame inside the
+        # logging package; what remains is the record's real call site, and
+        # the climb count is exactly loguru's ``depth``. The walk starts at
+        # THIS frame rather than ``logging.currentframe()``, whose internal
+        # offset is a CPython implementation detail — the supported matrix
+        # spans 3.12 to 3.14, and a wrong start would misattribute every
+        # bridged record.
+        frame, depth = sys._getframe(), 0
+        while frame is not None and (
+            depth == 0 or frame.f_code.co_filename == logging.__file__
+        ):
+            frame = frame.f_back
+            depth += 1
+        _loguru_logger.opt(depth=depth, exception=record.exc_info).log(
+            level, record.getMessage()
+        )
+
 
 # ---------------------------------------------------------------------------
 # Module state
@@ -99,6 +138,11 @@ def setup_logging(
         # current task_id / session_id from contextvars so business code
         # never has to thread these through.
         _loguru_logger.configure(patcher=_inject_context)
+
+        # Take over stdlib logging so its records obey the same transports.
+        # level=0 hands everything to loguru, whose sinks apply the real
+        # level filter; force=True keeps this idempotent across re-setups.
+        logging.basicConfig(handlers=[_StdlibBridgeHandler()], level=0, force=True)
 
         if "console" in transports or not transports:
             sid = _loguru_logger.add(
