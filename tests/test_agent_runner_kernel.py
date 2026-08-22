@@ -199,7 +199,14 @@ def test_environment_context_is_resolved_and_xml_safe(tmp_path: Path) -> None:
     assert "<shell>" in rendered
     assert "<current_date>" in rendered
     assert "<timezone>" in rendered
-    assert context.message() == {"role": "user", "content": rendered}
+    # The slot carries an explicit marker: the durable environment message is
+    # recognised by that key, never by sniffing its content, so a user message
+    # that merely quotes the block is not mistaken for the slot and overwritten.
+    assert context.message() == {
+        "role": "user",
+        "content": rendered,
+        "env_context": True,
+    }
 
 
 @pytest.mark.asyncio

@@ -16,6 +16,10 @@ from core.persistence.event_repository import EventRepository
 
 
 logger = logging.getLogger(__name__)
+
+#: Ceiling for the relay's failure backoff; polls resume at
+#: ``poll_interval`` as soon as one succeeds.
+_RELAY_BACKOFF_CAP_SECONDS = 30.0
 DEFAULT_RELAY_POLL_INTERVAL = 0.1
 DEFAULT_RELAY_BATCH_SIZE = 500
 
@@ -303,9 +307,34 @@ class DurableEventRelay:
         self._initialized = True
 
     def _run(self) -> None:
+        # Exponential backoff on persistent failure (each poll opens a fresh
+        # SQLite connection, so retrying is also how the relay heals from a
+        # transient "disk I/O error"). Only the FIRST failure of a streak
+        # carries the traceback; repeats are one-line warnings, and recovery
+        # is announced — a struggling disk must not flood the logs.
+        delay = self.poll_interval
+        failures = 0
         while not self._stop.is_set():
             try:
                 self.poll_once()
             except Exception:  # noqa: BLE001 - a transient read must not kill relay
-                logger.exception("durable event relay poll failed")
-            self._stop.wait(self.poll_interval)
+                failures += 1
+                if failures == 1:
+                    logger.exception("durable event relay poll failed")
+                else:
+                    logger.warning(
+                        "durable event relay poll still failing "
+                        "(attempt %d, retrying in %.1fs)",
+                        failures,
+                        delay,
+                    )
+                delay = min(delay * 2, _RELAY_BACKOFF_CAP_SECONDS)
+            else:
+                if failures:
+                    logger.info(
+                        "durable event relay recovered after %d failed polls",
+                        failures,
+                    )
+                failures = 0
+                delay = self.poll_interval
+            self._stop.wait(delay)

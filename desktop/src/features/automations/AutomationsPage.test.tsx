@@ -254,6 +254,8 @@ class AutomationRuntime implements DesktopRuntime {
     return [];
   }
 
+  async openPath(): Promise<void> {}
+
   async exportDiagnostics(): Promise<string | null> {
     return null;
   }

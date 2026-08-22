@@ -113,6 +113,10 @@ def run_headless_turn(
                 project.id,
                 title=prompt.splitlines()[0][:60],
                 session_kind="headless",
+                # A one-shot run is not a session a human is starting:
+                # inheriting an interactive default preset would strip
+                # this run's tools with nothing to explain why.
+                inherit_default_preset=False,
                 connection_id=profile.connection_id,
                 model=profile.model_id,
                 reasoning_effort=options.reasoning_effort,

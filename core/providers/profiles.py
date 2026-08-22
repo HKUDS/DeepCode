@@ -9,7 +9,7 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from core.config import ConfigError
+from core.config import ConfigError, ManualModelConfig
 from core.domain.execution_profile import ExecutionProfile, ExecutionSelection
 from core.providers.base import GenerationSettings, LLMProvider
 from core.providers.catalog import resolve_model_info
@@ -48,6 +48,9 @@ class ResolvedConnection:
     local: bool
     enabled: bool
     spec: ProviderSpec
+    # Full per-model declarations (label/capacities/efforts). ``manual_models``
+    # stays the plain id tuple existing consumers read; these carry the rest.
+    manual_model_entries: tuple[ManualModelConfig, ...] = ()
 
     def public_view(self) -> dict[str, Any]:
         return {
@@ -59,6 +62,10 @@ class ResolvedConnection:
             "apiKeyEnv": None,
             "modelCatalog": self.model_catalog_setting,
             "manualModels": list(self.manual_models),
+            "manualModelEntries": [
+                entry.model_dump(by_alias=True, exclude_none=True)
+                for entry in self.manual_model_entries
+            ],
             "configured": self.is_configured,
             "credentialSource": self.credential_source,
             "local": self.local,
@@ -313,6 +320,7 @@ class ConnectionResolver:
             legacy_key=legacy_key,
             key_optional=spec.is_local or spec.is_direct or spec.is_oauth,
         )
+        model_entries = _clean_model_entries(profile.manual_models)
         return ResolvedConnection(
             id=connection_id,
             label=profile.label.strip() or connection_id,
@@ -323,12 +331,25 @@ class ConnectionResolver:
             extra_headers=dict(profile.extra_headers),
             model_catalog=_catalog_kind(profile.model_catalog, spec),
             model_catalog_setting=profile.model_catalog,
-            manual_models=_clean_models(profile.manual_models),
+            manual_models=tuple(entry.id for entry in model_entries),
+            manual_model_entries=model_entries,
             credential_source=source,
             local=spec.is_local,
             enabled=profile.enabled,
             spec=spec,
         )
+
+    def template_connection(self, template: str) -> ResolvedConnection:
+        """A registry template as a connection value (for pre-save probing).
+
+        Nothing is read from ``providers.profiles`` — this is the shape a
+        connection WOULD have if the template were adopted as-is, so an
+        editor can discover models before its first save.
+        """
+        spec = find_by_name(validate_connection_id(template))
+        if spec is None:
+            raise ConfigError(f"Unknown provider template '{template}'")
+        return self._legacy_connection(spec)
 
     def _legacy_connection(self, spec: ProviderSpec) -> ResolvedConnection:
         provider = getattr(self.config.providers, spec.name)
@@ -382,8 +403,20 @@ def validate_connection_id(value: str) -> str:
     return clean
 
 
-def _clean_models(values: list[str]) -> tuple[str, ...]:
-    return tuple(dict.fromkeys(value.strip() for value in values if value.strip()))
+def _clean_model_entries(
+    values: list[str | ManualModelConfig],
+) -> tuple[ManualModelConfig, ...]:
+    """Normalize the mixed manualModels list to declarations, first id wins."""
+    entries: dict[str, ManualModelConfig] = {}
+    for value in values:
+        entry = (
+            ManualModelConfig(id=value.strip())
+            if isinstance(value, str)
+            else value.model_copy(update={"id": value.id.strip()})
+        )
+        if entry.id and entry.id not in entries:
+            entries[entry.id] = entry
+    return tuple(entries.values())
 
 
 def _catalog_kind(configured: str, spec: ProviderSpec) -> str:

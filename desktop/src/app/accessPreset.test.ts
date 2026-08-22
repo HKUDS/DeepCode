@@ -34,6 +34,7 @@ function settings(
 ): SettingsSnapshot {
   return {
     configPath: "/tmp/deepcode_config.json",
+  configRevision: "rev-test-1",
     agents: {},
     security,
     permissionModeExplicit: false,

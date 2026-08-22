@@ -25,6 +25,7 @@ jobs:
   verify-tag:
     name: Verify release identity
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
 
     steps:
       - name: Check out release tag
@@ -70,6 +71,7 @@ jobs:
             bundles: deb,appimage
             verify: appimage
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
 
     steps:
       - name: Check out release tag
@@ -79,20 +81,55 @@ jobs:
 
       - name: Install Tauri Linux dependencies
         if: runner.os == 'Linux'
+        timeout-minutes: 30
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            build-essential \
-            curl \
-            wget \
-            file \
-            libxdo-dev \
-            libssl-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf \
+          # Hosted-runner apt stalls on dead mirrors and debconf prompts
+          # instead of failing; bound every network step and retry so a
+          # flaky mirror costs minutes, not the job.
+          packages=(
+            libwebkit2gtk-4.1-dev
+            build-essential
+            curl
+            wget
+            file
+            libxdo-dev
+            libssl-dev
+            libayatana-appindicator3-dev
+            librsvg2-dev
+            patchelf
             libfuse2
+          )
+          for attempt in 1 2 3; do
+            if [ "$attempt" -gt 1 ]; then
+              # The Azure-local mirror goes fully unresponsive at times;
+              # retrying it is useless. Runner images configure apt through
+              # different mechanisms — a mirrorlist on some, sources lists
+              # on others — so point every one of them at the global archive.
+              if [ -f /etc/apt/apt-mirrors.txt ]; then
+                echo 'https://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+              fi
+              sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' \
+                /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+            fi
+            # timeout sits inside sudo so its KILL reaches apt itself (a
+            # TERM relayed through sudo dies unanswered when apt is wedged
+            # on a stalled socket); the Acquire options make apt abandon
+            # such sockets on its own instead of waiting forever.
+            apt_opts=(-o Acquire::ForceIPv4=true -o Acquire::http::Timeout=30
+                      -o Acquire::https::Timeout=30 -o Acquire::Retries=2)
+            if sudo -E timeout -k 30 180 apt-get update "${apt_opts[@]}" &&
+               sudo -E timeout -k 30 480 apt-get install -y "${apt_opts[@]}" \
+                 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
+                 "${packages[@]}"; then
+              exit 0
+            fi
+            echo "apt attempt ${attempt} failed or stalled; retrying" >&2
+            sleep 15
+          done
+          echo "Tauri dependency install failed after 3 attempts" >&2
+          exit 1
 
       - name: Set up Node
         uses: actions/setup-node@v4

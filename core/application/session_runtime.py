@@ -36,8 +36,12 @@ from core.application.errors import ConflictError, ThreadNotFoundError
 from core.domain.execution_permission import ExecutionPermissionMode
 from core.domain.execution_profile import ExecutionProfile
 from core.domain.execution_security import ExecutionSecurityProfile
+from core.file_lock import FileLease
 from core.sessions import Session, SessionStore
-from core.sessions.continuation import session_message_history_entry
+from core.sessions.transcript import (
+    new_records_from_history,
+    visible_kernel_history,
+)
 from core.skills.host import SkillWorkspaceRegistry
 
 
@@ -79,6 +83,9 @@ class LiveSessionRuntime:
     goals: GoalRuntimeRouter
     goals_enabled: bool
     active: bool = False
+    # Held for the duration of one execution window: the cross-process
+    # guarantee that only one process runs this Session at a time.
+    run_lease: FileLease | None = None
 
 
 class SessionRuntimeRegistry:
@@ -90,6 +97,7 @@ class SessionRuntimeRegistry:
         factory: AgentSessionFactory,
         *,
         max_live_sessions: int = 16,
+        holder_label: str | None = None,
         skill_hosts: SkillWorkspaceRegistry | None = None,
     ) -> None:
         if max_live_sessions < 1:
@@ -97,6 +105,10 @@ class SessionRuntimeRegistry:
         self.store = store
         self.factory = factory
         self.max_live_sessions = max_live_sessions
+        # Names this process in the refusal another process sees.
+        self.holder_label = (
+            holder_label or f"another DeepCode process (pid {os.getpid()})"
+        )
         self.skill_hosts = skill_hosts
         self._runtimes: OrderedDict[str, LiveSessionRuntime] = OrderedDict()
         self._mailbox_lock = threading.Lock()
@@ -164,6 +176,24 @@ class SessionRuntimeRegistry:
             runtime.agent.load_history(self._visible_history(canonical))
             runtime.canonical_message_count = len(canonical.messages)
 
+        # Cross-process gate (the dsh rule, enforced): one live writer per
+        # Session. Taken only around an execution window, so another process
+        # may hold the Session OPEN and take the next turn once this one
+        # settles; what is refused is running at the same time — the case
+        # that races the SQLite coordination layer. The OS releases the lock
+        # if this process dies, so a crash never wedges the Session.
+        run_lease = self.store.acquire_run_lease(session_id, holder=self.holder_label)
+        if run_lease is None:
+            self._runtimes[session_id] = runtime
+            holder = self.store.run_holder(session_id) or "another process"
+            raise ConflictError(
+                f"session is being run by {holder}: {session_id}",
+                user_message=(
+                    f"This Session is currently running a turn in {holder}. "
+                    "Wait for it to finish there, or continue in that window."
+                ),
+            )
+        runtime.run_lease = run_lease
         runtime.approvals.current = approval_callback
         runtime.active = True
         self._runtimes[session_id] = runtime
@@ -218,6 +248,9 @@ class SessionRuntimeRegistry:
             return
         runtime.approvals.current = None
         runtime.active = False
+        if runtime.run_lease is not None:
+            runtime.run_lease.close()
+            runtime.run_lease = None
 
     def reserve_input(
         self,
@@ -271,14 +304,21 @@ class SessionRuntimeRegistry:
         runtime.agent.load_history([])
         runtime.canonical_message_count = len(canonical.messages)
 
-    async def compact_live_history(self, session_id: str) -> dict[str, Any]:
+    async def compact_live_history(
+        self,
+        session_id: str,
+        *,
+        execution_profile: ExecutionProfile | None = None,
+    ) -> dict[str, Any]:
         """Summarize the resident model context in place (`/compact`).
 
-        The canonical Session log stays untouched — the same contract as
-        :meth:`clear_live_history`, but replacing older turns with a model
-        summary instead of dropping everything. A Session with no resident
-        runtime has nothing to compact: its context is rebuilt from
-        canonical history on the next acquire anyway.
+        After replacing the resident history, a compaction checkpoint is
+        appended to the canonical file so resume rebuilds the compacted
+        shape instead of the pre-compact giant.
+
+        ``execution_profile`` is the Thread's *current* resolved selection;
+        when given, a stale idle runtime is rebuilt first (see
+        :meth:`_refresh_idle_runtime`).
         """
         runtime = self._runtimes.get(session_id)
         if runtime is None:
@@ -288,12 +328,16 @@ class SessionRuntimeRegistry:
             )
         if runtime.active:
             raise ConflictError(f"session runtime is active: {session_id}")
+        if execution_profile is not None:
+            runtime = await self._refresh_idle_runtime(runtime, execution_profile)
         compact = getattr(runtime.agent, "compact", None)
         if not callable(compact):
             raise ConflictError(
                 "This Session's runtime does not support manual compaction."
             )
-        return await compact()
+        report = await compact()
+        self.persist_kernel_history(session_id, runtime.agent.history)
+        return report
 
     async def discard(self, session_id: str) -> None:
         """Close and forget one idle runtime after permanent Session deletion."""
@@ -318,6 +362,10 @@ class SessionRuntimeRegistry:
         self._runtimes.clear()
         for runtime in runtimes:
             runtime.approvals.current = None
+            if runtime.run_lease is not None:
+                # Shutdown can arrive mid-turn; hand the Session back.
+                runtime.run_lease.close()
+                runtime.run_lease = None
             try:
                 await runtime.agent.aclose()
             except Exception:
@@ -410,6 +458,49 @@ class SessionRuntimeRegistry:
             goals=goals,
             goals_enabled=goals_enabled,
         )
+
+    async def _refresh_idle_runtime(
+        self,
+        runtime: LiveSessionRuntime,
+        execution_profile: ExecutionProfile,
+    ) -> LiveSessionRuntime:
+        """Apply acquire's rebuild-on-config-change rule to an idle runtime.
+
+        Turns always pass through :meth:`acquire`, whose runtime-key gate
+        rebuilds the agent when the execution configuration changed.
+        On-demand maintenance (`/compact`) reuses the resident agent
+        directly, so it must honor the same rule — otherwise a model switch
+        would keep summarizing with the previous provider/model.
+        """
+        canonical = self.store.get_session(runtime.session_id)
+        if canonical is None:
+            raise ThreadNotFoundError(f"session not found: {runtime.session_id}")
+        agent_preset = AgentPresetSnapshot.from_metadata(
+            canonical.metadata.get(PRESET_METADATA_KEY)
+        )
+        runtime_key = self._runtime_key(
+            workspace=runtime.workspace,
+            model=execution_profile.model_id,
+            execution_profile=execution_profile,
+            execution_security_profile=runtime.execution_security_profile,
+            permission_mode_override=runtime.permission_mode_override,
+            agent_preset=agent_preset,
+        )
+        if runtime_key == runtime.runtime_key:
+            return runtime
+        await runtime.agent.aclose()
+        rebuilt = self._create(
+            canonical,
+            workspace=runtime.workspace,
+            model=execution_profile.model_id,
+            execution_profile=execution_profile,
+            execution_security_profile=runtime.execution_security_profile,
+            permission_mode_override=runtime.permission_mode_override,
+            agent_preset=agent_preset,
+            runtime_key=runtime_key,
+        )
+        self._runtimes[runtime.session_id] = rebuilt
+        return rebuilt
 
     def _mailbox(self, session_id: str) -> TurnInputMailbox:
         with self._mailbox_lock:
@@ -580,13 +671,32 @@ class SessionRuntimeRegistry:
 
         return note
 
+    def persist_kernel_history(
+        self,
+        session_id: str,
+        history: object,
+        extra_metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Append model-visible history that is not yet in the canonical file."""
+        canonical = self.store.get_session(session_id)
+        if canonical is None:
+            return
+        extra = extra_metadata or {}
+        for record in new_records_from_history(history or (), canonical.messages):
+            metadata = {**(record.metadata or {}), **extra}
+            stored = self.store.append_message(
+                session_id,
+                record.role,
+                record.content,
+                metadata=metadata or None,
+            )
+            if stored is None:
+                return
+        self.mark_persisted(session_id)
+
     @staticmethod
     def _visible_history(session: Session) -> list[dict[str, Any]]:
-        return [
-            session_message_history_entry(message)
-            for message in session.messages
-            if message.role in {"user", "assistant"} and message.content
-        ]
+        return visible_kernel_history(session.messages)
 
 
 def _accepts_keyword(callable_object, name: str) -> bool:

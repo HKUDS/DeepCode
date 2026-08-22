@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import logging
 import sqlite3
 import threading
@@ -196,6 +197,7 @@ class TurnService:
         *,
         session_factory: AgentSessionFactory | None = None,
         session_store: SessionStore,
+        holder_label: str | None = None,
         llm_configuration: LLMConfigurationService | None = None,
         execution_security_policy: ExecutionSecurityPolicy | None = None,
         skill_hosts: SkillWorkspaceRegistry | None = None,
@@ -210,10 +212,16 @@ class TurnService:
         self.execution_security_policy = (
             execution_security_policy or ExecutionSecurityPolicy()
         )
+        # One string shared with the registry, so "is that holder me?" is
+        # exact equality rather than pid parsing.
+        self.holder_label = holder_label or (
+            f"another DeepCode process (pid {os.getpid()})"
+        )
         self.session_runtimes = SessionRuntimeRegistry(
             session_store,
             self.session_factory,
             skill_hosts=skill_hosts,
+            holder_label=self.holder_label,
         )
         self.turn_inputs = TurnInputService(
             database,
@@ -541,6 +549,7 @@ class TurnService:
                 raise ProjectNotTrustedError(
                     "project must be trusted before agent execution"
                 )
+            self._refuse_if_running_elsewhere(thread_id)
             self._validate_workspace(thread, project.canonical_path)
             turns = TurnRepository(connection)
             items = ItemRepository(connection)
@@ -980,6 +989,35 @@ class TurnService:
             terminal_event_type="turn.recovered",
         )
 
+    def _refuse_if_running_elsewhere(self, thread_id: str) -> None:
+        """Fail a submission fast when another PROCESS is executing here.
+
+        The authoritative gate is the run lease taken around execution
+        (`SessionRuntimeRegistry.acquire`), but by then the Turn is already
+        created and marked running, so a refusal there surfaces as a failed
+        Turn. Probing at submission turns the common case into a clean
+        refusal before anything exists. Our own process holding the lease is
+        not a refusal: that is an active local Turn, and queueing behind it
+        is exactly what submission is for.
+        """
+        probe = self.session_store.acquire_run_lease(
+            thread_id, holder=self.holder_label
+        )
+        if probe is not None:
+            probe.close()
+            return
+        holder = self.session_store.run_holder(thread_id)
+        if holder == self.holder_label:
+            return
+        raise ConflictError(
+            f"session is being run by {holder or 'another process'}: {thread_id}",
+            user_message=(
+                "This Session is currently running a turn in "
+                f"{holder or 'another DeepCode process'}. Wait for it to "
+                "finish there, or continue in that window."
+            ),
+        )
+
     def _submitting_worker_id(self) -> str | None:
         coordinator = self._execution_coordinator
         worker = coordinator.worker if coordinator is not None else None
@@ -1119,7 +1157,25 @@ class TurnService:
         """
         if self.active_for_thread(thread_id) is not None:
             raise ConflictError("Compaction is unavailable while a Turn is active.")
-        return await self.session_runtimes.compact_live_history(thread_id)
+        with self.database.read() as connection:
+            thread = ThreadRepository(connection).get(thread_id)
+        if thread is None:
+            raise ThreadNotFoundError(f"thread not found: {thread_id}")
+        # Resolve the Thread's CURRENT selection exactly like a Turn does, so
+        # compaction summarizes with the model the user selected — not with
+        # whatever the resident runtime was built with before a switch.
+        execution_profile = self.llm_configuration.resolve(
+            thread.workspace_path,
+            ExecutionSelection(
+                connection_id=thread.connection_id,
+                model_id=thread.model,
+                reasoning_effort=thread.reasoning_effort,
+            ),
+        )
+        return await self.session_runtimes.compact_live_history(
+            thread_id,
+            execution_profile=execution_profile,
+        )
 
     def interrupt(
         self,
@@ -1343,33 +1399,68 @@ class TurnService:
             raw_usage = getattr(session, "last_usage", {})
             if not projection.usage:
                 turn_usage = normalize_usage(raw_usage)
+            self.session_runtimes.persist_kernel_history(
+                turn.thread_id,
+                getattr(session, "history", ()),
+                extra_metadata={
+                    "schemaVersion": 3,
+                    "client": turn_client,
+                    "turnId": turn.id,
+                    "executionProfile": execution_profile.to_dict(),
+                    "executionSecurityProfile": (
+                        turn.execution_security_profile.to_dict()
+                        if turn.execution_security_profile is not None
+                        else None
+                    ),
+                    **turn_identity_metadata,
+                    # Turn-level facts belong on every record this Turn
+                    # persists. Leaving them only on the fallback append lost
+                    # them entirely once the history path started writing the
+                    # assistant record itself.
+                    "skillInvocations": [
+                        invocation.to_metadata()
+                        for invocation in skill_invocations.values()
+                    ],
+                },
+            )
             if projection.saw_terminal:
                 if projection.final_text:
+                    canonical = self.session_store.get_session(turn.thread_id)
+                    already_stored = (
+                        canonical is not None
+                        and canonical.messages
+                        and canonical.messages[-1].role == "assistant"
+                        and canonical.messages[-1].content == projection.final_text
+                    )
                     continuation_metadata = assistant_continuation_metadata(
                         getattr(session, "history", ())
                     )
-                    stored_assistant = self.session_store.append_message(
-                        turn.thread_id,
-                        "assistant",
-                        projection.final_text,
-                        metadata={
-                            "schemaVersion": 3,
-                            "client": turn_client,
-                            "turnId": turn.id,
-                            "executionProfile": execution_profile.to_dict(),
-                            "executionSecurityProfile": (
-                                turn.execution_security_profile.to_dict()
-                                if turn.execution_security_profile is not None
-                                else None
-                            ),
-                            **continuation_metadata,
-                            **turn_identity_metadata,
-                            "skillInvocations": [
-                                invocation.to_metadata()
-                                for invocation in skill_invocations.values()
-                            ],
-                        },
-                    )
+                    stored_assistant = True
+                    if already_stored:
+                        self.session_runtimes.mark_persisted(turn.thread_id)
+                    else:
+                        stored_assistant = self.session_store.append_message(
+                            turn.thread_id,
+                            "assistant",
+                            projection.final_text,
+                            metadata={
+                                "schemaVersion": 3,
+                                "client": turn_client,
+                                "turnId": turn.id,
+                                "executionProfile": execution_profile.to_dict(),
+                                "executionSecurityProfile": (
+                                    turn.execution_security_profile.to_dict()
+                                    if turn.execution_security_profile is not None
+                                    else None
+                                ),
+                                **continuation_metadata,
+                                **turn_identity_metadata,
+                                "skillInvocations": [
+                                    invocation.to_metadata()
+                                    for invocation in skill_invocations.values()
+                                ],
+                            },
+                        )
                     if stored_assistant is None:
                         raise RuntimeError(
                             f"canonical session disappeared: {turn.thread_id}"

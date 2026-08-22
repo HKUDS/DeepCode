@@ -132,6 +132,14 @@ class TauriDesktopRuntime implements DesktopRuntime {
     }
   }
 
+  async openPath(path: string): Promise<void> {
+    try {
+      await invoke<void>("open_path", { path });
+    } catch (error) {
+      throw normalizeBridgeError(error);
+    }
+  }
+
   async checkForUpdate(): Promise<DesktopUpdateInfo | null> {
     try {
       if (this.pendingUpdate) {

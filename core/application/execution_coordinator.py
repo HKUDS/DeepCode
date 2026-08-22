@@ -200,8 +200,7 @@ class ExecutionCoordinator:
                 heartbeat_at=now,
             )
             try:
-                with self.database.transaction() as connection:
-                    RuntimeCoordinationRepository(connection).register_worker(worker)
+                self._register_worker_verified(worker)
             except BaseException:
                 lease.close()
                 raise
@@ -214,6 +213,41 @@ class ExecutionCoordinator:
             if background:
                 self._start_background_locked()
             return worker
+
+    def _register_worker_verified(self, worker: RuntimeWorker) -> None:
+        """Register and read the row back on a fresh connection.
+
+        Under concurrent process startup, a committed registration has been
+        observed missing from the database every later read sees — the cause
+        of a FOREIGN KEY failure at this worker's first turn submit, minutes
+        later and naming nothing. Verifying here converts that into either a
+        silent self-heal (one retry) or a startup error that says what
+        actually happened. (Root cause investigated 2026-08-19: the row
+        vanished under concurrent worker startup; the write itself raised
+        nothing.)
+        """
+        for attempt in (1, 2):
+            with self.database.transaction() as connection:
+                repository = RuntimeCoordinationRepository(connection)
+                if repository.get_worker(worker.id) is None:
+                    repository.register_worker(worker)
+            with self.database.read() as connection:
+                readback = RuntimeCoordinationRepository(connection).get_worker(
+                    worker.id
+                )
+            if readback is not None:
+                if attempt > 1:
+                    logger.warning(
+                        "Worker registration %s required a retry to become "
+                        "durable; a concurrent process start likely raced it",
+                        worker.id,
+                    )
+                return
+        raise RuntimeError(
+            f"worker registration did not become durable: {worker.id}. "
+            "Another DeepCode process starting at the same moment likely "
+            "raced this one; retry, or start the processes a moment apart."
+        )
 
     def start_background(self) -> None:
         """Begin admission after startup recovery has reached a stable boundary."""

@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 import core.skills.catalog as skill_catalog
+from core.agent_runtime.context import EnvironmentContext
 from core.events import AgentSession, UserInput
 from core.harness.tools import default_coding_tools
 from core.providers.base import LLMResponse, ToolCallRequest
@@ -131,19 +132,26 @@ async def test_explicit_skill_is_injected_and_narrows_tools(tmp_path: Path) -> N
     assert "<skills_instructions>" in system_text
     assert "PRODUCT-SKILL-MARKER" not in system_text
     assert "PRODUCT-SKILL-MARKER" in user_text
-    assert request_messages[-3]["content"].startswith("<environment_context>")
-    assert f"<cwd>{workspace.resolve()}</cwd>" in request_messages[-3]["content"]
+    env_messages = [
+        message
+        for message in request_messages
+        if isinstance(message.get("content"), str)
+        and message["content"].startswith("<environment_context>")
+    ]
+    assert len(env_messages) == 1
+    assert request_messages[1] is env_messages[0]
+    assert f"<cwd>{workspace.resolve()}</cwd>" in env_messages[0]["content"]
     assert request_messages[-2]["content"].startswith("<skill>")
     assert request_messages[-1] == {"role": "user", "content": "Review this change"}
     assert all(message["role"] != "developer" for message in request_messages)
     assert _tool_names(provider.calls[0]) == {"read", "grep", "skill"}
     assert all(message["role"] != "system" for message in session.history)
+    assert EnvironmentContext.is_history_message(session.history[0])
     assert all(
         marker not in str(message.get("content", ""))
         for message in session.history
         for marker in (
             "PRODUCT-SKILL-MARKER",
-            "<environment_context>",
             "<skills_instructions>",
         )
     )

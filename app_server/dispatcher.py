@@ -199,6 +199,7 @@ class Dispatcher:
             rpc_methods.PROVIDER_UPSERT: self._provider_upsert,
             rpc_methods.PROVIDER_REMOVE: self._provider_remove,
             rpc_methods.PROVIDER_TEST: self._provider_test,
+            rpc_methods.PROVIDER_DISCOVER: self._provider_discover,
             rpc_methods.MODEL_LIST: self._model_list,
             rpc_methods.PRESET_LIST: self._preset_list,
             rpc_methods.PRESET_CURRENT: self._preset_current,
@@ -398,7 +399,9 @@ class Dispatcher:
         }
 
     def _settings_update(self, params: Params) -> dict[str, Any]:
-        params.only("patch", "scope", "projectId", "riskAcknowledged")
+        params.only(
+            "patch", "scope", "projectId", "riskAcknowledged", "expectedRevision"
+        )
         patch = dict(params.object("patch") or {})
         security = patch.get("security")
         if (
@@ -413,6 +416,7 @@ class Dispatcher:
             patch,
             scope=params.string("scope", required=False) or "user",
             project_id=params.string("projectId", required=False),
+            expected_revision=params.string("expectedRevision", required=False),
         )
         return {"settings": settings}
 
@@ -423,12 +427,18 @@ class Dispatcher:
         )
 
     def _provider_upsert(self, params: Params) -> dict[str, Any]:
-        params.only("connection")
-        return self.application.llm.upsert(dict(params.object("connection") or {}))
+        params.only("connection", "expectedRevision")
+        return self.application.llm.upsert(
+            dict(params.object("connection") or {}),
+            expected_revision=params.string("expectedRevision", required=False),
+        )
 
     def _provider_remove(self, params: Params) -> dict[str, Any]:
-        params.only("connectionId")
-        return self.application.llm.remove(str(params.string("connectionId")))
+        params.only("connectionId", "expectedRevision")
+        return self.application.llm.remove(
+            str(params.string("connectionId")),
+            expected_revision=params.string("expectedRevision", required=False),
+        )
 
     def _provider_test(self, params: Params) -> dict[str, Any]:
         params.only("connectionId", "projectId", "model")
@@ -436,6 +446,16 @@ class Dispatcher:
             str(params.string("connectionId")),
             project_id=params.string("projectId", required=False),
             model_id=params.string("model", required=False),
+        )
+
+    def _provider_discover(self, params: Params) -> dict[str, Any]:
+        params.only("connectionId", "template", "apiBase", "apiKey", "projectId")
+        return self.application.llm.discover_models(
+            connection_id=params.string("connectionId", required=False),
+            template=params.string("template", required=False),
+            api_base=params.string("apiBase", required=False),
+            api_key=params.string("apiKey", required=False),
+            project_id=params.string("projectId", required=False),
         )
 
     def _model_list(self, params: Params) -> dict[str, Any]:

@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from core.application.config_store import ConfigStore
-from core.application.errors import InvalidArgumentError
+from core.application.config_store import (
+    ConfigRevisionConflict,
+    ConfigStore,
+)
+from core.application.errors import ConflictError, InvalidArgumentError
 from core.application.project_service import ProjectService
 from core.config import (
     ConnectionProfileConfig,
@@ -20,6 +24,7 @@ from core.domain.execution_profile import ExecutionProfile, ExecutionSelection
 from core.providers.catalog_service import ModelCatalogService
 from core.providers.credentials import CredentialStore
 from core.providers.profiles import ConnectionResolver, validate_connection_id
+from core.providers.reasoning import infer_reasoning_capabilities
 from core.providers.registry import PROVIDERS, find_by_name
 
 _PROFILE_FIELDS = {
@@ -107,7 +112,12 @@ class LLMConfigurationService:
         except ValueError:
             return None
 
-    def upsert(self, value: dict[str, Any]) -> dict[str, Any]:
+    def upsert(
+        self,
+        value: dict[str, Any],
+        *,
+        expected_revision: str | None = None,
+    ) -> dict[str, Any]:
         connection_id, api_key, clear_api_key = self._parse_mutation(value)
         config_fields_supplied = bool(set(value) - {"id", "apiKey", "clearApiKey"})
 
@@ -144,14 +154,19 @@ class LLMConfigurationService:
             and find_by_name(connection_id) is not None
         )
         if not credential_only_builtin:
-            self.config_store.mutate(transform)
+            self._mutate_config(transform, expected_revision)
         if clear_api_key:
             self.credentials.clear(connection_id)
         if api_key is not None:
             self.credentials.set(connection_id, api_key)
         return self.list_connections()
 
-    def remove(self, connection_id: str) -> dict[str, Any]:
+    def remove(
+        self,
+        connection_id: str,
+        *,
+        expected_revision: str | None = None,
+    ) -> dict[str, Any]:
         try:
             clean_id = validate_connection_id(connection_id)
         except ValueError as exc:
@@ -187,12 +202,79 @@ class LLMConfigurationService:
                 return {**current, "providers": providers}
             return {key: value for key, value in current.items() if key != "providers"}
 
-        self.config_store.mutate(transform)
+        self._mutate_config(transform, expected_revision)
         credential_removed = self.credentials.clear(clean_id)
         return {
             "removed": removed or credential_removed,
             **self.list_connections(),
         }
+
+    def discover_models(
+        self,
+        *,
+        connection_id: str | None = None,
+        template: str | None = None,
+        api_base: str | None = None,
+        api_key: str | None = None,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Probe an endpoint AS SHOWN in an editor form; writes nothing.
+
+        An existing connection supplies the baseline (its stored key stays
+        usable); a template covers create-before-first-save. An unsaved base
+        URL or freshly typed key overrides for this one probe only and never
+        leaves memory — discovery returns candidates, adopting writes
+        (the dsh rule).
+        """
+        resolver = self._resolver(project_id=project_id)
+        try:
+            if connection_id and connection_id.strip():
+                base = resolver.resolve_connection(connection_id.strip())
+            elif template and template.strip():
+                base = resolver.template_connection(template.strip())
+            else:
+                raise InvalidArgumentError(
+                    "provider discovery needs a connectionId or a template"
+                )
+        except ValueError as exc:
+            raise InvalidArgumentError(str(exc)) from exc
+        overrides: dict[str, Any] = {}
+        if api_base and api_base.strip():
+            overrides["api_base"] = api_base.strip()
+        if api_key and api_key.strip():
+            overrides["api_key"] = api_key.strip()
+        connection = replace(base, **overrides) if overrides else base
+        try:
+            models = self.catalog.probe(connection)
+        except Exception as exc:  # noqa: BLE001 - surfaced, never raised to UI
+            return {"models": [], "error": _safe_configuration_error(exc)}
+        return {"models": [model.to_dict() for model in models], "error": None}
+
+    def model_reasoning(
+        self,
+        connection_id: str,
+        model_id: str,
+        *,
+        project_id: str | None = None,
+    ):
+        """Last-known reasoning capabilities for one route, without I/O.
+
+        Catalog snapshot first (the provider's own published controls),
+        offline inference second — the same precedence
+        :meth:`resolve_phases` applies when building an execution profile.
+        """
+        try:
+            resolver = self._resolver(project_id=project_id)
+            connection = resolver.resolve_connection(connection_id)
+        except ValueError:
+            return infer_reasoning_capabilities(model_id)
+        cached = self.catalog.cached_model(connection, model_id)
+        if cached is not None and cached.reasoning is not None:
+            return cached.reasoning
+        return infer_reasoning_capabilities(
+            model_id,
+            provider_name=connection.provider_name,
+        )
 
     def list_models(
         self,
@@ -472,6 +554,12 @@ class LLMConfigurationService:
         project = self.projects.read(project_id)
         workspace = Path(project.canonical_path).resolve(strict=False)
         return load_config_for_workspace(workspace)
+
+    def _mutate_config(self, transform, expected_revision: str | None) -> None:
+        try:
+            self.config_store.mutate(transform, expected_revision=expected_revision)
+        except ConfigRevisionConflict as exc:
+            raise ConflictError(str(exc)) from exc
 
     @staticmethod
     def _parse_mutation(

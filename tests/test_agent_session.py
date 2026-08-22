@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from core.agent_runtime.context import EnvironmentContext  # noqa: E402
 from core.agent_runtime.tools.base import Tool, tool_parameters  # noqa: E402
 from core.agent_runtime.tools.registry import ToolRegistry  # noqa: E402
 from core.events import (  # noqa: E402
@@ -105,11 +106,13 @@ class ScriptedProvider:
     def __init__(self, responses: list[LLMResponse]):
         self.responses = list(responses)
         self.calls = 0
+        self.requests: list[list[dict[str, Any]]] = []
 
     def get_default_model(self) -> str:
         return "fake-model"
 
     async def chat_with_retry(self, **kwargs: Any) -> LLMResponse:
+        self.requests.append(list(kwargs.get("messages") or []))
         i = min(self.calls, len(self.responses) - 1)
         self.calls += 1
         return self.responses[i]
@@ -180,6 +183,37 @@ async def test_plain_text_turn_emits_started_message_complete():
     complete = events[-1].msg
     assert isinstance(complete, TaskComplete)
     assert complete.stop_reason == "completed"
+
+
+@pytest.mark.asyncio
+async def test_environment_context_is_durable_and_prefix_stable(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    provider = ScriptedProvider(
+        [
+            LLMResponse(content="first", finish_reason="stop"),
+            LLMResponse(content="second", finish_reason="stop"),
+        ]
+    )
+    session = _session(provider, workspace=workspace)
+
+    await session.submit(UserInput(text="one"))
+    await session.submit(UserInput(text="two"))
+
+    first, second = provider.requests
+    assert EnvironmentContext.is_history_message(first[0])
+    assert first == second[: len(first)]
+    assert EnvironmentContext.is_history_message(session.history[0])
+    assert (
+        sum(
+            1
+            for message in session.history
+            if EnvironmentContext.is_history_message(message)
+        )
+        == 1
+    )
 
 
 @pytest.mark.asyncio

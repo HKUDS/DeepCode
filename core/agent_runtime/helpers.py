@@ -45,8 +45,15 @@ def truncate_text(text: str, max_chars: int) -> str:
 _UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*]')
 _TOOL_RESULT_PREVIEW_CHARS = 1200
 _TOOL_RESULTS_DIR = ".deepcode/tool-results"
-_TOOL_RESULT_RETENTION_SECS = 7 * 24 * 60 * 60
-_TOOL_RESULT_MAX_BUCKETS = 32
+# A spilled result is referenced by the session history that produced it, so
+# its bucket has to outlive anything a user might resume. Deleting by RANK
+# (a "keep the newest N sessions" cap) broke exactly that: in a workspace with
+# more sessions than the cap, an older session's locators went dangling while
+# its history still pointed at them. Age is the only honest signal available
+# at this layer — the kernel cannot see which sessions still exist — so the
+# horizon is long enough that a bucket only disappears once nobody has
+# resumed that session for a full quarter.
+_TOOL_RESULT_RETENTION_SECS = 90 * 24 * 60 * 60
 
 
 def safe_filename(name: str) -> str:
@@ -120,21 +127,23 @@ def _bucket_mtime(path: Path) -> float:
         return 0.0
 
 
+_SWEPT_TOOL_RESULT_ROOTS: set[str] = set()
+
+
 def _cleanup_tool_result_buckets(root: Path, current_bucket: Path) -> None:
-    siblings = [
-        path for path in root.iterdir() if path.is_dir() and path != current_bucket
-    ]
-    cutoff = time.time() - _TOOL_RESULT_RETENTION_SECS
-    for path in siblings:
-        if _bucket_mtime(path) < cutoff:
-            shutil.rmtree(path, ignore_errors=True)
-    keep = max(_TOOL_RESULT_MAX_BUCKETS - 1, 0)
-    siblings = [path for path in siblings if path.exists()]
-    if len(siblings) <= keep:
+    """Drop buckets no session has touched inside the retention horizon.
+
+    Swept once per root per process: this used to run on every oversized tool
+    result, scanning and stat-ing the whole directory on a hot path.
+    """
+    key = str(root)
+    if key in _SWEPT_TOOL_RESULT_ROOTS:
         return
-    siblings.sort(key=_bucket_mtime, reverse=True)
-    for path in siblings[keep:]:
-        shutil.rmtree(path, ignore_errors=True)
+    _SWEPT_TOOL_RESULT_ROOTS.add(key)
+    cutoff = time.time() - _TOOL_RESULT_RETENTION_SECS
+    for path in root.iterdir():
+        if path.is_dir() and path != current_bucket and _bucket_mtime(path) < cutoff:
+            shutil.rmtree(path, ignore_errors=True)
 
 
 def _write_text_atomic(path: Path, content: str) -> None:
@@ -194,6 +203,28 @@ def maybe_persist_tool_result(
         preview=preview,
         truncated_preview=len(text_payload) > _TOOL_RESULT_PREVIEW_CHARS,
     )
+
+
+def history_signature(
+    messages: list[dict[str, Any]],
+) -> tuple[tuple[str, int], ...]:
+    """A cheap positional signature of the model-visible conversation.
+
+    Role plus content size per non-system message: enough to tell "the same
+    history with more appended" from "a history that was rewritten", without
+    serializing every message on a hot path. Shared by the token meter's
+    anchor and the compaction memo so the two agree on what "unchanged"
+    means.
+    """
+    signature: list[tuple[str, int]] = []
+    for message in messages:
+        if message.get("role") == "system":
+            continue
+        content = message.get("content")
+        length = len(content) if isinstance(content, str) else 0
+        calls = message.get("tool_calls") or ()
+        signature.append((str(message.get("role")), length + 16 * len(calls)))
+    return tuple(signature)
 
 
 def build_assistant_message(

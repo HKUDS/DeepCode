@@ -10,6 +10,7 @@ from pathlib import Path
 
 from core.agent_presets import METADATA_KEY as PRESET_METADATA_KEY
 from core.agent_presets import AgentPresetError, resolve_agent_preset
+from core.config import ConfigError, load_config_for_workspace
 from core.application.errors import (
     ConflictError,
     InvalidArgumentError,
@@ -43,6 +44,9 @@ from core.persistence.thread_repository import ThreadRepository
 from core.persistence.workflow_repository import WorkflowRepository
 from core.providers.reasoning import normalize_reasoning_effort
 from core.sessions import Session, SessionMessage, SessionStore
+from core.sessions.transcript import (
+    is_compaction_checkpoint as _is_compaction_checkpoint,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +54,44 @@ _DESKTOP_KIND = "desktop"
 _AUTOMATION_KIND = "automation"
 _MISSING_WORKSPACE_DIR = ".missing-workspaces"
 _UNSET = object()
+
+
+def _projected_item_kind(message: SessionMessage) -> ItemKind:
+    """The item kind a rebuilt-from-JSONL record should carry.
+
+    Mirrors the live projection's tool families
+    (`TurnProjection._kind_for_tool`) so a session rebuilt from the canonical
+    file renders the same way as one watched live.
+    """
+    if message.role == "user":
+        return ItemKind.USER_MESSAGE
+    if message.role != "tool":
+        return ItemKind.ASSISTANT_MESSAGE
+    name = str((message.metadata or {}).get("name") or "").lower()
+    if name in {"update_plan", "plan"}:
+        return ItemKind.PLAN
+    if name in {"bash", "exec", "execute_bash", "execute_commands"}:
+        return ItemKind.COMMAND_EXECUTION
+    if any(token in name for token in ("write", "edit", "apply_patch")):
+        return ItemKind.FILE_CHANGE
+    return ItemKind.TOOL_CALL
+
+
+def _projected_item_payload(message: SessionMessage) -> dict[str, object]:
+    """Payload matching what the live projection stores for the same kind."""
+    if message.role != "tool":
+        return {"text": message.content, "projectedFromSession": True}
+    metadata = message.metadata or {}
+    name = str(metadata.get("name") or "tool")
+    return {
+        "callId": str(metadata.get("toolCallId") or ""),
+        "name": name,
+        "detail": message.content[:160],
+        "activity": None,
+        "isError": False,
+        "resultPreview": message.content,
+        "projectedFromSession": True,
+    }
 
 
 class ThreadService:
@@ -102,6 +144,7 @@ class ThreadService:
         workspace_path: str | None = None,
         parent_thread_id: str | None = None,
         agent_preset: str | None = None,
+        inherit_default_preset: bool = True,
     ) -> Thread:
         clean_title = title.strip()
         if not clean_title:
@@ -154,6 +197,23 @@ class ThreadService:
                 )
             except AgentPresetError as exc:
                 raise InvalidArgumentError(str(exc)) from exc
+        elif inherit_default_preset:
+            # No explicit choice: fill the blank with the configured default
+            # for new Sessions (agents.defaults.defaultPreset), through the
+            # same by-value snapshot. The Session stays clearable/selectable
+            # while blank via set_agent_preset, exactly as if the user had
+            # picked the preset themselves.
+            #
+            # Callers that are not a human starting a session opt out: a
+            # default chosen for safe interactive chatting (say, a read-only
+            # composition) must not silently strip an automated run's tools
+            # in a way nothing announces.
+            preset_snapshot = self._configured_default_preset(workspace)
+            if preset_snapshot is not None:
+                logger.info(
+                    "applying configured default agent preset %r to new session",
+                    preset_snapshot.id,
+                )
         metadata = {
             "kind": clean_session_kind,
             "workspace": str(workspace),
@@ -683,12 +743,26 @@ class ThreadService:
     ) -> list[DomainEvent]:
         """Append missing visible JSONL messages into the disposable timeline."""
 
-        canonical = [
+        # Two views of the same records. The TRANSCRIPT is what the
+        # projected/canonical comparison is defined over — text the user
+        # exchanged with the agent, which is what `conversation_for_thread`
+        # returns. The TIMELINE additionally carries the tool records Phase 1
+        # started persisting, so a session rebuilt from JSONL shows what the
+        # agent did and not only what it said. A compaction checkpoint is in
+        # neither: it rides a user-role record but is bookkeeping, not
+        # conversation.
+        timeline = [
             message
             for message in session.messages
-            if message.role in {"user", "assistant"}
-            and message.content
+            if message.role in {"user", "assistant", "tool"}
+            and (message.content or (message.metadata or {}).get("toolCalls"))
             and not self._is_context_note(message)
+            and not _is_compaction_checkpoint(message)
+        ]
+        canonical = [
+            message
+            for message in timeline
+            if message.role in {"user", "assistant"} and message.content
         ]
         items = ItemRepository(connection)
         projected_items = items.conversation_for_thread(thread.id)
@@ -724,10 +798,32 @@ class ThreadService:
             )
             return [event]
 
-        missing = canonical[len(projected) :]
+        # Resume the timeline just past the text messages already projected,
+        # so tool records that belong to an already-projected turn are not
+        # appended a second time.
+        consumed = len(projected)
+        start = len(timeline)
+        seen = 0
+        for index, message in enumerate(timeline):
+            if message.role in {"user", "assistant"} and message.content:
+                if seen == consumed:
+                    start = index
+                    break
+                seen += 1
+        else:
+            if seen == consumed:
+                start = len(timeline)
+        missing = timeline[start:]
         groups: list[list[SessionMessage]] = []
         for message in missing:
-            if message.role == "user" or not groups:
+            # A compaction checkpoint is runtime bookkeeping that happens to
+            # ride a user-role record. Treating it as a prompt opened an empty
+            # Turn in the Desktop projection whose title was the summary
+            # preamble; it belongs to the Turn it closed, not to a new one.
+            starts_turn = message.role == "user" and not _is_compaction_checkpoint(
+                message
+            )
+            if starts_turn or not groups:
                 groups.append([message])
             else:
                 groups[-1].append(message)
@@ -739,7 +835,11 @@ class ThreadService:
             timestamps = [self._parse_time(message.timestamp) for message in messages]
             execution_security_profile = self._execution_security_for(messages)
             first_user = next(
-                (message for message in messages if message.role == "user"),
+                (
+                    message
+                    for message in messages
+                    if message.role == "user" and not _is_compaction_checkpoint(message)
+                ),
                 None,
             )
             turn = Turn(
@@ -820,17 +920,10 @@ class ThreadService:
                     thread_id=thread.id,
                     turn_id=turn.id,
                     ordinal=items.next_ordinal(turn.id),
-                    kind=(
-                        ItemKind.USER_MESSAGE
-                        if message.role == "user"
-                        else ItemKind.ASSISTANT_MESSAGE
-                    ),
+                    kind=_projected_item_kind(message),
                     status=ItemStatus.COMPLETED,
                     summary=message.content[:160],
-                    payload={
-                        "text": message.content,
-                        "projectedFromSession": True,
-                    },
+                    payload=_projected_item_payload(message),
                     created_at=created_at,
                     updated_at=created_at,
                 )
@@ -1533,3 +1626,30 @@ class ThreadService:
                 f"workspace is outside project boundary: {workspace}"
             )
         return workspace
+
+    @staticmethod
+    def _configured_default_preset(workspace: Path):
+        """The configured default composition for new Sessions, if usable.
+
+        Failures are deliberately swallowed: a stale preset name (or an
+        unreadable config) must never block creating a Session — it simply
+        starts with the default composition, and the roster view is where a
+        broken preset gets surfaced.
+        """
+        try:
+            configured = load_config_for_workspace(
+                workspace
+            ).agents.defaults.default_preset
+        except ConfigError:
+            return None
+        if configured is None or not configured.strip():
+            return None
+        try:
+            return resolve_agent_preset(configured.strip(), workspace)
+        except AgentPresetError:
+            logger.warning(
+                "configured default agent preset %r is not resolvable; "
+                "starting the Session without it",
+                configured,
+            )
+            return None

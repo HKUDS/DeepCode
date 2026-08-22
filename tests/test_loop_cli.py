@@ -185,7 +185,9 @@ def test_loop_cli_completes_through_the_model_goal_tool(monkeypatch, tmp_path, c
     out = capsys.readouterr().out
     assert "Goal active" in out
     assert "Goal complete" in out
-    assert "update_goal" in out
+    # The tool card's title is what a reader gets: the wire name reaches the
+    # transcript only through that humanised label.
+    assert "Update Goal" in out
     assert out.count("Goal complete (") == 1
     assert any(
         "python -m pytest -q" in str(request.get("messages"))

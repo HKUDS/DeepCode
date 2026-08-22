@@ -1,0 +1,512 @@
+---
+// The DeepCode landing page. Hand-crafted single file by design (the
+// terminal-as-editorial treatment); the teaching guides live under /guide/.
+const base = import.meta.env.BASE_URL.endsWith("/")
+  ? import.meta.env.BASE_URL
+  : import.meta.env.BASE_URL + "/";
+const guides = `${base}guide/`;
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="DeepCode — open agentic coding with a durable session record, one live writer per session, and measured context discipline."
+    />
+    <title>DeepCode</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✳</text></svg>" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Sans:wght@400;450;500;600&display=swap">
+    <style is:global>
+  /* DeepCode — the terminal as the page. One committed dark world:
+     every color painted explicitly, no theme borrowing. */
+  :root{
+    --ground:#0b1116;
+    --panel:#0f1922;
+    --panel-deep:#0c141c;
+    --ink:#e9f1f3;
+    --ink-soft:#94a8b2;
+    --ink-faint:#586e79;
+    --rule:rgba(233,241,243,.08);
+    --rule-strong:rgba(233,241,243,.16);
+    --sky:#0ea5e9;
+    --cyan:#06b6d4;
+    --teal:#4ecdc4;
+    --ok:#34d399;
+    --warn:#fbbf24;
+    --err:#f87171;
+    --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:"IBM Plex Sans",-apple-system,"Segoe UI","PingFang SC","Hiragino Sans GB",sans-serif;
+    --w:1120px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    background:var(--ground);
+    color:var(--ink);
+    font-family:var(--sans);
+    font-weight:450;
+    line-height:1.65;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  ::selection{background:rgba(6,182,212,.32)}
+  a{color:var(--teal);text-decoration:none}
+  a:hover{text-decoration:underline;text-underline-offset:3px}
+  a:focus-visible,button:focus-visible{outline:2px solid var(--cyan);outline-offset:3px;border-radius:2px}
+
+  /* ambient circuit glow behind the hero */
+  .atmo{
+    position:fixed;inset:0;pointer-events:none;z-index:0;
+    background:
+      radial-gradient(52rem 30rem at 82% -6rem, rgba(14,165,233,.13), transparent 62%),
+      radial-gradient(38rem 26rem at -8% 22rem, rgba(78,205,196,.07), transparent 60%);
+  }
+  .grain{
+    position:fixed;inset:0;pointer-events:none;z-index:0;opacity:.5;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .05 0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  main{position:relative;z-index:1}
+  .wrap{max-width:var(--w);margin:0 auto;padding:0 clamp(1.25rem,4vw,2.5rem)}
+
+  /* ── top bar ─────────────────────────────────────────── */
+  header.top{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:1.35rem 0 0;
+  }
+  .brand{display:flex;align-items:center;gap:.65rem;font-family:var(--mono);font-weight:600;font-size:1.02rem;color:var(--ink)}
+  .brand .mark{color:var(--teal);font-weight:700}
+  nav.links{display:flex;gap:1.6rem;font-family:var(--mono);font-size:.82rem}
+  nav.links a{color:var(--ink-soft)}
+  nav.links a:hover{color:var(--ink);text-decoration:none}
+  @media (max-width:640px){nav.links{display:none}}
+
+  /* ── hero ────────────────────────────────────────────── */
+  .hero{
+    display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr);
+    gap:clamp(2rem,5vw,4.5rem);align-items:center;
+    padding:clamp(3.5rem,9vh,7rem) 0 clamp(3rem,7vh,5.5rem);
+  }
+  @media (max-width:920px){.hero{grid-template-columns:1fr}}
+  .eyebrow{
+    font-family:var(--mono);font-size:.78rem;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--ink-faint);margin-bottom:1.1rem;
+  }
+  .eyebrow b{color:var(--cyan);font-weight:500}
+  h1{
+    font-family:var(--mono);font-weight:700;
+    font-size:clamp(2.5rem,5.4vw,4.1rem);
+    line-height:1.06;letter-spacing:-.03em;text-wrap:balance;
+  }
+  h1 .grad{
+    background:linear-gradient(92deg,var(--sky),var(--cyan) 46%,var(--teal));
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+  }
+  .hero p.lede{
+    margin:1.4rem 0 2rem;max-width:34rem;color:var(--ink-soft);
+    font-size:1.06rem;
+  }
+  .install{
+    display:inline-flex;align-items:center;gap:.85rem;
+    font-family:var(--mono);font-size:.92rem;
+    background:var(--panel);border:1px solid var(--rule-strong);
+    border-radius:8px;padding:.72rem 1.1rem;color:var(--ink);
+  }
+  .install .p{color:var(--ink-faint)}
+  .install button{
+    all:unset;cursor:pointer;color:var(--ink-faint);font-family:var(--mono);
+    font-size:.78rem;border-left:1px solid var(--rule);padding-left:.85rem;
+  }
+  .install button:hover{color:var(--teal)}
+  .hero .ctas{display:flex;align-items:center;flex-wrap:wrap;gap:1.1rem}
+  .ghlink{font-family:var(--mono);font-size:.85rem;color:var(--ink-soft)}
+
+  /* ── the terminal ────────────────────────────────────── */
+  .term{
+    background:var(--panel-deep);
+    border:1px solid var(--rule-strong);
+    border-radius:12px;
+    box-shadow:0 24px 70px rgba(0,0,0,.5), 0 0 0 1px rgba(6,182,212,.05);
+    overflow:hidden;
+    font-family:var(--mono);font-size:.83rem;line-height:1.62;
+  }
+  .term .bar{
+    display:flex;align-items:center;gap:.45rem;
+    padding:.6rem .9rem;border-bottom:1px solid var(--rule);
+    background:rgba(233,241,243,.02);
+  }
+  .term .dot{width:.62rem;height:.62rem;border-radius:50%;background:var(--rule-strong)}
+  .term .bar span{margin-left:auto;font-size:.72rem;color:var(--ink-faint)}
+  .term .screen{padding:1rem 1.2rem 1.2rem;min-height:23.5rem}
+  .term .row{white-space:pre-wrap;word-break:break-word;opacity:0;transform:translateY(2px)}
+  .term .row.on{opacity:1;transform:none;transition:opacity .18s ease,transform .18s ease}
+  .t-logo{color:var(--cyan);font-weight:600}
+  .t-logo .tr{color:var(--ink-faint);font-weight:400}
+  .t-dim{color:var(--ink-faint)}
+  .t-user{color:var(--ink)}
+  .t-user::before{content:"› ";color:var(--cyan);font-weight:600}
+  .t-tool .b{color:var(--cyan)}
+  .t-tool .n{font-weight:600}
+  .t-tool .s{color:var(--ink-faint)}
+  .t-elbow{color:var(--ink-faint)}
+  .t-elbow .ok{color:var(--ok)}
+  .t-plan .done{color:var(--ink-faint)}
+  .t-plan .act{color:var(--cyan)}
+  .t-text{color:var(--ink-soft)}
+  .t-foot{color:var(--ink-faint)}
+  .caret{display:inline-block;width:.55em;height:1.05em;vertical-align:-.16em;background:var(--cyan);animation:blink 1.1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+  @media (prefers-reduced-motion:reduce){
+    .term .row{opacity:1;transform:none;transition:none}
+    .caret{animation:none}
+  }
+
+  /* ── sections use the TUI's own grammar ──────────────── */
+  section{padding:clamp(3rem,7vh,5.5rem) 0;border-top:1px solid var(--rule)}
+  .sect-head{font-family:var(--mono);margin-bottom:.6rem}
+  .sect-head .b{color:var(--cyan)}
+  .sect-head .t{font-weight:600;font-size:1.05rem}
+  .sect-sub{
+    font-family:var(--mono);font-size:.85rem;color:var(--ink-faint);
+    margin-bottom:2.4rem;
+  }
+  .sect-sub::before{content:"  ⎿ ";white-space:pre}
+  h2.big{
+    font-family:var(--mono);font-weight:600;letter-spacing:-.02em;
+    font-size:clamp(1.5rem,3vw,2.15rem);line-height:1.2;text-wrap:balance;
+    margin:.4rem 0 .9rem;
+  }
+
+  /* surfaces grid */
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:10px;overflow:hidden}
+  .cell{background:var(--panel);padding:1.5rem 1.4rem 1.6rem;position:relative}
+  .cell:hover{background:#122029}
+  .cell h3{font-family:var(--mono);font-size:.95rem;font-weight:600;margin-bottom:.55rem}
+  .cell h3 .g{color:var(--teal);margin-right:.5rem}
+  .cell p{font-size:.9rem;color:var(--ink-soft)}
+  .cell code{font-family:var(--mono);font-size:.8rem;color:var(--cyan);background:rgba(6,182,212,.08);padding:.1rem .4rem;border-radius:4px}
+
+  /* measured runtime — stats as settled-turn footers */
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:2.4rem 3rem;margin-top:.8rem}
+  .stat .n{
+    font-family:var(--mono);font-weight:700;letter-spacing:-.03em;
+    font-size:clamp(2rem,4vw,2.9rem);line-height:1.1;
+    font-variant-numeric:tabular-nums;
+  }
+  .stat .n .g{background:linear-gradient(92deg,var(--sky),var(--teal));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .stat .cap{font-family:var(--mono);font-size:.8rem;color:var(--ink-faint);margin-top:.5rem}
+  .stat .cap::before{content:"· ";color:var(--teal)}
+  .stat p{font-size:.9rem;color:var(--ink-soft);margin-top:.55rem;max-width:26rem}
+  .foot-note{margin-top:2.2rem;font-size:.85rem;color:var(--ink-faint);max-width:44rem}
+
+  /* learns list */
+  .learns{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:2rem;margin-top:.5rem}
+  .learn h3{font-family:var(--mono);font-size:.92rem;font-weight:600;margin-bottom:.5rem}
+  .learn h3::before{content:"● ";color:var(--cyan)}
+  .learn p{font-size:.9rem;color:var(--ink-soft)}
+  .learn code{font-family:var(--mono);font-size:.8rem;color:var(--teal)}
+  .soon{
+    display:inline-block;font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;
+    text-transform:uppercase;color:var(--warn);border:1px solid rgba(251,191,36,.35);
+    border-radius:999px;padding:.1rem .55rem;margin-left:.5rem;vertical-align:.12em;
+  }
+
+  /* quickstart */
+  .qs{background:var(--panel-deep);border:1px solid var(--rule-strong);border-radius:10px;padding:1.4rem 1.6rem;font-family:var(--mono);font-size:.88rem;overflow-x:auto}
+  .qs .c{color:var(--ink-faint)}
+  .qs .cmd{color:var(--ink)}
+  .qs .cmd::before{content:"$ ";color:var(--teal)}
+  .qs div{padding:.14rem 0;white-space:pre}
+
+  /* footer */
+  footer{border-top:1px solid var(--rule);padding:2.6rem 0 3.4rem;margin-top:2rem}
+  footer .cols{display:flex;flex-wrap:wrap;gap:2.5rem;justify-content:space-between;align-items:flex-start}
+  footer .fbrand{font-family:var(--mono);font-weight:600}
+  footer .fbrand .mark{color:var(--teal)}
+  footer p{font-size:.84rem;color:var(--ink-faint);margin-top:.4rem;max-width:30rem}
+  footer nav{display:flex;gap:1.6rem;font-family:var(--mono);font-size:.82rem}
+  footer nav a{color:var(--ink-soft)}
+
+  /* scroll reveal */
+  .rv{opacity:0;transform:translateY(14px);transition:opacity .5s ease,transform .5s ease}
+  .rv.in{opacity:1;transform:none}
+  @media (prefers-reduced-motion:reduce){.rv{opacity:1;transform:none;transition:none}}
+</style>
+  </head>
+  <body>
+
+<div class="atmo" aria-hidden="true"></div>
+<div class="grain" aria-hidden="true"></div>
+
+<main>
+  <div class="wrap">
+    <header class="top">
+      <div class="brand"><span class="mark">✳</span> DeepCode</div>
+      <nav class="links" aria-label="Site">
+        <a href="#surfaces">Surfaces</a>
+        <a href="#runtime">Runtime</a>
+        <a href="#learns">Skills</a>
+        <a href="#start">Quickstart</a>
+        <a href="https://github.com/HKUDS/DeepCode">GitHub ↗</a>
+      </nav>
+    </header>
+
+    <div class="hero">
+      <div>
+        <p class="eyebrow">HKUDS · open source · <b>model-agnostic</b></p>
+        <h1>Open<br>agentic<br><span class="grad">coding.</span></h1>
+        <p class="lede">
+          A coding agent that lives where you work — a terminal-native TUI, a
+          desktop app, and a headless CLI over one shared runtime. Your
+          sessions, skills, and memory stay on your machine.
+        </p>
+        <div class="ctas">
+          <span class="install"><span class="p">$</span> pip install deepcode-hku
+            <button type="button" data-copy="pip install deepcode-hku">copy</button>
+          </span>
+          <a class="ghlink" href="https://github.com/HKUDS/DeepCode">github.com/HKUDS/DeepCode →</a>
+        </div>
+      </div>
+
+      <div class="term" aria-label="DeepCode terminal session replay">
+        <div class="bar" aria-hidden="true">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span>deepcode · ~/proj/app</span>
+        </div>
+        <div class="screen" id="replay">
+          <div class="row t-logo">██████<span class="tr">  ·──○</span></div>
+          <div class="row t-logo">██<span class="tr">       ○──·</span></div>
+          <div class="row t-logo">██████<span class="tr">  ·──○</span></div>
+          <div class="row t-dim">DeepCode · open agentic coding</div>
+          <div class="row t-dim">deepseek/deepseek-v4-pro · ~/proj/app</div>
+          <div class="row">&nbsp;</div>
+          <div class="row t-user">fix the failing auth test, then run the suite</div>
+          <div class="row">&nbsp;</div>
+          <div class="row t-tool"><span class="b">●</span> <span class="n">Read</span> <span class="s">tests/test_auth.py</span></div>
+          <div class="row t-elbow">  ⎿ <span class="ok">✓</span> 1: import pytest</div>
+          <div class="row t-tool"><span class="b">●</span> <span class="n">Plan</span> <span class="s">1/3</span></div>
+          <div class="row t-plan">  ⎿ <span class="done">✓ reproduce the failure</span></div>
+          <div class="row t-plan">    <span class="act">▸ patch the token-expiry check</span></div>
+          <div class="row t-plan">    <span class="done">◦ run the full suite</span></div>
+          <div class="row t-tool"><span class="b">●</span> <span class="n">Edit</span> <span class="s">src/auth/session.py</span></div>
+          <div class="row t-elbow">  ⎿ <span class="ok">✓</span> session.py</div>
+          <div class="row t-tool"><span class="b">●</span> <span class="n">Run</span> <span class="s">pytest -q</span></div>
+          <div class="row t-elbow">  ⎿ <span class="ok">✓</span> 214 passed in 8.3s</div>
+          <div class="row">&nbsp;</div>
+          <div class="row t-text">The expiry check compared naive and aware datetimes; normalized both to UTC.</div>
+          <div class="row t-foot">· 41s · 38.2k in · 512 out</div>
+          <div class="row t-user"><span class="caret" aria-hidden="true"></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section id="surfaces">
+    <div class="wrap">
+      <div class="rv">
+        <div class="sect-head"><span class="b">●</span> <span class="t">Surfaces</span></div>
+        <div class="sect-sub">one runtime · four ways in</div>
+        <h2 class="big">Every surface reads the same session.</h2>
+        <p style="max-width:42rem;color:var(--ink-soft);margin-bottom:2.2rem">
+          Start a conversation in the terminal over lunch, open it in the
+          desktop app in the afternoon. Sessions, skills, permissions, and
+          history are one shared record — not four copies.
+        </p>
+      </div>
+      <div class="grid rv">
+        <div class="cell">
+          <h3><span class="g">›_</span>Terminal TUI</h3>
+          <p>Streaming tool cards, a live status line, plan checklists, and a
+          settled-turn footer with real token costs. Works over SSH.
+          <code>python -m cli.tui</code></p>
+        </div>
+        <div class="cell">
+          <h3><span class="g">▣</span>Desktop</h3>
+          <p>A Tauri app over the same runtime: threads, approvals, skills,
+          automations, and settings — with the identical session IDs the CLI
+          uses.</p>
+        </div>
+        <div class="cell">
+          <h3><span class="g">⚙</span>Headless</h3>
+          <p>One-shot execution that streams structured events for scripts and
+          CI. <code>deepcode exec --json</code></p>
+        </div>
+        <div class="cell">
+          <h3><span class="g">◈</span>MCP &amp; automations</h3>
+          <p>Expose DeepCode as an MCP server, schedule goal-driven runs, and
+          let a goal loop work an objective against a real test command.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="runtime">
+    <div class="wrap">
+      <div class="rv">
+        <div class="sect-head"><span class="b">●</span> <span class="t">Runtime</span></div>
+        <div class="sect-sub">engineering you can measure</div>
+        <h2 class="big">The context the model sees is a discipline,<br>not an accident.</h2>
+        <p style="max-width:42rem;color:var(--ink-soft);margin-bottom:2.6rem">
+          DeepCode treats the request as something derived from the session
+          record — append-only, reconstructable, and priced by what the
+          provider actually reports. These numbers are from the changelog, not
+          the brochure.
+        </p>
+      </div>
+      <div class="stats rv">
+        <div class="stat">
+          <div class="n">7,420 <span class="g">→ 28</span></div>
+          <div class="cap">prompt tokens recomputed per turn boundary</div>
+          <p>The environment block is a durable slot in history, so a new turn
+          extends the previous request instead of invalidating its prefix
+          cache.</p>
+        </div>
+        <div class="stat">
+          <div class="n"><span class="g">1</span> live writer</div>
+          <div class="cap">per session · enforced by an OS lock</div>
+          <p>Two windows on one session alternate safely; a mid-turn collision
+          gets a sentence naming who is running it — not a crashed process.</p>
+        </div>
+        <div class="stat">
+          <div class="n">measured, <span class="g">not guessed</span></div>
+          <div class="cap">context pressure anchored on provider usage</div>
+          <p>The built-in estimator prices Chinese prose at more than twice its
+          real cost; the gate now trusts the number the provider reports.</p>
+        </div>
+        <div class="stat">
+          <div class="n">tools <span class="g">survive resume</span></div>
+          <div class="cap">model-visible means logged</div>
+          <p>Every request must be rebuildable from the session file alone — a
+          resumed agent can answer “what did you just run?”, and a test keeps
+          it that way.</p>
+        </div>
+      </div>
+      <p class="foot-note">Compaction keeps the recent tail verbatim — assistant
+      messages and tool results included — and replays correctly after resume.
+      Each claim above ships with its regression test.</p>
+    </div>
+  </section>
+
+  <section id="learns">
+    <div class="wrap">
+      <div class="rv">
+        <div class="sect-head"><span class="b">●</span> <span class="t">Skills · Memory · Goals</span></div>
+        <div class="sect-sub">what it keeps between conversations</div>
+        <h2 class="big">Local state that compounds.</h2>
+      </div>
+      <div class="learns rv">
+        <div class="learn">
+          <h3>Skills</h3>
+          <p>Progressive-disclosure playbooks in <code>.agents/skills/</code> —
+          the open Agent-Skills format, so a skill written for Claude Code or
+          Codex works here too.</p>
+        </div>
+        <div class="learn">
+          <h3>Memory &amp; instructions</h3>
+          <p>Reads <code>AGENTS.md</code> from repo root to workspace and keeps
+          durable notes under <code>.deepcode/memory/</code>, indexed and
+          injected each session.</p>
+        </div>
+        <div class="learn">
+          <h3>Goals</h3>
+          <p>Hand it an objective and a test command; the loop works, verifies
+          against your tests, and reports — interruptible and resumable at any
+          point.</p>
+        </div>
+        <div class="learn">
+          <h3>Evolve <span class="soon">in development</span></h3>
+          <p>An opt-in loop that distills your own sessions into project
+          skills — every learned skill carries provenance, passes a guardrail
+          check, and reverts with one click.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="start">
+    <div class="wrap">
+      <div class="rv">
+        <div class="sect-head"><span class="b">●</span> <span class="t">Quickstart</span></div>
+        <div class="sect-sub">three commands to a first session</div>
+      </div>
+      <div class="qs rv" role="figure" aria-label="Install commands">
+        <div><span class="c"># install</span></div>
+        <div class="cmd">pip install deepcode-hku</div>
+        <div>&nbsp;</div>
+        <div><span class="c"># set up providers once (OpenAI · Anthropic · OpenRouter · DeepSeek · Ollama …)</span></div>
+        <div class="cmd">deepcode init</div>
+        <div>&nbsp;</div>
+        <div><span class="c"># converse in any project directory</span></div>
+        <div class="cmd">deepcode</div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap cols">
+      <div>
+        <div class="fbrand"><span class="mark">✳</span> DeepCode</div>
+        <p>Built by <a href="https://github.com/HKUDS">HKUDS</a>, the Data
+        Intelligence Lab at the University of Hong Kong. MIT licensed.</p>
+      </div>
+      <nav aria-label="Footer">
+        <a href="https://github.com/HKUDS/DeepCode">GitHub</a>
+        <a href="https://arxiv.org/abs/2512.07921">Paper</a>
+        <a href={guides}>Guides</a>
+      </nav>
+    </div>
+  </footer>
+</main>
+
+<script is:inline>
+  // Terminal replay: rows appear on a schedule, then loop.
+  (function(){
+    var reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    var rows = Array.prototype.slice.call(document.querySelectorAll("#replay .row"));
+    if (reduce){ rows.forEach(function(r){ r.classList.add("on"); }); return; }
+    var delays = rows.map(function(r){
+      if (r.classList.contains("t-logo") || r.classList.contains("t-dim")) return 120;
+      if (r.classList.contains("t-user")) return 700;
+      if (r.classList.contains("t-tool")) return 620;
+      if (r.classList.contains("t-elbow")) return 420;
+      if (r.classList.contains("t-plan")) return 200;
+      if (r.classList.contains("t-text") || r.classList.contains("t-foot")) return 640;
+      return 200;
+    });
+    function play(){
+      rows.forEach(function(r){ r.classList.remove("on"); });
+      var t = 300;
+      rows.forEach(function(r,i){
+        t += delays[i];
+        setTimeout(function(){ r.classList.add("on"); }, t);
+      });
+      setTimeout(play, t + 7000);
+    }
+    play();
+  })();
+
+  // Scroll reveal.
+  (function(){
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if (e.isIntersecting){ e.target.classList.add("in"); io.unobserve(e.target); }
+      });
+    }, {rootMargin:"0px 0px -8% 0px"});
+    document.querySelectorAll(".rv").forEach(function(el){ io.observe(el); });
+  })();
+
+  // Copy button.
+  document.querySelectorAll("[data-copy]").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      navigator.clipboard.writeText(btn.getAttribute("data-copy")).then(function(){
+        var old = btn.textContent; btn.textContent = "copied";
+        setTimeout(function(){ btn.textContent = old; }, 1400);
+      });
+    });
+  });
+</script>
+
+  </body>
+</html>

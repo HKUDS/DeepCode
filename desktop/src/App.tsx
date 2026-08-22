@@ -17,7 +17,11 @@ import { ThreadHeader } from "./features/thread/ThreadHeader";
 import { useTranscriptMode } from "./features/thread/transcriptMode";
 import type { DesktopRuntime } from "./rpc/contracts";
 import { tauriRuntime } from "./rpc/tauriRuntime";
+import { initI18n } from "./app/i18n";
 import styles from "./App.module.css";
+
+// Idempotent: tests render <App> directly without main.tsx.
+initI18n();
 
 const Inspector = lazy(() =>
   import("./features/inspector/Inspector").then((module) => ({
@@ -27,6 +31,11 @@ const Inspector = lazy(() =>
 const ManagementWorkspace = lazy(() =>
   import("./features/management/ManagementWorkspace").then((module) => ({
     default: module.ManagementWorkspace,
+  })),
+);
+const SettingsDialog = lazy(() =>
+  import("./features/settings/SettingsDialog").then((module) => ({
+    default: module.SettingsDialog,
   })),
 );
 const ThreadConversation = lazy(() =>
@@ -122,9 +131,11 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
         busy={state.busy}
         runtime={state.runtime}
         destination={ui.destination}
+        settingsOpen={ui.settingsOpen}
         onDestination={(destination) => {
           void ui.navigateTo(destination);
         }}
+        onOpenSettings={ui.openSettings}
         onQueryChange={ui.setSessionQuery}
         onOpenProject={() => {
           void (async () => {
@@ -374,10 +385,6 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
               destination={ui.destination}
               runtime={runtime}
               project={selectedProject}
-              settings={state.settings}
-              busy={state.busy}
-              onRefreshSettings={controller.refreshSettings}
-              onUpdateSettings={controller.updateSettings}
               onThreadCreated={controller.registerThread}
               onOpenThread={(threadId) => {
                 void (async () => {
@@ -426,6 +433,20 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
             />
           </Suspense>
         </section>
+      ) : null}
+
+      {ui.settingsOpen ? (
+        <Suspense fallback={null}>
+          <SettingsDialog
+            runtime={runtime}
+            project={selectedProject}
+            settings={state.settings}
+            busy={state.busy}
+            onRefresh={controller.refreshSettings}
+            onUpdate={controller.updateSettings}
+            onClose={ui.closeSettings}
+          />
+        </Suspense>
       ) : null}
     </main>
   );

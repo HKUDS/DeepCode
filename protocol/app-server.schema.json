@@ -1236,6 +1236,10 @@
         "configPath": {
           "type": "string"
         },
+        "configRevision": {
+          "type": "string",
+          "minLength": 1
+        },
         "agents": {
           "$ref": "#/$defs/JsonObject"
         },
@@ -1293,6 +1297,7 @@
       },
       "required": [
         "configPath",
+        "configRevision",
         "agents",
         "security",
         "permissionModeExplicit",
@@ -1320,6 +1325,10 @@
         },
         "riskAcknowledged": {
           "type": "boolean"
+        },
+        "expectedRevision": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "required": [
@@ -1374,6 +1383,12 @@
             "type": "string"
           }
         },
+        "manualModelEntries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ManualModelEntry"
+          }
+        },
         "configured": {
           "type": "boolean"
         },
@@ -1406,6 +1421,7 @@
         "apiKeyEnv",
         "modelCatalog",
         "manualModels",
+        "manualModelEntries",
         "configured",
         "credentialSource",
         "local",
@@ -1523,6 +1539,10 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "expectedRevision": {
+          "type": "string",
+          "minLength": 1
+        },
         "connection": {
           "type": "object",
           "additionalProperties": false,
@@ -1582,7 +1602,15 @@
             "manualModels": {
               "type": "array",
               "items": {
-                "type": "string"
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "$ref": "#/$defs/ManualModelEntry"
+                  }
+                ]
               }
             },
             "enabled": {
@@ -1605,10 +1633,110 @@
         "connectionId": {
           "type": "string",
           "minLength": 1
+        },
+        "expectedRevision": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "required": [
         "connectionId"
+      ]
+    },
+    "ManualModelEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "contextWindow": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "maxOutputTokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "reasoningEfforts": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            {
+              "const": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "ProviderDiscoverParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "connectionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "template": {
+          "type": "string",
+          "minLength": 1
+        },
+        "apiBase": {
+          "type": "string"
+        },
+        "apiKey": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string",
+          "pattern": "^proj_"
+        }
+      }
+    },
+    "ProviderDiscoverResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "models": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CatalogModel"
+          }
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "models",
+        "error"
       ]
     },
     "ProviderTestParams": {
@@ -5179,6 +5307,9 @@
         "provider/test": {
           "$ref": "#/$defs/ProviderTestParams"
         },
+        "provider/discover": {
+          "$ref": "#/$defs/ProviderDiscoverParams"
+        },
         "model/list": {
           "$ref": "#/$defs/ModelListParams"
         },
@@ -5431,6 +5562,7 @@
         "provider/upsert",
         "provider/remove",
         "provider/test",
+        "provider/discover",
         "model/list",
         "preset/list",
         "preset/current",
@@ -5542,6 +5674,9 @@
         },
         "provider/test": {
           "$ref": "#/$defs/ProviderTestResult"
+        },
+        "provider/discover": {
+          "$ref": "#/$defs/ProviderDiscoverResult"
         },
         "model/list": {
           "$ref": "#/$defs/ModelCatalogResult"
@@ -6449,6 +6584,7 @@
         "provider/upsert",
         "provider/remove",
         "provider/test",
+        "provider/discover",
         "model/list",
         "preset/list",
         "preset/current",
@@ -6655,6 +6791,19 @@
           "additionalProperties": false,
           "properties": {}
         },
+        "settings.changed": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "configRevision": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "configRevision"
+          ]
+        },
         "mcp.changed": {
           "type": "object",
           "additionalProperties": false,
@@ -6705,6 +6854,7 @@
         "terminal.exit",
         "skills.changed",
         "plugins.changed",
+        "settings.changed",
         "mcp.changed",
         "server.warning"
       ]
