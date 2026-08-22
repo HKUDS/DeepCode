@@ -135,7 +135,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
     ProviderSpec(
         name="zhipu",
         keywords=("zhipu", "glm", "zai"),
-        env_key="ZAI_API_KEY",
+        env_key="ZHIPU_API_KEY",
         display_name="Zhipu AI",
         backend="openai_compat",
         default_api_base="https://open.bigmodel.cn/api/paas/v4",
