@@ -519,15 +519,21 @@ class AgentSession:
                     write_compaction_summary(self._workspace, summary, anchor)
                     try:
                         from core.observability.events import emit_event
-
-                        emit_event(
-                            "memory.compaction.deposited",
-                            session=(anchor or {}).get("session_key"),
-                            chars=len(summary or ""),
-                            phase=(anchor or {}).get("phase"),
-                        )
-                    except Exception:  # noqa: BLE001, S110
-                        pass
+                    except ImportError:
+                        # The observability bus is introduced by #181. Until it
+                        # lands, no-op the event so the deposit still succeeds
+                        # regardless of merge order.
+                        emit_event = None
+                    if emit_event is not None:
+                        try:
+                            emit_event(
+                                "memory.compaction.deposited",
+                                session=(anchor or {}).get("session_key"),
+                                chars=len(summary or ""),
+                                phase=(anchor or {}).get("phase"),
+                            )
+                        except Exception:  # noqa: BLE001, S110
+                            pass
                 except Exception:  # noqa: BLE001 - memory work never breaks turns
                     logger.debug("compaction summary deposit failed", exc_info=True)
 
