@@ -72,6 +72,13 @@ from core.skills.runtime import SkillRuntime, SkillTurnContext
 
 _DEFAULT_MAX_TOOL_RESULT_CHARS = 60_000
 
+# P1-4 (GenAI course lesson 05): the tool loop + structured outputs run at a
+# low temperature so repeated executions are reproducible (0.1 vs 0.9 variance
+# is the lesson's canonical trap). Creative subtasks override explicitly via
+# the execution profile / provider default. reasoning/effort models may ignore
+# temperature — that is their documented behavior, not a wiring bug.
+_DEFAULT_TOOL_LOOP_TEMPERATURE = 0.1
+
 
 def _one_line_detail(value: str, *, limit: int = 80) -> str:
     """Bound a tool-declared presentation value without inspecting its data."""
@@ -459,6 +466,9 @@ class AgentSession:
         # this to ask the model for one final complete/blocked/continue decision;
         # ordinary Turns leave it unset.
         self._closure_callback = closure_callback
+        # P1-5: compaction summaries → memory vault (compacted sessions stay
+        # retrievable). Built once here so auto and manual compaction share it.
+        self._compaction_summary_sink = self._make_compaction_summary_sink()
         self._mcp_runtime = mcp_runtime
         # Secret-free immutable selection used by persistence/frontends.
         self.execution_profile = execution_profile
@@ -490,6 +500,48 @@ class AgentSession:
                 submission_id=self._submission_id.get(),
             )
         )
+
+    def _make_compaction_summary_sink(self):
+        """P1-5: build the compaction → memory deposit callable (never raises).
+
+        The sink runs the memory write on a daemon thread (non-blocking, like
+        memory distillation) so compaction never stalls the turn. Fires the
+        P1-3 canonical ``memory.compaction.deposited`` event on success.
+        """
+
+        def _deposit(summary: str, anchor: dict[str, Any] | None = None) -> None:
+            import threading
+
+            def _work() -> None:
+                try:
+                    from core.harness.memory import write_compaction_summary
+
+                    write_compaction_summary(self._workspace, summary, anchor)
+                    try:
+                        from core.observability.events import emit_event
+
+                        emit_event(
+                            "memory.compaction.deposited",
+                            session=(anchor or {}).get("session_key"),
+                            chars=len(summary or ""),
+                            phase=(anchor or {}).get("phase"),
+                        )
+                    except Exception:  # noqa: BLE001, S110
+                        pass
+                except Exception:  # noqa: BLE001 - memory work never breaks turns
+                    logger.debug("compaction summary deposit failed", exc_info=True)
+
+            try:
+                thread = threading.Thread(
+                    target=_work,
+                    name="compaction-memory",
+                    daemon=True,
+                )
+                thread.start()
+            except Exception:  # noqa: BLE001, S110
+                pass
+
+        return _deposit
 
     async def next_event(self) -> Event:
         return await self._events.get()
@@ -598,6 +650,7 @@ class AgentSession:
             max_iterations=1,
             max_tool_result_chars=_DEFAULT_MAX_TOOL_RESULT_CHARS,
             context_window_tokens=self._context_window_tokens,
+            compaction_summary_sink=self._compaction_summary_sink,
             token_meter=self._token_meter,
         )
         before = list(self._history)
@@ -968,12 +1021,26 @@ class AgentSession:
                     names = tuple(str(name) for name in value)
             return names
 
+        # P1-4: default low temperature for the tool loop (reproducible
+        # executions); an explicit execution-profile temperature (creative
+        # subtasks) wins. 0.0 is a legitimate explicit choice, so compare
+        # against None rather than truthiness.
+        _profile_temperature = (
+            getattr(self.execution_profile, "temperature", None)
+            if self.execution_profile is not None
+            else None
+        )
         spec = AgentRunSpec(
             initial_messages=initial,
             tools=self._tools,
             model=self._model,
             max_iterations=self._max_iterations,
             max_tool_result_chars=_DEFAULT_MAX_TOOL_RESULT_CHARS,
+            temperature=(
+                _profile_temperature
+                if _profile_temperature is not None
+                else _DEFAULT_TOOL_LOOP_TEMPERATURE
+            ),
             token_meter=self._token_meter,
             transient_context_messages=tuple(turn_context_messages),
             workspace=self._workspace,
@@ -994,6 +1061,7 @@ class AgentSession:
                 if self._skill_runtime is not None or self._tool_filter is not None
                 else None
             ),
+            compaction_summary_sink=self._compaction_summary_sink,
         )
 
         try:
