@@ -90,8 +90,11 @@ def _instruction_excluded(candidate: Path) -> bool:
     逗号分隔 glob, 如 ``**/code/CLAUDE.md,**/vendor/**``; 用正斜杠规范化
     路径后匹配, 兼容 Windows 反斜杠路径。非法模式被忽略, 不阻断加载。
     """
-    patterns = [p.strip() for p in
-                os.environ.get(_INSTRUCTION_EXCLUDE_ENV, "").split(",") if p.strip()]
+    patterns = [
+        p.strip()
+        for p in os.environ.get(_INSTRUCTION_EXCLUDE_ENV, "").split(",")
+        if p.strip()
+    ]
     if not patterns:
         return False
     cand = str(candidate).replace("\\", "/")
