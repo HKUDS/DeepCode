@@ -182,10 +182,7 @@ def test_maybe_compact_checkpoint_injected_after_success(monkeypatch):
     from core.agent_runtime.runner import AgentRunSpec, AgentRunner
 
     runner = AgentRunner(provider=object())
-    monkeypatch.setattr(
-        "core.agent_runtime.runner.estimate_prompt_tokens_chain",
-        lambda *args, **kwargs: (999_999, None),
-    )
+    monkeypatch.setattr(runner, "_estimate_prompt", lambda spec, messages: 999_999)
 
     async def fake_summarize(spec, messages, *, response_observer=None):
         return "handoff summary"
@@ -205,11 +202,11 @@ def test_maybe_compact_checkpoint_injected_after_success(monkeypatch):
         pre_compact_hook=pre_compact_hook,
     )
     messages = [
-        {"role": "user", "content": "turn 1"},
+        {"role": "user", "content": "turn 1 " + "context " * 50},
         {"role": "assistant", "content": "a1"},
-        {"role": "user", "content": "turn 2"},
+        {"role": "user", "content": "turn 2 " + "context " * 50},
         {"role": "assistant", "content": "a2"},
-        {"role": "user", "content": "turn 3"},
+        {"role": "user", "content": "turn 3 " + "context " * 50},
     ]
     compacted = asyncio.run(runner._maybe_compact(spec, messages))
     checkpoint_msgs = [
@@ -227,10 +224,7 @@ def test_maybe_compact_block_skips_checkpoint(monkeypatch):
     from core.agent_runtime.runner import AgentRunSpec, AgentRunner
 
     runner = AgentRunner(provider=object())
-    monkeypatch.setattr(
-        "core.agent_runtime.runner.estimate_prompt_tokens_chain",
-        lambda *args, **kwargs: (999_999, None),
-    )
+    monkeypatch.setattr(runner, "_estimate_prompt", lambda spec, messages: 999_999)
 
     async def pre_compact_hook(trigger):
         return SimpleNamespace(block=True, additional_contexts=["should not appear"])
@@ -245,11 +239,11 @@ def test_maybe_compact_block_skips_checkpoint(monkeypatch):
         pre_compact_hook=pre_compact_hook,
     )
     messages = [
-        {"role": "user", "content": "turn 1"},
+        {"role": "user", "content": "turn 1 " + "context " * 50},
         {"role": "assistant", "content": "a1"},
-        {"role": "user", "content": "turn 2"},
+        {"role": "user", "content": "turn 2 " + "context " * 50},
         {"role": "assistant", "content": "a2"},
-        {"role": "user", "content": "turn 3"},
+        {"role": "user", "content": "turn 3 " + "context " * 50},
     ]
     compacted = asyncio.run(runner._maybe_compact(spec, messages))
     assert compacted is messages  # compaction aborted this turn
@@ -262,10 +256,7 @@ def test_maybe_compact_summarize_failure_no_checkpoint(monkeypatch):
     from core.agent_runtime.runner import AgentRunSpec, AgentRunner
 
     runner = AgentRunner(provider=object())
-    monkeypatch.setattr(
-        "core.agent_runtime.runner.estimate_prompt_tokens_chain",
-        lambda *args, **kwargs: (999_999, None),
-    )
+    monkeypatch.setattr(runner, "_estimate_prompt", lambda spec, messages: 999_999)
 
     async def fake_summarize_fails(spec, messages, *, response_observer=None):
         return None  # summarization failed
@@ -285,11 +276,11 @@ def test_maybe_compact_summarize_failure_no_checkpoint(monkeypatch):
         pre_compact_hook=pre_compact_hook,
     )
     messages = [
-        {"role": "user", "content": "turn 1"},
+        {"role": "user", "content": "turn 1 " + "context " * 50},
         {"role": "assistant", "content": "a1"},
-        {"role": "user", "content": "turn 2"},
+        {"role": "user", "content": "turn 2 " + "context " * 50},
         {"role": "assistant", "content": "a2"},
-        {"role": "user", "content": "turn 3"},
+        {"role": "user", "content": "turn 3 " + "context " * 50},
     ]
     compacted = asyncio.run(runner._maybe_compact(spec, messages))
     assert compacted is messages
