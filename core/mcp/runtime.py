@@ -279,10 +279,7 @@ class McpSessionRuntime:
         self._capabilities[server.server_id] = tools
         if server.policy_key is not None:
             self._capabilities[server.policy_key] = tools
-            if (
-                server.plugin_id is not None
-                and server.plugin_server_name is not None
-            ):
+            if server.plugin_id is not None and server.plugin_server_name is not None:
                 self._capabilities[
                     f"{server.plugin_id}:{server.plugin_server_name}"
                 ] = tools
