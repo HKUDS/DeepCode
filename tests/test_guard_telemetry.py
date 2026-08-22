@@ -16,7 +16,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -66,8 +65,15 @@ def test_blocked_event_maps_to_counter_and_streak_metric(monkeypatch):
 
     callback = make_telemetry_guard_callback()
     assert callback is not None
-    callback({"kind": "blocked", "tool": None, "level": 3, "streak": 6,
-              "message": "no new evidence"})
+    callback(
+        {
+            "kind": "blocked",
+            "tool": None,
+            "level": 3,
+            "streak": 6,
+            "message": "no new evidence",
+        }
+    )
 
     assert engine.counters == [("guard.blocked", 1.0)]
     assert engine.metrics == [("guard.blocked.streak", 6.0)]
@@ -127,9 +133,7 @@ def test_module_without_get_telemetry_returns_none(monkeypatch):
     import types
 
     mod = types.ModuleType("_fake_telemetry_no_getter")
-    monkeypatch.setattr(
-        "core.loop.guard_telemetry._load_telemetry_module", lambda: mod
-    )
+    monkeypatch.setattr("core.loop.guard_telemetry._load_telemetry_module", lambda: mod)
     monkeypatch.setattr("core.loop.guard_telemetry._attempted", False)
     monkeypatch.setattr("core.loop.guard_telemetry._callbacks_cache", None)
 

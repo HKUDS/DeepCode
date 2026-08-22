@@ -1306,9 +1306,7 @@ class AgentRunner:
         # Permission is the security layer (checked first); guards are the
         # loop-governance layer (checked second). Blocks are errors-as-data.
         if spec.guards is not None:
-            guard_message = spec.guards.check_tool(
-                tool_call.name, tool_call.arguments
-            )
+            guard_message = spec.guards.check_tool(tool_call.name, tool_call.arguments)
             if guard_message is not None:
                 event = {
                     "name": tool_call.name,
@@ -1466,9 +1464,7 @@ class AgentRunner:
             # Post-execution guard observation (REASONIX P3.6 port): result
             # fingerprint maintenance + mutation dependency tracking. Only the
             # success path reaches here, so pending-state updates are accurate.
-            spec.guards.observe_tool_result(
-                tool_call.name, tool_call.arguments, result
-            )
+            spec.guards.observe_tool_result(tool_call.name, tool_call.arguments, result)
             spec.guards.observe_tool_mutation(tool_call.name, tool_call.arguments)
             spec.guards.observe_tool_verify(tool_call.name, tool_call.arguments)
         return await self._finish_tool(

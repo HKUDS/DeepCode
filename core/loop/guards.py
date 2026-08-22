@@ -39,7 +39,7 @@ import fnmatch
 import hashlib
 import json
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Iterable
 
 # ---------------------------------------------------------------------------
@@ -120,7 +120,7 @@ class EvidenceLedger:
 
     @staticmethod
     def _build(
-        calls: Iterable[tuple[str, dict[str, Any] | None, Any]]
+        calls: Iterable[tuple[str, dict[str, Any] | None, Any]],
     ) -> list[ToolEvidence]:
         """把 (tool_name, arguments, result) 三元组构建为证据列表（不落账）。"""
         evidence: list[ToolEvidence] = []
@@ -143,7 +143,9 @@ class EvidenceLedger:
         if evidence:
             self._rounds.append(evidence)
 
-    def record(self, calls: Iterable[tuple[str, dict[str, Any] | None, Any]]) -> list[ToolEvidence]:
+    def record(
+        self, calls: Iterable[tuple[str, dict[str, Any] | None, Any]]
+    ) -> list[ToolEvidence]:
         """记录一轮 (tool_name, arguments, result) 三元组，返回本轮证据列表。"""
         evidence = self._build(calls)
         self._append(evidence)
@@ -168,7 +170,10 @@ class EvidenceLedger:
                 self._append(evidence)
                 return SCORE_NEW_EVIDENCE
         for item in evidence:
-            if item.result_hash is not None and item.result_hash not in self._seen_results:
+            if (
+                item.result_hash is not None
+                and item.result_hash not in self._seen_results
+            ):
                 # 相同调用但产生了新的结果内容 → 部分证据
                 self._append(evidence)
                 return SCORE_PARTIAL_EVIDENCE
@@ -291,9 +296,7 @@ class StormBreaker:
         return None
 
 
-def delegation_admission(
-    task: str, *, fork_turns: str = "none"
-) -> tuple[str, str]:
+def delegation_admission(task: str, *, fork_turns: str = "none") -> tuple[str, str]:
     """委派准入（``agent.delegationAdmission`` 的 DEEPCODE 适配版）。
 
     REASONIX 原版：委派场景下仅研究意图 / 外部 URL 引用放行，否则
@@ -390,7 +393,13 @@ class MutationDependencyBarrier:
 
     # 会登记 pending 路径的变更工具
     _MUTATION_TOOLS = (
-        "write_file", "write", "edit_file", "edit", "apply_patch", "patch", "replace",
+        "write_file",
+        "write",
+        "edit_file",
+        "edit",
+        "apply_patch",
+        "patch",
+        "replace",
     )
     # 会清除 pending 的验证工具
     _VERIFY_TOOLS = ("read_file", "read", "grep", "test", "pytest", "run_tests")
@@ -402,7 +411,9 @@ class MutationDependencyBarrier:
         self._pending: dict[str, str] = {}  # path -> 登记它的变更工具名
         self._lock = threading.Lock()
 
-    def observe_mutation(self, tool_name: str, arguments: dict[str, Any] | None) -> None:
+    def observe_mutation(
+        self, tool_name: str, arguments: dict[str, Any] | None
+    ) -> None:
         """变更工具执行成功后登记待验证路径。"""
         if tool_name not in self._MUTATION_TOOLS:
             return
@@ -534,21 +545,27 @@ class ToolResultMaintenanceView:
         self._cache: dict[str, str] = {}
         self._lock = threading.Lock()
 
-    def fingerprint(self, tool_name: str, arguments: dict[str, Any] | None, result: Any) -> str:
+    def fingerprint(
+        self, tool_name: str, arguments: dict[str, Any] | None, result: Any
+    ) -> str:
         """结果指纹 = 调用签名 + 结果哈希。"""
         return (
             f"{tool_call_signature(tool_name, arguments)}|"
             f"{result_hash(result) or '<empty>'}"
         )
 
-    def has_changed(self, tool_name: str, arguments: dict[str, Any] | None, result: Any) -> bool:
+    def has_changed(
+        self, tool_name: str, arguments: dict[str, Any] | None, result: Any
+    ) -> bool:
         """是否与最近一次标记的结果不同。"""
         key = tool_call_signature(tool_name, arguments)
         fp = self.fingerprint(tool_name, arguments, result)
         with self._lock:
             return self._cache.get(key) != fp
 
-    def mark(self, tool_name: str, arguments: dict[str, Any] | None, result: Any) -> bool:
+    def mark(
+        self, tool_name: str, arguments: dict[str, Any] | None, result: Any
+    ) -> bool:
         """标记结果指纹；返回 True=相对上次有新结果，False=完全重复。"""
         key = tool_call_signature(tool_name, arguments)
         fp = self.fingerprint(tool_name, arguments, result)
@@ -617,8 +634,10 @@ class LoopGuards:
         """
         calls = [
             (
-                getattr(tc, "name", None) or (tc.get("name") if isinstance(tc, dict) else None),
-                getattr(tc, "arguments", None) or (tc.get("arguments") if isinstance(tc, dict) else None),
+                getattr(tc, "name", None)
+                or (tc.get("name") if isinstance(tc, dict) else None),
+                getattr(tc, "arguments", None)
+                or (tc.get("arguments") if isinstance(tc, dict) else None),
                 result,
             )
             for tc, result in zip(tool_calls, results)
@@ -638,7 +657,9 @@ class LoopGuards:
 
         return injections
 
-    def check_tool(self, tool_name: str, arguments: dict[str, Any] | None) -> str | None:
+    def check_tool(
+        self, tool_name: str, arguments: dict[str, Any] | None
+    ) -> str | None:
         """工具执行前的单工具守卫链（runner ``_run_tool`` 调用）。
 
         链序：RecoveryGate（恢复未完成）→ ContextualToolGate（上下文可用性）→

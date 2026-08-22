@@ -34,9 +34,7 @@ def __getattr__(name: str):
     if name in ("AutodreamResult", "consolidate_memory"):
         from core.loop.autodream import AutodreamResult, consolidate_memory
 
-        value = (
-            AutodreamResult if name == "AutodreamResult" else consolidate_memory
-        )
+        value = AutodreamResult if name == "AutodreamResult" else consolidate_memory
         globals()[name] = value
         return value
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

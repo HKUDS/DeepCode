@@ -26,7 +26,9 @@ from typing import Any, Callable
 ENV_GUARD_TELEMETRY = "DEEPCODE_GUARD_TELEMETRY"
 
 # core/loop/guard_telemetry.py → parents[2] = F:/DEEPCODE
-_TELEMETRY_SKILL_REL = Path(".deepcode") / "skills" / "deepcode-telemetry" / "telemetry.py"
+_TELEMETRY_SKILL_REL = (
+    Path(".deepcode") / "skills" / "deepcode-telemetry" / "telemetry.py"
+)
 
 _attempted = False
 _callbacks_cache: Callable[[dict], None] | None = None
@@ -38,7 +40,9 @@ def _load_telemetry_module() -> Any | None:
     if not skill_py.is_file():
         return None
     try:
-        spec = importlib.util.spec_from_file_location("_deepcode_guard_telemetry", skill_py)
+        spec = importlib.util.spec_from_file_location(
+            "_deepcode_guard_telemetry", skill_py
+        )
         if spec is None or spec.loader is None:
             return None
         module = importlib.util.module_from_spec(spec)

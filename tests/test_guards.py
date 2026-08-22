@@ -16,7 +16,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -63,7 +62,9 @@ def test_score_round_four_buckets():
     scores = [
         ledger.score_round([("read_file", {"path": "x.py"}, "content-1")]),  # 全新调用
         ledger.score_round([("read_file", {"path": "x.py"}, "content-1")]),  # 完全相同
-        ledger.score_round([("read_file", {"path": "x.py"}, "content-CHANGED")]),  # 新结果
+        ledger.score_round(
+            [("read_file", {"path": "x.py"}, "content-CHANGED")]
+        ),  # 新结果
         ledger.score_round([("grep", {"q": "foo"}, "hits")]),  # 全新调用
         ledger.score_round([]),  # 空轮
     ]
@@ -80,8 +81,7 @@ def test_score_round_compare_before_record():
     """Regression: scoring must not pollute the seen-sets it is judged against."""
     ledger = EvidenceLedger()
     assert (
-        ledger.score_round([("read_file", {"path": "x.py"}, "c")])
-        == SCORE_NEW_EVIDENCE
+        ledger.score_round([("read_file", {"path": "x.py"}, "c")]) == SCORE_NEW_EVIDENCE
     )
     assert (
         ledger.score_round([("read_file", {"path": "x.py"}, "c")])
@@ -147,7 +147,9 @@ def test_delegation_admission_branches():
         "allow",
         "user_requested_research",
     )
-    assert delegation_admission("看下 https://example.com 的文档", fork_turns="none") == (
+    assert delegation_admission(
+        "看下 https://example.com 的文档", fork_turns="none"
+    ) == (
         "allow",
         "external_source_cited",
     )
@@ -191,7 +193,9 @@ def test_observe_batch_storm_injection():
     messages: list[dict[str, str]] = []
     for _ in range(4):
         messages.extend(lg.observe_batch(calls, results, events))
-    storm_msgs = [m for m in messages if "storm" in m["content"] or "loop guard" in m["content"]]
+    storm_msgs = [
+        m for m in messages if "storm" in m["content"] or "loop guard" in m["content"]
+    ]
     assert len(storm_msgs) == 1  # 熔断只宣布一次
 
 
@@ -249,7 +253,10 @@ def test_mutation_barrier_hard_block():
     barrier.observe_mutation("edit_file", {"path": "config.yaml"})
     message = barrier.check("bash", {"command": "cat config.yaml"})
     assert message is not None
-    assert "[shell_preflight] blocked tool execution pending dependent mutations" in message
+    assert (
+        "[shell_preflight] blocked tool execution pending dependent mutations"
+        in message
+    )
 
 
 def test_mutation_barrier_verify_clears_pending():
@@ -344,7 +351,10 @@ def test_check_tool_chains_all_gates():
         delivery=DeliveryPolicyGates(policies={"remember": "deny"}),
     )
     # RecoveryGate 最先触发
-    assert lg.check_tool("bash", {}) == "recovery required before continuing: pending approval"
+    assert (
+        lg.check_tool("bash", {})
+        == "recovery required before continuing: pending approval"
+    )
 
 
 def test_check_tool_delivery_gate_after_recovery_ok():
