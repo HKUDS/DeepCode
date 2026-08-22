@@ -102,8 +102,12 @@ def ensure_private_directory(path: Path | str) -> Path:
         component.mkdir(mode=PRIVATE_DIRECTORY_MODE, exist_ok=True)
         _chmod(component, PRIVATE_DIRECTORY_MODE, force=True)
 
+    was_missing = not directory.exists()
     directory.mkdir(parents=True, exist_ok=True, mode=PRIVATE_DIRECTORY_MODE)
-    _chmod(directory, PRIVATE_DIRECTORY_MODE, force=True)
+    # Restrict only what this call actually created. An existing directory was
+    # restricted at its own creation; re-running icacls on it on every open
+    # costs two subprocesses without changing the ACL.
+    _chmod(directory, PRIVATE_DIRECTORY_MODE, force=was_missing)
     return directory
 
 
@@ -133,7 +137,7 @@ def open_private_file(path: Path | str, flags: int) -> int:
             )
         if os.name != "nt":
             os.fchmod(descriptor, PRIVATE_FILE_MODE)
-        elif created:
+        if created:
             _restrict_windows_acl(target)
         return descriptor
     except BaseException:
@@ -184,7 +188,7 @@ def ensure_private_file(path: Path | str) -> None:
     except OSError:
         return
     if stat.S_ISREG(metadata.st_mode):
-        _chmod(target, PRIVATE_FILE_MODE)
+        _chmod(target, PRIVATE_FILE_MODE, force=True)
 
 
 def harden_private_tree(root: Path | str) -> Path:
@@ -194,12 +198,12 @@ def harden_private_tree(root: Path | str) -> Path:
 
     for current, directories, files in os.walk(base, followlinks=False):
         current_path = Path(current)
-        _chmod(current_path, PRIVATE_DIRECTORY_MODE)
+        _chmod(current_path, PRIVATE_DIRECTORY_MODE, force=True)
         directories[:] = [
             name for name in directories if not (current_path / name).is_symlink()
         ]
         for name in directories:
-            _chmod(current_path / name, PRIVATE_DIRECTORY_MODE)
+            _chmod(current_path / name, PRIVATE_DIRECTORY_MODE, force=True)
         for name in files:
             ensure_private_file(current_path / name)
     return base
@@ -207,11 +211,12 @@ def harden_private_tree(root: Path | str) -> Path:
 
 def _chmod(path: Path, mode: int, *, force: bool = False) -> None:
     if os.name == "nt":
-        # harden_private_tree deliberately re-applies the restriction even to
-        # existing paths (it repairs legacy trees whose ACLs may be absent or
-        # permissive), so _chmod restricts unconditionally. The per-open cost
-        # is avoided in open_private_file by only restricting new files.
-        _restrict_windows_acl(path)
+        # harden_private_tree (force=True) deliberately re-applies the
+        # restriction even to existing paths (it repairs legacy trees whose
+        # ACLs may be absent or permissive). Default callers pass force=False
+        # so an already-restricted path is not re-churned on every open.
+        if force:
+            _restrict_windows_acl(path)
         return
     try:
         os.chmod(path, mode, follow_symlinks=False)

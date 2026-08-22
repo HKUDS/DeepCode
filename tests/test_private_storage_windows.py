@@ -122,7 +122,9 @@ def test_windows_harden_private_tree_restricts_every_entry(tmp_path: Path) -> No
         _assert_current_user_has_full_control(path)
 
 
-def test_windows_open_existing_file_does_not_rerun_acl(monkeypatch, tmp_path: Path) -> None:
+def test_windows_open_existing_file_does_not_rerun_acl(
+    monkeypatch, tmp_path: Path
+) -> None:
     """The per-open ACL re-run is gone: opening an existing private file does
     not call _restrict_windows_acl again (the ACL was applied at creation)."""
     import core.private_storage as ps
