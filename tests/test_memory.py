@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.harness.memory import (  # noqa: E402
+from core.harness.memory import (
     _INSTRUCTION_EXCLUDE_ENV,
     _MAX_INJECT_CHARS,
     MemoryTool,
@@ -39,9 +39,7 @@ def test_project_instructions_prefers_agents_md(tmp_path):
 
 
 def test_instruction_excluded_matches_globs(monkeypatch):
-    monkeypatch.setenv(
-        _INSTRUCTION_EXCLUDE_ENV, "**/code/CLAUDE.md,**/vendor/**"
-    )
+    monkeypatch.setenv(_INSTRUCTION_EXCLUDE_ENV, "**/code/CLAUDE.md,**/vendor/**")
     # 匹配: 任意层级前缀 + 目录段精确匹配
     assert _instruction_excluded(Path("repo/code/CLAUDE.md"))
     assert _instruction_excluded(Path("repo/vendor/x/AGENTS.md"))
