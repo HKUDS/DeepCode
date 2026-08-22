@@ -63,7 +63,9 @@ def test_fresh_v16_schema_has_no_web_search_policy_columns(tmp_path: Path) -> No
     database.initialize()
 
     with database.read() as connection:
-        assert current_version(connection) == 16
+        # v16 dropped the web-search policy columns; later migrations (v17+)
+        # must keep them gone on a fresh schema.
+        assert current_version(connection) >= 16
         assert "web_search_mode_override" not in _column_names(connection, "threads")
         assert "web_access_policy_json" not in _column_names(connection, "turns")
 

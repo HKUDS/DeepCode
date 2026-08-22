@@ -196,3 +196,68 @@ def test_v14_session_execution_security_migration_is_reversible(
         ).execution_security_profile == _fail_closed_legacy_profile(
             ExecutionPermissionMode.FULL_AUTO,
         )
+
+
+def test_v17_widens_preset_override_check_to_dangerous_skip(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    database = Database(tmp_path / "state.sqlite3")
+    database.initialize(target_version=16)
+    thread, _ = _seed_v13_session(database, workspace)
+
+    with database.read() as connection:
+        # v16 CHECK rejects the new value.
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "UPDATE threads SET access_preset_override = 'dangerous_skip' "
+                "WHERE id = ?",
+                (thread.id,),
+            )
+
+        migrate(connection, 17)
+        assert current_version(connection) == 17
+        connection.execute(
+            "UPDATE threads SET access_preset_override = 'dangerous_skip' "
+            "WHERE id = ?",
+            (thread.id,),
+        )
+        assert ThreadRepository(connection).get(
+            thread.id
+        ).access_preset_override == ExecutionAccessPreset.DANGEROUS_SKIP
+        # Unknown values are still rejected after the widen.
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "UPDATE threads SET access_preset_override = 'unknown' WHERE id = ?",
+                (thread.id,),
+            )
+
+
+def test_v17_downgrade_clears_dangerous_skip_values(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    database = Database(tmp_path / "state.sqlite3")
+    database.initialize(target_version=16)
+    thread, _ = _seed_v13_session(database, workspace)
+
+    with database.read() as connection:
+        migrate(connection, 17)
+        connection.execute(
+            "UPDATE threads SET access_preset_override = 'dangerous_skip' "
+            "WHERE id = ?",
+            (thread.id,),
+        )
+
+        migrate(connection, 16)
+        assert current_version(connection) == 16
+        # The downgrade backup keeps only non-dangerous values, so the
+        # dangerous override is cleared rather than left violating v16 CHECK.
+        assert (
+            ThreadRepository(connection).get(thread.id).access_preset_override is None
+        )
+
+        migrate(connection, 17)
+        assert (
+            ThreadRepository(connection).get(thread.id).access_preset_override is None
+        )

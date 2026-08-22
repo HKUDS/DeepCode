@@ -272,7 +272,7 @@ class SecurityConfig(_Base):
       sandbox atomically; the environment gate remains for legacy callers.
     """
 
-    access_preset: Literal["ask", "read_only", "full_access"] | None = None
+    access_preset: Literal["ask", "read_only", "full_access", "dangerous_skip"] | None = None
     permission_mode: str = "full_auto"
     permissions: dict[str, Any] = Field(default_factory=dict)
     sandbox: bool = True

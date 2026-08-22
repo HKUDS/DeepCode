@@ -1310,6 +1310,44 @@ ALTER TABLE threads DROP COLUMN web_search_mode_override;
 _REMOVE_WEB_ACCESS_POLICY_V16 = _DROP_WEB_ACCESS_POLICY_V15
 _RESTORE_WEB_ACCESS_POLICY_V16 = _WEB_ACCESS_POLICY_V15
 
+# v17: Widen the access_preset_override CHECK to accept 'dangerous_skip'
+# (借鉴 Claude Code --allow-dangerously-skip-permissions; 同强度但显式命名危险).
+# SQLite cannot ALTER CHECK in-place, so backup → drop column → re-add with
+# the widened constraint → restore values.
+_WIDEN_DANGEROUS_SKIP_V17 = r"""
+CREATE TABLE threads_preset_backup AS
+    SELECT id, access_preset_override FROM threads
+    WHERE access_preset_override IS NOT NULL;
+ALTER TABLE threads DROP COLUMN access_preset_override;
+ALTER TABLE threads ADD COLUMN access_preset_override TEXT CHECK (
+    access_preset_override IS NULL OR
+    access_preset_override IN ('ask', 'read_only', 'full_access', 'dangerous_skip')
+);
+UPDATE threads
+SET access_preset_override = (
+    SELECT access_preset_override FROM threads_preset_backup
+    WHERE threads_preset_backup.id = threads.id
+);
+DROP TABLE threads_preset_backup;
+"""
+_NARROW_DANGEROUS_SKIP_V17 = r"""
+CREATE TABLE threads_preset_backup AS
+    SELECT id, access_preset_override FROM threads
+    WHERE access_preset_override IS NOT NULL
+      AND access_preset_override <> 'dangerous_skip';
+ALTER TABLE threads DROP COLUMN access_preset_override;
+ALTER TABLE threads ADD COLUMN access_preset_override TEXT CHECK (
+    access_preset_override IS NULL OR
+    access_preset_override IN ('ask', 'read_only', 'full_access')
+);
+UPDATE threads
+SET access_preset_override = (
+    SELECT access_preset_override FROM threads_preset_backup
+    WHERE threads_preset_backup.id = threads.id
+);
+DROP TABLE threads_preset_backup;
+"""
+
 MIGRATIONS = (
     Migration(1, "initial_domain", _INITIAL_SCHEMA, _DROP_INITIAL_SCHEMA),
     Migration(
@@ -1401,6 +1439,12 @@ MIGRATIONS = (
         "remove_web_access_policy",
         _REMOVE_WEB_ACCESS_POLICY_V16,
         _RESTORE_WEB_ACCESS_POLICY_V16,
+    ),
+    Migration(
+        17,
+        "widen_dangerous_skip_preset",
+        _WIDEN_DANGEROUS_SKIP_V17,
+        _NARROW_DANGEROUS_SKIP_V17,
     ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

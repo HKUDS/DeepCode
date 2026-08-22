@@ -38,7 +38,7 @@ export type ThreadMode = "code" | "paper" | "brief" | "review" | "goal";
 /**
  * User-facing tool access preset shared by Desktop and CLI.
  */
-export type ExecutionAccessPreset = "ask" | "read_only" | "full_access";
+export type ExecutionAccessPreset = "ask" | "read_only" | "full_access" | "dangerous_skip";
 export type ApprovalDecision = "approved_once" | "approved_session" | "denied";
 export type ExecutionPermissionMode = "default" | "plan" | "full_auto";
 export type AutomationStatus = "enabled" | "paused" | "retired";

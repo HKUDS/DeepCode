@@ -179,6 +179,7 @@ def test_protocol_exposes_session_access_and_immutable_security_profile() -> Non
         "ask",
         "read_only",
         "full_access",
+        "dangerous_skip",
     ]
     assert definitions["Thread"]["properties"]["accessPresetOverride"] == {
         "description": (
@@ -251,7 +252,7 @@ def test_protocol_exposes_session_access_and_immutable_security_profile() -> Non
     generated = GENERATED_TYPES.read_text(encoding="utf-8")
     assert (
         'export type ExecutionAccessPreset = "ask" | "read_only" | '
-        '"full_access";' in generated
+        '"full_access" | "dangerous_skip";' in generated
     )
     assert "accessPresetOverride: ExecutionAccessPreset | null;" in generated
     assert "executionSecurityProfile?: ExecutionSecurityProfile | null;" in generated
