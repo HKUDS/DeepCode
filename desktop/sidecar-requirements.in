@@ -17,6 +17,6 @@ PyYAML==6.0.3
 tiktoken==0.12.0
 
 # Packaging toolchain.
-pip==26.1.2
+pip==26.2
 pyinstaller==6.21.0
 pyinstaller-hooks-contrib==2026.6
