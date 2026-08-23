@@ -38,6 +38,8 @@ from core.harness.hooks.events import (
 )
 
 _DEFAULT_TIMEOUT_SEC = 600
+_SESSION_END_DEFAULT_TIMEOUT_SEC = 2
+_SESSION_END_MAX_TIMEOUT_SEC = 60
 
 
 @dataclass(slots=True)
@@ -150,12 +152,19 @@ def _append_group(
             warnings.append(f"skipping empty hook command in {path}")
             continue
         timeout = handler.get("timeout")
+        default_timeout = (
+            _SESSION_END_DEFAULT_TIMEOUT_SEC
+            if event_name == "SessionEnd"
+            else _DEFAULT_TIMEOUT_SEC
+        )
         try:
             timeout_sec = (
-                max(1, int(timeout)) if timeout is not None else _DEFAULT_TIMEOUT_SEC
+                max(1, int(timeout)) if timeout is not None else default_timeout
             )
         except (TypeError, ValueError):
-            timeout_sec = _DEFAULT_TIMEOUT_SEC
+            timeout_sec = default_timeout
+        if event_name == "SessionEnd":
+            timeout_sec = min(timeout_sec, _SESSION_END_MAX_TIMEOUT_SEC)
         status_message = handler.get("statusMessage") or handler.get("status_message")
         handlers.append(
             Handler(

@@ -250,7 +250,9 @@ _DECODERS = {
     "Stop": lambda o: _block_from_decision(o, "Stop"),
     "SubagentStop": lambda o: _block_from_decision(o, "SubagentStop"),
     "SessionStart": _decode_additional_context_only,
+    "SessionEnd": _decode_additional_context_only,
     "SubagentStart": _decode_additional_context_only,
+    "PreCompact": lambda o: _block_from_decision(o, "PreCompact"),
     "PermissionRequest": _decode_permission_request,
 }
 
