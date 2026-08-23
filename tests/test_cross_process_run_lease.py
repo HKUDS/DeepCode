@@ -128,11 +128,17 @@ def test_submitting_into_anothers_running_turn_is_refused_politely(
     # A pre-existing, documented crash can kill B at STARTUP — a WAL
     # "disk I/O error" while opening the shared database mid-turn of the
     # other process (investigated 2026-08-19; reproduced on ubuntu CI
-    # runners at resume-time projection reads). That
+    # runners at resume-time projection reads). The same corruption race
+    # also surfaces as "database disk image is malformed" on the first
+    # event_log read (observed 2026-08-22, Python CI ubuntu 3.13). That
     # failure happens before the collision under test here, so B retries a
     # bounded number of times on exactly that signature. Any other death is
     # a real failure of this test's subject.
-    _PREEXISTING = ("disk I/O error", "FOREIGN KEY constraint failed")
+    _PREEXISTING = (
+        "disk I/O error",
+        "FOREIGN KEY constraint failed",
+        "database disk image is malformed",
+    )
     try:
         deadline = time.monotonic() + 20
         while not marker.exists():
