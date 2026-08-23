@@ -418,6 +418,8 @@ class AgentSession:
         # no hooks are configured, so the whole feature is dormant at zero cost.
         self._hooks_engine = hooks_engine
         self._session_started = False
+        self._session_end_fired = False
+        self._session_end_lock = asyncio.Lock()
         # When this session is a spawned sub-agent, (agent_id, agent_type) — its
         # lifecycle fires SubagentStart/SubagentStop instead of SessionStart/Stop.
         self._agent_context = agent_context
@@ -625,7 +627,7 @@ class AgentSession:
             # SessionEnd fires exactly once, here — at the real session
             # termination boundary — never per turn. Per-turn notifications
             # are the Stop event's job (see _EVENTS_WITHOUT_MATCHER).
-            await self._run_end_hook(reason="shutdown")
+            await self._run_end_hook(reason="other")
             self._emit(ShutdownComplete())
         else:  # pragma: no cover - exhaustive guard
             self._emit(ErrorEvent(message=f"unknown op: {op!r}"))
@@ -645,6 +647,7 @@ class AgentSession:
             if task.cancelling() == 0:
                 task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+        await self._run_end_hook(reason="other")
         control = getattr(self, "_agent_control", None)
         if control is not None:
             await control.close()
@@ -694,21 +697,29 @@ class AgentSession:
             logger.exception("start hook failed")
             return None
 
-    async def _run_end_hook(self, reason: str = "shutdown") -> None:
+    async def _run_end_hook(self, reason: str = "other") -> None:
         """Run SessionEnd hooks when the session itself terminates.
 
         Notification-only: a failure is logged and never crashes the
-        shutdown. Fired exactly once per session from ``submit(Shutdown)``
-        with a documented session-exit reason (``shutdown``); per-turn
+        shutdown. Fired exactly once from ``submit(Shutdown)`` or the actual
+        resource teardown path, whichever comes first. ``other`` is the
+        compatible exit reason for a DeepCode runtime shutdown; per-turn
         notifications belong to the Stop event, not SessionEnd.
         """
-        engine = self._hooks_engine
-        if engine is None or not engine.has_event("SessionEnd"):
-            return
-        try:
-            await engine.run_session_end(reason=reason)
-        except Exception:  # noqa: BLE001 - hooks never crash a shutdown
-            logger.exception("session end hook failed")
+        async with self._session_end_lock:
+            if self._session_end_fired:
+                return
+            self._session_end_fired = True
+            # Spawned agents use their dedicated SubagentStop lifecycle.
+            if self._agent_context is not None:
+                return
+            engine = self._hooks_engine
+            if engine is None or not engine.has_event("SessionEnd"):
+                return
+            try:
+                await engine.run_session_end(reason=reason)
+            except Exception:  # noqa: BLE001 - hooks never crash a shutdown
+                logger.exception("session end hook failed")
 
     async def _run_prompt_hooks(
         self, text: str, hook_contexts: list[str]

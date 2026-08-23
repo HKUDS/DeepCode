@@ -99,14 +99,21 @@ _PRECOMPACT_CONTEXT_LIMIT = 2000  # chars per additional context
 _PRECOMPACT_TOTAL_LIMIT = 8000  # chars for the whole checkpoint block
 
 
-def _build_precompact_checkpoint(contexts: list[str]) -> str | None:
+def _build_precompact_checkpoint(
+    contexts: list[str],
+    *,
+    total_limit: int = _PRECOMPACT_TOTAL_LIMIT,
+) -> str | None:
     """Bounded, delimited representation of PreCompact hook context.
 
     Each context is stripped, truncated to ``_PRECOMPACT_CONTEXT_LIMIT`` chars
     and the combined block capped at ``_PRECOMPACT_TOTAL_LIMIT``. Returns
     ``None`` when nothing survives (empty input or all contexts blank).
     """
-    if not contexts:
+    prefix = _PRECOMPACT_CHECKPOINT_PREFIX + "\n"
+    total_limit = min(max(total_limit, 0), _PRECOMPACT_TOTAL_LIMIT)
+    content_limit = total_limit - len(prefix)
+    if not contexts or content_limit <= 0:
         return None
     parts: list[str] = []
     used = 0
@@ -115,14 +122,14 @@ def _build_precompact_checkpoint(contexts: list[str]) -> str | None:
         if not text:
             continue
         text = text[:_PRECOMPACT_CONTEXT_LIMIT]
-        room = _PRECOMPACT_TOTAL_LIMIT - used
+        room = content_limit - used
         if room <= 0:
             break
         parts.append(text[:room])
         used += min(len(text), room) + 1  # +1 for the newline separator
     if not parts:
         return None
-    return _PRECOMPACT_CHECKPOINT_PREFIX + "\n" + "\n".join(parts)
+    return prefix + "\n".join(parts)
 
 
 @dataclass(slots=True)
@@ -1767,9 +1774,21 @@ class AgentRunner:
         # blow the post-compaction window back open. When the hook blocks or
         # summarization fails we returned above — the checkpoint only ever
         # appears after a successful compaction.
-        checkpoint = _build_precompact_checkpoint(pre_contexts)
+        # A checkpoint must not turn successful compaction back into growth.
+        # Bound it to the actual character reduction in addition to the
+        # absolute hook-context cap.
+        checkpoint_room = (
+            self._history_chars(messages) - self._history_chars(compacted) - 1
+        )
+        checkpoint = _build_precompact_checkpoint(
+            pre_contexts,
+            total_limit=checkpoint_room,
+        )
         if checkpoint:
-            compacted = compacted + [{"role": "user", "content": checkpoint}]
+            self._append_injected_messages(
+                compacted,
+                [{"role": "user", "content": checkpoint}],
+            )
         self._refused_compaction = None
         if spec.post_compact_hook is not None:
             await self._call_tool_hook(spec.post_compact_hook, "auto")

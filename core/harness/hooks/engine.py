@@ -176,14 +176,13 @@ class HooksEngine:
             additional_contexts=folded.additional_contexts,
         )
 
-    async def run_session_end(self, reason: str = "shutdown") -> ContextOutcome:
+    async def run_session_end(self, reason: str = "other") -> ContextOutcome:
         """Session lifecycle end — fires exactly once when the session terminates.
 
         Called from ``AgentSession.submit(Shutdown)``, never per turn. The
-        reason doubles as the matcher input so a hook can target a specific
-        exit path (e.g. ``matcher: "shutdown"``); supported session-exit
-        reasons are ``shutdown``, ``interrupted`` and ``error``. The caller
-        logs failures so a hook can never crash the session close.
+        reason doubles as the matcher input. DeepCode runtime shutdown maps to
+        the compatible ``other`` reason. The caller logs failures so a hook
+        can never crash the session close.
         """
         payload = {"hook_event_name": "SessionEnd", "reason": reason}
         folded = await self._dispatch("SessionEnd", reason, payload)

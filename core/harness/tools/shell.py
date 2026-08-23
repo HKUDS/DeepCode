@@ -105,7 +105,6 @@ class BashTool(Tool):
             proc = await asyncio.create_subprocess_exec(
                 *wrapped.argv,
                 cwd=self._workspace,
-                env={**os.environ, **wrapped.extra_env},
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 **subprocess_group_kwargs(),

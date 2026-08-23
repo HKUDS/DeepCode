@@ -300,7 +300,7 @@ def test_stop_block_means_keep_going():
 
 def test_payload_delivered_on_stdin(tmp_path):
     capture = tmp_path / "payload.json"
-    eng = _engine([_handler("PreToolUse", f"cat > {capture.as_posix()}", matcher="*")])
+    eng = _engine([_handler("PreToolUse", f"cat > {capture}", matcher="*")])
     asyncio.run(eng.run_pre_tool_use("Bash", {"command": "ls"}, tool_use_id="tu-9"))
     payload = json.loads(capture.read_text())
     assert payload["session_id"] == "sess-1"
@@ -567,9 +567,7 @@ def test_session_start_and_prompt_context_injected():
 
 def test_subagent_start_payload_and_plaintext_context(tmp_path):
     capture = tmp_path / "p.json"
-    eng = _engine(
-        [_handler("SubagentStart", f"cat > {capture.as_posix()}; echo sub-context")]
-    )
+    eng = _engine([_handler("SubagentStart", f"cat > {capture}; echo sub-context")])
     res = asyncio.run(eng.run_subagent_start("worker-7", "subagent"))
     assert res.additional_contexts == ["sub-context"]  # plain-text context works
     p = json.loads(capture.read_text())
@@ -804,7 +802,7 @@ def test_runner_permission_request_hook_allows_an_ask():
 def test_pre_compact_hook_block_skips_and_payload(tmp_path):
     capture = tmp_path / "p.json"
     out = json.dumps({"continue": False})
-    eng = _engine([_handler("PreCompact", f"cat > {capture.as_posix()}; echo '{out}'")])
+    eng = _engine([_handler("PreCompact", f"cat > {capture}; echo '{out}'")])
     res = asyncio.run(eng.run_pre_compact("auto"))
     assert res.block is True  # continue:false → skip compaction
     p = json.loads(capture.read_text())
@@ -820,7 +818,7 @@ def test_pre_compact_matcher_matches_trigger():
 
 def test_post_compact_hook_fires_with_trigger(tmp_path):
     capture = tmp_path / "p.json"
-    eng = _engine([_handler("PostCompact", f"cat > {capture.as_posix()}")])
+    eng = _engine([_handler("PostCompact", f"cat > {capture}")])
     asyncio.run(eng.run_post_compact("auto"))
     p = json.loads(capture.read_text())
     assert p["hook_event_name"] == "PostCompact" and p["trigger"] == "auto"
@@ -831,7 +829,7 @@ def test_post_compact_hook_fires_with_trigger(tmp_path):
 
 def test_stop_payload_carries_stop_hook_active(tmp_path):
     capture = tmp_path / "p.json"
-    eng = _engine([_handler("Stop", f"cat > {capture.as_posix()}")])
+    eng = _engine([_handler("Stop", f"cat > {capture}")])
     asyncio.run(eng.run_stop(stop_hook_active=True))
     p = json.loads(capture.read_text())
     assert p["hook_event_name"] == "Stop" and p["stop_hook_active"] is True

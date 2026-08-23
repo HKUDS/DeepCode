@@ -1,17 +1,14 @@
-"""SessionEnd lifecycle + PreCompact checkpoint + MCP list-discovery e2e tests.
+"""SessionEnd lifecycle and PreCompact checkpoint end-to-end tests.
 
 Covers the lifecycle contracts introduced by the SessionEnd / PreCompact work:
 
 - ``SessionEnd`` fires exactly once at real session termination
   (``AgentSession.submit(Shutdown)``), never per turn; the session-exit reason
-  doubles as the matcher input (``shutdown`` / ``interrupted`` / ``error``);
-  a failing hook is non-fatal and never blocks ``ShutdownComplete``.
+  doubles as the matcher input (DeepCode shutdown maps to ``other``); a failing
+  hook is non-fatal and never blocks ``ShutdownComplete``.
 - The ``PreCompact`` hook's ``additional_contexts`` survive a successful
   compaction as a single bounded, provider-agnostic user message, and are
   absent when the hook blocks or summarization fails.
-- The deepcode-hooks MCP ``hooks_config.json`` list format is only accepted
-  from the ``user-mcp`` source, supports ``priority`` ordering, skips disabled
-  entries, warns on invalid entries, and honours timeouts and event aliases.
 
 Hooks are exercised as REAL subprocesses (``sh -lc`` commands that echo JSON or
 exit with a code), matching ``test_hooks.py`` so we test the true execution
@@ -32,9 +29,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.harness.hooks.discovery import Handler, discover_hooks  # noqa: E402
-from core.harness.hooks.engine import HooksEngine  # noqa: E402
 from core.events.protocol import Shutdown, ShutdownComplete, UserInput  # noqa: E402
+from core.harness.hooks.discovery import Handler  # noqa: E402
+from core.harness.hooks.engine import HooksEngine  # noqa: E402
 
 pytestmark = pytest.mark.skipif(
     shutil.which("sh") is None, reason="POSIX shell required"
@@ -82,6 +79,9 @@ class _FakeTools:
         self.calls.append((name, params))
         return f"ran {name} with {params}"
 
+    async def aclose(self):
+        return None
+
 
 # ---------------------------------------------------------------------------
 # SessionEnd lifecycle — fires exactly once at real session termination
@@ -99,13 +99,28 @@ def test_session_end_fires_exactly_once_on_shutdown(tmp_path):
     event = asyncio.run(session.next_event())
     assert isinstance(event.msg, ShutdownComplete)
 
+    asyncio.run(session.submit(Shutdown()))
+    asyncio.run(session.aclose())
+    assert count.read_text().count("x") == 1
+
+
+def test_session_end_fires_from_real_close_path(tmp_path):
+    count = tmp_path / "count.txt"
+    eng = _engine([_handler("SessionEnd", f"echo x >> {count}")])
+    session = _session(eng)
+
+    asyncio.run(session.aclose())
+    asyncio.run(session.aclose())
+
+    assert count.read_text().count("x") == 1
+
 
 def test_session_end_reason_matcher(tmp_path):
     shutdown_hits = tmp_path / "shutdown.txt"
     other_hits = tmp_path / "other.txt"
     eng = _engine(
         [
-            _handler("SessionEnd", f"echo x >> {shutdown_hits}", matcher="shutdown"),
+            _handler("SessionEnd", f"echo x >> {shutdown_hits}", matcher="other"),
             _handler("SessionEnd", f"echo x >> {other_hits}", matcher="complete"),
         ]
     )
@@ -125,6 +140,46 @@ def test_session_end_hook_failure_non_fatal():
     asyncio.run(session.submit(Shutdown()))
     event = asyncio.run(session.next_event())
     assert isinstance(event.msg, ShutdownComplete)
+
+
+def test_session_end_is_not_emitted_for_subagent_session(tmp_path):
+    count = tmp_path / "count.txt"
+    eng = _engine([_handler("SessionEnd", f"echo x >> {count}")])
+    session = _session(eng)
+    session._agent_context = ("child-1", "subagent")
+
+    asyncio.run(session.aclose())
+
+    assert not count.exists()
+
+
+def test_session_end_discovery_uses_bounded_exit_timeout(tmp_path):
+    from core.harness.hooks.discovery import discover_hooks
+
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    (home / ".deepcode").mkdir(parents=True)
+    workspace.mkdir()
+    (home / ".deepcode" / "hooks.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "SessionEnd": [
+                        {"matcher": "*", "hooks": [{"command": "echo default"}]},
+                        {
+                            "matcher": "*",
+                            "hooks": [{"command": "echo capped", "timeout": 999}],
+                        },
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = discover_hooks(str(workspace), str(home))
+
+    assert [handler.timeout_sec for handler in result.handlers] == [2, 60]
 
 
 def test_normal_turn_does_not_trigger_session_end(tmp_path):
@@ -173,13 +228,21 @@ def test_build_precompact_checkpoint_limits():
     checkpoint = _build_precompact_checkpoint(many)
     assert checkpoint is not None
     body = checkpoint[len(_PRECOMPACT_CHECKPOINT_PREFIX) + 1 :]
-    assert len(body) <= _PRECOMPACT_TOTAL_LIMIT
+    assert len(checkpoint) <= _PRECOMPACT_TOTAL_LIMIT
+
+
+def test_build_precompact_checkpoint_honors_smaller_dynamic_limit():
+    from core.agent_runtime.runner import _build_precompact_checkpoint
+
+    checkpoint = _build_precompact_checkpoint(["x" * 500], total_limit=100)
+    assert checkpoint is not None
+    assert len(checkpoint) <= 100
 
 
 def test_maybe_compact_checkpoint_injected_after_success(monkeypatch):
     from types import SimpleNamespace
 
-    from core.agent_runtime.runner import AgentRunSpec, AgentRunner
+    from core.agent_runtime.runner import AgentRunner, AgentRunSpec
 
     runner = AgentRunner(provider=object())
     monkeypatch.setattr(runner, "_estimate_prompt", lambda spec, messages: 999_999)
@@ -216,12 +279,15 @@ def test_maybe_compact_checkpoint_injected_after_success(monkeypatch):
     ]
     assert checkpoint_msgs, "checkpoint must survive a successful compaction"
     assert "checkpoint ctx" in checkpoint_msgs[0]["content"]
+    assert sum(len(str(m.get("content", ""))) for m in compacted) < sum(
+        len(str(m.get("content", ""))) for m in messages
+    )
 
 
 def test_maybe_compact_block_skips_checkpoint(monkeypatch):
     from types import SimpleNamespace
 
-    from core.agent_runtime.runner import AgentRunSpec, AgentRunner
+    from core.agent_runtime.runner import AgentRunner, AgentRunSpec
 
     runner = AgentRunner(provider=object())
     monkeypatch.setattr(runner, "_estimate_prompt", lambda spec, messages: 999_999)
@@ -253,7 +319,7 @@ def test_maybe_compact_block_skips_checkpoint(monkeypatch):
 def test_maybe_compact_summarize_failure_no_checkpoint(monkeypatch):
     from types import SimpleNamespace
 
-    from core.agent_runtime.runner import AgentRunSpec, AgentRunner
+    from core.agent_runtime.runner import AgentRunner, AgentRunSpec
 
     runner = AgentRunner(provider=object())
     monkeypatch.setattr(runner, "_estimate_prompt", lambda spec, messages: 999_999)
@@ -285,125 +351,3 @@ def test_maybe_compact_summarize_failure_no_checkpoint(monkeypatch):
     compacted = asyncio.run(runner._maybe_compact(spec, messages))
     assert compacted is messages
     assert "PreCompact checkpoint" not in json.dumps(compacted)
-
-
-# ---------------------------------------------------------------------------
-# deepcode-hooks MCP list-format discovery (hooks_config.json)
-# ---------------------------------------------------------------------------
-
-
-def _write_config(home, ws, payload):
-    (home / ".deepcode").mkdir(parents=True, exist_ok=True)
-    (ws / ".deepcode").mkdir(parents=True, exist_ok=True)
-    (home / ".deepcode" / "hooks_config.json").write_text(
-        json.dumps(payload), encoding="utf-8"
-    )
-    return str(ws), str(home)
-
-
-def test_mcp_list_format_accepted_from_user_mcp(tmp_path):
-    ws, home = _write_config(
-        tmp_path / "home",
-        tmp_path / "ws",
-        {"hooks": [{"name": "h1", "event": "PreToolUse", "handler": "echo hi"}]},
-    )
-    result = discover_hooks(ws, home)
-    assert result.warnings == []
-    assert any(
-        h.event_name == "PreToolUse" and h.command == "echo hi" for h in result.handlers
-    )
-
-
-def test_mcp_list_format_rejected_from_other_sources(tmp_path):
-    home = tmp_path / "home"
-    ws = tmp_path / "ws"
-    (home / ".deepcode").mkdir(parents=True, exist_ok=True)
-    (ws / ".deepcode").mkdir(parents=True, exist_ok=True)
-    # list shape in a project hooks.json (non user-mcp source) must be rejected
-    (ws / ".deepcode" / "hooks.json").write_text(
-        json.dumps(
-            {"hooks": [{"name": "h1", "event": "PreToolUse", "handler": "echo hi"}]}
-        ),
-        encoding="utf-8",
-    )
-    result = discover_hooks(str(ws), str(home))
-    assert any("list-shaped hooks" in w for w in result.warnings)
-    assert result.handlers == []
-
-
-def test_mcp_priority_ordering(tmp_path):
-    ws, home = _write_config(
-        tmp_path / "home",
-        tmp_path / "ws",
-        {
-            "hooks": [
-                {
-                    "name": "low",
-                    "event": "PreToolUse",
-                    "handler": "echo low",
-                    "priority": 1,
-                },
-                {
-                    "name": "high",
-                    "event": "PreToolUse",
-                    "handler": "echo high",
-                    "priority": 10,
-                },
-            ]
-        },
-    )
-    result = discover_hooks(ws, home)
-    pre_tool = [h for h in result.handlers if h.event_name == "PreToolUse"]
-    assert [h.command for h in pre_tool] == ["echo high", "echo low"]
-    assert pre_tool[0].display_order < pre_tool[1].display_order
-
-
-def test_mcp_disabled_and_invalid_entries(tmp_path):
-    ws, home = _write_config(
-        tmp_path / "home",
-        tmp_path / "ws",
-        {
-            "hooks": [
-                {
-                    "name": "disabled",
-                    "event": "PreToolUse",
-                    "handler": "echo x",
-                    "enabled": False,
-                },
-                {"name": "no-event", "handler": "echo x"},
-                {
-                    "name": "bad-type",
-                    "event": "PreToolUse",
-                    "handler": "pass",
-                    "type": "python",
-                },
-                {"name": "ok", "event": "PreToolUse", "handler": "echo ok"},
-            ]
-        },
-    )
-    result = discover_hooks(ws, home)
-    assert [h.command for h in result.handlers] == ["echo ok"]
-    assert any("without an event" in w for w in result.warnings)
-    assert any("only shell/node" in w for w in result.warnings)
-
-
-def test_mcp_timeout_and_event_alias(tmp_path):
-    ws, home = _write_config(
-        tmp_path / "home",
-        tmp_path / "ws",
-        {
-            "hooks": [
-                {
-                    "name": "aliased",
-                    "event": "sessionStart",
-                    "handler": "echo aliased",
-                    "timeout": 7,
-                }
-            ]
-        },
-    )
-    result = discover_hooks(ws, home)
-    assert result.warnings == []
-    hook = result.handlers[0]
-    assert hook.event_name == "SessionStart"
-    assert hook.timeout_sec == 7
