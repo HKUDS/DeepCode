@@ -9,6 +9,7 @@ from typing import Any
 
 from loguru import logger
 
+from core.agent_runtime.tools.base import Tool, ToolResult
 from core.agent_runtime.tools.registry import ToolRegistry
 from core.mcp.connection import CredentialResolver, McpConnection, OAuthProviderFactory
 from core.mcp.models import McpRuntimePlan, McpStartupError
@@ -24,6 +25,74 @@ class McpServerRuntimeStatus:
     state: str
     tool_count: int
     error: str | None = None
+
+
+class _ActivateMcpServerTool(Tool):
+    """Model-visible bridge that makes deferred servers reachable."""
+
+    def __init__(
+        self,
+        runtime: McpSessionRuntime,
+        *,
+        name: str,
+        server_ids: tuple[str, ...],
+    ) -> None:
+        self._runtime = runtime
+        self._name = name
+        self._server_ids = server_ids
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def description(self) -> str:
+        available = ", ".join(self._server_ids)
+        return (
+            "Start one configured deferred MCP server so its tools become "
+            f"available to this session. Deferred server ids: {available}."
+        )
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "server_id": {
+                    "type": "string",
+                    "enum": list(self._server_ids),
+                    "description": "Configured MCP server id to activate.",
+                }
+            },
+            "required": ["server_id"],
+            "additionalProperties": False,
+        }
+
+    def presentation_detail(self, arguments: dict[str, Any]) -> str | None:
+        value = arguments.get("server_id")
+        return value if isinstance(value, str) else ""
+
+    async def execute(self, *, server_id: str) -> ToolResult:
+        activated = await self._runtime.activate_server(server_id)
+        if not activated:
+            return ToolResult(
+                f"Error: MCP server '{server_id}' could not be activated.",
+                is_error=True,
+                metadata={"serverId": server_id, "activated": False},
+            )
+        tools = self._runtime.skill_capabilities.get(server_id, ())
+        suffix = f" Available tools: {', '.join(tools)}." if tools else ""
+        instructions = self._runtime.server_instruction(server_id)
+        if instructions:
+            suffix += f"\n\nServer instructions:\n{instructions}"
+        return ToolResult(
+            f"MCP server '{server_id}' activated.{suffix}",
+            metadata={
+                "serverId": server_id,
+                "activated": True,
+                "tools": list(tools),
+            },
+        )
 
 
 class McpSessionRuntime:
@@ -94,6 +163,14 @@ class McpSessionRuntime:
         if not sections:
             return None
         return "\n\n".join(sections)[:8_000]
+
+    def server_instruction(self, server_id: str) -> str | None:
+        """Return bounded instructions for one active server."""
+
+        connection = self._connections.get(server_id)
+        if connection is None or not connection.instructions:
+            return None
+        return str(connection.instructions)[:4_000]
 
     async def ensure_started(self) -> None:
         async with self._lock:
@@ -174,6 +251,20 @@ class McpSessionRuntime:
                 registered.extend(
                     self._register_server_tools(connection, definitions, used=used)
                 )
+            if deferred_ids:
+                activation_name = visible_tool_name(
+                    "deepcode_runtime",
+                    "activate_server",
+                    used=used,
+                )
+                self.registry.register(
+                    _ActivateMcpServerTool(
+                        self,
+                        name=activation_name,
+                        server_ids=tuple(sorted(deferred_ids)),
+                    )
+                )
+                registered.append(activation_name)
             self._registered_tools = tuple(registered)
             self._started = True
             self._publish_statuses()
@@ -188,7 +279,14 @@ class McpSessionRuntime:
         fails (status is set to ``failed``).
         """
         if not self._started:
-            await self.ensure_started()
+            if self._closed:
+                return False
+            try:
+                await self.ensure_started()
+            except RuntimeError:
+                if self._closed:
+                    return False
+                raise
         async with self._lock:
             if self._closed:
                 return False
@@ -215,6 +313,17 @@ class McpSessionRuntime:
             )
             try:
                 definitions = await connection.start()
+            except asyncio.CancelledError:
+                await connection.close()
+                self._statuses[server_id] = McpServerRuntimeStatus(
+                    server.server_id,
+                    server.name,
+                    server.source.value,
+                    "deferred" if server.definition.defer_loading else "failed",
+                    0,
+                )
+                self._publish_statuses()
+                raise
             except BaseException as exc:  # noqa: BLE001 - startup boundary
                 error = f"{type(exc).__name__}: {exc}"
                 self._statuses[server_id] = McpServerRuntimeStatus(

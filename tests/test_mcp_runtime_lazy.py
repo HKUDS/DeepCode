@@ -7,11 +7,16 @@ tools. This mirrors the CLI-side lazy-connect design (CodeWhale-derived).
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+from pydantic import ValidationError
 
 from core.agent_runtime.tools.registry import ToolRegistry
 from core.mcp.models import (
@@ -74,31 +79,46 @@ class LazyActivationTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_deferred_server_not_started_at_ensure(self) -> None:
+        registry = ToolRegistry()
         runtime = McpSessionRuntime(
             self._plan(self._server("eager1", False), self._server("lazy1", True)),
-            ToolRegistry(),
+            registry,
         )
-        await runtime.ensure_started()
-        statuses = {s.server_id: s for s in runtime.statuses}
-        self.assertEqual(statuses["eager1"].state, "ready")
-        self.assertEqual(statuses["lazy1"].state, "deferred")
-        self.assertNotIn("lazy1", runtime.available_server_ids)
-        # only the eager server's tool is registered
-        self.assertIn("eager1", runtime.skill_capabilities)
-        self.assertNotIn("lazy1", runtime.skill_capabilities)
+        try:
+            await runtime.ensure_started()
+            statuses = {s.server_id: s for s in runtime.statuses}
+            self.assertEqual(statuses["eager1"].state, "ready")
+            self.assertEqual(statuses["lazy1"].state, "deferred")
+            self.assertNotIn("lazy1", runtime.available_server_ids)
+            # Only the eager server's remote tool is registered, plus the
+            # activation bridge that makes deferred servers reachable.
+            self.assertIn("eager1", runtime.skill_capabilities)
+            self.assertNotIn("lazy1", runtime.skill_capabilities)
+            self.assertIn("mcp__deepcode_runtime__activate_server", registry.tool_names)
+        finally:
+            await runtime.aclose()
+        self.assertNotIn("mcp__deepcode_runtime__activate_server", registry.tool_names)
 
     async def test_activate_server_registers_tools(self) -> None:
+        registry = ToolRegistry()
         runtime = McpSessionRuntime(
             self._plan(self._server("eager1", False), self._server("lazy1", True)),
-            ToolRegistry(),
+            registry,
         )
-        await runtime.ensure_started()
-        self.assertTrue(await runtime.activate_server("lazy1"))
-        statuses = {s.server_id: s for s in runtime.statuses}
-        self.assertEqual(statuses["lazy1"].state, "ready")
-        self.assertIn("lazy1", runtime.available_server_ids)
-        self.assertIn("lazy1", runtime.skill_capabilities)
-        self.assertGreater(len(runtime.skill_capabilities["lazy1"]), 0)
+        try:
+            await runtime.ensure_started()
+            result = await registry.execute(
+                "mcp__deepcode_runtime__activate_server", {"server_id": "lazy1"}
+            )
+            self.assertIn("activated", str(result))
+            statuses = {s.server_id: s for s in runtime.statuses}
+            self.assertEqual(statuses["lazy1"].state, "ready")
+            self.assertIn("lazy1", runtime.available_server_ids)
+            self.assertIn("lazy1", runtime.skill_capabilities)
+            self.assertGreater(len(runtime.skill_capabilities["lazy1"]), 0)
+            self.assertIn("mcp__lazy1__echo", registry.tool_names)
+        finally:
+            await runtime.aclose()
 
     async def test_activate_is_idempotent(self) -> None:
         runtime = McpSessionRuntime(
@@ -106,11 +126,14 @@ class LazyActivationTests(unittest.IsolatedAsyncioTestCase):
             ToolRegistry(),
         )
         await runtime.ensure_started()
-        self.assertTrue(await runtime.activate_server("lazy1"))
-        tools_after_first = set(runtime.skill_capabilities.get("lazy1", ()))
-        self.assertTrue(await runtime.activate_server("lazy1"))
-        tools_after_second = set(runtime.skill_capabilities.get("lazy1", ()))
-        self.assertEqual(tools_after_first, tools_after_second)
+        try:
+            self.assertTrue(await runtime.activate_server("lazy1"))
+            tools_after_first = set(runtime.skill_capabilities.get("lazy1", ()))
+            self.assertTrue(await runtime.activate_server("lazy1"))
+            tools_after_second = set(runtime.skill_capabilities.get("lazy1", ()))
+            self.assertEqual(tools_after_first, tools_after_second)
+        finally:
+            await runtime.aclose()
 
     async def test_activate_unknown_server_returns_false(self) -> None:
         runtime = McpSessionRuntime(
@@ -118,7 +141,39 @@ class LazyActivationTests(unittest.IsolatedAsyncioTestCase):
             ToolRegistry(),
         )
         await runtime.ensure_started()
-        self.assertFalse(await runtime.activate_server("no-such-server"))
+        try:
+            self.assertFalse(await runtime.activate_server("no-such-server"))
+        finally:
+            await runtime.aclose()
+
+    async def test_activate_after_close_returns_false(self) -> None:
+        runtime = McpSessionRuntime(
+            self._plan(self._server("lazy1", True)),
+            ToolRegistry(),
+        )
+        await runtime.aclose()
+        self.assertFalse(await runtime.activate_server("lazy1"))
+
+    async def test_activation_cancellation_propagates_and_restores_state(self) -> None:
+        runtime = McpSessionRuntime(
+            self._plan(self._server("lazy1", True)),
+            ToolRegistry(),
+        )
+        await runtime.ensure_started()
+
+        async def cancel_start(_connection):
+            raise asyncio.CancelledError
+
+        try:
+            with (
+                patch("core.mcp.runtime.McpConnection.start", cancel_start),
+                self.assertRaises(asyncio.CancelledError),
+            ):
+                await runtime.activate_server("lazy1")
+            statuses = {s.server_id: s for s in runtime.statuses}
+            self.assertEqual(statuses["lazy1"].state, "deferred")
+        finally:
+            await runtime.aclose()
 
     async def test_activate_failure_marks_failed(self) -> None:
         broken = ResolvedMcpServer(
@@ -137,10 +192,23 @@ class LazyActivationTests(unittest.IsolatedAsyncioTestCase):
         )
         runtime = McpSessionRuntime(self._plan(broken), ToolRegistry())
         await runtime.ensure_started()
-        self.assertFalse(await runtime.activate_server("broken1"))
-        statuses = {s.server_id: s for s in runtime.statuses}
-        self.assertEqual(statuses["broken1"].state, "failed")
-        self.assertIsNotNone(statuses["broken1"].error)
+        try:
+            self.assertFalse(await runtime.activate_server("broken1"))
+            statuses = {s.server_id: s for s in runtime.statuses}
+            self.assertEqual(statuses["broken1"].state, "failed")
+            self.assertIsNotNone(statuses["broken1"].error)
+        finally:
+            await runtime.aclose()
+
+
+def test_required_server_cannot_be_deferred() -> None:
+    with pytest.raises(ValidationError, match="required MCP servers cannot defer"):
+        McpServerDefinition(
+            type="stdio",
+            command=sys.executable,
+            required=True,
+            defer_loading=True,
+        )
 
 
 if __name__ == "__main__":
