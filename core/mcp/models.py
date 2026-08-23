@@ -154,6 +154,10 @@ class McpServerDefinition(_ConfigModel):
 
     enabled: bool = True
     required: bool = False
+    defer_loading: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("deferLoading", "defer_loading"),
+    )
     supports_parallel_tool_calls: bool = False
     startup_timeout_seconds: Annotated[float, Field(gt=0, le=300)] = Field(
         default=10.0,
@@ -266,6 +270,9 @@ class McpServerDefinition(_ConfigModel):
 
     @model_validator(mode="after")
     def _transport_contract(self) -> McpServerDefinition:
+        if self.required and self.defer_loading:
+            raise ValueError("required MCP servers cannot defer loading")
+
         if self.bearer_token_env_var is not None and not _ENV_NAME.fullmatch(
             self.bearer_token_env_var
         ):
