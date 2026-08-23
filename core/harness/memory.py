@@ -23,6 +23,9 @@ escapes the memory directory.
 
 from __future__ import annotations
 
+import os
+import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +44,69 @@ _MAX_INJECT_CHARS = 8000  # keep the preamble bounded; the tool reads the rest
 _REMINDER_OPEN = "<system-reminder>"
 _REMINDER_CLOSE = "</system-reminder>"
 _REMINDER_CLOSE_ESCAPED = "&lt;/system-reminder&gt;"
+# Comma-separated glob patterns for instruction files that must not be loaded,
+# for example ``code/CLAUDE.md,**/vendor/**``.
+_INSTRUCTION_EXCLUDE_ENV = "DEEPCODE_INSTRUCTION_EXCLUDES"
+
+
+@lru_cache(maxsize=256)
+def _glob_to_re(pattern: str) -> re.Pattern[str]:
+    """Compile a path glob where ``**`` crosses directory boundaries."""
+
+    parts = []
+    i, n = 0, len(pattern)
+    while i < n:
+        c = pattern[i]
+        if c == "*":
+            if i + 1 < n and pattern[i + 1] == "*":
+                if i + 2 < n and pattern[i + 2] in "/\\":
+                    parts.append(r"(?:.*/)?")
+                    i += 3
+                else:
+                    parts.append(".*")
+                    i += 2
+            else:
+                parts.append(r"[^/\\]*")
+                i += 1
+        elif c == "?":
+            parts.append(r"[^/\\]")
+            i += 1
+        else:
+            parts.append(re.escape(c))
+            i += 1
+    flags = re.IGNORECASE if os.name == "nt" else 0
+    return re.compile("^" + "".join(parts) + "$", flags)
+
+
+def _instruction_excluded(candidate: Path, *, root: Path | None = None) -> bool:
+    """Whether the candidate instruction file is excluded by pattern.
+
+    Patterns containing a separator match both the absolute path and, when
+    available, the path relative to the repository root. A bare filename such
+    as ``CLAUDE.md`` matches that filename at any searched level.
+    """
+    patterns = [
+        p.strip()
+        for p in os.environ.get(_INSTRUCTION_EXCLUDE_ENV, "").split(",")
+        if p.strip()
+    ]
+    if not patterns:
+        return False
+    candidates = {str(candidate).replace("\\", "/"), candidate.name}
+    if root is not None:
+        try:
+            candidates.add(candidate.relative_to(root).as_posix())
+        except ValueError:
+            pass
+    for pat in patterns:
+        normalized = pat.replace("\\", "/")
+        try:
+            compiled = _glob_to_re(normalized)
+            if any(compiled.fullmatch(value) for value in candidates):
+                return True
+        except re.error:
+            continue
+    return False
 
 
 def memory_dir(workspace: str | Path) -> Path:
@@ -135,7 +201,10 @@ def project_instructions(workspace: str | Path) -> str:
     for directory in search_dirs:
         for name in _PROJECT_FILES:
             candidate = directory / name
-            if candidate.is_file():
+            if candidate.is_file() and not _instruction_excluded(
+                candidate,
+                root=root or workspace,
+            ):
                 try:
                     body = candidate.read_text(
                         encoding="utf-8", errors="replace"
