@@ -51,6 +51,18 @@ def test_instruction_excluded_matches_globs(monkeypatch):
     assert not _instruction_excluded(Path("repo/vendorized/x/CLAUDE.md"))
 
 
+def test_instruction_excluded_matches_repo_relative_and_bare_names(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "repo"
+    candidate = repo / "code" / "CLAUDE.md"
+    monkeypatch.setenv(_INSTRUCTION_EXCLUDE_ENV, "code/CLAUDE.md")
+    assert _instruction_excluded(candidate, root=repo)
+
+    monkeypatch.setenv(_INSTRUCTION_EXCLUDE_ENV, "CLAUDE.md")
+    assert _instruction_excluded(candidate, root=repo)
+
+
 def test_project_instructions_skips_excluded_file(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
@@ -63,8 +75,8 @@ def test_project_instructions_skips_excluded_file(tmp_path, monkeypatch):
     assert "subdir instructions" not in out
 
 
-def test_instruction_excluded_ignores_invalid_patterns(monkeypatch):
-    monkeypatch.setenv(_INSTRUCTION_EXCLUDE_ENV, "**/[code/CLAUDE.md")  # 非法 glob
+def test_instruction_excluded_treats_regex_metacharacters_literally(monkeypatch):
+    monkeypatch.setenv(_INSTRUCTION_EXCLUDE_ENV, "**/[code/CLAUDE.md")
     assert not _instruction_excluded(Path("code/CLAUDE.md"))
 
 
