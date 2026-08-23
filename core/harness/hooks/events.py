@@ -15,8 +15,8 @@ Event names (as they appear in ``hooks.json`` and in the JSON payload's
 - ``Stop``            — when the agent would end its turn (may force-continue)
 
 The remaining reference events (``PermissionRequest``, ``PreCompact``,
-``PostCompact``, ``SubagentStart``, ``SubagentStop``) are recognized by the
-engine but wired opportunistically as DeepCode grows the matching kernel seams.
+``PostCompact``, ``SessionEnd``, ``SubagentStart``, ``SubagentStop``) are
+recognized by the engine and wired at their matching lifecycle seams.
 """
 
 from __future__ import annotations
@@ -31,14 +31,18 @@ HOOK_EVENT_NAMES: tuple[str, ...] = (
     "PreCompact",
     "PostCompact",
     "SessionStart",
+    "SessionEnd",
     "UserPromptSubmit",
     "SubagentStart",
     "SubagentStop",
     "Stop",
 )
 
-# Events whose ``matcher`` field is meaningful. ``UserPromptSubmit`` and ``Stop``
-# fire unconditionally, so their matchers are ignored (mirrors the reference).
+# Events whose ``matcher`` field is meaningful. ``UserPromptSubmit`` and
+# ``Stop`` fire unconditionally, so their matchers are ignored (mirrors the
+# reference). ``SessionEnd`` DOES honour its matcher: the session-exit reason
+# is matched against the ``matcher`` field so hooks can target a specific exit
+# path. DeepCode runtime shutdown uses the compatible ``other`` reason.
 _EVENTS_WITHOUT_MATCHER: frozenset[str] = frozenset({"UserPromptSubmit", "Stop"})
 
 
