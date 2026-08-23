@@ -154,6 +154,16 @@ def test_private_tree_repair_does_not_follow_symlinks(tmp_path: Path) -> None:
     assert _mode(external) == 0o644
 
 
+def test_private_tree_rejects_a_link_as_its_root(tmp_path: Path) -> None:
+    external = tmp_path / "external"
+    external.mkdir()
+    link = tmp_path / "private-link"
+    link.symlink_to(external, target_is_directory=True)
+
+    with pytest.raises(OSError, match="must not be a link"):
+        harden_private_tree(link)
+
+
 def test_suite_redirects_all_user_state_to_the_test_directory(
     tmp_path: Path,
 ) -> None:

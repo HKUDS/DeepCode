@@ -94,6 +94,14 @@ def test_windows_private_directory_is_restricted(tmp_path: Path) -> None:
     _assert_no_dangerous_aces(directory)
     _assert_current_user_has_full_control(directory)
 
+    # The directory grant must be inheritable so files created by libraries
+    # that do not call open_private_file (SQLite WAL files, lock files, etc.)
+    # remain accessible without inheriting broad user-group access.
+    child = directory / "library-created.tmp"
+    child.write_text("x", encoding="utf-8")
+    _assert_no_dangerous_aces(child)
+    _assert_current_user_has_full_control(child)
+
 
 def test_windows_private_file_is_restricted(tmp_path: Path) -> None:
     target = tmp_path / "private" / "credentials.json"
@@ -114,6 +122,15 @@ def test_windows_harden_private_tree_restricts_every_entry(tmp_path: Path) -> No
     session.mkdir(parents=True)
     (session / "session.jsonl").write_text("legacy\n", encoding="utf-8")
     (root / "settings.json").write_text("{}", encoding="utf-8")
+    subprocess.run(
+        ["icacls", os.fspath(root / "settings.json"), "/grant", "*S-1-1-0:R"],
+        capture_output=True,
+        text=True,
+        encoding="mbcs",
+        errors="replace",
+        timeout=15,
+        check=True,
+    )
 
     harden_private_tree(root)
 

@@ -73,3 +73,101 @@ def test_open_without_creat_never_restricts(monkeypatch, tmp_path: Path) -> None
     assert _file_calls(calls, target) == 0, (
         "read-only open of an existing file must not restrict"
     )
+
+
+def test_concurrent_creator_is_not_mistaken_for_our_new_file(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import core.private_storage as ps
+
+    target = tmp_path / "raced.jsonl"
+    original_open = os.open
+    restrictions = []
+    raced = False
+
+    def racing_open(path, flags, mode=0o777):
+        nonlocal raced
+        if Path(path) == target and flags & os.O_EXCL and not raced:
+            raced = True
+            other = original_open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, mode)
+            os.close(other)
+            raise FileExistsError(os.fspath(target))
+        return original_open(path, flags, mode)
+
+    monkeypatch.setattr(ps.os, "open", racing_open)
+    monkeypatch.setattr(
+        ps, "_restrict_windows_acl", lambda path: restrictions.append(Path(path))
+    )
+
+    descriptor = ps.open_private_file(target, os.O_CREAT | os.O_RDWR)
+    os.close(descriptor)
+
+    assert raced is True
+    assert target not in restrictions
+
+
+def test_acl_restriction_orders_grant_strip_and_broad_principal_removal(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import core.private_storage as ps
+
+    calls = []
+    monkeypatch.setattr(ps, "_windows_identity", lambda: "DOMAIN\\user")
+    monkeypatch.setattr(ps, "_windows_icacls", lambda: "trusted-icacls.exe")
+
+    def record(executable, path, *arguments):
+        calls.append((executable, Path(path), arguments))
+        return True
+
+    monkeypatch.setattr(ps, "_run_icacls", record)
+
+    directory = tmp_path / "private"
+    directory.mkdir()
+    ps._restrict_windows_acl(directory)
+
+    assert calls[0][2] == ("/grant:r", "DOMAIN\\user:(OI)(CI)F")
+    assert calls[1][2] == ("/inheritance:r",)
+    assert calls[2][2] == ("/remove", *ps._WINDOWS_BROAD_ACCESS_SIDS)
+
+
+def test_acl_restriction_stops_before_strip_when_grant_fails(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import core.private_storage as ps
+
+    calls = []
+    monkeypatch.setattr(ps, "_windows_identity", lambda: "DOMAIN\\user")
+    monkeypatch.setattr(ps, "_windows_icacls", lambda: "trusted-icacls.exe")
+
+    def fail_grant(executable, path, *arguments):
+        calls.append(arguments)
+        return False
+
+    monkeypatch.setattr(ps, "_run_icacls", fail_grant)
+
+    ps._restrict_windows_acl(tmp_path / "private.json")
+
+    assert calls == [("/grant:r", "DOMAIN\\user:F")]
+
+
+def test_acl_restriction_does_not_remove_entries_when_strip_fails(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import core.private_storage as ps
+
+    calls = []
+    monkeypatch.setattr(ps, "_windows_identity", lambda: "DOMAIN\\user")
+    monkeypatch.setattr(ps, "_windows_icacls", lambda: "trusted-icacls.exe")
+
+    def fail_strip(executable, path, *arguments):
+        calls.append(arguments)
+        return arguments != ("/inheritance:r",)
+
+    monkeypatch.setattr(ps, "_run_icacls", fail_strip)
+
+    ps._restrict_windows_acl(tmp_path / "private.json")
+
+    assert calls == [
+        ("/grant:r", "DOMAIN\\user:F"),
+        ("/inheritance:r",),
+    ]
