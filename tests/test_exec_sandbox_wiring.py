@@ -159,3 +159,28 @@ async def test_execute_python_write_inside_ok(impl_server, tmp_path):
     data = json.loads(out)
     assert data["status"] == "success", data
     assert (tmp_path / "out.txt").read_text() == "ok"
+
+
+# ---- dangerous-command blocklist gating (runs before any execution) --------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command",
+    [
+        "RM  -rf ./marker",
+        "rm\t-rf ./marker",
+        "chmod  777 ./marker",
+    ],
+)
+async def test_execute_bash_blocklist_survives_case_and_spacing(
+    impl_server, tmp_path, command
+):
+    """Issue #128: case and whitespace-run variants must not slip past the
+    substring blocklist. The check returns before any subprocess runs, so
+    this needs no sandbox backend."""
+    impl_server.initialize_workspace(str(tmp_path))
+    out = await impl_server.execute_bash(command, timeout=30)
+    data = json.loads(out)
+    assert data["status"] == "error", data
+    assert "prohibited" in data["message"]

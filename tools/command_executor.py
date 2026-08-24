@@ -52,6 +52,14 @@ def _try_native_execute(command: str, cwd: Path) -> Optional[Tuple[int, str, str
         pp = Path(p)
         return pp if pp.is_absolute() else (cwd / pp)
 
+    # Native handlers run in-process, before the sandbox wrapper, so any
+    # operand resolving outside the working directory declines the fast
+    # path and takes the sandboxed shell route instead, where the OS
+    # write-fence applies.
+    root = cwd.resolve()
+    if any(not _resolve(p).resolve().is_relative_to(root) for p in paths):
+        return None
+
     try:
         if cmd == "mkdir":
             for p in paths:
