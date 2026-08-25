@@ -30,6 +30,8 @@ else:
         )
     from openai import AsyncOpenAI
 
+import httpx
+
 from core.providers.base import (
     LLMProvider,
     LLMResponse,
@@ -259,6 +261,12 @@ class OpenAICompatProvider(LLMProvider):
             default_headers=default_headers,
             max_retries=0,
             timeout=_get_default_request_timeout_s(),
+            # 禁用 keep-alive 连接复用：第三方网关(如 scnet)会回收空闲连接，
+            # 复用被回收的死连接会触发 SSL: UNEXPECTED_EOF_WHILE_READING。
+            # 每次请求新建连接，代价 ~50-100ms 握手，对 LLM 秒级请求可忽略。
+            http_client=httpx.AsyncClient(
+                limits=httpx.Limits(max_keepalive_connections=0),
+            ),
         )
 
         # Responses API circuit breaker: skip after repeated failures,
