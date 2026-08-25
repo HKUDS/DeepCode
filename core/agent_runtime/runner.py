@@ -19,34 +19,36 @@ from typing import Any
 
 from loguru import logger
 
+from core.agent_runtime.compaction import (
+    COMPACT_TRIGGER_FRACTION as _COMPACT_TRIGGER_FRACTION,
+)
+from core.agent_runtime.compaction import (
+    DEFAULT_COMPACTION_STRATEGY,
+    CompactionStrategy,
+)
+from core.agent_runtime.compaction import (
+    SUMMARIZATION_PROMPT as _SUMMARIZATION_PROMPT,
+)
+from core.agent_runtime.helpers import (
+    build_assistant_message,
+    estimate_message_tokens,
+    find_legal_message_start,
+    history_signature,
+    maybe_persist_tool_result,
+    truncate_text,
+)
+from core.agent_runtime.hook import AgentHook, AgentHookContext
 from core.agent_runtime.injections import (
     GoalObjectiveUpdated,
     SubagentMessage,
     UserSteer,
     runtime_input_to_provider_message,
 )
-from core.agent_runtime.compaction import (
-    COMPACT_TRIGGER_FRACTION as _COMPACT_TRIGGER_FRACTION,
-    DEFAULT_COMPACTION_STRATEGY,
-    SUMMARIZATION_PROMPT as _SUMMARIZATION_PROMPT,
-    CompactionStrategy,
-)
-from core.agent_runtime.helpers import (
-    build_assistant_message,
-    history_signature,
-    estimate_message_tokens,
-    find_legal_message_start,
-    maybe_persist_tool_result,
-    truncate_text,
-)
-from core.agent_runtime.token_meter import (
-    DEFAULT_TOKEN_METER_FACTORY,
-    TokenMeter,
-)
-from core.agent_runtime.hook import AgentHook, AgentHookContext
 from core.agent_runtime.pruner import ToolResultPruner
 from core.agent_runtime.repeat_guard import (
     DEFAULT_THRESHOLDS as DEFAULT_REPEAT_THRESHOLDS,
+)
+from core.agent_runtime.repeat_guard import (
     RepeatCallTracker,
 )
 from core.agent_runtime.runtime import (
@@ -56,6 +58,10 @@ from core.agent_runtime.runtime import (
     ensure_nonempty_tool_result,
     is_blank_text,
     repeated_external_lookup_error,
+)
+from core.agent_runtime.token_meter import (
+    DEFAULT_TOKEN_METER_FACTORY,
+    TokenMeter,
 )
 from core.agent_runtime.tools.base import ToolResult
 from core.agent_runtime.tools.registry import ToolRegistry

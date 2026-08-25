@@ -14,9 +14,8 @@ without touching business code.
 from __future__ import annotations
 
 import contextvars
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator
-
 
 _task_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "deepcode_task_id", default=None
