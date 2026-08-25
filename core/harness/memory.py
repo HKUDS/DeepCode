@@ -1,4 +1,4 @@
-﻿"""Agent memory 鈥?project instructions + persistent cross-session notes (P2).
+"""Agent memory 鈥?project instructions + persistent cross-session notes (P2).
 
 Two layers, aligned with Claude Code (DEEPCODE_V2_MASTER_PLAN.md P2-L5d(c)):
 
@@ -252,7 +252,9 @@ def memory_index(workspace: str | Path) -> str:
         if body.strip():
             from core.loop.injection_regression import render_data_block
 
-            return f"## Memory (from {_MEMORY_SUBDIR}/{_INDEX_FILE})\n\n{render_data_block(body.strip())}"
+            return _frame_instructions(
+                f"## Memory (from {_MEMORY_SUBDIR}/{_INDEX_FILE})\n\n{render_data_block(body.strip())}"
+            )
     return ""
 
 
