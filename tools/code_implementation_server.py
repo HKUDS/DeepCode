@@ -785,7 +785,11 @@ async def execute_bash(command: str, timeout: int = 30) -> str:
     try:
         # 安全检查：禁止危险命令
         dangerous_commands = ["rm -rf", "sudo", "chmod 777", "mkfs", "dd if="]
-        if any(dangerous in command.lower() for dangerous in dangerous_commands):
+        # Normalize case and whitespace runs before matching: "RM  -rf" or
+        # "rm\t-rf" must not slip past a plain substring check. Shallow
+        # defense-in-depth only — the sandbox below is the real boundary.
+        normalized_command = re.sub(r"\s+", " ", command).lower()
+        if any(dangerous in normalized_command for dangerous in dangerous_commands):
             result = {
                 "status": "error",
                 "message": f"Dangerous command execution prohibited: {command}",
