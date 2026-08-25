@@ -1,4 +1,4 @@
-"""Shared execution loop for tool-using agents.
+﻿"""Shared execution loop for tool-using agents.
 
 Ported from ``nanobot.agent.runner`` and adapted for DeepCode:
 
@@ -83,16 +83,16 @@ _SNIP_SAFETY_BUFFER = 1024
 
 # Summarization-based compaction (C4a). When the prompt nears the context
 # budget, a model call condenses the conversation into a handoff summary that
-# replaces old turns — semantic compaction, unlike the drop-based _snip_history
+# replaces old turns 鈥?semantic compaction, unlike the drop-based _snip_history
 # fallback. The compacted history is returned and persisted by the session, so
 # it survives across turns and is not re-summarized every step.
-_BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
+_BACKFILL_CONTENT = "[Tool result unavailable 鈥?call was interrupted or lost]"
 
 # PreCompact checkpoint re-injection (bounded, provider-safe). A PreCompact
 # hook may attach ``additional_contexts`` that must survive a successful
 # compaction so the post-compaction model can restore working context. The
 # re-injection is a plain ``role: user`` message (provider-agnostic) carrying a
-# clearly delimited prefix, with hard limits per context and in total — a
+# clearly delimited prefix, with hard limits per context and in total 鈥?a
 # runaway hook can never blow the post-compaction window back open.
 _PRECOMPACT_CHECKPOINT_PREFIX = "[PreCompact checkpoint]"
 _PRECOMPACT_CONTEXT_LIMIT = 2000  # chars per additional context
@@ -157,9 +157,9 @@ class AgentRunSpec:
     # reminder instead of a hard stop. ``None`` disables the guard.
     repeat_call_thresholds: tuple[int, ...] | None = DEFAULT_REPEAT_THRESHOLDS
     # Model-visible means logged (the dsh session-log rule): mid-turn messages
-    # the runner itself adds to the PERSISTED model history — injected
+    # the runner itself adds to the PERSISTED model history 鈥?injected
     # sub-agent results, Goal updates, repeat-call reminders, length-recovery
-    # prompts, stop-hook continuations — reach the model but are invisible to
+    # prompts, stop-hook continuations 鈥?reach the model but are invisible to
     # the host's canonical persistence, so a resumed Session would silently
     # rebuild a DIFFERENT history than the model actually saw. Per-request
     # transients (context messages, the finalization-retry prompt, the
@@ -188,7 +188,7 @@ class AgentRunSpec:
     # ``(tool_name, arguments) -> (decision, reason)`` where ``decision`` is
     # one of "allow"/"ask"/"deny" (str or enum with a ``.value``). Called
     # before each tool executes. "deny" and unresolved "ask" turn into an
-    # errors-as-data tool result fed back to the model — never a crash.
+    # errors-as-data tool result fed back to the model 鈥?never a crash.
     # ``ask`` is resolved by ``approval_callback`` if provided, else denied.
     permission_checker: Any | None = None
     approval_callback: Any | None = None
@@ -200,7 +200,7 @@ class AgentRunSpec:
     #     ``.block`` / ``.block_reason`` / ``.additional_contexts``.
     # A blocking PreToolUse becomes an errors-as-data result (the tool never
     # runs); ``updated_input`` rewrites the call; contexts are appended to the
-    # result the model reads. Absent (None) means no hooks — zero cost.
+    # result the model reads. Absent (None) means no hooks 鈥?zero cost.
     pre_tool_hook: Any | None = None
     post_tool_hook: Any | None = None
     # PermissionRequest hook (C3.1): fires in the approval path when a tool
@@ -209,7 +209,7 @@ class AgentRunSpec:
     # no verdict falls through to ``approval_callback``.
     permission_request_hook: Any | None = None
     # Compaction hooks (C4a). ``pre_compact_hook(trigger)`` fires before a
-    # summarization pass — a ``.block`` outcome skips compaction this turn;
+    # summarization pass 鈥?a ``.block`` outcome skips compaction this turn;
     # ``post_compact_hook(trigger)`` fires after. Both optional; ``trigger`` is
     # "auto" (only automatic compaction exists so far).
     pre_compact_hook: Any | None = None
@@ -234,7 +234,7 @@ class AgentRunSpec:
     # P1-5 (GenAI lesson 15): compaction-as-memory. Called with the handoff
     # summary + anchor metadata (session key, phase, timestamp, replaced
     # message count) after a compaction successfully shrinks the history, so
-    # the host can deposit the summary into the memory vault — compressed
+    # the host can deposit the summary into the memory vault 鈥?compressed
     # sessions stay retrievable instead of vanishing. Must never raise; a
     # failing sink is logged and swallowed.
     compaction_summary_sink: Any | None = None
@@ -310,7 +310,7 @@ class AgentRunner:
         self.provider = provider
         # The signature of a history whose automatic compaction was already
         # refused. Under sustained pressure the gate fires on every step, and
-        # a history with nothing older to replace — one long turn — gets the
+        # a history with nothing older to replace 鈥?one long turn 鈥?gets the
         # same summary refused every time by the convergence rule. Paying a
         # model round-trip per step to relearn that is pure waste; the memo
         # clears itself the moment the history actually changes.
@@ -429,7 +429,7 @@ class AgentRunner:
         injected_messages: list[dict[str, Any]] = []
         for item in items:
             message = runtime_input_to_provider_message(item)
-            # Model-visible means logged — for every drained input nothing
+            # Model-visible means logged 鈥?for every drained input nothing
             # else persists. Steering is appended to the canonical Session by
             # the service that accepted it; Goal updates, sub-agent results,
             # and raw injections exist only in this run's memory until noted.
@@ -489,7 +489,7 @@ class AgentRunner:
             raw_usage = self._usage_dict(response.usage)
             self._accumulate_usage(usage, raw_usage)
             # The provider just priced this exact history; that number is a
-            # better anchor than any estimate of it (§9.1).
+            # better anchor than any estimate of it (搂9.1).
             spec.token_meter.observe(raw_usage, messages)
             context.response_ordinal = response_ordinal
             context.response = response
@@ -653,7 +653,7 @@ class AgentRunner:
                     completed_tool_results.append(tool_message)
                 if repeat_tracker is not None:
                     # Observed at the result boundary so denied and failed
-                    # calls count too — a model hammering a rejected call is
+                    # calls count too 鈥?a model hammering a rejected call is
                     # exactly the loop worth interrupting. The reminder rides
                     # a user message AFTER the results, so the model reads
                     # what happened and then why it should change course.
@@ -1202,7 +1202,7 @@ class AgentRunner:
                 return lookup_error + _HINT, event, RuntimeError(lookup_error)
             return lookup_error + _HINT, event, None
 
-        # PreToolUse hook (C3). Fires before the permission gate — it may block
+        # PreToolUse hook (C3). Fires before the permission gate 鈥?it may block
         # the call (errors-as-data, tool never runs), rewrite its arguments, or
         # attach context the model reads with the result.
         pre_contexts: list[str] = []
@@ -1230,7 +1230,7 @@ class AgentRunner:
 
         # Permission gate (P1 security base). Denials and unresolved asks
         # become errors-as-data results the model can read and react to,
-        # never exceptions — a blocked tool must not abort the run.
+        # never exceptions 鈥?a blocked tool must not abort the run.
         denial = await self._check_permission(spec, tool_call)
         if denial is not None:
             event = {
@@ -1258,7 +1258,7 @@ class AgentRunner:
                 "status": "error",
                 "detail": prep_error.split(": ", 1)[-1][:120],
             }
-            # Tool never ran (bad args) — surface pre-hook context, no PostToolUse.
+            # Tool never ran (bad args) 鈥?surface pre-hook context, no PostToolUse.
             return (
                 self._compose_hook_context(prep_error + _HINT, pre_contexts),
                 event,
@@ -1267,7 +1267,7 @@ class AgentRunner:
         # Per-tool deadline (declared on Tool.timeout_s, enforced here so
         # every tool gets one implementation). ``asyncio.timeout`` gives the
         # attribution this needs for free: only OUR expired deadline becomes
-        # ``TimeoutError`` with ``expired()`` true — an outer cancellation
+        # ``TimeoutError`` with ``expired()`` true 鈥?an outer cancellation
         # passes through as ``CancelledError`` (re-raised below, unchanged),
         # and a ``TimeoutError`` the tool raised itself fails ``expired()``
         # and falls to the ordinary error path. Both mis-attributions would
@@ -1453,8 +1453,8 @@ class AgentRunner:
     ) -> str | None:
         """Return a denial reason, or ``None`` if the call is permitted.
 
-        ``allow`` → ``None``. ``deny`` → its reason. ``ask`` → resolved via
-        ``approval_callback`` (approved → ``None``, rejected → reason);
+        ``allow`` 鈫?``None``. ``deny`` 鈫?its reason. ``ask`` 鈫?resolved via
+        ``approval_callback`` (approved 鈫?``None``, rejected 鈫?reason);
         with no approval callback (headless runs) an ``ask`` is denied with
         an explanatory reason, so autonomy never silently escalates.
         """
@@ -1479,7 +1479,7 @@ class AgentRunner:
         if value == "deny":
             return reason or "denied by policy"
 
-        # ask — a PermissionRequest hook may resolve it before the human is
+        # ask 鈥?a PermissionRequest hook may resolve it before the human is
         # prompted: a hook "deny" blocks, "allow" permits, no verdict falls
         # through to the approver below.
         if spec.permission_request_hook is not None:
@@ -1498,7 +1498,7 @@ class AgentRunner:
         if approver is None:
             return (
                 (reason or "requires confirmation")
-                + " — no approver attached (non-interactive run), so this "
+                + " 鈥?no approver attached (non-interactive run), so this "
                 "action is blocked. Choose a path/command inside the allowed "
                 "workspace, or ask the user to approve it."
             )
@@ -1669,7 +1669,7 @@ class AgentRunner:
         return updated
 
     def _context_budget(self, spec: AgentRunSpec) -> int | None:
-        """Token budget for the model prompt (context window − output − buffer).
+        """Token budget for the model prompt (context window 鈭?output 鈭?buffer).
 
         ``None`` when unknown/non-positive. Shared by ``_snip_history`` and
         ``_maybe_compact`` so both agree on when the prompt is "too big".
@@ -1698,8 +1698,8 @@ class AgentRunner:
     ) -> list[dict[str, Any]]:
         """Relieve context pressure with the cheapest sufficient measure.
 
-        The ladder (dsh's ordering): pressure gate → model-free prune of
-        oversized tool results → remeasure → only if still over pressure,
+        The ladder (dsh's ordering): pressure gate 鈫?model-free prune of
+        oversized tool results 鈫?remeasure 鈫?only if still over pressure,
         a summarization round-trip that replaces old turns (C4a). Both
         effects are persisted in ``messages``; the drop-based
         ``_snip_history`` fallback still follows for anything left over.
@@ -1724,7 +1724,7 @@ class AgentRunner:
         # results in the persisted history, remeasure, and skip the model
         # round-trip entirely when pruning alone clears pressure. A landed
         # prune is durable even when the summary phase later fails or is
-        # blocked — that reduction is real and keeping it costs nothing.
+        # blocked 鈥?that reduction is real and keeping it costs nothing.
         if spec.tool_result_pruner is not None:
             pruned, pruned_count = spec.tool_result_pruner.prune_messages(messages)
             if pruned_count:
@@ -1756,7 +1756,7 @@ class AgentRunner:
         )
         if not summary:
             self._refused_compaction = signature
-            return messages  # summarization failed → leave it to _snip_history
+            return messages  # summarization failed 鈫?leave it to _snip_history
 
         compacted = spec.compaction_strategy.build_history(
             messages,
@@ -1765,7 +1765,7 @@ class AgentRunner:
         )
         # dsh's convergence rule, applied to the AUTO path too: a summary that
         # does not shrink its source by volume is growth wearing a summary's
-        # clothes — keep the original and let _snip_history bound the prompt.
+        # clothes 鈥?keep the original and let _snip_history bound the prompt.
         if self._history_chars(compacted) >= self._history_chars(messages):
             self._refused_compaction = signature
             logger.info(
@@ -1779,7 +1779,7 @@ class AgentRunner:
         # provider-agnostic user message. ``_build_precompact_checkpoint``
         # caps each context and the total block, so a runaway hook can never
         # blow the post-compaction window back open. When the hook blocks or
-        # summarization fails we returned above — the checkpoint only ever
+        # summarization fails we returned above 鈥?the checkpoint only ever
         # appears after a successful compaction.
         # A checkpoint must not turn successful compaction back into growth.
         # Bound it to the actual character reduction in addition to the
@@ -1800,7 +1800,7 @@ class AgentRunner:
         if spec.post_compact_hook is not None:
             await self._call_tool_hook(spec.post_compact_hook, "auto")
         logger.info(
-            "Compacted context for {}: {} → {} messages (est {} > {}·{:.0%} budget)",
+            "Compacted context for {}: {} 鈫?{} messages (est {} > {}路{:.0%} budget)",
             spec.session_key or "default",
             len(messages),
             len(compacted),
@@ -1836,10 +1836,10 @@ class AgentRunner:
     ) -> str | None:
         """Ask the model for a handoff summary of ``messages``.
 
-        The request replays the routed request's exact view — same governance
+        The request replays the routed request's exact view 鈥?same governance
         composition, same transient context, same tool schemas (kept even
         though the summarizer never calls one: dropping them would shorten
-        the token sequence and misalign every following token) — and appends
+        the token sequence and misalign every following token) 鈥?and appends
         only the compaction instruction. That makes this auxiliary call a
         genuine prefix of the last request the provider saw, so provider-side
         prefix/KV caching is reused instead of invalidated (the dsh rule).
@@ -1877,11 +1877,11 @@ class AgentRunner:
         spec: AgentRunSpec,
         messages: list[dict[str, Any]],
     ) -> tuple[list[dict[str, Any]] | None, str]:
-        """Summarize ``messages`` on demand — the manual `/compact` engine.
+        """Summarize ``messages`` on demand 鈥?the manual `/compact` engine.
 
         Unlike :meth:`_maybe_compact`, this skips the automatic pressure
         gate (dsh's rule: manual compaction works even below pressure) and
-        the compaction hooks — those are the AUTO path's policy points; a
+        the compaction hooks 鈥?those are the AUTO path's policy points; a
         human asking directly is the policy. Returns the compacted history,
         or ``None`` with a stable reason the caller can surface verbatim:
         the model produced no usable summary, or the summary did not shrink
@@ -1902,9 +1902,9 @@ class AgentRunner:
         )
         # Shrinkage is judged by VOLUME, not message count: replacing four
         # short turns with three longer ones is growth wearing a summary's
-        # clothes (dsh's convergence rule — reject a summary that does not
+        # clothes (dsh's convergence rule 鈥?reject a summary that does not
         # shrink its source). Observed live: a short conversation "compacted"
-        # 4 → 3 messages while gaining 1,347 characters.
+        # 4 鈫?3 messages while gaining 1,347 characters.
         if self._history_chars(compacted) >= self._history_chars(messages):
             return None, (
                 "Compaction would not shrink the conversation. "
@@ -1913,38 +1913,38 @@ class AgentRunner:
         self._notify_compaction_summary(spec, summary, messages, compacted, "manual")
         return compacted, "compacted"
 
-def _notify_compaction_summary(
-        self,
-        spec: AgentRunSpec,
-        summary: str,
-        before: list[dict[str, Any]],
-        after: list[dict[str, Any]],
-        phase: str,
-    ) -> None:
-        """Deposit the handoff summary + anchors into the memory sink (P1-5).
-
-        Pure fire-and-forget: a failing or absent sink never affects the
-        compaction result. Anchors keep the summary retrievable and
-        attributable (lesson 15: compressed summaries must carry session id,
-        phase, and timestamps rather than vanishing into the vault).
-        """
-        if spec.compaction_summary_sink is None:
-            return
-        import time as _time
-
-        anchor = {
-            "session_key": spec.session_key or "default",
-            "phase": phase,
-            "at": _time.strftime("%Y-%m-%dT%H:%M:%S"),
-            "messages_before": len(before),
-            "messages_after": len(after),
-            "chars_before": self._history_chars(before),
-            "chars_after": self._history_chars(after),
-        }
-        try:
-            spec.compaction_summary_sink(summary, anchor)
-        except Exception:  # noqa: BLE001 - memory work must never break the turn
-            logger.debug("compaction summary sink failed", exc_info=True)
+    def _notify_compaction_summary(
+            self,
+            spec: AgentRunSpec,
+            summary: str,
+            before: list[dict[str, Any]],
+            after: list[dict[str, Any]],
+            phase: str,
+        ) -> None:
+            """Deposit the handoff summary + anchors into the memory sink (P1-5).
+    
+            Pure fire-and-forget: a failing or absent sink never affects the
+            compaction result. Anchors keep the summary retrievable and
+            attributable (lesson 15: compressed summaries must carry session id,
+            phase, and timestamps rather than vanishing into the vault).
+            """
+            if spec.compaction_summary_sink is None:
+                return
+            import time as _time
+    
+            anchor = {
+                "session_key": spec.session_key or "default",
+                "phase": phase,
+                "at": _time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "messages_before": len(before),
+                "messages_after": len(after),
+                "chars_before": self._history_chars(before),
+                "chars_after": self._history_chars(after),
+            }
+            try:
+                spec.compaction_summary_sink(summary, anchor)
+            except Exception:  # noqa: BLE001 - memory work must never break the turn
+                logger.debug("compaction summary sink failed", exc_info=True)
 
     def _overflow_reduce(
         self,

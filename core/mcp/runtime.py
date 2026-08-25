@@ -1,4 +1,4 @@
-"""Session-scoped MCP lifecycle and immutable tool-catalog publication."""
+﻿"""Session-scoped MCP lifecycle and immutable tool-catalog publication."""
 
 from __future__ import annotations
 
@@ -248,7 +248,7 @@ class McpSessionRuntime:
             used = set(self.registry.tool_names)
             registered: list[str] = []
             for connection, definitions in ready:
-registered.extend(
+                registered.extend(
                     self._register_server_tools(connection, definitions, used=used)
                 )
             if deferred_ids:
