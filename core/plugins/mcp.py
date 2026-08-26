@@ -29,6 +29,32 @@ _UNSAFE_SERVER_ID = re.compile(r"[^A-Za-z0-9._-]+")
 _HTTP_HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 _STDIO_FIELDS = frozenset(("type", "command", "args", "env", "cwd"))
 _HTTP_FIELDS = frozenset(("type", "url", "headers"))
+_CREDENTIAL_NAME = re.compile(
+    r"(?:^|[^a-z0-9])(?:authorization|cookie|(?:access|refresh|bearer)[-_]?token|"
+    r"api[-_]?key|password|passwd|secret|private[-_]?key)(?:$|[^a-z0-9])",
+    re.IGNORECASE,
+)
+_CREDENTIAL_VALUE = re.compile(
+    r"(?:"
+    r"\bsk-[A-Za-z0-9_-]{16,}|"
+    r"\bgithub_pat_[A-Za-z0-9_]{20,}|"
+    r"\bgh[pousr]_[A-Za-z0-9]{20,}|"
+    r"\bAKIA[0-9A-Z]{16}\b|"
+    r"\bxox[baprs]-[A-Za-z0-9-]{10,}|"
+    r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----|"
+    r"\bbearer\s+[A-Za-z0-9._~+/=-]{16,}|"
+    r"\b(?:api[-_ ]?key|token|secret|password)\s*[:=]\s*\S{8,}"
+    r")",
+    re.IGNORECASE,
+)
+_CREDENTIAL_PLACEHOLDER = re.compile(
+    r"(?:(?:bearer|basic)\s+)?(?:"
+    r"\$\{[A-Z_][A-Z0-9_]*\}|"
+    r"<[^>\r\n]{1,80}>|"
+    r"(?:your|example|dummy|test|fake|replace[-_ ]?me)(?:[-_ :].*)?"
+    r")",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,7 +129,9 @@ def load_agent_plugin_mcp(root: Path, *, plugin_schema: str) -> AgentPluginMcpRe
     diagnostics: list[PluginDiagnostic] = []
     for name, value in servers.items():
         try:
-            parsed.append(_parse_server(root, name, value))
+            server = _parse_server(root, name, value)
+            parsed.append(server)
+            diagnostics.extend(_credential_diagnostics(server))
         except (ValidationError, ValueError, TypeError) as exc:
             diagnostics.append(
                 PluginDiagnostic(
@@ -119,6 +147,50 @@ def load_agent_plugin_mcp(root: Path, *, plugin_schema: str) -> AgentPluginMcpRe
         tuple(diagnostics),
         revision=revision,
     )
+
+
+def _credential_diagnostics(
+    server: AgentPluginMcpTemplate,
+) -> tuple[PluginDiagnostic, ...]:
+    """Warn about likely credentials without copying their values into output.
+
+    Agent Plugins permits literal ``env`` and ``headers`` values, so rejecting
+    them would make the parser non-conformant.  They are nevertheless package
+    data, not a secret store.  Keep the package usable while making that trust
+    boundary visible before its MCP server starts.
+    """
+
+    findings: list[PluginDiagnostic] = []
+    fields = (
+        ("env", server.definition.env),
+        ("headers", server.definition.headers),
+    )
+    for scope, values in fields:
+        for name, value in values.items():
+            if not _looks_like_credential(name, value):
+                continue
+            findings.append(
+                PluginDiagnostic(
+                    code="agent_plugins.possible_plaintext_credential",
+                    severity=PluginDiagnosticSeverity.WARNING,
+                    message=(
+                        f"Agent Plugin MCP server {server.name!r} field "
+                        f"{scope}.{name} may contain a plaintext credential. "
+                        "Values in mcp.json are distributable package data; "
+                        "bind secrets at runtime in user configuration instead."
+                    ),
+                    component=PluginComponentKind.MCP,
+                    resource="mcp.json",
+                )
+            )
+    return tuple(findings)
+
+
+def _looks_like_credential(name: str, value: str) -> bool:
+    clean = value.strip()
+    if not clean or _CREDENTIAL_PLACEHOLDER.fullmatch(clean):
+        return False
+    return bool(_CREDENTIAL_NAME.search(name) or _CREDENTIAL_VALUE.search(clean))
 
 
 def _parse_server(root: Path, name: Any, value: Any) -> AgentPluginMcpTemplate:

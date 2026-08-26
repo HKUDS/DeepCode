@@ -14,6 +14,7 @@ from core.mcp.tools import McpToolAdapter
 from core.plugins.domain import (
     PluginComponentKind,
     PluginComponentStatus,
+    PluginDiagnosticSeverity,
     PluginValidationError,
 )
 from core.plugins.formats.agent_plugins_v1 import AGENT_PLUGIN_SCHEMA
@@ -249,6 +250,88 @@ def test_mcp_component_accepts_unrestricted_json_server_names(
     assert plugin_server_id("review-tools", "runtime") == "review-tools--runtime"
     assert plugin_policy_key("review-tools", "数据库/α") == (
         "review-tools/%E6%95%B0%E6%8D%AE%E5%BA%93%2F%CE%B1"
+    )
+
+
+def test_mcp_component_warns_about_plaintext_credentials_without_leaking_values(
+    tmp_path: Path,
+) -> None:
+    root = _write_plugin(tmp_path / "plugin")
+    api_key = "sk-" + "a" * 24
+    bearer = "Bearer " + "b" * 24
+    _write_mcp(
+        root,
+        {
+            "stdio": {
+                "type": "stdio",
+                "command": "python3",
+                "env": {
+                    "OPENAI_API_KEY": api_key,
+                    "RUNTIME_CONFIG": api_key,
+                },
+            },
+            "remote": {
+                "type": "streamable-http",
+                "url": "https://example.com/mcp",
+                "headers": {"Authorization": bearer},
+            },
+        },
+    )
+
+    plugin = resolve_plugin(root)
+    component = plugin.package.component(PluginComponentKind.MCP)
+
+    assert component is not None
+    assert component.status is PluginComponentStatus.READY
+    assert component.item_count == 2
+    warnings = [
+        item
+        for item in component.diagnostics
+        if item.code == "agent_plugins.possible_plaintext_credential"
+    ]
+    assert len(warnings) == 3
+    assert all(item.severity is PluginDiagnosticSeverity.WARNING for item in warnings)
+    messages = "\n".join(item.message for item in warnings)
+    assert "env.OPENAI_API_KEY" in messages
+    assert "env.RUNTIME_CONFIG" in messages
+    assert "headers.Authorization" in messages
+    assert api_key not in messages
+    assert bearer not in messages
+
+
+def test_mcp_component_credential_warning_allows_placeholders_and_benign_names(
+    tmp_path: Path,
+) -> None:
+    root = _write_plugin(tmp_path / "plugin")
+    _write_mcp(
+        root,
+        {
+            "stdio": {
+                "type": "stdio",
+                "command": "python3",
+                "env": {
+                    "OPENAI_API_KEY": "${OPENAI_API_KEY}",
+                    "PASSWORD": "<runtime-injected>",
+                    "TOKENIZERS_PARALLELISM": "false",
+                },
+            },
+            "remote": {
+                "type": "streamable-http",
+                "url": "https://example.com/mcp",
+                "headers": {"Authorization": "Bearer ${SERVICE_TOKEN}"},
+            },
+        },
+    )
+
+    plugin = resolve_plugin(root)
+    component = plugin.package.component(PluginComponentKind.MCP)
+
+    assert component is not None
+    assert component.status is PluginComponentStatus.READY
+    assert component.item_count == 2
+    assert not any(
+        item.code == "agent_plugins.possible_plaintext_credential"
+        for item in component.diagnostics
     )
 
 
