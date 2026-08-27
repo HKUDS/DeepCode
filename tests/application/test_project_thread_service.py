@@ -82,10 +82,13 @@ def test_thread_and_authoritative_event_commit_atomically(tmp_path: Path) -> Non
     application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
     project = application.projects.add(str(workspace))
 
-    with patch(
-        "core.application.thread_service.EventRepository.append",
-        side_effect=RuntimeError("event write failed"),
-    ), pytest.raises(RuntimeError, match="event write failed"):
+    with (
+        patch(
+            "core.application.thread_service.EventRepository.append",
+            side_effect=RuntimeError("event write failed"),
+        ),
+        pytest.raises(RuntimeError, match="event write failed"),
+    ):
         application.threads.start(project.id, title="Must roll back")
 
     assert application.threads.list(project.id) == []

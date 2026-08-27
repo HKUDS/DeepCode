@@ -231,11 +231,7 @@ def _sha256(path: Path) -> str:
 
 
 def _timestamp(value: float) -> str:
-    return (
-        datetime.fromtimestamp(value, tz=UTC)
-        .isoformat()
-        .replace("+00:00", "Z")
-    )
+    return datetime.fromtimestamp(value, tz=UTC).isoformat().replace("+00:00", "Z")
 
 
 def _fsync_directory(path: Path) -> None:

@@ -43,7 +43,6 @@ class AgentHook:
     async def before_model_request(self, context: AgentHookContext) -> None:
         """Observe a user-visible model request before provider I/O begins."""
 
-
     async def on_stream(self, context: AgentHookContext, delta: str) -> None:
         pass
 
@@ -60,7 +59,6 @@ class AgentHook:
 
     async def on_model_response(self, context: AgentHookContext) -> None:
         """Observe one completed provider response before tools can run."""
-
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         pass

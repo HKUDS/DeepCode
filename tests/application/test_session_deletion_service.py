@@ -103,11 +103,14 @@ def test_delete_projects_a_cli_only_session_created_after_application_start(
 def test_database_failure_restores_quarantined_session(tmp_path: Path) -> None:
     application, _project_id, thread_id = _application(tmp_path)
     try:
-        with patch.object(
-            ThreadRepository,
-            "remove",
-            side_effect=RuntimeError("database write failed"),
-        ), pytest.raises(RuntimeError, match="database write failed"):
+        with (
+            patch.object(
+                ThreadRepository,
+                "remove",
+                side_effect=RuntimeError("database write failed"),
+            ),
+            pytest.raises(RuntimeError, match="database write failed"),
+        ):
             application.deletions.delete(thread_id)
 
         assert application.session_store.get_session(thread_id) is not None

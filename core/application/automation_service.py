@@ -447,7 +447,10 @@ class AutomationService:
                         and next_status is AutomationStatus.ENABLED
                     )
                 )
-                if next_kind is AutomationScheduleKind.MANUAL or next_status is AutomationStatus.PAUSED:
+                if (
+                    next_kind is AutomationScheduleKind.MANUAL
+                    or next_status is AutomationStatus.PAUSED
+                ):
                     next_run_at = None
                 elif schedule_changed or current.next_run_at is None:
                     assert next_interval is not None
