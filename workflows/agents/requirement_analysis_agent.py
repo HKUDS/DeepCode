@@ -8,7 +8,6 @@ This Agent seamlessly integrates with existing chat workflows to provide more pr
 
 import json
 import logging
-from typing import Dict, List, Optional
 
 from core.compat import Agent, RequestParams
 from core.llm_runtime import attach_workflow_llm
@@ -30,7 +29,7 @@ class RequirementAnalysisAgent:
     - Structured requirement output for easy understanding by code generation agents
     """
 
-    def __init__(self, logger: Optional[logging.Logger] = None):
+    def __init__(self, logger: logging.Logger | None = None):
         """
         Initialize requirement analysis agent
         Args:
@@ -104,7 +103,7 @@ Requirement Summary Principles:
             except Exception as e:
                 self.logger.warning(f"Error during resource cleanup: {e}")
 
-    async def generate_guiding_questions(self, user_input: str) -> List[Dict[str, str]]:
+    async def generate_guiding_questions(self, user_input: str) -> list[dict[str, str]]:
         """
         Generate guiding questions based on user initial requirements
 
@@ -223,7 +222,7 @@ Requirements: Questions should be specific and practical, avoiding general discu
             raise
 
     async def summarize_detailed_requirements(
-        self, initial_input: str, answers: Dict[str, str]
+        self, initial_input: str, answers: dict[str, str]
     ) -> str:
         """
         Generate detailed requirement document based on initial input and user answers

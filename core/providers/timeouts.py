@@ -9,7 +9,6 @@ from typing import TypeVar
 
 from loguru import logger
 
-
 DEFAULT_LLM_REQUEST_TIMEOUT_S = 300.0
 DEFAULT_STREAM_IDLE_TIMEOUT_S = 90.0
 
@@ -80,7 +79,7 @@ async def wait_for_stream_activity(awaitable: Awaitable[_T], *, timeout_s: float
 
     try:
         return await asyncio.wait_for(awaitable, timeout=timeout_s)
-    except asyncio.TimeoutError as exc:
+    except TimeoutError as exc:
         raise StreamIdleTimeoutError(timeout_s) from exc
 
 

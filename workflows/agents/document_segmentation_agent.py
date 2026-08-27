@@ -5,9 +5,9 @@ A lightweight agent that coordinates with the document segmentation MCP server
 to analyze document structure and prepare segments for other agents.
 """
 
-import os
 import logging
-from typing import Dict, Any, Optional
+import os
+from typing import Any
 
 from core.compat import Agent
 from core.llm_runtime import attach_workflow_llm
@@ -32,7 +32,7 @@ class DocumentSegmentationAgent:
     - Content type-aware segmentation strategies
     """
 
-    def __init__(self, logger: Optional[logging.Logger] = None):
+    def __init__(self, logger: logging.Logger | None = None):
         self.logger = logger or self._create_default_logger()
         self.mcp_agent = None
 
@@ -101,7 +101,7 @@ Use the enhanced document-segmentation tools to deliver superior segmentation re
 
     async def analyze_and_prepare_document(
         self, paper_dir: str, force_refresh: bool = False
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Perform intelligent semantic analysis and create optimized document segments.
 
@@ -169,7 +169,7 @@ After segmentation, get a document overview and provide:
                 "segments_available": False,
             }
 
-    async def get_document_overview(self, paper_dir: str) -> Dict[str, Any]:
+    async def get_document_overview(self, paper_dir: str) -> dict[str, Any]:
         """
         Get overview of document structure and segments.
 
@@ -207,7 +207,7 @@ Provide a comprehensive analysis focusing on:
             self.logger.error(f"Error getting document overview: {e}")
             return {"status": "error", "paper_dir": paper_dir, "error_message": str(e)}
 
-    async def validate_segmentation_quality(self, paper_dir: str) -> Dict[str, Any]:
+    async def validate_segmentation_quality(self, paper_dir: str) -> dict[str, Any]:
         """
         Validate the quality of document segmentation.
 
@@ -256,8 +256,8 @@ Provide a comprehensive analysis focusing on:
 
 
 async def run_document_segmentation_analysis(
-    paper_dir: str, logger: Optional[logging.Logger] = None, force_refresh: bool = False
-) -> Dict[str, Any]:
+    paper_dir: str, logger: logging.Logger | None = None, force_refresh: bool = False
+) -> dict[str, Any]:
     """
     Convenience function to run document segmentation analysis.
 
@@ -287,8 +287,8 @@ async def run_document_segmentation_analysis(
 
 # Utility function for integration with existing workflow
 async def prepare_document_segments(
-    paper_dir: str, logger: Optional[logging.Logger] = None
-) -> Dict[str, Any]:
+    paper_dir: str, logger: logging.Logger | None = None
+) -> dict[str, Any]:
     """
     Prepare intelligent document segments optimized for planning agents.
 

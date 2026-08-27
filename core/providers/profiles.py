@@ -14,12 +14,12 @@ from core.domain.execution_profile import ExecutionProfile, ExecutionSelection
 from core.providers.base import GenerationSettings, LLMProvider
 from core.providers.catalog import resolve_model_info
 from core.providers.credentials import CredentialStore
-from core.providers.registry import PROVIDERS, ProviderSpec, find_by_model, find_by_name
 from core.providers.reasoning import (
     ModelReasoningCapabilities,
     infer_reasoning_capabilities,
     resolve_reasoning_effort,
 )
+from core.providers.registry import PROVIDERS, ProviderSpec, find_by_model, find_by_name
 
 if TYPE_CHECKING:
     from core.config import ConnectionProfileConfig, DeepCodeConfig
@@ -93,7 +93,7 @@ class ConnectionResolver:
 
     def __init__(
         self,
-        config: "DeepCodeConfig",
+        config: DeepCodeConfig,
         credentials: CredentialStore | None = None,
     ) -> None:
         self.config = config
@@ -302,7 +302,7 @@ class ConnectionResolver:
     def _profile_connection(
         self,
         connection_id: str,
-        profile: "ConnectionProfileConfig",
+        profile: ConnectionProfileConfig,
     ) -> ResolvedConnection:
         spec = find_by_name(profile.template)
         if spec is None:

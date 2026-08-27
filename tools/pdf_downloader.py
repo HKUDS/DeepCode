@@ -18,15 +18,16 @@ import asyncio
 import ipaddress
 import os
 import re
-import socket
-import aiohttp
-import aiofiles
 import shutil
+import socket
 import sys
-from importlib import import_module
-from typing import List, Dict, Optional, Any
-from urllib.parse import unquote, urljoin, urlparse
 from datetime import datetime
+from importlib import import_module
+from typing import Any
+from urllib.parse import unquote, urljoin, urlparse
+
+import aiofiles
+import aiohttp
 
 from core.platform_compat import configure_utf8_stdio
 from tools.document_conversion import (
@@ -39,10 +40,9 @@ configure_utf8_stdio()
 
 # Docling imports for document conversion
 try:
-    from docling.document_converter import DocumentConverter
     from docling.datamodel.base_models import InputFormat
     from docling.datamodel.pipeline_options import PdfPipelineOptions
-    from docling.document_converter import PdfFormatOption
+    from docling.document_converter import DocumentConverter, PdfFormatOption
 
     DOCLING_AVAILABLE = True
 except ImportError:
@@ -152,7 +152,7 @@ async def _request_with_safe_redirects(
 
 
 # 辅助函数
-def format_success_message(action: str, details: Dict[str, Any]) -> str:
+def format_success_message(action: str, details: dict[str, Any]) -> str:
     """格式化成功消息"""
     return f"✅ {action}\n" + "\n".join(f"   {k}: {v}" for k, v in details.items())
 
@@ -171,7 +171,7 @@ async def perform_document_conversion(
     file_path: str,
     extract_images: bool = True,
     output_path: str | None = None,
-) -> Optional[str]:
+) -> str | None:
     """
     执行文档转换的共用逻辑
 
@@ -290,8 +290,8 @@ def format_file_operation_result(
     operation: str,
     source: str,
     destination: str,
-    result: Dict[str, Any],
-    conversion_msg: Optional[str] = None,
+    result: dict[str, Any],
+    conversion_msg: str | None = None,
 ) -> str:
     """
     格式化文件操作结果的共用逻辑
@@ -367,7 +367,7 @@ class LocalPathExtractor:
         return False
 
     @staticmethod
-    def extract_local_paths(text: str) -> List[str]:
+    def extract_local_paths(text: str) -> list[str]:
         """从文本中提取本地文件路径"""
         patterns = [
             r'"([^"]+)"',
@@ -416,7 +416,7 @@ class URLExtractor:
         return url
 
     @classmethod
-    def extract_urls(cls, text: str) -> List[str]:
+    def extract_urls(cls, text: str) -> list[str]:
         """从文本中提取URL"""
         urls = []
 
@@ -523,7 +523,7 @@ class PathExtractor:
     """路径提取器"""
 
     @staticmethod
-    def extract_target_path(text: str) -> Optional[str]:
+    def extract_target_path(text: str) -> str | None:
         """从文本中提取目标路径"""
         patterns = [
             r'(?:save|download|store|put|place|write|copy|move)\s+(?:to|into|in|at)\s+["\']?([^\s"\']+)["\']?',
@@ -562,8 +562,8 @@ class SimplePdfConverter:
     """简单的PDF转换器，使用 pypdf 提取文本"""
 
     def convert_pdf_to_markdown(
-        self, input_file: str, output_file: Optional[str] = None
-    ) -> Dict[str, Any]:
+        self, input_file: str, output_file: str | None = None
+    ) -> dict[str, Any]:
         """
         使用 pypdf 将 PDF 转换为 Markdown 格式
 
@@ -641,7 +641,7 @@ class SimplePdfConverter:
             return {
                 "success": False,
                 "input_file": input_file,
-                "error": f"Conversion failed: {str(e)}",
+                "error": f"Conversion failed: {e!s}",
             }
 
 
@@ -689,7 +689,7 @@ class DoclingConverter:
         except Exception:
             return False
 
-    def extract_images(self, doc, output_dir: str) -> Dict[str, str]:
+    def extract_images(self, doc, output_dir: str) -> dict[str, str]:
         """
         提取文档中的图片并保存到本地
 
@@ -743,7 +743,7 @@ class DoclingConverter:
         return image_map
 
     def process_markdown_with_images(
-        self, markdown_content: str, image_map: Dict[str, str]
+        self, markdown_content: str, image_map: dict[str, str]
     ) -> str:
         """
         处理Markdown内容，替换图片占位符为实际的图片路径
@@ -773,9 +773,9 @@ class DoclingConverter:
     def convert_to_markdown(
         self,
         input_file: str,
-        output_file: Optional[str] = None,
+        output_file: str | None = None,
         extract_images: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         将文档转换为Markdown格式，支持图片提取
 
@@ -880,11 +880,11 @@ class DoclingConverter:
             return {
                 "success": False,
                 "input_file": input_file,
-                "error": f"Conversion failed: {str(e)}",
+                "error": f"Conversion failed: {e!s}",
             }
 
 
-async def check_url_accessible(url: str) -> Dict[str, Any]:
+async def check_url_accessible(url: str) -> dict[str, Any]:
     """检查URL是否可访问"""
     try:
         timeout = aiohttp.ClientTimeout(total=10)
@@ -912,7 +912,7 @@ async def check_url_accessible(url: str) -> Dict[str, Any]:
         }
 
 
-async def download_file(url: str, destination: str) -> Dict[str, Any]:
+async def download_file(url: str, destination: str) -> dict[str, Any]:
     """下载单个文件"""
     start_time = datetime.now()
     chunk_size = 8192
@@ -983,18 +983,18 @@ async def download_file(url: str, destination: str) -> Dict[str, Any]:
             "success": False,
             "url": url,
             "destination": destination,
-            "error": f"Network error: {str(e)}",
+            "error": f"Network error: {e!s}",
         }
     except Exception as e:
         return {
             "success": False,
             "url": url,
             "destination": destination,
-            "error": f"Download error: {str(e)}",
+            "error": f"Download error: {e!s}",
         }
 
 
-async def move_local_file(source_path: str, destination: str) -> Dict[str, Any]:
+async def move_local_file(source_path: str, destination: str) -> dict[str, Any]:
     """复制本地文件到目标位置（保留原文件）"""
     start_time = datetime.now()
 
@@ -1036,7 +1036,7 @@ async def move_local_file(source_path: str, destination: str) -> Dict[str, Any]:
             "success": False,
             "source": source_path,
             "destination": destination,
-            "error": f"Copy error: {str(e)}",
+            "error": f"Copy error: {e!s}",
         }
 
 
@@ -1128,7 +1128,7 @@ async def download_files(instruction: str) -> str:
 
         except Exception as e:
             msg = f"[ERROR] Failed to download: {url}\n"
-            msg += f"   Error: {str(e)}"
+            msg += f"   Error: {e!s}"
 
         results.append(msg)
 
@@ -1181,7 +1181,7 @@ async def download_files(instruction: str) -> str:
 
         except Exception as e:
             msg = f"[ERROR] Failed to copy: {local_path}\n"
-            msg += f"   Error: {str(e)}"
+            msg += f"   Error: {e!s}"
 
         results.append(msg)
 
@@ -1235,7 +1235,7 @@ async def parse_download_urls(text: str) -> str:
 
 
 async def download_file_to(
-    url: str, destination: Optional[str] = None, filename: Optional[str] = None
+    url: str, destination: str | None = None, filename: str | None = None
 ) -> str:
     """
     Download a specific file with detailed options.
@@ -1343,7 +1343,7 @@ async def download_file_to(
 
 
 async def move_file_to(
-    source: str, destination: Optional[str] = None, filename: Optional[str] = None
+    source: str, destination: str | None = None, filename: str | None = None
 ) -> str:
     """
     Copy a local file to a new location (preserves original file).

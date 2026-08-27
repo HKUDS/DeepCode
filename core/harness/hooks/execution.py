@@ -84,7 +84,7 @@ async def run_command(handler: Handler, payload_json: str, cwd: str) -> CommandR
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(payload_json.encode()), timeout=handler.timeout_sec
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         await terminate_process_tree(proc)
         try:
             await proc.communicate()

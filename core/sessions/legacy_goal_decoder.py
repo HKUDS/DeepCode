@@ -13,7 +13,6 @@ from typing import Any
 
 from core.domain.thread_goal import ThreadGoal, ThreadGoalStatus
 
-
 LEGACY_GOAL_SCHEMA_VERSION = 1
 
 

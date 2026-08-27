@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.harness.tools.user_input import RequestUserInputTool  # noqa: E402
+from core.harness.tools.user_input import RequestUserInputTool
 
 
 def _run(tool, **kwargs):

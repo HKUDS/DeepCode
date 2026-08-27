@@ -88,7 +88,7 @@ class MCPToolWrapper(Tool):
                 self._session.call_tool(self._original_name, arguments=kwargs),
                 timeout=self._tool_timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 "MCP tool '{}' timed out after {}s", self._name, self._tool_timeout
             )
@@ -203,7 +203,7 @@ class MCPResourceWrapper(Tool):
                 self._session.read_resource(self._uri),
                 timeout=self._resource_timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 "MCP resource '{}' timed out after {}s",
                 self._name,
@@ -292,7 +292,7 @@ class MCPPromptWrapper(Tool):
                 self._session.get_prompt(self._prompt_name, arguments=kwargs),
                 timeout=self._prompt_timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 "MCP prompt '{}' timed out after {}s", self._name, self._prompt_timeout
             )
@@ -389,7 +389,9 @@ async def connect_mcp_servers(
             streamablehttp_client as streamable_http_client,
         )
     except ImportError:  # pragma: no cover - some mcp versions use the snake_case name
-        from mcp.client.streamable_http import streamable_http_client  # type: ignore[no-redef]
+        from mcp.client.streamable_http import (
+            streamable_http_client,  # type: ignore[no-redef]
+        )
 
     async def connect_single_server(
         name: str, cfg: MCPServerConfig

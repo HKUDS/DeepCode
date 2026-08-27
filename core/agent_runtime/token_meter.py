@@ -28,12 +28,15 @@ gap, and every response carries one.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping, Protocol
+from typing import Any, Protocol
 
 from core.agent_runtime.helpers import (
     estimate_message_tokens,
     estimate_prompt_tokens_chain,
+)
+from core.agent_runtime.helpers import (
     history_signature as _shape,
 )
 

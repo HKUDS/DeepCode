@@ -12,24 +12,24 @@ Usage:
 python tools/code_implementation_server.py
 """
 
-import os
-import subprocess
 import json
-import sys
-from pathlib import Path
-import re
-from typing import Dict, Any, List
-import tempfile
-import shutil
 import logging
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
 from datetime import datetime
+from pathlib import Path
+from typing import Any
 
+from core.harness.sandbox import build_exec_command, describe_backend, fences_writes
 from core.platform_compat import (
     configure_utf8_stdio,
     subprocess_env,
     subprocess_text_kwargs,
 )
-from core.harness.sandbox import build_exec_command, describe_backend, fences_writes
 
 configure_utf8_stdio()
 
@@ -96,7 +96,7 @@ def validate_path(path: str) -> Path:
     return full_path
 
 
-def log_operation(action: str, details: Dict[str, Any]):
+def log_operation(action: str, details: dict[str, Any]):
     """Log operation history"""
     OPERATION_HISTORY.append(
         {"timestamp": datetime.now().isoformat(), "action": action, "details": details}
@@ -165,7 +165,7 @@ async def read_file(
     except Exception as e:
         result = {
             "status": "error",
-            "message": f"Failed to read file: {str(e)}",
+            "message": f"Failed to read file: {e!s}",
             "file_path": file_path,
         }
         log_operation("read_file_error", {"file_path": file_path, "error": str(e)})
@@ -194,7 +194,7 @@ async def read_multiple_files(file_requests: str, max_files: int = 5) -> str:
             return json.dumps(
                 {
                     "status": "error",
-                    "message": f"Invalid JSON format for file_requests: {str(e)}",
+                    "message": f"Invalid JSON format for file_requests: {e!s}",
                     "operation_type": "multi_file",
                     "timestamp": datetime.now().isoformat(),
                 },
@@ -335,7 +335,7 @@ async def read_multiple_files(file_requests: str, max_files: int = 5) -> str:
                 # Record individual file error
                 results["files"][file_path] = {
                     "status": "error",
-                    "message": f"Failed to read file: {str(file_error)}",
+                    "message": f"Failed to read file: {file_error!s}",
                     "file_path": file_path,
                     "content": "",
                     "total_lines": 0,
@@ -386,7 +386,7 @@ async def read_multiple_files(file_requests: str, max_files: int = 5) -> str:
     except Exception as e:
         result = {
             "status": "error",
-            "message": f"Failed to read multiple files: {str(e)}",
+            "message": f"Failed to read multiple files: {e!s}",
             "operation_type": "multi_file",
             "timestamp": datetime.now().isoformat(),
             "files_processed": 0,
@@ -460,7 +460,7 @@ async def write_file(
     except Exception as e:
         result = {
             "status": "error",
-            "message": f"Failed to write file: {str(e)}",
+            "message": f"Failed to write file: {e!s}",
             "file_path": file_path,
         }
         log_operation("write_file_error", {"file_path": file_path, "error": str(e)})
@@ -495,7 +495,7 @@ async def write_multiple_files(
             return json.dumps(
                 {
                     "status": "error",
-                    "message": f"Invalid JSON format for file_implementations: {str(e)}",
+                    "message": f"Invalid JSON format for file_implementations: {e!s}",
                     "operation_type": "multi_file",
                     "timestamp": datetime.now().isoformat(),
                 },
@@ -619,7 +619,7 @@ async def write_multiple_files(
                 # Record individual file error
                 results["files"][file_path] = {
                     "status": "error",
-                    "message": f"Failed to write file: {str(file_error)}",
+                    "message": f"Failed to write file: {file_error!s}",
                     "size_bytes": 0,
                     "lines_written": 0,
                     "backup_created": False,
@@ -667,7 +667,7 @@ async def write_multiple_files(
     except Exception as e:
         result = {
             "status": "error",
-            "message": f"Failed to write multiple files: {str(e)}",
+            "message": f"Failed to write multiple files: {e!s}",
             "operation_type": "multi_file",
             "timestamp": datetime.now().isoformat(),
             "files_processed": 0,
@@ -764,7 +764,7 @@ async def execute_python(code: str, timeout: int = 30) -> str:
     except Exception as e:
         result = {
             "status": "error",
-            "message": f"Python code execution failed: {str(e)}",
+            "message": f"Python code execution failed: {e!s}",
         }
         log_operation("execute_python_error", {"error": str(e)})
         return json.dumps(result, ensure_ascii=False, indent=2)
@@ -862,7 +862,7 @@ async def execute_bash(command: str, timeout: int = 30) -> str:
     except Exception as e:
         result = {
             "status": "error",
-            "message": f"Failed to execute bash command: {str(e)}",
+            "message": f"Failed to execute bash command: {e!s}",
             "command": command,
         }
         log_operation("execute_bash_error", {"command": command, "error": str(e)})
@@ -870,7 +870,7 @@ async def execute_bash(command: str, timeout: int = 30) -> str:
 
 
 @mcp.tool()
-async def read_code_mem(file_paths: List[str]) -> str:
+async def read_code_mem(file_paths: list[str]) -> str:
     """
     Check if file summaries exist in implement_code_summary.md for multiple files
 
@@ -991,7 +991,7 @@ async def read_code_mem(file_paths: List[str]) -> str:
     except Exception as e:
         result = {
             "status": "error",
-            "message": f"Failed to check code memory: {str(e)}",
+            "message": f"Failed to check code memory: {e!s}",
             "file_paths": file_paths
             if isinstance(file_paths, list)
             else [str(file_paths)],
@@ -1117,8 +1117,7 @@ def _remove_common_prefixes(file_path: str) -> str:
     path = file_path
 
     for prefix in prefixes_to_remove:
-        if path.startswith(prefix):
-            path = path[len(prefix) :]
+        path = path.removeprefix(prefix)
 
     return path
 
@@ -1287,7 +1286,7 @@ async def search_code(
     except Exception as e:
         result = {
             "status": "error",
-            "message": f"Code search failed: {str(e)}",
+            "message": f"Code search failed: {e!s}",
             "pattern": pattern,
         }
         log_operation("search_code_error", {"pattern": pattern, "error": str(e)})
@@ -1324,7 +1323,7 @@ async def get_file_structure(directory: str = ".", max_depth: int = 5) -> str:
             }
             return json.dumps(result, ensure_ascii=False, indent=2)
 
-        def scan_directory(path: Path, current_depth: int = 0) -> Dict[str, Any]:
+        def scan_directory(path: Path, current_depth: int = 0) -> dict[str, Any]:
             """Recursively scan directory"""
             if current_depth >= max_depth:
                 return {"type": "directory", "name": path.name, "truncated": True}
@@ -1400,7 +1399,7 @@ async def get_file_structure(directory: str = ".", max_depth: int = 5) -> str:
     except Exception as e:
         result = {
             "status": "error",
-            "message": f"Failed to get file structure: {str(e)}",
+            "message": f"Failed to get file structure: {e!s}",
             "directory": directory,
         }
         log_operation(
@@ -1466,7 +1465,7 @@ async def set_workspace(workspace_path: str) -> str:
     except Exception as e:
         result = {
             "status": "error",
-            "message": f"Failed to set workspace: {str(e)}",
+            "message": f"Failed to set workspace: {e!s}",
             "workspace_path": workspace_path,
         }
         log_operation(
@@ -1504,7 +1503,7 @@ async def get_operation_history(last_n: int = 10) -> str:
     except Exception as e:
         result = {
             "status": "error",
-            "message": f"Failed to get operation history: {str(e)}",
+            "message": f"Failed to get operation history: {e!s}",
         }
         return json.dumps(result, ensure_ascii=False, indent=2)
 

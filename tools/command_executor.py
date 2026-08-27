@@ -11,24 +11,23 @@ import shlex
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
-from core.platform_compat import configure_utf8_stdio, subprocess_env
 from core.harness.sandbox import build_exec_command
+from core.platform_compat import configure_utf8_stdio, subprocess_env
 
 configure_utf8_stdio()
 
-from mcp.server.models import InitializationOptions
-import mcp.types as types
-from mcp.server import NotificationOptions, Server
 import mcp.server.stdio
+from mcp import types
+from mcp.server import NotificationOptions, Server
+from mcp.server.models import InitializationOptions
 
 IS_WINDOWS = platform.system() == "Windows"
 
 app = Server("command-executor")
 
 
-def _try_native_execute(command: str, cwd: Path) -> Optional[Tuple[int, str, str]]:
+def _try_native_execute(command: str, cwd: Path) -> tuple[int, str, str] | None:
     """Try to execute common file-tree commands natively (no shell).
 
     Handles Unix-style commands so they work on Windows where cmd.exe would
@@ -231,7 +230,7 @@ async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent
         return [
             types.TextContent(
                 type="text",
-                text=f"工具执行错误 / Error executing tool {name}: {str(e)}",
+                text=f"工具执行错误 / Error executing tool {name}: {e!s}",
             )
         ]
 
@@ -319,7 +318,7 @@ async def execute_command_batch(
                 results.append(f"⏱️ Command {i} timeout: {command}")
                 stats["timeout"] += 1
             except Exception as e:
-                results.append(f"💥 Command {i} exception: {command} - {str(e)}")
+                results.append(f"💥 Command {i} exception: {command} - {e!s}")
                 stats["failed"] += 1
 
         # 生成执行报告 / Generate execution report
@@ -332,7 +331,7 @@ async def execute_command_batch(
         return [
             types.TextContent(
                 type="text",
-                text=f"批量命令执行失败 / Failed to execute command batch: {str(e)}",
+                text=f"批量命令执行失败 / Failed to execute command batch: {e!s}",
             )
         ]
 
@@ -389,13 +388,13 @@ async def execute_single_command(
     except Exception as e:
         return [
             types.TextContent(
-                type="text", text=f"💥 命令执行错误 / Command execution error: {str(e)}"
+                type="text", text=f"💥 命令执行错误 / Command execution error: {e!s}"
             )
         ]
 
 
 def generate_execution_summary(
-    working_directory: str, command_lines: List[str], stats: Dict[str, int]
+    working_directory: str, command_lines: list[str], stats: dict[str, int]
 ) -> str:
     """
     生成执行总结 / Generate execution summary

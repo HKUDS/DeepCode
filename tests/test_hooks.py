@@ -18,9 +18,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.harness.hooks.discovery import Handler, discover_hooks  # noqa: E402
-from core.harness.hooks.engine import HooksEngine  # noqa: E402
-from core.harness.hooks.events import (  # noqa: E402
+from core.harness.hooks.discovery import Handler, discover_hooks
+from core.harness.hooks.engine import HooksEngine
+from core.harness.hooks.events import (
     matches_matcher,
     validate_matcher,
 )

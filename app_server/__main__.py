@@ -10,7 +10,6 @@ import sys
 import time
 from pathlib import Path
 
-
 _PROCESS_STARTED = time.perf_counter()
 
 

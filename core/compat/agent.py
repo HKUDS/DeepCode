@@ -21,7 +21,8 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import Any, Iterable, Type
+from collections.abc import Iterable
+from typing import Any
 
 from loguru import logger
 
@@ -218,7 +219,7 @@ class AugmentedLLM:
 
     def __init__(
         self,
-        agent: "Agent",
+        agent: Agent,
         provider: LLMProvider,
         provider_name: str,
         phase: str = "default",
@@ -351,7 +352,7 @@ class Agent:
         self._ready_event: asyncio.Event | None = None
         self._setup_error: BaseException | None = None
 
-    async def __aenter__(self) -> "Agent":
+    async def __aenter__(self) -> Agent:
         """Open MCP sessions on a dedicated supervisor task.
 
         Why a supervisor task? The MCP ``stdio_client`` uses anyio cancel
@@ -506,7 +507,7 @@ class Agent:
 
         if wanted:
             await connect_mcp_servers(wanted, self._tool_registry)
-            connected = sorted(self._tool_registry._owned_server_stacks.keys())  # noqa: SLF001
+            connected = sorted(self._tool_registry._owned_server_stacks.keys())
             failed = [name for name in wanted if name not in connected]
             if failed:
                 logger.warning(
@@ -525,7 +526,7 @@ class Agent:
 
     async def attach_llm(
         self,
-        llm_class: Type[AugmentedLLM] | None = None,
+        llm_class: type[AugmentedLLM] | None = None,
         *,
         phase: str = "default",
         provider_name: str | None = None,

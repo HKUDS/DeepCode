@@ -16,9 +16,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.config import ProvidersConfig  # noqa: E402
-from core.providers.openai_compat import OpenAICompatProvider  # noqa: E402
-from core.providers.registry import find_by_name  # noqa: E402
+from core.config import ProvidersConfig
+from core.providers.openai_compat import OpenAICompatProvider
+from core.providers.registry import find_by_name
 
 
 def test_forge_is_registered_as_a_gateway():

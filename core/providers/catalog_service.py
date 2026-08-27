@@ -476,7 +476,7 @@ def _has_declarations(entry: ManualModelConfig) -> bool:
 
 
 def _declared_model(
-    entry: "ManualModelConfig",
+    entry: ManualModelConfig,
     *,
     base: CatalogModel | None = None,
 ) -> CatalogModel:

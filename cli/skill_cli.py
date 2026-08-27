@@ -7,10 +7,10 @@ import json
 import os
 import sys
 
-from core.skills.management import LocalSkillManager
-from core.skills.models import MUTABLE_SKILL_SCOPES, SkillRecord, SkillScope
 from core.plugins.host import LocalPluginHost
 from core.skills.host import SkillWorkspaceRegistry
+from core.skills.management import LocalSkillManager
+from core.skills.models import MUTABLE_SKILL_SCOPES, SkillRecord, SkillScope
 
 
 def _parser() -> argparse.ArgumentParser:

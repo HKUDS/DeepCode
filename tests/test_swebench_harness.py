@@ -16,10 +16,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from eval.swebench import dataset  # noqa: E402
-from eval.swebench.evaluate import evaluate_local  # noqa: E402
-from eval.swebench.instance import load_local_instances  # noqa: E402
-from eval.swebench.predict import (  # noqa: E402
+from eval.swebench import dataset
+from eval.swebench.evaluate import evaluate_local
+from eval.swebench.instance import load_local_instances
+from eval.swebench.predict import (
     capture_patch,
     generate_prediction,
     prepare_workspace,
@@ -27,7 +27,7 @@ from eval.swebench.predict import (  # noqa: E402
 
 _HAVE_GIT = shutil.which("git") is not None
 
-import pytest  # noqa: E402
+import pytest
 
 pytestmark = pytest.mark.skipif(not _HAVE_GIT, reason="git required")
 

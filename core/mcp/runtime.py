@@ -1,4 +1,4 @@
-﻿"""Session-scoped MCP lifecycle and immutable tool-catalog publication."""
+"""Session-scoped MCP lifecycle and immutable tool-catalog publication."""
 
 from __future__ import annotations
 

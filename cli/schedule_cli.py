@@ -25,10 +25,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rich.console import Console
 
-from cli.tui import theme
-
-from cli.goal_runner import GoalRunOptions, run_goal
 from cli.execution_options import add_reasoning_effort_argument
+from cli.goal_runner import GoalRunOptions, run_goal
+from cli.tui import theme
 from core.domain.thread_goal import ThreadGoalStatus
 from core.loop.autodream import consolidate_memory
 from core.schedule.keepalive import Continuation
@@ -63,7 +62,7 @@ def _autodream_task(
     return task
 
 
-def _loop_task(args) -> "callable":
+def _loop_task(args) -> callable:
     async def task(run_index: int) -> RunOutcome:
         workspace = os.path.abspath(args.workspace)
         result = await run_goal(

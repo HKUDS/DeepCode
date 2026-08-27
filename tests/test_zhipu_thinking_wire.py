@@ -18,8 +18,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.providers.model_compat import resolve_model_compat  # noqa: E402
-from core.providers.registry import find_by_name  # noqa: E402
+from core.providers.model_compat import resolve_model_compat
+from core.providers.registry import find_by_name
 
 
 @pytest.mark.parametrize(

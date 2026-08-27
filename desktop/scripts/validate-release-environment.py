@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import os
 
-
 COMMON = ("TAURI_SIGNING_PRIVATE_KEY", "TAURI_UPDATER_PUBLIC_KEY")
 PLATFORM_REQUIREMENTS = {
     "macos": (

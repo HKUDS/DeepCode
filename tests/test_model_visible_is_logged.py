@@ -26,12 +26,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import cli.tui.app as tui_app  # noqa: E402
-from core import agent_setup  # noqa: E402
-from core.agent_runtime.context import EnvironmentContext  # noqa: E402
-from core.providers.base import LLMResponse, ToolCallRequest  # noqa: E402
-from core.sessions import SessionStore  # noqa: E402
-from core.sessions.transcript import visible_kernel_history  # noqa: E402
+import cli.tui.app as tui_app
+from core import agent_setup
+from core.agent_runtime.context import EnvironmentContext
+from core.providers.base import LLMResponse, ToolCallRequest
+from core.sessions import SessionStore
+from core.sessions.transcript import visible_kernel_history
 
 
 class _Profile:

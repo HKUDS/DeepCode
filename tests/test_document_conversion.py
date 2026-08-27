@@ -6,12 +6,12 @@ from pathlib import Path
 
 import pytest
 
+from tools import pdf_downloader
 from tools.document_conversion import (
     UnsupportedDocumentError,
     convert_to_markdown,
     detect_document_kind,
 )
-from tools import pdf_downloader
 from workflows.agent_orchestration_engine import acquire_input_artifact
 from workflows.environment import _normalize_input
 from workflows.workflow_context import WorkflowContext

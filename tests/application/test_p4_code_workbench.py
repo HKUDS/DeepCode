@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import subprocess
 import shutil
+import subprocess
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -313,7 +313,7 @@ def test_allowlisted_test_run_creates_durable_test_result_item(tmp_path: Path) -
         "def test_ok():\n    assert 6 * 7 == 42\n", encoding="utf-8"
     )
     application, thread_id = _application(tmp_path, workspace)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     with application.database.transaction() as connection:
         turns = TurnRepository(connection)
         turn = Turn(
@@ -353,7 +353,7 @@ def test_test_discovery_requires_a_real_npm_script_and_bounds_failure_output(
         encoding="utf-8",
     )
     application, thread_id = _application(tmp_path, workspace)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     with application.database.transaction() as connection:
         turns = TurnRepository(connection)
         turn = Turn(

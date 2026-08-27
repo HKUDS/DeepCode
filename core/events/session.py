@@ -656,7 +656,7 @@ class AgentSession:
             max_iterations=1,
             max_tool_result_chars=_DEFAULT_MAX_TOOL_RESULT_CHARS,
             context_window_tokens=self._context_window_tokens,
-token_meter=self._token_meter,
+            token_meter=self._token_meter,
             compaction_summary_sink=self._compaction_summary_sink,
         )
         before = list(self._history)
@@ -1042,7 +1042,7 @@ token_meter=self._token_meter,
             model=self._model,
             max_iterations=self._max_iterations,
             max_tool_result_chars=_DEFAULT_MAX_TOOL_RESULT_CHARS,
-token_meter=self._token_meter,
+            token_meter=self._token_meter,
             temperature=(
                 _profile_temperature
                 if _profile_temperature is not None

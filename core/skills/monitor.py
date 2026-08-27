@@ -106,7 +106,7 @@ class SkillCatalogMonitor:
         for workspace, entry, generation in entries:
             try:
                 token = entry.host.change_token()
-            except Exception:  # noqa: BLE001 - one provider must not stop monitoring
+            except Exception:
                 with self._lock:
                     current = self._entries.get(workspace)
                     current_generation = (
@@ -136,7 +136,7 @@ class SkillCatalogMonitor:
             changed.append(workspace)
             try:
                 self._on_change(workspace)
-            except Exception:  # noqa: BLE001 - observers must not stop monitoring
+            except Exception:
                 logger.exception("Skill catalog change observer failed")
         return tuple(changed)
 

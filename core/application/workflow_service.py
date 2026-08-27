@@ -68,7 +68,6 @@ from core.persistence.thread_repository import ThreadRepository
 from core.persistence.workflow_repository import ArtifactRepository, WorkflowRepository
 from core.sessions import SessionStore
 
-
 SUPPORTED_KINDS = frozenset({"paper2code"})
 SUPPORTED_SOURCE_TYPES = frozenset({"local", "url", "repository", "requirement"})
 MAX_SOURCE_LENGTH = 16_384

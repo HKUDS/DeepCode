@@ -5,7 +5,6 @@ File processing utilities for handling paper files and related operations.
 import json
 import os
 import re
-from typing import Dict, List, Optional, Union
 
 
 class FileProcessor:
@@ -14,7 +13,7 @@ class FileProcessor:
     """
 
     @staticmethod
-    def extract_file_path(file_info: Union[str, Dict]) -> Optional[str]:
+    def extract_file_path(file_info: str | dict) -> str | None:
         """
         Extract paper directory path from the input information.
 
@@ -68,10 +67,10 @@ class FileProcessor:
             return paper_dir
 
         except (AttributeError, TypeError) as e:
-            raise ValueError(f"Invalid input format: {str(e)}")
+            raise ValueError(f"Invalid input format: {e!s}")
 
     @staticmethod
-    def find_markdown_file(directory: str) -> Optional[str]:
+    def find_markdown_file(directory: str) -> str | None:
         """
         Find the first markdown file in the given directory.
 
@@ -90,7 +89,7 @@ class FileProcessor:
         return None
 
     @staticmethod
-    def parse_markdown_sections(content: str) -> List[Dict[str, Union[str, int, List]]]:
+    def parse_markdown_sections(content: str) -> list[dict[str, str | int | list]]:
         """
         Parse markdown content and organize it by sections based on headers.
 
@@ -141,7 +140,7 @@ class FileProcessor:
         return FileProcessor._organize_sections(sections)
 
     @staticmethod
-    def _organize_sections(sections: List[Dict]) -> List[Dict]:
+    def _organize_sections(sections: list[dict]) -> list[dict]:
         """
         Organize sections into a hierarchical structure based on their levels.
 
@@ -202,12 +201,12 @@ class FileProcessor:
                             # Use the converted markdown file instead
                             file_path = conversion_result["output_file"]
                         else:
-                            raise IOError(
+                            raise OSError(
                                 f"PDF conversion failed: {conversion_result['error']}"
                             )
                     except Exception as conv_error:
-                        raise IOError(
-                            f"File {file_path} is a PDF file, not a text file. PDF conversion failed: {str(conv_error)}"
+                        raise OSError(
+                            f"File {file_path} is a PDF file, not a text file. PDF conversion failed: {conv_error!s}"
                         )
 
             # Read file content
@@ -219,14 +218,14 @@ class FileProcessor:
             return content
 
         except UnicodeDecodeError as e:
-            raise IOError(
-                f"Error reading file {file_path}: File encoding is not UTF-8. Original error: {str(e)}"
+            raise OSError(
+                f"Error reading file {file_path}: File encoding is not UTF-8. Original error: {e!s}"
             )
         except Exception as e:
-            raise IOError(f"Error reading file {file_path}: {str(e)}")
+            raise OSError(f"Error reading file {file_path}: {e!s}")
 
     @staticmethod
-    def format_section_content(section: Dict) -> str:
+    def format_section_content(section: dict) -> str:
         """
         Format a section's content with standardized spacing and structure.
 
@@ -259,7 +258,7 @@ class FileProcessor:
         return formatted
 
     @staticmethod
-    def standardize_output(sections: List[Dict]) -> str:
+    def standardize_output(sections: list[dict]) -> str:
         """
         Convert structured sections into a standardized string format.
 
@@ -280,8 +279,8 @@ class FileProcessor:
 
     @classmethod
     async def process_file_input(
-        cls, file_input: Union[str, Dict], base_dir: str = None
-    ) -> Dict:
+        cls, file_input: str | dict, base_dir: str = None
+    ) -> dict:
         """
         Process file input information and return the structured content.
 
@@ -430,10 +429,10 @@ class FileProcessor:
             }
 
         except Exception as e:
-            raise ValueError(f"Error processing file input: {str(e)}")
+            raise ValueError(f"Error processing file input: {e!s}")
 
     @staticmethod
-    def extract_json_from_text(text: str) -> Optional[Dict]:
+    def extract_json_from_text(text: str) -> dict | None:
         """
         Extract JSON from text that may contain markdown code blocks or other content.
 

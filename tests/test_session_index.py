@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.sessions.store import SessionStore  # noqa: E402
+from core.sessions.store import SessionStore
 
 
 def test_default_root_follows_deepcode_home(tmp_path, monkeypatch):

@@ -9,8 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.harness.collaboration import collaboration_preamble  # noqa: E402
-from core.harness.permissions import PermissionMode  # noqa: E402
+from core.harness.collaboration import collaboration_preamble
+from core.harness.permissions import PermissionMode
 
 
 def test_plan_mode_preamble_is_non_mutating_and_plan_first():

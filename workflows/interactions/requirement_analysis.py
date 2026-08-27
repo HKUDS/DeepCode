@@ -12,7 +12,8 @@ Flow:
 5. Enhanced requirements passed to planning phase
 """
 
-from typing import Any, Dict, Optional
+from typing import Any
+
 from .base import (
     InteractionHandler,
     InteractionPoint,
@@ -38,7 +39,7 @@ class RequirementAnalysisHandler(InteractionHandler):
     hook_point = InteractionPoint.BEFORE_PLANNING
     priority = 10  # High priority - runs first
 
-    def __init__(self, enabled: bool = True, config: Optional[Dict] = None):
+    def __init__(self, enabled: bool = True, config: dict | None = None):
         super().__init__(enabled, config)
         self._agent = None
 
@@ -59,7 +60,7 @@ class RequirementAnalysisHandler(InteractionHandler):
             await self._agent.cleanup()
             self._agent = None
 
-    async def should_trigger(self, context: Dict[str, Any]) -> bool:
+    async def should_trigger(self, context: dict[str, Any]) -> bool:
         """
         Trigger if:
         - User has provided initial requirements
@@ -81,7 +82,7 @@ class RequirementAnalysisHandler(InteractionHandler):
 
         return True
 
-    async def create_interaction(self, context: Dict[str, Any]) -> InteractionRequest:
+    async def create_interaction(self, context: dict[str, Any]) -> InteractionRequest:
         """Generate questions based on user's initial requirements."""
         user_input = context.get("user_input") or context.get("requirements", "")
 
@@ -132,8 +133,8 @@ class RequirementAnalysisHandler(InteractionHandler):
             )
 
     async def process_response(
-        self, response: InteractionResponse, context: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, response: InteractionResponse, context: dict[str, Any]
+    ) -> dict[str, Any]:
         """Process user's answers and create enhanced requirements."""
         user_input = context.get("user_input") or context.get("requirements", "")
         answers = response.data.get("answers", {})
@@ -170,14 +171,14 @@ class RequirementAnalysisHandler(InteractionHandler):
 
         return context
 
-    async def on_skip(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_skip(self, context: dict[str, Any]) -> dict[str, Any]:
         """Handle skip - mark as processed but don't modify requirements."""
         context["requirements_enhanced"] = True
         context["requirements_skipped"] = True
         await self._cleanup_agent()
         return context
 
-    async def on_timeout(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_timeout(self, context: dict[str, Any]) -> dict[str, Any]:
         """Handle timeout - same as skip."""
         self.logger.warning(
             "Requirement analysis timed out, continuing with original requirements"

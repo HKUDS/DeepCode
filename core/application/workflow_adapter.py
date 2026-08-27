@@ -11,7 +11,6 @@ from typing import Any, Literal, Protocol
 
 from core.domain.common import JsonObject
 
-
 WorkflowOutcomeStatus = Literal["completed", "incomplete", "cancelled"]
 ProgressCallback = Callable[[str, int, int, str, JsonObject], Awaitable[None]]
 InteractionCallback = Callable[[JsonObject], Awaitable[JsonObject]]

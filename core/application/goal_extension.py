@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from importlib.resources import files
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from core.agent_runtime.goal_runtime import GoalRuntimeContext, GoalRuntimeHandler
 from core.application.errors import (
@@ -42,7 +42,6 @@ from core.sessions.thread_goal_store import (
     ThreadGoalStore,
 )
 from core.skills.models import MAX_SELECTED_SKILLS, SkillSelection
-
 
 logger = logging.getLogger(__name__)
 _EVIDENCE_KINDS = frozenset(
@@ -907,7 +906,7 @@ class GoalExtension(GoalRuntimeHandler):
             return
         try:
             self._update_sink(thread_id, goal)
-        except Exception:  # noqa: BLE001 - canonical ledger already committed
+        except Exception:
             logger.exception("failed to publish Goal update for %s", thread_id)
 
     def _emit(
@@ -920,7 +919,7 @@ class GoalExtension(GoalRuntimeHandler):
             return
         try:
             self._lifecycle_sink(thread_id, event_type, payload)
-        except Exception:  # noqa: BLE001 - canonical ledger already committed
+        except Exception:
             logger.exception(
                 "failed to publish Goal lifecycle event %s for %s",
                 event_type,

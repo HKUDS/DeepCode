@@ -60,7 +60,6 @@ from core.domain.project import TrustState
 from core.file_lock import FileLease
 from core.providers.reasoning import normalize_reasoning_effort
 
-
 _MODEL_CATALOG_PREVIEW = 4  # models shown per connection in /model
 # Sentinel: switch_model keeps the session's effort unless told otherwise.
 _KEEP_EFFORT: object = object()
@@ -313,7 +312,7 @@ class TuiApp:
             else:
                 catalog = "no catalog configured — any model id accepted"
             marker = " · current" if view.get("id") == profile.connection_id else ""
-            lines.append(f"  {str(view.get('id', '')):<{width}}  {catalog}{marker}")
+            lines.append(f"  {view.get('id', '')!s:<{width}}  {catalog}{marker}")
         return "\n".join(lines)
 
     def connection_model_catalog(self) -> list[tuple[str, list[dict]]]:

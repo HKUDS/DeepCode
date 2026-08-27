@@ -54,10 +54,12 @@ To create an automation script, include only Playwright logic (servers are manag
 from playwright.sync_api import sync_playwright
 
 with sync_playwright() as p:
-    browser = p.chromium.launch(headless=True) # Always launch chromium in headless mode
+    browser = p.chromium.launch(
+        headless=True
+    )  # Always launch chromium in headless mode
     page = browser.new_page()
-    page.goto('http://localhost:5173') # Server already running and ready
-    page.wait_for_load_state('networkidle') # CRITICAL: Wait for JS to execute
+    page.goto("http://localhost:5173")  # Server already running and ready
+    page.wait_for_load_state("networkidle")  # CRITICAL: Wait for JS to execute
     # ... your automation logic
     browser.close()
 ```
@@ -66,9 +68,9 @@ with sync_playwright() as p:
 
 1. **Inspect rendered DOM**:
    ```python
-   page.screenshot(path='/tmp/inspect.png', full_page=True)
+   page.screenshot(path="/tmp/inspect.png", full_page=True)
    content = page.content()
-   page.locator('button').all()
+   page.locator("button").all()
    ```
 
 2. **Identify selectors** from inspection results

@@ -9,7 +9,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 DESKTOP_ROOT = Path(__file__).resolve().parents[1]
 ENV_ROOT = DESKTOP_ROOT / "build" / "sidecar" / ".venv"
 LOCK_PATH = DESKTOP_ROOT / "sidecar-requirements.lock"

@@ -8,9 +8,10 @@ thought; it is the provider-designated reasoning text received on the wire.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Mapping
+from typing import Any
 
 
 class ReasoningChannel(str, Enum):
@@ -61,7 +62,7 @@ class ReasoningPayload:
         self,
         channel: ReasoningChannel,
         delta: str,
-    ) -> "ReasoningPayload":
+    ) -> ReasoningPayload:
         if channel is ReasoningChannel.SUMMARY:
             return ReasoningPayload(
                 summary_text=self.summary_text + delta,
@@ -92,7 +93,7 @@ class ReasoningPayload:
         }
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, Any] | None) -> "ReasoningPayload":
+    def from_dict(cls, value: Mapping[str, Any] | None) -> ReasoningPayload:
         """Decode current and legacy ``{"text": summary}`` item payloads."""
 
         raw = value or {}

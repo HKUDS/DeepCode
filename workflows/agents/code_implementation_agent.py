@@ -6,9 +6,9 @@ memory optimization for long-running development sessions.
 """
 
 import json
-import time
 import logging
-from typing import Dict, Any, List, Optional
+import time
+from typing import Any
 
 # Import tiktoken for token calculation
 try:
@@ -19,8 +19,8 @@ except ImportError:
     TIKTOKEN_AVAILABLE = False
 
 # Import prompts from code_prompts
-import sys
 import os
+import sys
 
 sys.path.insert(
     0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -45,7 +45,7 @@ class CodeImplementationAgent:
     def __init__(
         self,
         mcp_agent,
-        logger: Optional[logging.Logger] = None,
+        logger: logging.Logger | None = None,
         enable_read_tools: bool = True,
     ):
         """
@@ -151,7 +151,7 @@ class CodeImplementationAgent:
         self.llm_client_type = llm_client_type
         self.logger.info("Memory agent integration configured")
 
-    async def execute_tool_calls(self, tool_calls: List[Dict]) -> List[Dict]:
+    async def execute_tool_calls(self, tool_calls: list[dict]) -> list[dict]:
         """
         Execute MCP tool calls and track implementation progress
 
@@ -277,7 +277,7 @@ class CodeImplementationAgent:
 
     # _handle_read_code_mem method removed - read_code_mem is now a proper MCP tool
 
-    async def _handle_read_file_with_memory_optimization(self, tool_call: Dict) -> Dict:
+    async def _handle_read_file_with_memory_optimization(self, tool_call: dict) -> dict:
         """
         Intercept read_file calls and redirect to read_code_mem if a summary exists.
         This prevents unnecessary file reads if the summary is already available.
@@ -409,7 +409,7 @@ class CodeImplementationAgent:
                 }
 
     async def _track_file_implementation_with_summary(
-        self, tool_call: Dict, result: Any
+        self, tool_call: dict, result: Any
     ):
         """
         Track file implementation and create code summary
@@ -448,7 +448,7 @@ class CodeImplementationAgent:
             except Exception as e:
                 self.logger.error(f"Failed to create code summary: {e}")
 
-    def _track_file_implementation(self, tool_call: Dict, result: Any):
+    def _track_file_implementation(self, tool_call: dict, result: Any):
         """
         Track file implementation progress
         """
@@ -545,7 +545,7 @@ class CodeImplementationAgent:
                     f"File implementation counted (emergency fallback): count={self.files_implemented_count}, file={file_path}"
                 )
 
-    def _track_dependency_analysis(self, tool_call: Dict, result: Any):
+    def _track_dependency_analysis(self, tool_call: dict, result: Any):
         """
         Track dependency analysis through read_file calls
         """
@@ -572,7 +572,7 @@ class CodeImplementationAgent:
         except Exception as e:
             self.logger.warning(f"Failed to track dependency analysis: {e}")
 
-    def calculate_messages_token_count(self, messages: List[Dict]) -> int:
+    def calculate_messages_token_count(self, messages: list[dict]) -> int:
         """
         Calculate total token count for a list of messages
 
@@ -613,7 +613,7 @@ class CodeImplementationAgent:
             total_chars = sum(len(str(msg.get("content", ""))) for msg in messages)
             return total_chars // 4
 
-    def should_trigger_summary_by_tokens(self, messages: List[Dict]) -> bool:
+    def should_trigger_summary_by_tokens(self, messages: list[dict]) -> bool:
         """
         Check if summary should be triggered based on token count
 
@@ -647,7 +647,7 @@ class CodeImplementationAgent:
         return should_trigger
 
     def should_trigger_summary(
-        self, summary_trigger: int = 5, messages: List[Dict] = None
+        self, summary_trigger: int = 5, messages: list[dict] = None
     ) -> bool:
         """
         Check if summary should be triggered based on token count (preferred) or file count (fallback)
@@ -674,7 +674,7 @@ class CodeImplementationAgent:
 
         return should_trigger
 
-    def mark_summary_triggered(self, messages: List[Dict] = None):
+    def mark_summary_triggered(self, messages: list[dict] = None):
         """
         Mark that summary has been triggered for current state
         标记当前状态的总结已被触发
@@ -699,7 +699,7 @@ class CodeImplementationAgent:
                 f"Summary marked as triggered for file count: {self.files_implemented_count}"
             )
 
-    def get_implementation_summary(self) -> Dict[str, Any]:
+    def get_implementation_summary(self) -> dict[str, Any]:
         """
         Get current implementation summary
         获取当前实现总结
@@ -713,7 +713,7 @@ class CodeImplementationAgent:
         """
         return self.files_implemented_count
 
-    def get_read_tools_status(self) -> Dict[str, Any]:
+    def get_read_tools_status(self) -> dict[str, Any]:
         """
         Get read tools configuration status
         获取读取工具配置状态
@@ -770,7 +770,7 @@ class CodeImplementationAgent:
         )
         self.logger.info(f"Architecture note recorded: {note}")
 
-    def get_implementation_statistics(self) -> Dict[str, Any]:
+    def get_implementation_statistics(self) -> dict[str, Any]:
         """
         Get comprehensive implementation statistics
         获取全面的实现统计信息
@@ -896,7 +896,7 @@ class CodeImplementationAgent:
         return f"""🚨 **ANALYSIS LOOP DETECTED - IMMEDIATE ACTION REQUIRED**
 
 **Problem**: You've been reading/analyzing files for {len(self.recent_tool_calls)} consecutive calls without writing code.
-**Recent tool calls**: {' → '.join(self.recent_tool_calls)}
+**Recent tool calls**: {" → ".join(self.recent_tool_calls)}
 
 **SOLUTION - IMPLEMENT CODE NOW**:
 1. **STOP ANALYZING** - You have enough information

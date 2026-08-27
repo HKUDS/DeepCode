@@ -23,7 +23,6 @@ from typing import Literal
 from urllib.parse import urlparse
 from xml.etree import ElementTree
 
-
 DocumentKind = Literal["markdown", "text", "html", "docx", "pdf"]
 
 _MARKDOWN_SUFFIXES = {".md", ".markdown"}
@@ -111,9 +110,7 @@ def convert_to_markdown(
         if output_file is not None
         else source.with_suffix(".md")
     )
-    if kind == "markdown":
-        markdown = _read_text(source)
-    elif kind == "text":
+    if kind == "markdown" or kind == "text":
         markdown = _read_text(source)
     elif kind == "html":
         markdown = _html_to_markdown(_read_text(source))

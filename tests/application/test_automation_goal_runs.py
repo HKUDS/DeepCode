@@ -38,7 +38,6 @@ from core.persistence.automation_repository import (
 from core.persistence.execution_repository import TurnRepository
 from core.sessions import SessionStore
 
-
 _Decision = Literal["complete", "blocked"]
 
 
@@ -53,7 +52,7 @@ class _GoalAwareSession:
 
     def __init__(
         self,
-        factory: "_GoalAwareFactory",
+        factory: _GoalAwareFactory,
         goal_runtime: GoalRuntimeRouter,
     ) -> None:
         self.factory = factory

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import codecs
 import hashlib
 import itertools
-import codecs
 import os
 import tempfile
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from core.application.errors import (
@@ -22,7 +22,6 @@ from core.application.errors import (
 from core.application.workspace_service import WorkspaceService
 from core.persistence.database import Database
 from core.persistence.execution_repository import TurnRepository
-
 
 DEFAULT_READ_LIMIT = 128 * 1024
 MAX_READ_LIMIT = 128 * 1024
@@ -233,7 +232,7 @@ def _sha256(path: Path) -> str:
 
 def _timestamp(value: float) -> str:
     return (
-        datetime.fromtimestamp(value, tz=timezone.utc)
+        datetime.fromtimestamp(value, tz=UTC)
         .isoformat()
         .replace("+00:00", "Z")
     )

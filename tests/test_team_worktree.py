@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.team.worktree import _EXCLUDE_BEGIN, WorktreeManager  # noqa: E402
+from core.team.worktree import _EXCLUDE_BEGIN, WorktreeManager
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git required")
 
@@ -67,7 +67,7 @@ def test_overlapping_workers_conflict_is_detected(tmp_path):
     assert not r2.clean  # second overlaps → conflict, not silent clobber
     assert "shared.py" in r2.conflicts
     # The base kept w1's value; w2's conflict did not clobber it.
-    assert m._git("status", "--porcelain").stdout.strip() == ""  # noqa: SLF001
+    assert m._git("status", "--porcelain").stdout.strip() == ""
     m.cleanup_all()
 
 
@@ -100,7 +100,7 @@ def test_build_artifacts_do_not_break_merge_or_pollute(tmp_path):
     assert r.clean, f"merge should be clean, got: {r.detail}"
     assert (m.base / "mod.py").read_text() == "VALUE = 1\n"  # real work landed
     # The artifact was neither committed nor did it obstruct the merge.
-    tracked = m._git("ls-files").stdout  # noqa: SLF001
+    tracked = m._git("ls-files").stdout
     assert "mod.py" in tracked
     assert "__pycache__" not in tracked and ".pyc" not in tracked
     m.cleanup_all()
@@ -112,7 +112,7 @@ def test_team_exclude_is_local_idempotent_and_reverted(tmp_path):
     exclude = m.base / ".git" / "info" / "exclude"
     # A user's own rule sits alongside and must survive our install/remove.
     exclude.write_text("user-secret.txt\n" + exclude.read_text())
-    m._install_team_exclude()  # noqa: SLF001 - re-install is a no-op
+    m._install_team_exclude()
     assert exclude.read_text().count(_EXCLUDE_BEGIN) == 1  # idempotent, no dup
 
     m.cleanup_all()  # leaves the repo's config as we found it

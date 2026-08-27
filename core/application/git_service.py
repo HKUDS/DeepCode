@@ -20,7 +20,6 @@ from core.application.workspace_service import WorkspaceService
 from core.persistence.database import Database
 from core.persistence.execution_repository import TurnRepository
 
-
 MAX_GIT_OUTPUT = 8 * 1024 * 1024
 MAX_DIFF_FILES = 500
 MAX_DIFF_LINES = 4_000

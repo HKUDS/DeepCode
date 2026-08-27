@@ -38,7 +38,7 @@ def _row_count(application: DeepCodeApplication, table: str, thread_id: str) -> 
     column = "id" if table == "threads" else "thread_id"
     with application.database.read() as connection:
         row = connection.execute(
-            f"SELECT COUNT(*) FROM {table} WHERE {column} = ?",  # noqa: S608
+            f"SELECT COUNT(*) FROM {table} WHERE {column} = ?",
             (thread_id,),
         ).fetchone()
     return int(row[0])
@@ -107,9 +107,8 @@ def test_database_failure_restores_quarantined_session(tmp_path: Path) -> None:
             ThreadRepository,
             "remove",
             side_effect=RuntimeError("database write failed"),
-        ):
-            with pytest.raises(RuntimeError, match="database write failed"):
-                application.deletions.delete(thread_id)
+        ), pytest.raises(RuntimeError, match="database write failed"):
+            application.deletions.delete(thread_id)
 
         assert application.session_store.get_session(thread_id) is not None
         assert application.session_store.is_deletion_pending(thread_id) is False

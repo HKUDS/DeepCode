@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
 import importlib.util
+import json
 import os
 import secrets
 import string
@@ -44,12 +44,12 @@ from core.providers.openai_responses import (
     parse_response_output,
 )
 from core.providers.reasoning import OPENROUTER_REASONING_DETAILS
-from core.reasoning import ReasoningChannel
 from core.providers.timeouts import (
     StreamIdleTimeoutError,
     iter_with_stream_idle_timeout,
     resolve_stream_idle_timeout_s,
 )
+from core.reasoning import ReasoningChannel
 
 if TYPE_CHECKING:
     from core.providers.registry import ProviderSpec
@@ -154,7 +154,7 @@ def _extract_tc_extras(
 
 
 def _uses_openrouter_attribution(
-    spec: "ProviderSpec | None", api_base: str | None
+    spec: ProviderSpec | None, api_base: str | None
 ) -> bool:
     """Apply Nanobot attribution headers to OpenRouter requests by default."""
     if spec and spec.name == "openrouter":
@@ -163,7 +163,7 @@ def _uses_openrouter_attribution(
 
 
 def _uses_requesty_attribution(
-    spec: "ProviderSpec | None", api_base: str | None
+    spec: ProviderSpec | None, api_base: str | None
 ) -> bool:
     """Apply DeepCode attribution headers to Requesty requests by default."""
     if spec and spec.name == "requesty":
@@ -381,7 +381,7 @@ class OpenAICompatProvider(LLMProvider):
                     # Some OpenAI-compatible gateways reject assistant messages
                     # that mix non-empty content with tool_calls.
                     clean["content"] = None
-            if "tool_call_id" in clean and clean["tool_call_id"]:
+            if clean.get("tool_call_id"):
                 clean["tool_call_id"] = map_id(clean["tool_call_id"])
         return self._enforce_role_alternation(sanitized)
 
@@ -497,9 +497,7 @@ class OpenAICompatProvider(LLMProvider):
 
         model_name = (model or self.default_model).lower()
         wants = False
-        if reasoning_effort and reasoning_effort.lower() != "none":
-            wants = True
-        elif any(token in model_name for token in ("gpt-5", "o1", "o3", "o4")):
+        if reasoning_effort and reasoning_effort.lower() != "none" or any(token in model_name for token in ("gpt-5", "o1", "o3", "o4")):
             wants = True
         if not wants:
             return False

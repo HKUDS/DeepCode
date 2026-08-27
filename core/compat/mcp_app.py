@@ -15,9 +15,10 @@ pool. Each :class:`core.compat.Agent` opens / closes its own MCP servers.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any, AsyncIterator
+from typing import Any
 
 from core.compat.runtime import (
     DeepCodeRuntime,

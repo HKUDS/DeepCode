@@ -20,9 +20,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.agent_runtime.tools.registry import ToolRegistry  # noqa: E402
-from core.events import AgentSession, UserInput  # noqa: E402
-from core.providers.base import LLMResponse  # noqa: E402
+from core.agent_runtime.tools.registry import ToolRegistry
+from core.events import AgentSession, UserInput
+from core.providers.base import LLMResponse
 
 
 class _ReportingProvider:

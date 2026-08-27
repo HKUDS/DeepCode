@@ -20,7 +20,7 @@ from core.skills.monitor import (
     SkillChangeCallback,
     provider_change_token,
 )
-from core.skills.provider import SkillListQuery, SkillProviderSource, SkillProviders
+from core.skills.provider import SkillListQuery, SkillProviders, SkillProviderSource
 
 logger = logging.getLogger(__name__)
 
@@ -300,7 +300,7 @@ class SkillWorkspaceRegistry:
         for listener in listeners:
             try:
                 listener(workspace)
-            except Exception:  # noqa: BLE001 - observers are isolated
+            except Exception:
                 logger.exception("Skill workspace change listener failed")
 
 

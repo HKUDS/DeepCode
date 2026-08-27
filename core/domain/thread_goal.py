@@ -19,7 +19,6 @@ from core.domain.common import (
 )
 from core.skills.models import MAX_SELECTED_SKILLS, SkillSelection
 
-
 GOAL_OBJECTIVE_INPUT_MAX_CHARS = 4_000
 GOAL_OBJECTIVE_MAX_CHARS = 16_384
 GOAL_OUTCOME_EVIDENCE_MAX_ITEMS = 12
@@ -161,7 +160,7 @@ class ThreadGoal:
         token_budget: int | None,
         skill_ids: tuple[str, ...],
         now: datetime | None = None,
-    ) -> "ThreadGoal":
+    ) -> ThreadGoal:
         """Update the same logical Goal without creating a hidden revision."""
 
         next_status = self.status
@@ -185,7 +184,7 @@ class ThreadGoal:
         status: ThreadGoalStatus,
         *,
         now: datetime | None = None,
-    ) -> "ThreadGoal":
+    ) -> ThreadGoal:
         """Apply an explicit user-controlled lifecycle transition."""
 
         if status is self.status:
@@ -209,7 +208,7 @@ class ThreadGoal:
         status: ThreadGoalStatus,
         *,
         now: datetime | None = None,
-    ) -> "ThreadGoal":
+    ) -> ThreadGoal:
         """Apply the only terminal states the active Agent may request."""
 
         if status not in {ThreadGoalStatus.COMPLETE, ThreadGoalStatus.BLOCKED}:
@@ -218,7 +217,7 @@ class ThreadGoal:
             raise ValueError("only an active Goal accepts an Agent status update")
         return replace(self, status=status, updated_at=now or utc_now())
 
-    def block_after_error(self, *, now: datetime | None = None) -> "ThreadGoal":
+    def block_after_error(self, *, now: datetime | None = None) -> ThreadGoal:
         """Stop automatic continuation after a terminal runtime failure."""
 
         if self.status is not ThreadGoalStatus.ACTIVE:
@@ -235,7 +234,7 @@ class ThreadGoal:
         tokens: int,
         elapsed_seconds: int,
         now: datetime | None = None,
-    ) -> "ThreadGoal":
+    ) -> ThreadGoal:
         if isinstance(tokens, bool) or tokens < 0:
             raise ValueError("tokens must not be negative")
         if isinstance(elapsed_seconds, bool) or elapsed_seconds < 0:
@@ -258,11 +257,11 @@ class ThreadGoal:
 
 
 __all__ = [
+    "GOAL_OBJECTIVE_INPUT_MAX_CHARS",
+    "GOAL_OBJECTIVE_MAX_CHARS",
     "GOAL_OUTCOME_EVIDENCE_MAX_ITEMS",
     "GOAL_OUTCOME_EVIDENCE_SUMMARY_MAX_CHARS",
     "GOAL_OUTCOME_REASON_MAX_CHARS",
-    "GOAL_OBJECTIVE_INPUT_MAX_CHARS",
-    "GOAL_OBJECTIVE_MAX_CHARS",
     "GoalDecisionSource",
     "GoalEvidenceRef",
     "GoalOutcome",

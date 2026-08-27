@@ -41,7 +41,6 @@ from cli.tui.text import fit_head, fit_tail, workspace_path
 from core.events.protocol import Event
 from core.reasoning import ReasoningAvailability, ReasoningChannel
 
-
 _NORMAL_PREVIEW_CHARS = 240
 _STATUS_DETAIL_CHARS = 72
 _SUBJECT_CELLS = 88  # ceiling; the real budget is the terminal's width

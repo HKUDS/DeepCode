@@ -18,11 +18,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.providers.model_compat import (  # noqa: E402
+from core.providers.model_compat import (
     model_supports_thinking,
     resolve_model_compat,
 )
-from core.providers.registry import find_by_name  # noqa: E402
+from core.providers.registry import find_by_name
 
 # Every provider that declares a thinking dialect.
 THINKING_ENDPOINTS = ["deepseek", "zhipu", "dashscope"]

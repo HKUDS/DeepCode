@@ -360,17 +360,17 @@ class SkillProviders:
 
 
 __all__ = [
-    "InvalidatableSkillProvider",
     "MAX_PROVIDER_RESOURCE_BYTES",
     "MAX_PROVIDER_SEARCH_QUERY_CHARS",
+    "InvalidatableSkillProvider",
     "SkillListQuery",
     "SkillProvider",
-    "SkillProviderUnavailableError",
     "SkillProviderSource",
+    "SkillProviderUnavailableError",
     "SkillProviders",
     "SkillReadRequest",
     "SkillReadResult",
-    "SkillSearchRequest",
     "SkillSearchMatch",
+    "SkillSearchRequest",
     "SkillSearchResult",
 ]

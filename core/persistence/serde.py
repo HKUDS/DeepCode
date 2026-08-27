@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 
@@ -32,7 +32,7 @@ def load_json_list(value: str | None) -> list[Any]:
 def dump_datetime(value: datetime | None) -> str | None:
     if value is None:
         return None
-    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 def load_datetime(value: str | None) -> datetime | None:
@@ -42,7 +42,7 @@ def load_datetime(value: str | None) -> datetime | None:
     parsed = datetime.fromisoformat(normalized)
     if parsed.tzinfo is None:
         raise ValueError("persisted timestamp is not timezone-aware")
-    return parsed.astimezone(timezone.utc)
+    return parsed.astimezone(UTC)
 
 
 def load_required_datetime(value: str) -> datetime:

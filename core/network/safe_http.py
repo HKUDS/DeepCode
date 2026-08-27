@@ -406,7 +406,7 @@ class SafeHttpClient:
                     response.release()
         except SafeHttpError:
             raise
-        except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as exc:
+        except (TimeoutError, aiohttp.ClientError, OSError) as exc:
             raise NetworkTransportError("web request failed") from exc
 
     async def get_json(

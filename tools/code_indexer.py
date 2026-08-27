@@ -18,10 +18,10 @@ import json
 import logging
 import os
 import re
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from dataclasses import dataclass, asdict
-from typing import List, Dict, Any
+from typing import Any
 
 from core.llm_runtime import get_workflow_provider
 from utils.llm_utils import get_default_models
@@ -35,8 +35,8 @@ class FileRelationship:
     target_file_path: str
     relationship_type: str  # 'direct_match', 'partial_match', 'reference', 'utility'
     confidence_score: float  # 0.0 to 1.0
-    helpful_aspects: List[str]
-    potential_contributions: List[str]
+    helpful_aspects: list[str]
+    potential_contributions: list[str]
     usage_suggestions: str
 
 
@@ -46,9 +46,9 @@ class FileSummary:
 
     file_path: str
     file_type: str
-    main_functions: List[str]
-    key_concepts: List[str]
-    dependencies: List[str]
+    main_functions: list[str]
+    key_concepts: list[str]
+    dependencies: list[str]
     summary: str
     lines_of_code: int
     last_modified: str
@@ -60,9 +60,9 @@ class RepoIndex:
 
     repo_name: str
     total_files: int
-    file_summaries: List[FileSummary]
-    relationships: List[FileRelationship]
-    analysis_metadata: Dict[str, Any]
+    file_summaries: list[FileSummary]
+    relationships: list[FileRelationship]
+    analysis_metadata: dict[str, Any]
 
 
 class CodeIndexer:
@@ -275,7 +275,7 @@ class CodeIndexer:
 
         return logger
 
-    def _load_indexer_config(self) -> Dict[str, Any]:
+    def _load_indexer_config(self) -> dict[str, Any]:
         """Load indexer configuration from YAML file"""
         try:
             import yaml
@@ -366,7 +366,7 @@ class CodeIndexer:
                 if attempt < self.max_retries - 1:
                     await asyncio.sleep(self.retry_delay * (attempt + 1))
 
-        error_msg = f"LLM call failed after {self.max_retries} attempts. Last error: {str(last_error)}"
+        error_msg = f"LLM call failed after {self.max_retries} attempts. Last error: {last_error!s}"
         self.logger.error(error_msg)
         return f"Error in LLM analysis: {error_msg}"
 
@@ -447,7 +447,7 @@ class CodeIndexer:
         except Exception as e:
             self.logger.warning(f"Failed to save debug response: {e}")
 
-    def get_all_repo_files(self, repo_path: Path) -> List[Path]:
+    def get_all_repo_files(self, repo_path: Path) -> list[Path]:
         """Recursively get all supported files in a repository"""
         files = []
 
@@ -513,13 +513,13 @@ class CodeIndexer:
             except PermissionError:
                 tree_lines.append(f"{prefix}├── [Permission Denied]")
             except Exception as e:
-                tree_lines.append(f"{prefix}├── [Error: {str(e)}]")
+                tree_lines.append(f"{prefix}├── [Error: {e!s}]")
 
         tree_lines.append(f"{repo_path.name}/")
         add_to_tree(repo_path)
         return "\n".join(tree_lines)
 
-    async def pre_filter_files(self, repo_path: Path, file_tree: str) -> List[str]:
+    async def pre_filter_files(self, repo_path: Path, file_tree: str) -> list[str]:
         """Use LLM to pre-filter relevant files based on target structure"""
         filter_prompt = f"""
         You are a code analysis expert. Please analyze the following code repository file tree based on the target project structure and filter out files that may be relevant to the target project.
@@ -602,8 +602,8 @@ class CodeIndexer:
             return []
 
     def filter_files_by_paths(
-        self, all_files: List[Path], selected_paths: List[str], repo_path: Path
-    ) -> List[Path]:
+        self, all_files: list[Path], selected_paths: list[str], repo_path: Path
+    ) -> list[Path]:
         """Filter file list based on LLM-selected paths"""
         if not selected_paths:
             return all_files
@@ -762,14 +762,14 @@ class CodeIndexer:
                 main_functions=[],
                 key_concepts=[],
                 dependencies=[],
-                summary=f"Analysis failed: {str(e)}",
+                summary=f"Analysis failed: {e!s}",
                 lines_of_code=0,
                 last_modified="",
             )
 
     async def find_relationships(
         self, file_summary: FileSummary
-    ) -> List[FileRelationship]:
+    ) -> list[FileRelationship]:
         """Find relationships between a repo file and target structure"""
 
         # Build relationship type description from config
@@ -783,8 +783,8 @@ class CodeIndexer:
         Existing File Analysis:
         - Path: {file_summary.file_path}
         - Type: {file_summary.file_type}
-        - Functions: {', '.join(file_summary.main_functions)}
-        - Concepts: {', '.join(file_summary.key_concepts)}
+        - Functions: {", ".join(file_summary.main_functions)}
+        - Concepts: {", ".join(file_summary.key_concepts)}
         - Summary: {file_summary.summary}
 
         Target Project Structure:
@@ -1024,7 +1024,7 @@ class CodeIndexer:
                             main_functions=[],
                             key_concepts=[],
                             dependencies=[],
-                            summary=f"Concurrent analysis failed: {str(result)}",
+                            summary=f"Concurrent analysis failed: {result!s}",
                             lines_of_code=0,
                             last_modified="",
                         )
@@ -1093,7 +1093,7 @@ class CodeIndexer:
 
             gc.collect()
 
-    async def build_all_indexes(self) -> Dict[str, str]:
+    async def build_all_indexes(self) -> dict[str, str]:
         """Build indexes for all repositories in code_base"""
         if not self.code_base_path.exists():
             raise FileNotFoundError(
@@ -1174,7 +1174,7 @@ class CodeIndexer:
 
         return output_files
 
-    def _extract_repository_statistics(self, repo_index: RepoIndex) -> Dict[str, Any]:
+    def _extract_repository_statistics(self, repo_index: RepoIndex) -> dict[str, Any]:
         """Extract statistical information from a repository index"""
         metadata = repo_index.analysis_metadata
 
@@ -1226,7 +1226,7 @@ class CodeIndexer:
             "analysis_date": metadata.get("analysis_date", "unknown"),
         }
 
-    def generate_statistics_report(self, statistics_data: List[Dict[str, Any]]) -> str:
+    def generate_statistics_report(self, statistics_data: list[dict[str, Any]]) -> str:
         """Generate a detailed statistics report"""
         stats_path = self.output_dir / self.stats_filename
 
@@ -1333,7 +1333,7 @@ class CodeIndexer:
 
         return str(stats_path)
 
-    def generate_summary_report(self, output_files: Dict[str, str]) -> str:
+    def generate_summary_report(self, output_files: dict[str, str]) -> str:
         """Generate a summary report of all indexes created"""
         report_path = self.output_dir / "indexing_summary.json"
 

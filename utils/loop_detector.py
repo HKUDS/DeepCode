@@ -6,7 +6,7 @@ in the code implementation process to prevent hanging processes.
 """
 
 import time
-from typing import List, Dict, Any, Optional
+from typing import Any
 
 
 class LoopDetector:
@@ -46,7 +46,7 @@ class LoopDetector:
         self.max_errors = max_errors
 
         # Tracking state
-        self.tool_history: List[str] = []
+        self.tool_history: list[str] = []
         self.start_time = time.time()
         self.last_progress_time = time.time()
         self.consecutive_errors = 0
@@ -64,7 +64,7 @@ class LoopDetector:
         self.last_progress_time = time.time()
         print(f"📁 Starting file: {filename}")
 
-    def check_tool_call(self, tool_name: str) -> Dict[str, Any]:
+    def check_tool_call(self, tool_name: str) -> dict[str, Any]:
         """
         Check if tool call indicates a loop or timeout.
 
@@ -153,7 +153,7 @@ class LoopDetector:
         self.consecutive_errors = 0
         self.record_progress()
 
-    def get_status_summary(self) -> Dict[str, Any]:
+    def get_status_summary(self) -> dict[str, Any]:
         """Get current status summary."""
         current_time = time.time()
         file_elapsed = (
@@ -175,7 +175,7 @@ class LoopDetector:
         status = self.check_tool_call("")  # Check without adding to history
         return status["should_stop"]
 
-    def get_abort_reason(self) -> Optional[str]:
+    def get_abort_reason(self) -> str | None:
         """Get reason for abort if should abort."""
         if self.should_abort():
             status = self.check_tool_call("")
@@ -232,7 +232,7 @@ class ProgressTracker:
         )
         return True
 
-    def get_progress_info(self) -> Dict[str, Any]:
+    def get_progress_info(self) -> dict[str, Any]:
         """Get current progress information."""
         elapsed = time.time() - self.start_time
 

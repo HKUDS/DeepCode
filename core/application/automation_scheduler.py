@@ -13,7 +13,6 @@ from core.domain.automation import AutomationRun
 from core.domain.common import utc_now
 from core.file_lock import FileLease
 
-
 logger = logging.getLogger(__name__)
 SCHEDULER_STANDBY_POLL_SECONDS = 0.5
 SCHEDULER_LEADER_POLL_CEILING_SECONDS = 5.0
@@ -125,7 +124,7 @@ class AutomationScheduler:
                 try:
                     self._run_due()
                     timeout = self._next_timeout()
-                except Exception:  # noqa: BLE001 - leader remains available
+                except Exception:
                     logger.exception("automation scheduler pass failed")
                 self._wait(timeout)
         finally:

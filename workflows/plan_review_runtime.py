@@ -9,8 +9,9 @@ mutation logic and keeps concurrent sessions isolated by their task directory.
 from __future__ import annotations
 
 import os
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from core.compat import Agent, RequestParams
 from core.llm_runtime import attach_workflow_llm
@@ -23,7 +24,6 @@ from workflows.planning_runtime import (
     validate_plan_text,
     write_planning_meta,
 )
-
 
 PlanReviewCallback = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
 

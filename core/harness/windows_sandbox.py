@@ -32,10 +32,10 @@ plain ``subprocess`` passthrough if any Win32 call fails.
 from __future__ import annotations
 
 import ctypes
-import ctypes.wintypes as wintypes
 import os
 import subprocess
 import sys
+from ctypes import wintypes
 
 # ── Job Object constants (winnt.h) ──────────────────────────────────────
 _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000

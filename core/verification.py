@@ -11,7 +11,6 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-
 MAX_VERIFICATION_OUTPUT = 64 * 1024
 MAX_DISCOVERY_FILES = 256
 MAX_DISCOVERY_CHARS = 64 * 1024

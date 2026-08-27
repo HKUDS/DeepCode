@@ -23,8 +23,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rich.console import Console
 
-from cli.tui import theme
-
 from cli.execution_options import (
     add_access_preset_argument,
     add_reasoning_effort_argument,
@@ -37,6 +35,7 @@ from cli.goal_runner import (
     resume_goal,
     run_goal,
 )
+from cli.tui import theme
 from cli.tui.renderer import EventRenderer
 from core.application.errors import ApplicationError
 from core.config import ConfigError

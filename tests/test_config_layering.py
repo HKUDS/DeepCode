@@ -19,7 +19,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.config import (  # noqa: E402
+import core.compat.runtime as runtime_module
+from core.compat.runtime import (
+    DeepCodeRuntime,
+    get_runtime,
+    use_runtime,
+)
+from core.config import (
     _DEFAULT_CONFIG_FILENAME,
     _deep_merge,
     _load_raw,
@@ -29,12 +35,6 @@ from core.config import (  # noqa: E402
     load_config_for_workspace,
     project_config_path,
 )
-from core.compat.runtime import (  # noqa: E402
-    DeepCodeRuntime,
-    get_runtime,
-    use_runtime,
-)
-import core.compat.runtime as runtime_module  # noqa: E402
 
 
 def _write_config(directory: Path, data: dict) -> Path:

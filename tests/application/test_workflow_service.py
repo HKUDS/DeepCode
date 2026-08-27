@@ -5,7 +5,7 @@ import json
 import threading
 import time
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -905,7 +905,7 @@ def test_dead_worker_workflow_is_failed_once_and_never_replayed(
     application, thread_id, _workspace = _application(tmp_path, runner)
     application.execution_coordinator.quiesce()
     thread = application.threads.read(thread_id)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     dead = RuntimeWorker(
         id="worker_dead_workflow",
         pid=4242,
@@ -984,7 +984,7 @@ def test_open_recovers_workflow_before_generic_turn_recovery(tmp_path: Path) -> 
     first, thread_id, _workspace = _application(tmp_path, runner)
     database_path = first.database.path
     first.close()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     with first.database.transaction() as connection:
         threads = ThreadRepository(connection)
         thread = threads.get(thread_id)

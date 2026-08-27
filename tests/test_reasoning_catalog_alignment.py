@@ -20,8 +20,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.providers.catalog import _SEED, resolve_model_info  # noqa: E402
-from core.providers.reasoning import infer_reasoning_capabilities  # noqa: E402
+from core.providers.catalog import _SEED, resolve_model_info
+from core.providers.reasoning import infer_reasoning_capabilities
 
 
 @pytest.mark.parametrize(

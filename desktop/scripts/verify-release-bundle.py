@@ -11,7 +11,6 @@ import tempfile
 import time
 from pathlib import Path
 
-
 DESKTOP_ROOT = Path(__file__).resolve().parents[1]
 TARGET_ROOT = DESKTOP_ROOT / "src-tauri" / "target" / "release"
 BUNDLE_ROOT = TARGET_ROOT / "bundle"

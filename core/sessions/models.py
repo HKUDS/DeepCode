@@ -23,12 +23,12 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 
 def _utcnow_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _new_session_id() -> str:
@@ -64,7 +64,7 @@ class SessionMessage:
         return d
 
     @classmethod
-    def from_dict(cls, raw: dict[str, Any]) -> "SessionMessage":
+    def from_dict(cls, raw: dict[str, Any]) -> SessionMessage:
         return cls(
             role=str(raw.get("role", "user")),
             content=str(raw.get("content", "")),
@@ -101,7 +101,7 @@ class SessionTask:
         return d
 
     @classmethod
-    def from_dict(cls, raw: dict[str, Any]) -> "SessionTask":
+    def from_dict(cls, raw: dict[str, Any]) -> SessionTask:
         return cls(
             task_id=str(raw.get("task_id", "")),
             task_kind=str(raw.get("task_kind", "unknown")),
@@ -208,7 +208,7 @@ class Session:
         first_line = content.strip().splitlines()[0] if content.strip() else ""
         return (first_line[:60] + "…") if len(first_line) > 60 else first_line
 
-    def summary(self) -> "SessionSummary":
+    def summary(self) -> SessionSummary:
         return SessionSummary(
             session_id=self.session_id,
             title=self.title,

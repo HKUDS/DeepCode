@@ -29,7 +29,6 @@ from core.persistence.project_repository import ProjectRepository
 from core.persistence.thread_repository import ThreadRepository
 from core.sessions import SessionStore
 
-
 MANIFEST_VERSION = 1
 
 

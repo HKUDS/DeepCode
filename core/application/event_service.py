@@ -14,7 +14,6 @@ from core.domain.event import DomainEvent
 from core.persistence.database import Database
 from core.persistence.event_repository import EventRepository
 
-
 logger = logging.getLogger(__name__)
 
 #: Ceiling for the relay's failure backoff; polls resume at
@@ -56,8 +55,7 @@ class _SequenceWatermark:
         return True
 
     def seed(self, sequence: int) -> None:
-        if sequence > self.contiguous:
-            self.contiguous = sequence
+        self.contiguous = max(self.contiguous, sequence)
         self.out_of_order = {
             candidate for candidate in self.out_of_order if candidate > self.contiguous
         }
@@ -266,24 +264,23 @@ class DurableEventRelay:
                 return 0
             self._initialize_locked()
         delivered = 0
-        with self._poll_lock:
-            with self.database.read() as connection:
-                repository = EventRepository(connection)
-                heads = repository.sequence_heads()
-                for thread_id in sorted(heads):
-                    after = self._cursors.get(thread_id, 0)
-                    if heads[thread_id] <= after:
-                        continue
-                    events = repository.replay(
-                        thread_id,
-                        after=after,
-                        limit=self.batch_size,
-                    )
-                    for event in events:
-                        if self.broker.publish(event):
-                            delivered += 1
-                    if events:
-                        self._cursors[thread_id] = events[-1].sequence
+        with self._poll_lock, self.database.read() as connection:
+            repository = EventRepository(connection)
+            heads = repository.sequence_heads()
+            for thread_id in sorted(heads):
+                after = self._cursors.get(thread_id, 0)
+                if heads[thread_id] <= after:
+                    continue
+                events = repository.replay(
+                    thread_id,
+                    after=after,
+                    limit=self.batch_size,
+                )
+                for event in events:
+                    if self.broker.publish(event):
+                        delivered += 1
+                if events:
+                    self._cursors[thread_id] = events[-1].sequence
         return delivered
 
     def close(self) -> None:
@@ -317,7 +314,7 @@ class DurableEventRelay:
         while not self._stop.is_set():
             try:
                 self.poll_once()
-            except Exception:  # noqa: BLE001 - a transient read must not kill relay
+            except Exception:
                 failures += 1
                 if failures == 1:
                     logger.exception("durable event relay poll failed")

@@ -10,12 +10,12 @@ class TranscriptMode(StrEnum):
     VERBOSE = "verbose"
     SUMMARY = "summary"
 
-    def next(self) -> "TranscriptMode":
+    def next(self) -> TranscriptMode:
         modes = tuple(type(self))
         return modes[(modes.index(self) + 1) % len(modes)]
 
     @classmethod
-    def parse(cls, value: str) -> "TranscriptMode":
+    def parse(cls, value: str) -> TranscriptMode:
         clean = value.strip().lower()
         try:
             return cls(clean)

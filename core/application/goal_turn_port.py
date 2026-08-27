@@ -6,8 +6,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ContextManager, Protocol
 
-from core.domain.turn import Turn
 from core.domain.message_provenance import ClientSurface, TurnInputSource
+from core.domain.turn import Turn
 
 if TYPE_CHECKING:
     from core.application.turn_service import TurnSnapshot
@@ -39,13 +39,13 @@ class GoalTurnPort(Protocol):
         connection_id: str | None = None,
         model: str | None = None,
         reasoning_effort: str | None = None,
-        event_observer: Callable[["Event"], None] | None = None,
+        event_observer: Callable[[Event], None] | None = None,
         client_surface: ClientSurface = ClientSurface.INTERNAL,
         input_source: TurnInputSource = TurnInputSource.START,
         expected_goal_id: str | None = None,
-    ) -> "TurnSnapshot": ...
+    ) -> TurnSnapshot: ...
 
-    def read(self, turn_id: str) -> "TurnSnapshot": ...
+    def read(self, turn_id: str) -> TurnSnapshot: ...
 
     def active_for_thread(self, thread_id: str) -> Turn | None: ...
 

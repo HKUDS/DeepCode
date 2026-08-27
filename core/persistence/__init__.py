@@ -1,6 +1,5 @@
 """SQLite persistence for the product domain."""
 
-from core.persistence.database import Database, default_database_path
 from core.persistence.automation_repository import (
     AutomationOccurrenceRepository,
     AutomationRepository,
@@ -8,8 +7,9 @@ from core.persistence.automation_repository import (
     AutomationRunRepository,
 )
 from core.persistence.coordination_repository import RuntimeCoordinationRepository
-from core.persistence.event_repository import EventRepository
+from core.persistence.database import Database, default_database_path
 from core.persistence.errors import PersistenceConflictError
+from core.persistence.event_repository import EventRepository
 from core.persistence.execution_repository import (
     ApprovalGrantRepository,
     ApprovalRepository,
@@ -22,11 +22,11 @@ from core.persistence.thread_repository import ThreadRepository
 from core.persistence.workflow_repository import ArtifactRepository, WorkflowRepository
 
 __all__ = [
-    "ApprovalRepository",
     "ApprovalGrantRepository",
+    "ApprovalRepository",
     "ArtifactRepository",
-    "AutomationRepository",
     "AutomationOccurrenceRepository",
+    "AutomationRepository",
     "AutomationRevisionRepository",
     "AutomationRunRepository",
     "Database",
