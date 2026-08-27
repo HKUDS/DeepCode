@@ -94,15 +94,22 @@ def test_no_submission_renders_none() -> None:
 
 
 def test_compose_tool_filters_chains_narrowing() -> None:
-    allow_read = lambda names: tuple(n for n in names if "read" in n)
-    drop_web = lambda names: tuple(n for n in names if n != "read_web")
+    def allow_read(names: tuple[str, ...]) -> tuple[str, ...]:
+        return tuple(n for n in names if "read" in n)
+
+    def drop_web(names: tuple[str, ...]) -> tuple[str, ...]:
+        return tuple(n for n in names if n != "read_web")
+
     chained = _compose_tool_filters(allow_read, drop_web)
     assert chained(("read_file", "read_web", "bash")) == ("read_file",)
 
 
 def test_compose_tool_filters_collapses_trivial_cases() -> None:
     assert _compose_tool_filters(None, None) is None
-    only = lambda names: names
+
+    def only(names: tuple[str, ...]) -> tuple[str, ...]:
+        return names
+
     assert _compose_tool_filters(None, only) is only
 
 
