@@ -7,13 +7,12 @@ from pathlib import Path
 
 from core.application.errors import InvalidArgumentError
 from core.application.project_service import ProjectService
-from core.harness.hooks import discover_hooks
 from core.application.skill_service import (
     SkillDetail,
     SkillDiscovery,
     SkillService,
 )
-
+from core.harness.hooks import discover_hooks
 
 MAX_HOOK_HANDLERS = 500
 MAX_DISCOVERY_WARNINGS = 100

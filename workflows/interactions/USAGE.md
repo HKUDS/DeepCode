@@ -24,6 +24,7 @@
 from workflows.interactions.integration import WorkflowInteractionIntegration
 from workflows.interactions import InteractionPoint
 
+
 class WorkflowService:
     def __init__(self):
         self._tasks = {}
@@ -45,8 +46,7 @@ class WorkflowService:
 
         # 2. 运行 BEFORE_PLANNING 插件 (需求分析)
         context = await self._interaction_integration.run_hook(
-            InteractionPoint.BEFORE_PLANNING,
-            context
+            InteractionPoint.BEFORE_PLANNING, context
         )
 
         # 检查是否被取消
@@ -62,8 +62,7 @@ class WorkflowService:
         # ===== 添加计划确认插件 =====
         context["planning_result"] = planning_result
         context = await self._interaction_integration.run_hook(
-            InteractionPoint.AFTER_PLANNING,
-            context
+            InteractionPoint.AFTER_PLANNING, context
         )
 
         if context.get("workflow_cancelled"):
@@ -80,6 +79,7 @@ class WorkflowService:
 
 ```python
 # workflows.py (API routes)
+
 
 @router.post("/respond/{task_id}")
 async def respond_to_interaction(task_id: str, response: InteractionResponseRequest):
@@ -133,7 +133,12 @@ registry.enable("plan_review")
 ### 创建自定义插件
 
 ```python
-from workflows.interactions import InteractionHandler, InteractionPoint, InteractionRequest
+from workflows.interactions import (
+    InteractionHandler,
+    InteractionPoint,
+    InteractionRequest,
+)
+
 
 class MyCustomHandler(InteractionHandler):
     name = "my_custom_handler"
@@ -159,6 +164,7 @@ class MyCustomHandler(InteractionHandler):
         else:
             context["workflow_cancelled"] = True
         return context
+
 
 # 注册插件
 registry.register(MyCustomHandler())

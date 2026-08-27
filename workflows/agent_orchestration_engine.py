@@ -31,30 +31,37 @@ import json
 import os
 import re
 import textwrap
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
+
+from core.agent_runtime.runner import AgentRunResult
 
 # MCP Agent imports
 from core.compat import Agent, RequestParams
-from core.agent_runtime.runner import AgentRunResult
 from core.llm_runtime import attach_workflow_llm
 
 # Local imports
 from prompts.code_prompts import (
-    PAPER_REFERENCE_ANALYZER_PROMPT,
     CHAT_AGENT_PLANNING_PROMPT,
+    PAPER_REFERENCE_ANALYZER_PROMPT,
 )
+from tools.pdf_downloader import download_file_to, move_file_to
 from utils.file_processor import FileProcessor
-from workflows.code_implementation_workflow import CodeImplementationWorkflow
-from tools.pdf_downloader import move_file_to, download_file_to
 from utils.llm_utils import (
-    should_use_document_segmentation,
     get_adaptive_prompts,
     get_token_limits,
+    should_use_document_segmentation,
 )
 from workflows.agents.document_segmentation_agent import prepare_document_segments
 from workflows.agents.requirement_analysis_agent import RequirementAnalysisAgent
+from workflows.code_implementation_workflow import CodeImplementationWorkflow
 from workflows.environment import prepare_workflow_environment
+from workflows.plan_review_runtime import (
+    PlanReviewCallback,
+    PlanReviewCancelled,
+    run_plan_review_gate,
+)
 from workflows.planning_runtime import (
     append_planning_attempt,
     build_planning_checkpoint_callback,
@@ -64,11 +71,6 @@ from workflows.planning_runtime import (
     read_planning_meta,
     validate_plan_text,
     write_planning_meta,
-)
-from workflows.plan_review_runtime import (
-    PlanReviewCallback,
-    PlanReviewCancelled,
-    run_plan_review_gate,
 )
 from workflows.workflow_context import WorkflowContext
 
@@ -151,7 +153,7 @@ def _load_paper_markdown_content(paper_dir: str, logger) -> tuple[str, str]:
 
 def _load_document_segments_context(
     paper_dir: str, *, max_segments: int = 8, max_chars: int = 24000
-) -> Optional[str]:
+) -> str | None:
     """Build deterministic planner context from the segmentation index."""
     index_path = os.path.join(paper_dir, "document_segments", "document_index.json")
     if not os.path.exists(index_path):
@@ -173,7 +175,7 @@ def _load_document_segments_context(
         reverse=True,
     )
 
-    selected_segments: List[Dict[str, Any]] = []
+    selected_segments: list[dict[str, Any]] = []
     selected_chars = 0
     for segment in ranked_segments:
         content = (segment.get("content") or "").strip()
@@ -223,7 +225,7 @@ def _build_planning_message(
     paper_dir: str,
     paper_content: str,
     use_segmentation: bool,
-    segmented_context: Optional[str],
+    segmented_context: str | None,
 ) -> str:
     """Create planner input for segmented or full-document planning."""
     if use_segmentation and segmented_context:
@@ -411,10 +413,10 @@ def _adjust_params_for_retry(params: RequestParams, retry_count: int) -> Request
 async def execute_requirement_analysis_workflow(
     user_input: str,
     analysis_mode: str,
-    user_answers: Optional[Dict[str, str]] = None,
+    user_answers: dict[str, str] | None = None,
     logger=None,
-    progress_callback: Optional[Callable[[int, str], None]] = None,
-) -> Dict[str, Any]:
+    progress_callback: Callable[[int, str], None] | None = None,
+) -> dict[str, Any]:
     """
     Lightweight orchestrator to run requirement-analysis-specific flows.
     """
@@ -479,8 +481,8 @@ def get_default_search_server() -> str:
 
 
 def get_search_server_names(
-    additional_servers: Optional[List[str]] = None,
-) -> List[str]:
+    additional_servers: list[str] | None = None,
+) -> list[str]:
     """
     Get server names list with fetch plus the configured auxiliary server.
 
@@ -534,7 +536,7 @@ def _chat_planning_needs_fetch(user_input: str) -> bool:
     return any(keyword in lowered for keyword in _CHAT_PLANNING_WEB_KEYWORDS)
 
 
-def get_chat_planning_server_names(user_input: str) -> List[str]:
+def get_chat_planning_server_names(user_input: str) -> list[str]:
     """Expose fetch to chat planning only when the request asks for web context."""
     return ["fetch"] if _chat_planning_needs_fetch(user_input) else []
 
@@ -679,7 +681,7 @@ async def run_code_analyzer(
     retry_count = 0
     best_invalid_result = ""
     best_invalid_score = -1.0
-    best_invalid_validation: Dict[str, Any] | None = None
+    best_invalid_validation: dict[str, Any] | None = None
     final_planning_error: str | None = None
     request_timeout_s = _get_code_analyzer_timeout_s()
     logger.info(
@@ -689,7 +691,7 @@ async def run_code_analyzer(
 
     while retry_count < max_retries:
         attempt = retry_count + 1
-        attempt_record: Dict[str, Any] = {
+        attempt_record: dict[str, Any] = {
             "attempt": attempt,
             "max_retries": max_retries,
             "mode": planning_mode,
@@ -831,7 +833,7 @@ async def run_code_analyzer(
             current_temperature = new_temperature
             retry_count += 1
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             timeout_msg = (
                 f"Code planning attempt {attempt}/{max_retries} timed out "
                 f"after {request_timeout_s}s while waiting for the LLM response"
@@ -931,9 +933,7 @@ async def github_repo_download(search_result: str, paper_dir: str, logger) -> st
     """
     github_download_agent = Agent(
         name="GithubDownloadAgent",
-        instruction="Download github repo to the directory {paper_dir}/code_base".format(
-            paper_dir=paper_dir
-        ),
+        instruction=f"Download github repo to the directory {paper_dir}/code_base",
         server_names=["filesystem", "github-downloader"],
     )
 
@@ -1002,7 +1002,7 @@ Goal: Find the most valuable GitHub repositories from the paper's reference list
 
 async def synthesize_workspace_infrastructure_agent(
     ctx: WorkflowContext, logger
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """
     Synthesize the per-task workspace by reading the converted markdown into ``ctx``.
 
@@ -1034,7 +1034,7 @@ async def synthesize_workspace_infrastructure_agent(
 
 
 async def orchestrate_reference_intelligence_agent(
-    dir_info: Dict[str, str], logger, progress_callback: Optional[Callable] = None
+    dir_info: dict[str, str], logger, progress_callback: Callable | None = None
 ) -> str:
     """
     Orchestrate intelligent reference analysis with automated research discovery.
@@ -1073,8 +1073,8 @@ async def orchestrate_reference_intelligence_agent(
 
 
 async def orchestrate_document_preprocessing_agent(
-    dir_info: Dict[str, str], logger
-) -> Dict[str, Any]:
+    dir_info: dict[str, str], logger
+) -> dict[str, Any]:
     """
     Orchestrate adaptive document preprocessing with intelligent segmentation control.
 
@@ -1139,12 +1139,12 @@ async def orchestrate_document_preprocessing_agent(
                             # Use the converted markdown file instead
                             md_path = conversion_result["output_file"]
                         else:
-                            raise IOError(
+                            raise OSError(
                                 f"PDF conversion failed: {conversion_result['error']}"
                             )
                     except Exception as conv_error:
-                        raise IOError(
-                            f"File {md_path} is a PDF file, not a text file. PDF conversion failed: {str(conv_error)}"
+                        raise OSError(
+                            f"File {md_path} is a PDF file, not a text file. PDF conversion failed: {conv_error!s}"
                         )
 
             with open(md_path, "r", encoding="utf-8") as f:
@@ -1155,7 +1155,7 @@ async def orchestrate_document_preprocessing_agent(
             dir_info["use_segmentation"] = False
             return {
                 "status": "error",
-                "error_message": f"Failed to read document: {str(e)}",
+                "error_message": f"Failed to read document: {e!s}",
                 "paper_dir": dir_info["paper_dir"],
                 "segments_ready": False,
                 "use_segmentation": False,
@@ -1238,9 +1238,9 @@ async def orchestrate_document_preprocessing_agent(
 
 
 async def orchestrate_code_planning_agent(
-    dir_info: Dict[str, str],
+    dir_info: dict[str, str],
     logger,
-    progress_callback: Optional[Callable] = None,
+    progress_callback: Callable | None = None,
     *,
     strict_plan_validation: bool = False,
 ):
@@ -1360,9 +1360,9 @@ async def orchestrate_code_planning_agent(
 
 async def automate_repository_acquisition_agent(
     reference_result: str,
-    dir_info: Dict[str, str],
+    dir_info: dict[str, str],
     logger,
-    progress_callback: Optional[Callable] = None,
+    progress_callback: Callable | None = None,
 ):
     """
     Automate intelligent repository acquisition with AI-guided selection.
@@ -1425,7 +1425,7 @@ async def automate_repository_acquisition_agent(
     except Exception as e:
         print(f"Error during GitHub repository download: {e}")
         # Still save the error information
-        error_message = f"GitHub download failed: {str(e)}"
+        error_message = f"GitHub download failed: {e!s}"
         with open(dir_info["download_path"], "w", encoding="utf-8") as f:
             f.write(error_message)
         print(f"GitHub download error saved to {dir_info['download_path']}")
@@ -1433,8 +1433,8 @@ async def automate_repository_acquisition_agent(
 
 
 async def orchestrate_codebase_intelligence_agent(
-    dir_info: Dict[str, str], logger, progress_callback: Optional[Callable] = None
-) -> Dict:
+    dir_info: dict[str, str], logger, progress_callback: Callable | None = None
+) -> dict:
     """
     Orchestrate intelligent codebase analysis with automated knowledge extraction.
 
@@ -1504,7 +1504,7 @@ async def orchestrate_codebase_intelligence_agent(
         print(f"Error checking code base directory: {e}")
         return {
             "status": "error",
-            "message": f"Error checking code base directory: {str(e)}",
+            "message": f"Error checking code base directory: {e!s}",
         }
 
     try:
@@ -1559,13 +1559,13 @@ async def orchestrate_codebase_intelligence_agent(
 
 
 async def synthesize_code_implementation_agent(
-    dir_info: Dict[str, str],
+    dir_info: dict[str, str],
     logger,
-    progress_callback: Optional[Callable] = None,
+    progress_callback: Callable | None = None,
     enable_indexing: bool = True,
     *,
     require_verification: bool = False,
-) -> Dict:
+) -> dict:
     """
     Synthesize intelligent code implementation with automated development.
 
@@ -1775,20 +1775,20 @@ Please provide a detailed implementation plan that covers all aspects needed for
 
     except Exception as e:
         print(f"❌ run_chat_planning_agent failed: {e}")
-        print(f"Exception details: {type(e).__name__}: {str(e)}")
+        print(f"Exception details: {type(e).__name__}: {e!s}")
         raise
 
 
 async def execute_multi_agent_research_pipeline(
     input_source: str,
     logger,
-    progress_callback: Optional[Callable] = None,
+    progress_callback: Callable | None = None,
     enable_indexing: bool = True,
-    task_id: Optional[str] = None,
-    plan_review_callback: Optional[PlanReviewCallback] = None,
+    task_id: str | None = None,
+    plan_review_callback: PlanReviewCallback | None = None,
     workflow_root: Path | str | None = None,
     strict_outcomes: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Execute the complete intelligent multi-agent research orchestration pipeline.
 
@@ -1813,7 +1813,7 @@ async def execute_multi_agent_research_pipeline(
     # session store regardless of which branch (return / except / cancel) we
     # take. Also remember the resolved task_id, since `ctx` may not exist if
     # prepare_workflow_environment raises before assignment.
-    _resolved_task_id: Optional[str] = task_id
+    _resolved_task_id: str | None = task_id
     _final_status: str = "running"
 
     try:
@@ -2113,7 +2113,7 @@ async def execute_multi_agent_research_pipeline(
         error_msg = f"Error in execute_multi_agent_research_pipeline: {e}"
         print(f"❌ {error_msg}")
         print(f"   Error type: {type(e).__name__}")
-        print(f"   Error details: {str(e)}")
+        print(f"   Error details: {e!s}")
 
         # Display error in UI if progress callback available
         if progress_callback:
@@ -2156,7 +2156,7 @@ async def execute_multi_agent_research_pipeline(
 
 # Backward compatibility alias (deprecated)
 async def paper_code_preparation(
-    input_source: str, logger, progress_callback: Optional[Callable] = None
+    input_source: str, logger, progress_callback: Callable | None = None
 ) -> str:
     """
     Deprecated: Use execute_multi_agent_research_pipeline instead.
@@ -2180,14 +2180,14 @@ async def paper_code_preparation(
 async def execute_chat_based_planning_pipeline(
     user_input: str,
     logger,
-    progress_callback: Optional[Callable] = None,
+    progress_callback: Callable | None = None,
     enable_indexing: bool = True,
-    task_id: Optional[str] = None,
-    plan_review_callback: Optional[PlanReviewCallback] = None,
+    task_id: str | None = None,
+    plan_review_callback: PlanReviewCallback | None = None,
     workflow_root: Path | str | None = None,
     return_details: bool = False,
     strict_outcomes: bool = False,
-) -> str | Dict[str, Any]:
+) -> str | dict[str, Any]:
     """
     Execute the chat-based planning and implementation pipeline.
 
@@ -2252,7 +2252,7 @@ async def execute_chat_based_planning_pipeline(
         import time
         import uuid as _uuid
 
-        from workflows.workflow_context import TASKS_DIRNAME, TASK_KIND_PREFIX
+        from workflows.workflow_context import TASK_KIND_PREFIX, TASKS_DIRNAME
 
         timestamp = str(int(time.time()))
         chat_id = task_id or _uuid.uuid4().hex[:8]

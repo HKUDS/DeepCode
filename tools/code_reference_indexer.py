@@ -18,10 +18,9 @@ Key Improvement:
 """
 
 import json
-from pathlib import Path
-from typing import Dict, List, Tuple
-from dataclasses import dataclass
 import logging
+from dataclasses import dataclass
+from pathlib import Path
 
 from core.platform_compat import configure_utf8_stdio
 
@@ -44,9 +43,9 @@ class CodeReference:
 
     file_path: str
     file_type: str
-    main_functions: List[str]
-    key_concepts: List[str]
-    dependencies: List[str]
+    main_functions: list[str]
+    key_concepts: list[str]
+    dependencies: list[str]
     summary: str
     lines_of_code: int
     repo_name: str
@@ -61,12 +60,12 @@ class RelationshipInfo:
     target_file_path: str
     relationship_type: str
     confidence_score: float
-    helpful_aspects: List[str]
-    potential_contributions: List[str]
+    helpful_aspects: list[str]
+    potential_contributions: list[str]
     usage_suggestions: str
 
 
-def load_index_files_from_directory(indexes_directory: str) -> Dict[str, Dict]:
+def load_index_files_from_directory(indexes_directory: str) -> dict[str, dict]:
     """Load all index files from specified directory"""
     indexes_path = Path(indexes_directory).resolve()
 
@@ -89,7 +88,7 @@ def load_index_files_from_directory(indexes_directory: str) -> Dict[str, Dict]:
     return index_cache
 
 
-def extract_code_references(index_data: Dict) -> List[CodeReference]:
+def extract_code_references(index_data: dict) -> list[CodeReference]:
     """Extract code reference information from index data"""
     references = []
 
@@ -112,7 +111,7 @@ def extract_code_references(index_data: Dict) -> List[CodeReference]:
     return references
 
 
-def extract_relationships(index_data: Dict) -> List[RelationshipInfo]:
+def extract_relationships(index_data: dict) -> list[RelationshipInfo]:
     """Extract relationship information from index data"""
     relationships = []
 
@@ -134,7 +133,7 @@ def extract_relationships(index_data: Dict) -> List[RelationshipInfo]:
 
 
 def calculate_relevance_score(
-    target_file: str, reference: CodeReference, keywords: List[str] = None
+    target_file: str, reference: CodeReference, keywords: list[str] = None
 ) -> float:
     """Calculate relevance score between reference code and target file"""
     score = 0.0
@@ -178,10 +177,10 @@ def calculate_relevance_score(
 
 def find_relevant_references_in_cache(
     target_file: str,
-    index_cache: Dict[str, Dict],
-    keywords: List[str] = None,
+    index_cache: dict[str, dict],
+    keywords: list[str] = None,
     max_results: int = 10,
-) -> List[Tuple[CodeReference, float]]:
+) -> list[tuple[CodeReference, float]]:
     """Find reference code relevant to target file from provided cache"""
     all_references = []
 
@@ -200,8 +199,8 @@ def find_relevant_references_in_cache(
 
 
 def find_direct_relationships_in_cache(
-    target_file: str, index_cache: Dict[str, Dict]
-) -> List[RelationshipInfo]:
+    target_file: str, index_cache: dict[str, dict]
+) -> list[RelationshipInfo]:
     """Find direct relationships with target file from provided cache"""
     relationships = []
 
@@ -242,8 +241,8 @@ def find_direct_relationships_in_cache(
 
 def format_reference_output(
     target_file: str,
-    relevant_refs: List[Tuple[CodeReference, float]],
-    relationships: List[RelationshipInfo],
+    relevant_refs: list[tuple[CodeReference, float]],
+    relationships: list[RelationshipInfo],
 ) -> str:
     """Format reference information output"""
     output_lines = []
@@ -402,10 +401,10 @@ async def search_code_references(
         return json.dumps(result, ensure_ascii=False, indent=2)
 
     except Exception as e:
-        logger.error(f"Error in search_code_references: {str(e)}")
+        logger.error(f"Error in search_code_references: {e!s}")
         result = {
             "status": "error",
-            "message": f"Failed to search reference code: {str(e)}",
+            "message": f"Failed to search reference code: {e!s}",
             "target_file": target_file,
             "indexes_path": indexes_path,
         }
@@ -474,7 +473,7 @@ async def get_indexes_overview(indexes_path: str) -> str:
     except Exception as e:
         result = {
             "status": "error",
-            "message": f"Failed to get indexes overview: {str(e)}",
+            "message": f"Failed to get indexes overview: {e!s}",
             "indexes_path": indexes_path,
         }
         return json.dumps(result, ensure_ascii=False, indent=2)

@@ -94,15 +94,15 @@ def test_no_submission_renders_none() -> None:
 
 
 def test_compose_tool_filters_chains_narrowing() -> None:
-    allow_read = lambda names: tuple(n for n in names if "read" in n)  # noqa: E731
-    drop_web = lambda names: tuple(n for n in names if n != "read_web")  # noqa: E731
+    allow_read = lambda names: tuple(n for n in names if "read" in n)
+    drop_web = lambda names: tuple(n for n in names if n != "read_web")
     chained = _compose_tool_filters(allow_read, drop_web)
     assert chained(("read_file", "read_web", "bash")) == ("read_file",)
 
 
 def test_compose_tool_filters_collapses_trivial_cases() -> None:
     assert _compose_tool_filters(None, None) is None
-    only = lambda names: names  # noqa: E731
+    only = lambda names: names
     assert _compose_tool_filters(None, only) is only
 
 
@@ -142,7 +142,7 @@ def test_spawn_records_composition_on_the_subagent(
 ) -> None:
     control = _control(tmp_path)
 
-    async def fake_run(sub, workspace):  # noqa: ANN001 - test double
+    async def fake_run(sub, workspace):
         return "done"
 
     monkeypatch.setattr(control, "_run_subagent", fake_run)

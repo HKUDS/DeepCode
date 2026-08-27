@@ -11,7 +11,6 @@ import os
 import sys
 from collections.abc import Iterable
 
-
 DESKTOP_IMPACT_PREFIXES = (
     ".github/actions/",
     "app_server/",

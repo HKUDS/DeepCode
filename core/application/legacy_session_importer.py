@@ -7,7 +7,7 @@ an explicitly supplied external store. Source files remain read-only.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from core.application.errors import (
@@ -329,8 +329,8 @@ class LegacySessionImporter:
         try:
             parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
             if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=timezone.utc)
-            return parsed.astimezone(timezone.utc)
+                parsed = parsed.replace(tzinfo=UTC)
+            return parsed.astimezone(UTC)
         except (TypeError, ValueError):
             return utc_now()
 

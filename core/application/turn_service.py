@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import logging
+import os
 import sqlite3
 import threading
 import time
@@ -100,8 +100,8 @@ from core.persistence.execution_repository import (
 from core.persistence.project_repository import ProjectRepository
 from core.persistence.thread_repository import ThreadRepository
 from core.sessions import SessionStore
-from core.skills.host import SkillWorkspaceRegistry
 from core.sessions.continuation import assistant_continuation_metadata
+from core.skills.host import SkillWorkspaceRegistry
 from core.skills.models import MAX_SELECTED_SKILLS, SkillInvocation, SkillSelection
 
 TurnSettledListener = Callable[[Turn], None]

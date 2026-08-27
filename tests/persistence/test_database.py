@@ -115,12 +115,11 @@ def test_fresh_and_current_database_do_not_create_migration_backups(
 def test_transaction_rolls_back_the_whole_write(tmp_path: Path) -> None:
     database = Database(tmp_path / "state.sqlite3")
     database.initialize()
-    with pytest.raises(RuntimeError):
-        with database.transaction() as connection:
-            ProjectRepository(connection).add(
-                Project(canonical_path=str(tmp_path), display_name="Will roll back")
-            )
-            raise RuntimeError("abort")
+    with pytest.raises(RuntimeError), database.transaction() as connection:
+        ProjectRepository(connection).add(
+            Project(canonical_path=str(tmp_path), display_name="Will roll back")
+        )
+        raise RuntimeError("abort")
     with database.read() as connection:
         assert ProjectRepository(connection).list() == []
 

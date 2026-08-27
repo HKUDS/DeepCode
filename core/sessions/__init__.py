@@ -41,7 +41,7 @@ __all__ = [
     "SessionStore",
     "SessionSummary",
     "SessionTask",
-    "ThreadGoalStore",
     "ThreadGoalRecord",
+    "ThreadGoalStore",
     "get_default_store",
 ]

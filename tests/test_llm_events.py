@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.events.llm_events import (  # noqa: E402
+from core.events.llm_events import (
     ReasoningDelta,
     StreamError,
     TextDelta,
@@ -18,8 +18,8 @@ from core.events.llm_events import (  # noqa: E402
     llm_response_to_events,
     serialize_llm_event,
 )
-from core.providers.base import LLMResponse, ToolCallRequest  # noqa: E402
-from core.reasoning import ReasoningChannel  # noqa: E402
+from core.providers.base import LLMResponse, ToolCallRequest
+from core.reasoning import ReasoningChannel
 
 
 def test_text_only_response():

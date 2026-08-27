@@ -25,7 +25,7 @@ import sys
 import uuid
 from typing import Any
 
-import mcp.types as types
+from mcp import types
 from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 

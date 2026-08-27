@@ -17,9 +17,10 @@ touches a model or a terminal — this is pure protocol.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Any, Mapping, Union
+from typing import Any, Union
 
 from core.reasoning import ReasoningAvailability, ReasoningChannel
 from core.skills.models import SkillInvocation, SkillSelection

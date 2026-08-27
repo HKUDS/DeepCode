@@ -7,7 +7,6 @@ import asyncio
 import os
 import re
 import sys
-from typing import Dict, List, Optional
 from pathlib import Path
 
 from core.platform_compat import configure_utf8_stdio, subprocess_env
@@ -24,7 +23,7 @@ class GitHubURLExtractor:
     """提取GitHub URL的工具类"""
 
     @staticmethod
-    def extract_github_urls(text: str) -> List[str]:
+    def extract_github_urls(text: str) -> list[str]:
         """从文本中提取GitHub URLs"""
         patterns = [
             # 标准HTTPS URL
@@ -81,7 +80,7 @@ class GitHubURLExtractor:
         return list(set(urls))  # 去重
 
     @staticmethod
-    def extract_target_path(text: str) -> Optional[str]:
+    def extract_target_path(text: str) -> str | None:
         """从文本中提取目标路径"""
         # 路径指示词模式
         patterns = [
@@ -136,7 +135,7 @@ async def check_git_installed() -> bool:
         return False
 
 
-async def clone_repository(repo_url: str, target_path: str) -> Dict[str, any]:
+async def clone_repository(repo_url: str, target_path: str) -> dict[str, any]:
     """执行git clone命令"""
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -249,7 +248,7 @@ async def download_github_repo(instruction: str) -> str:
 
         except Exception as e:
             msg = f"❌ Failed to download: {url}\n"
-            msg += f"   Error: {str(e)}"
+            msg += f"   Error: {e!s}"
 
         results.append(msg)
 
@@ -291,7 +290,7 @@ async def parse_github_urls(text: str) -> str:
 
 @mcp.tool()
 async def git_clone(
-    repo_url: str, target_path: Optional[str] = None, branch: Optional[str] = None
+    repo_url: str, target_path: str | None = None, branch: str | None = None
 ) -> str:
     """
     Clone a specific GitHub repository.
@@ -349,7 +348,7 @@ async def git_clone(
             return f"❌ Clone failed\nError: {stderr.decode('utf-8', errors='replace')}"
 
     except Exception as e:
-        return f"❌ Clone failed\nError: {str(e)}"
+        return f"❌ Clone failed\nError: {e!s}"
 
 
 # 主程序入口
@@ -362,7 +361,7 @@ if __name__ == "__main__":
     print("  • download_github_repo - Download repos from natural language")
     print("  • parse_github_urls - Extract GitHub URLs from text")
     print("  • git_clone - Clone a specific repository")
-    print("")
+    print()
 
     # 运行服务器
     sys.stdout = _mcp_stdout

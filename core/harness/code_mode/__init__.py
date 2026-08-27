@@ -9,4 +9,4 @@ from core.harness.code_mode.tool import (
     api_from_definitions,
 )
 
-__all__ = ["CodeModeTool", "ToolAPISpec", "GovernedExecute", "api_from_definitions"]
+__all__ = ["CodeModeTool", "GovernedExecute", "ToolAPISpec", "api_from_definitions"]

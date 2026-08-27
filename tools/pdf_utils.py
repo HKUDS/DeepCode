@@ -3,6 +3,7 @@ PDF utility functions for the DeepCode agent system.
 """
 
 from pathlib import Path
+
 import pypdf
 
 
@@ -43,7 +44,7 @@ def read_pdf_metadata(file_path: Path) -> dict:
             }
 
     except Exception as e:
-        print(f"\nError reading PDF: {str(e)}")
+        print(f"\nError reading PDF: {e!s}")
         return {
             "title": "Error reading PDF",
             "authors": ["Unknown"],

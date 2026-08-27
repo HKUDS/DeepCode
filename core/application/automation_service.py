@@ -15,7 +15,6 @@ from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 
-from core.application.automation_scheduler import AutomationSchedulerPort
 from core.application.automation_permission_policy import (
     AutomationPermissionPolicy,
     WorkspaceAutomationPermissionPolicy,
@@ -25,7 +24,7 @@ from core.application.automation_schedule_policy import (
     AutomationSchedulePolicy,
     DefaultAutomationSchedulePolicy,
 )
-
+from core.application.automation_scheduler import AutomationSchedulerPort
 from core.application.errors import (
     AutomationBootstrapPendingError,
     AutomationNotFoundError,
@@ -83,7 +82,6 @@ from core.persistence.execution_repository import TurnRepository
 from core.persistence.project_repository import ProjectRepository
 from core.persistence.serde import dump_datetime
 from core.persistence.thread_repository import ThreadRepository
-
 
 MIN_INTERVAL_SECONDS = 60
 MAX_INTERVAL_SECONDS = 366 * 24 * 60 * 60
@@ -449,9 +447,10 @@ class AutomationService:
                         and next_status is AutomationStatus.ENABLED
                     )
                 )
-                if next_kind is AutomationScheduleKind.MANUAL:
-                    next_run_at = None
-                elif next_status is AutomationStatus.PAUSED:
+                if (
+                    next_kind is AutomationScheduleKind.MANUAL
+                    or next_status is AutomationStatus.PAUSED
+                ):
                     next_run_at = None
                 elif schedule_changed or current.next_run_at is None:
                     assert next_interval is not None

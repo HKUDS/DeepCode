@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import pytest
 
@@ -23,11 +24,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.agent_runtime.tools.base import Tool  # noqa: E402
-from core.agent_runtime.tools.registry import ToolRegistry  # noqa: E402
-from core.providers.base import LLMResponse, ToolCallRequest  # noqa: E402
-from workflows.agents.memory_agent_concise import ConciseMemoryAgent  # noqa: E402
-from workflows.code_implementation_workflow import (  # noqa: E402
+from core.agent_runtime.tools.base import Tool
+from core.agent_runtime.tools.registry import ToolRegistry
+from core.providers.base import LLMResponse, ToolCallRequest
+from workflows.agents.memory_agent_concise import ConciseMemoryAgent
+from workflows.code_implementation_workflow import (
     CodeImplementationWorkflow,
 )
 

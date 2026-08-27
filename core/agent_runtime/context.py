@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 from xml.sax.saxutils import escape
 
 
@@ -47,7 +48,7 @@ class EnvironmentContext:
     timezone: str
 
     @classmethod
-    def for_workspace(cls, workspace: str | Path) -> "EnvironmentContext":
+    def for_workspace(cls, workspace: str | Path) -> EnvironmentContext:
         now = datetime.now().astimezone()
         return cls(
             cwd=str(Path(workspace).expanduser().resolve(strict=False)),

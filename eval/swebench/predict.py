@@ -19,8 +19,8 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from eval.swebench.instance import Instance
 

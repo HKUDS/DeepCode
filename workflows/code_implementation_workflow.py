@@ -31,33 +31,34 @@ import os
 import sys
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 from core.agent_runtime.hook import AgentHook, AgentHookContext
 from core.agent_runtime.runner import AgentRunner, AgentRunSpec
 from core.agent_runtime.tools.alias import AliasedTool, build_aliased_registry
 from core.agent_runtime.tools.registry import ToolRegistry
-from core.harness.approval import TerminalApprover
-from core.harness.permissions import PermissionMode
-from core.harness.policy import build_permission_engine
-from core.verification import discover_verification_commands, run_verification
 
 # DeepCode-native compat layer (owns the MCP server lifecycle)
 from core.compat import Agent, get_runtime
+from core.harness.approval import TerminalApprover
+from core.harness.permissions import PermissionMode
+from core.harness.policy import build_permission_engine
 from core.llm_runtime import attach_workflow_llm, get_workflow_provider
+from core.verification import discover_verification_commands, run_verification
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from prompts.code_prompts import (  # noqa: E402
+from prompts.code_prompts import (
     GENERAL_CODE_IMPLEMENTATION_SYSTEM_PROMPT,
     PURE_CODE_IMPLEMENTATION_SYSTEM_PROMPT_INDEX,
     STRUCTURE_GENERATOR_PROMPT,
 )
-from utils.llm_utils import get_default_models  # noqa: E402
-from utils.loop_detector import LoopDetector, ProgressTracker  # noqa: E402
-from workflows.agents import CodeImplementationAgent  # noqa: E402
-from workflows.agents.memory_agent_concise import ConciseMemoryAgent  # noqa: E402
+from utils.llm_utils import get_default_models
+from utils.loop_detector import LoopDetector, ProgressTracker
+from workflows.agents import CodeImplementationAgent
+from workflows.agents.memory_agent_concise import ConciseMemoryAgent
 
 # Model-visible tool surfaces. These mirror the curated lists the deleted
 # ``config/mcp_tool_definitions*.py`` used to hardcode — but the schemas
@@ -104,21 +105,21 @@ class _RunState:
     logger: logging.Logger
     system_prompt: str
     guidance: "_GuidanceTexts"
-    progress_callback: Optional[Callable] = None
+    progress_callback: Callable | None = None
     start_time: float = field(default_factory=time.time)
     max_wall_seconds: float = _MAX_WALL_SECONDS
     iterations_done: int = 0
     in_tools_phase: bool = False
-    last_finish_reason: Optional[str] = None
-    abort_reason: Optional[str] = None
+    last_finish_reason: str | None = None
+    abort_reason: str | None = None
     # (status, reason) once a terminal condition is known.
-    run_status: Optional[tuple] = None
+    run_status: tuple | None = None
 
     def emit_progress(self, message: str) -> None:
         if self.progress_callback:
             try:
                 self.progress_callback(85, message)
-            except Exception:  # noqa: BLE001 - progress must never kill the run
+            except Exception:
                 self.logger.debug("progress_callback failed", exc_info=True)
 
 
@@ -314,7 +315,7 @@ class _ImplementationHook(AgentHook):
         state = self._state
         try:
             self._after_iteration(context)
-        except Exception:  # noqa: BLE001 - policy must not kill the kernel loop
+        except Exception:
             state.logger.exception("Implementation hook failed; continuing run")
         finally:
             state.in_tools_phase = False
@@ -386,7 +387,7 @@ class _ImplementationHook(AgentHook):
             context.messages[:] = system_messages + list(optimized)
 
 
-def _tool_results_contain_error(tool_results: List[Any]) -> bool:
+def _tool_results_contain_error(tool_results: list[Any]) -> bool:
     """Port of the legacy error sniffing over raw tool result strings."""
     for result in tool_results:
         text = result if isinstance(result, str) else str(result)
@@ -427,7 +428,7 @@ class CodeImplementationWorkflow:
         self.enable_read_tools = True
         self.loop_detector = LoopDetector()
         self.progress_tracker = ProgressTracker()
-        self._last_run_state: Dict[str, Any] = {
+        self._last_run_state: dict[str, Any] = {
             "status": "unknown",
             "reason": None,
             "iterations": 0,
@@ -466,10 +467,10 @@ class CodeImplementationWorkflow:
     async def run_workflow(
         self,
         plan_file_path: str,
-        target_directory: Optional[str] = None,
+        target_directory: str | None = None,
         pure_code_mode: bool = False,
         enable_read_tools: bool = True,
-        progress_callback: Optional[Callable] = None,
+        progress_callback: Callable | None = None,
     ):
         """Run complete workflow - Main public interface."""
         self.enable_read_tools = enable_read_tools
@@ -708,7 +709,7 @@ Requirements:
         plan_content: str,
         target_directory: str,
         code_directory: str = None,
-        progress_callback: Optional[Callable] = None,
+        progress_callback: Callable | None = None,
     ) -> str:
         """Pure code implementation on the unified kernel."""
         self.logger.info("Starting pure code implementation (no testing)...")
@@ -749,7 +750,7 @@ Requirements:
             return PURE_CODE_IMPLEMENTATION_SYSTEM_PROMPT_INDEX
         return GENERAL_CODE_IMPLEMENTATION_SYSTEM_PROMPT
 
-    def _model_tool_names(self) -> List[str]:
+    def _model_tool_names(self) -> list[str]:
         names = list(
             _INDEXED_TOOL_NAMES if self.enable_indexing else _STANDARD_TOOL_NAMES
         )
@@ -783,7 +784,7 @@ Requirements:
         plan_content: str,
         target_directory: str,
         code_directory: str,
-        progress_callback: Optional[Callable] = None,
+        progress_callback: Callable | None = None,
     ) -> str:
         system_prompt = self._system_prompt()
 
@@ -839,7 +840,7 @@ Requirements:
             {"role": "user", "content": implementation_message},
         ]
 
-        async def should_stop() -> Optional[str]:
+        async def should_stop() -> str | None:
             if state.run_status is not None:
                 return state.run_status[1]
             if state.abort_reason:
@@ -878,7 +879,7 @@ Requirements:
                     return "all planned files implemented"
             return None
 
-        async def inject_followups() -> List[Dict[str, Any]]:
+        async def inject_followups() -> list[dict[str, Any]]:
             # Only steer after a toolless final response; post-tool guidance
             # is appended by the hook, and errors must end the run.
             if state.in_tools_phase or state.run_status is not None:
@@ -1110,7 +1111,7 @@ Requirements:
 
         except Exception as e:
             self.logger.error(f"Failed to generate final report: {e}")
-            return f"Failed to generate final report: {str(e)}"
+            return f"Failed to generate final report: {e!s}"
 
 
 class CodeImplementationWorkflowWithIndex(CodeImplementationWorkflow):

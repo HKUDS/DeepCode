@@ -39,9 +39,8 @@ from core.providers.catalog_service import ModelCatalogService
 from core.providers.credentials import CredentialStore
 from core.providers.profiles import ConnectionResolver
 
-
 _runtime_lock = threading.Lock()
-_runtime: "DeepCodeRuntime | None" = None
+_runtime: DeepCodeRuntime | None = None
 
 
 @dataclass(slots=True)
@@ -90,7 +89,7 @@ class DeepCodeRuntime:
         self.context = _ContextNamespace(config=config_namespace)
 
     @classmethod
-    def load(cls, config_path: str | None = None) -> "DeepCodeRuntime":
+    def load(cls, config_path: str | None = None) -> DeepCodeRuntime:
         """Read ``deepcode_config.json`` and build a fresh runtime."""
         return cls(load_config(config_path=config_path))
 

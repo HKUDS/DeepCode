@@ -13,8 +13,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from core.private_storage import ensure_private_directory, open_private_file
-
 from core.agent_presets import METADATA_KEY as PRESET_METADATA_KEY
 from core.agent_presets import AgentPresetSnapshot
 from core.agent_runtime.goal_runtime import (
@@ -37,6 +35,7 @@ from core.domain.execution_permission import ExecutionPermissionMode
 from core.domain.execution_profile import ExecutionProfile
 from core.domain.execution_security import ExecutionSecurityProfile
 from core.file_lock import FileLease
+from core.private_storage import ensure_private_directory, open_private_file
 from core.sessions import Session, SessionStore
 from core.sessions.transcript import (
     new_records_from_history,

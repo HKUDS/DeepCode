@@ -250,7 +250,7 @@ class SkillService:
             for listener in listeners:
                 try:
                     listener(project_id)
-                except Exception:  # noqa: BLE001 - observers are isolated
+                except Exception:
                     logger.exception("Skill catalog change listener failed")
 
 

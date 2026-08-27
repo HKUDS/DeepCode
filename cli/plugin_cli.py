@@ -6,8 +6,8 @@ import argparse
 import json
 import sys
 
-from core.application.plugin_service import PluginDiscovery, PluginInfo, PluginService
 from core.application.errors import ApplicationError
+from core.application.plugin_service import PluginDiscovery, PluginInfo, PluginService
 from core.plugins.host import LocalPluginHost
 from core.skills.host import SkillWorkspaceRegistry
 

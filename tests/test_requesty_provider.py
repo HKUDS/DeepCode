@@ -21,7 +21,7 @@ BACKEND = ROOT / "new_ui" / "backend"
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
-from core.providers.registry import find_by_model, find_by_name  # noqa: E402
+from core.providers.registry import find_by_model, find_by_name
 
 REQUESTY = find_by_name("requesty")
 OPENROUTER = find_by_name("openrouter")

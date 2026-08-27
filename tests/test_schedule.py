@@ -10,9 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.schedule.keepalive import Continuation  # noqa: E402
-from core.schedule.scheduler import RunOutcome, run_scheduled  # noqa: E402
-
+from core.schedule.keepalive import Continuation
+from core.schedule.scheduler import RunOutcome, run_scheduled
 
 # -- gate --------------------------------------------------------------------
 

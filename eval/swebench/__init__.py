@@ -25,4 +25,4 @@ that is DeepCode's to own and reuses the rest:
 from eval.swebench.instance import Instance, load_local_instances
 from eval.swebench.report import Report, ResultRow
 
-__all__ = ["Instance", "load_local_instances", "Report", "ResultRow"]
+__all__ = ["Instance", "Report", "ResultRow", "load_local_instances"]

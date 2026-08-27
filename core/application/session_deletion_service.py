@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 from core.application.errors import (
     ApplicationError,
@@ -22,7 +22,6 @@ from core.persistence.workflow_repository import WorkflowRepository
 from core.sessions import SessionStore, ThreadGoalStore
 from core.sessions.deletion import SessionDeletionTicket
 from core.sessions.store import SessionDeletionGuard
-
 
 logger = logging.getLogger(__name__)
 DeletionCallback = Callable[[str], None]
@@ -101,7 +100,7 @@ class SessionDeletionService:
                     self._recover_guarded(ticket, guarded)
                 self._notify_deleted(ticket.session_id)
                 recovered += 1
-            except Exception:  # noqa: BLE001 - isolate damaged tombstones
+            except Exception:
                 logger.exception(
                     "Session deletion recovery failed for %s",
                     ticket.session_id,
@@ -234,7 +233,7 @@ class SessionDeletionService:
             return
         try:
             self._on_deleted(thread_id)
-        except Exception:  # noqa: BLE001 - deletion is already durable
+        except Exception:
             logger.exception("post-delete cleanup failed for %s", thread_id)
 
 

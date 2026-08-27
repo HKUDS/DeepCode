@@ -27,12 +27,13 @@ Example integration in execute_chat_based_planning_pipeline:
 """
 
 import asyncio
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
 from datetime import datetime
+from typing import Any
 
 from .base import (
-    InteractionRegistry,
     InteractionPoint,
+    InteractionRegistry,
     InteractionRequest,
     InteractionResponse,
     get_default_registry,
@@ -73,7 +74,7 @@ class WorkflowInteractionIntegration:
     """
 
     def __init__(
-        self, workflow_service: Any, registry: Optional[InteractionRegistry] = None
+        self, workflow_service: Any, registry: InteractionRegistry | None = None
     ):
         """
         Initialize workflow interaction integration.
@@ -89,9 +90,9 @@ class WorkflowInteractionIntegration:
         self._registry.set_interaction_callback(self._handle_interaction)
 
         # Pending interactions (task_id -> response_future)
-        self._pending_interactions: Dict[str, asyncio.Future] = {}
+        self._pending_interactions: dict[str, asyncio.Future] = {}
 
-    def create_context(self, task_id: str, **kwargs) -> Dict[str, Any]:
+    def create_context(self, task_id: str, **kwargs) -> dict[str, Any]:
         """Create a workflow context with interaction-handler support."""
         return {
             "task_id": task_id,
@@ -102,8 +103,8 @@ class WorkflowInteractionIntegration:
     async def run_hook(
         self,
         hook_point: InteractionPoint,
-        context: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
         """
         Run handlers at an interaction point.
 
@@ -177,7 +178,7 @@ class WorkflowInteractionIntegration:
             )
             return response
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # Return timeout response
             return InteractionResponse(
                 action="timeout",
@@ -195,7 +196,7 @@ class WorkflowInteractionIntegration:
         self,
         task_id: str,
         action: str,
-        data: Optional[Dict[str, Any]] = None,
+        data: dict[str, Any] | None = None,
         skipped: bool = False,
     ) -> bool:
         """
@@ -239,8 +240,8 @@ class WorkflowInteractionIntegration:
 
 def create_interaction_wrapper(
     original_function: Callable,
-    before_hooks: List[InteractionPoint],
-    after_hooks: List[InteractionPoint],
+    before_hooks: list[InteractionPoint],
+    after_hooks: list[InteractionPoint],
     integration: WorkflowInteractionIntegration,
 ) -> Callable:
     """

@@ -8,8 +8,8 @@ conversation history and maps developer priority to each provider safely.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 from core.agent_runtime.helpers import estimate_message_tokens
 from core.skills.models import SkillProviderKind, SkillRecord, SkillTurnSnapshot
@@ -155,8 +155,8 @@ def _summary_line(record: SkillRecord, *, description_limit: int) -> str:
 
 __all__ = [
     "CATALOG_CONTEXT_FRACTION",
-    "SkillPromptBundle",
     "UNKNOWN_CONTEXT_CHAR_BUDGET",
+    "SkillPromptBundle",
     "build_skill_prompt_bundle",
     "render_skill_catalog",
 ]

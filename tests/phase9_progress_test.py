@@ -7,8 +7,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from workflows.agents.memory_agent_concise import ConciseMemoryAgent  # noqa: E402
-from utils.loop_detector import ProgressTracker  # noqa: E402
+from utils.loop_detector import ProgressTracker
+from workflows.agents.memory_agent_concise import ConciseMemoryAgent
 
 # NOTE: the legacy ``call_provider_with_legacy_tools`` retry-surfacing test was
 # removed together with ``workflows/implementation_llm_runtime.py`` — the

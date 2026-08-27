@@ -19,7 +19,6 @@ from core.application.views import (
 )
 from core.domain.automation import AutomationActivationStatus, AutomationScheduleKind
 
-
 ApplicationFactory = Callable[[], DeepCodeApplication]
 
 

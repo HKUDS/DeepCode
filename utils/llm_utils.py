@@ -8,7 +8,7 @@ JSON file.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Tuple
+from typing import Any
 
 from core.config import DeepCodeConfig
 
@@ -26,7 +26,7 @@ def _resolve_config(config: DeepCodeConfig | None = None) -> DeepCodeConfig:
     return get_runtime().config
 
 
-def get_default_models(config: DeepCodeConfig | None = None) -> Dict[str, str]:
+def get_default_models(config: DeepCodeConfig | None = None) -> dict[str, str]:
     """Return the model name resolved for each phase.
 
     Always returns the same keys (``"anthropic"``, ``"openai"``, ``"google"``,
@@ -54,7 +54,7 @@ def get_default_models(config: DeepCodeConfig | None = None) -> Dict[str, str]:
     }
 
 
-def get_token_limits(config: DeepCodeConfig | None = None) -> Tuple[int, int]:
+def get_token_limits(config: DeepCodeConfig | None = None) -> tuple[int, int]:
     """Return ``(base_max_tokens, retry_max_tokens)``.
 
     ``base`` defaults to ``agents.defaults.maxTokens`` (or
@@ -70,7 +70,7 @@ def get_token_limits(config: DeepCodeConfig | None = None) -> Tuple[int, int]:
 
 def get_document_segmentation_config(
     config: DeepCodeConfig | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Return the document-segmentation policy as a plain dict."""
     try:
         cfg = _resolve_config(config)
@@ -89,7 +89,7 @@ def get_document_segmentation_config(
 def should_use_document_segmentation(
     document_content: str,
     config: DeepCodeConfig | None = None,
-) -> Tuple[bool, str]:
+) -> tuple[bool, str]:
     """Decide whether segmentation is needed for *document_content*."""
     seg = get_document_segmentation_config(config)
 
@@ -112,7 +112,7 @@ def should_use_document_segmentation(
 
 def get_adaptive_agent_config(
     use_segmentation: bool, search_server_names: list | None = None
-) -> Dict[str, list]:
+) -> dict[str, list]:
     """Return per-agent server lists, swapping in the segmentation server when asked."""
     if search_server_names is None:
         search_server_names = []
@@ -139,7 +139,7 @@ def get_adaptive_agent_config(
     return config
 
 
-def get_adaptive_prompts(use_segmentation: bool) -> Dict[str, str]:
+def get_adaptive_prompts(use_segmentation: bool) -> dict[str, str]:
     """Return the right system prompts for segmented vs. monolithic reading."""
     from prompts.code_prompts import (
         CODE_PLANNING_PROMPT,

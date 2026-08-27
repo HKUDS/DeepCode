@@ -23,13 +23,13 @@ from core.providers.reasoning import (
     infer_reasoning_capabilities,
     normalize_reasoning_effort,
 )
-from core.reasoning import ReasoningChannel
 from core.providers.timeouts import (
     StreamIdleTimeoutError,
     iter_with_stream_idle_timeout,
     resolve_stream_idle_timeout_s,
     wait_for_stream_activity,
 )
+from core.reasoning import ReasoningChannel
 
 _ALNUM = string.ascii_letters + string.digits
 

@@ -12,8 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from cli.config_errors import format_config_error, is_unconfigured  # noqa: E402
-from core.config import ConfigError, _DEFAULT_CONFIG_FILENAME  # noqa: E402
+from cli.config_errors import format_config_error, is_unconfigured
+from core.config import _DEFAULT_CONFIG_FILENAME, ConfigError
 
 
 @pytest.fixture

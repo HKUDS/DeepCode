@@ -6,7 +6,6 @@ import threading
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-
 GOAL_TOOL_NAMES = frozenset({"get_goal", "update_goal"})
 _GOAL_CLOSURE_PROMPT = """\
 Before ending this Goal-associated Turn, call get_goal and compare the latest

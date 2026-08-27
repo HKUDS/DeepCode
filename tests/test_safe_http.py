@@ -103,13 +103,13 @@ def test_cross_origin_redirect_drops_credentials_and_custom_headers() -> None:
         "X-Subscription-Token": "secret",
         "X-Custom": "value",
     }
-    assert safe_http._headers_after_redirect(  # noqa: SLF001
+    assert safe_http._headers_after_redirect(
         headers,
         "https://api.example.com/start",
         "https://other.example.com/end",
     ) == {"Accept": "application/json"}
     assert (
-        safe_http._headers_after_redirect(  # noqa: SLF001
+        safe_http._headers_after_redirect(
             headers,
             "https://api.example.com/start",
             "https://api.example.com/end",
@@ -150,7 +150,7 @@ class _RedirectSession:
 async def test_response_limit_applies_to_streamed_decoded_bytes() -> None:
     response = _FakeResponse([b"1234", b"5678"])
     with pytest.raises(ResponseTooLargeError):
-        await safe_http._read_limited_body(response, 7)  # noqa: SLF001
+        await safe_http._read_limited_body(response, 7)
 
 
 @pytest.mark.asyncio
@@ -183,7 +183,7 @@ async def test_client_rejects_oversized_redirect_before_following_it() -> None:
     client = SafeHttpClient(SafeHttpPolicy(max_url_characters=64))
 
     with pytest.raises(UnsafeUrlError, match="length limit"):
-        await client._request_with_redirects(  # noqa: SLF001
+        await client._request_with_redirects(
             _RedirectSession(),  # type: ignore[arg-type]
             "https://example.com/start",
             params=None,

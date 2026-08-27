@@ -7,9 +7,9 @@ conditionals of their own.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Iterable
-
+from typing import Any
 
 _OFF_VALUES = frozenset({"none", "off", "disabled"})
 _EFFORT_ALIASES = {"minimum": "minimal"}
@@ -69,7 +69,7 @@ class ModelReasoningCapabilities:
         }
 
     @classmethod
-    def from_dict(cls, value: Any) -> "ModelReasoningCapabilities | None":
+    def from_dict(cls, value: Any) -> ModelReasoningCapabilities | None:
         if not isinstance(value, dict):
             return None
         raw_efforts = value.get("supportedEfforts", value.get("supported_efforts", ()))
@@ -194,9 +194,9 @@ def _optional_string(value: Any) -> str | None:
 
 __all__ = [
     "ANTHROPIC_THINKING_BLOCKS",
-    "ModelReasoningCapabilities",
     "OPENAI_RESPONSE_REASONING_ITEMS",
     "OPENROUTER_REASONING_DETAILS",
+    "ModelReasoningCapabilities",
     "infer_reasoning_capabilities",
     "normalize_reasoning_effort",
     "resolve_reasoning_effort",

@@ -1,4 +1,4 @@
-﻿"""Session-scoped MCP lifecycle and immutable tool-catalog publication."""
+"""Session-scoped MCP lifecycle and immutable tool-catalog publication."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from core.agent_runtime.tools.base import Tool, ToolResult
 from core.agent_runtime.tools.registry import ToolRegistry
 from core.mcp.connection import CredentialResolver, McpConnection, OAuthProviderFactory
 from core.mcp.models import McpRuntimePlan, McpStartupError
-from core.mcp.naming import server_allowed, visible_tool_name
+from core.mcp.naming import visible_tool_name
 from core.mcp.tools import McpToolAdapter
 
 

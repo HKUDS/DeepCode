@@ -5,17 +5,15 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.providers.registry import (  # noqa: E402
+from core.providers.registry import (
     PROVIDERS,
     find_by_model,
     find_by_name,
 )
-
 
 # ---------------------------------------------------------------------------
 # Core registry tests
@@ -88,13 +86,13 @@ class TestConfigModel:
         assert cfg.minimax.api_key is None
 
     def test_providers_config_with_api_key(self):
-        from core.config import ProvidersConfig, ProviderConfig
+        from core.config import ProviderConfig, ProvidersConfig
 
         cfg = ProvidersConfig(minimax=ProviderConfig(api_key="test-key"))
         assert cfg.minimax.api_key == "test-key"
 
     def test_providers_config_with_custom_base(self):
-        from core.config import ProvidersConfig, ProviderConfig
+        from core.config import ProviderConfig, ProvidersConfig
 
         cfg = ProvidersConfig(
             minimax=ProviderConfig(

@@ -8,7 +8,6 @@ from typing import Any
 from app_server.errors import InvalidRequest, ParseError
 from app_server.protocol.models import Request
 
-
 DEFAULT_MAX_MESSAGE_BYTES = 1024 * 1024
 
 

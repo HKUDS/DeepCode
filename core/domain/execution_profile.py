@@ -15,7 +15,7 @@ class ExecutionSelection:
     model_id: str | None = None
     reasoning_effort: str | None = None
 
-    def normalized(self) -> "ExecutionSelection":
+    def normalized(self) -> ExecutionSelection:
         return ExecutionSelection(
             connection_id=_clean_optional(self.connection_id),
             model_id=_clean_optional(self.model_id),
@@ -76,7 +76,7 @@ class ExecutionProfile:
         }
 
     @classmethod
-    def from_dict(cls, value: Any) -> "ExecutionProfile | None":
+    def from_dict(cls, value: Any) -> ExecutionProfile | None:
         """Decode persisted data, returning ``None`` for legacy/invalid rows."""
 
         if not isinstance(value, dict):

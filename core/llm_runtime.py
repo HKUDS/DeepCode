@@ -108,13 +108,13 @@ def get_workflow_provider(
 
 
 async def attach_workflow_llm(
-    agent: "Agent",
+    agent: Agent,
     *,
     phase: str,
     provider_name: str | None = None,
     connection_id: str | None = None,
     model: str | None = None,
-) -> "AugmentedLLM":
+) -> AugmentedLLM:
     """Attach an LLM to an agent with explicit workflow phase semantics."""
     llm = await agent.attach_llm(
         phase=phase,

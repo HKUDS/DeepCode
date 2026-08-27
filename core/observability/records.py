@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 
 def _utcnow_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @dataclass
@@ -85,7 +85,7 @@ class LLMLogRecord:
         reasoning_preview: str | None = None,
         tool_calls: list[dict[str, Any]] | None = None,
         error: str | None = None,
-    ) -> "LLMLogRecord":
+    ) -> LLMLogRecord:
         usage = usage or {}
         return cls(
             timestamp=_utcnow_iso(),
@@ -141,7 +141,7 @@ class MCPLogRecord:
         arguments_preview: str | None = None,
         result_preview: str | None = None,
         error: str | None = None,
-    ) -> "MCPLogRecord":
+    ) -> MCPLogRecord:
         return cls(
             timestamp=_utcnow_iso(),
             task_id=task_id,

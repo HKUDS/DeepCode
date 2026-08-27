@@ -30,8 +30,8 @@ from core.skills.provider import (
     SkillListQuery,
     SkillReadRequest,
     SkillReadResult,
-    SkillSearchRequest,
     SkillSearchMatch,
+    SkillSearchRequest,
     SkillSearchResult,
 )
 from core.skills.roots import discover_skill_roots

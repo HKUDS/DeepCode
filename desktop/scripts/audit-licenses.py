@@ -10,7 +10,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
 DESKTOP_ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY_ROOT = DESKTOP_ROOT.parent
 SIDECAR_ENV = DESKTOP_ROOT / "build" / "sidecar" / ".venv"

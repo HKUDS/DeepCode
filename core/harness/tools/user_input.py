@@ -16,7 +16,8 @@ degrades to telling the model to make a reasonable assumption and continue.
 from __future__ import annotations
 
 import inspect
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from core.agent_runtime.tools.base import Tool, tool_parameters
 

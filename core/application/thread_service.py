@@ -10,7 +10,6 @@ from pathlib import Path
 
 from core.agent_presets import METADATA_KEY as PRESET_METADATA_KEY
 from core.agent_presets import AgentPresetError, resolve_agent_preset
-from core.config import ConfigError, load_config_for_workspace
 from core.application.errors import (
     ConflictError,
     InvalidArgumentError,
@@ -20,6 +19,7 @@ from core.application.errors import (
 )
 from core.application.event_service import EventBroker
 from core.application.views import item_view, thread_view, turn_view, workflow_view
+from core.config import ConfigError, load_config_for_workspace
 from core.domain.common import new_id, utc_now
 from core.domain.event import DomainEvent
 from core.domain.execution_profile import ExecutionProfile

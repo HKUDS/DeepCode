@@ -10,4 +10,4 @@ which gives a sub-agent an isolated git worktree and merges its result back with
 
 from core.team.worktree import MergeResult, WorktreeError, WorktreeManager
 
-__all__ = ["WorktreeManager", "MergeResult", "WorktreeError"]
+__all__ = ["MergeResult", "WorktreeError", "WorktreeManager"]

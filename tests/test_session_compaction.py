@@ -19,11 +19,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import asyncio  # noqa: E402
+import asyncio
 
-from core.agent_runtime.tools.registry import ToolRegistry  # noqa: E402
-from core.events import AgentSession, UserInput  # noqa: E402
-from core.providers.base import LLMResponse  # noqa: E402
+from core.agent_runtime.tools.registry import ToolRegistry
+from core.events import AgentSession, UserInput
+from core.providers.base import LLMResponse
 
 
 class _CapturingProvider:
@@ -104,8 +104,10 @@ def test_short_history_is_untouched():
 
 # -- C4a: summarization-based compaction ------------------------------------
 
-from core.agent_runtime.compaction import SUMMARY_PREFIX as _SUMMARY_PREFIX  # noqa: E402
-from core.agent_runtime.runner import (  # noqa: E402
+from core.agent_runtime.compaction import (
+    SUMMARY_PREFIX as _SUMMARY_PREFIX,
+)
+from core.agent_runtime.runner import (
     AgentRunner,
     AgentRunSpec,
 )

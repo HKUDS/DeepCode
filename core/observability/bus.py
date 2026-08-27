@@ -30,7 +30,6 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger as _loguru_logger
 
-
 from core.observability.context import current_session_id, current_task_id
 from core.observability.records import LLMLogRecord, MCPLogRecord, truncate
 
@@ -94,7 +93,7 @@ _MCP_PREVIEW_CHARS = 2000
 
 
 def setup_logging(
-    config: "LoggerConfig | None" = None,
+    config: LoggerConfig | None = None,
     *,
     workspace_root: Path | None = None,
     force: bool = False,

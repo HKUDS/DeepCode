@@ -7,8 +7,9 @@ on resume.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from copy import deepcopy
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from core.agent_runtime.context import EnvironmentContext
 from core.sessions.continuation import session_message_history_entry

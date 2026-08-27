@@ -8,7 +8,8 @@ relies on: ``await parallel.generate_str(message, request_params)``.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Callable, Iterable, Type
+from collections.abc import Callable, Iterable
+from typing import Any
 
 from loguru import logger
 
@@ -23,7 +24,7 @@ class ParallelLLM:
         self,
         fan_in_agent: Agent,
         fan_out_agents: Iterable[Agent],
-        llm_factory: Callable[[Agent], Any] | Type[AugmentedLLM] | None = None,
+        llm_factory: Callable[[Agent], Any] | type[AugmentedLLM] | None = None,
         instruction: str | None = None,
     ) -> None:
         self.fan_in_agent = fan_in_agent

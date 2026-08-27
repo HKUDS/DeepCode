@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from core.application.event_service import DeliveryBatch, EventService
 from core.domain.event import DomainEvent
 
-
 _REPLAY_PAGE_SIZE = 500
 
 

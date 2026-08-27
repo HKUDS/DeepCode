@@ -21,7 +21,7 @@ import logging
 import os
 import time
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Any
 
 
 class ConciseMemoryAgent:
@@ -43,10 +43,10 @@ class ConciseMemoryAgent:
     def __init__(
         self,
         initial_plan_content: str,
-        logger: Optional[logging.Logger] = None,
-        target_directory: Optional[str] = None,
-        default_models: Optional[Dict[str, str]] = None,
-        code_directory: Optional[str] = None,
+        logger: logging.Logger | None = None,
+        target_directory: str | None = None,
+        default_models: dict[str, str] | None = None,
+        code_directory: str | None = None,
     ):
         """
         Initialize Concise Memory Agent
@@ -150,7 +150,7 @@ class ConciseMemoryAgent:
             normalized = normalized[3:]
         return normalized.strip("/")
 
-    def _dedupe_normalized_paths(self, files: List[str]) -> List[str]:
+    def _dedupe_normalized_paths(self, files: list[str]) -> list[str]:
         """Normalize and de-duplicate paths while preserving first occurrence."""
         seen = set()
         normalized_files = []
@@ -168,7 +168,7 @@ class ConciseMemoryAgent:
         logger.setLevel(logging.INFO)
         return logger
 
-    def _parse_phase_structure(self) -> Dict[str, List[str]]:
+    def _parse_phase_structure(self) -> dict[str, list[str]]:
         """Parse implementation phases from initial plan"""
         try:
             phases = {}
@@ -201,7 +201,7 @@ class ConciseMemoryAgent:
             self.logger.warning(f"Failed to parse phase structure: {e}")
             return {}
 
-    def _extract_all_files(self) -> List[str]:
+    def _extract_all_files(self) -> list[str]:
         """
         Extract all code files - prioritizes generated directory over plan parsing
 
@@ -227,7 +227,7 @@ class ConciseMemoryAgent:
         )
         return self._extract_all_files_from_plan()
 
-    def _extract_files_from_generated_directory(self) -> List[str]:
+    def _extract_files_from_generated_directory(self) -> list[str]:
         """
         Extract all code files from the generated code directory
         This is more reliable than parsing the LLM-generated plan
@@ -346,7 +346,7 @@ class ConciseMemoryAgent:
             self.logger.error(f"Failed to extract files from directory: {e}")
             return []
 
-    def _extract_all_files_from_plan(self) -> List[str]:
+    def _extract_all_files_from_plan(self) -> list[str]:
         """
         Extract all file paths from the file_structure section in initial plan
         Handles multiple formats: tree structure, YAML, and simple lists
@@ -385,7 +385,7 @@ class ConciseMemoryAgent:
             self.logger.error(f"Failed to extract files from initial plan: {e}")
             return []
 
-    def _extract_from_tree_structure(self, lines: List[str]) -> List[str]:
+    def _extract_from_tree_structure(self, lines: list[str]) -> list[str]:
         """
         Extract files from tree structure format - Advanced algorithm with multi-strategy approach
 
@@ -686,7 +686,7 @@ class ConciseMemoryAgent:
         # Default: if no extension and not a known file, likely a directory
         return "." not in basename
 
-    def _extract_from_simple_list(self, lines: List[str]) -> List[str]:
+    def _extract_from_simple_list(self, lines: list[str]) -> list[str]:
         """Extract files from simple list format (- filename)"""
         files = []
 
@@ -706,7 +706,7 @@ class ConciseMemoryAgent:
 
         return files
 
-    def _extract_from_plan_content(self, lines: List[str]) -> List[str]:
+    def _extract_from_plan_content(self, lines: list[str]) -> list[str]:
         """
         Advanced fallback extraction: Extract files from anywhere in the plan content
         Uses multiple regex patterns and intelligent filtering
@@ -845,7 +845,7 @@ class ConciseMemoryAgent:
 
         return files
 
-    def _clean_and_validate_files(self, files: List[str]) -> List[str]:
+    def _clean_and_validate_files(self, files: list[str]) -> list[str]:
         """
         Clean and validate extracted file paths - advanced filtering and deduplication
 
@@ -929,8 +929,7 @@ class ConciseMemoryAgent:
                 cleaned_path = cleaned_path.replace("//", "/")
 
             # Handle relative paths (remove ./ prefix)
-            if cleaned_path.startswith("./"):
-                cleaned_path = cleaned_path[2:]
+            cleaned_path = cleaned_path.removeprefix("./")
 
             # === Step 3: Validate File Structure ===
             # Must have filename (not just directory)
@@ -1213,7 +1212,7 @@ class ConciseMemoryAgent:
     #   Format: {{file_path}}: Function {{function_name}}: core ideas--{{ideas}}; Required parameters--{{params}}; Return parameters--{{returns}}
     #   Required packages: {{packages}}
 
-    def _extract_summary_sections(self, llm_summary: str) -> Dict[str, str]:
+    def _extract_summary_sections(self, llm_summary: str) -> dict[str, str]:
         """
         Extract different sections from LLM-generated summary
 
@@ -1360,7 +1359,7 @@ class ConciseMemoryAgent:
         summary = f"""# Code Implementation Summary
 **All Previously Implemented Files:**
 {implemented_files_list}
-**Generated**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+**Generated**: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 **File Implemented**: {file_path}
 **Total Files Implemented**: {files_implemented}
 **Summary failed to generate.**
@@ -1412,8 +1411,8 @@ class ConciseMemoryAgent:
             self.logger.error(f"Failed to save code implementation summary: {e}")
 
     async def _call_llm_for_summary(
-        self, client, client_type: str, summary_messages: List[Dict]
-    ) -> Dict[str, Any]:
+        self, client, client_type: str, summary_messages: list[dict]
+    ) -> dict[str, Any]:
         """
         Call LLM for code implementation summary generation ONLY
 
@@ -1544,7 +1543,7 @@ class ConciseMemoryAgent:
         else:
             raise ValueError(f"Unsupported client type: {client_type}")
 
-    def start_new_round(self, iteration: Optional[int] = None):
+    def start_new_round(self, iteration: int | None = None):
         """Start a new dialogue round and reset tool results
 
         Args:
@@ -1565,7 +1564,7 @@ class ConciseMemoryAgent:
         # self.logger.info(f"🔄 Round {self.current_round} - Tool results cleared, memory flags preserved")
 
     def record_tool_result(
-        self, tool_name: str, tool_input: Dict[str, Any], tool_result: Any
+        self, tool_name: str, tool_input: dict[str, Any], tool_result: Any
     ):
         """
         Record tool result for current round and detect write_file calls
@@ -1616,9 +1615,9 @@ class ConciseMemoryAgent:
     def create_concise_messages(
         self,
         system_prompt: str,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         files_implemented: int,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Create concise message list for LLM input
         NEW LOGIC: Always clear after write_file, keep system_prompt + initial_plan + current round tools
@@ -1760,7 +1759,7 @@ Write_file can be used to implement the new component
         #         # self.logger.info(f"✅ Concise messages created: {len(concise_messages)} messages (original: {len(messages)})")
         return concise_messages
 
-    def _read_code_knowledge_base(self) -> Optional[str]:
+    def _read_code_knowledge_base(self) -> str | None:
         """
         Read the implement_code_summary.md file as code knowledge base
         Returns all content from the file
@@ -1785,7 +1784,7 @@ Write_file can be used to implement the new component
             self.logger.error(f"Failed to read code knowledge base: {e}")
             return None
 
-    def _extract_latest_implementation_entry(self, content: str) -> Optional[str]:
+    def _extract_latest_implementation_entry(self, content: str) -> str | None:
         """
         Extract the latest/final implementation entry from the implement_code_summary.md content
         Uses a simpler approach to find the last implementation section
@@ -1946,7 +1945,7 @@ Write_file can be used to implement the new component
         else:
             return str(tool_result)
 
-    def get_memory_statistics(self, files_implemented: int = 0) -> Dict[str, Any]:
+    def get_memory_statistics(self, files_implemented: int = 0) -> dict[str, Any]:
         """Get memory agent statistics"""
         unimplemented_files = self.get_unimplemented_files()
         return {
@@ -1978,11 +1977,11 @@ Write_file can be used to implement the new component
             else 0,
         }
 
-    def get_implemented_files(self) -> List[str]:
+    def get_implemented_files(self) -> list[str]:
         """Get list of all implemented files"""
         return self.implemented_files.copy()
 
-    def get_all_files_list(self) -> List[str]:
+    def get_all_files_list(self) -> list[str]:
         """Get list of all files that should be implemented according to the plan"""
         return self.all_files_list.copy()
 
@@ -2008,7 +2007,7 @@ Write_file can be used to implement the new component
         self.logger.warning("Cannot refresh from directory, keeping current list")
         return False
 
-    def get_unimplemented_files(self) -> List[str]:
+    def get_unimplemented_files(self) -> list[str]:
         """
         Get list of files that haven't been implemented yet
         Uses exact normalized matching, with suffix matching only when the
@@ -2041,7 +2040,7 @@ Write_file can be used to implement the new component
 
         return [f for f in planned_files if f not in completed_planned]
 
-    def get_formatted_files_lists(self) -> Dict[str, str]:
+    def get_formatted_files_lists(self) -> dict[str, str]:
         """
         Get formatted strings for implemented and unimplemented files
 
@@ -2049,7 +2048,7 @@ Write_file can be used to implement the new component
             Dictionary with 'implemented' and 'unimplemented' formatted lists
         """
 
-        def format_preview(files: List[str], empty_text: str) -> str:
+        def format_preview(files: list[str], empty_text: str) -> str:
             if not files:
                 return empty_text
             preview = "\n".join([f"- {file}" for file in files[:20]])
@@ -2084,7 +2083,7 @@ Write_file can be used to implement the new component
         )
 
     def should_trigger_memory_optimization(
-        self, messages: List[Dict[str, Any]], files_implemented: int = 0
+        self, messages: list[dict[str, Any]], files_implemented: int = 0
     ) -> bool:
         """
         Check if memory optimization should be triggered
@@ -2106,8 +2105,8 @@ Write_file can be used to implement the new component
         return False
 
     def apply_memory_optimization(
-        self, system_prompt: str, messages: List[Dict[str, Any]], files_implemented: int
-    ) -> List[Dict[str, Any]]:
+        self, system_prompt: str, messages: list[dict[str, Any]], files_implemented: int
+    ) -> list[dict[str, Any]]:
         """
         Apply memory optimization using concise approach
         NEW LOGIC: Clear all history after write_file, keep only system_prompt + initial_plan + current tools
@@ -2170,7 +2169,7 @@ Write_file can be used to implement the new component
         print(f"Next Steps length: {stats['next_steps_length']} chars")
         if self.current_next_steps.strip():
             print(f"Next Steps preview: {self.current_next_steps[:100]}...")
-        print("")
+        print()
         print("📋 FILE TRACKING:")
         print(f"  Total files in plan: {stats['total_files_in_plan']}")
         print(f"  Files implemented: {stats['files_implemented_count']}")
@@ -2178,7 +2177,7 @@ Write_file can be used to implement the new component
         print(f"  Progress: {stats['implementation_progress_percent']:.1f}%")
         if stats["unimplemented_files_list"]:
             print(f"  Next possible files: {stats['unimplemented_files_list'][:3]}...")
-        print("")
+        print()
         print(
             "📊 NEW LOGIC: write_file → clear memory → accumulate tools → next write_file"
         )

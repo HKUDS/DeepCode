@@ -24,11 +24,12 @@ Usage:
 """
 
 import asyncio
+import logging
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Awaitable
-import logging
+from typing import Any
 
 
 class InteractionPoint(Enum):
@@ -61,8 +62,8 @@ class InteractionRequest:
     interaction_type: str  # Type of interaction (e.g., "questions", "plan_review")
     title: str  # Display title
     description: str  # Description for user
-    data: Dict[str, Any]  # Interaction-specific data
-    options: Dict[str, str] = field(default_factory=dict)  # Available actions
+    data: dict[str, Any]  # Interaction-specific data
+    options: dict[str, str] = field(default_factory=dict)  # Available actions
     required: bool = False  # If True, cannot be skipped
     timeout_seconds: int = 300  # Timeout for response (5 min default)
 
@@ -72,7 +73,7 @@ class InteractionResponse:
     """Data structure for user's response to interaction"""
 
     action: str  # User's action (e.g., "confirm", "modify", "skip")
-    data: Dict[str, Any] = field(default_factory=dict)  # Response data
+    data: dict[str, Any] = field(default_factory=dict)  # Response data
     skipped: bool = False  # True if user chose to skip
 
 
@@ -107,13 +108,13 @@ class InteractionHandler(ABC):
     hook_point: InteractionPoint = InteractionPoint.BEFORE_PLANNING
     priority: int = 100  # Lower number = higher priority (runs first)
 
-    def __init__(self, enabled: bool = True, config: Optional[Dict] = None):
+    def __init__(self, enabled: bool = True, config: dict | None = None):
         self.enabled = enabled
         self.config = config or {}
         self.logger = logging.getLogger(f"workflow.interactions.{self.name}")
 
     @abstractmethod
-    async def should_trigger(self, context: Dict[str, Any]) -> bool:
+    async def should_trigger(self, context: dict[str, Any]) -> bool:
         """
         Determine if this handler should trigger.
 
@@ -123,10 +124,9 @@ class InteractionHandler(ABC):
         Returns:
             True if the handler should run, False to skip
         """
-        pass
 
     @abstractmethod
-    async def create_interaction(self, context: Dict[str, Any]) -> InteractionRequest:
+    async def create_interaction(self, context: dict[str, Any]) -> InteractionRequest:
         """
         Create the interaction request to send to user.
 
@@ -136,12 +136,11 @@ class InteractionHandler(ABC):
         Returns:
             InteractionRequest with data for user interface
         """
-        pass
 
     @abstractmethod
     async def process_response(
-        self, response: InteractionResponse, context: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, response: InteractionResponse, context: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Process user's response and update context.
 
@@ -152,9 +151,8 @@ class InteractionHandler(ABC):
         Returns:
             Updated context dictionary
         """
-        pass
 
-    async def on_skip(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_skip(self, context: dict[str, Any]) -> dict[str, Any]:
         """
         Called when user skips the interaction.
         Override to provide default behavior.
@@ -168,7 +166,7 @@ class InteractionHandler(ABC):
         self.logger.info(f"Interaction handler {self.name} skipped by user")
         return context
 
-    async def on_timeout(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_timeout(self, context: dict[str, Any]) -> dict[str, Any]:
         """
         Called when interaction times out.
         Override to provide timeout behavior.
@@ -215,8 +213,8 @@ class InteractionRegistry:
         context = await registry.run_hook(InteractionPoint.BEFORE_PLANNING, context)
     """
 
-    def __init__(self, interaction_callback: Optional[InteractionCallback] = None):
-        self._handlers: Dict[InteractionPoint, List[InteractionHandler]] = {
+    def __init__(self, interaction_callback: InteractionCallback | None = None):
+        self._handlers: dict[InteractionPoint, list[InteractionHandler]] = {
             point: [] for point in InteractionPoint
         }
         self._interaction_callback = interaction_callback
@@ -264,16 +262,16 @@ class InteractionRegistry:
         """Set the callback function for user interactions."""
         self._interaction_callback = callback
 
-    def get_handlers(self, hook_point: InteractionPoint) -> List[InteractionHandler]:
+    def get_handlers(self, hook_point: InteractionPoint) -> list[InteractionHandler]:
         """Get handlers registered at an interaction point."""
         return self._handlers.get(hook_point, [])
 
     async def run_hook(
         self,
         hook_point: InteractionPoint,
-        context: Dict[str, Any],
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        context: dict[str, Any],
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         """
         Execute all enabled handlers at an interaction point.
 
@@ -327,7 +325,7 @@ class InteractionRegistry:
                         else:
                             context = await handler.process_response(response, context)
 
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         self.logger.warning(
                             f"Handler '{handler.name}' interaction timed out"
                         )
@@ -354,7 +352,7 @@ class InteractionRegistry:
 
 
 # Global default registry
-_default_registry: Optional[InteractionRegistry] = None
+_default_registry: InteractionRegistry | None = None
 
 
 def get_default_registry(auto_register: bool = True) -> InteractionRegistry:

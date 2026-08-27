@@ -76,31 +76,46 @@ from mcp.server.fastmcp import FastMCP
 # Initialize the MCP server
 mcp = FastMCP("example_mcp")
 
+
 # Define Pydantic model for input validation
 class ServiceToolInput(BaseModel):
-    '''Input model for service tool operation.'''
+    """Input model for service tool operation."""
+
     model_config = ConfigDict(
         str_strip_whitespace=True,  # Auto-strip whitespace from strings
-        validate_assignment=True,    # Validate on assignment
-        extra='forbid'              # Forbid extra fields
+        validate_assignment=True,  # Validate on assignment
+        extra="forbid",  # Forbid extra fields
     )
 
-    param1: str = Field(..., description="First parameter description (e.g., 'user123', 'project-abc')", min_length=1, max_length=100)
-    param2: Optional[int] = Field(default=None, description="Optional integer parameter with constraints", ge=0, le=1000)
-    tags: Optional[List[str]] = Field(default_factory=list, description="List of tags to apply", max_items=10)
+    param1: str = Field(
+        ...,
+        description="First parameter description (e.g., 'user123', 'project-abc')",
+        min_length=1,
+        max_length=100,
+    )
+    param2: Optional[int] = Field(
+        default=None,
+        description="Optional integer parameter with constraints",
+        ge=0,
+        le=1000,
+    )
+    tags: Optional[List[str]] = Field(
+        default_factory=list, description="List of tags to apply", max_items=10
+    )
+
 
 @mcp.tool(
     name="service_tool_name",
     annotations={
         "title": "Human-Readable Tool Title",
-        "readOnlyHint": True,     # Tool does not modify environment
+        "readOnlyHint": True,  # Tool does not modify environment
         "destructiveHint": False,  # Tool does not perform destructive operations
-        "idempotentHint": True,    # Repeated calls have no additional effect
-        "openWorldHint": False     # Tool does not interact with external entities
-    }
+        "idempotentHint": True,  # Repeated calls have no additional effect
+        "openWorldHint": False,  # Tool does not interact with external entities
+    },
 )
 async def service_tool_name(params: ServiceToolInput) -> str:
-    '''Tool description automatically becomes the 'description' field.
+    """Tool description automatically becomes the 'description' field.
 
     This tool performs a specific operation on the service. It validates all inputs
     using the ServiceToolInput Pydantic model before processing.
@@ -113,7 +128,7 @@ async def service_tool_name(params: ServiceToolInput) -> str:
 
     Returns:
         str: JSON-formatted response containing operation results
-    '''
+    """
     # Implementation here
     pass
 ```
@@ -129,17 +144,17 @@ async def service_tool_name(params: ServiceToolInput) -> str:
 ```python
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 
+
 class CreateUserInput(BaseModel):
-    model_config = ConfigDict(
-        str_strip_whitespace=True,
-        validate_assignment=True
-    )
+    model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True)
 
     name: str = Field(..., description="User's full name", min_length=1, max_length=100)
-    email: str = Field(..., description="User's email address", pattern=r'^[\w\.-]+@[\w\.-]+\.\w+$')
+    email: str = Field(
+        ..., description="User's email address", pattern=r"^[\w\.-]+@[\w\.-]+\.\w+$"
+    )
     age: int = Field(..., description="User's age", ge=0, le=150)
 
-    @field_validator('email')
+    @field_validator("email")
     @classmethod
     def validate_email(cls, v: str) -> str:
         if not v.strip():
@@ -154,16 +169,19 @@ Support multiple output formats for flexibility:
 ```python
 from enum import Enum
 
+
 class ResponseFormat(str, Enum):
-    '''Output format for tool responses.'''
+    """Output format for tool responses."""
+
     MARKDOWN = "markdown"
     JSON = "json"
+
 
 class UserSearchInput(BaseModel):
     query: str = Field(..., description="Search query")
     response_format: ResponseFormat = Field(
         default=ResponseFormat.MARKDOWN,
-        description="Output format: 'markdown' for human-readable or 'json' for machine-readable"
+        description="Output format: 'markdown' for human-readable or 'json' for machine-readable",
     )
 ```
 
@@ -185,8 +203,13 @@ For tools that list resources:
 
 ```python
 class ListInput(BaseModel):
-    limit: Optional[int] = Field(default=20, description="Maximum results to return", ge=1, le=100)
-    offset: Optional[int] = Field(default=0, description="Number of results to skip for pagination", ge=0)
+    limit: Optional[int] = Field(
+        default=20, description="Maximum results to return", ge=1, le=100
+    )
+    offset: Optional[int] = Field(
+        default=0, description="Number of results to skip for pagination", ge=0
+    )
+
 
 async def list_items(params: ListInput) -> str:
     # Make API request with pagination
@@ -199,7 +222,9 @@ async def list_items(params: ListInput) -> str:
         "offset": params.offset,
         "items": data["items"],
         "has_more": data["total"] > params.offset + len(data["items"]),
-        "next_offset": params.offset + len(data["items"]) if data["total"] > params.offset + len(data["items"]) else None
+        "next_offset": params.offset + len(data["items"])
+        if data["total"] > params.offset + len(data["items"])
+        else None,
     }
     return json.dumps(response, indent=2)
 ```
@@ -210,14 +235,16 @@ Provide clear, actionable error messages:
 
 ```python
 def _handle_api_error(e: Exception) -> str:
-    '''Consistent error formatting across all tools.'''
+    """Consistent error formatting across all tools."""
     if isinstance(e, httpx.HTTPStatusError):
         if e.response.status_code == 404:
             return "Error: Resource not found. Please check the ID is correct."
         elif e.response.status_code == 403:
             return "Error: Permission denied. You don't have access to this resource."
         elif e.response.status_code == 429:
-            return "Error: Rate limit exceeded. Please wait before making more requests."
+            return (
+                "Error: Rate limit exceeded. Please wait before making more requests."
+            )
         return f"Error: API request failed with status {e.response.status_code}"
     elif isinstance(e, httpx.TimeoutException):
         return "Error: Request timed out. Please try again."
@@ -231,13 +258,10 @@ Extract common functionality into reusable functions:
 ```python
 # Shared API request function
 async def _make_api_request(endpoint: str, method: str = "GET", **kwargs) -> dict:
-    '''Reusable function for all API calls.'''
+    """Reusable function for all API calls."""
     async with httpx.AsyncClient() as client:
         response = await client.request(
-            method,
-            f"{API_BASE_URL}/{endpoint}",
-            timeout=30.0,
-            **kwargs
+            method, f"{API_BASE_URL}/{endpoint}", timeout=30.0, **kwargs
         )
         response.raise_for_status()
         return response.json()
@@ -255,6 +279,7 @@ async def fetch_data(resource_id: str) -> dict:
         response.raise_for_status()
         return response.json()
 
+
 # Bad: Synchronous request
 def fetch_data(resource_id: str) -> dict:
     response = requests.get(f"{API_URL}/resource/{resource_id}")  # Blocks
@@ -268,6 +293,7 @@ Use type hints throughout:
 ```python
 from typing import Optional, List, Dict, Any
 
+
 async def get_user(user_id: str) -> Dict[str, Any]:
     data = await fetch_user(user_id)
     return {"id": data["id"], "name": data["name"]}
@@ -279,7 +305,7 @@ Every tool must have comprehensive docstrings with explicit type information:
 
 ```python
 async def search_users(params: UserSearchInput) -> str:
-    '''
+    """
     Search for users in the Example system by name, email, or team.
 
     This tool searches across all user profiles in the Example platform,
@@ -324,7 +350,7 @@ async def search_users(params: UserSearchInput) -> str:
         - Returns "Error: Rate limit exceeded" if too many requests (429 status)
         - Returns "Error: Invalid API authentication" if API key is invalid (401 status)
         - Returns formatted list of results or "No users found matching 'query'"
-    '''
+    """
 ```
 
 ## Complete Example
@@ -333,12 +359,12 @@ See below for a complete Python MCP server example:
 
 ```python
 #!/usr/bin/env python3
-'''
+"""
 MCP Server for Example Service.
 
 This server provides tools to interact with Example API, including user search,
 project management, and data export capabilities.
-'''
+"""
 
 from typing import Optional, List, Dict, Any
 from enum import Enum
@@ -352,58 +378,72 @@ mcp = FastMCP("example_mcp")
 # Constants
 API_BASE_URL = "https://api.example.com/v1"
 
+
 # Enums
 class ResponseFormat(str, Enum):
-    '''Output format for tool responses.'''
+    """Output format for tool responses."""
+
     MARKDOWN = "markdown"
     JSON = "json"
 
+
 # Pydantic Models for Input Validation
 class UserSearchInput(BaseModel):
-    '''Input model for user search operations.'''
-    model_config = ConfigDict(
-        str_strip_whitespace=True,
-        validate_assignment=True
+    """Input model for user search operations."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True)
+
+    query: str = Field(
+        ...,
+        description="Search string to match against names/emails",
+        min_length=2,
+        max_length=200,
+    )
+    limit: Optional[int] = Field(
+        default=20, description="Maximum results to return", ge=1, le=100
+    )
+    offset: Optional[int] = Field(
+        default=0, description="Number of results to skip for pagination", ge=0
+    )
+    response_format: ResponseFormat = Field(
+        default=ResponseFormat.MARKDOWN, description="Output format"
     )
 
-    query: str = Field(..., description="Search string to match against names/emails", min_length=2, max_length=200)
-    limit: Optional[int] = Field(default=20, description="Maximum results to return", ge=1, le=100)
-    offset: Optional[int] = Field(default=0, description="Number of results to skip for pagination", ge=0)
-    response_format: ResponseFormat = Field(default=ResponseFormat.MARKDOWN, description="Output format")
-
-    @field_validator('query')
+    @field_validator("query")
     @classmethod
     def validate_query(cls, v: str) -> str:
         if not v.strip():
             raise ValueError("Query cannot be empty or whitespace only")
         return v.strip()
 
+
 # Shared utility functions
 async def _make_api_request(endpoint: str, method: str = "GET", **kwargs) -> dict:
-    '''Reusable function for all API calls.'''
+    """Reusable function for all API calls."""
     async with httpx.AsyncClient() as client:
         response = await client.request(
-            method,
-            f"{API_BASE_URL}/{endpoint}",
-            timeout=30.0,
-            **kwargs
+            method, f"{API_BASE_URL}/{endpoint}", timeout=30.0, **kwargs
         )
         response.raise_for_status()
         return response.json()
 
+
 def _handle_api_error(e: Exception) -> str:
-    '''Consistent error formatting across all tools.'''
+    """Consistent error formatting across all tools."""
     if isinstance(e, httpx.HTTPStatusError):
         if e.response.status_code == 404:
             return "Error: Resource not found. Please check the ID is correct."
         elif e.response.status_code == 403:
             return "Error: Permission denied. You don't have access to this resource."
         elif e.response.status_code == 429:
-            return "Error: Rate limit exceeded. Please wait before making more requests."
+            return (
+                "Error: Rate limit exceeded. Please wait before making more requests."
+            )
         return f"Error: API request failed with status {e.response.status_code}"
     elif isinstance(e, httpx.TimeoutException):
         return "Error: Request timed out. Please try again."
     return f"Error: Unexpected error occurred: {type(e).__name__}"
+
 
 # Tool definitions
 @mcp.tool(
@@ -413,23 +453,19 @@ def _handle_api_error(e: Exception) -> str:
         "readOnlyHint": True,
         "destructiveHint": False,
         "idempotentHint": True,
-        "openWorldHint": True
-    }
+        "openWorldHint": True,
+    },
 )
 async def example_search_users(params: UserSearchInput) -> str:
-    '''Search for users in the Example system by name, email, or team.
+    """Search for users in the Example system by name, email, or team.
 
     [Full docstring as shown above]
-    '''
+    """
     try:
         # Make API request using validated parameters
         data = await _make_api_request(
             "users/search",
-            params={
-                "q": params.query,
-                "limit": params.limit,
-                "offset": params.offset
-            }
+            params={"q": params.query, "limit": params.limit, "offset": params.offset},
         )
 
         users = data.get("users", [])
@@ -447,7 +483,7 @@ async def example_search_users(params: UserSearchInput) -> str:
             for user in users:
                 lines.append(f"## {user['name']} ({user['id']})")
                 lines.append(f"- **Email**: {user['email']}")
-                if user.get('team'):
+                if user.get("team"):
                     lines.append(f"- **Team**: {user['team']}")
                 lines.append("")
 
@@ -456,16 +492,18 @@ async def example_search_users(params: UserSearchInput) -> str:
         else:
             # Machine-readable JSON format
             import json
+
             response = {
                 "total": total,
                 "count": len(users),
                 "offset": params.offset,
-                "users": users
+                "users": users,
             }
             return json.dumps(response, indent=2)
 
     except Exception as e:
         return _handle_api_error(e)
+
 
 if __name__ == "__main__":
     mcp.run()
@@ -484,15 +522,18 @@ from mcp.server.fastmcp import FastMCP, Context
 
 mcp = FastMCP("example_mcp")
 
+
 @mcp.tool()
 async def advanced_search(query: str, ctx: Context) -> str:
-    '''Advanced tool with context access for logging and progress.'''
+    """Advanced tool with context access for logging and progress."""
 
     # Report progress for long operations
     await ctx.report_progress(0.25, "Starting search...")
 
     # Log information for debugging
-    await ctx.log_info("Processing query", {"query": query, "timestamp": datetime.now()})
+    await ctx.log_info(
+        "Processing query", {"query": query, "timestamp": datetime.now()}
+    )
 
     # Perform search
     results = await search_api(query)
@@ -503,14 +544,14 @@ async def advanced_search(query: str, ctx: Context) -> str:
 
     return format_results(results)
 
+
 @mcp.tool()
 async def interactive_tool(resource_id: str, ctx: Context) -> str:
-    '''Tool that can request additional input from users.'''
+    """Tool that can request additional input from users."""
 
     # Request sensitive information when needed
     api_key = await ctx.elicit(
-        prompt="Please provide your API key:",
-        input_type="password"
+        prompt="Please provide your API key:", input_type="password"
     )
 
     # Use the provided key
@@ -531,18 +572,19 @@ Expose data as resources for efficient, template-based access:
 ```python
 @mcp.resource("file://documents/{name}")
 async def get_document(name: str) -> str:
-    '''Expose documents as MCP resources.
+    """Expose documents as MCP resources.
 
     Resources are useful for static or semi-static data that doesn't
     require complex parameters. They use URI templates for flexible access.
-    '''
+    """
     document_path = f"./docs/{name}"
     with open(document_path, "r") as f:
         return f.read()
 
+
 @mcp.resource("config://settings/{key}")
 async def get_setting(key: str, ctx: Context) -> str:
-    '''Expose configuration as resources with context.'''
+    """Expose configuration as resources with context."""
     settings = await load_settings()
     return json.dumps(settings.get(key, {}))
 ```
@@ -560,16 +602,19 @@ from typing import TypedDict
 from dataclasses import dataclass
 from pydantic import BaseModel
 
+
 # TypedDict for structured returns
 class UserData(TypedDict):
     id: str
     name: str
     email: str
 
+
 @mcp.tool()
 async def get_user_typed(user_id: str) -> UserData:
-    '''Returns structured data - FastMCP handles serialization.'''
+    """Returns structured data - FastMCP handles serialization."""
     return {"id": user_id, "name": "John Doe", "email": "john@example.com"}
+
 
 # Pydantic models for complex validation
 class DetailedUser(BaseModel):
@@ -579,9 +624,10 @@ class DetailedUser(BaseModel):
     created_at: datetime
     metadata: Dict[str, Any]
 
+
 @mcp.tool()
 async def get_user_detailed(user_id: str) -> DetailedUser:
-    '''Returns Pydantic model - automatically generates schema.'''
+    """Returns Pydantic model - automatically generates schema."""
     user = await fetch_user(user_id)
     return DetailedUser(**user)
 ```
@@ -593,9 +639,10 @@ Initialize resources that persist across requests:
 ```python
 from contextlib import asynccontextmanager
 
+
 @asynccontextmanager
 async def app_lifespan():
-    '''Manage resources that live for the server's lifetime.'''
+    """Manage resources that live for the server's lifetime."""
     # Initialize connections, load config, etc.
     db = await connect_to_database()
     config = load_configuration()
@@ -606,11 +653,13 @@ async def app_lifespan():
     # Cleanup on shutdown
     await db.close()
 
+
 mcp = FastMCP("example_mcp", lifespan=app_lifespan)
+
 
 @mcp.tool()
 async def query_data(query: str, ctx: Context) -> str:
-    '''Access lifespan resources through context.'''
+    """Access lifespan resources through context."""
     db = ctx.request_context.lifespan_state["db"]
     results = await db.query(query)
     return format_results(results)

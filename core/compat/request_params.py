@@ -19,7 +19,6 @@ from typing import Any
 
 from loguru import logger
 
-
 _KNOWN_FIELDS = frozenset(
     {
         "max_tokens",
@@ -63,31 +62,31 @@ class RequestParams:
     """
 
     __slots__ = (
-        "max_tokens",
-        "maxTokens",
-        "temperature",
-        "reasoning_effort",
-        "model",
-        "use_history",
-        "max_iterations",
-        "parallel_tool_calls",
-        "tool_filter",
-        "max_tool_result_chars",
-        "context_window_tokens",
-        "context_block_limit",
-        "provider_retry_mode",
-        "retry_wait_callback",
         "checkpoint_callback",
-        "llm_timeout_s",
+        "context_block_limit",
+        "context_window_tokens",
         "enforce_default_max_iterations",
+        "llm_timeout_s",
+        "maxTokens",
+        "max_iterations",
+        "max_tokens",
+        "max_tool_result_chars",
         "metadata",
+        "model",
+        "parallel_tool_calls",
+        "provider_retry_mode",
+        "reasoning_effort",
+        "retry_wait_callback",
+        "temperature",
+        "tool_filter",
+        "use_history",
     )
 
     def __init__(
         self,
         *,
         max_tokens: int | None = None,
-        maxTokens: int | None = None,  # noqa: N803 - legacy spelling
+        maxTokens: int | None = None,
         temperature: float | None = None,
         reasoning_effort: str | None = None,
         model: str | None = None,

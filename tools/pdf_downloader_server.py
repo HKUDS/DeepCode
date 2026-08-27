@@ -60,7 +60,7 @@ def run() -> None:
     if DOCLING_AVAILABLE:
         print("Advanced formats/features: PPTX, image extraction, layout preservation")
 
-    print("")
+    print()
     sys.stdout = protocol_stdout
     build_server().run()
 

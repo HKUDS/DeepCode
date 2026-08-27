@@ -11,10 +11,10 @@ import json
 from pathlib import Path
 
 from core.application.llm_configuration_service import LLMConfigurationService
-from core.providers.catalog_service import ModelCatalogService
-from core.providers.profiles import ConnectionResolver
 from core.config import load_config
+from core.providers.catalog_service import ModelCatalogService
 from core.providers.credentials import CredentialStore
+from core.providers.profiles import ConnectionResolver
 
 
 def _service(

@@ -13,10 +13,11 @@ Flow:
 """
 
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
-from workflows.planning_runtime import validate_plan_text
 from workflows.plan_review_runtime import revise_plan_with_feedback
+from workflows.planning_runtime import validate_plan_text
+
 from .base import (
     InteractionHandler,
     InteractionPoint,
@@ -43,13 +44,13 @@ class PlanReviewHandler(InteractionHandler):
     hook_point = InteractionPoint.AFTER_PLANNING
     priority = 10
 
-    def __init__(self, enabled: bool = True, config: Optional[Dict] = None):
+    def __init__(self, enabled: bool = True, config: dict | None = None):
         super().__init__(enabled, config)
         self._max_modification_rounds = (
             config.get("max_modification_rounds", 3) if config else 3
         )
 
-    async def should_trigger(self, context: Dict[str, Any]) -> bool:
+    async def should_trigger(self, context: dict[str, Any]) -> bool:
         """
         Trigger if:
         - A plan has been generated
@@ -81,7 +82,7 @@ class PlanReviewHandler(InteractionHandler):
 
         return len(str(plan).strip()) > 0
 
-    async def create_interaction(self, context: Dict[str, Any]) -> InteractionRequest:
+    async def create_interaction(self, context: dict[str, Any]) -> InteractionRequest:
         """Create plan review interaction."""
         plan = context.get("implementation_plan") or context.get("planning_result", "")
         modification_round = context.get("plan_modification_round", 0)
@@ -120,8 +121,8 @@ class PlanReviewHandler(InteractionHandler):
         )
 
     async def process_response(
-        self, response: InteractionResponse, context: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, response: InteractionResponse, context: dict[str, Any]
+    ) -> dict[str, Any]:
         """Process user's plan review response."""
         action = response.action.lower()
 
@@ -215,7 +216,7 @@ class PlanReviewHandler(InteractionHandler):
         return context
 
     async def _modify_plan(
-        self, current_plan: str, feedback: str, context: Dict[str, Any]
+        self, current_plan: str, feedback: str, context: dict[str, Any]
     ) -> str:
         """
         Modify the implementation plan based on user feedback.
@@ -242,14 +243,14 @@ class PlanReviewHandler(InteractionHandler):
 # ==========================================
 """
 
-    async def on_skip(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_skip(self, context: dict[str, Any]) -> dict[str, Any]:
         """Handle skip - auto-approve the plan."""
         context["plan_approved"] = True
         context["plan_auto_approved"] = True
         self.logger.info("Plan auto-approved (user skipped review)")
         return context
 
-    async def on_timeout(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_timeout(self, context: dict[str, Any]) -> dict[str, Any]:
         """Handle timeout - auto-approve."""
         self.logger.warning("Plan review timed out, auto-approving")
         return await self.on_skip(context)

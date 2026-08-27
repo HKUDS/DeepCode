@@ -10,7 +10,7 @@ user configures shell commands in ``hooks.json`` that fire on lifecycle events
 hooks pays nothing.
 """
 
-from core.harness.hooks.discovery import Handler, DiscoveryResult, discover_hooks
+from core.harness.hooks.discovery import DiscoveryResult, Handler, discover_hooks
 from core.harness.hooks.engine import (
     ContextOutcome,
     HooksEngine,
@@ -21,13 +21,13 @@ from core.harness.hooks.engine import (
 )
 
 __all__ = [
-    "Handler",
-    "DiscoveryResult",
-    "discover_hooks",
-    "HooksEngine",
-    "PreToolUseOutcome",
-    "PostToolUseOutcome",
     "ContextOutcome",
-    "StopOutcome",
+    "DiscoveryResult",
+    "Handler",
+    "HooksEngine",
     "PermissionRequestOutcome",
+    "PostToolUseOutcome",
+    "PreToolUseOutcome",
+    "StopOutcome",
+    "discover_hooks",
 ]

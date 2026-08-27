@@ -18,13 +18,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.harness.sandbox import (  # noqa: E402
+from core.harness.sandbox import (
     SandboxPolicy,
     _seatbelt_profile,
     fences_writes,
     wrap_shell_command,
 )
-from core.harness.windows_sandbox import _run_in_job  # noqa: E402
+from core.harness.windows_sandbox import _run_in_job
 
 
 def test_policy_for_workspace_normalizes_root(tmp_path):

@@ -18,7 +18,8 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any
+
 import yaml
 
 # Add tools directory to path
@@ -55,7 +56,7 @@ class CodebaseIndexWorkflow:
 
         return logger
 
-    def extract_file_tree_from_plan(self, plan_content: str) -> Optional[str]:
+    def extract_file_tree_from_plan(self, plan_content: str) -> str | None:
         """
         Extract file tree structure from initial_plan.txt content
 
@@ -275,7 +276,7 @@ project/
 └── setup.py
 """
 
-    def load_or_create_indexer_config(self, paper_dir: str) -> Dict[str, Any]:
+    def load_or_create_indexer_config(self, paper_dir: str) -> dict[str, Any]:
         """
         Load or create indexer configuration
 
@@ -406,8 +407,8 @@ project/
     async def run_indexing_workflow(
         self,
         paper_dir: str,
-        initial_plan_path: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        initial_plan_path: str | None = None,
+    ) -> dict[str, Any]:
         """
         Run the complete code indexing workflow
 
@@ -678,9 +679,9 @@ project/
 # Convenience function for direct workflow invocation
 async def run_codebase_indexing(
     paper_dir: str,
-    initial_plan_path: Optional[str] = None,
+    initial_plan_path: str | None = None,
     logger=None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Convenience function to run codebase indexing
 

@@ -685,7 +685,7 @@ def test_sweep_crosses_the_label_then_holds_off_it_for_the_rest_of_the_cycle():
     strobes; the beat is what makes it read as a sweep.
     """
     width = 12
-    starts = [animation.sweep_span(width, t / 20)[0] for t in range(0, 47)]
+    starts = [animation.sweep_span(width, t / 20)[0] for t in range(47)]
     assert starts == sorted(starts), "the band never moves backwards mid-cycle"
 
     # Inside the hold (the last 10% of the cycle) nothing is lit.
@@ -699,7 +699,7 @@ def test_sweep_crosses_the_label_then_holds_off_it_for_the_rest_of_the_cycle():
 
 def test_shimmer_and_spinner_are_pure_functions_that_lose_nothing():
     label = "Thinking"
-    for tick in range(0, 60):
+    for tick in range(60):
         elapsed = tick / 20
         fragments = animation.shimmer(label, elapsed, base_style="a", glare_style="b")
         assert "".join(text for _style, text in fragments) == label

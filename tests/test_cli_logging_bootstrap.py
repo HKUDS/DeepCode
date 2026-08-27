@@ -21,12 +21,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import deepcode  # noqa: E402
-from core.observability import shutdown_logging  # noqa: E402
+import deepcode
+from core.observability import shutdown_logging
 
 
 def sink_levels() -> list[int]:
-    return [handler.levelno for handler in logger._core.handlers.values()]  # noqa: SLF001
+    return [handler.levelno for handler in logger._core.handlers.values()]
 
 
 @pytest.fixture(autouse=True)

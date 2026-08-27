@@ -5,13 +5,13 @@ from pathlib import Path
 
 from core.skills.catalog import SkillCatalog, discover_skill_catalog
 from core.skills.host import SkillCatalogHost, SkillWorkspaceRegistry
-from core.skills.monitor import SkillCatalogMonitor
 from core.skills.models import (
     SkillAuthority,
     SkillPackageId,
     SkillProviderKind,
     SkillReference,
 )
+from core.skills.monitor import SkillCatalogMonitor
 from core.skills.provider import (
     SkillListQuery,
     SkillProviderSource,

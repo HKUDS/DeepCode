@@ -29,9 +29,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.events.protocol import Shutdown, ShutdownComplete, UserInput  # noqa: E402
-from core.harness.hooks.discovery import Handler  # noqa: E402
-from core.harness.hooks.engine import HooksEngine  # noqa: E402
+from core.events.protocol import Shutdown, ShutdownComplete, UserInput
+from core.harness.hooks.discovery import Handler
+from core.harness.hooks.engine import HooksEngine
 
 pytestmark = pytest.mark.skipif(
     shutil.which("sh") is None, reason="POSIX shell required"

@@ -113,7 +113,7 @@ class ToolRegistry:
                 return result + _HINT
             return result
         except Exception as e:
-            return f"Error executing {name}: {str(e)}" + _HINT
+            return f"Error executing {name}: {e!s}" + _HINT
 
     @property
     def tool_names(self) -> list[str]:
@@ -150,7 +150,7 @@ class ToolRegistry:
         for name, stack in list(self._owned_server_stacks.items()):
             try:
                 await asyncio.wait_for(stack.aclose(), timeout=timeout_s)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 errors.append(
                     TimeoutError(
                         f"MCP server '{name}' close timed out after {timeout_s:g}s"
@@ -162,7 +162,7 @@ class ToolRegistry:
                 self._owned_server_stacks.pop(name, None)
         try:
             await asyncio.wait_for(self._exit_stack.aclose(), timeout=timeout_s)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             errors.append(
                 TimeoutError(
                     f"ToolRegistry exit stack close timed out after {timeout_s:g}s"

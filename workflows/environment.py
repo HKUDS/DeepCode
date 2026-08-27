@@ -26,8 +26,9 @@ from __future__ import annotations
 import os
 import shutil
 import uuid
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any
 from urllib.parse import unquote, urlparse
 
 from loguru import logger as default_logger
@@ -35,9 +36,9 @@ from loguru import logger as default_logger
 from core.compat.runtime import get_runtime
 from workflows.workflow_context import (
     EXTENSION_TO_KIND,
-    InputKind,
     TASK_KIND_PREFIX,
     TASKS_DIRNAME,
+    InputKind,
     TaskKind,
     WorkflowContext,
     resolve_workspace_root,
@@ -217,7 +218,7 @@ def _maybe_progress(cb: ProgressCallback | None, pct: int, msg: str) -> None:
             # Fire-and-forget keeps prepare_workflow_environment cheap.
             import asyncio
 
-            asyncio.ensure_future(result)  # noqa: RUF006
+            asyncio.ensure_future(result)
     except Exception as exc:  # pragma: no cover - cosmetic
         default_logger.debug("progress callback failed: {}", exc)
 

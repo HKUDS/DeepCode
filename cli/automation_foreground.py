@@ -17,7 +17,6 @@ from core.domain.approval import Approval, ApprovalStatus
 from core.domain.automation import AutomationRunStatus
 from core.domain.event import DomainEvent
 
-
 _EVENT_PAGE_SIZE = 500
 _LIVE_WAKE_SECONDS = 0.25
 

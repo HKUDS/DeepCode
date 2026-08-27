@@ -14,13 +14,13 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
+import platform
+import shutil
 import subprocess
 import tempfile
-import shutil
-import platform
-import os
 from pathlib import Path
-from typing import Union, Optional, Dict, Any
+from typing import Any
 
 from core.platform_compat import configure_utf8_stdio, subprocess_env
 
@@ -43,10 +43,9 @@ class PDFConverter:
 
     def __init__(self) -> None:
         """Initialize the PDF converter."""
-        pass
 
     @staticmethod
-    def find_libreoffice_windows() -> Optional[str]:
+    def find_libreoffice_windows() -> str | None:
         """
         Find LibreOffice installation on Windows.
 
@@ -84,7 +83,7 @@ class PDFConverter:
 
     @staticmethod
     def convert_office_to_pdf(
-        doc_path: Union[str, Path], output_dir: Optional[str] = None
+        doc_path: str | Path, output_dir: str | None = None
     ) -> Path:
         """
         Convert Office document (.doc, .docx, .ppt, .pptx, .xls, .xlsx) to PDF.
@@ -124,10 +123,10 @@ class PDFConverter:
 
             # Check if LibreOffice is available
             libreoffice_available = False
-            working_libreoffice_cmd: Optional[str] = None
+            working_libreoffice_cmd: str | None = None
 
             # Prepare subprocess parameters to hide console window on Windows
-            subprocess_kwargs: Dict[str, Any] = {
+            subprocess_kwargs: dict[str, Any] = {
                 "capture_output": True,
                 "check": True,
                 "timeout": 10,
@@ -236,7 +235,7 @@ class PDFConverter:
                         ]
 
                         # Prepare conversion subprocess parameters
-                        convert_subprocess_kwargs: Dict[str, Any] = {
+                        convert_subprocess_kwargs: dict[str, Any] = {
                             "capture_output": True,
                             "text": True,
                             "timeout": 60,  # 60 second timeout
@@ -312,12 +311,12 @@ class PDFConverter:
                 return final_pdf_path
 
         except Exception as e:
-            logging.error(f"Error in convert_office_to_pdf: {str(e)}")
+            logging.error(f"Error in convert_office_to_pdf: {e!s}")
             raise
 
     @staticmethod
     def convert_text_to_pdf(
-        text_path: Union[str, Path], output_dir: Optional[str] = None
+        text_path: str | Path, output_dir: str | None = None
     ) -> Path:
         """
         Convert text file (.txt, .md) to PDF using ReportLab with full markdown support.
@@ -381,10 +380,10 @@ class PDFConverter:
 
             try:
                 from reportlab.lib.pagesizes import A4
-                from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-                from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+                from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
                 from reportlab.lib.units import inch
                 from reportlab.pdfbase import pdfmetrics
+                from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
                 # Create PDF document
                 doc = SimpleDocTemplate(
@@ -516,7 +515,7 @@ class PDFConverter:
                 )
             except Exception as e:
                 raise RuntimeError(
-                    f"Failed to convert text file {text_path.name} to PDF: {str(e)}"
+                    f"Failed to convert text file {text_path.name} to PDF: {e!s}"
                 )
 
             # Validate the generated PDF
@@ -532,7 +531,7 @@ class PDFConverter:
             return pdf_path
 
         except Exception as e:
-            logging.error(f"Error in convert_text_to_pdf: {str(e)}")
+            logging.error(f"Error in convert_text_to_pdf: {e!s}")
             raise
 
     @staticmethod
@@ -581,8 +580,8 @@ class PDFConverter:
 
     def convert_to_pdf(
         self,
-        file_path: Union[str, Path],
-        output_dir: Optional[str] = None,
+        file_path: str | Path,
+        output_dir: str | None = None,
     ) -> Path:
         """
         Convert document to PDF based on file extension
@@ -634,7 +633,7 @@ class PDFConverter:
         else:
             # On non-Windows systems, try running the version command
             try:
-                subprocess_kwargs: Dict[str, Any] = {
+                subprocess_kwargs: dict[str, Any] = {
                     "capture_output": True,
                     "text": True,
                     "check": True,
@@ -740,7 +739,7 @@ def main():
         print(f"📄 File size: {output_pdf.stat().st_size / 1024:.1f} KB")
 
     except Exception as e:
-        print(f"❌ Error: {str(e)}")
+        print(f"❌ Error: {e!s}")
         return 1
 
     return 0

@@ -7,6 +7,6 @@ __all__ = [
     "InteractionHandler",
     "InteractionPoint",
     "InteractionRegistry",
-    "RequirementAnalysisHandler",
     "PlanReviewHandler",
+    "RequirementAnalysisHandler",
 ]

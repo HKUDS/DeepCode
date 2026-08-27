@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.harness.approval import TerminalApprover  # noqa: E402
+from core.harness.approval import TerminalApprover
 
 
 def _approver(answers, *, interactive=True):

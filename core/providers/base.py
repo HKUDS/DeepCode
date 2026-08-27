@@ -6,14 +6,13 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Any
 
 from loguru import logger
 
 from core.reasoning import ReasoningChannel
-
 
 ReasoningDeltaCallback = Callable[[str, ReasoningChannel], Awaitable[None]]
 
@@ -717,7 +716,7 @@ class LLMProvider(ABC):
         except Exception:
             return None
         if retry_at.tzinfo is None:
-            retry_at = retry_at.replace(tzinfo=timezone.utc)
+            retry_at = retry_at.replace(tzinfo=UTC)
         remaining = (retry_at - datetime.now(retry_at.tzinfo)).total_seconds()
         return max(0.1, remaining)
 
