@@ -57,6 +57,12 @@ Streamable HTTP servers to the same session-scoped MCP runtime used by
 standalone configuration. Invalid server entries are skipped independently;
 an invalid MCP component does not disable valid Plugin Skills.
 
+> [!WARNING]
+> Never place credentials in `mcp.json`. Literal `env` and `headers` values are
+> plaintext package data: they can be committed, copied, or disclosed with the
+> Plugin. Bind secrets at runtime from user configuration with `credentialEnv`,
+> `bearerTokenCredential`, or another supported environment reference instead.
+
 Discovery remains inert: listing or registering a Plugin never imports Python
 code or starts a process. When an Agent Session first uses the package,
 DeepCode supplies immutable `PLUGIN_ROOT` and installation-specific
