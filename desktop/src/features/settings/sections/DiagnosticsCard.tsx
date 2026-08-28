@@ -2,6 +2,7 @@
 
 import { Download, RefreshCw } from "lucide-react";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import type { Project } from "../../../generated/app-server";
 import type { DesktopRuntime } from "../../../rpc/contracts";
@@ -15,6 +16,7 @@ export function DiagnosticsCard({
   runtime: DesktopRuntime;
   project: Project | null;
 }) {
+  const { t } = useTranslation();
   const diagnostics = useDiagnostics(runtime, project?.id ?? null);
   const [exporting, setExporting] = useState(false);
   const [exportPath, setExportPath] = useState<string | null>(null);
@@ -39,8 +41,8 @@ export function DiagnosticsCard({
     <section className={styles.section}>
       <header className={styles.sectionHeader}>
         <div>
-          <p className={styles.eyebrow}>Troubleshooting</p>
-          <h2>Diagnostics</h2>
+          <p className={styles.eyebrow}>{t("settings.diagnostics.eyebrow", "Troubleshooting")}</p>
+          <h2>{t("settings.diagnostics.title", "Diagnostics")}</h2>
         </div>
         <div className={styles.headerActions}>
           <button
@@ -50,7 +52,7 @@ export function DiagnosticsCard({
             onClick={() => void exportDiagnostics()}
           >
             <Download size={14} />
-            {exporting ? "Exporting…" : "Export report"}
+            {exporting ? t("settings.diagnostics.exporting", "Exporting…") : t("settings.diagnostics.export", "Export report")}
           </button>
           <button
             className={styles.secondaryButton}
@@ -59,7 +61,7 @@ export function DiagnosticsCard({
             onClick={() => void diagnostics.refresh()}
           >
             <RefreshCw size={14} />
-            Run checks
+            {t("settings.diagnostics.runChecks", "Run checks")}
           </button>
         </div>
       </header>
@@ -68,7 +70,7 @@ export function DiagnosticsCard({
       ) : null}
       {exportError ? <p className={styles.errorBanner}>{exportError}</p> : null}
       {exportPath ? (
-        <p className={styles.note}>Sanitized diagnostics saved to {exportPath}</p>
+        <p className={styles.note}>{t("settings.diagnostics.savedTo", "Sanitized diagnostics saved to {{path}}", { path: exportPath })}</p>
       ) : null}
       {diagnostics.diagnostics ? (
         <>
@@ -106,10 +108,10 @@ export function DiagnosticsCard({
               value={String(diagnostics.diagnostics.automationCount)}
             />
             <Diagnostic
-              label="Project config"
+              label={t("settings.diagnostics.noProject", "Project config")}
               value={
                 diagnostics.diagnostics.projectConfigPath ??
-                "No project selected"
+                t("settings.diagnostics.noProject", "No project selected")
               }
             />
           </dl>

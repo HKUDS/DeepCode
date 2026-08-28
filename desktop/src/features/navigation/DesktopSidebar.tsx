@@ -142,8 +142,8 @@ export function DesktopSidebar({
       regularGroups.push({
         key: "recovered-history",
         project: null,
-        displayName: "Previous sessions",
-        description: "Original folders unavailable",
+        displayName: t("sidebar.previousSessions", "Previous sessions"),
+        description: t("sidebar.folderUnavailable", "Original folders unavailable"),
         threads: recoveredThreads,
         active: recoveredThreads.some(
           (thread) => thread.projectId === selectedProjectId,
@@ -151,7 +151,7 @@ export function DesktopSidebar({
       });
     }
     return regularGroups;
-  }, [normalizedQuery, projects, selectedProjectId, threads]);
+  }, [normalizedQuery, projects, selectedProjectId, t, threads]);
   const activeGroupKey =
     projectGroups.find((group) => group.active)?.key ?? null;
   const disclosure = useProjectDisclosure(activeGroupKey);
@@ -192,7 +192,7 @@ export function DesktopSidebar({
         </span>
         <span className={styles.brandCopy}>
           <strong>DeepCode</strong>
-          <small>Local agent</small>
+          <small>{t("sidebar.localAgent", "Local agent")}</small>
         </span>
       </div>
 
@@ -205,13 +205,13 @@ export function DesktopSidebar({
             disabled={busy || !canCreateThread}
           >
             <Plus size={16} strokeWidth={1.9} />
-            New thread
+            {t("sidebar.newThread", "New thread")}
             <kbd>⌘N</kbd>
           </button>
 
           <label className={styles.search}>
             <Search size={16} strokeWidth={1.8} aria-hidden="true" />
-            <span className={styles.srOnly}>Search Sessions</span>
+            <span className={styles.srOnly}>{t("sidebar.searchSessions", "Search Sessions")}</span>
             <input
               ref={searchRef}
               value={query}
@@ -222,7 +222,7 @@ export function DesktopSidebar({
                   event.currentTarget.blur();
                 }
               }}
-              placeholder="Search Sessions"
+              placeholder={t("sidebar.searchSessions", "Search Sessions")}
               spellCheck={false}
             />
             <kbd>⌘K</kbd>
@@ -299,15 +299,15 @@ export function DesktopSidebar({
           <button className={styles.emptyProject} type="button" onClick={onOpenProject}>
             <FolderOpen size={18} />
             <span>
-              <strong>Open a local folder</strong>
-              <small>Your CLI Sessions will appear here.</small>
+              <strong>{t("sidebar.openFolder", "Open a local folder")}</strong>
+              <small>{t("sidebar.openFolderHint", "Your CLI Sessions will appear here.")}</small>
             </span>
           </button>
         ) : normalizedQuery && projectGroups.length === 0 ? (
           <div className={styles.noResults}>
             <Search size={16} />
-            <strong>No matching Sessions</strong>
-            <small>Search by title, project, or workspace path.</small>
+            <strong>{t("sidebar.noResults", "No matching Sessions")}</strong>
+            <small>{t("sidebar.noResultsHint", "Search by title, project, or workspace path.")}</small>
           </div>
         ) : (
           projectGroups.map((group) => {
@@ -381,8 +381,8 @@ export function DesktopSidebar({
       <footer className={styles.footer}>
         <Sparkles size={14} aria-hidden="true" />
         <span>
-          <strong>{runtime.phase === "ready" ? "Local agent ready" : runtime.phase}</strong>
-          <small>Shared Session history</small>
+          <strong>{runtime.phase === "ready" ? t("sidebar.agentReady", "Local agent ready") : runtime.phase}</strong>
+          <small>{t("sidebar.sharedHistory", "Shared Session history")}</small>
         </span>
         <span className={styles.runtimeDot} data-phase={runtime.phase} aria-hidden="true" />
       </footer>
@@ -418,6 +418,7 @@ function ProjectSessions({
   onDeleteThread,
 }: ProjectSessionsProps) {
   const [showAll, setShowAll] = useState(false);
+  const { t } = useTranslation();
 
   if (!expanded) return null;
 
@@ -441,7 +442,7 @@ function ProjectSessions({
   return (
     <div className={styles.threadList} id={id}>
       {threads.length === 0 ? (
-        <p className={styles.noSessions}>No Sessions</p>
+        <p className={styles.noSessions}>{t("sidebar.noSessions", "No Sessions")}</p>
       ) : (
         visibleThreads.map((thread) => (
           <SessionRow
@@ -462,7 +463,7 @@ function ProjectSessions({
           className={styles.showMore}
           onClick={() => setShowAll((current) => !current)}
         >
-          {showAll ? "Show less" : `Show ${hiddenCount} more`}
+          {showAll ? t("sidebar.showLess", "Show less") : t("sidebar.showMore", "Show {{count}} more", { count: hiddenCount })}
         </button>
       ) : null}
     </div>
