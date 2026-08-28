@@ -148,6 +148,36 @@ Skills, permissions, Goals, and Automations. See the
 
 ## News
 
+**2026-08-28 · Community fixes: plugin credential warnings and a wider zh-CN Desktop**
+
+- **Agent Plugin manifests now warn about plaintext credentials.** Literal
+  `env` and `headers` values in a Plugin's `mcp.json` that look like secrets
+  produce a redacted warning instead of loading silently, and the docs point
+  to runtime credential bindings instead. (#194, landed 2026-08-27)
+- **Most of the Desktop shell speaks Simplified Chinese.** The thread header,
+  Goal rail, approval card, inspector, sidebar, and the Updates and
+  Diagnostics settings gained about a hundred zh-CN strings; English stays
+  the inline default. (#187)
+
+**2026-08-25 · Command executors close two bypasses**
+
+- **Case and whitespace no longer slip past the dangerous-command check**, and
+  the native `mkdir`/`touch`/`rm`/`cp`/`mv` fast path declines any operand
+  outside the working directory, so those commands run through the sandbox
+  like every other command instead of as in-process file operations. (#193)
+
+**2026-08-23 · Five repaired contributions land together**
+
+- **MCP servers can start lazily.** `deferLoading` keeps a server off until
+  the agent calls `activate_server`; deferred servers stay reachable and
+  cancellation-safe. (#184)
+- **Hooks see the whole lifecycle.** `SessionEnd` runs exactly once at
+  teardown and `PreCompact` can inject context before a compaction. (#172)
+- **Instruction files can be excluded, and the dangerous preset must be named
+  explicitly.** (#186)
+- **Windows private files get a fail-safe ACL**, applied once at creation
+  (#164); the Desktop sidecar's pip pin also moved past PYSEC-2026-3721 (#191).
+
 **2026-08-19 · Sessions that survive resume, compaction, and a second window**
 
 - **Resuming a session restores what the agent did, not only what it said.**
