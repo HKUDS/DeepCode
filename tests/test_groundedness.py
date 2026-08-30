@@ -18,10 +18,7 @@ _EVIDENCE = (
 
 
 def test_supported_answer_high_ratio():
-    answer = (
-        "The parser module is in src/parser.py. "
-        "It uses the tokenize library."
-    )
+    answer = "The parser module is in src/parser.py. It uses the tokenize library."
     report = check_groundedness(answer, _EVIDENCE)
     assert report.supported_ratio == 1.0
     assert report.unsupported_sentences() == []

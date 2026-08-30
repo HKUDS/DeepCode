@@ -1913,7 +1913,7 @@ class AgentRunner:
         self._notify_compaction_summary(spec, summary, messages, compacted, "manual")
         return compacted, "compacted"
 
-def _overflow_reduce(
+    def _overflow_reduce(
         self,
         spec: AgentRunSpec,
         messages: list[dict[str, Any]],

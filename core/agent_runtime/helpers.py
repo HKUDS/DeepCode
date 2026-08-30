@@ -203,9 +203,7 @@ def maybe_persist_tool_result(
     try:
         from core.loop.slm_tasks import choose_tool_result_preview
 
-        preview = choose_tool_result_preview(
-            text_payload, default_preview=preview
-        )
+        preview = choose_tool_result_preview(text_payload, default_preview=preview)
     except Exception:
         pass
     return _render_tool_result_reference(

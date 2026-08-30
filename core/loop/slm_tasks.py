@@ -24,7 +24,6 @@ Enable: follows ``DEEPCODE_SLM_ROUTING`` (see :mod:`core.loop.slm_routing`).
 from __future__ import annotations
 
 import re
-from typing import Any
 
 from core.loop.slm_routing import (
     SUBTASK_MEDIUM,

@@ -158,9 +158,7 @@ def _definition_notes(definition: Any) -> list[str]:
     if getattr(definition, "read_only_tools", None):
         notes.append("declares read-only tool hints")
     if getattr(definition, "required_env_vars", None):
-        notes.append(
-            "requires env vars: " + ", ".join(definition.required_env_vars)
-        )
+        notes.append("requires env vars: " + ", ".join(definition.required_env_vars))
     if getattr(definition, "supports_parallel_tool_calls", None) is False:
         notes.append("serial tool calls only")
     return notes
