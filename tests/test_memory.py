@@ -251,7 +251,14 @@ def test_every_injected_instruction_source_is_framed(tmp_path, monkeypatch):
         "memory": memory_index(workspace),
     }
     for label, text in sources.items():
-        assert text.startswith("<system-reminder>"), label
-        assert text.rstrip().endswith("</system-reminder>"), label
-        # Exactly one closing tag: the one the frame owns.
-        assert text.count("</system-reminder>") == 1, label
+        if label == "memory":
+            # Memory is untrusted reference data — wrapped in the P1-3 data
+            # boundary (<untrusted-data>), not in the <system-reminder> frame.
+            assert text.startswith("<untrusted-data>\n"), label
+            assert "</untrusted-data>" in text, label
+            assert "untrusted reference data" in text, label
+        else:
+            assert text.startswith("<system-reminder>"), label
+            assert text.rstrip().endswith("</system-reminder>"), label
+            # Exactly one closing tag: the one the frame owns.
+            assert text.count("</system-reminder>") == 1, label
