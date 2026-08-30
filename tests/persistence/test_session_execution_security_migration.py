@@ -219,13 +219,13 @@ def test_v17_widens_preset_override_check_to_dangerous_skip(
         migrate(connection, 17)
         assert current_version(connection) == 17
         connection.execute(
-            "UPDATE threads SET access_preset_override = 'dangerous_skip' "
-            "WHERE id = ?",
+            "UPDATE threads SET access_preset_override = 'dangerous_skip' WHERE id = ?",
             (thread.id,),
         )
-        assert ThreadRepository(connection).get(
-            thread.id
-        ).access_preset_override == ExecutionAccessPreset.DANGEROUS_SKIP
+        assert (
+            ThreadRepository(connection).get(thread.id).access_preset_override
+            == ExecutionAccessPreset.DANGEROUS_SKIP
+        )
         # Unknown values are still rejected after the widen.
         with pytest.raises(sqlite3.IntegrityError):
             connection.execute(
@@ -244,8 +244,7 @@ def test_v17_downgrade_clears_dangerous_skip_values(tmp_path: Path) -> None:
     with database.read() as connection:
         migrate(connection, 17)
         connection.execute(
-            "UPDATE threads SET access_preset_override = 'dangerous_skip' "
-            "WHERE id = ?",
+            "UPDATE threads SET access_preset_override = 'dangerous_skip' WHERE id = ?",
             (thread.id,),
         )
 
