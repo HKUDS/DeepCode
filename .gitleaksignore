@@ -40,3 +40,8 @@ a8045cc32e9a8e342594c82f5c3b63a741bb5de4:.deepcode/skills/deepcode-cerebellum/ce
 # real secrets.
 c812dca0c0d3b09a811197d03121cb46f8021a8d:tests/test_mcp_manager.py:generic-api-key:42
 c812dca0c0d3b09a811197d03121cb46f8021a8d:tests/test_mcp_manager.py:generic-api-key:55
+
+# Self-ignored: commit 92881ea1 contains .gitleaksignore comments with test fixture
+# pattern strings that trigger generic-api-key. Fixed in e1fb6ab9.
+92881ea1a192629028aa9115b5fa3af912ee4411:.gitleaksignore:generic-api-key:38
+92881ea1a192629028aa9115b5fa3af912ee4411:.gitleaksignore:generic-api-key:39
