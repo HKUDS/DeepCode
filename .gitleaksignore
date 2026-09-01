@@ -35,8 +35,8 @@ a8045cc32e9a8e342594c82f5c3b63a741bb5de4:.deepcode/skills/deepcode-cerebellum/ce
 # uses ${TUSHARE_TOKEN} env var reference instead of a hardcoded value.
 59078649a5371e36b958782b490fb31947ffc349:mcp_servers_canonical.json:generic-api-key:9
 
-# Test fixture in test_mcp_manager.py — `api_key=sk-1234567890abcdefghijklmn...` and
-# `token=sk-proj-0123456789abcdef...` — both are recognizable placeholder values used
-# in MCP manager unit tests, not real credentials. Current file has no real secrets.
+# Test fixture placeholder keys in test_mcp_manager.py — placeholder values
+# used in MCP manager unit tests, not real credentials. Current file has no
+# real secrets.
 c812dca0c0d3b09a811197d03121cb46f8021a8d:tests/test_mcp_manager.py:generic-api-key:42
 c812dca0c0d3b09a811197d03121cb46f8021a8d:tests/test_mcp_manager.py:generic-api-key:55
