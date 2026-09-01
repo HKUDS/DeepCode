@@ -20,3 +20,23 @@ b2dccbe6d37e74e98b8a57593c1a5bb4994fba59:mcp_agent.secrets.yaml:generic-api-key:
 # commits (the original fixture and its first, value-only fix attempt).
 86294aa61c2fc68dbbd51dbb8a594700fb38e3dc:tests/test_config_layers.py:generic-api-key:80
 46f1b7111706e58cd2b457c9483fda8fcbbb07eb:tests/test_config_layers.py:generic-api-key:82
+
+# JWT fixtures in test_memory_distill_structured.py — both are `eyJhbGciOi...`
+# JWTs from the HKUDS/DeepCode upstream commit history, clearly test-only data.
+# Current file has no JWT secrets.
+485c993f8ea95df309782dc494f750db3d512f73:tests/test_memory_distill_structured.py:jwt:43
+ad2a60a6e2dad27ea784c9703dd8ea999e3f57d9:tests/test_memory_distill_structured.py:jwt:41
+
+# Historical Tushare token in cerebellum_mcp_server.py — the current working
+# tree no longer carries any token value on that line.
+a8045cc32e9a8e342594c82f5c3b63a741bb5de4:.deepcode/skills/deepcode-cerebellum/cerebellum_mcp_server.py:generic-api-key:416
+
+# Historical Tushare token in mcp_servers_canonical.json — the current file now
+# uses ${TUSHARE_TOKEN} env var reference instead of a hardcoded value.
+59078649a5371e36b958782b490fb31947ffc349:mcp_servers_canonical.json:generic-api-key:9
+
+# Test fixture in test_mcp_manager.py — `api_key=sk-1234567890abcdefghijklmn...` and
+# `token=sk-proj-0123456789abcdef...` — both are recognizable placeholder values used
+# in MCP manager unit tests, not real credentials. Current file has no real secrets.
+c812dca0c0d3b09a811197d03121cb46f8021a8d:tests/test_mcp_manager.py:generic-api-key:42
+c812dca0c0d3b09a811197d03121cb46f8021a8d:tests/test_mcp_manager.py:generic-api-key:55

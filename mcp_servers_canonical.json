@@ -1,0 +1,93 @@
+{
+  "_comment": "================================================================",
+  "_comment2": "  规范 MCP 服务器定义 — 唯一真相源",
+  "_comment3": "  修改后运行: python scripts/sync_mcp_config.py",
+  "_comment4": "  自动同步到: settings.json + .mcp.json",
+  "_comment5": "================================================================",
+  "mcpServers": {
+    "tushareMcp": {
+      "url": "https://api.tushare.pro/mcp/?token=${TUSHARE_TOKEN}"
+    },
+    "tradingview": {
+      "command": "uvx",
+      "args": ["tradingview-mcp"]
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["@playwright/mcp@latest"]
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "F:/DEEPCODE/core"]
+    },
+    "sqlite": {
+      "command": "npx",
+      "args": ["-y", "mcp-server-sqlite", "--db", "F:/DEEPCODE/core/data.db"]
+    },
+    "duckdb": {
+      "command": "npx",
+      "args": ["-y", "mcp-duckdb-local", "--db-path", ":memory:", "--read-write"]
+    },
+    "postgres": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://postgres:postgres@localhost:5432/claude_analytics"]
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+      }
+    },
+    "deveco-mcp": {
+      "command": "devecocli",
+      "args": ["serve", "mcp"],
+      "env": {
+        "PROJECT_PATH": "F:/DEEPCODE/core"
+      }
+    },
+    "harmonyos": {
+      "command": "npx",
+      "args": ["-y", "harmonyos-mcp"]
+    },
+    "harmonyos-best-practices": {
+      "command": "npx",
+      "args": ["-y", "harmonyos-best-practices-mcp"]
+    },
+    "hometrans": {
+      "command": "ht",
+      "args": ["mcp"]
+    },
+    "office-pro": {
+      "command": "npx",
+      "args": ["-y", "office-mcp"]
+    },
+    "winapp": {
+      "command": "node",
+      "args": ["C:/Users/raymo/AppData/Roaming/npm/node_modules/winapp-mcp/bin/winapp-mcp.js"]
+    },
+    "notion": {
+      "command": "npx",
+      "args": ["-y", "@notionhq/notion-mcp-server"]
+    },
+    "autocad": {
+      "command": "uv",
+      "args": ["--directory", "C:/Users/raymo/multiCAD-mcp", "run", "python", "src/server.py"]
+    },
+    "ghidra-mcp": {
+      "command": "uv",
+      "args": ["--directory", "F:/DEEPCODE/tools/ghidra-mcp", "run", "bridge-mcp-ghidra", "--transport", "stdio"],
+      "env": {
+        "GHIDRA_MCP_URL": "http://127.0.0.1:8089",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    },
+    "router-mcp": {
+      "command": "python3",
+      "args": ["F:/DEEPCODE/core/mcp_servers/router_mcp_server.py"],
+      "env": {
+        "DEEPSEEK_API_KEY": "${DEEPSEEK_API_KEY}"
+      }
+    }
+  }
+}
