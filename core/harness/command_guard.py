@@ -144,7 +144,7 @@ def screen_command(command: str) -> str | None:
             continue
         if not tokens:
             continue
-        reason = _classify(tokens[0], tokens[1:])
+        reason = _classify(tokens[0].lower(), tokens[1:])
         if reason is not None:
             return reason
 

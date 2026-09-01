@@ -28,6 +28,7 @@ from core.harness.command_guard import screen_command
         "rm -rf /",
         "rm -rf /tmp/x",
         "rm  -rf /tmp/x",  # extra whitespace — old substring bypass
+        "RM -rf /tmp/x",  # uppercase command — old screen was case-insensitive
         "rm -r -f /tmp/x",  # split flags — old substring bypass
         "rm -fr /tmp/x",  # reversed flag order
         "rm -Rf /tmp/x",  # capital R

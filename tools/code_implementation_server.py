@@ -800,7 +800,7 @@ async def execute_bash(command: str, timeout: int = 30) -> str:
         if blocked_reason is not None:
             result = {
                 "status": "error",
-                "message": f"Dangerous command blocked ({blocked_reason}): {command}",
+                "message": f"Dangerous command prohibited ({blocked_reason}): {command}",
             }
             log_operation(
                 "execute_bash_blocked",
