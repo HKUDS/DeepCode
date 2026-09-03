@@ -136,7 +136,7 @@ pyinstaller-hooks-contrib==2026.6
     #   pyinstaller
 pyjwt==2.13.0
     # via mcp
-pypdf==6.15.0
+pypdf==6.16.1
     # via -r sidecar-requirements.in
 python-dotenv==1.2.2
     # via pydantic-settings
