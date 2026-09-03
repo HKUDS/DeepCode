@@ -23,6 +23,7 @@ export function useMcpCatalog(runtime: DesktopRuntime, project: Project | null) 
   const projectId = project?.id;
   const catalogKey = projectId ?? "__user__";
   const generation = useRef(0);
+  const activeCatalogKey = useRef<string | null>(catalogKey);
   const [state, setState] = useState<McpCatalogState>({
     key: "",
     inventory: null,
@@ -32,6 +33,10 @@ export function useMcpCatalog(runtime: DesktopRuntime, project: Project | null) 
   });
 
   const load = useCallback(async () => {
+    // A mutation started for a previous project may finish after the user has
+    // switched projects. Do not let its captured loader invalidate or replace
+    // the active project's catalog request.
+    if (activeCatalogKey.current !== catalogKey) return;
     const requestGeneration = ++generation.current;
     setState((current) => ({
       ...current,
@@ -65,6 +70,7 @@ export function useMcpCatalog(runtime: DesktopRuntime, project: Project | null) 
   }, [catalogKey, projectId, runtime]);
 
   useEffect(() => {
+    activeCatalogKey.current = catalogKey;
     void load();
     let active = true;
     let unsubscribe: (() => void) | null = null;
@@ -83,10 +89,13 @@ export function useMcpCatalog(runtime: DesktopRuntime, project: Project | null) 
     }
     return () => {
       active = false;
+      if (activeCatalogKey.current === catalogKey) {
+        activeCatalogKey.current = null;
+      }
       generation.current += 1;
       unsubscribe?.();
     };
-  }, [load, runtime]);
+  }, [catalogKey, load, runtime]);
 
   const mutate = useCallback(
     async (operation: () => Promise<McpInventory>) => {
