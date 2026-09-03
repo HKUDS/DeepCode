@@ -460,7 +460,7 @@ DeepCode v2.0 希望让你少花时间逐步盯着 Agent，多花时间完成真
 
 </details>
 
-## What Deep means in DeepCode
+## DeepCode 中的 Deep
 
 大多数 Coding Agent 都能生成代码。真正困难的是：理解一个真实项目、在正确的边界内完成修改、根据运行结果持续修正，并让用户清楚地知道结果为什么可信。
 
@@ -483,7 +483,7 @@ DeepCode 最特别的地方可以归纳为三点：
 
 DeepCode 的目标不是让 Agent 显得更忙，而是帮助你更可靠地完成真正的软件工程工作。
 
-## Core capabilities
+## 核心能力
 
 DeepCode 提供完整的本地 Coding Agent 工作流。CLI 和 Desktop 只是两种使用方式，它们共享同一套 Agent、Session、模型、Skills、权限和任务状态。
 
