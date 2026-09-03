@@ -148,6 +148,23 @@ Skills, permissions, Goals, and Automations. See the
 
 ## News
 
+**2026-09-03 · Desktop catalog race, an honest command screen, GLM-5.2, and two dependency bumps**
+
+- **Switching projects no longer strands the MCP catalog.** A probe or
+  mutation started in one project can no longer invalidate the load of the
+  project you switched to, so the catalog stops sticking in a loading state.
+  (#201)
+- **The legacy `execute_bash` screen matches on argv, not substrings.**
+  `rm -r -f`, `--recursive --force`, `chmod 0777` and a destructive stage
+  inside a pipeline are caught; `touch rm-rf-notes.txt` is not. It stays a
+  cheap first pass in front of the sandbox, which remains the boundary.
+  (#195)
+- **GLM-5.2 is in the model catalog** — 1M context, 128K output,
+  `reasoning_effort` `high` / `max`. (from #198)
+- **Security bumps:** `browserslist` past GHSA-c83g-rgw3-j3cx in the Desktop
+  toolchain, and the App Server sidecar's `pypdf` to 6.16.1
+  (CVE-2026-84309/84310/84311).
+
 **2026-08-28 · Community fixes: plugin credential warnings and a wider zh-CN Desktop**
 
 - **Agent Plugin manifests now warn about plaintext credentials.** Literal
