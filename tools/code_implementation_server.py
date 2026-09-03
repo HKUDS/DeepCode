@@ -30,6 +30,7 @@ from core.platform_compat import (
     subprocess_text_kwargs,
 )
 from core.harness.sandbox import build_exec_command, describe_backend, fences_writes
+from core.harness.command_guard import screen_command
 
 configure_utf8_stdio()
 
@@ -783,20 +784,27 @@ async def execute_bash(command: str, timeout: int = 30) -> str:
         JSON string of execution result
     """
     try:
-        # 安全检查：禁止危险命令
-        dangerous_commands = ["rm -rf", "sudo", "chmod 777", "mkfs", "dd if="]
-        # Normalize case and whitespace runs before matching: "RM  -rf" or
-        # "rm\t-rf" must not slip past a plain substring check. Shallow
-        # defense-in-depth only — the sandbox below is the real boundary.
-        normalized_command = re.sub(r"\s+", " ", command).lower()
-        if any(dangerous in normalized_command for dangerous in dangerous_commands):
+        # Cheap defense-in-depth: screen out obviously destructive commands
+        # before they reach the shell. This is NOT the security boundary — the
+        # workspace sandbox below is (see core.harness.sandbox).
+        #
+        # This started as a substring match ("rm -rf" in command.lower()) and
+        # grew a whitespace-normalization pass, but a normalized substring check
+        # still misses split/long flag spellings ("rm -r -f",
+        # "rm --recursive --force"), numeric permission variants ("chmod 0777")
+        # and falsely trips on benign commands that merely contain the text
+        # ("touch rm-rf-notes.txt"). screen_command tokenises the command and
+        # matches on argv instead, so it honestly catches what it claims to.
+        # Anything it cannot parse is passed through and left to the sandbox.
+        blocked_reason = screen_command(command)
+        if blocked_reason is not None:
             result = {
                 "status": "error",
-                "message": f"Dangerous command execution prohibited: {command}",
+                "message": f"Dangerous command prohibited ({blocked_reason}): {command}",
             }
             log_operation(
                 "execute_bash_blocked",
-                {"command": command, "reason": "dangerous_command"},
+                {"command": command, "reason": blocked_reason},
             )
             return json.dumps(result, ensure_ascii=False, indent=2)
 
@@ -804,11 +812,10 @@ async def execute_bash(command: str, timeout: int = 30) -> str:
         ensure_workspace_exists()
 
         # Execute inside the workspace write-fence sandbox (P1 security base).
-        # The pre-existing dangerous-command blocklist above stays as cheap
-        # defense-in-depth; the sandbox additionally prevents any write
-        # outside the workspace (e.g. tampering with the repo or $HOME) even
-        # if a command slips past the blocklist. Degrades to a bare run when
-        # no sandbox backend is available.
+        # The screen_command check above stays as cheap defense-in-depth; the
+        # sandbox additionally prevents any write outside the workspace (e.g.
+        # tampering with the repo or $HOME) even if a command slips past the
+        # screen. Degrades to a bare run when no sandbox backend is available.
         wrapped = build_exec_command(command=command, workspace=str(WORKSPACE_DIR))
         try:
             result = subprocess.run(
