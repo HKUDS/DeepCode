@@ -121,26 +121,28 @@ Automations。从源码启动请参考
 - [📰 新闻](#新闻)
 - [🧠 DeepCode 中的 Deep](#deepcode-中的-deep)
 - [🚀 核心能力](#核心能力)
-  - [Agent Harness](#agent-harness)
-  - [Loop Engineering](#loop-engineering)
-  - [Context Engineering](#context-engineering)
+  - [直接在你的仓库里工作](#直接在你的仓库里工作)
+  - [以 Goal 驱动的 Loop Engineering](#以-goal-驱动的-loop-engineering)
   - [以证据判断完成](#以证据判断完成)
-  - [持久化本地工作](#持久化本地工作)
-  - [由用户控制的模型与 Skills](#由用户控制的模型与-skills)
-  - [实时 Web 调研](#live-web-research)
-  - [并行且可重复的工作](#并行且可重复的工作)
+  - [持久化的 Session 与项目上下文](#持久化的-session-与项目上下文)
+  - [你的模型，你的推理设置](#你的模型你的推理设置)
+  - [可复用的 Skills](#可复用的-skills)
+  - [看得懂的权限](#看得懂的权限)
+  - [并行 Agent，互不冲突文件](#并行-agent互不冲突文件)
+  - [让可重复的工程工作自动化](#让可重复的工程工作自动化)
+  - [Paper2Code](#paper2code)
 - [⚡ 快速开始](#快速开始)
 - [🧭 使用 DeepCode](#使用-deepcode)
 - [⚙️ Headless 与 Automation](docs/HEADLESS_AND_AUTOMATION.md#中文)
-- [🔬 Paper2Code](#paper2code)
+- [🔬 Paper2Code](#paper2code-1)
   - [原始架构](#原始架构)
   - [研究结果](#研究结果)
-- [🎬 实时演示](#live-demonstrations)
+- [🎬 实时演示](#-实时演示)
 - [🛠️ 开发](#开发)
-- [⭐ 星标历史](#star-history)
-- [🙏 致谢](#contributors)
-- [📖 引用](#citation)
-- [📄 许可证](#license)
+- [⭐ 星标历史](#-星标历史)
+- [🙏 致谢](#-致谢)
+- [📖 引用](#-引用)
+- [📄 许可证](#-许可证)
 
 <p align="center">
   <img src="assets/readme/deepcode-overview.png" alt="DeepCode 完成并验证一个真实任务" width="1080" />
@@ -491,7 +493,7 @@ DeepCode 提供完整的本地 Coding Agent 工作流。CLI 和 Desktop 只是�
   <img src="assets/readme/verification-loop.png" alt="DeepCode Agent Harness 与验证循环" width="1080" />
 </p>
 
-### Work directly in your repository
+### 直接在你的仓库里工作
 
 DeepCode 可以读取和搜索代码、编辑文件、应用 Patch、运行命令与测试，并根据结果继续修改。工具调用、执行进度和文件变化会被持续展示，你可以随时查看 Agent 做了什么以及项目发生了哪些变化。
 
@@ -499,7 +501,7 @@ DeepCode 可以读取和搜索代码、编辑文件、应用 Patch、运行命�
 
 当你提供一个公开的 HTTP 或 HTTPS URL 时，共享的 `web_fetch` 工具可以直接读取页面，不需要搜索服务或额外的 API Key。
 
-### Goal-driven Loop Engineering
+### 以 Goal 驱动的 Loop Engineering
 
 对于无法在一次回答中完成的任务，你可以直接给 DeepCode 一个自然语言 Goal。Agent 会围绕目标持续进行分析、实现、验证和修复，而不需要用户手动推动每一个步骤。
 
@@ -513,31 +515,31 @@ DeepCode 可以读取和搜索代码、编辑文件、应用 Patch、运行命�
 
 任务不会因为进入自动执行就失去控制权。你始终可以改变接下来的方向。
 
-### Evidence-driven completion
+### 以证据判断完成
 
 DeepCode 不使用一套硬编码规则判断所有 Coding 任务。它会根据任务本身选择合适的证据，例如测试结果、构建输出、静态检查、诊断信息、文件变化、Diff 或生成的 Artifacts。
 
 验证失败不会被包装成成功，而会成为下一轮修复的输入。任务完成或真正受阻时，结果、原因以及相关证据会继续保留在 Session 中，方便你检查和复现。
 
-### Durable Sessions and project context
+### 持久化的 Session 与项目上下文
 
 每个 Session 都会保存在本地，并关联到它最初所属的项目。你可以从任意目录启动 DeepCode，找到之前的项目和 Session，在 CLI 或 Desktop 中继续同一段工作。
 
 Session 不只保存聊天文本，还保存工具调用、权限决策、Goal、模型配置和验证记录。项目规则、持久记忆、Skills 与长对话压缩共同帮助 Agent 在复杂任务中保持上下文连续。
 
-### Your models, your reasoning settings
+### 你的模型，你的推理设置
 
 DeepCode 不绑定单一模型厂商。你可以连接 OpenRouter、OpenAI、Anthropic、DeepSeek、Gemini、OpenAI-compatible Gateway、Ollama、vLLM 或其他兼容端点，并使用自己的 API Key。
 
 连接可以在使用前检查凭据、模型列表和真实推理请求。每个 Session 都可以选择模型与 Thinking Level；中途切换模型只影响后续 Turn，不会删除已有对话或混淆之前的工作来源。模型支持时，DeepCode 也会展示 Provider 返回的推理摘要。
 
-### Reusable Skills
+### 可复用的 Skills
 
-Skills 可以把团队规范、领域知识、评审方法或重复工作流变成 Agent 可复用的能力。项目 Skill 放在 `.agents/skills`，个人 Skill 放在 `~/.agents/skills`，也可以通过内置 Skill Creator 以对话方式创建。
+Skills 可以把团队规范、领域知识、评审方法或重复工作流变成 Agent 可复用的能力。DeepCode 内置了钉定版本的上游 Skills，覆盖 Skill 编写、代码审查、安全、前端、MCP 与 Web 测试工作流。项目 Skill 放在 `.agents/skills`，个人 Skill 放在 `~/.agents/skills`，也可以通过内置 Skill Creator 以对话方式创建。
 
 DeepCode 继续读取已有的 `.deepcode/skills` 和 Claude 风格目录，不会自动迁移。Skill 可以指导 Agent 如何工作，但不能绕过项目信任、工具权限或安全边界。
 
-### Permissions you can understand
+### 看得懂的权限
 
 每个项目在执行前都需要明确信任。每个 Session 可以选择：
 
@@ -547,13 +549,13 @@ DeepCode 继续读取已有的 `.deepcode/skills` 和 Claude 风格目录，不�
 
 工具级别还支持 `allow`、`ask` 和 `deny`。CLI 与 Desktop 使用相同的权限状态，任务被停止或异常中断时，DeepCode 不会静默重放可能产生副作用的操作。
 
-### Parallel agents without file collisions
+### 并行 Agent，互不冲突文件
 
 复杂任务可以被拆分给多个专门的 Agent，例如让不同 Agent 分别负责代码调查、测试分析和实现审查。
 
 并行修改可以运行在隔离的 Git Worktree 中，避免多个 Agent 同时修改同一个工作目录。结果返回主任务后再进行检查和整合，冲突会被明确展示，而不是被静默覆盖。主 Agent 始终负责最终 Goal，不会因为委派任务而失去方向。
 
-### Automate repeatable engineering work
+### 让可重复的工程工作自动化
 
 当一项工作已经足够稳定，可以把它保存为 Automation，手动运行或按时间间隔重复执行。例如：
 
@@ -767,6 +769,10 @@ Skill**，或在 CLI 调用 `$skill-creator`，即可通过普通 Agent Turn 创
 兼容读取。Skill 只能指导 Agent，不能授予权限，也不能绕过 Project trust、
 审批或工具策略。导入、启用、禁用和目录管理命令统一放在
 [高级指南](docs/HEADLESS_AND_AUTOMATION.md#skills-管理)中。
+
+### Local Plugins
+
+Plugins 可以选择性地把 Skills 打包在一份经校验的本地清单之后；独立的项目级与用户级 Skills 无需 Plugin 也照常安装和运行。新的包必须使用 Agent Plugins 1.0.0 清单与固定的 `skills/` 布局。在 Desktop 的 Plugins 工作区添加一个受信文件夹，或执行 `deepcode plugin add <path>`，其中的 Skills 就会出现在普通的 Skill 目录与 Composer 中。符合标准的 `mcp.json` 也可以贡献 MCP 服务器；注册本身保持惰性，这些进程只会在 Agent Session 内启动。DeepCode 不执行 Plugin 的 hooks 或 Apps，也不会从 Marketplace 下载。参见[本地 Plugin 契约](docs/LOCAL_PLUGINS.md)。
 
 ### MCP 服务器
 
