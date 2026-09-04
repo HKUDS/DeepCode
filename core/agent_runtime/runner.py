@@ -59,6 +59,8 @@ from core.agent_runtime.runtime import (
 )
 from core.agent_runtime.tools.base import ToolResult
 from core.agent_runtime.tools.registry import ToolRegistry
+from core.loop.guard_telemetry import install_guard_telemetry
+from core.loop.guards import LoopGuards
 from core.providers.base import (
     LLMProvider,
     LLMResponse,
@@ -231,6 +233,20 @@ class AgentRunSpec:
     # follow-up prompt and the loop keeps going. ``stop_hook_active`` is passed
     # so a well-behaved hook stops blocking after its first continuation.
     stop_hook: Any | None = None
+
+    # Loop guards (REASONIX §5/§6 port, P3.5): anti-wandering circuit breakers.
+    # ``LoopGuards.observe_batch`` runs after each tool batch; triggered
+    # interventions are injected as user messages. Once the progress guard
+    # forces a final answer (N consecutive zero-evidence rounds), further tool
+    # execution is short-circuited. Absent (None) means zero cost.
+    guards: LoopGuards | None = None
+
+    # Guard-event telemetry seam (REASONIX P1): optional callable invoked when a
+    # loop guard triggers (blocked short-circuit / observe_batch injection /
+    # check_tool block). Receives a structured dict
+    # ``{"kind", "tool", "level", "streak", "message"}``; default None keeps the
+    # existing logger.warning behavior.
+    guard_event_callback: Callable[[dict], None] | None = None
 
     def allowed_tool_names(self) -> frozenset[str] | None:
         if self.tool_filter is None:
@@ -449,6 +465,9 @@ class AgentRunner:
         return "injection"
 
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
+        # P5: optional guard telemetry wiring (DEEPCODE_GUARD_TELEMETRY=1
+        # auto-connects; zero overhead by default).
+        install_guard_telemetry(spec)
         hook = spec.hook or AgentHook()
         messages = list(spec.initial_messages)
         final_content: str | None = None
@@ -621,11 +640,33 @@ class AgentRunner:
 
                 await hook.before_execute_tools(context)
 
-                results, new_events, fatal_error = await self._execute_tools(
-                    spec,
-                    response.tool_calls,
-                    external_lookup_counts,
-                )
+                # Progress guard forced a final answer (REASONIX §2.2 level 3):
+                # short-circuit tool execution and feed errors-as-data instead,
+                # so the model reads the block reason and wraps up cleanly.
+                if spec.guards is not None and spec.guards.blocked:
+                    block_reason = (
+                        "Error: blocked by loop guard — no new evidence for "
+                        f"{spec.guards.streak} consecutive tool rounds. "
+                        "Produce your final answer now."
+                    )
+                    blocked_results = [block_reason for _ in response.tool_calls]
+                    results, new_events, fatal_error = blocked_results, [], None
+                    if spec.guard_event_callback is not None:
+                        spec.guard_event_callback(
+                            {
+                                "kind": "blocked",
+                                "tool": None,
+                                "level": 3,
+                                "streak": spec.guards.streak,
+                                "message": block_reason,
+                            }
+                        )
+                else:
+                    results, new_events, fatal_error = await self._execute_tools(
+                        spec,
+                        response.tool_calls,
+                        external_lookup_counts,
+                    )
                 tool_events.extend(new_events)
                 context.tool_results = list(results)
                 context.tool_events = list(new_events)
@@ -710,6 +751,31 @@ class AgentRunner:
                 if drained:
                     had_injections = True
                     sampling_limit.reset()
+
+                if spec.guards is not None:
+                    guard_injections = spec.guards.observe_batch(
+                        response.tool_calls, results, new_events
+                    )
+                    if guard_injections:
+                        self._append_injected_messages(messages, guard_injections)
+                        for injection in guard_injections:
+                            logger.warning(
+                                "Loop guard on turn {} for {}: {}",
+                                current_iteration,
+                                spec.session_key or "default",
+                                injection["content"][:120],
+                            )
+                            if spec.guard_event_callback is not None:
+                                spec.guard_event_callback(
+                                    {
+                                        "kind": "injection",
+                                        "tool": None,
+                                        "level": None,
+                                        "streak": spec.guards.streak,
+                                        "message": injection["content"],
+                                    }
+                                )
+
                 await hook.after_iteration(context)
                 continue
 
@@ -1236,6 +1302,32 @@ class AgentRunner:
             )
             return result, event, None
 
+        # Loop guards (REASONIX §1.2–1.8 port, P3.6) — per-tool governance gate.
+        # Permission is the security layer (checked first); guards are the
+        # loop-governance layer (checked second). Blocks are errors-as-data.
+        if spec.guards is not None:
+            guard_message = spec.guards.check_tool(tool_call.name, tool_call.arguments)
+            if guard_message is not None:
+                event = {
+                    "name": tool_call.name,
+                    "status": "denied",
+                    "detail": guard_message.replace("\n", " ").strip()[:120],
+                }
+                if spec.guard_event_callback is not None:
+                    spec.guard_event_callback(
+                        {
+                            "kind": "tool_block",
+                            "tool": tool_call.name,
+                            "level": None,
+                            "streak": spec.guards.streak,
+                            "message": guard_message,
+                        }
+                    )
+                result = self._compose_hook_context(
+                    f"Error: {guard_message}" + _HINT, pre_contexts
+                )
+                return result, event, None
+
         prepare_call = getattr(spec.tools, "prepare_call", None)
         tool, params, prep_error = None, tool_call.arguments, None
         if callable(prepare_call):
@@ -1368,6 +1460,13 @@ class AgentRunner:
         elif len(detail) > 120:
             detail = detail[:120] + "..."
         event = {"name": tool_call.name, "status": "ok", "detail": detail}
+        if spec.guards is not None:
+            # Post-execution guard observation (REASONIX P3.6 port): result
+            # fingerprint maintenance + mutation dependency tracking. Only the
+            # success path reaches here, so pending-state updates are accurate.
+            spec.guards.observe_tool_result(tool_call.name, tool_call.arguments, result)
+            spec.guards.observe_tool_mutation(tool_call.name, tool_call.arguments)
+            spec.guards.observe_tool_verify(tool_call.name, tool_call.arguments)
         return await self._finish_tool(
             spec, tool_call, result, event, None, pre_contexts
         )
