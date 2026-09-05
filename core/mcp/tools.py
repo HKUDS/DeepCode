@@ -8,7 +8,7 @@ from typing import Any
 
 from loguru import logger
 
-from core.agent_runtime.tools.base import Tool, ToolResult
+from core.agent_runtime.tools.base import Tool, ToolResult, sanitize_description
 from core.mcp.connection import McpConnection
 from core.mcp.models import (
     McpToolAnnotations,
@@ -37,9 +37,13 @@ class McpToolAdapter(Tool):
             raw_name=str(tool_definition.name),
         )
         self._name = visible_name
-        self._description = str(tool_definition.description or tool_definition.name)[
-            :8_000
-        ]
+        # P1-2: remote descriptions are untrusted and quality-uncontrolled —
+        # bound length (they count against the prompt budget) and replace
+        # degenerate/empty ones so the model still has something to route on.
+        self._description = sanitize_description(
+            str(tool_definition.description or ""),
+            name=visible_name,
+        )
         raw_schema = getattr(tool_definition, "inputSchema", None)
         self._parameters = normalize_schema_for_openai(raw_schema)
         self.annotations = McpToolAnnotations.from_sdk(
