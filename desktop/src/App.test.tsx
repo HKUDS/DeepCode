@@ -1977,6 +1977,32 @@ describe("desktop command center", () => {
         .map((button) => button.textContent),
     ).toEqual(["通用", "模型", "插件", "智能体预设"]);
     expect(screen.getByRole("button", { name: "打开配置文件" })).toBeTruthy();
+    expect(
+      within(dialog).getByRole("group", { name: "外观模式" }),
+    ).toBeTruthy();
+    expect(
+      within(dialog).getByRole("button", { name: "浅色" }),
+    ).toBeTruthy();
+    expect(
+      within(dialog).getByRole("button", { name: "深色" }),
+    ).toBeTruthy();
+    expect(
+      within(dialog).getByRole("button", { name: "跟随系统" }),
+    ).toBeTruthy();
+    expect(within(dialog).getByLabelText(/^对话宽度/)).toBeTruthy();
+    expect(within(dialog).getByLabelText(/^字号/)).toBeTruthy();
+    expect(within(dialog).getByLabelText("首选字体")).toBeTruthy();
+    expect(
+      within(dialog).getByRole("option", { name: "纸张 · 暖色低蓝光" }),
+    ).toBeTruthy();
+    expect(
+      within(dialog).getByText(
+        "这些显示设置仅保存在本机，会立即生效，不属于项目配置。",
+      ),
+    ).toBeTruthy();
+    expect(
+      within(dialog).getByRole("button", { name: "恢复默认设置" }),
+    ).toBeTruthy();
 
     // Switching back restores English for the remaining tests' queries.
     fireEvent.change(
