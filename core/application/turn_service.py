@@ -621,6 +621,7 @@ class TurnService:
                             if reasoning_effort is not None
                             else thread.reasoning_effort
                         ),
+                        context_window=thread.context_window,
                     ),
                 )
             goal_turns = (
@@ -1170,6 +1171,7 @@ class TurnService:
                 connection_id=thread.connection_id,
                 model_id=thread.model,
                 reasoning_effort=thread.reasoning_effort,
+                context_window=thread.context_window,
             ),
         )
         return await self.session_runtimes.compact_live_history(
@@ -1737,6 +1739,7 @@ class TurnService:
                         connection_id=thread.connection_id,
                         model_id=thread.model,
                         reasoning_effort=thread.reasoning_effort,
+                        context_window=thread.context_window,
                     ),
                 )
                 running = replace(running, execution_profile=profile)

@@ -67,6 +67,7 @@ interface ComposerProps {
     connectionId: string | null,
     model: string | null,
     reasoningEffort: string | null,
+    contextWindow: number | null,
   ): void;
   onAccessPresetChange(preset: ExecutionAccessPreset | null): Promise<boolean>;
   onSetGoal(input: GoalDefinitionInput): Promise<void>;

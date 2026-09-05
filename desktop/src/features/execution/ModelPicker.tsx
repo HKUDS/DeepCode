@@ -29,6 +29,7 @@ interface ModelPickerProps {
     connectionId: string | null,
     model: string | null,
     reasoningEffort: string | null,
+    contextWindow: number | null,
   ): void;
 }
 
@@ -49,6 +50,7 @@ export function ModelPicker({
   const [connectionId, setConnectionId] = useState("");
   const [modelId, setModelId] = useState("");
   const [reasoningEffort, setReasoningEffort] = useState("auto");
+  const [contextWindow, setContextWindow] = useState<number | null>(null);
   const [catalog, setCatalog] = useState<ModelCatalogResult | null>(null);
   const [refreshingModels, setRefreshingModels] = useState(false);
   const [modelFailure, setModelFailure] = useState<{
@@ -83,6 +85,15 @@ export function ModelPicker({
     : "auto";
   const effectiveEffort =
     thread?.reasoningEffort ?? defaults.reasoningEffort ?? "auto";
+  const effectiveContextWindow = thread?.contextWindow ?? null;
+  const contextOptions = useMemo(
+    () =>
+      contextWindowOptions(
+        selectedModel?.contextWindow ?? null,
+        contextWindow,
+      ),
+    [contextWindow, selectedModel?.contextWindow],
+  );
 
   useEffect(() => {
     if (!open || !selectedConnectionId) return;
@@ -151,7 +162,12 @@ export function ModelPicker({
 
   const apply = () => {
     if (!selectedConnectionId || !modelId) return;
-    onChange(selectedConnectionId, modelId, validReasoningEffort);
+    onChange(
+      selectedConnectionId,
+      modelId,
+      validReasoningEffort,
+      contextWindow,
+    );
     setOpen(false);
     setQuery("");
     setManualModel("");
@@ -185,6 +201,7 @@ export function ModelPicker({
           if (!open) {
             setModelId(effectiveModel ?? "");
             setReasoningEffort(effectiveEffort);
+            setContextWindow(effectiveContextWindow);
           }
           setOpen((current) => !current);
         }}
@@ -198,7 +215,12 @@ export function ModelPicker({
         <span>
           <small>{effectiveConnection?.label ?? "Automatic"}</small>
           <strong>{effectiveModel || "Configured model"}</strong>
-          <em>{effortLabel(effectiveEffort)}</em>
+          <em>
+            {effortLabel(effectiveEffort)} ·{" "}
+            {effectiveContextWindow
+              ? `${formatTokens(effectiveContextWindow)} context cap`
+              : "Auto context"}
+          </em>
         </span>
         <ChevronDown size={12} />
       </button>
@@ -232,6 +254,7 @@ export function ModelPicker({
                 setConnectionId(event.target.value);
                 setModelId("");
                 setReasoningEffort("auto");
+                setContextWindow(null);
                 setModelFailure(null);
                 setQuery("");
               }}
@@ -273,6 +296,7 @@ export function ModelPicker({
                   onClick={() => {
                     setModelId(model.id);
                     setReasoningEffort("auto");
+                    setContextWindow(null);
                   }}
                 >
                   <span>
@@ -321,6 +345,38 @@ export function ModelPicker({
             </div>
           </section>
 
+          <section className={styles.context} aria-label="Context window">
+            <div>
+              <strong>Context</strong>
+              <span>
+                Cap future Turns below the model&apos;s published window. Lower
+                caps compact history sooner.
+              </span>
+            </div>
+            <select
+              aria-label="Context window cap"
+              value={contextWindow ?? ""}
+              disabled={!selectedModel}
+              onChange={(event) =>
+                setContextWindow(
+                  event.target.value ? Number(event.target.value) : null,
+                )
+              }
+            >
+              <option value="">
+                Automatic
+                {selectedModel
+                  ? ` · ${formatTokens(selectedModel.contextWindow)}`
+                  : ""}
+              </option>
+              {contextOptions.map((value) => (
+                <option key={value} value={value}>
+                  {formatTokens(value)}
+                </option>
+              ))}
+            </select>
+          </section>
+
           <footer>
             <input
               value={manualModel}
@@ -333,6 +389,7 @@ export function ModelPicker({
               onClick={() => {
                 setModelId(manualModel.trim());
                 setReasoningEffort("auto");
+                setContextWindow(null);
               }}
               disabled={!selectedConnectionId || !manualModel.trim()}
             >
@@ -350,7 +407,7 @@ export function ModelPicker({
               type="button"
               className={styles.reset}
               onClick={() => {
-                onChange(null, null, null);
+                onChange(null, null, null, null);
                 setOpen(false);
               }}
             >
@@ -434,4 +491,16 @@ function formatTokens(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
   if (value >= 1_000) return `${Math.round(value / 1_000)}K`;
   return String(value);
+}
+
+function contextWindowOptions(
+  published: number | null,
+  current: number | null,
+): number[] {
+  if (!published) return [];
+  const options = [32_000, 64_000, 128_000, 256_000, 512_000, 1_000_000].filter(
+    (value) => value < published,
+  );
+  if (current && current <= published) options.push(current);
+  return [...new Set(options)].sort((left, right) => left - right);
 }

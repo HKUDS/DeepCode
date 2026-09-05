@@ -102,6 +102,7 @@ class TuiApp:
             if reasoning_effort is not None
             else None
         )
+        self._requested_context_window: int | None = None
         self.selected_skill_ids: list[str] = []
         self._session_activity: FileLease | None = None
         self._leased_session_id: str | None = None
@@ -132,6 +133,7 @@ class TuiApp:
         self._requested_connection = profile.connection_id
         self._requested_model = profile.model_id
         self._requested_reasoning_effort = thread.reasoning_effort
+        self._requested_context_window = thread.context_window
         self.bridge = SessionBridge(
             store=self.thread_client.store,
             session_id=thread.id,
@@ -236,6 +238,7 @@ class TuiApp:
             connection_id=connection_id,
             model=model,
             reasoning_effort=effort,
+            context_window=self._requested_context_window,
         )
         self.model = profile.model_id
         self._requested_connection = profile.connection_id
@@ -271,9 +274,22 @@ class TuiApp:
             connection_id=self.thread_client.execution_profile.connection_id,
             model=self.thread_client.execution_profile.model_id,
             reasoning_effort=requested,
+            context_window=self._requested_context_window,
         )
         self.model = profile.model_id
         self._requested_reasoning_effort = requested
+
+    async def switch_context_window(self, context_window: int | None) -> None:
+        """Change the context cap for future Turns in this Session."""
+
+        profile = self.thread_client.switch_execution(
+            connection_id=self.thread_client.execution_profile.connection_id,
+            model=self.thread_client.execution_profile.model_id,
+            reasoning_effort=self._requested_reasoning_effort,
+            context_window=context_window,
+        )
+        self.model = profile.model_id
+        self._requested_context_window = context_window
 
     def connection_views(self) -> list[dict]:
         data = self.thread_client.application.llm.list_connections(
@@ -290,7 +306,8 @@ class TuiApp:
         profile = self.thread_client.execution_profile
         current = (
             f"connection: {profile.connection_id} · model: {self.model} · "
-            f"effort: {self.requested_reasoning_effort}"
+            f"effort: {self.requested_reasoning_effort} · "
+            f"context: {self.requested_context_window}"
         )
         views = [
             view
@@ -414,6 +431,11 @@ class TuiApp:
         """User-facing selection; ``auto`` means provider/model default."""
 
         return self._requested_reasoning_effort or "auto"
+
+    @property
+    def requested_context_window(self) -> str:
+        value = self._requested_context_window
+        return f"{value} tokens" if value is not None else "auto"
 
     def clear_conversation(self) -> None:
         self.goal_controller.close()

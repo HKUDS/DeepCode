@@ -735,6 +735,7 @@ Project，或者从项目目录启动 `deepcode`，然后创建新 Session 或�
 | 附加文件 | 使用输入框附件 | `@文件路径` |
 | 修改下一个 Turn 的模型 | 输入框模型选择器 | `/model` |
 | 调整 Thinking 档位 | 输入框 Thinking 选择器 | `/effort` |
+| 限制 Session 上下文窗口 | 模型选择器上下文控件 | `/context` |
 | 选择工具权限 | 输入框权限选择器 | `/permissions` |
 | 为下一个 Turn 加载 Skills | 输入框 Skills 控件 | `/skill <名称>` |
 | 创建可复用 Skill | **Skills → Create Skill** | `$skill-creator` |
@@ -749,6 +750,8 @@ Session，不删除历史；永久删除只移除 Session 记录，不会删除�
 Desktop 在 **Settings → AI providers** 中提供连接配置与验证。CLI 使用
 `/model` 修改后续 Turn 的连接和模型，使用 `/effort` 选择该模型支持的
 Thinking 档位。
+在模型选择器中设置上下文上限，或在 TUI 中输入 `/context 64k`，可以让
+后续 Turn 更早压缩历史；`/context auto` 会恢复模型公布的上下文窗口。
 
 模型切换不会改写已有历史，也不会改变正在运行的 Turn。Thinking 档位决定
 发送给 Provider 的请求；transcript 详细程度只影响界面展示。DeepCode 只在

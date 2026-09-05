@@ -117,6 +117,7 @@ def _application(
         connection_id="router-a",
         model="moonshotai/kimi-k2.5",
         reasoning_effort="low",
+        context_window=128_000,
     )
     return application, thread.id, sessions
 
@@ -155,6 +156,7 @@ def test_session_switch_rebuilds_runtime_but_preserves_history_and_turn_provenan
             connection_id="router-b",
             model="openai/gpt-5-mini",
             reasoning_effort="high",
+            context_window=64_000,
         )
         second = application.turns.start(thread_id, prompt="second")
         second_done = _wait(
@@ -168,9 +170,11 @@ def test_session_switch_rebuilds_runtime_but_preserves_history_and_turn_provenan
         assert first_done.turn.execution_profile.connection_id == "router-a"
         assert first_done.turn.execution_profile.model_id == "moonshotai/kimi-k2.5"
         assert first_done.turn.execution_profile.reasoning_effort == "low"
+        assert first_done.turn.execution_profile.context_window == 128_000
         assert second_done.turn.execution_profile.connection_id == "router-b"
         assert second_done.turn.execution_profile.model_id == "openai/gpt-5-mini"
         assert second_done.turn.execution_profile.reasoning_effort == "high"
+        assert second_done.turn.execution_profile.context_window == 64_000
         assert [profile.connection_id for profile in factory.profiles] == [
             "router-a",
             "router-b",
@@ -188,6 +192,7 @@ def test_session_switch_rebuilds_runtime_but_preserves_history_and_turn_provenan
         assert canonical.metadata["connection_id"] == "router-b"
         assert canonical.metadata["model"] == "openai/gpt-5-mini"
         assert canonical.metadata["reasoning_effort"] == "high"
+        assert canonical.metadata["context_window"] == 64_000
         assert (
             canonical.messages[0].metadata["executionProfile"]["connectionId"]
             == "router-a"
@@ -241,6 +246,7 @@ def test_active_goal_turn_keeps_snapshot_while_selection_updates_future_turns(
             connection_id="router-b",
             model="openai/gpt-5-mini",
             reasoning_effort="high",
+            context_window=64_000,
         )
         queued = application.turns.enqueue(
             thread_id,
@@ -252,11 +258,13 @@ def test_active_goal_turn_keeps_snapshot_while_selection_updates_future_turns(
         assert active_snapshot.turn.execution_profile.connection_id == "router-a"
         assert active_snapshot.turn.execution_profile.model_id == "moonshotai/kimi-k2.5"
         assert active_snapshot.turn.execution_profile.reasoning_effort == "low"
+        assert active_snapshot.turn.execution_profile.context_window == 128_000
         assert queued.turn.status is TurnStatus.QUEUED
         assert queued.turn.execution_profile is not None
         assert queued.turn.execution_profile.connection_id == "router-b"
         assert queued.turn.execution_profile.model_id == "openai/gpt-5-mini"
         assert queued.turn.execution_profile.reasoning_effort == "high"
+        assert queued.turn.execution_profile.context_window == 64_000
         assert active_snapshot.turn.goal_id == goal.id
         assert queued.turn.goal_id == goal.id
         assert application.turns.active_for_thread(thread_id).id == active.turn.id

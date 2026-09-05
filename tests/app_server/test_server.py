@@ -768,10 +768,32 @@ def test_connection_and_model_protocol_is_shared_secret_safe_state(
                 "connectionId": "router-rpc",
                 "model": "moonshotai/kimi-k3",
                 "reasoningEffort": "high",
+                "contextWindow": 64_000,
             },
         )
-        + _request(7, "provider/remove", {"connectionId": "router-rpc"})
-        + _request(8, "shutdown", {})
+        + _request(
+            7,
+            "thread/execution/update",
+            {
+                "threadId": thread.id,
+                "connectionId": "router-rpc",
+                "model": "moonshotai/kimi-k3",
+                "reasoningEffort": "high",
+            },
+        )
+        + _request(
+            8,
+            "thread/execution/update",
+            {
+                "threadId": thread.id,
+                "connectionId": "router-rpc",
+                "model": "moonshotai/kimi-k3",
+                "reasoningEffort": "high",
+                "contextWindow": None,
+            },
+        )
+        + _request(9, "provider/remove", {"connectionId": "router-rpc"})
+        + _request(10, "shutdown", {})
     )
     sink = io.BytesIO()
 
@@ -813,7 +835,10 @@ def test_connection_and_model_protocol_is_shared_secret_safe_state(
     assert responses[6]["thread"]["connectionId"] == "router-rpc"
     assert responses[6]["thread"]["model"] == "moonshotai/kimi-k3"
     assert responses[6]["thread"]["reasoningEffort"] == "high"
-    assert responses[7]["removed"] is True
+    assert responses[6]["thread"]["contextWindow"] == 64_000
+    assert responses[7]["thread"]["contextWindow"] == 64_000
+    assert responses[8]["thread"]["contextWindow"] is None
+    assert responses[9]["removed"] is True
 
     persisted = json.loads((home / "deepcode_config.json").read_text())
     assert secret not in json.dumps(persisted)
@@ -823,6 +848,7 @@ def test_connection_and_model_protocol_is_shared_secret_safe_state(
     assert canonical.metadata["connection_id"] == "router-rpc"
     assert canonical.metadata["model"] == "moonshotai/kimi-k3"
     assert canonical.metadata["reasoning_effort"] == "high"
+    assert canonical.metadata["context_window"] is None
 
 
 def test_management_methods_round_trip_real_project_state(

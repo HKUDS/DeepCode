@@ -896,6 +896,7 @@ and CLI without export or conversion.
 | Attach a file | Use the composer attachment | `@path/to/file` |
 | Change the next Turn's model | Composer model picker | `/model` |
 | Adjust Thinking effort | Composer effort picker | `/effort` |
+| Cap the Session context window | Model picker context control | `/context` |
 | Choose tool access | Composer access picker | `/permissions` |
 | Load Skills for the next Turn | Composer Skills control | `/skill <name>` |
 | Create a reusable Skill | **Skills → Create Skill** | `$skill-creator` |
@@ -918,6 +919,9 @@ permanent deletion removes the Session records but never repository files.
 Desktop provides connection setup and verification under **Settings → AI
 providers**. In the CLI, `/model` changes the connection and model for future
 Turns, while `/effort` selects a Thinking level supported by that model.
+Use the model picker's context control, or `/context 64k` in the TUI, to make
+future Turns compact history sooner; `/context auto` restores the model's
+published window.
 
 Model changes never rewrite earlier history or alter an active Turn. Thinking
 effort controls the request sent to the provider; transcript detail controls

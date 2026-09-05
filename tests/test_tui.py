@@ -24,6 +24,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import cli.tui.app as tui_app
+from cli.execution_options import parse_context_window
 from cli.transcript import TranscriptMode
 from cli.tui import animation, theme
 from cli.tui import text as text_fitting
@@ -80,6 +81,14 @@ class _ScriptedProvider:
 
 class _Profile:
     model = "fake-model"
+
+
+def test_context_window_parser_accepts_human_units_and_auto() -> None:
+    assert parse_context_window("32k") == 32_000
+    assert parse_context_window("1.5M") == 1_500_000
+    assert parse_context_window("auto") is None
+    with pytest.raises(ValueError, match="between"):
+        parse_context_window("2k")
 
 
 def _patch_provider(monkeypatch, provider):
@@ -1295,6 +1304,34 @@ def test_effort_switch_preserves_history_and_session_selection(
     stored = store.get_session(store.list_sessions()[0].session_id)
     assert stored is not None
     assert stored.metadata["reasoning_effort"] == "high"
+    assert [message.content for message in stored.messages] == [
+        "hello",
+        "first reply",
+        "continue",
+        "second reply",
+    ]
+
+
+def test_context_switch_preserves_history_and_session_selection(
+    monkeypatch, tmp_path, capsys
+):
+    rc, provider = _run_tui(
+        monkeypatch,
+        tmp_path,
+        "hello\n/context 64k\ncontinue\n/exit\n",
+        ["first reply", "second reply"],
+    )
+
+    assert rc == 0
+    assert provider.calls == 2
+    assert "context cap switched to 64000 tokens" in capsys.readouterr().out
+
+    from core.sessions.store import SessionStore
+
+    store = SessionStore(tmp_path / "sessions")
+    stored = store.get_session(store.list_sessions()[0].session_id)
+    assert stored is not None
+    assert stored.metadata["context_window"] == 64_000
     assert [message.content for message in stored.messages] == [
         "hello",
         "first reply",

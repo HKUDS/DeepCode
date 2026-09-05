@@ -695,6 +695,7 @@ class WorkflowService:
                 connection_id=thread.connection_id,
                 model_id=thread.model,
                 reasoning_effort=thread.reasoning_effort,
+                context_window=thread.context_window,
             )
             phase_profiles = self.llm_configuration.resolve_phases(
                 context.root,

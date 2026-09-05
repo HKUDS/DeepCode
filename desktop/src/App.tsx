@@ -350,11 +350,17 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
                 disabledReason={disabledReason}
                 transcriptMode={transcript.mode}
                 onTranscriptModeChange={transcript.selectMode}
-                onModelChange={(connectionId, model, reasoningEffort) =>
+                onModelChange={(
+                  connectionId,
+                  model,
+                  reasoningEffort,
+                  contextWindow,
+                ) =>
                   void controller.setThreadExecution(
                     connectionId,
                     model,
                     reasoningEffort,
+                    contextWindow,
                   )
                 }
                 onAccessPresetChange={controller.setAccessPreset}

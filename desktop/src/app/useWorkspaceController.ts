@@ -91,6 +91,7 @@ export interface WorkspaceController {
     connectionId: string | null,
     model: string | null,
     reasoningEffort: string | null,
+    contextWindow: number | null,
   ): Promise<void>;
   setAccessPreset(preset: ExecutionAccessPreset | null): Promise<boolean>;
   refreshSettings(): Promise<void>;
@@ -506,6 +507,7 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
       connectionId: string | null,
       model: string | null,
       reasoningEffort: string | null,
+      contextWindow: number | null,
     ) =>
       withBusy(async () => {
         if (!selectedThread) return;
@@ -514,6 +516,7 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
           connectionId,
           model,
           reasoningEffort,
+          contextWindow,
         });
         dispatch({ type: "thread-upsert", thread: result.thread });
       }),

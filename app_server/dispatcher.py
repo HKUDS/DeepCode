@@ -59,7 +59,11 @@ from core.domain.automation import (
     AutomationActivationStatus,
     AutomationScheduleKind,
 )
-from core.domain.execution_profile import ExecutionSelection
+from core.domain.execution_profile import (
+    MAX_CONTEXT_WINDOW_TOKENS,
+    MIN_CONTEXT_WINDOW_TOKENS,
+    ExecutionSelection,
+)
 from core.domain.execution_security import ExecutionAccessPreset
 from core.domain.message_provenance import ClientSurface
 from core.domain.project import TrustState
@@ -168,6 +172,28 @@ class Params:
             return None
         if not isinstance(value, str) or not value.strip():
             raise InvalidParams(f"{name} must be a non-empty string or null")
+        return value
+
+    def nullable_integer(
+        self,
+        name: str,
+        *,
+        minimum: int = 0,
+        maximum: int | None = None,
+    ) -> int | None:
+        if name not in self.values:
+            raise InvalidParams(f"{name} is required")
+        value = self.values[name]
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise InvalidParams(f"{name} must be an integer or null")
+        if value < minimum or (maximum is not None and value > maximum):
+            if maximum is None:
+                raise InvalidParams(f"{name} must be at least {minimum} or null")
+            raise InvalidParams(
+                f"{name} must be between {minimum} and {maximum}, or null"
+            )
         return value
 
 
@@ -862,6 +888,7 @@ class Dispatcher:
             "connectionId",
             "model",
             "reasoningEffort",
+            "contextWindow",
             "workspacePath",
             "parentThreadId",
             "agentPreset",
@@ -878,6 +905,11 @@ class Dispatcher:
             connection_id=params.string("connectionId", required=False),
             model=params.string("model", required=False),
             reasoning_effort=params.string("reasoningEffort", required=False),
+            context_window=params.optional_integer(
+                "contextWindow",
+                minimum=MIN_CONTEXT_WINDOW_TOKENS,
+                maximum=MAX_CONTEXT_WINDOW_TOKENS,
+            ),
             workspace_path=params.string("workspacePath", required=False),
             parent_thread_id=params.string("parentThreadId", required=False),
             agent_preset=params.string("agentPreset", required=False),
@@ -928,6 +960,7 @@ class Dispatcher:
                     connection_id=connection_id,
                     model_id=model,
                     reasoning_effort=current.reasoning_effort,
+                    context_window=current.context_window,
                 ),
             )
             thread = self.application.threads.set_execution_selection(
@@ -944,6 +977,7 @@ class Dispatcher:
                     connection_id=current.connection_id,
                     model_id=model,
                     reasoning_effort=current.reasoning_effort,
+                    context_window=current.context_window,
                 ),
             )
             thread = self.application.threads.set_model(
@@ -955,18 +989,34 @@ class Dispatcher:
     def _thread_execution_update(self, params: Params) -> dict[str, Any]:
         """Atomically validate and update the future-Turn execution choice."""
 
-        params.only("threadId", "connectionId", "model", "reasoningEffort")
+        params.only(
+            "threadId",
+            "connectionId",
+            "model",
+            "reasoningEffort",
+            "contextWindow",
+        )
         thread_id = str(params.string("threadId"))
         current = self.application.threads.read(thread_id)
         connection_id = params.nullable_string("connectionId")
         model = params.nullable_string("model")
         reasoning_effort = params.nullable_string("reasoningEffort")
+        context_window = (
+            params.nullable_integer(
+                "contextWindow",
+                minimum=MIN_CONTEXT_WINDOW_TOKENS,
+                maximum=MAX_CONTEXT_WINDOW_TOKENS,
+            )
+            if "contextWindow" in params.values
+            else current.context_window
+        )
         self.application.llm.resolve(
             current.workspace_path,
             ExecutionSelection(
                 connection_id=connection_id,
                 model_id=model,
                 reasoning_effort=reasoning_effort,
+                context_window=context_window,
             ),
         )
         thread = self.application.threads.set_execution_selection(
@@ -974,6 +1024,7 @@ class Dispatcher:
             connection_id=connection_id,
             model=model,
             reasoning_effort=reasoning_effort,
+            context_window=context_window,
         )
         return {"thread": thread_view(thread)}
 

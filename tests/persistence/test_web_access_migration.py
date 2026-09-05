@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from core.domain import Project, Thread, ThreadMode, Turn
@@ -60,7 +61,7 @@ def test_v16_removes_the_abandoned_v15_web_policy_without_losing_rows(
 
 def test_fresh_v16_schema_has_no_web_search_policy_columns(tmp_path: Path) -> None:
     database = Database(tmp_path / "fresh.sqlite3")
-    database.initialize()
+    database.initialize(target_version=16)
 
     with database.read() as connection:
         assert current_version(connection) == 16
@@ -99,3 +100,23 @@ def test_v16_downgrade_restores_empty_v15_compatibility_columns(
         migrate(connection, 16)
         assert "web_search_mode_override" not in _column_names(connection, "threads")
         assert "web_access_policy_json" not in _column_names(connection, "turns")
+
+
+def test_v17_adds_reversible_session_context_window_column(tmp_path: Path) -> None:
+    database = Database(tmp_path / "context-window.sqlite3")
+    database.initialize(target_version=16)
+    thread, _turn = _seed_v14(database, tmp_path / "workspace")
+
+    with database.read() as connection:
+        migrate(connection, 17)
+        assert current_version(connection) == 17
+        assert "context_window" in _column_names(connection, "threads")
+        assert ThreadRepository(connection).get(thread.id) == thread
+
+        capped = replace(thread, context_window=64_000)
+        ThreadRepository(connection).update(capped)
+        assert ThreadRepository(connection).get(thread.id) == capped
+
+        migrate(connection, 16)
+        assert "context_window" not in _column_names(connection, "threads")
+        assert ThreadRepository(connection).get(thread.id) == thread
