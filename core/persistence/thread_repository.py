@@ -39,6 +39,9 @@ class ThreadRepository:
             dump_datetime(thread.updated_at),
             dump_datetime(thread.archived_at),
         )
+        if self._has_context_window_column():
+            columns += ", context_window"
+            values += (thread.context_window,)
         if self._has_access_preset_column():
             columns += ", access_preset_override"
             values += (
@@ -56,6 +59,9 @@ class ThreadRepository:
         access_assignment = (
             ", access_preset_override = ?" if self._has_access_preset_column() else ""
         )
+        context_assignment = (
+            ", context_window = ?" if self._has_context_window_column() else ""
+        )
         values: tuple[object, ...] = (
             thread.project_id,
             thread.parent_thread_id,
@@ -70,6 +76,8 @@ class ThreadRepository:
             dump_datetime(thread.updated_at),
             dump_datetime(thread.archived_at),
         )
+        if context_assignment:
+            values += (thread.context_window,)
         if access_assignment:
             values += (
                 thread.access_preset_override.value
@@ -81,7 +89,8 @@ class ThreadRepository:
             "UPDATE threads SET project_id = ?, parent_thread_id = ?, title = ?, "
             "mode = ?, status = ?, model = ?, connection_id = ?, "
             "workspace_path = ?, worktree_path = ?, reasoning_effort = ?, "
-            f"updated_at = ?, archived_at = ?{access_assignment} WHERE id = ?",
+            f"updated_at = ?, archived_at = ?{context_assignment}"
+            f"{access_assignment} WHERE id = ?",
             values,
         )
         if cursor.rowcount != 1:
@@ -133,6 +142,7 @@ class ThreadRepository:
     @staticmethod
     def _from_row(row: sqlite3.Row) -> Thread:
         access_preset_available = "access_preset_override" in row.keys()
+        context_window_available = "context_window" in row.keys()
         return Thread(
             id=row["id"],
             project_id=row["project_id"],
@@ -143,6 +153,9 @@ class ThreadRepository:
             model=row["model"],
             connection_id=row["connection_id"],
             reasoning_effort=row["reasoning_effort"],
+            context_window=(
+                row["context_window"] if context_window_available else None
+            ),
             access_preset_override=(
                 ExecutionAccessPreset(row["access_preset_override"])
                 if access_preset_available and row["access_preset_override"] is not None
@@ -158,5 +171,11 @@ class ThreadRepository:
     def _has_access_preset_column(self) -> bool:
         return any(
             row["name"] == "access_preset_override"
+            for row in self.connection.execute("PRAGMA table_info(threads)")
+        )
+
+    def _has_context_window_column(self) -> bool:
+        return any(
+            row["name"] == "context_window"
             for row in self.connection.execute("PRAGMA table_info(threads)")
         )

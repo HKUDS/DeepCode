@@ -285,6 +285,35 @@
   color: var(--text-primary);
 }
 
+.context {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.context > div {
+  display: grid;
+  gap: 2px;
+}
+
+.context strong {
+  color: var(--text-primary);
+  font-size: var(--text-2xs);
+}
+
+.context span {
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+}
+
+.context select {
+  min-height: 34px;
+  font: var(--text-2xs) var(--font-mono);
+}
+
 .menu > footer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto auto;

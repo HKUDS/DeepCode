@@ -430,6 +430,7 @@ def thread_view(thread: Thread) -> dict[str, Any]:
         "model": thread.model,
         "connectionId": thread.connection_id,
         "reasoningEffort": thread.reasoning_effort,
+        "contextWindow": thread.context_window,
         "accessPresetOverride": (
             thread.access_preset_override.value
             if thread.access_preset_override is not None

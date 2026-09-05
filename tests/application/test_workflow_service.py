@@ -364,6 +364,7 @@ def test_workflow_freezes_session_model_for_every_paper2code_phase(
         connection_id="session-provider",
         model="openai/gpt-5.2",
         reasoning_effort="high",
+        context_window=64_000,
     )
     try:
         started = application.workflows.start(
@@ -380,6 +381,7 @@ def test_workflow_freezes_session_model_for_every_paper2code_phase(
             assert profile.connection_id == "session-provider"
             assert profile.model_id == "openai/gpt-5.2"
             assert profile.reasoning_effort == "high"
+            assert profile.context_window == 64_000
         captured = completed.run.input["executionProfiles"]
         assert captured["planning"] == runner.profiles["planning"].to_dict()
         assert captured["implementation"] == runner.profiles["implementation"].to_dict()

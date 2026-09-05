@@ -67,6 +67,7 @@ describe("workspace event projection", () => {
     model: null,
     connectionId: null,
     reasoningEffort: null,
+    contextWindow: null,
     accessPresetOverride: null,
     workspacePath: "/workspace/project-1",
     worktreePath: null,

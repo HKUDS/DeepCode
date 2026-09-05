@@ -376,6 +376,7 @@ export interface ThreadStartParams {
   connectionId?: string;
   model?: string;
   reasoningEffort?: string;
+  contextWindow?: number;
   workspacePath?: string;
   parentThreadId?: string;
   agentPreset?: string;
@@ -404,6 +405,10 @@ export interface ThreadExecutionParams {
   connectionId: string | null;
   model: string | null;
   reasoningEffort: string | null;
+  /**
+   * Null clears the Session cap and follows the model's published context window.
+   */
+  contextWindow?: number | null;
 }
 export interface ThreadPermissionUpdateParams {
   threadId: string;
@@ -1247,6 +1252,10 @@ export interface Thread {
   model: string | null;
   connectionId: string | null;
   reasoningEffort: string | null;
+  /**
+   * Optional Session cap for future Turns. Null uses the model's published window.
+   */
+  contextWindow: number | null;
   /**
    * Session override. Null inherits the effective Settings default.
    */

@@ -746,6 +746,10 @@ class TestRuntime implements DesktopRuntime {
           connectionId: request.connectionId,
           model: request.model,
           reasoningEffort: request.reasoningEffort,
+          contextWindow:
+            request.contextWindow === undefined
+              ? this.threadState[index].contextWindow
+              : request.contextWindow,
         };
         return { thread: this.threadState[index] } as MethodResults[M];
       }
@@ -1128,6 +1132,7 @@ const thread: Thread = {
   model: null,
   connectionId: null,
   reasoningEffort: null,
+  contextWindow: null,
   accessPresetOverride: null,
   workspacePath: project.canonicalPath,
   worktreePath: null,
@@ -2933,6 +2938,10 @@ describe("desktop command center", () => {
     const highEffort = screen.getByRole("radio", { name: "High" });
     fireEvent.click(highEffort);
     expect(highEffort.getAttribute("aria-checked")).toBe("true");
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "Context window cap" }),
+      { target: { value: "64000" } },
+    );
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     await waitFor(() => {
       expect(runtime.calls).toContain("thread/execution/update");
@@ -2947,6 +2956,7 @@ describe("desktop command center", () => {
       connectionId: "openai",
       model: "gpt-5-mini",
       reasoningEffort: "high",
+      contextWindow: 64_000,
     });
 
     fireEvent.change(permissions, { target: { value: "read_only" } });

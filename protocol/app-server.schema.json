@@ -535,6 +535,15 @@
             "null"
           ]
         },
+        "contextWindow": {
+          "description": "Optional Session cap for future Turns. Null uses the model's published window.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 4096,
+          "maximum": 10000000
+        },
         "accessPresetOverride": {
           "description": "Session override. Null inherits the effective Settings default.",
           "oneOf": [
@@ -581,6 +590,7 @@
         "model",
         "connectionId",
         "reasoningEffort",
+        "contextWindow",
         "accessPresetOverride",
         "workspacePath",
         "worktreePath",
@@ -3660,6 +3670,11 @@
           "type": "string",
           "minLength": 1
         },
+        "contextWindow": {
+          "type": "integer",
+          "minimum": 4096,
+          "maximum": 10000000
+        },
         "workspacePath": {
           "type": "string"
         },
@@ -3795,6 +3810,15 @@
             "null"
           ],
           "minLength": 1
+        },
+        "contextWindow": {
+          "description": "Null clears the Session cap and follows the model's published context window.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 4096,
+          "maximum": 10000000
         }
       },
       "required": [

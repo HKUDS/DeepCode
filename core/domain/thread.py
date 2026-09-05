@@ -13,6 +13,10 @@ from core.domain.common import (
     require_prefixed_id,
     utc_now,
 )
+from core.domain.execution_profile import (
+    MAX_CONTEXT_WINDOW_TOKENS,
+    MIN_CONTEXT_WINDOW_TOKENS,
+)
 from core.domain.execution_security import ExecutionAccessPreset
 
 
@@ -42,6 +46,7 @@ class Thread:
     model: str | None = None
     connection_id: str | None = None
     reasoning_effort: str | None = None
+    context_window: int | None = None
     access_preset_override: ExecutionAccessPreset | None = None
     parent_thread_id: str | None = None
     worktree_path: str | None = None
@@ -63,6 +68,19 @@ class Thread:
             require_non_empty(self.connection_id, "connection_id")
         if self.reasoning_effort is not None:
             require_non_empty(self.reasoning_effort, "reasoning_effort")
+        if self.context_window is not None:
+            if isinstance(self.context_window, bool) or not isinstance(
+                self.context_window, int
+            ):
+                raise TypeError("context_window must be an integer or None")
+            if self.context_window < MIN_CONTEXT_WINDOW_TOKENS:
+                raise ValueError(
+                    f"context_window must be at least {MIN_CONTEXT_WINDOW_TOKENS}"
+                )
+            if self.context_window > MAX_CONTEXT_WINDOW_TOKENS:
+                raise ValueError(
+                    f"context_window must be at most {MAX_CONTEXT_WINDOW_TOKENS}"
+                )
         if self.access_preset_override is not None and not isinstance(
             self.access_preset_override,
             ExecutionAccessPreset,

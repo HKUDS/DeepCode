@@ -81,6 +81,23 @@ While the model thinks, the status line shows the effort and the newest
 thought; `Ctrl+O`'s verbose mode prints full reasoning summaries when the
 provider exposes them.
 
+## Context window cap
+
+The model picker in Desktop can give the current Session a smaller context
+budget. The TUI exposes the same future-Turn setting directly:
+
+```text
+› /context 64k
+› /context auto     # return to the model's published window
+```
+
+The cap can only narrow the selected model's published context window. It does
+not claim that a model accepts more context than its catalog entry, and it must
+leave room for the configured generation limit. Each Turn freezes the effective
+window when it is accepted, so changing the Session later does not reinterpret
+an active or already queued Turn. A lower cap makes DeepCode compact long
+history sooner.
+
 ## What the turn footer tells you about cost
 
 ```text

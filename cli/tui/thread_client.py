@@ -325,6 +325,7 @@ class TuiThreadClient:
             connection_id=self.execution_profile.connection_id,
             model=self.execution_profile.model_id,
             reasoning_effort=self._requested.reasoning_effort,
+            context_window=self._requested.context_window,
             workspace_path=self.workspace,
         )
         self._replace_thread(thread)
@@ -391,11 +392,13 @@ class TuiThreadClient:
         connection_id: str | None,
         model: str | None,
         reasoning_effort: str | None,
+        context_window: int | None,
     ) -> ExecutionProfile:
         selection = ExecutionSelection(
             connection_id=connection_id,
             model_id=model,
             reasoning_effort=reasoning_effort,
+            context_window=context_window,
         )
         profile = self.application.llm.resolve(self.workspace, selection)
         self.thread = self.application.threads.set_execution_selection(
@@ -403,6 +406,7 @@ class TuiThreadClient:
             connection_id=profile.connection_id,
             model=profile.model_id,
             reasoning_effort=reasoning_effort,
+            context_window=context_window,
         )
         self._requested = selection
         self.execution_profile = profile
@@ -462,6 +466,7 @@ class TuiThreadClient:
                 connection_id=profile.connection_id,
                 model=profile.model_id,
                 reasoning_effort=self._requested.reasoning_effort,
+                context_window=self._requested.context_window,
                 workspace_path=self.workspace,
             )
         thread = self.application.threads.resume(
@@ -476,6 +481,11 @@ class TuiThreadClient:
                 if self._requested.reasoning_effort is not None
                 else thread.reasoning_effort
             ),
+            context_window=(
+                self._requested.context_window
+                if self._requested.context_window is not None
+                else thread.context_window
+            ),
         )
         self._requested = stored_selection
         profile = self.application.llm.resolve(self.workspace, stored_selection)
@@ -484,6 +494,7 @@ class TuiThreadClient:
             connection_id=profile.connection_id,
             model=profile.model_id,
             reasoning_effort=stored_selection.reasoning_effort,
+            context_window=stored_selection.context_window,
         )
 
     def _resolve_selection(self, thread: Thread) -> ExecutionProfile:
@@ -495,6 +506,7 @@ class TuiThreadClient:
             connection_id=thread.connection_id,
             model_id=thread.model,
             reasoning_effort=thread.reasoning_effort,
+            context_window=thread.context_window,
         )
         self._requested = selection
         return self.application.llm.resolve(self.workspace, selection)

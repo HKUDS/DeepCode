@@ -77,6 +77,7 @@ function thread(id: string): Thread {
     model: null,
     connectionId: null,
     reasoningEffort: null,
+    contextWindow: null,
     accessPresetOverride: null,
     workspacePath: `/workspace/${id}`,
     worktreePath: null,

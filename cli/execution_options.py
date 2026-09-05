@@ -3,8 +3,15 @@
 from __future__ import annotations
 
 import argparse
+import re
 
+from core.domain.execution_profile import (
+    MAX_CONTEXT_WINDOW_TOKENS,
+    MIN_CONTEXT_WINDOW_TOKENS,
+)
 from core.domain.execution_security import ExecutionAccessPreset
+
+_CONTEXT_WINDOW = re.compile(r"^(\d+(?:\.\d+)?)\s*([km]?)$", re.IGNORECASE)
 
 
 def add_reasoning_effort_argument(parser: argparse.ArgumentParser) -> None:
@@ -25,6 +32,29 @@ def add_reasoning_effort_argument(parser: argparse.ArgumentParser) -> None:
             "level supported by the selected model."
         ),
     )
+
+
+def parse_context_window(value: str) -> int | None:
+    """Parse a human context cap (``32k``, ``1m``), or ``auto`` to inherit."""
+
+    clean = value.strip().lower()
+    if clean in {"auto", "default", "inherit"}:
+        return None
+    match = _CONTEXT_WINDOW.fullmatch(clean)
+    if match is None:
+        raise ValueError("context window must be auto or a token count such as 32k")
+    amount = float(match.group(1))
+    multiplier = {"": 1, "k": 1_000, "m": 1_000_000}[match.group(2).lower()]
+    tokens = amount * multiplier
+    if not tokens.is_integer():
+        raise ValueError("context window must resolve to a whole token count")
+    parsed = int(tokens)
+    if not MIN_CONTEXT_WINDOW_TOKENS <= parsed <= MAX_CONTEXT_WINDOW_TOKENS:
+        raise ValueError(
+            "context window must be between "
+            f"{MIN_CONTEXT_WINDOW_TOKENS} and {MAX_CONTEXT_WINDOW_TOKENS} tokens"
+        )
+    return parsed
 
 
 def add_access_preset_argument(parser: argparse.ArgumentParser) -> None:
@@ -61,4 +91,5 @@ __all__ = [
     "add_reasoning_effort_argument",
     "add_workspace_trust_argument",
     "parse_access_preset",
+    "parse_context_window",
 ]

@@ -1310,6 +1310,19 @@ ALTER TABLE threads DROP COLUMN web_search_mode_override;
 _REMOVE_WEB_ACCESS_POLICY_V16 = _DROP_WEB_ACCESS_POLICY_V15
 _RESTORE_WEB_ACCESS_POLICY_V16 = _WEB_ACCESS_POLICY_V15
 
+_SESSION_CONTEXT_WINDOW_V17 = r"""
+ALTER TABLE threads
+    ADD COLUMN context_window INTEGER
+    CHECK (
+        context_window IS NULL OR
+        context_window BETWEEN 4096 AND 10000000
+    );
+"""
+
+_DROP_SESSION_CONTEXT_WINDOW_V17 = r"""
+ALTER TABLE threads DROP COLUMN context_window;
+"""
+
 MIGRATIONS = (
     Migration(1, "initial_domain", _INITIAL_SCHEMA, _DROP_INITIAL_SCHEMA),
     Migration(
@@ -1401,6 +1414,12 @@ MIGRATIONS = (
         "remove_web_access_policy",
         _REMOVE_WEB_ACCESS_POLICY_V16,
         _RESTORE_WEB_ACCESS_POLICY_V16,
+    ),
+    Migration(
+        17,
+        "session_context_window",
+        _SESSION_CONTEXT_WINDOW_V17,
+        _DROP_SESSION_CONTEXT_WINDOW_V17,
     ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

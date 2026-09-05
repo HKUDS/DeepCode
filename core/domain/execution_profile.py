@@ -6,6 +6,9 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
+MIN_CONTEXT_WINDOW_TOKENS = 4_096
+MAX_CONTEXT_WINDOW_TOKENS = 10_000_000
+
 
 @dataclass(frozen=True, slots=True)
 class ExecutionSelection:
@@ -14,12 +17,26 @@ class ExecutionSelection:
     connection_id: str | None = None
     model_id: str | None = None
     reasoning_effort: str | None = None
+    context_window: int | None = None
 
     def normalized(self) -> "ExecutionSelection":
+        context_window = self.context_window
+        if context_window is not None:
+            if isinstance(context_window, bool) or not isinstance(context_window, int):
+                raise ValueError("context_window must be an integer or None")
+            if context_window < MIN_CONTEXT_WINDOW_TOKENS:
+                raise ValueError(
+                    f"context_window must be at least {MIN_CONTEXT_WINDOW_TOKENS}"
+                )
+            if context_window > MAX_CONTEXT_WINDOW_TOKENS:
+                raise ValueError(
+                    f"context_window must be at most {MAX_CONTEXT_WINDOW_TOKENS}"
+                )
         return ExecutionSelection(
             connection_id=_clean_optional(self.connection_id),
             model_id=_clean_optional(self.model_id),
             reasoning_effort=_clean_optional(self.reasoning_effort),
+            context_window=context_window,
         )
 
 
@@ -109,4 +126,9 @@ def _clean_optional(value: str | None) -> str | None:
     return clean or None
 
 
-__all__ = ["ExecutionProfile", "ExecutionSelection"]
+__all__ = [
+    "MIN_CONTEXT_WINDOW_TOKENS",
+    "MAX_CONTEXT_WINDOW_TOKENS",
+    "ExecutionProfile",
+    "ExecutionSelection",
+]

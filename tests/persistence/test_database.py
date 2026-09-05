@@ -136,6 +136,7 @@ def test_repositories_round_trip_every_p1_entity(tmp_path: Path) -> None:
         model="moonshotai/kimi-k2.6",
         connection_id="router-test",
         reasoning_effort="high",
+        context_window=64_000,
         workspace_path=str(tmp_path),
     )
     turn = Turn(

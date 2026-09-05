@@ -181,12 +181,26 @@ class ConnectionResolver:
         connection, model = self.resolve_selection(normalized, phase=phase)
         settings = self.config.resolve_phase(phase)
         info = resolve_model_info(model)
-        context_window, max_output_tokens = model_limits or (
+        published_context_window, max_output_tokens = model_limits or (
             info.context_window,
             info.max_output_tokens,
         )
-        if context_window < 1 or max_output_tokens < 1:
+        if published_context_window < 1 or max_output_tokens < 1:
             raise ConfigError(f"Invalid model limits for '{model}'")
+        max_tokens = min(settings.max_tokens, max_output_tokens)
+        context_window = published_context_window
+        if normalized.context_window is not None:
+            if normalized.context_window > published_context_window:
+                raise ConfigError(
+                    f"Context window cap {normalized.context_window} exceeds "
+                    f"the published {published_context_window} token window for '{model}'"
+                )
+            if normalized.context_window <= max_tokens:
+                raise ConfigError(
+                    f"Context window cap must exceed the {max_tokens} token "
+                    "generation limit"
+                )
+            context_window = normalized.context_window
         capabilities = reasoning_capabilities or infer_reasoning_capabilities(
             model,
             provider_name=connection.provider_name,
@@ -206,7 +220,7 @@ class ConnectionResolver:
             model_id=model,
             context_window=context_window,
             max_output_tokens=max_output_tokens,
-            max_tokens=min(settings.max_tokens, max_output_tokens),
+            max_tokens=max_tokens,
             temperature=settings.temperature,
             reasoning_effort=reasoning_effort,
             config_revision=self.connection_revision(connection),
