@@ -44,6 +44,29 @@ const THEME_LABELS: Record<ThemePreference, string> = {
   contrast: "High contrast — AAA",
 };
 
+function themeTranslationKey(preference: ThemePreference): string {
+  const suffix = preference === "claude-dark" ? "claudeDark" : preference;
+  return `settings.appearance.${suffix}`;
+}
+
+const FONT_GROUPS = [
+  {
+    value: "Interface",
+    key: "settings.appearance.fontGroup.interface",
+    defaultValue: "Interface",
+  },
+  {
+    value: "Monospace",
+    key: "settings.appearance.fontGroup.monospace",
+    defaultValue: "Monospace",
+  },
+  {
+    value: "CJK",
+    key: "settings.appearance.fontGroup.cjk",
+    defaultValue: "CJK",
+  },
+] as const;
+
 /**
  * Appearance controls, rendered from `APPEARANCE_SETTINGS`.
  *
@@ -77,7 +100,7 @@ export function AppearanceSettings() {
       <div
         className={modeStyles.modeRow}
         role="group"
-        aria-label="Appearance mode"
+        aria-label={t("settings.appearance.mode", "Appearance mode")}
       >
         {MODE_CARDS.map((mode) => {
           const Icon = mode.icon;
@@ -90,7 +113,7 @@ export function AppearanceSettings() {
               onClick={() => set("theme", mode.value)}
             >
               <Icon size={18} />
-              {mode.label}
+              {t(themeTranslationKey(mode.value), mode.label)}
             </button>
           );
         })}
@@ -100,11 +123,12 @@ export function AppearanceSettings() {
         {APPEARANCE_SETTINGS.map((setting) => {
           const id = `${fieldId}-${setting.key}`;
           const value = appearance[setting.key];
+          const label = t(`settings.appearance.${setting.key}`, setting.label);
 
           if (setting.key === "theme") {
             return (
               <label key={setting.key} htmlFor={id}>
-                {setting.label}
+                {label}
                 <select
                   id={id}
                   value={value as ThemePreference}
@@ -114,7 +138,10 @@ export function AppearanceSettings() {
                 >
                   {THEME_PREFERENCES.map((preference) => (
                     <option key={preference} value={preference}>
-                      {THEME_LABELS[preference]}
+                      {t(
+                        themeTranslationKey(preference),
+                        THEME_LABELS[preference],
+                      )}
                     </option>
                   ))}
                 </select>
@@ -126,7 +153,7 @@ export function AppearanceSettings() {
             const { min, max, step, unit } = setting.range;
             return (
               <label key={setting.key} htmlFor={id}>
-                {setting.label}
+                {label}
                 <span className={styles.note}>
                   {value}
                   {unit}
@@ -151,19 +178,25 @@ export function AppearanceSettings() {
 
           return (
             <label key={setting.key} htmlFor={id}>
-              {setting.label}
+              {label}
               <input
                 id={id}
                 type="text"
                 value={value as string}
-                placeholder="e.g. Sarasa Mono SC, Inter"
+                placeholder={t(
+                  "settings.appearance.fontPlaceholder",
+                  "e.g. Sarasa Mono SC, Inter",
+                )}
                 onChange={(event) =>
                   set(setting.key as "fontFamily", event.target.value)
                 }
               />
               {installed.length > 0 ? (
                 <select
-                  aria-label="Add an installed font"
+                  aria-label={t(
+                    "settings.appearance.addInstalledFont",
+                    "Add an installed font",
+                  )}
                   value=""
                   onChange={(event) => {
                     if (!event.target.value) return;
@@ -173,14 +206,22 @@ export function AppearanceSettings() {
                     );
                   }}
                 >
-                  <option value="">Add an installed font…</option>
-                  {["Interface", "Monospace", "CJK"].map((group) => {
+                  <option value="">
+                    {t(
+                      "settings.appearance.addInstalledFont",
+                      "Add an installed font…",
+                    )}
+                  </option>
+                  {FONT_GROUPS.map((group) => {
                     const members = installed.filter(
-                      (candidate) => candidate.group === group,
+                      (candidate) => candidate.group === group.value,
                     );
                     if (members.length === 0) return null;
                     return (
-                      <optgroup key={group} label={group}>
+                      <optgroup
+                        key={group.value}
+                        label={t(group.key, group.defaultValue)}
+                      >
                         {members.map((candidate) => (
                           <option
                             key={candidate.family}
@@ -200,16 +241,19 @@ export function AppearanceSettings() {
       </div>
 
       <p className={styles.note}>
-        {
+        {t(
+          "settings.appearance.fontDescription",
           APPEARANCE_SETTINGS.find((setting) => setting.key === "fontFamily")
-            ?.description
-        }
+            ?.description ?? "Choose fonts for the interface.",
+        )}
       </p>
 
       <footer className={styles.formActions}>
         <span>
-          These are per-machine display settings. They apply immediately and
-          are not part of project configuration.
+          {t(
+            "settings.appearance.localOnly",
+            "These are per-machine display settings. They apply immediately and are not part of project configuration.",
+          )}
         </span>
         <button
           className={styles.primaryButton}
@@ -217,7 +261,7 @@ export function AppearanceSettings() {
           disabled={isDefault}
           onClick={reset}
         >
-          Reset to defaults
+          {t("settings.appearance.reset", "Reset to defaults")}
         </button>
       </footer>
     </section>
