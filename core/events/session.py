@@ -1032,6 +1032,19 @@ class AgentSession:
                     names = tuple(str(name) for name in value)
             return names
 
+        # P0-1: optional LLM risk classifier for headless asks. Off unless
+        # DEEPCODE_RISK_CLASSIFIER=1; when enabled and the run has no human
+        # approver, the runner auto-allows only decisive-low-risk asks.
+        risk_classifier = None
+        if self._provider is not None:
+            from core.harness.classifier import (
+                build_risk_classifier,
+                classifier_enabled,
+            )
+
+            if classifier_enabled():
+                risk_classifier = build_risk_classifier(self._provider)
+
         spec = AgentRunSpec(
             initial_messages=initial,
             tools=self._tools,
@@ -1045,6 +1058,7 @@ class AgentSession:
             hook=event_hook,
             permission_checker=self._permission_checker,
             approval_callback=self._approval_callback,
+            risk_classifier=risk_classifier,
             injection_callback=self._injection_callback,
             context_note_sink=self._context_note_sink,
             history_sink=self._keep_history,
