@@ -245,10 +245,44 @@ def asyncio_wait_for(awaitable: Any, *, timeout: float) -> Any:
     return asyncio.wait_for(awaitable, timeout=timeout)
 
 
+def build_risk_classifier(
+    provider: Any, *, model: str | None = None
+) -> Any:
+    """Build the async resolver that wires this module into the permission gate.
+
+    Returns an ``async (tool_name, arguments, reason) -> RiskVerdict | None``
+    callable usable as ``AgentRunSpec.risk_classifier``. The kernel consults it
+    only for an ``ask`` with no human approver (headless) and only ever upgrades
+    a decisive ``low`` verdict to allow; medium/high/no-verdict/error keep the
+    existing deny (never widens a deny, never escalates risk).
+
+    The resolver is inert unless ``DEEPCODE_RISK_CLASSIFIER=1``. ``provider``
+    must expose ``async chat(messages, *, model=..., max_tokens=...,
+    temperature=...)`` — the same ``core.providers`` interface the agent loop
+    already uses, so callers can reuse the run's own provider::
+
+        spec.risk_classifier = build_risk_classifier(provider)  # opt-in per run
+    """
+
+    async def _resolve(
+        tool_name: str,
+        arguments: dict[str, Any] | None = None,
+        reason: str | None = None,
+    ) -> RiskVerdict | None:
+        if not classifier_enabled():
+            return None
+        return await LLMRiskClassifier(provider, model=model).classify(
+            tool_name, arguments, reason
+        )
+
+    return _resolve
+
+
 __all__ = [
     "LLMRiskClassifier",
     "RiskLevel",
     "RiskVerdict",
+    "build_risk_classifier",
     "classifier_enabled",
     "classifier_model",
     "parse_risk_verdict",
