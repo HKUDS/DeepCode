@@ -41,6 +41,7 @@ from cli.tui.renderer import EventRenderer
 from core.application.errors import ApplicationError
 from core.config import ConfigError
 from core.domain.thread_goal import ThreadGoalStatus
+from core.platform_compat import configure_utf8_stdio
 
 _STATUS_STYLE = {
     "succeeded": "bold green",
@@ -161,6 +162,9 @@ def _run(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows consoles default to GBK/cp936; rich and model output emit UTF-8.
+    # Reconfigure early so headless runs never crash rendering non-GBK text.
+    configure_utf8_stdio()
     parser = argparse.ArgumentParser(
         prog="deepcode loop",
         description="Run a durable Goal on the shared ordinary-Turn runtime.",
