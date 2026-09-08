@@ -1,5 +1,5 @@
 import { Monitor, Moon, Sun } from "lucide-react";
-import { useMemo, useId } from "react";
+import { useMemo, useId, useState } from "react";
 
 import {
   APPEARANCE_DEFAULTS,
@@ -13,6 +13,7 @@ import {
   availableFontCandidates,
 } from "../../app/fontCandidates";
 import { useAppearance } from "../../app/useAppearance";
+import { parseVsCodeTheme, ThemeImportError } from "../../app/importedTheme";
 import { useTranslation } from "react-i18next";
 import styles from "../management/ManagementWorkspace.module.css";
 import modeStyles from "./AppearanceSettings.module.css";
@@ -42,6 +43,7 @@ const THEME_LABELS: Record<ThemePreference, string> = {
   claude: "Claude — ivory & terracotta",
   "claude-dark": "Claude Dark — slate & terracotta",
   contrast: "High contrast — AAA",
+  imported: "Imported theme",
 };
 
 function themeTranslationKey(preference: ThemePreference): string {
@@ -76,15 +78,32 @@ const FONT_GROUPS = [
  * display choices, not project configuration, so there is nothing to save.
  */
 export function AppearanceSettings() {
-  const { appearance, set, reset } = useAppearance();
+  const { appearance, set, update, reset } = useAppearance();
   const { t } = useTranslation();
   const fieldId = useId();
+  const [importError, setImportError] = useState<string | null>(null);
   // Probed once per mount: the set of installed fonts does not change while
   // the settings page is open.
   const installed = useMemo(() => availableFontCandidates(), []);
   const isDefault = APPEARANCE_SETTINGS.every(
     (setting) => appearance[setting.key] === APPEARANCE_DEFAULTS[setting.key],
-  );
+  ) && appearance.importedTheme === null;
+
+  const importTheme = async (file: File | null) => {
+    if (!file) return;
+    setImportError(null);
+    try {
+      if (file.size > 1_000_000) {
+        throw new ThemeImportError("Theme files must be 1 MB or smaller.");
+      }
+      const importedTheme = parseVsCodeTheme(await file.text(), file.name);
+      update({ importedTheme, theme: "imported" });
+    } catch (cause) {
+      setImportError(
+        cause instanceof Error ? cause.message : "The theme could not be imported.",
+      );
+    }
+  };
 
   return (
     <section className={styles.formCard}>
@@ -137,10 +156,16 @@ export function AppearanceSettings() {
                   }
                 >
                   {THEME_PREFERENCES.map((preference) => (
-                    <option key={preference} value={preference}>
+                    <option
+                      key={preference}
+                      value={preference}
+                      disabled={preference === "imported" && !appearance.importedTheme}
+                    >
                       {t(
                         themeTranslationKey(preference),
-                        THEME_LABELS[preference],
+                        preference === "imported" && appearance.importedTheme
+                          ? `Imported — ${appearance.importedTheme.name}`
+                          : THEME_LABELS[preference],
                       )}
                     </option>
                   ))}
@@ -238,6 +263,39 @@ export function AppearanceSettings() {
             </label>
           );
         })}
+      </div>
+
+      <div className={modeStyles.importTheme}>
+        <label>
+          <span>
+            {t("settings.appearance.importTheme", "Import VS Code theme")}
+          </span>
+          <input
+            type="file"
+            accept=".json,.jsonc,application/json"
+            onChange={(event) => {
+              const file = event.currentTarget.files?.[0] ?? null;
+              event.currentTarget.value = "";
+              void importTheme(file);
+            }}
+          />
+        </label>
+        <p>
+          {appearance.importedTheme
+            ? t(
+                "settings.appearance.importedReady",
+                "Imported {{name}} · {{base}} base",
+                {
+                  name: appearance.importedTheme.name,
+                  base: appearance.importedTheme.base,
+                },
+              )
+            : t(
+                "settings.appearance.importHint",
+                "Reads one local JSON/JSONC color-theme file. Theme includes and syntax colors are not imported.",
+              )}
+        </p>
+        {importError ? <p role="alert">{importError}</p> : null}
       </div>
 
       <p className={styles.note}>

@@ -58,6 +58,8 @@ export interface AppearanceController {
   appearance: AppearanceState;
   /** Update one preference; the others are untouched. */
   set<K extends keyof AppearanceState>(key: K, value: AppearanceState[K]): void;
+  /** Update related preferences atomically (used when importing a palette). */
+  update(patch: Partial<AppearanceState>): void;
   reset(): void;
 }
 
@@ -71,9 +73,14 @@ export function useAppearance(): AppearanceController {
     [],
   );
 
+  const update = useCallback(
+    (patch: Partial<AppearanceState>) => commit({ ...state, ...patch }),
+    [],
+  );
+
   const reset = useCallback(() => commit({ ...APPEARANCE_DEFAULTS }), []);
 
-  return { appearance, set, reset };
+  return { appearance, set, update, reset };
 }
 
 /** Reset module state between tests. */

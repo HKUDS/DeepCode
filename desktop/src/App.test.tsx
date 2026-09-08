@@ -1932,6 +1932,54 @@ describe("desktop command center", () => {
     expect(document.documentElement.getAttribute("data-theme")).toBeNull();
   });
 
+  it("imports one VS Code theme and reports invalid colors", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const dialog = await screen.findByRole("dialog", { name: "Settings" });
+    const input = within(dialog).getByLabelText(
+      "Import VS Code theme",
+    ) as HTMLInputElement;
+    const valid = new File(["theme"], "ocean-color-theme.jsonc", {
+      type: "application/json",
+    });
+    Object.defineProperty(valid, "text", {
+      value: () =>
+        Promise.resolve(`{
+          // local JSONC only
+          "name": "Ocean",
+          "colors": {
+            "editor.background": "#102030",
+            "editor.foreground": "#f0f4f8",
+          },
+        }`),
+    });
+
+    fireEvent.change(input, { target: { files: [valid] } });
+
+    await waitFor(() =>
+      expect(document.documentElement.getAttribute("data-theme")).toBe(
+        "imported",
+      ),
+    );
+    expect(
+      document.documentElement.style.getPropertyValue("--surface-canvas"),
+    ).toBe("#102030");
+    expect(within(dialog).getByRole("option", { name: /Ocean/ })).toBeTruthy();
+
+    const invalid = new File(["theme"], "invalid.json");
+    Object.defineProperty(invalid, "text", {
+      value: () =>
+        Promise.resolve('{"colors":{"editor.background":"not-a-color"}}'),
+    });
+    fireEvent.change(input, { target: { files: [invalid] } });
+    expect((await within(dialog).findByRole("alert")).textContent).toContain(
+      "Invalid color for editor.background",
+    );
+  });
+
   it("lets plain Enter queue while busy when the preference says queue", async () => {
     localStorage.setItem(
       "deepcode.desktop.composer.v1",

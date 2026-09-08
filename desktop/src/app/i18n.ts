@@ -58,6 +58,11 @@ const ZH_CN: Record<string, string> = {
   "settings.appearance.claude": "Claude · 象牙白与陶土色",
   "settings.appearance.claudeDark": "Claude 深色 · 石板灰与陶土色",
   "settings.appearance.contrast": "高对比度 · AAA",
+  "settings.appearance.imported": "导入的主题",
+  "settings.appearance.importTheme": "导入 VS Code 主题",
+  "settings.appearance.importedReady": "已导入 {{name}} · {{base}} 基础主题",
+  "settings.appearance.importHint":
+    "读取一个本地 JSON/JSONC 颜色主题文件；暂不导入主题 include 链和语法配色。",
   "settings.appearance.fontPlaceholder": "例如：更纱黑体 SC、Inter",
   "settings.appearance.addInstalledFont": "添加已安装字体…",
   "settings.appearance.fontGroup.interface": "界面字体",

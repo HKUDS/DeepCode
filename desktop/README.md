@@ -223,6 +223,20 @@ deepcode provider test personal-openrouter --model <model-id>
 deepcode -c personal-openrouter -m <model-id> --effort auto
 ```
 
+### Appearance and imported themes
+
+**Settings → Appearance** controls the machine-local theme, conversation width,
+and typography. **Import VS Code theme** accepts one local `.json` or `.jsonc`
+color-theme file, validates every value in its `colors` object, and maps the
+supported workbench colors onto DeepCode's complete palette. Unmapped tokens
+come from the inferred light or dark base, so an imported theme never leaves a
+component on an unrelated fallback palette.
+
+Only the normalized palette and display name are persisted. DeepCode does not
+retain the source path or raw file, execute theme content, discover extension
+packages, import syntax `tokenColors`, or follow `include` chains. Invalid
+colors are reported in the Appearance panel and leave the current theme intact.
+
 ### Run a durable Goal
 
 Use **Set a Goal** above the Session composer to define one natural-language

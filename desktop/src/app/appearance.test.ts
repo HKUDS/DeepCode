@@ -8,6 +8,7 @@ import {
   sanitizeAppearance,
   writeAppearance,
 } from "./appearance";
+import { parseVsCodeTheme } from "./importedTheme";
 
 function root(): HTMLElement {
   return document.documentElement;
@@ -39,6 +40,10 @@ describe("sanitizeAppearance", () => {
     expect(state).toEqual(APPEARANCE_DEFAULTS);
   });
 
+  it("does not select an imported theme without a valid stored palette", () => {
+    expect(sanitizeAppearance({ theme: "imported" }).theme).toBe("system");
+  });
+
   it("is total over the settings table", () => {
     // A row added without a matching default would silently produce
     // `undefined` here rather than failing at the point of the mistake.
@@ -55,6 +60,22 @@ describe("persistence", () => {
     const restored = readAppearance();
     expect(restored.fontSize).toBe(18);
     expect(restored.theme).toBe("dark");
+  });
+
+  it("round-trips a normalized imported palette", () => {
+    const importedTheme = parseVsCodeTheme(
+      '{"name":"Stored","colors":{"editor.background":"#123456"}}',
+      "stored.json",
+    );
+    writeAppearance({
+      ...APPEARANCE_DEFAULTS,
+      theme: "imported",
+      importedTheme,
+    });
+    const restored = readAppearance();
+    expect(restored.theme).toBe("imported");
+    expect(restored.importedTheme?.name).toBe("Stored");
+    expect(restored.importedTheme?.tokens["--surface-canvas"]).toBe("#123456");
   });
 
   it("falls back to defaults when storage holds garbage", () => {
@@ -88,6 +109,22 @@ describe("applyAppearance", () => {
 
     applyAppearance({ ...APPEARANCE_DEFAULTS, theme: "system" }, root());
     expect(root().hasAttribute("data-theme")).toBe(false);
+  });
+
+  it("applies an imported palette through the theme attribute", () => {
+    const importedTheme = parseVsCodeTheme(
+      '{"colors":{"editor.background":"#123456"}}',
+      "imported.json",
+    );
+    applyAppearance(
+      { ...APPEARANCE_DEFAULTS, theme: "imported", importedTheme },
+      root(),
+    );
+    expect(root().getAttribute("data-theme")).toBe("imported");
+    expect(root().style.getPropertyValue("--surface-canvas")).toBe("#123456");
+
+    applyAppearance(APPEARANCE_DEFAULTS, root());
+    expect(root().style.getPropertyValue("--surface-canvas")).toBe("");
   });
 
   it("appends preferred fonts as a prefix of the built-in stack", () => {
