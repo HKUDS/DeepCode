@@ -4,6 +4,11 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { THEME_PREFERENCES } from "../app/appearance";
+import {
+  DARK_IMPORTED_THEME_BASE,
+  IMPORTED_THEME_TOKEN_NAMES,
+  LIGHT_IMPORTED_THEME_BASE,
+} from "../app/importedTheme";
 
 // Vitest runs from the Vite root (desktop/); jsdom leaves import.meta.url as
 // a non-file URL, so resolve against the project root instead.
@@ -83,7 +88,8 @@ describe("optional palettes", () => {
   // Two names are exempt: "system" sets no attribute at all, and "light" is
   // the base :root, so its block carries only `color-scheme`.
   const palettes = THEME_PREFERENCES.filter(
-    (theme) => theme !== "system" && theme !== "light",
+    (theme) =>
+      theme !== "system" && theme !== "light" && theme !== "imported",
   );
 
   it("checks every theme the picker offers", () => {
@@ -102,6 +108,32 @@ describe("optional palettes", () => {
     expect(
       declarationsAfter(`:root[data-theme="${theme}"]`).get("color-scheme"),
     ).toMatch(/^(light|dark)$/);
+  });
+});
+
+describe("imported palette contract", () => {
+  const rootDeclarations = declarationsAfter(":root {");
+  const darkDeclarations = declarationsAfter(':root[data-theme="dark"]');
+  const reference = [...darkDeclarations.keys()].filter((name) =>
+    name.startsWith("--"),
+  );
+
+  it("fills exactly the same token set as every built-in palette", () => {
+    expect([...IMPORTED_THEME_TOKEN_NAMES].sort()).toEqual(reference.sort());
+  });
+
+  it("keeps both fallback bases synchronized with tokens.css", () => {
+    for (const token of IMPORTED_THEME_TOKEN_NAMES) {
+      expect(LIGHT_IMPORTED_THEME_BASE[token]).toBe(rootDeclarations.get(token));
+      expect(DARK_IMPORTED_THEME_BASE[token]).toBe(darkDeclarations.get(token));
+    }
+  });
+
+  it("uses the ordinary data-theme selector", () => {
+    const imported = declarationsAfter(':root[data-theme="imported"]');
+    expect(imported.get("color-scheme")).toBe("var(--imported-color-scheme)");
+    expect(imported.get("color")).toBe("var(--text-primary)");
+    expect(imported.get("background")).toBe("var(--surface-shell)");
   });
 });
 

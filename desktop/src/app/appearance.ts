@@ -12,6 +12,12 @@
  * which keeps components free of appearance conditionals.
  */
 
+import {
+  applyImportedTheme,
+  sanitizeImportedTheme,
+  type ImportedTheme,
+} from "./importedTheme";
+
 const STORAGE_KEY = "deepcode.desktop.appearance.v1";
 
 /**
@@ -30,7 +36,8 @@ export type ThemePreference =
   | "midnight"
   | "claude"
   | "claude-dark"
-  | "contrast";
+  | "contrast"
+  | "imported";
 
 export const THEME_PREFERENCES: readonly ThemePreference[] = [
   "system",
@@ -41,6 +48,7 @@ export const THEME_PREFERENCES: readonly ThemePreference[] = [
   "claude",
   "claude-dark",
   "contrast",
+  "imported",
 ];
 
 export interface AppearanceState {
@@ -55,6 +63,8 @@ export interface AppearanceState {
    * fixed list would be both wrong and stale. Empty means "use the default".
    */
   fontFamily: string;
+  /** Complete, normalized palette imported from one local VS Code theme. */
+  importedTheme: ImportedTheme | null;
 }
 
 export const APPEARANCE_DEFAULTS: AppearanceState = {
@@ -62,6 +72,7 @@ export const APPEARANCE_DEFAULTS: AppearanceState = {
   theme: "system",
   fontSize: 14,
   fontFamily: "",
+  importedTheme: null,
 };
 
 /**
@@ -153,13 +164,17 @@ export const APPEARANCE_SETTINGS = [
 export function sanitizeAppearance(value: unknown): AppearanceState {
   const raw = typeof value === "object" && value !== null ? value : {};
   const source = raw as Record<string, unknown>;
-  return APPEARANCE_SETTINGS.reduce(
+  const importedTheme = sanitizeImportedTheme(source.importedTheme);
+  const state = APPEARANCE_SETTINGS.reduce<AppearanceState>(
     (state, setting) => ({
       ...state,
       [setting.key]: setting.sanitize(source[setting.key]),
     }),
-    { ...APPEARANCE_DEFAULTS },
+    { ...APPEARANCE_DEFAULTS, importedTheme },
   );
+  return state.theme === "imported" && !importedTheme
+    ? { ...state, theme: "system" }
+    : state;
 }
 
 export function readAppearance(): AppearanceState {
@@ -194,6 +209,8 @@ export function applyAppearance(state: AppearanceState, root: HTMLElement): void
       root.style.setProperty(setting.cssVariable, rendered);
     }
   }
+
+  applyImportedTheme(state.theme === "imported" ? state.importedTheme : null, root);
 
   if (state.theme === "system") {
     root.removeAttribute("data-theme");

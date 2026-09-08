@@ -34,3 +34,47 @@
   background: var(--surface-hover);
   font-weight: var(--weight-semibold, 600);
 }
+
+.importTheme {
+  display: grid;
+  gap: 5px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.importTheme label {
+  display: grid;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+}
+
+.importTheme input {
+  max-width: 100%;
+  color: var(--text-secondary);
+  font-size: var(--text-2xs);
+}
+
+.importTheme input::file-selector-button {
+  min-height: 32px;
+  margin-right: 10px;
+  padding: 0 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.importTheme p {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+  line-height: 1.5;
+}
+
+.importTheme p[role="alert"] {
+  color: var(--danger);
+}

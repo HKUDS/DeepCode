@@ -492,6 +492,15 @@
   --shadow-menu: 0 0 0 2px #000000;
 }
 
+/* Imported themes provide a complete normalized palette as inline custom
+   properties. This selector keeps them in the same data-theme mechanism as
+   built-in palettes while the imported base controls native form chrome. */
+:root[data-theme="imported"] {
+  color-scheme: var(--imported-color-scheme);
+  color: var(--text-primary);
+  background: var(--surface-shell);
+}
+
 * {
   box-sizing: border-box;
 }
