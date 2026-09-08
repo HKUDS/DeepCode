@@ -517,6 +517,14 @@ def _looks_native(model_id: str, provider_name: str) -> bool:
     markers = {
         "openai": ("gpt-", "o1", "o3", "o4"),
         "anthropic": ("claude-",),
+        "bedrock": (
+            "anthropic.",
+            "us.anthropic.",
+            "eu.anthropic.",
+            "au.anthropic.",
+            "jp.anthropic.",
+            "global.anthropic.",
+        ),
         "gemini": ("gemini-",),
         "deepseek": ("deepseek-",),
         "dashscope": ("qwen",),
