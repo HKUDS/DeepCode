@@ -25,6 +25,30 @@ Connections live under `providers` in `~/.deepcode/deepcode_config.json`
 work). Project-level config deliberately cannot add connections — credentials
 stay user-scoped.
 
+### Amazon Bedrock
+
+Bedrock's OpenAI-compatible endpoint is region-specific. Supply its
+`/openai/v1` base URL and expose an Amazon Bedrock API key through the standard
+`AWS_BEARER_TOKEN_BEDROCK` environment variable:
+
+```console
+deepcode provider set work-bedrock --template bedrock \
+  --api-base https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1 \
+  --api-key-env AWS_BEARER_TOKEN_BEDROCK
+deepcode provider models work-bedrock --refresh
+deepcode provider test work-bedrock --model us.anthropic.claude-sonnet-4-6
+```
+
+Replace `us-east-1` with the Region that serves your account and choose a model
+ID returned by the refresh command. Bedrock may return an in-Region ID such as
+`anthropic.claude-sonnet-4-6`, a geography-scoped ID such as
+`us.anthropic.claude-sonnet-4-6` or `eu.anthropic.claude-sonnet-4-6`, or a
+`global.` ID depending on model and Region.
+
+This first integration sends the configured value as a bearer token through
+Bedrock's OpenAI-compatible Chat Completions API. It does **not** implement AWS
+SigV4 signing, IAM role/profile discovery, SSO, or the native Converse API.
+
 ## Declared models
 
 When a gateway serves a model the catalog doesn't know — or knows wrongly —
