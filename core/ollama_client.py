@@ -26,12 +26,14 @@ from typing import Any, Dict, List, Optional
 # 底层 HTTP (urllib, 零第三方依赖)
 # ═══════════════════════════════════════════
 
+
 def _url(host: str, path: str) -> str:
     return f"{host.rstrip('/')}{path}"
 
 
-def post_json(host: str, path: str, payload: Dict[str, Any],
-              timeout: int = 120) -> Dict[str, Any]:
+def post_json(
+    host: str, path: str, payload: Dict[str, Any], timeout: int = 120
+) -> Dict[str, Any]:
     """POST JSON → JSON。网络/解析异常向上抛, 由调用方决定降级。"""
     req = urllib.request.Request(
         _url(host, path),
@@ -50,8 +52,9 @@ def get_json(host: str, path: str, timeout: int = 30) -> Dict[str, Any]:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def _stream_lines(host: str, path: str, payload: Dict[str, Any],
-                  timeout: int = 120) -> List[Dict[str, Any]]:
+def _stream_lines(
+    host: str, path: str, payload: Dict[str, Any], timeout: int = 120
+) -> List[Dict[str, Any]]:
     """流式 POST, 逐行解析 JSON 对象 (Ollama NDJSON)。异常向上抛。"""
     req = urllib.request.Request(
         _url(host, path),
@@ -76,6 +79,7 @@ def _stream_lines(host: str, path: str, payload: Dict[str, Any],
 # 健康检查
 # ═══════════════════════════════════════════
 
+
 def status(host: str) -> Dict[str, Any]:
     """Ollama 健康检查 (GET /api/tags)。失败自带降级: {"ok": False, "error": ...}"""
     try:
@@ -90,9 +94,14 @@ def status(host: str) -> Dict[str, Any]:
 # 向量嵌入 (新版 /api/embed, 支持批处理)
 # ═══════════════════════════════════════════
 
-def embed(host: str, model: str, texts: List[str], timeout: int = 60) -> List[List[float]]:
+
+def embed(
+    host: str, model: str, texts: List[str], timeout: int = 60
+) -> List[List[float]]:
     """批量向量化, 返回 embeddings 列表 (与 texts 顺序一致)。异常向上抛。"""
-    resp = post_json(host, "/api/embed", {"model": model, "input": texts}, timeout=timeout)
+    resp = post_json(
+        host, "/api/embed", {"model": model, "input": texts}, timeout=timeout
+    )
     return resp.get("embeddings", [])
 
 
@@ -100,9 +109,17 @@ def embed(host: str, model: str, texts: List[str], timeout: int = 60) -> List[Li
 # 补全式生成 (/api/generate, 非流式)
 # ═══════════════════════════════════════════
 
-def generate(host: str, model: str, prompt: str, system: str = "",
-             temperature: float = 0.3, max_tokens: int = 512,
-             timeout: int = 120, think: Optional[bool] = None) -> str:
+
+def generate(
+    host: str,
+    model: str,
+    prompt: str,
+    system: str = "",
+    temperature: float = 0.3,
+    max_tokens: int = 512,
+    timeout: int = 120,
+    think: Optional[bool] = None,
+) -> str:
     """补全式生成, 返回正文文本。异常向上抛。
 
     think: qwen3 等思考模型的控制开关; None=不控制, False=关闭思考
@@ -126,9 +143,15 @@ def generate(host: str, model: str, prompt: str, system: str = "",
     return out
 
 
-def generate_stream(host: str, model: str, prompt: str, system: str = "",
-                    temperature: float = 0.7, max_tokens: int = 2048,
-                    timeout: int = 120) -> str:
+def generate_stream(
+    host: str,
+    model: str,
+    prompt: str,
+    system: str = "",
+    temperature: float = 0.7,
+    max_tokens: int = 2048,
+    timeout: int = 120,
+) -> str:
     """流式补全生成 (逐行 NDJSON), 拼接 response 返回。异常向上抛。"""
     payload: Dict[str, Any] = {
         "model": model,
@@ -151,9 +174,16 @@ def generate_stream(host: str, model: str, prompt: str, system: str = "",
 # 聊天式生成 (/api/chat)
 # ═══════════════════════════════════════════
 
-def chat(host: str, model: str, messages: List[Dict[str, Any]],
-         temperature: float = 0.2, max_tokens: int = 512,
-         timeout: int = 180, keep_alive: str = "30m") -> Dict[str, Any]:
+
+def chat(
+    host: str,
+    model: str,
+    messages: List[Dict[str, Any]],
+    temperature: float = 0.2,
+    max_tokens: int = 512,
+    timeout: int = 180,
+    keep_alive: str = "30m",
+) -> Dict[str, Any]:
     """聊天式生成 (非流式), 返回 Ollama 原始 JSON
     (含 message.content / prompt_eval_count / eval_count)。异常向上抛。
     """
@@ -167,9 +197,14 @@ def chat(host: str, model: str, messages: List[Dict[str, Any]],
     return post_json(host, "/api/chat", payload, timeout=timeout)
 
 
-def chat_stream(host: str, model: str, messages: List[Dict[str, Any]],
-                temperature: float = 0.7, max_tokens: int = 2048,
-                timeout: int = 120) -> str:
+def chat_stream(
+    host: str,
+    model: str,
+    messages: List[Dict[str, Any]],
+    temperature: float = 0.7,
+    max_tokens: int = 2048,
+    timeout: int = 120,
+) -> str:
     """流式聊天 (逐行 NDJSON), 拼接 message.content 返回。异常向上抛。"""
     payload: Dict[str, Any] = {
         "model": model,
@@ -192,6 +227,7 @@ def chat_stream(host: str, model: str, messages: List[Dict[str, Any]],
 # 模型管理
 # ═══════════════════════════════════════════
 
+
 def list_models(host: str, timeout: int = 30) -> List[str]:
     """列出已安装模型名。异常向上抛。"""
     tags = get_json(host, "/api/tags", timeout=timeout)
@@ -200,7 +236,9 @@ def list_models(host: str, timeout: int = 30) -> List[str]:
 
 def pull_model(host: str, model: str, timeout: int = 300) -> Dict[str, Any]:
     """拉取模型 (POST /api/pull)。异常向上抛。"""
-    return post_json(host, "/api/pull", {"model": model, "stream": False}, timeout=timeout)
+    return post_json(
+        host, "/api/pull", {"model": model, "stream": False}, timeout=timeout
+    )
 
 
 def delete_model(host: str, model: str, timeout: int = 60) -> Dict[str, Any]:
