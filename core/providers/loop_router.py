@@ -58,12 +58,18 @@ class TieredLoopProvider:
     def _pick(self, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         if not self._enabled:
             return self._primary
-        messages = kwargs.get("messages") or (args[0] if args and isinstance(args[0], list) else None)
+        messages = kwargs.get("messages") or (
+            args[0] if args and isinstance(args[0], list) else None
+        )
         if not isinstance(messages, list) or not messages:
             return self._primary
-        size = sum(len(str(m.get("content", ""))) for m in messages if isinstance(m, dict))
+        size = sum(
+            len(str(m.get("content", ""))) for m in messages if isinstance(m, dict)
+        )
         has_turn = any(
-            m.get("role") in {"assistant", "tool"} for m in messages if isinstance(m, dict)
+            m.get("role") in {"assistant", "tool"}
+            for m in messages
+            if isinstance(m, dict)
         )
         if not has_turn and size <= self._light_max_chars:
             return self._light
