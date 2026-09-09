@@ -12,6 +12,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 import json_repair
 from loguru import logger
@@ -86,6 +87,17 @@ _DEFAULT_REQUESTY_HEADERS = {
     "HTTP-Referer": "https://github.com/HKUDS/DeepCode",
     "X-Title": "DeepCode",
 }
+_DEFAULT_AIMLAPI_HEADERS = {
+    "HTTP-Referer": "https://github.com/HKUDS/DeepCode",
+    "X-Title": "DeepCode",
+    "X-AIMLAPI-Source": "agent/deepcode",
+    "X-AIMLAPI-Partner-ID": "part_CxcOejScJ3hI0O2cExWchiBy",
+}
+# Hosts that are actually AI/ML API. Attribution is keyed on the resolved
+# request origin rather than on the selected template, so a user who repoints
+# the ``aimlapi`` template at a proxy of their own does not hand a third party
+# DeepCode's partner identity.
+_AIMLAPI_HOST_SUFFIX = ".aimlapi.com"
 # Per-model thinking / reasoning quirks now live declaratively in
 # ``core.providers.model_compat`` (resolved via ``resolve_model_compat``);
 # this module only assembles requests from the resolved value.
@@ -178,6 +190,22 @@ def _uses_requesty_attribution(
     return bool(api_base and "requesty" in api_base.lower())
 
 
+def _uses_aimlapi_attribution(
+    spec: "ProviderSpec | None", api_base: str | None
+) -> bool:
+    """Apply DeepCode attribution headers to AI/ML API requests by default.
+
+    Stricter than the two helpers above: a substring test would also fire for
+    a gateway that merely *fronts* AI/ML API, so the host of the resolved base
+    URL has to be ours. The template name only decides the case where no base
+    URL was resolved at all.
+    """
+    if not api_base:
+        return bool(spec and spec.name == "aimlapi")
+    host = (urlparse(api_base.strip()).hostname or "").lower()
+    return host == "aimlapi.com" or host.endswith(_AIMLAPI_HOST_SUFFIX)
+
+
 _RESPONSES_FAILURE_THRESHOLD = 3
 _RESPONSES_PROBE_INTERVAL_S = 300  # 5 minutes
 
@@ -266,6 +294,8 @@ class OpenAICompatProvider(LLMProvider):
             default_headers.update(_DEFAULT_OPENROUTER_HEADERS)
         if _uses_requesty_attribution(spec, effective_base):
             default_headers.update(_DEFAULT_REQUESTY_HEADERS)
+        if _uses_aimlapi_attribution(spec, effective_base):
+            default_headers.update(_DEFAULT_AIMLAPI_HEADERS)
         if extra_headers:
             default_headers.update(extra_headers)
         if auth_mode == "none":
