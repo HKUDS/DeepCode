@@ -32,7 +32,7 @@ from typing import Any
 # 注意：这是降级名单，不是能力白名单 —— 名单命中即默认关闭 fn_call。
 FN_CALL_DISABLED_MODEL_TOKENS: tuple[str, ...] = (
     "deepseek-reasoner",
-    "o1-",   # o1 系列（部分端点不支持 tool_choice）
+    "o1-",  # o1 系列（部分端点不支持 tool_choice）
     "o3-",
     "o4-",
     "reasoner",
@@ -120,7 +120,9 @@ def to_non_function_call_messages(
             clean.pop("tool_calls", None)
             calls_text = _tool_calls_to_text(calls)
             text = str(clean.get("content") or "")
-            clean["content"] = (text + "\n\n" + calls_text).strip() if text else calls_text
+            clean["content"] = (
+                (text + "\n\n" + calls_text).strip() if text else calls_text
+            )
             result.append(clean)
             continue
         if role == "tool":
