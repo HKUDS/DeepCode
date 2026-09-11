@@ -366,8 +366,7 @@ async def execute_single_command(
             return [
                 types.TextContent(
                     type="text",
-                    text=f"🚫 Command BLOCKED: {command}
-Reason: {blocked_reason}"
+                    text=f"🚫 Command BLOCKED: {command}\nReason: {blocked_reason}",
                 )
             ]
 
