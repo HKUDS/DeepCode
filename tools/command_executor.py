@@ -15,6 +15,7 @@ from typing import Dict, List, Optional, Tuple
 
 from core.platform_compat import configure_utf8_stdio, subprocess_env
 from core.harness.sandbox import build_exec_command
+from core.harness.command_guard import screen_command
 
 configure_utf8_stdio()
 
@@ -270,6 +271,14 @@ async def execute_command_batch(
         cwd_path = Path(working_directory)
 
         for i, command in enumerate(command_lines, 1):
+            # Defense-in-depth: screen obviously destructive commands
+            blocked_reason = screen_command(command)
+            if blocked_reason is not None:
+                results.append(f"🚫 Command {i} BLOCKED: {command}")
+                results.append(f"   Reason: {blocked_reason}")
+                stats["failed"] += 1
+                continue
+
             native = _try_native_execute(command, cwd_path)
             if native is not None:
                 rc, out, err = native
@@ -351,6 +360,16 @@ async def execute_single_command(
         执行结果 / Execution result
     """
     try:
+        # Defense-in-depth: screen obviously destructive commands
+        blocked_reason = screen_command(command)
+        if blocked_reason is not None:
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"🚫 Command BLOCKED: {command}\nReason: {blocked_reason}",
+                )
+            ]
+
         cwd_path = Path(working_directory)
         cwd_path.mkdir(parents=True, exist_ok=True)
 
