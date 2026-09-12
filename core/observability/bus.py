@@ -16,23 +16,39 @@ The bus is intentionally module-level and idempotent. The first call to
 LLM and MCP records are emitted via :func:`log_llm_call` /
 :func:`log_mcp_call` directly (they bypass loguru because their schemas
 are richer and they need their own files).
+
+``llm.jsonl`` is also the home of the append-only transparency log (P1-1):
+every :class:`LLMLogRecord` we append is linked into a hash chain
+(``prev_hash`` -> ``entry_hash``) *at write time* — the link depends on the
+target file, so it cannot live in the record constructor. MCP and system
+records keep their existing formats and are deliberately **not** chained:
+the forensic question is about credential flow to the model endpoint, and
+mixing three schemas into one chain would make the verifier's line numbers
+meaningless. Telemetry stays local (console + JSONL sinks only); do not add
+a network exporter here — ``MCPLogRecord.arguments_preview`` can contain
+credentials (see the P1-1 note in ``docs/ROUTER_SUPPLY_CHAIN_HARDENING.md``).
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 import threading
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO
 
 from loguru import logger as _loguru_logger
 
-
 from core.observability.context import current_session_id, current_task_id
-from core.observability.records import LLMLogRecord, MCPLogRecord, truncate
+from core.observability.records import (
+    LLMLogRecord,
+    MCPLogRecord,
+    sha256_hex,
+    truncate,
+)
 
 if TYPE_CHECKING:
     from core.config import LoggerConfig
@@ -87,6 +103,18 @@ _GLOBAL_LOG_DIR_FALLBACK = Path("logs")
 _LLM_PREVIEW_CHARS = 2000
 _MCP_PREVIEW_CHARS = 2000
 
+# --- transparency-log chain state (P1-1) -----------------------------------
+# Keyed by *resolved* log path, not by task_id: two tasks can share a
+# fallback file (both unbound -> ``logs/llm.jsonl``) and splitting the chain
+# by task id would hand out the same predecessor hash twice. The value is the
+# ``entry_hash`` of the last line this process appended, or the hash recovered
+# from the file tail the first time we touch a file after a restart.
+_CHAIN_LOCK = threading.Lock()
+_CHAIN_TAIL: dict[str, str] = {}
+# Backward-scan chunk for tail recovery. Small enough not to buffer a big log,
+# large enough that the common case (one short line) is found in one read.
+_CHAIN_SCAN_CHUNK = 64 * 1024
+
 
 # ---------------------------------------------------------------------------
 # Public: setup / shutdown
@@ -94,7 +122,7 @@ _MCP_PREVIEW_CHARS = 2000
 
 
 def setup_logging(
-    config: "LoggerConfig | None" = None,
+    config: LoggerConfig | None = None,
     *,
     workspace_root: Path | None = None,
     force: bool = False,
@@ -253,12 +281,30 @@ def log_llm_call(
     reasoning: Any = None,
     tool_calls: list[dict[str, Any]] | None = None,
     error: str | None = None,
+    endpoint_host: str | None = None,
+    endpoint_class: str | None = None,
+    request_nonce: str | None = None,
+    response_sha256: str | None = None,
+    tool_calls_sha256: str | None = None,
 ) -> None:
     """Append an :class:`LLMLogRecord` to the active task's ``llm.jsonl``.
 
     Falls back to the global ``logs/llm.jsonl`` when no task is bound
     (e.g. process-startup probes).
+
+    The extra keyword arguments are the transparency-log fields. They are
+    optional so every existing caller keeps working unchanged; callers that
+    know the serving endpoint should pass ``endpoint_host`` /
+    ``endpoint_class``, which is what turns the log into a credential-exposure
+    report rather than a wall of provider names.
     """
+    # Digest the FULL response and tool calls before truncation. Hashing the
+    # previews instead would let a malicious router rewrite everything past
+    # the 2000-char cap without changing a single forensic fingerprint.
+    if response_sha256 is None:
+        response_sha256 = sha256_hex(response)
+    if tool_calls_sha256 is None:
+        tool_calls_sha256 = sha256_hex(tool_calls)
     record = LLMLogRecord.make(
         task_id=current_task_id(),
         session_id=current_session_id(),
@@ -274,8 +320,13 @@ def log_llm_call(
         reasoning_preview=truncate(reasoning, _LLM_PREVIEW_CHARS),
         tool_calls=tool_calls,
         error=truncate(error, _LLM_PREVIEW_CHARS),
+        endpoint_host=endpoint_host,
+        endpoint_class=endpoint_class,
+        request_nonce=request_nonce,
+        response_sha256=response_sha256,
+        tool_calls_sha256=tool_calls_sha256,
     )
-    _write_jsonl(_resolve_channel_path(record.task_id, "llm.jsonl"), record.to_jsonl())
+    _append_llm_record(_resolve_channel_path(record.task_id, "llm.jsonl"), record)
 
 
 def log_mcp_call(
@@ -341,7 +392,7 @@ def _serialize_record(record: dict[str, Any]) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "timestamp": record["time"].isoformat()
         if record.get("time")
-        else datetime.utcnow().isoformat(),
+        else datetime.now(UTC).isoformat(),
         "level": record["level"].name if record.get("level") else "INFO",
         "logger": record.get("name") or "",
         "function": record.get("function") or "",
@@ -379,7 +430,7 @@ def _make_global_sink(global_dir: str):
             return
         ts = record.get("time")
         date_segment = (
-            ts.strftime("%Y%m%d") if ts else datetime.utcnow().strftime("%Y%m%d")
+            ts.strftime("%Y%m%d") if ts else datetime.now(UTC).strftime("%Y%m%d")
         )
         path = Path(global_dir) / f"server-{date_segment}.jsonl"
         payload = _serialize_record(record)
@@ -419,8 +470,157 @@ def _resolve_channel_path(task_id: str | None, filename: str) -> Path:
     return fallback / filename
 
 
-def _write_jsonl(path: Path, line: str) -> None:
-    """Append a single JSONL line to ``path``, creating parents on demand."""
+# ---------------------------------------------------------------------------
+# Transparency-log hash chain (LLM records only)
+# ---------------------------------------------------------------------------
+
+
+def reset_transparency_chain() -> None:
+    """Forget the cached chain tails so the next append re-reads the file.
+
+    Needed by tests and by long-lived processes that rotate or truncate the
+    log file underneath us; without it the next entry would chain onto a
+    predecessor that no longer exists on disk.
+    """
+    with _CHAIN_LOCK:
+        _CHAIN_TAIL.clear()
+
+
+def _entry_hash_from_line(raw: bytes) -> str | None:
+    """Return a line's ``entry_hash``, or ``None`` if the line is unusable.
+
+    One bad line (crash mid-write, partial flush) must never stop logging,
+    and must never be silently mistaken for "no chain here".
+    """
+    try:
+        parsed = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    digest = parsed.get("entry_hash")
+    return digest if isinstance(digest, str) and digest else None
+
+
+def _recover_tail_entry_hash(path: Path) -> str:
+    """Recover ``prev_hash`` for a file we are about to append to.
+
+    Scans *backwards* in chunks rather than reading the whole file: the line
+    we want is the last one, and a transparency log can reach tens of MB. A
+    corrupt or partial tail is skipped (we walk further back) instead of
+    raising — logging survives it, and the verifier is the tool whose job is
+    to complain about the resulting gap. Returns ``""`` for a missing, empty,
+    or entirely unparseable file, which is exactly the genesis predecessor.
+    """
+    try:
+        with path.open("rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            pos = fh.tell()
+            buffer = b""
+            while pos > 0:
+                read = min(_CHAIN_SCAN_CHUNK, pos)
+                pos -= read
+                fh.seek(pos)
+                buffer = fh.read(read) + buffer
+                # While unread bytes remain, buffer[0] may be a partial line;
+                # hold it back for the next (earlier) chunk instead of parsing.
+                lines = buffer.split(b"\n")
+                tail = lines[1:] if pos > 0 else lines
+                for raw in reversed(tail):
+                    if not raw.strip():
+                        continue
+                    digest = _entry_hash_from_line(raw)
+                    if digest is not None:
+                        return digest
+                buffer = lines[0]
+            return ""
+    except OSError:
+        # Unreadable file: start a fresh chain rather than break logging.
+        return ""
+
+
+def transparency_log_enabled() -> bool:
+    """Whether LLM log lines carry a hash chain. On unless disabled.
+
+    On by default because the chain's whole value is forensic and it is worth
+    nothing retroactively: an operator who discovers a suspect relay cannot go
+    back and chain the sessions that already ran. The cost is two short hex
+    fields per line.
+
+    The escape hatch exists for a real limitation rather than for tidiness.
+    ``_append_llm_record`` serialises threads within one process but not
+    separate processes, so two processes appending to the same ``llm.jsonl``
+    will legitimately fork the chain and the verifier will report a fork that
+    is not an attack. A deployment that runs several writers against one log
+    file should set ``DEEPCODE_TRANSPARENCY_LOG=0``, or give each writer its
+    own task directory, rather than learn to ignore the verifier.
+    """
+
+    return os.environ.get("DEEPCODE_TRANSPARENCY_LOG", "").strip().lower() not in {
+        "0",
+        "false",
+        "off",
+        "no",
+    }
+
+
+def _append_llm_record(path: Path, record: LLMLogRecord) -> None:
+    """Append an LLM record, extending the per-file hash chain.
+
+    The lock spans recover + hash + write, so two threads cannot chain onto
+    the same predecessor and fork the chain. It does *not* serialise separate
+    processes: two processes appending concurrently will fork it, and the
+    verifier will report that fork. That is the honest outcome — a claim of
+    cross-process safety would need file locking we do not have.
+    """
+    if not transparency_log_enabled():
+        _write_jsonl(path, record.to_jsonl())
+        return
+    try:
+        key = str(path.resolve())
+    except OSError:
+        key = str(path)
+    with _CHAIN_LOCK:
+        if key not in _CHAIN_TAIL:
+            _CHAIN_TAIL[key] = _recover_tail_entry_hash(path)
+        record.apply_chain(_CHAIN_TAIL[key])
+        if _append_chained_jsonl(path, record.to_jsonl()):
+            # Only advance on a durable append: chaining past a failed write
+            # would make the next entry reference a hash nobody can find.
+            _CHAIN_TAIL[key] = record.entry_hash or _CHAIN_TAIL[key]
+
+
+def _append_chained_jsonl(path: Path, line: str) -> bool:
+    """Append one chained line, first repairing an unterminated tail.
+
+    ``_recover_tail_entry_hash`` deliberately skips a partial line left by a
+    crash, but a bare append would then glue the new entry onto it — one
+    unparseable line holding two records, i.e. the *new* entry silently
+    loses its verifiability. Writing the missing separator keeps the damage
+    confined to the line that was already broken.
+    """
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a+b") as fh:
+            fh.seek(0, os.SEEK_END)
+            if fh.tell() > 0:
+                fh.seek(-1, os.SEEK_END)
+                if fh.read(1) != b"\n":
+                    fh.write(b"\n")
+            fh.write(line.encode("utf-8"))
+            fh.write(b"\n")
+    except OSError:
+        # Logging must never break the workflow. Swallow filesystem errors.
+        return False
+    return True
+
+
+def _write_jsonl(path: Path, line: str) -> bool:
+    """Append a single JSONL line to ``path``, creating parents on demand.
+
+    Returns whether the append succeeded; callers that maintain state across
+    appends (the hash chain) must not assume it did.
+    """
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as fh:
@@ -428,7 +628,8 @@ def _write_jsonl(path: Path, line: str) -> None:
             fh.write("\n")
     except OSError:
         # Logging must never break the workflow. Swallow filesystem errors.
-        pass
+        return False
+    return True
 
 
 def _resolve_global_log_dir(workspace_root: Path | None) -> Path:
@@ -441,6 +642,7 @@ __all__ = [
     "log_llm_call",
     "log_mcp_call",
     "register_task_dir",
+    "reset_transparency_chain",
     "set_task_dir",
     "setup_logging",
     "shutdown_logging",
