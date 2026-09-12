@@ -27,6 +27,7 @@ from core.agent_runtime.processes import (
     subprocess_group_kwargs,
     terminate_process_tree,
 )
+from core.harness.env_sanitize import scrubbed_parent_env
 from core.harness.hooks.discovery import Handler
 
 
@@ -66,7 +67,11 @@ async def run_command(handler: Handler, payload_json: str, cwd: str) -> CommandR
     """Run one hook command, feeding ``payload_json`` on stdin, with a timeout."""
     started = time.monotonic()
     argv = [*_default_shell(), handler.command]
-    env = {**os.environ, **handler.env}
+    # Credential-shaped variables are not handed to hook commands. A hook is
+    # workspace-supplied code, so the ambient environment is not its business;
+    # a hook that genuinely needs one declares it in ``handler.env``, which
+    # merges after the scrub.
+    env = scrubbed_parent_env(handler.env)
     try:
         proc = await asyncio.create_subprocess_exec(
             *argv,

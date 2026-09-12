@@ -26,8 +26,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
-import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -44,7 +42,15 @@ from core.config import home_config_path
 # ``PATH``, ``HOME``, locale, and proxy variables survive, so the CLI runs
 # normally and reads its own credential store; a deliberately forwarded
 # secret goes through the config env layer, which merges after the scrub.
-SENSITIVE_ENV_PATTERN = re.compile(r"KEY|PASSWORD|SECRET|TOKEN", re.IGNORECASE)
+#
+# The implementation moved to :mod:`core.harness.env_sanitize` so the shell,
+# hook, code-mode, and terminal call sites share one pattern instead of
+# growing their own. Both names stay importable from here for callers (and
+# tests) that already reference this module.
+from core.harness.env_sanitize import (
+    SENSITIVE_ENV_PATTERN,
+    scrubbed_parent_env,
+)
 
 # Wall-clock budget for one external run, unless config overrides it. Long
 # enough for a real subtask; short enough that a hung CLI frees its slot.
@@ -206,20 +212,6 @@ def backend_settings(name: str) -> dict[str, Any]:
     return block if isinstance(block, dict) else {}
 
 
-def scrubbed_parent_env(
-    extra_env: dict[str, str] | None = None,
-) -> dict[str, str]:
-    """The ambient environment minus credential-shaped names."""
-    env = {
-        key: value
-        for key, value in os.environ.items()
-        if not SENSITIVE_ENV_PATTERN.search(key)
-    }
-    if extra_env:
-        env.update(extra_env)
-    return env
-
-
 async def run_external_subagent(
     backend_name: str,
     task: str,
@@ -293,6 +285,7 @@ def _stderr_tail(stderr: bytes | None) -> str:
 
 __all__ = [
     "BACKENDS",
+    "SENSITIVE_ENV_PATTERN",
     "ExternalBackendError",
     "backend_settings",
     "resolve_backend",
