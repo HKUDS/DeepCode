@@ -23,6 +23,7 @@ from core.domain.execution_security import (
 from core.harness.permissions import PermissionDecision, PermissionMode
 from core.harness.policy import (
     build_permission_engine,
+    describe_security_posture,
     resolve_execution_security_profile,
     resolve_permission_mode,
 )
@@ -211,3 +212,40 @@ def test_invalid_config_action_raises(bad_action):
         build_permission_engine(
             _cfg(permissions={"write_file": {"*": bad_action}}), cwd="/w"
         )
+
+
+# --- posture reporting ------------------------------------------------------
+
+
+def test_posture_reports_full_auto_as_unattended():
+    """The one fact a reader needs: will anyone be asked before a tool runs?
+
+    ``full_auto`` short-circuits the engine with an unconditional ALLOW while
+    still carrying an ``on_request`` approval policy, so a report that trusted
+    the policy field alone would label the most permissive configuration as
+    gated.
+    """
+
+    profile = resolve_execution_security_profile(
+        None, default_mode=PermissionMode.FULL_AUTO
+    )
+    posture = describe_security_posture(profile, sandbox_backend="job")
+    assert posture["unattended"] is True
+    assert posture["permission_mode"] == "full_auto"
+    assert posture["sandbox_backend"] == "job"
+
+
+@pytest.mark.parametrize("mode", [PermissionMode.DEFAULT, PermissionMode.PLAN])
+def test_posture_reports_gated_modes_as_attended(mode):
+    profile = resolve_execution_security_profile(None, default_mode=mode)
+    assert describe_security_posture(profile)["unattended"] is False
+
+
+def test_posture_reports_full_access_preset_and_counts_rules():
+    profile = resolve_execution_security_profile(
+        _cfg(permissions={"bash": {"git push *": "ask"}})
+    )
+    posture = describe_security_posture(profile)
+    assert posture["permission_rule_count"] == len(profile.permission_rules)
+    assert posture["access_preset"] in {"legacy", "full_access", "ask", "read_only"}
+    assert posture["sandbox_backend"] == "unknown"
