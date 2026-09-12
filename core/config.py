@@ -43,6 +43,12 @@ from pydantic_settings import BaseSettings
 from core.agent_runtime.tools.mcp import MCPServerConfig
 from core.mcp.models import McpServerDefinition
 from core.providers.base import GenerationSettings, LLMProvider
+from core.providers.egress import (
+    WARN,
+    describe_denial,
+    evaluate_provider_egress,
+    resolve_egress_policy,
+)
 from core.providers.protocol_config import (
     ProviderCompat,
     ProviderProtocol,
@@ -265,6 +271,42 @@ class ConnectionProfileConfig(_Base):
         return self
 
 
+class EgressPolicyConfig(_Base):
+    """Optional model-egress policy for LLM provider endpoints (P0-1).
+
+    Why: ``apiBase`` *is* the trust boundary. Whoever terminates TLS for an
+    endpoint reads every prompt and tool result in plaintext and can rewrite
+    the tool calls in the response, so the same hostname policy that already
+    guards WebFetch is applied to model traffic.
+
+    Accepted keys (camelCase; snake_case also accepted):
+
+    - ``allowedDomains``: list of domains. Empty means "no allow-list
+      configured" — every host is allowed unless blocked. That is the existing
+      meaning of an empty allow-list in ``core/network/hostnames.py`` and is
+      preserved so an unconfigured install keeps working after upgrade.
+    - ``blockedDomains``: list of domains. Deny wins over allow; matching is
+      exact-or-subdomain.
+    - ``mode``: ``enforce`` (default) or ``warn``. ``warn`` evaluates and logs
+      but never blocks, so the policy can be rolled out against a live setup.
+
+    Environment overrides, taken as a union with the config lists (block still
+    wins, and an env list cannot un-block what the config blocks):
+
+    - ``DEEPCODE_EGRESS_ALLOW_DOMAINS`` — comma-separated.
+    - ``DEEPCODE_EGRESS_BLOCK_DOMAINS`` — comma-separated.
+    - ``DEEPCODE_EGRESS_MODE`` — ``enforce`` (default) or ``warn``.
+
+    A project-level ``deepcode_config.json`` cannot loosen this: the project
+    layer (``_project_runtime_layer``) drops every provider routing field
+    except a literal ``apiKey``, so ``providers.egress`` stays user-owned.
+    """
+
+    allowed_domains: list[str] = Field(default_factory=list)
+    blocked_domains: list[str] = Field(default_factory=list)
+    mode: Literal["enforce", "warn"] | None = None
+
+
 class ProvidersConfig(_Base):
     """Per-provider connection blocks. Add new providers by extending here
     and adding the matching :class:`~core.providers.registry.ProviderSpec`.
@@ -284,6 +326,9 @@ class ProvidersConfig(_Base):
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     ollama: ProviderConfig = Field(default_factory=ProviderConfig)
     profiles: dict[str, ConnectionProfileConfig] = Field(default_factory=dict)
+    # Not a provider block: resolves by name from the registry, never
+    # `getattr(providers, spec.name)`, so it cannot shadow a provider entry.
+    egress: EgressPolicyConfig = Field(default_factory=EgressPolicyConfig)
 
 
 # ---------------------------------------------------------------------------
@@ -932,6 +977,56 @@ def _resolve_spec_for_phase(
     return matched_cfg, spec, chosen_model, settings
 
 
+def _enforce_provider_egress(
+    config: DeepCodeConfig,
+    spec: ProviderSpec,
+    api_base: str | None,
+    *,
+    phase: str,
+) -> None:
+    """Apply the model-egress policy to one resolved provider endpoint (P0-1).
+
+    Called exactly once per provider construction, so it must stay cheap: the
+    decision is a string comparison, not a request-time cost. Policy lives in
+    ``providers.egress`` and the ``DEEPCODE_EGRESS_*`` env vars; see
+    :class:`EgressPolicyConfig`.
+
+    ``enforce`` raises :class:`ConfigError` (the convention of this module for
+    user-fixable configuration problems, and still a ``ValueError`` for legacy
+    handlers). ``warn`` logs the same message and continues, which is what lets
+    an operator measure a live setup before turning the gate on.
+    """
+
+    policy = resolve_egress_policy(config)
+    endpoint_class = spec.resolve_endpoint_class(api_base)
+    decision = evaluate_provider_egress(
+        api_base,
+        endpoint_class=endpoint_class,
+        allowed_domains=policy.allowed_domains,
+        blocked_domains=policy.blocked_domains,
+    )
+    if decision.allowed:
+        logger.trace(
+            "Model egress ok: provider={} host={} endpoint_class={}",
+            spec.name,
+            decision.host,
+            decision.endpoint_class,
+        )
+        return
+
+    message = describe_denial(
+        provider=spec.name,
+        phase=phase,
+        decision=decision,
+        policy=policy,
+        api_base=api_base,
+    )
+    if policy.mode == WARN:
+        logger.warning(message)
+        return
+    raise ConfigError(message)
+
+
 def make_llm_provider(
     config: DeepCodeConfig,
     *,
@@ -945,6 +1040,10 @@ def make_llm_provider(
     :class:`~core.providers.registry.ProviderSpec` decides which backend
     (``openai_compat``, ``anthropic``, ...) is instantiated. ``GenerationSettings``
     are derived from the resolved phase settings.
+
+    The resolved endpoint passes the model-egress policy once, here — this
+    function is the single construction point for LLM providers, so gating it
+    covers every backend without teaching each SDK client about policy.
     """
     provider_cfg, spec, chosen_model, settings = _resolve_spec_for_phase(
         config, phase, provider_override=provider_name, model_override=model
@@ -974,6 +1073,9 @@ def make_llm_provider(
         )
 
     effective_base = api_base or spec.default_api_base or None
+    # P0-1: one egress decision per provider construction. Placed after
+    # `effective_base` so the spec's own default endpoint is judged too.
+    _enforce_provider_egress(config, spec, effective_base, phase=phase)
 
     if backend == "anthropic":
         from core.providers.anthropic import AnthropicProvider
@@ -1021,6 +1123,7 @@ __all__ = [
     "ManualModelConfig",
     "DeepCodeConfig",
     "DocumentSegmentationConfig",
+    "EgressPolicyConfig",
     "LLMLoggerConfig",
     "LoggerConfig",
     "LoggerGlobalFile",
