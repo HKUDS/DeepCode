@@ -29,6 +29,7 @@ from core.agent_runtime.processes import (
     terminate_process_tree,
 )
 from core.agent_runtime.tools.base import Tool, tool_parameters
+from core.harness.env_sanitize import scrubbed_parent_env
 from core.harness.sandbox import build_exec_command
 
 _RUNNER = str(Path(__file__).with_name("_runner.py"))
@@ -169,7 +170,10 @@ class CodeModeTool(Tool):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self._workspace,
-                env={**os.environ},
+                # The code-mode runtime executes model-authored Python, which
+                # can read the environment. Hand it a cred- scrubbed one so a
+                # stray os.environ dump cannot become tool output.
+                env=dict(scrubbed_parent_env()),
                 limit=_STREAM_LIMIT,
                 **subprocess_group_kwargs(),
             )

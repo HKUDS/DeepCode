@@ -5,13 +5,30 @@ Runs a shell command inside the P1 workspace sandbox (reusing
 Large output is capped and spilled to a temp file with an inline preview, so
 a chatty command never blows the context. A small declarative preflight
 refuses known-interactive scaffolds that would otherwise hang the agent.
+
+Two screens run before the command reaches the shell, and they exist because
+the command text is not necessarily the model's own: an intermediary between
+us and the provider can rewrite a tool call on its way back. ``screen_all``
+(:mod:`core.harness.command_guard`) catches destructive argv, remote scripts
+piped into an interpreter, and one-edit package names. The child also gets a
+credential-scrubbed environment (:mod:`core.harness.env_sanitize`) so a plain
+``env`` no longer copies every provider key into the transcript — and from
+there into the next request the model sends, where a relay reads it in
+plaintext.
+
+Neither screen is the security boundary. The sandbox is. Both are cheap first
+passes that fail closed on shapes we can recognise, and both are waivable on
+purpose (``DEEPCODE_ALLOW_REMOTE_SCRIPT``, ``DEEPCODE_BASH_FULL_ENV``,
+``DEEPCODE_COMMAND_SCREEN``).
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
+import re
 import tempfile
+from pathlib import Path
 from typing import Any
 
 from core.agent_runtime.processes import (
@@ -19,6 +36,8 @@ from core.agent_runtime.processes import (
     terminate_process_tree,
 )
 from core.agent_runtime.tools.base import Tool, ToolResult, tool_parameters
+from core.harness.command_guard import screen_all
+from core.harness.env_sanitize import scrubbed_parent_env
 from core.harness.sandbox import build_exec_command
 
 _MAX_OUTPUT_CHARS = 30_000
@@ -48,6 +67,68 @@ def _preflight(command: str) -> str | None:
     return None
 
 
+# Manifest files worth reading for declared dependency names. Parsing is
+# deliberately shallow: we only need names to compare against, and a missed
+# name only costs us a weaker typosquat check — it never blocks anything.
+_REQUIREMENT_LINE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
+_PYPROJECT_DEP = re.compile(r"[\"']([A-Za-z0-9][A-Za-z0-9._-]*)")
+_MAX_MANIFEST_BYTES = 200_000
+
+
+def _declared_packages(workspace: str) -> frozenset[str]:
+    """Dependency names declared by the workspace, best effort.
+
+    Used to spot a package that is one edit away from something the project
+    already depends on. Reading the real manifest beats any built-in list: the
+    confusable that matters is the one *this* project would plausibly install.
+    """
+
+    names: set[str] = set()
+    root = Path(workspace)
+
+    for candidate in sorted(root.glob("requirements*.txt"))[:5]:
+        text = _read_manifest(candidate)
+        for line in text.splitlines():
+            line = line.split("#", 1)[0]
+            match = _REQUIREMENT_LINE.match(line)
+            if match:
+                names.add(match.group(1))
+
+    text = _read_manifest(root / "package.json")
+    if text:
+        try:
+            import json
+
+            payload = json.loads(text)
+        except ValueError:
+            payload = None
+        if isinstance(payload, dict):
+            for key in ("dependencies", "devDependencies"):
+                block = payload.get(key)
+                if isinstance(block, dict):
+                    names.update(str(name) for name in block)
+
+    text = _read_manifest(root / "pyproject.toml")
+    if text:
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith(("dependencies", '"', "'", "[")) or "=" in stripped:
+                match = _PYPROJECT_DEP.search(line)
+                if match:
+                    names.add(match.group(1))
+
+    return frozenset(name for name in names if name)
+
+
+def _read_manifest(path: Path) -> str:
+    try:
+        if not path.is_file() or path.stat().st_size > _MAX_MANIFEST_BYTES:
+            return ""
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
 @tool_parameters(
     {
         "type": "object",
@@ -67,6 +148,14 @@ class BashTool(Tool):
     def __init__(self, workspace: str, *, sandbox_enabled: bool | None = None):
         self._workspace = str(workspace)
         self._sandbox_enabled = sandbox_enabled
+        self._declared_packages: frozenset[str] | None = None
+
+    def _known_packages(self) -> frozenset[str]:
+        """Declared dependency names, read once per tool instance."""
+
+        if self._declared_packages is None:
+            self._declared_packages = _declared_packages(self._workspace)
+        return self._declared_packages
 
     @property
     def name(self) -> str:
@@ -96,6 +185,18 @@ class BashTool(Tool):
         if refusal:
             return f"Error: {refusal}"
 
+        # Fail closed on shapes we can recognise: destructive argv, a remote
+        # script piped into an interpreter, a package one edit from a declared
+        # dependency, or an install from a non-canonical index. The rewritten
+        # tool call an intermediary would deliver is schema-valid, so the
+        # arguments are the only place it can show.
+        screened = screen_all(command, known_packages=self._known_packages())
+        if screened:
+            return (
+                f"Error: command blocked by policy screen ({screened}). "
+                "If this is intended, re-run with the matching DEEPCODE_* waiver."
+            )
+
         wrapped = build_exec_command(
             command=command,
             workspace=self._workspace,
@@ -105,6 +206,10 @@ class BashTool(Tool):
             proc = await asyncio.create_subprocess_exec(
                 *wrapped.argv,
                 cwd=self._workspace,
+                # Credential-shaped variables are dropped so a plain `env` (or
+                # any command that echoes one) cannot copy provider keys into
+                # the transcript and from there into the next outbound request.
+                env=scrubbed_parent_env(),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 **subprocess_group_kwargs(),
