@@ -173,7 +173,9 @@ def test_acl_restriction_does_not_remove_entries_when_strip_fails(
     ]
 
 
-def test_icacls_is_abandoned_when_the_spawn_itself_blocks(monkeypatch, tmp_path: Path) -> None:
+def test_icacls_is_abandoned_when_the_spawn_itself_blocks(
+    monkeypatch, tmp_path: Path
+) -> None:
     """A stuck ``CreateProcess`` must not be able to wedge the caller.
 
     ``subprocess.run(timeout=...)`` starts counting only once the child exists:
@@ -202,7 +204,9 @@ def test_icacls_is_abandoned_when_the_spawn_itself_blocks(monkeypatch, tmp_path:
 
     began = time.monotonic()
     try:
-        result = ps._run_icacls("trusted-icacls.exe", tmp_path / "state.jsonl", "/grant:r", "u:F")
+        result = ps._run_icacls(
+            "trusted-icacls.exe", tmp_path / "state.jsonl", "/grant:r", "u:F"
+        )
         assert time.monotonic() - began < 5, "the caller must return promptly"
         assert result is False, "fail safe: report failure instead of hanging"
         assert started.wait(5) is True, "the spawn was actually attempted"
