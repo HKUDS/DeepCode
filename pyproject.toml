@@ -7,6 +7,10 @@ testpaths = ["tests"]
 pythonpath = ["."]
 # Emit thread stacks for a stalled test without changing its pass/fail budget.
 faulthandler_timeout = 60
+# A stalled test must stop the run instead of sitting there all night: on
+# 2026-09-13 a TUI test blocked inside CreateProcess (ACL hardening, see
+# core/private_storage.py) and the suite produced no output until morning.
+faulthandler_exit_on_timeout = true
 filterwarnings = [
     "error::pytest.PytestUnhandledThreadExceptionWarning",
     "error::pytest.PytestUnraisableExceptionWarning",
