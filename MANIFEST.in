@@ -4,7 +4,10 @@ include LICENSE
 include THIRD_PARTY_NOTICES.md
 include requirements.txt
 include uv.lock
-include __init__.py
+# NOTE: the repository root is deliberately NOT a package (no `include __init__.py`).
+# A root __init__.py made `import deepcode` bind to the checkout directory instead of
+# deepcode.py on case-insensitive filesystems (pytest puts the package root on
+# sys.path), which broke `deepcode.main()` from a source checkout on Windows.
 recursive-include prompts *
 recursive-include schema *
 recursive-include cli *.py
