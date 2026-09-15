@@ -39,9 +39,16 @@ jobs:
           ./gitleaks git --redact --no-banner --exit-code 1
 
   dependency-audit:
+    # Advisory databases change on their own schedule. Running this on every
+    # push turned main red for upstream advisories unrelated to the change,
+    # so it runs weekly and on demand and reports through an issue instead.
     name: Dependency and license audit
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
 
     steps:
       - name: Check out repository
@@ -49,12 +56,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Classify changes
-        id: scope
-        uses: ./.github/actions/ci-scope
-
       - name: Set up Node
-        if: steps.scope.outputs.runtime_changed == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -62,7 +64,6 @@ jobs:
           cache-dependency-path: desktop/package-lock.json
 
       - name: Set up Python
-        if: steps.scope.outputs.runtime_changed == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -72,18 +73,15 @@ jobs:
             desktop/sidecar-requirements.lock
 
       - name: Set up Rust
-        if: steps.scope.outputs.runtime_changed == 'true'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust audit tools
-        if: steps.scope.outputs.runtime_changed == 'true'
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: desktop/src-tauri
           key: audit-0.22.2
 
       - name: Audit Node dependencies
-        if: steps.scope.outputs.runtime_changed == 'true'
         working-directory: desktop
         run: |
           npm ci
@@ -92,7 +90,6 @@ jobs:
           npm sbom --sbom-format cyclonedx > build/security/node-sbom.json
 
       - name: Audit Python package dependencies
-        if: steps.scope.outputs.runtime_changed == 'true'
         run: |
           python -m pip install --upgrade pip pip-audit==2.10.1
           mkdir -p desktop/build/security
@@ -106,13 +103,11 @@ jobs:
           rm -rf desktop/build/python-audit-env
 
       - name: Audit pinned CI dependencies
-        if: steps.scope.outputs.runtime_changed == 'true'
         run: >-
           python -m pip_audit --requirement scripts/ci/requirements.lock
           --no-deps --disable-pip
 
       - name: Audit locked App Server environment
-        if: steps.scope.outputs.runtime_changed == 'true'
         working-directory: desktop
         run: |
           npm run setup:sidecar
@@ -121,18 +116,15 @@ jobs:
             --output build/security/sidecar-sbom.json
 
       - name: Audit Rust dependencies
-        if: steps.scope.outputs.runtime_changed == 'true'
         run: |
           cargo install cargo-audit --version 0.22.2 --locked
           cargo audit --file desktop/src-tauri/Cargo.lock
 
       - name: Audit dependency licenses
-        if: steps.scope.outputs.runtime_changed == 'true'
         working-directory: desktop
         run: npm run audit:licenses
 
       - name: Upload audit reports
-        if: steps.scope.outputs.runtime_changed == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: dependency-security-reports
@@ -141,6 +133,22 @@ jobs:
             desktop/build/licenses/dependencies.json
           if-no-files-found: error
           retention-days: 30
+
+      - name: Open or update the audit issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Dependency audit failed on main"
+          existing="$(gh issue list --state open --label dependencies \
+            --search "\"$title\" in:title" --json number --jq '.[0].number')"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "The scheduled audit failed again: $RUN_URL"
+          else
+            gh issue create --title "$title" --label dependencies \
+              --body "A scheduled dependency or license audit found a new advisory. See the failing step in $RUN_URL and bump the affected lockfile."
+          fi
 
   dependency-review:
     name: Pull request dependency review

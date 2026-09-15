@@ -3,9 +3,17 @@
 CI checks the complete pull request from its merge base, so unrelated changes
 added to the target branch do not count as changes in the PR. A README update
 inside a PR that also changes runtime code still receives the runtime checks.
-A PR containing only README files, `docs/`, or `assets/readme/` skips runtime
-tests and builds, while formatting, secret scanning, and dependency review
-remain active. Unknown paths and missing comparison history run checks.
+A PR containing only top-level Markdown files, `docs/`, `assets/`, `website/`,
+or issue templates skips runtime tests and builds, while formatting, secret
+scanning, and dependency review remain active. Unknown paths and missing
+comparison history run checks.
+
+Pushes to `main` run the Python suite on 3.13 only; pull requests and manual
+runs cover 3.12–3.14. Desktop pushes and PRs run the quality gates; the four
+platform bundles build weekly and on demand (`workflow_dispatch`). The
+dependency and license audit consults live advisory databases, so it also runs
+weekly and on demand rather than on every push; a failure opens or updates the
+issue "Dependency audit failed on main" instead of marking the push red.
 
 The classification lives in `scripts/ci_scope.py`, used through
 `.github/actions/ci-scope`. Runtime test jobs keep their existing check names
@@ -16,13 +24,14 @@ workflow that never started. Desktop bundle jobs retain their existing scope.
 
 | Check | What it verifies |
 |---|---|
-| Python 3.12, 3.13, and 3.14 | The full backend suite on Ubuntu 24.04 |
+| Python 3.13 (push) / 3.12–3.14 (PR) | The full backend suite on Ubuntu 24.04 |
 | Windows lifecycle | Real file locks, ACLs, recovery, background service operations, and discovery races |
 | Browser | Chromium interactions with the real local service and a deterministic test Agent |
 | Python package | Distribution metadata, packaged resources, and installation in a clean environment |
 | Desktop quality | Frontend tests, types, protocol consistency, Rust formatting, lint, and tests |
-| Four platform bundles | Build artifacts, packaged runtime startup, resources, and platform package checks |
-| Security | Secret history, dependency vulnerabilities, and dependency licenses |
+| Four platform bundles (weekly / manual) | Build artifacts, packaged runtime startup, resources, and platform package checks |
+| Secret scan and dependency review | Secret history on every push and PR; dependency review on PRs |
+| Dependency audit (weekly / manual) | Dependency vulnerabilities and licenses; failures are reported as an issue |
 
 Browser CI does not call a paid model. Live-provider, native GUI, and actual
 OS login/reboot acceptance remain separate from these regression checks.

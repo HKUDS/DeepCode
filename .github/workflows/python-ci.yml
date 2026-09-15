@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -20,7 +21,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13", "3.14"]
+        # Pushes to main run the primary interpreter only; pull requests and
+        # manual runs cover the full supported range.
+        python-version: ${{ fromJSON(github.event_name == 'push' && '["3.13"]' || '["3.12", "3.13", "3.14"]') }}
 
     steps:
       - name: Check out repository

@@ -47,13 +47,29 @@ def affects_desktop(paths: Iterable[str]) -> bool:
     )
 
 
+RUNTIME_EXEMPT_FILES = frozenset({"LICENSE", "CITATION.cff"})
+
+# Documentation, marketing assets and the docs website have their own checks
+# (or none) and never feed the Python runtime, so they do not trigger the
+# runtime suites. Anything else, including unknown paths, does.
+RUNTIME_EXEMPT_PREFIXES = (
+    "docs/",
+    "assets/",
+    "website/",
+    ".github/ISSUE_TEMPLATE/",
+)
+
+
+def _is_runtime_exempt(path: str) -> bool:
+    if path in RUNTIME_EXEMPT_FILES or path.startswith(RUNTIME_EXEMPT_PREFIXES):
+        return True
+    # Top-level Markdown (README, README_ZH, CONTRIBUTORS, CHANGELOG, ...).
+    return "/" not in path and path.endswith(".md")
+
+
 def affects_runtime(paths: Iterable[str]) -> bool:
     """Only known documentation paths may bypass runtime tests."""
-    return any(
-        path not in {"README.md", "README_ZH.md", "CONTRIBUTORS.md"}
-        and not path.startswith(("docs/", "assets/readme/"))
-        for path in paths
-    )
+    return any(not _is_runtime_exempt(path) for path in paths)
 
 
 def _read_null_delimited_paths() -> list[str]:

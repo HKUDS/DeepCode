@@ -43,7 +43,19 @@ def test_desktop_ci_runs_when_any_changed_path_has_desktop_impact() -> None:
 
 
 @pytest.mark.parametrize(
-    "path", ["README.md", "README_ZH.md", "docs/CI.md", "assets/readme/demo.png"]
+    "path",
+    [
+        "README.md",
+        "README_ZH.md",
+        "CONTRIBUTORS.md",
+        "CHANGELOG.md",
+        "LICENSE",
+        "docs/CI.md",
+        "assets/readme/demo.png",
+        "assets/logo.svg",
+        "website/package-lock.json",
+        ".github/ISSUE_TEMPLATE/bug_report.yml",
+    ],
 )
 def test_documentation_does_not_require_runtime_tests(path):
     assert not affects_runtime([path])
@@ -56,6 +68,8 @@ def test_documentation_does_not_require_runtime_tests(path):
         "scripts/ci/requirements.lock",
         "core/skills/builtin/example/SKILL.md",
         "prompts/agent.md",
+        "desktop/README.md",
+        "docs.py",
         ".github/actions/ci-scope/action.yml",
         ".github/workflows/python-ci.yml",
         "setup.py",
