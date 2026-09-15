@@ -100,6 +100,18 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=True,
     ),
     ProviderSpec(
+        name="bedrock",
+        keywords=("bedrock",),
+        env_key="AWS_BEARER_TOKEN_BEDROCK",
+        display_name="Amazon Bedrock",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_base_keyword="bedrock-runtime",
+        # Bedrock Runtime endpoints are region-specific, so there is no safe
+        # registry default. The connection supplies its own ``/openai/v1`` URL.
+        requires_api_base=True,
+    ),
+    ProviderSpec(
         name="anthropic",
         keywords=("anthropic", "claude"),
         env_key="ANTHROPIC_API_KEY",
