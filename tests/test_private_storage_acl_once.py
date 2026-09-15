@@ -171,3 +171,44 @@ def test_acl_restriction_does_not_remove_entries_when_strip_fails(
         ("/grant:r", "DOMAIN\\user:F"),
         ("/inheritance:r",),
     ]
+
+
+def test_icacls_is_abandoned_when_the_spawn_itself_blocks(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """A stuck ``CreateProcess`` must not be able to wedge the caller.
+
+    ``subprocess.run(timeout=...)`` starts counting only once the child exists:
+    ``_winapi.CreateProcess`` is unbounded, and under sustained spawn pressure
+    (a Windows security product filtering every process creation) it blocked for
+    minutes *past* the declared 15s timeout — the stall that hung the whole test
+    suite on 2026-09-14. The spawn therefore runs on a worker thread the module
+    is willing to abandon; a stuck creation degrades to "ACLs left as they are".
+    """
+
+    import threading
+    import time
+
+    import core.private_storage as ps
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_spawn(*_args, **_kwargs):
+        started.set()
+        release.wait(30)  # never released in the failing case: creation never returns
+        raise ps.subprocess.TimeoutExpired("icacls", 15)
+
+    monkeypatch.setattr(ps.subprocess, "run", blocking_spawn)
+    monkeypatch.setattr(ps, "_ICACLS_ABANDON_AFTER_SECONDS", 0.2)
+
+    began = time.monotonic()
+    try:
+        result = ps._run_icacls(
+            "trusted-icacls.exe", tmp_path / "state.jsonl", "/grant:r", "u:F"
+        )
+        assert time.monotonic() - began < 5, "the caller must return promptly"
+        assert result is False, "fail safe: report failure instead of hanging"
+        assert started.wait(5) is True, "the spawn was actually attempted"
+    finally:
+        release.set()

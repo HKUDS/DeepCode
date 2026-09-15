@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import stat
 import subprocess
+import threading
 from functools import lru_cache
 from pathlib import Path
 
@@ -90,26 +91,50 @@ def _windows_icacls() -> str | None:
         return None
 
 
-def _run_icacls(executable: str, path: Path, *arguments: str) -> bool:
-    """Run one bounded icacls operation and report whether it succeeded."""
+_ICACLS_TIMEOUT_SECONDS = 15.0
+# How long the caller waits for the whole spawn before giving up and leaving the
+# ACLs as they are.  See _run_icacls for why that wait has to exist.
+_ICACLS_ABANDON_AFTER_SECONDS = _ICACLS_TIMEOUT_SECONDS + 5.0
 
-    try:
-        subprocess.run(
-            [executable, os.fspath(path), *arguments],
-            capture_output=True,
-            text=True,
-            encoding="mbcs",
-            errors="replace",
-            timeout=15,
-            check=True,
-            # A detached service has no console to inherit. Avoid allocating
-            # a new console for every ACL helper it launches.
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-            stdin=subprocess.DEVNULL,
-        )
-    except (OSError, subprocess.SubprocessError):
+
+def _run_icacls(executable: str, path: Path, *arguments: str) -> bool:
+    """Run one bounded icacls operation and report whether it succeeded.
+
+    Bounded end to end: both the child's run *and* its creation are covered, because
+    the caller must never be able to hang here.  ``subprocess``'s own ``timeout``
+    only starts once the process exists, and ``CreateProcess`` itself is unbounded,
+    so the spawn runs on a daemon worker thread that may be abandoned mid-flight.
+    """
+
+    completed = threading.Event()
+    succeeded: list[bool] = []
+
+    def _attempt() -> None:
+        try:
+            subprocess.run(
+                [executable, os.fspath(path), *arguments],
+                capture_output=True,
+                text=True,
+                encoding="mbcs",
+                errors="replace",
+                timeout=_ICACLS_TIMEOUT_SECONDS,
+                check=True,
+                # A detached service has no console to inherit. Avoid allocating
+                # a new console for every ACL helper it launches.
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                stdin=subprocess.DEVNULL,
+            )
+            succeeded.append(True)
+        except (OSError, subprocess.SubprocessError):
+            succeeded.append(False)
+        finally:
+            completed.set()
+
+    worker = threading.Thread(target=_attempt, name="deepcode-icacls", daemon=True)
+    worker.start()
+    if not completed.wait(_ICACLS_ABANDON_AFTER_SECONDS):
         return False
-    return True
+    return bool(succeeded and succeeded[0])
 
 
 def _restrict_windows_acl(path: Path) -> None:
