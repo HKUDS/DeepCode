@@ -10,9 +10,13 @@ what makes an injected index safe to act on.
 
 from __future__ import annotations
 
+import asyncio
+import os
 import re
 import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -330,3 +334,58 @@ def test_preamble_presents_memory_as_a_hint_to_verify(tmp_path):
 
 def test_hint_rule_is_present_even_with_no_memory_yet(tmp_path):
     assert "hint to verify, not established fact" in system_preamble(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# Wiring: the tool reads through layer 2, autodream writes through layer 3
+# ---------------------------------------------------------------------------
+
+
+def test_tool_read_goes_through_the_topic_reader(tmp_path):
+    from core.harness.memory import MemoryTool
+
+    root = memory_dir(tmp_path)
+    root.mkdir(parents=True)
+    (root / "notes.md").write_text("remembered", encoding="utf-8")
+    tool = MemoryTool(str(tmp_path))
+    assert asyncio.run(tool.execute(action="read", name="notes.md")) == "remembered"
+    missing = asyncio.run(tool.execute(action="read", name="absent.md"))
+    assert missing.startswith("Error: no such memory")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink semantics")
+def test_tool_read_refuses_a_symlink_that_leaves_the_root(tmp_path):
+    from core.harness.memory import MemoryTool
+
+    root = memory_dir(tmp_path)
+    root.mkdir(parents=True)
+    outside = tmp_path / "secret.txt"
+    outside.write_text("do not read", encoding="utf-8")
+    (root / "link.md").symlink_to(outside)
+    out = asyncio.run(MemoryTool(str(tmp_path)).execute(action="read", name="link.md"))
+    assert out.startswith("Error:") and "do not read" not in out
+
+
+def test_consolidate_pointer_index_rewrites_only_a_pointer_index(tmp_path):
+    from core.harness.memory import consolidate_pointer_index
+
+    root = memory_dir(tmp_path)
+    root.mkdir(parents=True)
+    index = root / "MEMORY.md"
+    (root / "orphan.md").write_text(
+        "# Orphan\n\nA fact nobody indexed.\n", encoding="utf-8"
+    )
+    index.write_text(
+        "- [Build](build.md) — how to build\n- [Build](build.md) — how to build\n",
+        encoding="utf-8",
+    )
+    assert consolidate_pointer_index(tmp_path) is True
+    lines = index.read_text(encoding="utf-8").splitlines()
+    assert lines.count("- [Build](build.md) — how to build") == 1
+    assert any("(orphan.md)" in line for line in lines)
+    # Idempotent: a second pass changes nothing.
+    assert consolidate_pointer_index(tmp_path) is False
+
+    index.write_text("A prose fact that is not a pointer.\n", encoding="utf-8")
+    assert consolidate_pointer_index(tmp_path) is False
+    assert index.read_text(encoding="utf-8") == "A prose fact that is not a pointer.\n"

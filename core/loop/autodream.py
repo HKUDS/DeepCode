@@ -21,7 +21,7 @@ from dataclasses import dataclass
 
 from core.agent_setup import build_agent_session
 from core.events import UserInput
-from core.harness.memory import memory_dir
+from core.harness.memory import consolidate_pointer_index, memory_dir
 
 _CONSOLIDATE_PROMPT = (
     "Consolidate your persistent memory. Use ONLY the `memory` tool — do not "
@@ -40,6 +40,9 @@ class AutodreamResult:
     notes_before: int
     notes_after: int
     summary: str
+    # Whether the deterministic pointer-index pass changed MEMORY.md after the
+    # model pass (see core.harness.memory.consolidate_pointer_index).
+    index_consolidated: bool = False
 
 
 def _note_count(workspace: str) -> int:
@@ -87,9 +90,15 @@ async def consolidate_memory(
     first_line = summary.strip().splitlines()[:1]
     summary = first_line[0] if first_line else ""
 
+    # Deterministic follow-up: if the model left a pointer index, de-duplicate
+    # it, add pointers for orphaned topic files and enforce the caps. A prose
+    # index is left exactly as the model wrote it.
+    index_consolidated = consolidate_pointer_index(workspace)
+
     return AutodreamResult(
         ran=True,
         notes_before=before,
         notes_after=_note_count(workspace),
         summary=summary[:200],
+        index_consolidated=index_consolidated,
     )

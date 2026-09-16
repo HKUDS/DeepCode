@@ -14,8 +14,8 @@ Two layers, aligned with Claude Code (DEEPCODE_V2_MASTER_PLAN.md P2-L5d(c)):
    durable facts (decisions, conventions, gotchas) survive across
    conversations.
 
-Persistent memory itself has three layers (P2-2, migrated from the leaked
-Claude Code design):
+Persistent memory itself has three layers (P2-2, following Claude Code's
+memory layout):
 
 1. the ``MEMORY.md`` **index**, permanently in context, holding *pointers* —
    one ``- [Title](topic.md) — hook`` line per topic, which is why it is
@@ -258,7 +258,7 @@ def user_global_instructions(home: str | Path | None = None) -> str:
 # P2-2 layer 1/2 boundary: the index holds pointers, not facts
 # ---------------------------------------------------------------------------
 #
-# The leaked Claude Code memory design keeps ``MEMORY.md`` permanently in
+# Claude Code's memory layout keeps ``MEMORY.md`` permanently in
 # context and stores only *pointers* to topic files — one line per topic,
 # ``- [Title](topic.md) — hook`` — so the index stays cheap to inject on every
 # turn while the facts live in the topic files that are read on demand. The
@@ -431,7 +431,7 @@ def _frame_data_block(body: str) -> str:
 
 # The one rule the model must apply to *every* recalled memory, stated outside
 # the data boundary (it is our guidance, not the note's content). Wording
-# mirrors the leaked design's drift rule: a memory records what was true at a
+# mirrors Claude Code's drift rule: a memory records what was true at a
 # point in time, so the current state of the code wins over a conflicting note.
 _MEMORY_HINT_RULE = (
     "Recalled memory is a hint to verify, not established fact: read it, and "
@@ -620,7 +620,7 @@ def fetch_memory_topic(workspace: str | Path, reference: str) -> TopicFetch:
 # ~3 bytes per character and a character count would under-report the prompt
 # cost several-fold.
 _MAX_INDEX_LINES = 200
-_MAX_INDEX_BYTES = 25_000  # ~25 KB, matching the leaked design's budget
+_MAX_INDEX_BYTES = 25_000  # ~25 KB, the same budget Claude Code uses
 _MIN_USEFUL_CHARS = 12  # below this a line is a stub, not a candidate fact
 _CONSOLIDATED_INDEX_FILE = "MEMORY.consolidated.md"
 # Bullet-only or fence-only lines carry no content; keep them out of the index.
@@ -904,10 +904,8 @@ def consolidate_memory_index(
     reviewed step swap it in: the pass runs unattended, so "the consolidation
     ate my memory" has to stay recoverable from the previous file.
 
-    This is the *offline* consolidator the memory ADR assigns to the md backend
-    (``docs/MEMORY_SYSTEMS_DIAGNOSIS.md`` §五): md stays the in-context index,
-    and deep consolidation of session transcripts stays with the cerebellum.
-    Nothing here calls a model.
+    Nothing here calls a model; :func:`consolidate_pointer_index` is the one
+    caller that writes the result back, and only for a pointer index.
     """
     orientation = orient(workspace)
     candidates = gather(orientation)
@@ -922,6 +920,35 @@ def consolidate_memory_index(
         truncated=len(kept) < len(merged),
         topics=tuple(name for name, _body in orientation.topics),
     )
+
+
+def consolidate_pointer_index(workspace: str | Path) -> bool:
+    """Rewrite ``MEMORY.md`` from a consolidation pass when it is a pointer index.
+
+    This is the one writer built on :func:`consolidate_memory_index`, and it
+    is deliberately narrow: only an index that already consists of pointers
+    (see :func:`is_pointer_index`) is rewritten, because on such an index the
+    pass can only de-duplicate pointers, add pointers for orphaned topic files
+    and enforce the caps — it cannot lose a fact, since the facts live in the
+    topic files. A prose index is left untouched. Returns whether the file was
+    changed. Called by autodream after its model pass so a tidy index stays
+    tidy without a model in the loop.
+    """
+    root = memory_dir(workspace)
+    index = root / _INDEX_FILE
+    if not index.is_file():
+        return False
+    current = _read_capped(index, _TOPIC_BODY_MAX_CHARS)
+    if not is_pointer_index(current):
+        return False
+    result = consolidate_memory_index(workspace)
+    if not result.text.strip() or result.text == current:
+        return False
+    try:
+        index.write_text(result.text, encoding="utf-8")
+    except OSError:
+        return False
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -1002,6 +1029,7 @@ __all__ = [
     "compaction_sink_enabled",
     "consolidate",
     "consolidate_memory_index",
+    "consolidate_pointer_index",
     "fetch_memory_topic",
     "gather",
     "is_pointer_index",
@@ -1046,6 +1074,7 @@ class MemoryTool(Tool):
     """Read/write persistent memory notes under ``<workspace>/.deepcode/memory``."""
 
     def __init__(self, workspace: str):
+        self._workspace = workspace
         self._dir = memory_dir(workspace)
 
     @property
@@ -1082,9 +1111,15 @@ class MemoryTool(Tool):
             return f"Error: invalid memory name: {name!r} (use a plain file name)."
 
         if action == "read":
-            if not target.is_file():
+            # Layer 2's reader: refuses a symlink that leaves the memory
+            # directory and caps the body, so a planted link or a runaway
+            # file cannot turn "read my note" into something else.
+            fetched = fetch_memory_topic(self._workspace, name)
+            if fetched.status == "not_found":
                 return f"Error: no such memory: {name}"
-            return target.read_text(encoding="utf-8", errors="replace")
+            if not fetched:
+                return f"Error: cannot read memory {name}: {fetched.reason}"
+            return fetched.text
 
         if action in ("write", "append"):
             if not content.strip():
