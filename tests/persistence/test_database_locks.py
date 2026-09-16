@@ -102,6 +102,7 @@ def test_other_process_close_cannot_unlink_wal_under_an_open_connection(
         assert fresh.execute("SELECT x FROM probe").fetchall()[0][0] == 42
 
 
+@pytest.mark.skipif(not POSIX, reason="the anchor connection is POSIX-only")
 def test_anchor_keeps_wal_files_alive_between_operations(database: Database) -> None:
     with database.transaction() as connection:
         connection.execute("INSERT INTO probe(x) VALUES (1)")
@@ -140,3 +141,10 @@ def test_database_file_and_wal_are_user_private(database: Database) -> None:
         connection.execute("INSERT INTO probe(x) VALUES (1)")
     for suffix in ("", "-wal", "-shm"):
         assert stat.S_IMODE(os.stat(f"{database.path}{suffix}").st_mode) == 0o600
+
+
+@pytest.mark.skipif(POSIX, reason="Windows must not hold an anchor handle")
+def test_no_anchor_on_windows(database: Database) -> None:
+    with database.read() as connection:
+        connection.execute("SELECT count(*) FROM probe").fetchone()
+    assert database._anchor is None

@@ -46,6 +46,8 @@ class Database:
     ``-wal``/``-shm`` are not checkpointed, unlinked and recreated on every
     last-connection close (see :meth:`_ensure_anchor`).
 
+    The anchor exists only on POSIX; see :meth:`_ensure_anchor`.
+
     Invariant (POSIX): **never open and close a separate descriptor on the
     database file while any connection in this process may be open.** POSIX
     fcntl locks are per process; ``close()`` of *any* descriptor for the file
@@ -74,7 +76,11 @@ class Database:
             anchor.close()
 
     def _ensure_anchor(self) -> None:
-        if self._anchor is not None:
+        if os.name == "nt" or self._anchor is not None:
+            # Windows locks are per handle, so closing another descriptor
+            # cannot drop a connection's lock and no anchor is needed. Holding
+            # one there would be harmful: an open handle blocks os.replace(),
+            # which the state restore uses to swap the database file.
             return
         with self._anchor_lock:
             if self._anchor is not None:
