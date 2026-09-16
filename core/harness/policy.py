@@ -30,6 +30,13 @@ from core.harness.permissions import (
 )
 from core.harness.sandbox import sandbox_enabled
 
+__all__ = [
+    "build_permission_engine",
+    "describe_security_posture",
+    "resolve_execution_security_profile",
+    "resolve_permission_mode",
+]
+
 
 def resolve_permission_mode(
     config_mode: str | PermissionMode | None = None,
@@ -120,6 +127,51 @@ def resolve_execution_security_profile(
             getattr(security_config, "permissions", None)
         ),
     )
+
+
+def describe_security_posture(
+    profile: ExecutionSecurityProfile,
+    *,
+    sandbox_backend: str | None = None,
+) -> dict[str, Any]:
+    """One-line answer to "what is actually enforcing right now?".
+
+    Why this exists. The resolved posture is spread across four independent
+    knobs (mode, preset, sandbox, approval policy) that interact, and a reader
+    of a log cannot tell from any one of them whether the run was gated or
+    wide open. That matters more than usual here: the difference between an
+    unattended ``full_auto`` run and one with an approver is the difference
+    between a rewritten tool call executing and a rewritten tool call being
+    stopped, and the two look identical in a transcript.
+
+    The returned mapping is deliberately flat and string-friendly so it can be
+    dropped into a log line or a structured event without further shaping. It
+    reports facts; it does not judge them.
+    """
+
+    preset = profile.access_preset.value if profile.access_preset else None
+    # "Unattended" means nobody will be consulted before a tool call runs — not
+    # merely that the approval policy says so. The legacy ``full_auto`` mode
+    # short-circuits the engine with an unconditional ALLOW while still
+    # reporting ``on_request``, so trusting the policy field alone would report
+    # the most permissive configuration as gated, which is the exact mistake
+    # this helper exists to prevent.
+    unattended = (
+        profile.approval_policy is ApprovalPolicy.NEVER
+        or profile.permission_mode is ExecutionPermissionMode.FULL_AUTO
+    )
+    return {
+        "permission_mode": profile.permission_mode.value,
+        "access_preset": preset or "legacy",
+        "command_sandbox": profile.command_sandbox,
+        "sandbox_backend": sandbox_backend or "unknown",
+        "filesystem_scope": profile.filesystem_scope.value,
+        "approval_policy": profile.approval_policy.value,
+        "permission_rule_count": len(profile.permission_rules),
+        # The single fact worth surfacing without a reader having to combine
+        # the others: nobody will be asked before a tool call runs.
+        "unattended": unattended,
+    }
 
 
 def build_permission_engine(

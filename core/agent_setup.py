@@ -30,8 +30,10 @@ from core.events import AgentSession
 from core.harness.permissions import PermissionMode
 from core.harness.policy import (
     build_permission_engine,
+    describe_security_posture,
     resolve_execution_security_profile,
 )
+from core.harness.sandbox import sandbox_backend
 from core.harness.tools import default_coding_tools
 from core.llm_runtime import get_workflow_provider
 from core.providers.catalog import resolve_model_info
@@ -342,6 +344,18 @@ def build_agent_session(
         default_mode=default_permission_mode,
         mode_override=permission_mode_override,
         execution_security_profile=resolved_security_profile,
+    )
+
+    # Record what is actually enforcing for this session. The four knobs
+    # interact, and an unattended `full_auto` run looks identical to an
+    # approval-gated one in the transcript — which is precisely the fact a
+    # reader needs when asking whether a rewritten tool call could have run.
+    logger.info(
+        "security posture: {}",
+        describe_security_posture(
+            resolved_security_profile,
+            sandbox_backend=sandbox_backend(),
+        ),
     )
 
     # Stable system context is assembled once here. Skills are intentionally

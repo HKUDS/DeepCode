@@ -904,7 +904,16 @@ Requirements:
         # approver so an `ask` becomes an interactive confirmation. An unknown
         # value falls back to this legacy client's FULL_AUTO default.
         security_cfg = getattr(get_runtime().config, "security", None)
-        permission_engine = build_permission_engine(security_cfg, cwd=code_directory)
+        # ``default_mode`` is passed explicitly rather than left to the
+        # signature default. This workflow is the one caller that intentionally
+        # runs unattended, so its mode should be readable at the call site
+        # instead of inherited from a parameter far away — and a reviewer
+        # grepping for "who runs with no approver?" gets an answer.
+        permission_engine = build_permission_engine(
+            security_cfg,
+            cwd=code_directory,
+            default_mode=PermissionMode.FULL_AUTO,
+        )
         mode = permission_engine.mode
         approval_cb = None
         if mode is not PermissionMode.FULL_AUTO:
