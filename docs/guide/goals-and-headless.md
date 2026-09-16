@@ -118,6 +118,24 @@ continues in the service. Use Automations when the schedule itself must survive
 client exit. The test-command limitation described above also applies here.
 See [service operation](../SERVICE_RUNTIME.md) for shutdown and drain semantics.
 
+### Change-gated schedules
+
+A schedule that only needs to act when something changed can put a monitor in
+front of the model call. `python -m core.schedule.monitor` runs a script or
+fetches a URL, hashes the output, and reports `changed` only when it differs
+from the last run (the first run records a baseline). Unchanged ticks cost no
+model call. On a change it prints a context block with the diff to hand to the
+next turn:
+
+```console
+python -m core.schedule.monitor --job-id releases --url https://example.com/releases.json --json
+```
+
+Exit code 0 with `"changed": true` means "act now"; feed `context_block` to
+`deepcode exec` in the same cron entry. URLs follow the same public-host policy
+as the web tools, scripts pass the destructive-command screen, and state lives
+in `<deepcode home>/state/monitor.sqlite3`.
+
 ## DeepCode as an MCP server
 
 Expose DeepCode task tools to another agent or editor with:
