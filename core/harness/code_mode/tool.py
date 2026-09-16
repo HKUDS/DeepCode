@@ -29,6 +29,7 @@ from core.agent_runtime.processes import (
     terminate_process_tree,
 )
 from core.agent_runtime.tools.base import Tool, tool_parameters
+from core.harness.env_sanitize import child_env
 from core.harness.sandbox import build_exec_command
 
 _RUNNER = str(Path(__file__).with_name("_runner.py"))
@@ -169,7 +170,9 @@ class CodeModeTool(Tool):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self._workspace,
-                env={**os.environ},
+                # Full environment unless DEEPCODE_BASH_SCRUB_ENV=1 drops the
+                # credential-shaped variables (see env_sanitize.child_env).
+                env=child_env(),
                 limit=_STREAM_LIMIT,
                 **subprocess_group_kwargs(),
             )
