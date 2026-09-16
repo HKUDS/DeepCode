@@ -18,11 +18,16 @@ Design principles (derived from Hermes cron/monitor.py):
 5. Diff is capped at ``MAX_DIFF_CHARS`` (4K), new output at 8K
    (avoid feeding the delta to the LLM).
 
+Boundaries: a monitored URL passes the same public-host policy as the web
+tools (no loopback/private addresses, http(s) only); a monitored script passes
+the destructive-command screen; the state store lives under the DeepCode home
+(``deepcode_home()/state/monitor.sqlite3``) and is user-private.
+
 Usage::
 
     from core.schedule.monitor import MonitorStore, monitor_gate
 
-    store = MonitorStore(Path("state.db"))
+    store = MonitorStore()  # default: <deepcode home>/state/monitor.sqlite3
     outcome = monitor_gate("my-job", store=store,
                            monitor_script="git diff --stat")
     if outcome.changed:
@@ -31,6 +36,11 @@ Usage::
         log.warning(outcome.error)             # source failure
     else:
         pass                                   # silent tick, skip LLM
+
+From a shell (for cron or ``deepcode schedule``)::
+
+    python -m core.schedule.monitor --job-id prices --url https://example.com/p --json
+    # exit 0 and "changed": true  -> feed context_block to `deepcode exec`
 """
 
 from __future__ import annotations
@@ -46,6 +56,11 @@ from datetime import UTC, datetime
 from difflib import unified_diff
 from pathlib import Path
 from urllib.request import Request, urlopen
+
+from core.config import deepcode_home
+from core.harness.command_guard import screen_command
+from core.network.safe_http import UnsafeUrlError, validate_public_url
+from core.private_storage import ensure_private_directory, ensure_private_file
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -117,8 +132,12 @@ def _fetch_monitor_url(url: str) -> tuple[str, str]:
     to ``MAX_URL_BYTES``; exceeding the limit is reported as an error.
     """
     try:
-        req = Request(url, method="GET")
-        with urlopen(req, timeout=URL_TIMEOUT_SECONDS) as resp:
+        safe_url = validate_public_url(url)
+    except UnsafeUrlError as exc:
+        return "", f"URL refused by network policy: {exc}"
+    try:
+        req = Request(safe_url, method="GET")
+        with urlopen(req, timeout=URL_TIMEOUT_SECONDS) as resp:  # noqa: S310 - validated above
             data = resp.read(MAX_URL_BYTES + 1)
             if len(data) > MAX_URL_BYTES:
                 return "", f"Response exceeds {MAX_URL_BYTES} bytes, truncated"
@@ -132,8 +151,12 @@ def _run_monitor_script(script: str) -> tuple[str, str]:
     """Execute a shell script; returns ``(stdout, '')`` on success.
 
     Non-zero exit and timeouts are reported as errors (not changes).
-    stdout is capped at ``SNAPSHOT_MAX_BYTES``.
+    stdout is capped at ``SNAPSHOT_MAX_BYTES``. The script is operator
+    configuration, but it still passes the destructive-command screen.
     """
+    blocked = screen_command(script)
+    if blocked:
+        return "", f"Script refused: {blocked}"
     try:
         proc = subprocess.run(
             script,
@@ -267,15 +290,22 @@ def check_monitor(
 # ── Persistence ──────────────────────────────────────────────────────────────
 
 
+def default_monitor_store_path() -> Path:
+    """The user-private default location of the monitor state database."""
+    return deepcode_home() / "state" / "monitor.sqlite3"
+
+
 class MonitorStore:
     """SQLite-backed persistence for monitor job state.
 
     The table ``monitor_jobs`` stores per-job: last seen hash, previous-output
-    snapshot, and ISO-8601 timestamp.
+    snapshot, and ISO-8601 timestamp. Defaults to
+    :func:`default_monitor_store_path`; the directory and file are kept
+    user-private like the rest of the DeepCode state.
     """
 
-    def __init__(self, db_path: str | Path) -> None:
-        self._db_path = Path(db_path)
+    def __init__(self, db_path: str | Path | None = None) -> None:
+        self._db_path = Path(db_path) if db_path else default_monitor_store_path()
         self._init_db()
 
     # ----- helpers -----------------------------------------------------------
@@ -288,7 +318,7 @@ class MonitorStore:
         return conn
 
     def _init_db(self) -> None:
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        ensure_private_directory(self._db_path.parent)
         conn = self._connect()
         try:
             conn.execute(
@@ -302,6 +332,7 @@ class MonitorStore:
             conn.commit()
         finally:
             conn.close()
+        ensure_private_file(self._db_path)
 
     # ----- public API --------------------------------------------------------
 
@@ -413,16 +444,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--job-id", required=True)
     parser.add_argument("--script", default="", help="Shell command to monitor")
     parser.add_argument("--url", default="", help="URL to monitor")
-    parser.add_argument("--db", default="", help="Path to monitor_state.db")
+    parser.add_argument(
+        "--db",
+        default="",
+        help="Path to the monitor state database (default: <deepcode home>/state/monitor.sqlite3)",
+    )
     parser.add_argument("--json", action="store_true", help="JSON output")
 
     args = parser.parse_args(argv)
 
-    store = (
-        MonitorStore(args.db)
-        if args.db
-        else MonitorStore(Path.cwd() / "monitor_state.db")
-    )
+    store = MonitorStore(args.db or None)
     outcome = monitor_gate(
         job_id=args.job_id,
         monitor_script=args.script,

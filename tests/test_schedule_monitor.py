@@ -146,3 +146,31 @@ def test_monitor_gate_keeps_hash_on_source_failure(tmp_path: Path) -> None:
     assert outcome.changed is False
     # A failed source must not clobber the stored baseline.
     assert store.get_job("job-y")["monitor_hash"] == before
+
+
+def test_url_monitor_refuses_private_hosts() -> None:
+    """Loopback/private URLs never reach the network (same policy as WebFetch)."""
+    from core.schedule.monitor import check_monitor
+
+    outcome = check_monitor(monitor_url="http://127.0.0.1:9/never")
+    assert not outcome.changed and "network policy" in outcome.error
+
+
+def test_script_monitor_refuses_destructive_commands() -> None:
+    from core.schedule.monitor import check_monitor
+
+    outcome = check_monitor(monitor_script="rm -rf /")
+    assert not outcome.changed and outcome.error.startswith("Script refused")
+
+
+def test_default_store_lives_under_the_deepcode_home(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from core.schedule.monitor import MonitorStore, default_monitor_store_path
+
+    monkeypatch.setenv("DEEPCODE_HOME", str(tmp_path / "home"))
+    expected = tmp_path / "home" / "state" / "monitor.sqlite3"
+    assert default_monitor_store_path() == expected.resolve()
+    store = MonitorStore()
+    store.save_job("j", "h", "s")
+    assert expected.exists()
