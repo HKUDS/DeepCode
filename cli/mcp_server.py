@@ -4,17 +4,11 @@ The mirror of DeepCode's MCP *client*: instead of DeepCode calling other MCP
 servers for tools, this lets any MCP client (another agent, an IDE, a second
 DeepCode) drive DeepCode itself as a coding sub-agent over stdio.
 
-Ported from the reference agent's ``mcp-server/`` (``codex_tool_config`` +
-``codex_tool_runner`` + ``message_processor``), adapted to DeepCode's ``mcp``
-SDK and :func:`core.agent_setup.build_agent_session`. Two tools are exposed:
-
-- ``deepcode``        — run a coding task on a prompt (starts a session)
-- ``deepcode-reply``  — continue a prior session by id (multi-turn)
-
-Every call runs through ``build_agent_session``, so it inherits the full agent
-— native tools, hooks, summarization compaction, sandbox, spawn_agent
-delegation, skills, and memory. The transport is stdio; the JSON-RPC channel is
-stdout, so all logging must stay on stderr (configured below).
+The stdio server submits durable Turns to the shared local service. The
+``deepcode`` tool starts a Session; ``deepcode-reply`` resumes its canonical id.
+Workspace trust and tool approval remain enforced by the service. Closing MCP
+stdio detaches the client; it does not close the Agent or erase Session history.
+Logs stay on stderr so stdout remains the MCP protocol channel.
 """
 
 from __future__ import annotations
@@ -22,16 +16,11 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-import uuid
 from typing import Any
 
 import mcp.types as types
 from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
-
-# Sessions kept alive for ``deepcode-reply`` follow-ups, keyed by the id we
-# return from a ``deepcode`` call (mirrors the reference's thread_id map).
-_SESSIONS: dict[str, Any] = {}
 
 _DEEPCODE_TOOL = types.Tool(
     name="deepcode",
@@ -69,7 +58,7 @@ _REPLY_TOOL = types.Tool(
     title="DeepCode reply",
     description=(
         "Continue an existing DeepCode session (started by a prior deepcode "
-        "call) with a follow-up prompt. The session keeps its full history."
+        "call) with a follow-up prompt. The shared service keeps its full history across MCP connections."
     ),
     inputSchema={
         "type": "object",
@@ -89,52 +78,62 @@ _REPLY_TOOL = types.Tool(
 )
 
 
-async def _run_turn(session: Any, prompt: str) -> tuple[str, str]:
-    """Run one turn on ``session`` and return (final_text, stop_reason)."""
-    from core.events import UserInput
-
-    final, stop_reason = "", "completed"
-    async for event in session.run_stream(UserInput(text=prompt)):
-        if event.msg.type == "task_complete":
-            final = event.msg.final_text or ""
-            stop_reason = event.msg.stop_reason or "completed"
-    return (final.strip() or "(the agent produced no summary)"), stop_reason
-
-
 def _reply(
     text: str, structured: dict[str, Any]
 ) -> tuple[list[types.TextContent], dict[str, Any]]:
     return [types.TextContent(type="text", text=text)], structured
 
 
-async def _handle_deepcode(arguments: dict[str, Any]):
-    from core.agent_setup import build_agent_session
+async def _run_task(prompt: str, *, workspace=None, model=None, session_id=None):
+    from cli.thread_client import HeadlessTurnOptions
+    from cli.service_turn import run_service_turn_async
+    from core.application.errors import ApplicationError
 
+    summary = ""
+
+    def on_event(event):
+        nonlocal summary
+        if event.msg.type == "agent_message" and event.msg.phase.value == "final_answer":
+            summary = event.msg.text
+        elif event.msg.type == "task_complete":
+            summary = event.msg.final_text or summary
+
+    try:
+        result = await run_service_turn_async(
+            HeadlessTurnOptions(
+                prompt=prompt, workspace=workspace, model=model, resume_id=session_id
+            ),
+            on_event=on_event,
+        )
+    except (ApplicationError, OSError, ValueError) as exc:
+        return _reply(f"Error: {exc}", {"error": getattr(exc, "code", "task failed")})
+    return _reply(
+        summary.strip() or "(the agent produced no summary)",
+        {
+            "session_id": result.session_id,
+            "stop_reason": result.turn.stop_reason or result.turn.status.value,
+        },
+    )
+
+
+async def _handle_deepcode(arguments: dict[str, Any]):
     prompt = str(arguments.get("prompt") or "").strip()
     if not prompt:
         return _reply("Error: 'prompt' is required.", {"error": "missing prompt"})
     workspace = os.path.abspath(str(arguments.get("workspace") or os.getcwd()))
-    model = arguments.get("model") or None
-    session, _model, _engine = build_agent_session(workspace=workspace, model=model)
-    session_id = uuid.uuid4().hex
-    _SESSIONS[session_id] = session
-    final, stop_reason = await _run_turn(session, prompt)
-    return _reply(final, {"session_id": session_id, "stop_reason": stop_reason})
+    return await _run_task(
+        prompt, workspace=workspace, model=arguments.get("model") or None
+    )
 
 
 async def _handle_reply(arguments: dict[str, Any]):
-    session_id = str(arguments.get("session_id") or "")
-    session = _SESSIONS.get(session_id)
-    if session is None:
-        return _reply(
-            f"Error: no such session {session_id!r}. Start one with the deepcode tool first.",
-            {"error": "unknown session"},
-        )
+    session_id = str(arguments.get("session_id") or "").strip()
+    if not session_id:
+        return _reply("Error: 'session_id' is required.", {"error": "missing session"})
     prompt = str(arguments.get("prompt") or "").strip()
     if not prompt:
         return _reply("Error: 'prompt' is required.", {"error": "missing prompt"})
-    final, stop_reason = await _run_turn(session, prompt)
-    return _reply(final, {"session_id": session_id, "stop_reason": stop_reason})
+    return await _run_task(prompt, session_id=session_id)
 
 
 def build_server() -> Server:

@@ -61,11 +61,19 @@ class EventRepository:
         *,
         after: int = 0,
         limit: int = 500,
+        through: int | None = None,
     ) -> list[DomainEvent]:
+        upper_bound = " AND sequence <= ?" if through is not None else ""
+        parameters = (
+            (thread_id, after, through, limit)
+            if through is not None
+            else (thread_id, after, limit)
+        )
         rows = self.connection.execute(
-            "SELECT * FROM event_log WHERE thread_id = ? AND sequence > ? "
+            "SELECT * FROM event_log WHERE thread_id = ? AND sequence > ?"
+            f"{upper_bound} "
             "ORDER BY sequence LIMIT ?",
-            (thread_id, after, limit),
+            parameters,
         ).fetchall()
         return [self._from_row(row) for row in rows]
 

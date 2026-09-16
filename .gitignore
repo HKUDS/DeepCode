@@ -21,8 +21,6 @@ build/
 site/
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
-desktop/src-tauri/binaries/*
-!desktop/src-tauri/binaries/.gitkeep
 desktop/build/sidecar/
 
 # Logs / Reports
@@ -84,6 +82,9 @@ memory-bank/
 # project files
 deepcode_lab/
 uploads/
+/app_server/web_assets/
+/desktop/test-results/
+/desktop/playwright-report/
 
 # Secrets belong in DeepCode's credential store or environment variables.
 # NEVER commit real API keys or local user configuration.

@@ -26,7 +26,7 @@ import sys
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TextIO
 
 from loguru import logger as _loguru_logger
 
@@ -98,6 +98,7 @@ def setup_logging(
     *,
     workspace_root: Path | None = None,
     force: bool = False,
+    console_sink: TextIO | logging.Handler | None = None,
 ) -> None:
     """Wire up loguru sinks. Idempotent unless ``force=True``.
 
@@ -108,6 +109,9 @@ def setup_logging(
     ``workspace_root`` controls where the global log file lives (``logs/``
     is created relative to it). When omitted the current working
     directory is used.
+
+    ``console_sink`` lets a headless host redirect the console channel without
+    replacing the shared stdlib/loguru bridge or duplicating its routing.
     """
     global _INITIALISED, _LLM_PREVIEW_CHARS, _MCP_PREVIEW_CHARS
 
@@ -146,7 +150,7 @@ def setup_logging(
 
         if "console" in transports or not transports:
             sid = _loguru_logger.add(
-                sys.stderr,
+                console_sink if console_sink is not None else sys.stderr,
                 level=level,
                 format=_console_format,
                 backtrace=False,

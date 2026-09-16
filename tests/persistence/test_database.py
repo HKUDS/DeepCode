@@ -375,3 +375,42 @@ def test_database_rejects_cross_thread_execution_records(tmp_path: Path) -> None
     with pytest.raises(sqlite3.IntegrityError):
         with database.transaction() as connection:
             ItemRepository(connection).add(cross_thread_item)
+
+
+def test_an_existing_database_is_not_restricted_again_on_every_open(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Opening the database must not re-apply the ACL (3 ``icacls`` spawns/file).
+
+    ``_harden_files`` runs on every connect, read and transaction. Re-applying
+    the restriction there contradicts the "restrict at creation, not per open"
+    contract (tests/test_private_storage_acl_once.py) and spawned tens of
+    thousands of ``icacls`` processes per suite run — and under that much
+    process-creation pressure ``CreateProcess`` was observed to block for
+    minutes, which is how a TUI test (and the overnight suite) wedged on
+    2026-09-14. New ``-wal``/``-shm`` files inherit the restricted directory
+    ACL, so one repair per file identity is enough.
+    """
+
+    import core.persistence.database as database_module
+
+    hardened: list[str] = []
+    monkeypatch.setattr(
+        database_module,
+        "ensure_private_file",
+        lambda path: hardened.append(Path(path).name),
+    )
+    monkeypatch.setattr(database_module, "_hardened_files", set())
+
+    database = Database(tmp_path / "state" / "deepcode.sqlite3")
+    database.initialize()
+
+    assert hardened.count("deepcode.sqlite3") == 1
+
+    for _ in range(5):
+        with database.read():
+            pass
+        with database.transaction():
+            pass
+
+    assert hardened.count("deepcode.sqlite3") == 1, "an existing file is repaired once"

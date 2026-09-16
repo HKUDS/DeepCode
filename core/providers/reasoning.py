@@ -95,6 +95,25 @@ class ModelReasoningCapabilities:
             return None
 
 
+def declared_reasoning_capabilities(
+    efforts: list[str] | bool | None,
+    fallback: ModelReasoningCapabilities | None,
+) -> ModelReasoningCapabilities | None:
+    """Resolve the same manual capability declaration for catalog and execution."""
+    if efforts is None:
+        return fallback
+    if efforts is False:
+        return ModelReasoningCapabilities()
+    levels = tuple(
+        dict.fromkeys(level.strip().lower() for level in efforts if level.strip())
+    )
+    return ModelReasoningCapabilities(
+        supported_efforts=tuple(level for level in levels if level != "off"),
+        default_enabled=True,
+        mandatory="off" not in levels,
+    )
+
+
 def resolve_reasoning_effort(
     *,
     requested: str | None,

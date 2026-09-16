@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { Project } from "../../../generated/app-server";
-import type { DesktopRuntime } from "../../../rpc/contracts";
+import type { ClientRuntime } from "../../../rpc/contracts";
 import { useDiagnostics } from "../useDiagnostics";
 import styles from "../../management/ManagementWorkspace.module.css";
 
@@ -13,7 +13,7 @@ export function DiagnosticsCard({
   runtime,
   project,
 }: {
-  runtime: DesktopRuntime;
+  runtime: ClientRuntime;
   project: Project | null;
 }) {
   const { t } = useTranslation();

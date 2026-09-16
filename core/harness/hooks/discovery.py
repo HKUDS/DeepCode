@@ -103,7 +103,7 @@ def _load_hook_events(path: Path, warnings: list[str]) -> dict | None:
     if not path.is_file():
         return None
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         warnings.append(f"failed to read hooks config {path}: {exc}")
         return None

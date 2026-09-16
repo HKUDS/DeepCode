@@ -12,7 +12,7 @@ import type {
 } from "../../generated/app-server";
 import type {
   AnyRpcNotification,
-  DesktopRuntime,
+  ClientRuntime,
   RpcMethod,
   SidecarStatus,
 } from "../../rpc/contracts";
@@ -100,7 +100,7 @@ const testItem: Item = {
   updatedAt: "2026-07-16T00:00:00Z",
 };
 
-class WorkbenchRuntime implements DesktopRuntime {
+class WorkbenchRuntime implements ClientRuntime {
   readonly firstFiles = deferred<MethodResults["file/list"]>();
 
   async request<M extends RpcMethod>(
@@ -202,7 +202,7 @@ it("does not let a slow previous Thread overwrite the active workbench", async (
   expect(result.current.entries[0]?.path).toBe("b.txt");
 });
 
-class MutationRuntime implements DesktopRuntime {
+class MutationRuntime implements ClientRuntime {
   readonly calls: Array<{ method: RpcMethod; params: unknown }> = [];
   readonly writeResult = deferred<MethodResults["file/write"]>();
   fileListCount = 0;

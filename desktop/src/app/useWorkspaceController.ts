@@ -17,7 +17,7 @@ import { confirmAction } from "../platform/confirmAction";
 import type {
   AnyRpcNotification,
   BridgeError,
-  DesktopRuntime,
+  ClientRuntime,
   SidecarStatus,
 } from "../rpc/contracts";
 import {
@@ -25,7 +25,7 @@ import {
   sendInteractiveTurn,
   type InteractiveDelivery,
 } from "./interactiveTurnRouter";
-import { replayThreadHistory } from "./replayThreadHistory";
+import { ThreadEventStream } from "./threadEventStream";
 import {
   initialWorkspaceState,
   workspaceReducer,
@@ -57,7 +57,8 @@ function isEvent(value: unknown): value is Event {
     typeof value === "object" &&
     value !== null &&
     "sequence" in value &&
-    typeof (value as { sequence?: unknown }).sequence === "number"
+    Number.isSafeInteger((value as { sequence?: unknown }).sequence) &&
+    (value as { sequence: number }).sequence > 0
   );
 }
 
@@ -133,10 +134,11 @@ export interface WorkspaceController {
   dismissError(): void;
 }
 
-export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceController {
+export function useWorkspaceController(runtime: ClientRuntime): WorkspaceController {
   const [state, dispatch] = useReducer(workspaceReducer, initialWorkspaceState);
   const selectedThreadRef = useRef<string | null>(null);
   const loadedRuntimeRef = useRef(false);
+  const eventStreamRef = useRef<ThreadEventStream | null>(null);
 
   const reportError = useCallback((error: unknown) => {
     dispatch({ type: "error", error: normalizeError(error) });
@@ -144,12 +146,23 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
 
   const replayThread = useCallback(
     async (threadId: string) => {
+      if (selectedThreadRef.current !== threadId) return;
+      eventStreamRef.current?.stop();
       dispatch({ type: "trace-reset" });
-      await replayThreadHistory(runtime, threadId, (event) => {
-          dispatch({ type: "event", event });
-      });
+      const stream = new ThreadEventStream(
+        runtime,
+        threadId,
+        (event) => {
+          if (selectedThreadRef.current === threadId) {
+            dispatch({ type: "event", event });
+          }
+        },
+        reportError,
+      );
+      eventStreamRef.current = stream;
+      await stream.recover();
     },
-    [runtime],
+    [reportError, runtime],
   );
 
   const loadSettings = useCallback(
@@ -165,6 +178,7 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
   const loadGoal = useCallback(
     async (threadId: string) => {
       const result = await runtime.request("thread/goal/get", { threadId });
+      if (selectedThreadRef.current !== threadId) return;
       dispatch({
         type: "goal",
         goal: result.goal,
@@ -199,6 +213,7 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
         localStorage.setItem(PROJECT_KEY, selectedThread.projectId);
       }
       selectedThreadRef.current = selected;
+      if (!selected) eventStreamRef.current?.stop();
       if (selected) {
         localStorage.setItem(THREAD_KEY, selected);
         const resumed = await runtime.request("thread/resume", {
@@ -253,48 +268,63 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
       dispatch({ type: "runtime", status });
       if (status.phase === "ready") {
         void loadProjects();
-      } else if (status.phase === "crashed" || status.phase === "stopped") {
+      } else {
         loadedRuntimeRef.current = false;
+        eventStreamRef.current?.stop();
       }
     };
 
     const acceptNotification = (notification: AnyRpcNotification) => {
       if (disposed) return;
       if (notification.method === "server.warning") {
-        const threadId = selectedThreadRef.current;
-        if (threadId) void replayThread(threadId).catch(reportError);
+        if (notification.params.replayRequired === true) {
+          void eventStreamRef.current?.recover().catch(reportError);
+        }
         return;
       }
       if (isEvent(notification.params)) {
-        if (notification.method === "thread.updated") {
-          dispatch({ type: "event", event: notification.params });
-          return;
-        }
         const threadId = selectedThreadRef.current;
         if (threadId === notification.params.threadId) {
+          if (eventStreamRef.current?.threadId === threadId) {
+            eventStreamRef.current.receive(notification.params);
+          }
+        } else if (notification.method === "thread.updated") {
           dispatch({ type: "event", event: notification.params });
         }
       }
     };
 
     void (async () => {
+      const register = async (subscription: Promise<() => void>) => {
+        const cleanup = await subscription;
+        if (disposed) cleanup();
+        else cleanups.push(cleanup);
+      };
       try {
-        cleanups.push(await runtime.onStatus(acceptStatus));
-        cleanups.push(await runtime.onNotification(acceptNotification));
-        cleanups.push(
-          await runtime.onLog((message) => dispatch({ type: "log", message })),
+        // Install live delivery before status can trigger the first replay.
+        await register(runtime.onNotification(acceptNotification));
+        if (disposed) return;
+        await register(runtime.onStatus(acceptStatus));
+        if (disposed) return;
+        await register(
+          runtime.onLog((message) => {
+            if (!disposed) dispatch({ type: "log", message });
+          }),
         );
+        if (disposed) return;
         acceptStatus(await runtime.status());
       } catch (error) {
-        reportError(error);
+        if (!disposed) reportError(error);
       }
     })();
 
     return () => {
       disposed = true;
+      eventStreamRef.current?.stop();
+      loadedRuntimeRef.current = false;
       for (const cleanup of cleanups) cleanup();
     };
-  }, [loadProjects, replayThread, reportError, runtime]);
+  }, [loadProjects, reportError, runtime]);
 
   const withBusy = useCallback(
     async <Result,>(
@@ -326,6 +356,7 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
         dispatch({ type: "project-upsert", project: result.project });
         dispatch({ type: "select-project", projectId: result.project.id });
         selectedThreadRef.current = null;
+        eventStreamRef.current?.stop();
         localStorage.setItem(PROJECT_KEY, result.project.id);
         await loadThreads(result.project.id);
         await loadSettings(result.project.id);
@@ -338,6 +369,7 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
       withBusy(async () => {
         dispatch({ type: "select-project", projectId });
         selectedThreadRef.current = null;
+        eventStreamRef.current?.stop();
         localStorage.setItem(PROJECT_KEY, projectId);
         await loadThreads(projectId, localStorage.getItem(THREAD_KEY));
         await loadSettings(projectId);
@@ -376,9 +408,10 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
         dispatch({ type: "select-thread", threadId: result.thread.id });
         selectedThreadRef.current = result.thread.id;
         localStorage.setItem(THREAD_KEY, result.thread.id);
+        await replayThread(result.thread.id);
         return result.thread;
       }),
-    [runtime, selectedProject, withBusy],
+    [replayThread, runtime, selectedProject, withBusy],
   );
 
   const forkThread = useCallback(
@@ -396,8 +429,9 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
         dispatch({ type: "select-thread", threadId: isolated.thread.id });
         selectedThreadRef.current = isolated.thread.id;
         localStorage.setItem(THREAD_KEY, isolated.thread.id);
+        await replayThread(isolated.thread.id);
       }),
-    [runtime, selectedThread, withBusy],
+    [replayThread, runtime, selectedThread, withBusy],
   );
 
   const activateThread = useCallback(
@@ -452,6 +486,7 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
       if (!wasSelected) return;
 
       selectedThreadRef.current = null;
+      eventStreamRef.current?.stop();
       localStorage.removeItem(THREAD_KEY);
       const replacement =
         remaining
@@ -778,9 +813,9 @@ export function useWorkspaceController(runtime: DesktopRuntime): WorkspaceContro
     [runtime, selectedThread, withBusy],
   );
 
-  const pickWorkflowFile = useCallback(() => runtime.pickFile(), [runtime]);
+  const pickWorkflowFile = useCallback(() => runtime.pickFile(selectedThreadRef.current ?? undefined), [runtime]);
   const pickContextFiles = useCallback(
-    () => runtime.pickContextFiles(),
+    () => runtime.pickContextFiles(selectedThreadRef.current ?? undefined),
     [runtime],
   );
 

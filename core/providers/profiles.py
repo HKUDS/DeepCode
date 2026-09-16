@@ -6,7 +6,8 @@ import hashlib
 import json
 import os
 import re
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from core.config import ConfigError, ManualModelConfig
@@ -14,12 +15,15 @@ from core.domain.execution_profile import ExecutionProfile, ExecutionSelection
 from core.providers.base import GenerationSettings, LLMProvider
 from core.providers.catalog import resolve_model_info
 from core.providers.credentials import CredentialStore
-from core.providers.registry import PROVIDERS, ProviderSpec, find_by_model, find_by_name
+from core.providers.protocol_config import ProviderCompat, protocol_adapter
 from core.providers.reasoning import (
     ModelReasoningCapabilities,
     infer_reasoning_capabilities,
+    declared_reasoning_capabilities,
     resolve_reasoning_effort,
 )
+from core.providers.registry import PROVIDERS, ProviderSpec, find_by_model, find_by_name
+from core.providers.revisions import ProviderRevisionStore, credential_digest
 
 if TYPE_CHECKING:
     from core.config import ConnectionProfileConfig, DeepCodeConfig
@@ -51,6 +55,10 @@ class ResolvedConnection:
     # Full per-model declarations (label/capacities/efforts). ``manual_models``
     # stays the plain id tuple existing consumers read; these carry the rest.
     manual_model_entries: tuple[ManualModelConfig, ...] = ()
+    account_id: str | None = None
+    protocol: str = "auto"
+    auth: str = "api_key"
+    compat: ProviderCompat = field(default_factory=ProviderCompat)
 
     def public_view(self) -> dict[str, Any]:
         return {
@@ -58,6 +66,10 @@ class ResolvedConnection:
             "label": self.label,
             "providerName": self.provider_name,
             "adapter": self.adapter,
+            "protocol": self.protocol,
+            "auth": self.auth,
+            "accountId": self.account_id,
+            "compat": self.compat.model_dump(by_alias=True, exclude_none=True),
             "apiBase": self.api_base,
             "apiKeyEnv": None,
             "modelCatalog": self.model_catalog_setting,
@@ -76,9 +88,11 @@ class ResolvedConnection:
     def is_configured(self) -> bool:
         credential_ready = (
             bool(self.api_key)
-            or self.local
-            or self.spec.is_direct
-            or self.spec.is_oauth
+            or self.auth == "none"
+            or (
+                self.protocol == "auto"
+                and (self.local or self.spec.is_direct or self.spec.is_oauth)
+            )
         )
         endpoint_ready = not self.spec.requires_api_base or bool(self.api_base)
         return credential_ready and endpoint_ready
@@ -95,9 +109,17 @@ class ConnectionResolver:
         self,
         config: "DeepCodeConfig",
         credentials: CredentialStore | None = None,
+        *,
+        config_loader: Callable[[], "DeepCodeConfig"] | None = None,
+        credential_overrides: dict[str, str | None] | None = None,
     ) -> None:
         self.config = config
+        self.config_loader = config_loader
+        self._credential_overrides = dict(credential_overrides or {})
         self.credentials = credentials or CredentialStore()
+        self.revisions = ProviderRevisionStore(
+            self.credentials.path.parent / "provider_revisions"
+        )
 
     def list_connections(
         self, *, include_unconfigured: bool = True
@@ -176,15 +198,22 @@ class ConnectionResolver:
         phase: str = "implementation",
         model_limits: tuple[int, int] | None = None,
         reasoning_capabilities: ModelReasoningCapabilities | None = None,
+        persist_revision: bool = True,
     ) -> ExecutionProfile:
         normalized = (selection or ExecutionSelection()).normalized()
         connection, model = self.resolve_selection(normalized, phase=phase)
         settings = self.config.resolve_phase(phase)
+        entry = next(
+            (item for item in connection.manual_model_entries if item.id == model), None
+        )
         info = resolve_model_info(model)
         published_context_window, max_output_tokens = model_limits or (
             info.context_window,
             info.max_output_tokens,
         )
+        if entry is not None:
+            published_context_window = entry.context_window or published_context_window
+            max_output_tokens = entry.max_output_tokens or max_output_tokens
         if published_context_window < 1 or max_output_tokens < 1:
             raise ConfigError(f"Invalid model limits for '{model}'")
         max_tokens = min(settings.max_tokens, max_output_tokens)
@@ -205,14 +234,61 @@ class ConnectionResolver:
             model,
             provider_name=connection.provider_name,
         )
+        if entry is not None:
+            capabilities = declared_reasoning_capabilities(
+                entry.reasoning_efforts, capabilities
+            )
+        reasoning_supported = (
+            None
+            if entry is None or entry.reasoning_efforts is None
+            else entry.reasoning_efforts is not False
+        )
+        if reasoning_supported is False and normalized.reasoning_effort not in {
+            None,
+            "auto",
+            "none",
+            "off",
+        }:
+            raise ConfigError("This model is explicitly declared non-reasoning")
         try:
             reasoning_effort = resolve_reasoning_effort(
                 requested=normalized.reasoning_effort,
-                configured=settings.reasoning_effort,
+                configured=settings.reasoning_effort
+                if reasoning_supported is not False
+                else None,
                 capabilities=capabilities,
             )
         except ValueError as exc:
             raise ConfigError(str(exc)) from exc
+        compat = ProviderCompat.model_validate(
+            {
+                **connection.compat.model_dump(exclude_none=True),
+                **(
+                    entry.compat.model_dump(exclude_none=True)
+                    if entry is not None
+                    else {}
+                ),
+            }
+        )
+        revision = (
+            self.revisions.put(
+                {
+                    "schemaVersion": 1,
+                    "connectionId": connection.id,
+                    "providerName": connection.provider_name,
+                    "adapter": connection.adapter,
+                    "protocol": connection.protocol,
+                    "auth": connection.auth,
+                    "apiBase": connection.api_base,
+                    "extraHeaders": connection.extra_headers,
+                    "compat": compat.model_dump(by_alias=True, exclude_none=True),
+                    "credentialDigest": credential_digest(connection.api_key),
+                    "credentialAccount": connection.account_id,
+                }
+            )
+            if persist_revision
+            else None
+        )
         return ExecutionProfile(
             connection_id=connection.id,
             provider_name=connection.provider_name,
@@ -224,6 +300,13 @@ class ConnectionResolver:
             temperature=settings.temperature,
             reasoning_effort=reasoning_effort,
             config_revision=self.connection_revision(connection),
+            protocol=connection.protocol,
+            provider_revision=revision,
+            input_modalities=tuple(entry.input_modalities)
+            if entry is not None and entry.input_modalities is not None
+            else None,
+            tool_calling=entry.tool_calling if entry is not None else None,
+            reasoning_supported=reasoning_supported,
         )
 
     def build_provider(self, profile: ExecutionProfile) -> LLMProvider:
@@ -236,6 +319,7 @@ class ConnectionResolver:
                 api_base=connection.api_base,
                 default_model=profile.model_id,
                 extra_headers=connection.extra_headers,
+                compat=connection.compat,
             )
         elif connection.adapter == "openai_compat":
             from core.providers.openai_compat import OpenAICompatProvider
@@ -246,12 +330,28 @@ class ConnectionResolver:
                 default_model=profile.model_id,
                 extra_headers=connection.extra_headers,
                 spec=connection.spec,
+                protocol=connection.protocol,
+                compat=connection.compat,
+                auth_mode=connection.auth,
             )
         else:
             raise ConfigError(
                 f"Unsupported adapter '{connection.adapter}' "
                 f"for connection '{connection.id}'"
             )
+
+        def current_credential():
+            resolver = ConnectionResolver(
+                self.config_loader() if self.config_loader else self.config,
+                self.credentials,
+                credential_overrides=self._credential_overrides,
+            )
+            return resolver.connection_for_profile(profile).api_key
+
+        provider.request_guard = current_credential
+        provider.input_modalities = profile.input_modalities
+        provider.tool_calling = profile.tool_calling
+        provider.reasoning_supported = profile.reasoning_supported
         provider.generation = GenerationSettings(
             temperature=profile.temperature,
             max_tokens=profile.max_tokens,
@@ -259,27 +359,81 @@ class ConnectionResolver:
         )
         return provider
 
-    def connection_for_profile(
-        self,
-        profile: ExecutionProfile,
-    ) -> ResolvedConnection:
-        """Resolve credentials while rejecting non-secret config drift."""
-
+    def connection_for_profile(self, profile: ExecutionProfile) -> ResolvedConnection:
+        """Resolve live credentials against a frozen private route, or legacy revision."""
         connection = self.resolve_connection(
-            profile.connection_id,
-            model=profile.model_id,
+            profile.connection_id, model=profile.model_id
         )
-        if self.connection_revision(connection) != profile.config_revision:
-            raise ConfigError(
-                f"LLM connection '{connection.id}' changed after this Turn was "
-                "accepted. Retry with the current Session selection."
-            )
         if not connection.is_usable:
             raise ConfigError(
-                f"LLM connection '{connection.id}' has no credential. "
-                "Configure it in Desktop Settings or with `deepcode provider set`."
+                f"LLM connection '{connection.id}' is disabled or has no credential"
             )
-        return connection
+        if profile.provider_revision is None:
+            if self.connection_revision(connection) != profile.config_revision:
+                raise ConfigError(
+                    f"LLM connection '{connection.id}' changed after this Turn was accepted. Retry with the current Session selection."
+                )
+            entry = next(
+                (
+                    item
+                    for item in connection.manual_model_entries
+                    if item.id == profile.model_id
+                ),
+                None,
+            )
+            if entry is not None:
+                connection = replace(
+                    connection,
+                    compat=ProviderCompat.model_validate(
+                        {
+                            **connection.compat.model_dump(exclude_none=True),
+                            **entry.compat.model_dump(exclude_none=True),
+                        }
+                    ),
+                )
+            return connection
+        try:
+            snapshot = self.revisions.get(profile.provider_revision)
+            if (
+                snapshot.get("schemaVersion") != 1
+                or snapshot.get("connectionId") != connection.id
+                or snapshot.get("providerName") != connection.provider_name
+                or snapshot.get("auth") != connection.auth
+                or snapshot.get("protocol") != profile.protocol
+                or snapshot.get("adapter") != profile.adapter
+                or snapshot.get("credentialAccount") != connection.account_id
+            ):
+                raise ValueError("Provider identity changed after admission")
+            if connection.extra_headers != snapshot["extraHeaders"]:
+                raise ValueError(
+                    "Header credentials or configuration changed after this Turn was accepted; resubmit with current settings"
+                )
+            if connection.api_key is None and snapshot[
+                "credentialDigest"
+            ] != credential_digest(None):
+                raise ValueError("The credential used by this Turn has been removed")
+            if (
+                credential_digest(connection.api_key) != snapshot["credentialDigest"]
+                and connection.api_base != snapshot["apiBase"]
+            ):
+                raise ValueError(
+                    "Credential and endpoint changed after this Turn was accepted"
+                )
+            return replace(
+                connection,
+                adapter=snapshot["adapter"],
+                protocol=snapshot["protocol"],
+                api_base=snapshot["apiBase"],
+                extra_headers=dict(snapshot["extraHeaders"]),
+                compat=ProviderCompat.model_validate(snapshot["compat"]),
+                manual_model_entries=(),
+            )
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ConfigError(
+                str(exc)
+                if isinstance(exc, ValueError)
+                else "Invalid private provider revision; resubmit with current settings"
+            ) from exc
 
     @staticmethod
     def connection_revision(connection: ResolvedConnection) -> str:
@@ -293,6 +447,17 @@ class ConnectionResolver:
                 "apiBase": connection.api_base,
                 "extraHeaders": connection.extra_headers,
                 "enabled": connection.enabled,
+                **(
+                    {"protocol": connection.protocol}
+                    if connection.protocol != "auto"
+                    else {}
+                ),
+                **({"auth": connection.auth} if connection.auth != "api_key" else {}),
+                **(
+                    {"compat": connection.compat.model_dump(exclude_none=True)}
+                    if connection.compat.model_dump(exclude_none=True)
+                    else {}
+                ),
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -334,20 +499,28 @@ class ConnectionResolver:
             legacy_key=legacy_key,
             key_optional=spec.is_local or spec.is_direct or spec.is_oauth,
         )
+        account_id = None
+        if profile.auth == "oauth":
+            api_key, account_id = self.credentials.oauth_credential(connection_id)
+            source = "oauth" if api_key else "missing"
         model_entries = _clean_model_entries(profile.manual_models)
         return ResolvedConnection(
             id=connection_id,
             label=profile.label.strip() or connection_id,
             provider_name=spec.name,
-            adapter=profile.adapter or spec.backend,
-            api_key=api_key,
+            adapter=protocol_adapter(profile.protocol, profile.adapter or spec.backend),
+            protocol=profile.protocol,
+            account_id=account_id,
+            auth=profile.auth,
+            compat=profile.compat,
+            api_key=api_key if profile.auth != "none" else None,
             api_base=profile.api_base or spec.default_api_base or None,
             extra_headers=dict(profile.extra_headers),
-            model_catalog=_catalog_kind(profile.model_catalog, spec),
+            model_catalog=_catalog_kind(profile.model_catalog, spec, profile.protocol),
             model_catalog_setting=profile.model_catalog,
             manual_models=tuple(entry.id for entry in model_entries),
             manual_model_entries=model_entries,
-            credential_source=source,
+            credential_source=source if profile.auth != "none" else "not_required",
             local=spec.is_local,
             enabled=profile.enabled,
             spec=spec,
@@ -367,6 +540,11 @@ class ConnectionResolver:
 
     def _legacy_connection(self, spec: ProviderSpec) -> ResolvedConnection:
         provider = getattr(self.config.providers, spec.name)
+        if (
+            provider.auth == "none"
+            and protocol_adapter(provider.protocol, spec.backend) == "anthropic"
+        ):
+            raise ConfigError("Anthropic Messages requires an API key")
         api_key, source = self._credential(
             spec.name,
             env_name=spec.env_key,
@@ -377,14 +555,17 @@ class ConnectionResolver:
             id=spec.name,
             label=spec.label,
             provider_name=spec.name,
-            adapter=spec.backend,
-            api_key=api_key,
+            adapter=protocol_adapter(provider.protocol, spec.backend),
+            protocol=provider.protocol,
+            auth=provider.auth,
+            compat=provider.compat,
+            api_key=api_key if provider.auth != "none" else None,
             api_base=provider.api_base or spec.default_api_base or None,
             extra_headers=dict(provider.extra_headers or {}),
-            model_catalog=_catalog_kind("auto", spec),
+            model_catalog=_catalog_kind("auto", spec, provider.protocol),
             model_catalog_setting="auto",
             manual_models=(),
-            credential_source=source,
+            credential_source=source if provider.auth != "none" else "not_required",
             local=spec.is_local,
             enabled=True,
             spec=spec,
@@ -398,6 +579,9 @@ class ConnectionResolver:
         legacy_key: str | None,
         key_optional: bool,
     ) -> tuple[str | None, str]:
+        if connection_id in self._credential_overrides:
+            value = self._credential_overrides[connection_id]
+            return value, "request" if value else "missing"
         if env_name and os.environ.get(env_name):
             return os.environ[env_name], "environment"
         stored = self.credentials.get(connection_id)
@@ -433,9 +617,13 @@ def _clean_model_entries(
     return tuple(entries.values())
 
 
-def _catalog_kind(configured: str, spec: ProviderSpec) -> str:
+def _catalog_kind(configured: str, spec: ProviderSpec, protocol: str = "auto") -> str:
     if configured != "auto":
         return configured
+    if protocol == "anthropic_messages":
+        return "anthropic"
+    if protocol in {"openai_chat", "openai_responses"} and spec.backend == "anthropic":
+        return "openai"
     if spec.name == "openrouter":
         return "openrouter"
     if spec.name == "anthropic":

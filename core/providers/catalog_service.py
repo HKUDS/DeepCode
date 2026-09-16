@@ -21,6 +21,7 @@ from core.providers.profiles import ConnectionResolver, ResolvedConnection
 from core.providers.reasoning import (
     ModelReasoningCapabilities,
     infer_reasoning_capabilities,
+    declared_reasoning_capabilities,
 )
 
 
@@ -32,6 +33,8 @@ class CatalogModel:
     max_output_tokens: int
     supported_parameters: tuple[str, ...] = ()
     reasoning: ModelReasoningCapabilities | None = None
+    input_modalities: tuple[str, ...] | None = None
+    tool_calling: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -41,6 +44,16 @@ class CatalogModel:
             "maxOutputTokens": self.max_output_tokens,
             "supportedParameters": list(self.supported_parameters),
             "reasoning": self.reasoning.to_dict() if self.reasoning else None,
+            **(
+                {"inputModalities": list(self.input_modalities)}
+                if self.input_modalities is not None
+                else {}
+            ),
+            **(
+                {"toolCalling": self.tool_calling}
+                if self.tool_calling is not None
+                else {}
+            ),
         }
 
     @classmethod
@@ -64,6 +77,10 @@ class CatalogModel:
                     for item in value.get("supportedParameters", [])
                     if isinstance(item, str)
                 ),
+                input_modalities=tuple(value["inputModalities"])
+                if value.get("inputModalities") is not None
+                else None,
+                tool_calling=value.get("toolCalling"),
                 reasoning=(
                     ModelReasoningCapabilities.from_dict(value.get("reasoning"))
                     or infer_reasoning_capabilities(
@@ -489,6 +506,9 @@ def _has_declarations(entry: ManualModelConfig) -> bool:
         or entry.context_window is not None
         or entry.max_output_tokens is not None
         or entry.reasoning_efforts is not None
+        or entry.input_modalities is not None
+        or entry.tool_calling is not None
+        or bool(entry.compat.model_dump(exclude_none=True))
     )
 
 
@@ -501,31 +521,22 @@ def _declared_model(
     anything it leaves unsaid falls through — to the discovered row when
     overlaying a remote catalog, otherwise to the built-in cascade."""
     base = base if base is not None else _offline_model(entry.id)
-    if entry.reasoning_efforts is None:
-        reasoning = base.reasoning
-    elif entry.reasoning_efforts is False:
-        # Declared non-reasoning: block the inference fallback with an
-        # explicit "no controls" answer instead of an absent one.
-        reasoning = ModelReasoningCapabilities()
-    else:
-        levels = tuple(
-            dict.fromkeys(
-                level.strip().lower()
-                for level in entry.reasoning_efforts
-                if level.strip()
-            )
-        )
-        reasoning = ModelReasoningCapabilities(
-            supported_efforts=tuple(level for level in levels if level != "off"),
-            default_enabled=True,
-            mandatory="off" not in levels,
-        )
+    reasoning = declared_reasoning_capabilities(
+        entry.reasoning_efforts, base.reasoning or ModelReasoningCapabilities()
+    )
     return CatalogModel(
         id=entry.id,
         name=entry.label or base.name,
         context_window=entry.context_window or base.context_window,
         max_output_tokens=entry.max_output_tokens or base.max_output_tokens,
         reasoning=reasoning,
+        supported_parameters=base.supported_parameters,
+        input_modalities=tuple(entry.input_modalities)
+        if entry.input_modalities is not None
+        else base.input_modalities,
+        tool_calling=entry.tool_calling
+        if entry.tool_calling is not None
+        else base.tool_calling,
     )
 
 
@@ -534,6 +545,14 @@ def _looks_native(model_id: str, provider_name: str) -> bool:
     markers = {
         "openai": ("gpt-", "o1", "o3", "o4"),
         "anthropic": ("claude-",),
+        "bedrock": (
+            "anthropic.",
+            "us.anthropic.",
+            "eu.anthropic.",
+            "au.anthropic.",
+            "jp.anthropic.",
+            "global.anthropic.",
+        ),
         "gemini": ("gemini-",),
         "deepseek": ("deepseek-",),
         "dashscope": ("qwen",),

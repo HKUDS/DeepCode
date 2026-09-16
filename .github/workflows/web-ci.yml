@@ -1,0 +1,62 @@
+name: Web client acceptance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Classify changes
+        id: scope
+        uses: ./.github/actions/ci-scope
+      - uses: actions/setup-python@v5
+        if: steps.scope.outputs.runtime_changed == 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scripts/ci/requirements.lock
+      - uses: actions/setup-node@v4
+        if: steps.scope.outputs.runtime_changed == 'true'
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Install test runtime
+        if: steps.scope.outputs.runtime_changed == 'true'
+        run: |
+          python -m pip install -r scripts/ci/requirements.lock
+          python -m pip install --no-deps --no-build-isolation -e ".[test]"
+          python -m pip check
+      - name: Install browser tooling
+        if: steps.scope.outputs.runtime_changed == 'true'
+        working-directory: desktop
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Run deterministic browser acceptance
+        if: steps.scope.outputs.runtime_changed == 'true'
+        working-directory: desktop
+        env:
+          DEEPCODE_TEST_PYTHON: python
+        run: npm run test:web
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.scope.outputs.runtime_changed == 'true'
+        with:
+          name: web-test-results
+          path: desktop/test-results/
+          retention-days: 7

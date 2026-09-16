@@ -11,6 +11,7 @@ import { LanguageCard } from "./LanguageCard";
 import { DefaultPresetCard } from "./DefaultPresetCard";
 import { DiagnosticsCard } from "./DiagnosticsCard";
 import { PermissionCard } from "./PermissionCard";
+import { ServiceCard } from "./ServiceCard";
 import { UpdatesCard } from "./UpdatesCard";
 import styles from "../../management/ManagementWorkspace.module.css";
 
@@ -28,6 +29,7 @@ export function GeneralSection(props: SettingsSectionProps) {
       <LanguageCard />
       <AppearanceSettings />
       <ComposerBehaviorCard />
+      <ServiceCard runtime={runtime} />
       <UpdatesCard runtime={runtime} />
       <DiagnosticsCard runtime={runtime} project={project} />
       <aside className={styles.credits} aria-label="Visual credits">

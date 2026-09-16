@@ -131,6 +131,31 @@ class _GoalAwareFactory:
         with self._lock:
             self.decisions.append((index, decision))
 
+    def wait_for_started(self, prompt: str) -> None:
+        # A durable RUNNING Run does not mean its Agent claimed a script step.
+        _wait_until(
+            lambda: prompt in self.started_prompts,
+            f"Agent to consume its scripted step for {prompt!r}",
+        )
+
+
+@pytest.fixture(autouse=True, params=["immediate", "deferred"])
+def _agent_dispatch(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch):
+    """Exercise both fast Agents and Agents that start after submission returns."""
+    if request.param == "immediate":
+        return
+
+    original = _GoalAwareSession.run_stream
+
+    async def deferred(self, op):
+        # Scheduling perturbation, not a readiness wait: assertions must still
+        # synchronize on the actual Agent or durable completion they inspect.
+        await asyncio.sleep(0.1)
+        async for event in original(self, op):
+            yield event
+
+    monkeypatch.setattr(_GoalAwareSession, "run_stream", deferred)
+
 
 def _application(
     tmp_path: Path,
@@ -447,8 +472,6 @@ def test_new_occurrence_during_active_run_is_terminal_skipped_without_turn(
             2,
             1,
         )
-        assert len(factory.started_prompts) == 1
-
         completion_gate.set()
         _wait_for_run(
             application,
@@ -456,6 +479,7 @@ def test_new_occurrence_during_active_run_is_terminal_skipped_without_turn(
             active.run.id,
             AutomationRunStatus.COMPLETED,
         )
+        assert factory.started_prompts == [automation.prompt]
     finally:
         completion_gate.set()
         application.close()
@@ -699,6 +723,7 @@ def test_interrupted_turn_keeps_run_open_for_explicit_goal_continue(
         assert running.turn_id is not None
         assert running.goal_id is not None
 
+        factory.wait_for_started(automation.prompt)
         accepted, interrupted_turn = application.turns.interrupt(
             automation.thread_id,
             running.turn_id,
@@ -1041,6 +1066,7 @@ def test_legacy_unreserved_turn_is_never_adopted_as_automation_initial_turn(
         assert foreign.prompt == "A legacy client won the race"
         assert foreign.id != execution.run.turn_id
 
+        factory.wait_for_started(foreign.prompt)
         accepted, interrupted = application.turns.interrupt(
             automation.thread_id,
             foreign.id,

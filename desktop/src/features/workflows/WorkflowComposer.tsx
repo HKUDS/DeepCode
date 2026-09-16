@@ -53,15 +53,22 @@ export function WorkflowComposer({
   const [enableIndexing, setEnableIndexing] = useState(false);
   const [planReview, setPlanReview] = useState(true);
   const [feedback, setFeedback] = useState("");
-  const active = workflow && ["queued", "running", "waiting"].includes(workflow.status);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const active =
+    workflow && ["queued", "running", "waiting"].includes(workflow.status);
   const interaction = useMemo(() => workflowInteraction(workflow), [workflow]);
   const progress = workflow?.progressTotal
     ? Math.round((workflow.progressCurrent / workflow.progressTotal) * 100)
     : 0;
 
   const chooseFile = async () => {
-    const path = await onPickFile();
-    if (path) setSource(path);
+    setFileError(null);
+    try {
+      const path = await onPickFile();
+      if (path) setSource(path);
+    } catch (error) {
+      setFileError(error instanceof Error ? error.message : String(error));
+    }
   };
 
   const start = async () => {
@@ -78,6 +85,7 @@ export function WorkflowComposer({
 
   return (
     <footer className={styles.region}>
+      {fileError && <p role="alert">{fileError}</p>}
       {active ? (
         <section className={styles.console} aria-live="polite">
           <div className={styles.consoleHead}>
@@ -85,7 +93,9 @@ export function WorkflowComposer({
               <span className={styles.kicker}>
                 Paper2Code · attempt {workflow.attempt}
               </span>
-              <strong>{workflow.currentStage?.replaceAll("_", " ") ?? workflow.status}</strong>
+              <strong>
+                {workflow.currentStage?.replaceAll("_", " ") ?? workflow.status}
+              </strong>
             </div>
             <span className={styles.percent}>{progress}%</span>
           </div>
@@ -99,7 +109,9 @@ export function WorkflowComposer({
                 <h3>{interaction.title}</h3>
                 <p>{interaction.description}</p>
               </div>
-              {interaction.planPreview ? <pre>{interaction.planPreview}</pre> : null}
+              {interaction.planPreview ? (
+                <pre>{interaction.planPreview}</pre>
+              ) : null}
               <textarea
                 value={feedback}
                 onChange={(event) => setFeedback(event.target.value)}
@@ -129,7 +141,10 @@ export function WorkflowComposer({
             </div>
           ) : (
             <div className={styles.runningRow}>
-              <span>The run is durable; closing the window will recover it as retryable.</span>
+              <span>
+                The run is durable; closing the window will recover it as
+                retryable.
+              </span>
               <button
                 className={styles.danger}
                 type="button"
@@ -181,7 +196,11 @@ export function WorkflowComposer({
               />
             )}
             {sourceType === "local" ? (
-              <button type="button" onClick={() => void chooseFile()} disabled={!enabled}>
+              <button
+                type="button"
+                onClick={() => void chooseFile()}
+                disabled={!enabled}
+              >
                 Choose file
               </button>
             ) : null}
@@ -207,7 +226,8 @@ export function WorkflowComposer({
             </div>
             <div className={styles.submit}>
               <span>{disabledReason ?? terminalSummary(workflow)}</span>
-              {workflow?.status === "failed" || workflow?.status === "cancelled" ? (
+              {workflow?.status === "failed" ||
+              workflow?.status === "cancelled" ? (
                 <button
                   type="button"
                   disabled={busy}
@@ -239,7 +259,9 @@ interface InteractionView {
   planPreview: string | null;
 }
 
-function workflowInteraction(workflow: WorkflowRun | null): InteractionView | null {
+function workflowInteraction(
+  workflow: WorkflowRun | null,
+): InteractionView | null {
   if (!workflow || workflow.status !== "waiting") return null;
   const interaction = recordValue(workflow.checkpoint.interaction);
   if (!interaction || typeof interaction.id !== "string") return null;
@@ -249,7 +271,8 @@ function workflowInteraction(workflow: WorkflowRun | null): InteractionView | nu
     id: interaction.id,
     title: stringValue(request.title) ?? "Review implementation plan",
     description:
-      stringValue(request.description) ?? "Approve or revise the plan before generation.",
+      stringValue(request.description) ??
+      "Approve or revise the plan before generation.",
     planPreview: stringValue(data?.plan_preview),
   };
 }
@@ -271,7 +294,11 @@ function placeholderFor(sourceType: SourceType): string {
 }
 
 function terminalSummary(workflow: WorkflowRun | null): string {
-  if (!workflow) return "The generated code must pass discovered tests to complete.";
-  if (workflow.status === "completed") return "Last run completed with passing verification.";
-  return workflow.errorMessage ?? "Last run can be retried from its checkpoint.";
+  if (!workflow)
+    return "The generated code must pass discovered tests to complete.";
+  if (workflow.status === "completed")
+    return "Last run completed with passing verification.";
+  return (
+    workflow.errorMessage ?? "Last run can be retried from its checkpoint."
+  );
 }

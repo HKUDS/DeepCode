@@ -15,11 +15,14 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+import pytest
+
+pytestmark = pytest.mark.usefixtures("shared_cli_service")
 
 from cli import loop_cli
 from core import agent_setup

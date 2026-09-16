@@ -7,7 +7,7 @@ import type {
 } from "../generated/app-server";
 import type {
   BridgeError,
-  DesktopRuntime,
+  ClientRuntime,
   RpcMethod,
 } from "../rpc/contracts";
 import {
@@ -24,8 +24,8 @@ type Step =
   | { method: RpcMethod; result: unknown }
   | { method: RpcMethod; error: BridgeError };
 
-function scriptedRuntime(steps: Step[], calls: RecordedCall[]): DesktopRuntime {
-  const transport: Pick<DesktopRuntime, "request"> = {
+function scriptedRuntime(steps: Step[], calls: RecordedCall[]): ClientRuntime {
+  const transport: Pick<ClientRuntime, "request"> = {
     async request<M extends RpcMethod>(
       method: M,
       params: MethodParams[M],
@@ -38,7 +38,7 @@ function scriptedRuntime(steps: Step[], calls: RecordedCall[]): DesktopRuntime {
       return step.result as MethodResults[M];
     },
   };
-  return transport as DesktopRuntime;
+  return transport as ClientRuntime;
 }
 
 function turn(id: string, status: Turn["status"], ordinal = 1): Turn {

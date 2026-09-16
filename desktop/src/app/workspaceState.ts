@@ -38,7 +38,6 @@ export interface WorkspaceState {
   plansByTurnId: Record<string, TurnPlanState>;
   goal: Goal | null;
   goalOutcome: GoalOutcome | null;
-  lastSequence: number;
   entitySequences: Record<string, number>;
   selectedItemId: string | null;
   busy: boolean;
@@ -89,7 +88,6 @@ export const initialWorkspaceState: WorkspaceState = {
   plansByTurnId: {},
   goal: null,
   goalOutcome: null,
-  lastSequence: 0,
   entitySequences: {},
   selectedItemId: null,
   busy: false,
@@ -154,24 +152,15 @@ function applyItemDelta(state: WorkspaceState, event: Event): WorkspaceState {
   const itemId = event.itemId;
   const delta = event.payload.delta;
   if (!itemId || typeof delta !== "string") {
-    return {
-      ...state,
-      lastSequence: Math.max(state.lastSequence, event.sequence),
-    };
+    return state;
   }
   const key = `item:${itemId}`;
   if ((state.entitySequences[key] ?? 0) >= event.sequence) {
-    return {
-      ...state,
-      lastSequence: Math.max(state.lastSequence, event.sequence),
-    };
+    return state;
   }
   const index = state.items.findIndex((candidate) => candidate.id === itemId);
   if (index === -1) {
-    return {
-      ...state,
-      lastSequence: Math.max(state.lastSequence, event.sequence),
-    };
+    return state;
   }
 
   const current = state.items[index];
@@ -183,7 +172,6 @@ function applyItemDelta(state: WorkspaceState, event: Event): WorkspaceState {
   if (current.kind === "reasoning_summary" && !isReasoningDelta) {
     return {
       ...state,
-      lastSequence: Math.max(state.lastSequence, event.sequence),
       entitySequences: {
         ...state.entitySequences,
         [key]: event.sequence,
@@ -218,7 +206,6 @@ function applyItemDelta(state: WorkspaceState, event: Event): WorkspaceState {
   return {
     ...state,
     items,
-    lastSequence: Math.max(state.lastSequence, event.sequence),
     entitySequences: {
       ...state.entitySequences,
       [key]: event.sequence,
@@ -234,10 +221,7 @@ function applyDomainEvent(state: WorkspaceState, event: Event): WorkspaceState {
     const plan = eventPlan(event);
     const key = event.turnId ? `plan:${event.turnId}` : null;
     if (!plan || !key || (state.entitySequences[key] ?? 0) >= event.sequence) {
-      return {
-        ...state,
-        lastSequence: Math.max(state.lastSequence, event.sequence),
-      };
+      return state;
     }
     return {
       ...state,
@@ -245,7 +229,6 @@ function applyDomainEvent(state: WorkspaceState, event: Event): WorkspaceState {
         ...state.plansByTurnId,
         [plan.turnId]: plan,
       },
-      lastSequence: Math.max(state.lastSequence, event.sequence),
       entitySequences: {
         ...state.entitySequences,
         [key]: event.sequence,
@@ -255,10 +238,7 @@ function applyDomainEvent(state: WorkspaceState, event: Event): WorkspaceState {
   if (event.type === "goal.updated") {
     const key = `goal:${event.threadId}`;
     if ((state.entitySequences[key] ?? 0) > event.sequence) {
-      return {
-        ...state,
-        lastSequence: Math.max(state.lastSequence, event.sequence),
-      };
+      return state;
     }
     const rawGoal = event.payload.goal;
     const rawOutcome = event.payload.outcome;
@@ -268,7 +248,6 @@ function applyDomainEvent(state: WorkspaceState, event: Event): WorkspaceState {
       goalOutcome: isRecord(rawOutcome)
         ? (rawOutcome as unknown as GoalOutcome)
         : null,
-      lastSequence: Math.max(state.lastSequence, event.sequence),
       entitySequences: {
         ...state.entitySequences,
         [key]: event.sequence,
@@ -317,7 +296,6 @@ function applyDomainEvent(state: WorkspaceState, event: Event): WorkspaceState {
       artifact && accepted.get("artifact")
         ? upsert(state.artifacts, artifact)
         : state.artifacts,
-    lastSequence: Math.max(state.lastSequence, event.sequence),
     entitySequences: nextSequences,
   };
 }
@@ -363,7 +341,6 @@ export function workspaceReducer(
         plansByTurnId: {},
         goal: null,
         goalOutcome: null,
-        lastSequence: 0,
         entitySequences: {},
         selectedItemId: null,
       };
@@ -395,7 +372,6 @@ export function workspaceReducer(
         plansByTurnId: selected ? {} : state.plansByTurnId,
         goal: selected ? null : state.goal,
         goalOutcome: selected ? null : state.goalOutcome,
-        lastSequence: selected ? 0 : state.lastSequence,
         entitySequences: selected ? {} : state.entitySequences,
         selectedItemId: selected ? null : state.selectedItemId,
       };
@@ -412,7 +388,6 @@ export function workspaceReducer(
         plansByTurnId: {},
         goal: null,
         goalOutcome: null,
-        lastSequence: 0,
         entitySequences: {},
         selectedItemId: null,
       };
@@ -427,7 +402,6 @@ export function workspaceReducer(
         plansByTurnId: {},
         goal: null,
         goalOutcome: null,
-        lastSequence: 0,
         entitySequences: {},
         selectedItemId: null,
       };

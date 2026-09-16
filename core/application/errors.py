@@ -221,6 +221,15 @@ class DuplicateMessageConflictError(ApplicationError):
     code = "DUPLICATE_MESSAGE_CONFLICT"
 
 
+class InputDeliveryPendingError(ApplicationError):
+    code = "INPUT_DELIVERY_PENDING"
+    retryable = True
+
+
+class InputDeliveryUncertainError(ApplicationError):
+    code = "INPUT_DELIVERY_UNCERTAIN"
+
+
 class TurnInterruptTimeoutError(ApplicationError):
     code = "TURN_INTERRUPT_TIMEOUT"
     retryable = True

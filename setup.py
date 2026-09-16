@@ -69,6 +69,7 @@ setuptools.setup(
     python_requires=">=3.12",
     install_requires=requirements,
     extras_require={
+        "server": [],
         "advanced-documents": ["docling>=2.113.0"],
         "test": [
             "pytest>=8,<10",
@@ -77,6 +78,7 @@ setuptools.setup(
     },
     include_package_data=True,
     package_data={
+        "app_server": ["web_assets/*", "web_assets/assets/*"],
         "core.application.goal_prompts": ["*.md"],
         "core.skills": [
             "builtin/*.json",

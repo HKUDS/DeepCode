@@ -19,6 +19,7 @@ Design:
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 from functools import partial
 from pathlib import Path
@@ -399,9 +400,11 @@ class AgentSession:
         tool_filter: Any | None = None,
         closure_callback: Any | None = None,
         mcp_runtime: McpSessionRuntime | None = None,
+        provider_cleanup: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self._runner = AgentRunner(provider)
         self._provider = provider
+        self._provider_cleanup = provider_cleanup
         self._tools = tools
         self._model = model
         self._system_prompt = system_prompt
@@ -692,6 +695,9 @@ class AgentSession:
         if self._mcp_runtime is not None:
             await self._mcp_runtime.aclose()
         await self._tools.aclose()
+        if self._provider_cleanup is not None:
+            await self._provider_cleanup()
+            self._provider_cleanup = None
 
     async def _cancel_turn_subagents(self) -> None:
         """Stop delegated work without letting repeated Stop interrupt teardown."""

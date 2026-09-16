@@ -41,6 +41,7 @@ from cli.tui.renderer import EventRenderer
 from core.application.errors import ApplicationError
 from core.config import ConfigError
 from core.domain.thread_goal import ThreadGoalStatus
+from core.platform_compat import configure_utf8_stdio
 
 _STATUS_STYLE = {
     "succeeded": "bold green",
@@ -97,7 +98,6 @@ def _run(args: argparse.Namespace) -> int:
                         connection_id=args.connection,
                         reasoning_effort=args.reasoning_effort,
                         token_budget=args.token_budget,
-                        max_iterations=args.max_iterations,
                         trust_workspace=args.trust,
                         access_preset=parse_access_preset(args.access),
                     ),
@@ -118,7 +118,6 @@ def _run(args: argparse.Namespace) -> int:
                         reasoning_effort=args.reasoning_effort,
                         skill_identifiers=tuple(args.skill),
                         token_budget=args.token_budget,
-                        max_iterations=args.max_iterations,
                         trust_workspace=args.trust,
                         access_preset=parse_access_preset(args.access),
                     ),
@@ -161,6 +160,9 @@ def _run(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows consoles default to GBK/cp936; rich and model output emit UTF-8.
+    # Reconfigure early so headless runs never crash rendering non-GBK text.
+    configure_utf8_stdio()
     parser = argparse.ArgumentParser(
         prog="deepcode loop",
         description="Run a durable Goal on the shared ordinary-Turn runtime.",
@@ -216,12 +218,6 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=None,
         help="Total budget for a new Goal, or a larger budget when resuming.",
-    )
-    parser.add_argument(
-        "--max-iterations",
-        type=int,
-        default=None,
-        help="Optional model-sampling limit for diagnostics (unlimited by default).",
     )
     args = parser.parse_args(argv)
     if (args.goal is None) == (args.resume is None):

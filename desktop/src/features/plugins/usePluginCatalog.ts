@@ -4,7 +4,7 @@ import type {
   PluginCatalogResult,
   PluginInfo,
 } from "../../generated/app-server";
-import type { DesktopRuntime } from "../../rpc/contracts";
+import type { ClientRuntime } from "../../rpc/contracts";
 
 interface PluginCatalogState extends PluginCatalogResult {
   loading: boolean;
@@ -23,7 +23,7 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function usePluginCatalog(runtime: DesktopRuntime) {
+export function usePluginCatalog(runtime: ClientRuntime) {
   const [state, setState] = useState<PluginCatalogState>(emptyState);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const generation = useRef(0);

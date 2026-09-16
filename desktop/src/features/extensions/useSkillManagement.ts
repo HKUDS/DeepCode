@@ -4,7 +4,7 @@ import type {
   ConfigScope,
   SkillDetail,
 } from "../../generated/app-server";
-import type { DesktopRuntime } from "../../rpc/contracts";
+import type { ClientRuntime } from "../../rpc/contracts";
 import { useSkillCatalog } from "../skills/useSkillCatalog";
 
 interface SkillManagementState {
@@ -26,7 +26,7 @@ function message(error: unknown): string {
 }
 
 export function useSkillManagement(
-  runtime: DesktopRuntime,
+  runtime: ClientRuntime,
   projectId: string | null,
 ) {
   const catalog = useSkillCatalog(runtime, projectId);

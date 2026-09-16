@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import type { AgentPresetEntry } from "../../generated/app-server";
-import type { DesktopRuntime } from "../../rpc/contracts";
+import type { ClientRuntime } from "../../rpc/contracts";
 
 export interface PresetCatalogState {
   entries: AgentPresetEntry[];
@@ -28,7 +28,7 @@ function errorMessage(error: unknown): string {
  * an effect and a late-landing response for a previous owner is ignored.
  */
 export function usePresetCatalog(
-  runtime: DesktopRuntime,
+  runtime: ClientRuntime,
   projectId: string | null,
   threadId: string | null,
 ): PresetCatalogState & { select(presetId: string | null): Promise<void> } {

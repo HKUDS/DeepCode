@@ -1,0 +1,38 @@
+name: Classify CI changes
+description: Check the full PR or push diff; missing history runs all checks.
+outputs:
+  runtime_changed:
+    description: Whether runtime tests and Python packaging are needed.
+    value: ${{ steps.scope.outputs.runtime_changed }}
+  desktop_changed:
+    description: Whether Desktop or bundled runtime inputs changed.
+    value: ${{ steps.scope.outputs.desktop_changed }}
+runs:
+  using: composite
+  steps:
+    - id: scope
+      shell: bash
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      run: |
+        run_all() {
+          echo "runtime_changed=true" >> "$GITHUB_OUTPUT"
+          echo "desktop_changed=true" >> "$GITHUB_OUTPUT"
+        }
+        if [[ "$EVENT_NAME" != "pull_request" && "$EVENT_NAME" != "push" ]] ||
+           [[ -z "$BASE_SHA" || "$BASE_SHA" =~ ^0+$ ]] ||
+           ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null ||
+           ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
+          run_all
+          exit 0
+        fi
+        if [[ "$EVENT_NAME" == "pull_request" ]]; then
+          if ! BASE_SHA="$(git merge-base "$BASE_SHA" "$HEAD_SHA")"; then
+            run_all
+            exit 0
+          fi
+        fi
+        git diff --no-renames --name-only -z "$BASE_SHA" "$HEAD_SHA" \
+          | python scripts/ci_scope.py >> "$GITHUB_OUTPUT"

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { DiagnosticsSnapshot } from "../../generated/app-server";
-import type { DesktopRuntime } from "../../rpc/contracts";
+import type { ClientRuntime } from "../../rpc/contracts";
 
 export function useDiagnostics(
-  runtime: DesktopRuntime,
+  runtime: ClientRuntime,
   projectId: string | null,
 ) {
   const [diagnostics, setDiagnostics] = useState<DiagnosticsSnapshot | null>(null);

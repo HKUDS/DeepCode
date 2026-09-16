@@ -43,12 +43,45 @@ def _autodream_task(
     connection_id: str | None,
     reasoning_effort: str | None,
 ):
+    async def prompt_runner(prompt):
+        from cli.thread_client import HeadlessTurnOptions
+        from cli.service_turn import run_service_turn_async
+
+        summary = ""
+
+        def on_event(event):
+            nonlocal summary
+            if (
+                event.msg.type == "agent_message"
+                and event.msg.phase.value == "final_answer"
+            ):
+                summary = event.msg.text
+            elif event.msg.type == "task_complete":
+                summary = event.msg.final_text or summary
+
+        result = await run_service_turn_async(
+            HeadlessTurnOptions(
+                prompt=prompt,
+                workspace=workspace,
+                model=model,
+                connection_id=connection_id,
+                reasoning_effort=reasoning_effort,
+            ),
+            on_event=on_event,
+        )
+        if result.turn.status.value != "completed":
+            raise RuntimeError(
+                result.turn.error_message or "Memory maintenance did not complete"
+            )
+        return result.turn.stop_reason or "completed", summary
+
     async def task(run_index: int) -> RunOutcome:
         result = await consolidate_memory(
             workspace,
             model=model,
             connection_id=connection_id,
             reasoning_effort=reasoning_effort,
+            prompt_runner=prompt_runner,
         )
         detail = (
             f"{result.notes_before}->{result.notes_after} notes"
@@ -75,7 +108,6 @@ def _loop_task(args) -> "callable":
                 connection_id=args.connection,
                 reasoning_effort=args.reasoning_effort,
                 token_budget=args.token_budget,
-                max_iterations=args.max_iterations,
             )
         )
         return RunOutcome(
@@ -149,12 +181,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--max-runs", type=int, default=5)
     parser.add_argument("--token-budget", type=int, default=None)
-    parser.add_argument(
-        "--max-iterations",
-        type=int,
-        default=None,
-        help="Optional model-sampling limit for diagnostics (unlimited by default).",
-    )
     parser.add_argument("--once", action="store_true", help="Run a single pass.")
     args = parser.parse_args(argv)
     if args.job == "loop" and not args.goal:

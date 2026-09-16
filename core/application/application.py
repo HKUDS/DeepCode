@@ -302,6 +302,9 @@ class DeepCodeApplication:
                 event_relay_batch_size=event_relay_batch_size,
             )
             application._application_lease = lease
+            if database.restore_recovery_marker.exists():
+                application._pause_restored_scheduling()
+                database.restore_recovery_marker.unlink()
             application.event_relay.start()
             application.execution_coordinator.start(background=False)
             if lease.recovery_owner:
@@ -329,6 +332,35 @@ class DeepCodeApplication:
                 lease.close()
             raise
 
+    def _pause_restored_scheduling(self) -> None:
+        """A data rollback cannot roll back tool effects in project directories."""
+        from core.domain.automation import (
+            AutomationActivationStatus,
+            AutomationScheduleKind,
+            AutomationStatus,
+        )
+        from core.domain.thread_goal import ThreadGoalStatus
+
+        for goal in self.goals.store.list_current():
+            if goal.status is ThreadGoalStatus.ACTIVE:
+                self.goals.pause(goal.thread_id, expected_goal_id=goal.id)
+        definitions = []
+        offset = 0
+        while True:
+            page = self.automations.list(limit=100, offset=offset)
+            definitions.extend(page.automations)
+            if not page.has_more:
+                break
+            offset = page.next_offset
+        for definition in definitions:
+            if (
+                definition.status is AutomationStatus.ENABLED
+                and definition.schedule_kind is AutomationScheduleKind.INTERVAL
+            ):
+                self.automations.update(
+                    definition.id, status=AutomationActivationStatus.PAUSED
+                )
+
     def close(self) -> None:
         errors: list[Exception] = []
 
@@ -347,6 +379,7 @@ class DeepCodeApplication:
             "execution runtime",
             lambda: self.executions.close(cleanup=self.turns.close_live_sessions),
         )
+        attempt("Provider login", self.llm.close)
         attempt("Plugin service", self.plugins.close)
         attempt("Skill service", self.skills.close)
         attempt("Skill workspace registry", self.skill_hosts.close)

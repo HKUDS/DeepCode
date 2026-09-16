@@ -6,6 +6,7 @@ import argparse
 import getpass
 import json
 import sys
+import time
 
 from core.application.errors import ApplicationError
 from core.application.llm_configuration_service import LLMConfigurationService
@@ -29,6 +30,21 @@ def _parser() -> argparse.ArgumentParser:
     add.add_argument("--template")
     add.add_argument("--label")
     add.add_argument("--adapter", choices=("openai_compat", "anthropic"))
+    add.add_argument(
+        "--protocol",
+        choices=("auto", "openai_chat", "openai_responses", "anthropic_messages"),
+    )
+    add.add_argument("--auth", choices=("api_key", "none", "oauth"))
+    add.add_argument(
+        "--compat",
+        type=json.loads,
+        help="Typed compatibility object (JSON); unknown fields are rejected.",
+    )
+    add.add_argument(
+        "--model-declarations",
+        type=json.loads,
+        help="Model declaration array (JSON), including capacities and capabilities.",
+    )
     add.add_argument("--api-base")
     add.add_argument("--api-key-env")
     add.add_argument(
@@ -58,9 +74,28 @@ def _parser() -> argparse.ArgumentParser:
     command_parsers.append(test)
     test.add_argument("id")
     test.add_argument(
+        "--agent",
+        action="store_true",
+        help="Verify streaming and a local tool round trip: up to 3 model requests, 90 seconds; no shell or file tools.",
+    )
+    test.add_argument(
         "--model",
         help="Send a minimal real inference request to this model.",
     )
+
+    login = commands.add_parser(
+        "login",
+        help="Sign in to a saved OpenRouter OAuth connection (up to 5 minutes).",
+    )
+    command_parsers.append(login)
+    login.add_argument("id")
+    login.add_argument("--no-browser", action="store_true")
+    logout = commands.add_parser(
+        "logout",
+        help="Disconnect a Provider account locally; remote key revocation stays in the Provider settings.",
+    )
+    command_parsers.append(logout)
+    logout.add_argument("id")
 
     models = commands.add_parser("models", help="List models for a connection.")
     command_parsers.append(models)
@@ -91,6 +126,9 @@ def run(argv: list[str] | None = None) -> int:
                 ("template", "template"),
                 ("label", "label"),
                 ("adapter", "adapter"),
+                ("protocol", "protocol"),
+                ("auth", "auth"),
+                ("compat", "compat"),
                 ("api_base", "apiBase"),
                 ("api_key_env", "apiKeyEnv"),
                 ("catalog", "modelCatalog"),
@@ -100,6 +138,10 @@ def run(argv: list[str] | None = None) -> int:
                 candidate = getattr(args, argument)
                 if candidate is not None:
                     value[field] = candidate
+            if args.model_declarations is not None:
+                if args.model:
+                    raise ValueError("Use either --model or --model-declarations")
+                value["manualModels"] = args.model_declarations
             if args.clear_api_key:
                 value["clearApiKey"] = True
             if args.api_key:
@@ -107,8 +149,31 @@ def run(argv: list[str] | None = None) -> int:
             result = service.upsert(value)
         elif args.command == "remove":
             result = service.remove(args.id)
+        elif args.command == "login":
+            flow = service.login_start(args.id, open_browser=not args.no_browser)
+            try:
+                if flow["authorizationUrl"]:
+                    print(
+                        flow["authorizationUrl"],
+                        file=sys.stderr if args.json else sys.stdout,
+                    )
+                while flow["status"] in {"starting", "pending", "exchanging"}:
+                    time.sleep(0.5)
+                    flow = service.login_poll(flow["flowId"])
+                result = flow
+            except KeyboardInterrupt:
+                service.login_cancel(flow["flowId"])
+                return 130
+            finally:
+                service.close()
+        elif args.command == "logout":
+            result = service.logout(args.id)
         elif args.command == "test":
-            result = service.test(args.id, model_id=args.model)
+            result = service.test(
+                args.id,
+                model_id=args.model,
+                **({"mode": "agent"} if args.agent else {}),
+            )
         else:
             result = service.list_models(args.id, refresh=args.refresh)
     except (ApplicationError, ValueError) as exc:
@@ -117,6 +182,13 @@ def run(argv: list[str] | None = None) -> int:
 
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
+    elif args.command in {"login", "logout"}:
+        if args.command == "login":
+            print(
+                f"{result['status']}: {result.get('accountId') or result.get('error') or args.id}"
+            )
+        else:
+            print("Disconnected locally. Remote key settings: " + result["manageUrl"])
     elif args.command == "list" or args.command in {"set", "remove"}:
         for connection in result["connections"]:
             state = "ready" if connection["configured"] else "credential needed"
@@ -150,7 +222,7 @@ def run(argv: list[str] | None = None) -> int:
             )
         if result.get("error"):
             print(f"warning: {result['error']}", file=sys.stderr)
-    return 0
+    return 1 if args.command == "login" and result["status"] != "authenticated" else 0
 
 
 if __name__ == "__main__":

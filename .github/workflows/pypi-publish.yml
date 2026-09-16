@@ -31,6 +31,19 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      - name: Set up Node for packaged web assets
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Build packaged browser client
+        working-directory: desktop
+        run: |
+          npm ci
+          npm run build:web
+
       - name: Build release distributions
         run: |
           python -m pip install --upgrade pip build packaging twine

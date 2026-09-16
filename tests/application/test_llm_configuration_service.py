@@ -390,6 +390,9 @@ def test_connection_verification_sends_only_a_minimal_real_model_probe(
     requests: list[dict] = []
 
     class ProbeProvider:
+        async def aclose(self):
+            pass
+
         async def chat(self, **kwargs):
             requests.append(kwargs)
             return LLMResponse(content="OK")
@@ -447,6 +450,9 @@ def test_connection_verification_maps_provider_errors_without_leaking_response(
     )
 
     class DeniedProvider:
+        async def aclose(self):
+            pass
+
         async def chat(self, **_kwargs):
             return LLMResponse(
                 content=f"provider payload contained {secret}",

@@ -14,6 +14,11 @@ from core.application.config_store import (
 )
 from core.application.errors import ConflictError, InvalidArgumentError
 from core.application.project_service import ProjectService
+from core.application.provider_verification import (
+    verification_stage as _verification_stage,
+    model_error_detail as _model_error_detail,
+    verify_agent,
+)
 from core.config import (
     ConnectionProfileConfig,
     DeepCodeConfig,
@@ -21,9 +26,10 @@ from core.config import (
     load_config_for_workspace,
 )
 from core.domain.execution_profile import ExecutionProfile, ExecutionSelection
-from core.providers.catalog_service import ModelCatalogService
+from core.providers.catalog_service import ModelCatalogService, ModelCatalog
 from core.providers.credentials import CredentialStore
 from core.providers.profiles import ConnectionResolver, validate_connection_id
+from core.providers.oauth import ProviderOAuthManager
 from core.providers.reasoning import infer_reasoning_capabilities
 from core.providers.registry import PROVIDERS, find_by_name
 
@@ -32,6 +38,9 @@ _PROFILE_FIELDS = {
     "label",
     "template",
     "adapter",
+    "protocol",
+    "auth",
+    "compat",
     "apiBase",
     "apiKeyEnv",
     "apiKey",
@@ -63,6 +72,7 @@ class LLMConfigurationService:
         self.config_store = config_store or ConfigStore()
         self.credentials = credential_store or CredentialStore()
         self.catalog = catalog or ModelCatalogService()
+        self.oauth = ProviderOAuthManager(self.credentials)
 
     def list_connections(self, project_id: str | None = None) -> dict[str, Any]:
         config = self._config(project_id=project_id)
@@ -134,6 +144,10 @@ class LLMConfigurationService:
                 existing=existing,
                 providers=providers,
             )
+            if normalized["auth"] == "oauth" and api_key is not None:
+                raise InvalidArgumentError(
+                    "Use provider login for OAuth connections, or select API-key authentication"
+                )
             profiles[connection_id] = normalized
             providers["profiles"] = profiles
             return {**current, "providers": providers}
@@ -155,6 +169,9 @@ class LLMConfigurationService:
         )
         if not credential_only_builtin:
             self._mutate_config(transform, expected_revision)
+            self.credentials.begin_login(
+                connection_id
+            )  # invalidate pending flows after configuration changes
         if clear_api_key:
             self.credentials.clear(connection_id)
         if api_key is not None:
@@ -209,6 +226,36 @@ class LLMConfigurationService:
             **self.list_connections(),
         }
 
+    def close(self) -> None:
+        self.oauth.close()
+
+    def login_start(self, connection_id: str, *, open_browser: bool = False) -> dict:
+        connection = self._resolver().resolve_connection(connection_id)
+        if connection.auth != "oauth" or not connection.enabled:
+            raise InvalidArgumentError(
+                "Save an enabled OpenRouter OAuth connection before signing in"
+            )
+        return self.oauth.start(connection.id, open_browser=open_browser)
+
+    def login_poll(self, flow_id: str) -> dict:
+        return self.oauth.poll(flow_id)
+
+    def login_cancel(self, flow_id: str) -> dict:
+        return self.oauth.cancel(flow_id)
+
+    def logout(self, connection_id: str) -> dict:
+        connection = self._resolver().resolve_connection(connection_id)
+        if connection.auth != "oauth":
+            raise InvalidArgumentError(
+                "The selected connection does not use Provider login"
+            )
+        self.credentials.clear(connection.id)
+        return {
+            "disconnected": True,
+            "remoteRevoked": False,
+            "manageUrl": "https://openrouter.ai/settings/keys",
+        }
+
     def discover_models(
         self,
         *,
@@ -217,6 +264,7 @@ class LLMConfigurationService:
         api_base: str | None = None,
         api_key: str | None = None,
         project_id: str | None = None,
+        draft: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Probe an endpoint AS SHOWN in an editor form; writes nothing.
 
@@ -226,9 +274,15 @@ class LLMConfigurationService:
         leaves memory — discovery returns candidates, adopting writes
         (the dsh rule).
         """
-        resolver = self._resolver(project_id=project_id)
+        resolver = (
+            self._draft_resolver(draft, project_id)
+            if draft is not None
+            else self._resolver(project_id=project_id)
+        )
         try:
-            if connection_id and connection_id.strip():
+            if draft is not None:
+                base = resolver.resolve_connection(str(draft["id"]))
+            elif connection_id and connection_id.strip():
                 base = resolver.resolve_connection(connection_id.strip())
             elif template and template.strip():
                 base = resolver.template_connection(template.strip())
@@ -296,6 +350,8 @@ class LLMConfigurationService:
         *,
         project_id: str | None = None,
         model_id: str | None = None,
+        draft: dict[str, Any] | None = None,
+        mode: str = "quick",
     ) -> dict[str, Any]:
         """Check one connection and optionally run a minimal real model request.
 
@@ -305,8 +361,20 @@ class LLMConfigurationService:
         credential may call a particular model.
         """
 
+        if mode not in {"quick", "agent"}:
+            raise InvalidArgumentError("Unknown verification mode")
+        if mode == "agent" and not _clean_optional(model_id):
+            raise InvalidArgumentError("Agent verification requires a model")
+        if draft is not None and draft.get("id") != connection_id:
+            raise InvalidArgumentError(
+                "Draft connection ID does not match the selected connection"
+            )
         try:
-            resolver = self._resolver(project_id=project_id)
+            resolver = (
+                self._draft_resolver(draft, project_id)
+                if draft is not None
+                else self._resolver(project_id=project_id)
+            )
             connection = resolver.resolve_connection(connection_id)
         except ValueError as exc:
             raise InvalidArgumentError(str(exc)) from exc
@@ -338,7 +406,32 @@ class LLMConfigurationService:
             _credential_detail(connection.credential_source),
         )
         catalog_started = time.monotonic()
-        catalog = self.catalog.list_models(connection, refresh=True)
+        if draft is None:
+            catalog = self.catalog.list_models(connection, refresh=True)
+        else:
+            # Form probes never persist catalogs, credentials or route revisions.
+            try:
+                models = (
+                    self.catalog.probe(connection)
+                    if connection.model_catalog != "manual"
+                    else ()
+                )
+                catalog = ModelCatalog(
+                    connection_id=connection.id,
+                    models=models,
+                    source="remote"
+                    if connection.model_catalog != "manual"
+                    else "manual",
+                    stale=False,
+                )
+            except Exception as exc:
+                catalog = ModelCatalog(
+                    connection_id=connection.id,
+                    models=(),
+                    source="fallback",
+                    stale=True,
+                    error=_safe_configuration_error(exc),
+                )
         catalog_latency = round((time.monotonic() - catalog_started) * 1000)
         if catalog.source == "manual" and not catalog.stale:
             catalog_stage = _verification_stage(
@@ -372,7 +465,12 @@ class LLMConfigurationService:
             "Choose a model to run a minimal verification request",
             model_id=clean_model,
         )
-        if clean_model is not None:
+        agent_stages = []
+        if clean_model is not None and mode == "agent":
+            agent_stages = self._verify_agent(
+                resolver, connection.id, clean_model, catalog
+            )
+        elif clean_model is not None:
             model_stage = self._verify_model(
                 resolver,
                 connection_id=connection.id,
@@ -380,7 +478,18 @@ class LLMConfigurationService:
                 catalog=catalog,
             )
 
-        if clean_model is not None:
+        if mode == "agent":
+            required = {"stream", "tool", "continuation"}
+            ok = all(
+                any(
+                    stage["id"] == name and stage["status"] == "passed"
+                    for stage in agent_stages
+                )
+                for name in required
+            ) and not any(stage["status"] == "failed" for stage in agent_stages)
+            status = "ready" if ok else "error"
+            error = None if ok else "Agent compatibility verification did not pass"
+        elif clean_model is not None:
             ok = model_stage["status"] == "passed"
             status = "ready" if ok else "error"
             error = None if ok else str(model_stage["detail"])
@@ -404,7 +513,9 @@ class LLMConfigurationService:
             started=started,
             model_count=len(catalog.models),
             error=error,
-            stages=(credential, catalog_stage, model_stage),
+            stages=(credential, catalog_stage, *agent_stages)
+            if mode == "agent"
+            else (credential, catalog_stage, model_stage),
         )
 
     def _verify_model(
@@ -426,6 +537,7 @@ class LLMConfigurationService:
                     model_id=model_id,
                 ),
                 phase="implementation",
+                persist_revision=False,
                 model_limits=(
                     (
                         catalog_model.context_window,
@@ -447,17 +559,22 @@ class LLMConfigurationService:
                 model_id=model_id,
             )
 
-        started = time.monotonic()
-        try:
-            response = _run_probe_isolated(
-                provider.chat(
+        async def probe():
+            try:
+                return await provider.chat(
                     messages=[{"role": "user", "content": _MODEL_PROBE_PROMPT}],
                     model=profile.model_id,
                     max_tokens=min(16, profile.max_output_tokens),
                     temperature=0,
                     reasoning_effort=None,
-                ),
-                timeout=_MODEL_PROBE_TIMEOUT_SECONDS,
+                )
+            finally:
+                await provider.aclose()
+
+        started = time.monotonic()
+        try:
+            response = _run_probe_isolated(
+                probe(), timeout=_MODEL_PROBE_TIMEOUT_SECONDS
             )
         except TimeoutError:
             return _verification_stage(
@@ -543,6 +660,47 @@ class LLMConfigurationService:
         except ValueError as exc:
             raise InvalidArgumentError(str(exc)) from exc
 
+    def _draft_resolver(
+        self, draft: dict[str, Any], project_id: str | None
+    ) -> ConnectionResolver:
+        connection_id, key, clear = self._parse_mutation(draft)
+        config = self._config(project_id=project_id).model_copy(deep=True)
+        providers = config.providers.model_dump(by_alias=True, exclude_none=True)
+        existing = providers.get("profiles", {}).get(connection_id)
+        normalized = self._normalize_profile(
+            draft, connection_id=connection_id, existing=existing, providers=providers
+        )
+        config.providers.profiles[connection_id] = (
+            ConnectionProfileConfig.model_validate(normalized)
+        )
+        overrides = {connection_id: key} if key is not None or clear else {}
+        return ConnectionResolver(
+            config, self.credentials, credential_overrides=overrides
+        )
+
+    def _verify_agent(self, resolver, connection_id, model_id, catalog):
+        selected = next((item for item in catalog.models if item.id == model_id), None)
+        try:
+            profile = resolver.execution_profile(
+                ExecutionSelection(connection_id, model_id),
+                model_limits=(selected.context_window, selected.max_output_tokens)
+                if selected
+                else None,
+                reasoning_capabilities=selected.reasoning if selected else None,
+                persist_revision=False,
+            )
+            provider = resolver.build_provider(profile)
+            return _run_probe_isolated(verify_agent(provider, profile), timeout=95)
+        except Exception as exc:
+            return [
+                _verification_stage(
+                    "stream",
+                    "failed",
+                    _safe_configuration_error(exc),
+                    model_id=model_id,
+                )
+            ]
+
     def _resolver(self, project_id: str | None = None) -> ConnectionResolver:
         return ConnectionResolver(self._config(project_id=project_id), self.credentials)
 
@@ -604,6 +762,9 @@ class LLMConfigurationService:
             "label",
             "template",
             "adapter",
+            "protocol",
+            "auth",
+            "compat",
             "apiBase",
             "apiKeyEnv",
             "extraHeaders",
@@ -637,25 +798,6 @@ def _clean_optional(value: Any) -> str | None:
     return clean or None
 
 
-def _verification_stage(
-    stage_id: str,
-    status: str,
-    detail: str,
-    *,
-    latency_ms: int | None = None,
-    model_count: int | None = None,
-    model_id: str | None = None,
-) -> dict[str, Any]:
-    return {
-        "id": stage_id,
-        "status": status,
-        "detail": detail[:300],
-        "latencyMs": latency_ms,
-        "modelCount": model_count,
-        "modelId": model_id,
-    }
-
-
 def _verification_result(
     connection_id: str,
     *,
@@ -684,7 +826,9 @@ def _credential_detail(source: str) -> str:
         "environment": "Credential resolved from the configured environment variable",
         "credential_store": "Credential loaded from DeepCode private storage",
         "legacy_config": "Credential loaded from legacy DeepCode configuration",
-        "not_required": "This local or direct connection does not require a credential",
+        "not_required": "This connection does not require a credential",
+        "request": "Unsaved credential supplied for this verification only",
+        "oauth": "Credential bound to the signed-in OpenRouter account",
     }.get(source, "Credential is configured")
 
 
@@ -712,27 +856,6 @@ def _safe_configuration_error(exc: Exception) -> str:
     return f"{type(exc).__name__}: model verification could not be completed"
 
 
-def _model_error_detail(response: Any) -> str:
-    status = response.error_status_code
-    if status == 401:
-        return "The provider rejected the API credential"
-    if status == 403:
-        return "The credential does not have access to this model"
-    if status == 404:
-        return "The endpoint or selected model was not found"
-    if status == 408:
-        return "The model verification request timed out"
-    if status == 429:
-        return "The provider reported a rate, quota, or balance limit"
-    if isinstance(status, int) and status >= 500:
-        return "The provider is temporarily unavailable"
-    if response.error_kind == "timeout":
-        return "The model verification request timed out"
-    if response.error_kind == "connection":
-        return "DeepCode could not connect to the model endpoint"
-    return "The provider rejected the model verification request"
-
-
 def _profile_seed(
     connection_id: str,
     *,
@@ -756,6 +879,9 @@ def _profile_seed(
         "label": spec.label,
         "template": spec.name,
         "adapter": spec.backend,
+        "protocol": legacy.get("protocol", "auto"),
+        "auth": legacy.get("auth", "api_key"),
+        "compat": legacy.get("compat", {}),
         "apiBase": legacy.get("apiBase", legacy.get("api_base"))
         or spec.default_api_base
         or None,

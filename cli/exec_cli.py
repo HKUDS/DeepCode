@@ -14,7 +14,8 @@ from cli.execution_options import (
     add_workspace_trust_argument,
     parse_access_preset,
 )
-from cli.headless_turn import HeadlessTurnOptions, run_headless_turn, succeeded
+from cli.thread_client import HeadlessTurnOptions
+from core.domain.turn import TurnStatus
 from cli.transcript import TranscriptMode
 from core.application.errors import ApplicationError
 from core.config import ConfigError
@@ -105,7 +106,7 @@ def _approval_decider(approval: Approval) -> ApprovalStatus:
     return ApprovalStatus.DENIED
 
 
-def _run(args: argparse.Namespace) -> int:
+def _run(args: argparse.Namespace, *, shared_service: bool = True) -> int:
     transcript_mode = TranscriptMode.parse(
         "verbose" if args.verbose else args.transcript
     )
@@ -125,7 +126,17 @@ def _run(args: argparse.Namespace) -> int:
             _emit_human(event, transcript_mode)
 
     try:
-        result = run_headless_turn(
+        runner_options = {}
+        if shared_service:
+            from cli.service_turn import run_service_turn
+
+            runner = run_service_turn
+            runner_options["detach"] = args.detach
+        else:
+            from cli.headless_turn import run_headless_turn
+
+            runner = run_headless_turn
+        result = runner(
             HeadlessTurnOptions(
                 prompt=args.prompt,
                 workspace=workspace,
@@ -141,6 +152,7 @@ def _run(args: argparse.Namespace) -> int:
             ),
             on_event=on_event,
             decide_approval=_approval_decider,
+            **runner_options,
         )
     except ConfigError as exc:
         print(format_config_error(exc), file=sys.stderr, flush=True)
@@ -161,13 +173,31 @@ def _run(args: argparse.Namespace) -> int:
         file=sys.stderr,
         flush=True,
     )
-    return 0 if succeeded(result) else 1
+    if args.detach:
+        print(
+            json.dumps(
+                {
+                    "threadId": result.session_id,
+                    "turnId": result.turn.id,
+                    "status": result.turn.status.value,
+                    "detached": True,
+                }
+            ),
+            flush=True,
+        )
+        return 0
+    return 0 if result.turn.status is TurnStatus.COMPLETED else 1
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, shared_service: bool = True) -> int:
     parser = argparse.ArgumentParser(
         prog="deepcode exec",
         description="Run one durable coding Turn headlessly.",
+    )
+    parser.add_argument(
+        "--detach",
+        action="store_true",
+        help="Submit to the service and return its task identity without waiting",
     )
     parser.add_argument("prompt", help="The coding task to perform.")
     parser.add_argument(
@@ -227,16 +257,17 @@ def main(argv: list[str] | None = None) -> int:
         metavar="ID_OR_NAME",
         help="Select a Skill for this Turn (repeatable, maximum 8).",
     )
-    parser.add_argument(
-        "--max-iterations",
-        type=int,
-        default=None,
-        help="Optional model-sampling limit for diagnostics (unlimited by default).",
-    )
+    parser.set_defaults(max_iterations=None)
+    if not shared_service:
+        parser.add_argument(
+            "--max-iterations", type=int, help="Optional model-sampling limit."
+        )
     args = parser.parse_args(argv)
+    if args.detach and not shared_service:
+        parser.error("--detach requires the shared service")
     if len(args.skill) > MAX_SELECTED_SKILLS:
         parser.error(f"--skill may be specified at most {MAX_SELECTED_SKILLS} times")
-    return _run(args)
+    return _run(args, shared_service=shared_service)
 
 
 if __name__ == "__main__":

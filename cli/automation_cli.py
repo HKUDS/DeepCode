@@ -336,8 +336,8 @@ def _print_result(command: str, result: dict[str, Any], *, as_json: bool) -> Non
                 f"{latest_status:<12} {automation['name']} · {automation['id']}"
             )
         print(
-            "Interval schedules run only while a scheduler-enabled DeepCode "
-            "Desktop or App Server is active."
+            "Interval schedules run while the DeepCode background service is running."
+            " Closing a client does not stop the service."
         )
         _print_pagination_hint(result, "Automations")
         return
@@ -352,8 +352,8 @@ def _print_result(command: str, result: dict[str, Any], *, as_json: bool) -> Non
         print(f"thread: {automation['threadId']}")
         if command == "create" and automation["scheduleKind"] == "interval":
             print(
-                "Interval schedules run only while a scheduler-enabled DeepCode "
-                "Desktop or App Server is active."
+                "Interval schedules run while the DeepCode background service is running."
+                " Closing a client does not stop the service."
             )
         return
 
@@ -446,8 +446,17 @@ def run(
     factory = application_factory or _default_application_factory
     application: DeepCodeApplication | None = None
     try:
-        application = factory()
-        result = _dispatch(application, args)
+        if application_factory is None and args.command == "run":
+            from cli.service_automation import run_automation_service
+
+            result = run_automation_service(
+                args.automation_id,
+                request_id=args.request_id,
+                interactive=bool(not args.json and sys.stdin.isatty()),
+            )
+        else:
+            application = factory()
+            result = _dispatch(application, args)
     except (ApplicationError, ValueError) as exc:
         _print_error(exc, as_json=args.json)
         return 1

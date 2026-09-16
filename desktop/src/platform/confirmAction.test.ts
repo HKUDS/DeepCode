@@ -1,22 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  isTauri: vi.fn(),
   nativeConfirm: vi.fn(),
 }));
 
-vi.mock("@tauri-apps/api/core", () => ({
-  isTauri: mocks.isTauri,
-}));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   confirm: mocks.nativeConfirm,
+  open: vi.fn(),
 }));
 
-import { confirmAction } from "./confirmAction";
+import { confirmAction, setConfirmHandler } from "./confirmAction";
+import { configureNativeDialogs } from "../rpc/tauriRuntime";
 
 describe("confirmAction", () => {
   beforeEach(() => {
-    mocks.isTauri.mockReturnValue(false);
+    setConfirmHandler(async (message) => window.confirm(message));
     mocks.nativeConfirm.mockReset();
   });
 
@@ -32,7 +32,7 @@ describe("confirmAction", () => {
   });
 
   it("awaits the native Tauri dialog with explicit destructive labels", async () => {
-    mocks.isTauri.mockReturnValue(true);
+    configureNativeDialogs();
     mocks.nativeConfirm.mockResolvedValue(false);
     const browserConfirm = vi.spyOn(window, "confirm");
 

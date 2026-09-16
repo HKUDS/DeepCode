@@ -40,7 +40,9 @@ export interface RpcFailure {
   };
 }
 
-export interface RpcNotification<M extends NotificationMethod = NotificationMethod> {
+export interface RpcNotification<
+  M extends NotificationMethod = NotificationMethod,
+> {
   jsonrpc: "2.0";
   method: M;
   params: Notifications[M];
@@ -64,6 +66,8 @@ export interface RpcTransport {
 export interface SidecarStatus {
   phase: "starting" | "ready" | "stopping" | "stopped" | "crashed";
   message: string | null;
+  /** Connection failure code, when the transport can identify the cause. */
+  errorCode?: string | null;
   launchSource: string | null;
   serverInfo: MethodResults["initialize"] | null;
 }
@@ -88,22 +92,30 @@ export interface DesktopUpdateProgress {
   totalBytes: number | null;
 }
 
-export interface DesktopRuntime extends RpcTransport {
+export interface ClientRuntime extends RpcTransport {
+  readonly host?: {
+    kind: "desktop" | "browser";
+    nativeOpen: boolean;
+    updates: boolean;
+  };
   status(): Promise<SidecarStatus>;
   restart(): Promise<SidecarStatus>;
+  serviceStatus?(): Promise<{ phase: string; activeTurns: number; queuedTurns: number; terminals: number }>;
+  stopService?(): Promise<void>;
   pickDirectory(): Promise<string | null>;
-  pickFile(): Promise<string | null>;
-  pickContextFiles(): Promise<string[]>;
-  exportDiagnostics(
-    diagnostics: DiagnosticsSnapshot,
-  ): Promise<string | null>;
+  pickFile(threadId?: string): Promise<string | null>;
+  pickContextFiles(threadId?: string): Promise<string[]>;
+  downloadFile?(threadId: string, path: string): Promise<void>;
+  exportDiagnostics(diagnostics: DiagnosticsSnapshot): Promise<string | null>;
   /** Open a local file in the platform's default application. */
   openPath(path: string): Promise<void>;
   checkForUpdate(): Promise<DesktopUpdateInfo | null>;
   installUpdate(
     listener: (progress: DesktopUpdateProgress) => void,
   ): Promise<void>;
-  onNotification(listener: (notification: AnyRpcNotification) => void): Promise<() => void>;
+  onNotification(
+    listener: (notification: AnyRpcNotification) => void,
+  ): Promise<() => void>;
   onStatus(listener: (status: SidecarStatus) => void): Promise<() => void>;
   onLog(listener: (message: string) => void): Promise<() => void>;
 }

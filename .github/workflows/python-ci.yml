@@ -5,38 +5,63 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: python-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13", "3.14"]
+        # Pushes to main run the primary interpreter only; pull requests and
+        # manual runs cover the full supported range.
+        python-version: ${{ fromJSON(github.event_name == 'push' && '["3.13"]' || '["3.12", "3.13", "3.14"]') }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Classify changes
+        id: scope
+        uses: ./.github/actions/ci-scope
 
       - name: Set up Python
+        if: steps.scope.outputs.runtime_changed == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
+          cache-dependency-path: scripts/ci/requirements.lock
 
       - name: Install package and test tools
+        if: steps.scope.outputs.runtime_changed == 'true'
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[test]"
+          python -m pip install -r scripts/ci/requirements.lock
+          python -m pip install --no-deps --no-build-isolation -e ".[test]"
 
       - name: Run tests
+        if: steps.scope.outputs.runtime_changed == 'true'
         run: |
           python -m pip check
-          python -m pytest -q
+          python -m pytest -v --durations=10 --junitxml=test-results/python.xml
+
+      - name: Upload test results
+        if: always() && steps.scope.outputs.runtime_changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-${{ matrix.python-version }}-results
+          path: test-results/
+          retention-days: 7
 
   windows-lifecycle:
     name: Windows lifecycle locks and platform isolation
@@ -46,21 +71,33 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Classify changes
+        id: scope
+        uses: ./.github/actions/ci-scope
 
       - name: Set up Python
+        if: steps.scope.outputs.runtime_changed == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: scripts/ci/requirements.lock
 
       - name: Install package and test tools
+        if: steps.scope.outputs.runtime_changed == 'true'
+        shell: bash
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[test]"
+          python -m pip install -r scripts/ci/requirements.lock
+          python -m pip install --no-deps --no-build-isolation -e ".[test]"
+          python -m pip check
 
       - name: Verify shared leases, startup recovery, and scheduler leadership
+        if: steps.scope.outputs.runtime_changed == 'true'
         run: >-
-          python -m pytest -q
+          python -m pytest -v --durations=10 --junitxml=test-results/windows-lifecycle.xml
           tests/application/test_application_lease.py
           tests/application/test_automation_scheduler_leadership.py
           tests/application/test_session_deletion_service.py
@@ -70,36 +107,77 @@ jobs:
       # backend) that the ubuntu job can only skip. This is the sole place
       # they actually execute.
       - name: Verify Windows ACLs and Job Object sandbox
+        if: steps.scope.outputs.runtime_changed == 'true'
         run: >-
-          python -m pytest -q
+          python -m pytest -v --durations=10 --junitxml=test-results/windows-platform.xml
           tests/test_private_storage_windows.py
           tests/test_harness_sandbox.py
           tests/test_exec_sandbox_wiring.py
+          tests/app_server/test_windows_task.py
+          tests/app_server/test_state_backup.py
+          tests/test_provider_oauth.py
+          tests/test_provider_protocols.py
+          tests/app_server/test_service.py
+          tests/app_server/test_service_discovery.py
+
+      - name: Upload test results
+        if: always() && steps.scope.outputs.runtime_changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-lifecycle-results
+          path: test-results/
+          retention-days: 7
 
   package:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Classify changes
+        id: scope
+        uses: ./.github/actions/ci-scope
 
       - name: Set up Python
+        if: steps.scope.outputs.runtime_changed == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: scripts/ci/requirements.lock
+
+      - name: Set up Node for packaged web assets
+        if: steps.scope.outputs.runtime_changed == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Build packaged browser client
+        if: steps.scope.outputs.runtime_changed == 'true'
+        working-directory: desktop
+        run: |
+          npm ci
+          npm run build:web
 
       - name: Build distributions
+        if: steps.scope.outputs.runtime_changed == 'true'
         run: |
-          python -m pip install --upgrade pip build packaging twine
-          python -m build
+          python -m pip install -r scripts/ci/requirements.lock
+          python -m build --no-isolation
           python -m twine check dist/*
 
       - name: Verify distribution metadata and installed runtime
+        if: steps.scope.outputs.runtime_changed == 'true'
         run: python scripts/verify_python_distribution.py --dist-dir dist
 
       - name: Upload distributions
+        if: steps.scope.outputs.runtime_changed == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: python-distributions

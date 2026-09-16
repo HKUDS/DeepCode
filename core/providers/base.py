@@ -14,7 +14,6 @@ from loguru import logger
 
 from core.reasoning import ReasoningChannel
 
-
 ReasoningDeltaCallback = Callable[[str, ReasoningChannel], Awaitable[None]]
 
 _CONTEXT_WINDOW_MARKERS = (
@@ -94,6 +93,14 @@ class ToolCallRequest:
         return tool_call
 
 
+class ProviderConfigurationError(ValueError):
+    """A frozen route or live credential is no longer valid for this Turn."""
+
+
+class ProviderCapabilityError(ValueError):
+    """The user explicitly declared this request capability unsupported."""
+
+
 @dataclass
 class LLMResponse:
     """Response from an LLM provider."""
@@ -117,6 +124,7 @@ class LLMResponse:
     error_code: str | None = None
     error_retry_after_s: float | None = None
     error_should_retry: bool | None = None
+    partial_output: bool = False
 
     @property
     def has_tool_calls(self) -> bool:
@@ -222,6 +230,72 @@ class LLMProvider(ABC):
     )
 
     _SENTINEL = object()
+
+    request_guard = None
+
+    async def refresh_request_credentials(self) -> None:
+        if self.request_guard is not None:
+            import asyncio
+
+            try:
+                key = await asyncio.to_thread(self.request_guard)
+            except ValueError as exc:
+                raise ProviderConfigurationError(str(exc)) from exc
+            self._set_runtime_credential(key)
+
+    async def aclose(self) -> None:
+        """Release transport resources owned by this provider instance."""
+
+    def _set_runtime_credential(self, key: str | None) -> None:
+        self.api_key = key
+
+    @staticmethod
+    def redact_error(response: LLMResponse, error: Exception, values) -> LLMResponse:
+        """Keep echoed request credentials out of owned errors and observability."""
+        secrets = {value for value in values if isinstance(value, str) and value}
+        try:
+            request = getattr(error, "request", None)
+        except RuntimeError:
+            request = None
+        headers = getattr(request, "headers", {})
+        for name in ("authorization", "proxy-authorization", "x-api-key", "api-key"):
+            value = headers.get(name)
+            if isinstance(value, str) and value:
+                secrets.add(value)
+                if name.endswith("authorization") and " " in value:
+                    token = value.split(" ", 1)[1]
+                    if token:
+                        secrets.add(token)
+        for attribute in ("content", "error_type", "error_code"):
+            text = getattr(response, attribute)
+            if isinstance(text, str):
+                for secret in sorted(secrets, key=len, reverse=True):
+                    text = text.replace(secret, "[redacted]")
+                setattr(response, attribute, text)
+        return response
+
+    input_modalities: tuple[str, ...] | None = None
+    tool_calling: bool | None = None
+    reasoning_supported: bool | None = None
+
+    def validate_request_capabilities(
+        self, messages: list[dict], tools: list[dict] | None
+    ) -> None:
+        if tools and self.tool_calling is False:
+            raise ProviderCapabilityError(
+                "The selected model is declared not to support tool calling"
+            )
+        if self.input_modalities is not None and "image" not in self.input_modalities:
+            for message in messages:
+                content = message.get("content")
+                if isinstance(content, list) and any(
+                    isinstance(block, dict)
+                    and block.get("type") in {"image", "image_url", "input_image"}
+                    for block in content
+                ):
+                    raise ProviderCapabilityError(
+                        "The selected model is declared not to support image input"
+                    )
 
     def __init__(self, api_key: str | None = None, api_base: str | None = None):
         self.api_key = api_key
@@ -562,19 +636,45 @@ class LLMProvider(ABC):
                 response.reasoning_content,
                 ReasoningChannel.PROVIDER_TRACE,
             )
-        if on_content_delta and response.content:
+        if on_content_delta and response.content and response.finish_reason != "error":
             await on_content_delta(response.content)
         return response
 
     async def _safe_chat_stream(self, **kwargs: Any) -> LLMResponse:
+        delivered = False
+        content_callback = kwargs.get("on_content_delta")
+        reasoning_callback = kwargs.get("on_reasoning_delta")
+
+        async def content_delta(text):
+            nonlocal delivered
+            delivered = delivered or bool(text)
+            if content_callback:
+                await content_callback(text)
+
+        async def reasoning_delta(text, channel):
+            nonlocal delivered
+            delivered = delivered or bool(text)
+            if reasoning_callback:
+                await reasoning_callback(text, channel)
+
         try:
-            return await self.chat_stream(**kwargs)
+            response = await self.chat_stream(
+                **{
+                    **kwargs,
+                    "on_content_delta": content_delta,
+                    "on_reasoning_delta": reasoning_delta,
+                }
+            )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            return LLMResponse(
+            response = LLMResponse(
                 content=f"Error calling LLM: {exc}", finish_reason="error"
             )
+        if response.finish_reason == "error" and delivered:
+            response.partial_output = True
+            response.error_should_retry = False
+        return response
 
     async def chat_stream_with_retry(
         self,
@@ -770,7 +870,11 @@ class LLMProvider(ABC):
         while True:
             attempt += 1
             response = await call(**kw)
-            if response.finish_reason != "error":
+            if (
+                response.finish_reason != "error"
+                or response.partial_output
+                or response.error_kind in {"capability", "configuration"}
+            ):
                 return response
             last_response = response
             error_key = (response.content or "").strip().lower() or None

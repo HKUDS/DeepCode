@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useState } from "react";
 
 import { useSystemDarkMode } from "../../app/useSystemDarkMode";
 import { confirmAction } from "../../platform/confirmAction";
@@ -13,13 +13,16 @@ interface FilesPanelProps {
   trusted: boolean;
   hasActiveTurn: boolean;
   workbench: CodeWorkbenchController;
+  onDownload?: (path: string) => Promise<void>;
 }
 
 export function FilesPanel({
   trusted,
   hasActiveTurn,
   workbench,
+  onDownload,
 }: FilesPanelProps) {
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const darkMode = useSystemDarkMode();
   const dirty = Boolean(
     workbench.file && workbench.draft !== workbench.file.content,
@@ -66,6 +69,10 @@ export function FilesPanel({
           <header>
             <span title={workbench.file.path}>{workbench.file.path}</span>
             <div>
+              {onDownload && <button type="button" onClick={() => {
+                setDownloadError(null);
+                void onDownload(workbench.file!.path).catch((error) => setDownloadError(String(error)));
+              }}>Download</button>}
               {workbench.file.truncated ? (
                 <small>Truncated · read-only</small>
               ) : dirty ? (
@@ -86,6 +93,7 @@ export function FilesPanel({
               </button>
             </div>
           </header>
+          {downloadError && <p role="alert">{downloadError}</p>}
           <Suspense fallback={<div className={styles.editorLoading}>Loading editor…</div>}>
             <LocalMonacoEditor
               height="100%"

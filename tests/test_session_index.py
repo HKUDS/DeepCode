@@ -11,6 +11,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -173,3 +175,18 @@ def store_summary(store: SessionStore) -> list[tuple[str, int, int]]:
         (s.title, s.message_count, s.task_count)
         for s in store.list_sessions(order="oldest")
     ]
+
+
+def test_store_close_releases_index_for_offline_replacement(tmp_path):
+    import sqlite3
+
+    store = SessionStore(tmp_path / "sessions")
+    index = store._index
+    assert index is not None and index.available
+    connection = index._conn
+    store.close()
+    store.close()
+    assert not index.available
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        connection.execute("SELECT 1")
+    (store.root / "index.db").unlink()

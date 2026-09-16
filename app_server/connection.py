@@ -29,6 +29,9 @@ class ConnectionState:
         self.initialized = True
 
     def close(self) -> None:
+        self.initialized = False
+        self.client_name = None
+        self.client_surface = ClientSurface.APP_SERVER
         if self.subscription_token is not None:
             self.broker.unsubscribe(self.subscription_token)
             self.subscription_token = None

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 import threading
 import time
 
@@ -12,6 +14,8 @@ from core.application.errors import (
     DuplicateMessageConflictError,
     EmptyInputError,
     ExpectedTurnMismatchError,
+    InputDeliveryPendingError,
+    InputDeliveryUncertainError,
     InputTooLargeError,
     NoActiveTurnError,
     TurnAlreadyRunningError,
@@ -19,6 +23,8 @@ from core.application.errors import (
 )
 from core.domain import ItemKind, TrustState, TurnStatus
 from core.events import AgentMessage, Event, TaskComplete, TurnStarted
+from core.persistence.event_repository import EventRepository
+from core.persistence.execution_repository import ItemRepository
 
 
 class _SteeringAgent:
@@ -128,6 +134,206 @@ def _wait_for(predicate, timeout: float = 3.0) -> None:
             return
         time.sleep(0.02)
     raise AssertionError("condition did not become true before timeout")
+
+
+@pytest.fixture
+def live_input(tmp_path):
+    factory = _SteeringFactory()
+    app = DeepCodeApplication.open(tmp_path / "state.sqlite3", session_factory=factory)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    project = app.projects.add(str(workspace), trust_state=TrustState.TRUSTED)
+    thread = app.threads.start(project.id, title="Delivery confirmation")
+    turn = app.turns.start(thread.id, prompt="Initial task").turn
+    try:
+        assert factory.started.wait(3)
+        yield app, factory, thread.id, turn.id
+    finally:
+        factory.release.set()
+        app.close()
+
+
+def _steer(app, thread_id, turn_id):
+    return app.turns.steer(
+        thread_id,
+        expected_turn_id=turn_id,
+        prompt="Preserve compatibility",
+        message_id="stable-steer",
+    )
+
+
+def _steered_events(app, thread_id, turn_id):
+    with app.database.read() as connection:
+        return EventRepository(connection).list_for_turn(
+            thread_id, turn_id, event_type="turn.steered"
+        )
+
+
+def test_concurrent_retry_observes_pending_until_delivery_confirmed(
+    live_input, monkeypatch
+):
+    app, factory, thread_id, turn_id = live_input
+    service = app.turns.turn_inputs
+    append = service._append_canonical_input
+    entered, release = threading.Event(), threading.Event()
+
+    def pause(item):
+        entered.set()
+        assert release.wait(5)
+        append(item)
+
+    monkeypatch.setattr(service, "_append_canonical_input", pause)
+    with ThreadPoolExecutor(2) as pool:
+        first = pool.submit(_steer, app, thread_id, turn_id)
+        try:
+            assert entered.wait(3)
+            assert (
+                app.turns.read_input(thread_id, "stable-steer").payload["deliveryState"]
+                == "pending"
+            )
+            assert _steered_events(app, thread_id, turn_id) == []
+            with pytest.raises(InputDeliveryPendingError) as pending:
+                _steer(app, thread_id, turn_id)
+            assert pending.value.retryable
+        finally:
+            release.set()
+        assert not first.result(3).duplicate
+    assert _steer(app, thread_id, turn_id).duplicate
+    assert (
+        app.turns.read_input(thread_id, "stable-steer").payload["deliveryState"]
+        == "accepted"
+    )
+    assert len(_steered_events(app, thread_id, turn_id)) == 1
+    factory.release.set()
+    _wait_for(lambda: app.turns.read(turn_id).turn.status.is_terminal)
+    assert factory.injected == ["Preserve compatibility"]
+
+
+@pytest.mark.parametrize(
+    "stage",
+    [
+        "intent",
+        "canonical_before",
+        "canonical_after",
+        "commit_before",
+        "commit_after",
+        "confirmation",
+        "publication",
+    ],
+)
+def test_delivery_failures_do_not_acknowledge_or_repeat_input(
+    live_input, monkeypatch, stage
+):
+    app, factory, thread_id, turn_id = live_input
+    service = app.turns.turn_inputs
+    if stage == "intent":
+        target, method = EventRepository, "append"
+    elif stage.startswith("canonical"):
+        target, method = app.session_store, "append_message"
+    elif stage.startswith("commit"):
+        target, method = service.session_runtimes, "commit_input"
+    elif stage == "confirmation":
+        target, method = ItemRepository, "update"
+    else:
+        target, method = service, "_publish"
+    original = getattr(target, method)
+
+    def fail(*args, **kwargs):
+        if (
+            stage == "confirmation"
+            and args[1].payload.get("deliveryState") != "accepted"
+        ):
+            return original(*args, **kwargs)
+        if stage == "publication" and not any(
+            event.type == "turn.steered" for event in args[0]
+        ):
+            return original(*args, **kwargs)
+        if stage.endswith("after") or stage == "intent":
+            original(*args, **kwargs)
+        raise OSError("injected storage/delivery failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(target, method, fail)
+        with pytest.raises(
+            OSError if stage == "intent" else InputDeliveryUncertainError
+        ):
+            _steer(app, thread_id, turn_id)
+    item = app.turns.read_input(thread_id, "stable-steer")
+    if stage == "intent":
+        assert item is None
+        assert not _steer(app, thread_id, turn_id).duplicate
+    elif stage == "publication":
+        assert item.payload["deliveryState"] == "accepted"
+        assert _steer(app, thread_id, turn_id).duplicate
+    else:
+        assert item.payload["deliveryState"] == "unknown"
+        with pytest.raises(InputDeliveryUncertainError) as uncertain:
+            _steer(app, thread_id, turn_id)
+        assert not uncertain.value.retryable
+        assert _steered_events(app, thread_id, turn_id) == []
+    factory.release.set()
+    _wait_for(lambda: app.turns.read(turn_id).turn.status.is_terminal)
+    delivered = stage in {"intent", "commit_after", "confirmation", "publication"}
+    assert factory.injected == (["Preserve compatibility"] if delivered else [])
+    snapshot = app.turns.read(turn_id)
+    assert (
+        sum(item.payload.get("messageId") == "stable-steer" for item in snapshot.items)
+        == 1
+    )
+
+
+@pytest.mark.parametrize("state", [None, "pending"])
+def test_legacy_and_abandoned_receipts_are_uncertain(live_input, state):
+    app, factory, thread_id, turn_id = live_input
+    _steer(app, thread_id, turn_id)
+    item = app.turns.read_input(thread_id, "stable-steer")
+    payload = {
+        key: value for key, value in item.payload.items() if key != "deliveryState"
+    }
+    if state:
+        payload["deliveryState"] = state
+    with app.database.transaction() as connection:
+        ItemRepository(connection).update(replace(item, payload=payload))
+    factory.release.set()
+    _wait_for(lambda: app.turns.read(turn_id).turn.status.is_terminal)
+    assert (
+        app.turns.read_input(thread_id, "stable-steer").payload["deliveryState"]
+        == "unknown"
+    )
+    with pytest.raises(InputDeliveryUncertainError):
+        _steer(app, thread_id, turn_id)
+    if state:
+        with app.database.read() as connection:
+            assert (
+                ItemRepository(connection).get(item.id).payload["deliveryState"]
+                == "unknown"
+            )
+
+
+@pytest.mark.parametrize("rebuild", [False, True])
+def test_steer_receipt_restart_preserves_only_confirmed_evidence(
+    live_input, tmp_path, rebuild
+):
+    app, factory, thread_id, turn_id = live_input
+    _steer(app, thread_id, turn_id)
+    factory.release.set()
+    _wait_for(lambda: app.turns.read(turn_id).turn.status.is_terminal)
+    app.close()
+    reopened = DeepCodeApplication.open(
+        tmp_path / ("rebuilt.sqlite3" if rebuild else "state.sqlite3"),
+        session_factory=_SteeringFactory(),
+    )
+    try:
+        item = reopened.turns.read_input(thread_id, "stable-steer")
+        assert item.payload["expectedTurnId"] == turn_id
+        assert item.payload["deliveryState"] == ("unknown" if rebuild else "accepted")
+        if rebuild:
+            with pytest.raises(InputDeliveryUncertainError):
+                _steer(reopened, thread_id, turn_id)
+        else:
+            assert _steer(reopened, thread_id, turn_id).duplicate
+    finally:
+        reopened.close()
 
 
 def test_live_steer_is_durable_injected_once_and_visible_in_items(tmp_path) -> None:

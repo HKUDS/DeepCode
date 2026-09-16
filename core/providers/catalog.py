@@ -123,6 +123,18 @@ _REASONING_ALWAYS_ON = ModelReasoningCapabilities(
     mandatory=True,
 )
 
+# Bedrock exposes the same Claude release through direct, geography-scoped,
+# and global inference IDs. Keep these exact spellings in the offline catalog:
+# the dots are part of the IDs and cannot be removed by the slash normalizer.
+_BEDROCK_CLAUDE_SONNET_46_IDS = (
+    "anthropic.claude-sonnet-4-6",
+    "us.anthropic.claude-sonnet-4-6",
+    "eu.anthropic.claude-sonnet-4-6",
+    "au.anthropic.claude-sonnet-4-6",
+    "jp.anthropic.claude-sonnet-4-6",
+    "global.anthropic.claude-sonnet-4-6",
+)
+
 # --------------------------------------------------------------------------
 # Seed catalog — exact ids DeepCode targets, curated from models.dev.
 # Context/output are the vendor-published limits; costs are list price per 1M.
@@ -186,6 +198,14 @@ _SEED: dict[str, ModelInfo] = {
     "claude-haiku-4-5": ModelInfo(
         "claude-haiku-4-5", 200_000, 64_000, 1.0, 5.0, reasoning=_REASONING_ANTHROPIC
     ),
+    # Amazon Bedrock Claude Sonnet 4.6 inference IDs. Bedrock publishes a 1M
+    # context window for this release. Pricing is deliberately absent because
+    # it is account/region/service-tier dependent, and the OpenAI-compatible
+    # surface does not publish DeepCode's semantic reasoning-effort ladder.
+    **{
+        model_id: ModelInfo(model_id, 1_000_000, 64_000)
+        for model_id in _BEDROCK_CLAUDE_SONNET_46_IDS
+    },
     # Dotted spellings of the same Anthropic releases. Listed rather than
     # normalised away, because the dot is meaningful elsewhere in this table
     # (``gpt-5.4``, ``kimi-k2.5`` are distinct models, not separator noise).

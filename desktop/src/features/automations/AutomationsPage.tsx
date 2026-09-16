@@ -16,7 +16,7 @@ import type {
   Thread,
 } from "../../generated/app-server";
 import { confirmAction } from "../../platform/confirmAction";
-import type { DesktopRuntime } from "../../rpc/contracts";
+import type { ClientRuntime } from "../../rpc/contracts";
 import styles from "../management/ManagementWorkspace.module.css";
 import {
   automationIntervalInput,
@@ -27,7 +27,7 @@ import {
 import { useAutomations } from "./useAutomations";
 
 interface AutomationsPageProps {
-  runtime: DesktopRuntime;
+  runtime: ClientRuntime;
   project: Project | null;
   onThreadCreated(thread: Thread): void;
   onOpenThread(threadId: string): void;

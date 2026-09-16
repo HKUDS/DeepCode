@@ -78,11 +78,10 @@
 *Work with DeepCode in a visual workspace for Sessions, goals, tool activity, code changes, and verification.*
 </div>
 
-DeepCode has one Agent runtime and two interfaces: an interactive CLI for
-terminal workflows and a Tauri Desktop workbench for visual Sessions, review,
-and settings. Both open the same local Projects, Session history, models,
-Skills, permissions, Goals, and Automations. See the
-[`Desktop source guide`](desktop/README.md) to run the application locally.
+DeepCode provides TUI, Desktop, and Web clients over one shared local service.
+They share Projects, Session history, models, Skills, permissions, Goals, and
+Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
+[Quick start](#quick-start) for installation and your first task.
 
 ---
 
@@ -133,6 +132,14 @@ Skills, permissions, Goals, and Automations. See the
   - [Automate repeatable engineering work](#automate-repeatable-engineering-work)
   - [Paper2Code](#paper2code)
 - [⚡ Quick start](#quick-start)
+  - [Launch commands at a glance](#launch-commands-at-a-glance)
+  - [Install the runtime](#install-the-runtime)
+  - [Configure a model](#configure-a-model)
+  - [Start the TUI](#start-the-tui)
+  - [Start Desktop](#start-desktop)
+  - [Start Web](#start-web)
+  - [Complete your first task](#complete-your-first-task)
+  - [Manage the shared background service](#manage-the-shared-background-service)
 - [🧭 Using DeepCode](#using-deepcode)
 - [⚙️ Headless and automation](docs/HEADLESS_AND_AUTOMATION.md)
 - [🔬 Paper2Code](#paper2code-1)
@@ -150,6 +157,29 @@ Skills, permissions, Goals, and Automations. See the
 </p>
 
 ## News
+
+**2026-09-09 · TUI, Desktop, and Web share one local background service**
+
+- **Choose your interface.** Run `deepcode` for the TUI, `deepcode desktop`
+  for the native app, or `deepcode web` to open the workbench in your browser.
+  All three connect to the same local service; Web needs no DeepCode account.
+- **Continue the same task across interfaces.** Closing a client leaves running
+  work in the background. Reconnect from another interface to follow the same
+  conversation, review tool activity, and respond to approvals. The computer
+  must remain awake, and pending approvals still need your response.
+- **Configure and verify your models.** Save cloud or local model connections
+  for use across all three interfaces. Browse available models, check a model's
+  response, and test streaming and tool calls before using a custom server.
+  See [Models and providers](docs/guide/models.md).
+- **Manage your background service and prepare for upgrades.** Use
+  `deepcode service` commands to check status, read logs, or stop after current
+  work finishes. Create a runtime snapshot before upgrading and restore it when
+  needed; keep project files in your usual version control or backup.
+  See [Upgrading DeepCode](docs/UPGRADE_AND_RESTORE.md).
+
+Start with the updated [Quick start](#quick-start) and
+[first coding task tutorial](docs/guide/getting-started.md).
+([#212](https://github.com/HKUDS/DeepCode/pull/212))
 
 **2026-09-06 · DeepCode v2.2.0: Session context-window caps, compaction that leaves a memory, and a fully localized Desktop**
 
@@ -604,9 +634,9 @@ you finish real software engineering work more reliably.
 
 ## Core capabilities
 
-DeepCode provides a complete local Coding Agent workflow. CLI and Desktop are
-two ways to use the same Agent, Sessions, models, Skills, permissions, and task
-state.
+DeepCode provides a complete local Coding Agent workflow. TUI, Desktop, and Web
+use the same Agent, Sessions, models, Skills, permissions, and task state through
+the shared local service.
 
 <p align="center">
   <img src="assets/readme/verification-loop.png" alt="DeepCode Agent Harness and verification loop" width="1080" />
@@ -725,7 +755,14 @@ Automation does not launch a separate, reduced Agent. It uses the same
 Sessions, models, Skills, permissions, approvals, and recovery behavior, and
 keeps the history of every run.
 
-### Paper2Code
+### Shared background service
+
+Desktop, Web, TUI, `exec`, `loop`, and MCP task calls use the same local service.
+Starting a client starts the service when needed. Closing a client leaves its
+accepted tasks running; explicitly stop the service to shut down the runtime.
+See [Quick start](#quick-start) for installation and launch commands.
+
+## Paper2Code
 
 Paper2Code was DeepCode's original research direction and remains its dedicated
 workflow for research reproduction.
@@ -739,156 +776,188 @@ run, be inspected, and keep improving.
 
 ## Quick start
 
-DeepCode has two interfaces with separate installation paths. Choose one to get
-started; both use the same Agent runtime and canonical Session history.
+Use DeepCode to explore a repository, make changes, and run tests. Choose the
+terminal, desktop app, or browser—your projects and conversations are available
+in all three.
 
-> `uv tool install --python 3.12 deepcode-hku` installs the CLI and shared
-> Python runtime. It does **not** install the Tauri Desktop application.
+### Launch commands at a glance
 
-### Option A — Install the CLI
+After installation, open the interface you prefer:
 
-Install `uv` first if it is not already available. On Windows PowerShell:
+| Interface | Start command |
+|---|---|
+| **TUI** — work in your terminal | `deepcode` |
+| **Desktop** — use a native app | `deepcode desktop` |
+| **Web** — work in your browser | `deepcode web` |
 
-```powershell
-winget install --id astral-sh.uv --exact
-```
+DeepCode starts its local background service automatically. You can close an
+interface and return to your conversation later.
 
-Open a new terminal after the first `uv` installation, then run:
+### Install the runtime
+
+#### Published package
+
+With `uv` installed, run:
 
 ```console
 uv tool install --python 3.12 deepcode-hku
 deepcode init
 ```
 
-The explicit Python selection is intentional: DeepCode requires Python 3.12+
-and must not fall back to an unsupported legacy package on an older interpreter.
-If an existing uv tool environment still contains DeepCode 1.x, migrate it with
-`uv tool upgrade --python 3.12 deepcode-hku`.
+On Windows, you can install `uv` with `winget install --id astral-sh.uv --exact`,
+then open a new terminal. DeepCode requires Python 3.12 or later.
 
-Create a model connection once. `--api-key` opens a non-echoing prompt:
+To use the native app, also install DeepCode Desktop from
+[GitHub Releases](https://github.com/HKUDS/DeepCode/releases). To try changes
+that have not been released yet, install from source below.
 
-```console
-deepcode provider set personal-openrouter --template openrouter --label "OpenRouter · Personal" --api-key
-deepcode provider models personal-openrouter --refresh
-deepcode provider test personal-openrouter --model <model-id>
-```
+<details>
+<summary>Install from source</summary>
 
-Enter the repository you want DeepCode to work in and start the interactive
-Agent:
+#### Current source checkout
+
+You will need Git, `uv`, and Node.js 22 or later. Run these commands in your terminal:
 
 ```console
-cd <your-project>
-deepcode
-```
-
-`deepcode init` creates minimal user configuration under `~/.deepcode/`.
-Credentials are stored separately in user-private storage and are never written
-to Session history. `pipx install deepcode-hku` and `pip install deepcode-hku`
-are also supported in an appropriate Python 3.12+ environment.
-
-### Option B — Install Desktop
-
-Desktop release bundles are distributed separately from the Python package.
-Check [GitHub Releases](https://github.com/HKUDS/DeepCode/releases) for a signed
-installer for your platform. If no installer is attached, use the source setup
-below.
-
-#### macOS and Linux from source
-
-Install the platform dependencies from the
-[Tauri 2 prerequisite guide](https://v2.tauri.app/start/prerequisites/), plus
-Git, Python 3.12+, `uv`, Node.js 22+, and stable Rust. Then run:
-
-```bash
 git clone https://github.com/HKUDS/DeepCode.git
 cd DeepCode
-uv venv --python 3.12
-uv pip install --python .venv/bin/python -e .
-.venv/bin/deepcode init
-cd desktop
-npm ci
-npm run setup:sidecar
-npm run build:sidecar
-cd ..
-mkdir -p ~/.local/bin
-ln -sf "$(pwd)/scripts/deepcode-desktop" ~/.local/bin/deepcode-desktop
-export PATH="$HOME/.local/bin:$PATH"
-deepcode-desktop
+npm --prefix desktop ci
+npm --prefix desktop run build:web
+uv tool install --python 3.12 --force .
+deepcode init
 ```
 
-The final link is a one-time source launcher installation. Afterwards,
-`deepcode-desktop` starts this checkout from any directory, provided
-`~/.local/bin` is on `PATH`. Add the export to your shell profile if it is not
-already configured. The command launches Desktop; add or select the repository
-you want to work on from the Project sidebar.
+If you already have the repository, start in its root directory and skip cloning.
+You can now run `deepcode` from any directory. For source Desktop, also install
+Rust and the platform dependencies described in the [Desktop guide](desktop/README.md).
 
-#### Windows from source
+</details>
 
-Windows requires Microsoft Edge WebView2 and the Visual Studio 2022 Build Tools
-workload **Desktop development with C++**. Accept the UAC prompt raised by Build
-Tools:
+If your terminal cannot find `deepcode`, run `uv tool update-shell` and open a
+new terminal.
 
-```powershell
-winget install --id Git.Git --exact
-winget install --id astral-sh.uv --exact
-winget install --id OpenJS.NodeJS.LTS --exact
-winget install --id Rustlang.Rustup --exact
-winget install --id Microsoft.VisualStudio.2022.BuildTools --exact `
-  --override "--wait --passive --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
-```
+### Configure a model
 
-Close PowerShell, open a new window, and verify the toolchains:
+Choose either the graphical setup or the terminal commands below.
 
-```powershell
-git --version
-uv --version
-node --version
-rustup default stable-msvc
-rustc --version
-cargo --version
-```
-
-Clone, prepare, and start Desktop:
-
-```powershell
-git clone https://github.com/HKUDS/DeepCode.git
-Set-Location DeepCode
-uv venv --python 3.12
-uv pip install --python .venv\Scripts\python.exe -e .
-.venv\Scripts\deepcode.exe init
-Set-Location desktop
-npm ci
-$env:DEEPCODE_PYTHON = (Resolve-Path ..\.venv\Scripts\python.exe)
-npm run setup:sidecar
-npm run build:sidecar
-npm run tauri -- dev
-```
-
-Keep that PowerShell window open while Desktop is running. See the
-[Desktop source guide](desktop/README.md#windows-powershell) for subsequent
-launches and troubleshooting.
-
-#### Configure the Desktop model
-
-Open **Settings → AI providers** after Desktop starts.
+**In Desktop or Web:** open **Settings → AI providers**, select **Add provider**,
+and enter your provider's API key. Click **Save and check** to load its models.
+Under **Agent model**, choose a model and click **Save and verify model** to try
+a short request. Then choose the connection and model in your conversation's
+message box.
 
 <div align="center">
-  <img src="assets/setting_model.png" alt="Configure an AI provider and model in DeepCode Desktop" width="100%" style="border-radius: 10px; box-shadow: 0 8px 20px rgba(45,55,72,0.2); margin: 15px 0;"/>
-
-  <sub>Provider credentials, model discovery, and inference verification stay in one Desktop workflow.</sub>
+  <img src="assets/setting_model.png" alt="Choose a provider and model in DeepCode settings" width="100%" style="border-radius: 10px; box-shadow: 0 8px 20px rgba(45,55,72,0.2); margin: 15px 0;"/>
 </div>
 
-1. Select **Add provider**, choose the service, and enter an API key or its
-   environment-variable name.
-2. Select **Save and check** to verify the credential and load the provider's
-   model catalog without sending repository content.
-3. Under **Agent model**, choose an exact model ID and select **Save and verify
-   model**. This final check sends only a minimal inference request.
-4. Add or open a Project, create a Session, choose the model, Thinking effort,
-   and access level, then describe the task in natural language.
+**In your terminal:** this example connects to OpenRouter. Enter your API key
+when prompted; it will not be displayed as you type.
 
-> The interface changes how the work is presented, not the Agent, policy,
-> configuration, or Session history behind it.
+```console
+deepcode provider set my-openrouter --template openrouter --api-key
+deepcode provider models my-openrouter --refresh
+```
+
+Choose a model from the list. Replace `MODEL_ID` below with its exact ID and
+send a short test request:
+
+```console
+deepcode provider test my-openrouter --model MODEL_ID
+```
+
+You can use the same connection in all three interfaces. For other providers,
+local models, and tool-calling checks, see [Models and providers](docs/guide/models.md).
+
+### Start the TUI
+
+Open a terminal in the project you want to work on. On your first visit, use
+`--trust` to allow DeepCode to work in that folder. With the connection configured
+above:
+
+```console
+cd /path/to/your-project
+deepcode --trust --connection my-openrouter --model MODEL_ID
+```
+
+Replace the path with your project directory; on Windows, for example,
+`C:\projects\my-app`. For later visits, run `deepcode` in that directory and use
+`/model` to choose your connection and model. Use `/help` to see available commands.
+
+### Start Desktop
+
+```console
+deepcode desktop
+```
+
+Add your project folder, confirm that you trust it, and click **New thread**.
+Choose a model in the message box, then describe what you want to do.
+
+If you installed from source, this command opens the development app. Its first
+launch may take longer while dependencies are prepared; keep the terminal open
+while you use it. See the [Desktop guide](desktop/README.md) for platform setup
+and custom installation paths.
+
+### Start Web
+
+```console
+deepcode web
+```
+
+DeepCode opens a browser tab. Add your project folder on this computer, confirm
+that you trust it, and create a thread. Select a model and send your first message.
+No DeepCode account is needed.
+
+To copy the access link and open it yourself, use `deepcode web --no-open`.
+Open the link within 60 seconds. If it expires or the page asks you to sign in
+again, run `deepcode web` to get a fresh link.
+
+### Complete your first task
+
+Start by asking DeepCode to help you understand your project:
+
+```text
+Explain how this project is organized and how to run its tests.
+Do not change any files yet.
+```
+
+Then ask for a small change, describing the behavior you want and how to check it:
+
+```text
+Add tests for the configuration loader's handling of missing and invalid
+values. Follow the existing test style, run the relevant tests, and summarize
+the changes and results.
+```
+
+Adapt the task to your repository. Follow the tool activity as DeepCode works,
+respond to any approval requests, and review the changed files and test output.
+You can send a follow-up message to adjust the task, or use the stop button
+(`/stop` in the TUI) to interrupt it.
+
+Your conversation is saved automatically. In Desktop/Web, select it from the
+project's thread list. In the TUI, use `/resume` to pick a saved conversation.
+You can switch interfaces and continue the same task.
+
+For a complete exercise in a new folder, follow
+[Your first coding task](docs/guide/getting-started.md). It takes you through
+creating a Python function, testing it, and returning to the conversation later.
+
+### Manage the shared background service
+
+Closing an interface leaves running tasks in the background. Pending approvals
+still need your response, and the computer must remain awake for work to continue.
+
+Most days, you can just launch your preferred interface. When you need to inspect
+or stop the background service, use the command for that action:
+
+| What you want to do | Command |
+|---|---|
+| Check whether DeepCode is running | `deepcode service status` |
+| Read recent logs | `deepcode service logs --lines 100` |
+| Stop after current work finishes | `deepcode service stop --drain --timeout 60` |
+| Start automatically after signing into your computer | `deepcode service install --at-login` |
+
+For updates and backups, follow [Upgrading DeepCode](docs/UPGRADE_AND_RESTORE.md).
+If something does not work, start with [Troubleshooting](docs/guide/troubleshooting.md).
 
 ## Using DeepCode
 
@@ -900,10 +969,10 @@ skills and memory, and headless automation — with worked examples.
 
 Every task lives in a durable Session attached to its original Project. Open a
 Project in Desktop or start `deepcode` from its directory, then create a new
-Session or resume an existing one. The same history can move between Desktop
-and CLI without export or conversion.
+Session or resume an existing one. The same history is available in TUI,
+Desktop, and Web without export or conversion.
 
-| What you want to do | Desktop | Interactive CLI |
+| What you want to do | Desktop / Web | Interactive CLI |
 |---|---|---|
 | Start a Session | **New thread** | `/new [title]` |
 | Resume local history | Select it under the Project | `/resume` |
@@ -924,9 +993,11 @@ and CLI without export or conversion.
 | Rename or delete a Session | Session context menu | `/rename <title>` · `/delete <id>` |
 
 Session history, tool activity, approvals, Goal state, and verification evidence
-remain together. A Session has one live writer at a time: Desktop and the CLI
-may hold it open together, but if one is mid-Turn the other refuses new input
-with a message naming the holder instead of corrupting shared history. Archiving hides a Session without deleting its history;
+remain together. TUI, Desktop, and Web can observe the same Session while the
+shared service serializes its execution. Normal input during a Turn steers the
+active work; explicit queueing requests a subsequent Turn. The interface reports
+how the input was accepted. Closing a client leaves accepted work running.
+Archiving hides a Session without deleting its history;
 permanent deletion removes the Session records but never repository files.
 
 ### Connections and models
@@ -1246,6 +1317,9 @@ uv pip install -e .
 On Windows PowerShell, activate with `.\.venv\Scripts\Activate.ps1`.
 
 ### Verification
+
+To reproduce CI's Python environment and understand each check, see the
+[CI guide](docs/CI.md).
 
 ```bash
 uvx pre-commit run --all-files

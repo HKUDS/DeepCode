@@ -9,7 +9,7 @@ import type {
   TestCommand,
   Thread,
 } from "../../generated/app-server";
-import type { BridgeError, DesktopRuntime } from "../../rpc/contracts";
+import type { BridgeError, ClientRuntime } from "../../rpc/contracts";
 
 function errorMessage(error: unknown): string {
   if (typeof error === "object" && error !== null && "message" in error) {
@@ -60,7 +60,7 @@ const initialState: CodeWorkbenchState = {
 };
 
 export function useCodeWorkbench(
-  runtime: DesktopRuntime,
+  runtime: ClientRuntime,
   thread: Thread | null,
 ): CodeWorkbenchController {
   const [state, setState] = useState(initialState);

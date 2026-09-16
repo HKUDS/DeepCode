@@ -6,18 +6,29 @@ import type {
   ConnectionCatalogResult,
   ModelCatalogResult,
   ProviderTestResult,
+  ProviderTestParams,
+  ProviderLoginFlow,
+  ProviderLogoutResult,
   ProviderUpsertParams,
 } from "../../generated/app-server";
-import type { DesktopRuntime } from "../../rpc/contracts";
+import type { ClientRuntime } from "../../rpc/contracts";
 
 export interface ConnectionCatalogController {
   catalog: ConnectionCatalogResult | null;
   loading: boolean;
   error: string | null;
   reload(): Promise<void>;
+  login(connectionId: string): Promise<ProviderLoginFlow>;
+  pollLogin(flowId: string): Promise<ProviderLoginFlow>;
+  cancelLogin(flowId: string): Promise<ProviderLoginFlow>;
+  logout(connectionId: string): Promise<ProviderLogoutResult>;
   upsert(connection: ProviderUpsertParams["connection"]): Promise<void>;
   remove(connectionId: string): Promise<void>;
-  test(connectionId: string, model?: string): Promise<ProviderTestResult>;
+  test(
+    connectionId: string,
+    model?: string,
+    options?: Pick<ProviderTestParams, "mode" | "connection">,
+  ): Promise<ProviderTestResult>;
   models(connectionId: string, refresh?: boolean): Promise<ModelCatalogResult>;
   /** Probe an endpoint AS SHOWN in an editor form; nothing is stored. */
   discover(
@@ -26,7 +37,7 @@ export interface ConnectionCatalogController {
 }
 
 export function useConnectionCatalog(
-  runtime: DesktopRuntime,
+  runtime: ClientRuntime,
   projectId: string | null,
 ): ConnectionCatalogController {
   const [state, setState] = useState<{
@@ -138,10 +149,15 @@ export function useConnectionCatalog(
   );
 
   const test = useCallback(
-    async (connectionId: string, model?: string) => {
+    async (
+      connectionId: string,
+      model?: string,
+      options?: Pick<ProviderTestParams, "mode" | "connection">,
+    ) => {
       try {
         const result = await runtime.request("provider/test", {
           connectionId,
+          ...options,
           ...(projectId ? { projectId } : {}),
           ...(model ? { model } : {}),
         });
@@ -174,8 +190,33 @@ export function useConnectionCatalog(
     [projectId, runtime],
   );
 
+  const login = useCallback(
+    (connectionId: string) =>
+      runtime.request("provider/login/start", {
+        connectionId,
+        openBrowser: true,
+      }),
+    [runtime],
+  );
+  const pollLogin = useCallback(
+    (flowId: string) => runtime.request("provider/login/poll", { flowId }),
+    [runtime],
+  );
+  const cancelLogin = useCallback(
+    (flowId: string) => runtime.request("provider/login/cancel", { flowId }),
+    [runtime],
+  );
+  const logout = useCallback(
+    (connectionId: string) =>
+      runtime.request("provider/logout", { connectionId }),
+    [runtime],
+  );
   const currentProject = state.projectId === projectId;
   return {
+    login,
+    pollLogin,
+    cancelLogin,
+    logout,
     catalog: currentProject ? state.catalog : null,
     loading: currentProject ? state.loading : true,
     error: currentProject ? state.error : null,

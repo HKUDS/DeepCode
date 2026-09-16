@@ -5,17 +5,16 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import secrets
 import threading
-import uuid
 from pathlib import Path
 from typing import Any
 
 from core.config import deepcode_home
 from core.file_lock import exclusive_file_lock
 from core.private_storage import (
-    ensure_private_directory,
+    atomic_write_private_json,
     open_existing_private_file,
-    open_private_file,
 )
 
 
@@ -49,16 +48,17 @@ class CredentialStore:
         clean = api_key.strip()
         if not clean:
             raise ValueError("api key must not be empty")
-        self._mutate(
-            lambda data: {
+
+        def transform(data):
+            self._invalidate_login(data, connection_id)
+            data.setdefault("accounts", {}).pop(connection_id, None)
+            return {
                 **data,
                 "version": 1,
-                "connections": {
-                    **_connections(data),
-                    connection_id: clean,
-                },
+                "connections": {**_connections(data), connection_id: clean},
             }
-        )
+
+        self._mutate(transform)
 
     def clear(self, connection_id: str) -> bool:
         removed = False
@@ -66,11 +66,77 @@ class CredentialStore:
         def transform(data: dict[str, Any]) -> dict[str, Any]:
             nonlocal removed
             connections = _connections(data)
+            self._invalidate_login(data, connection_id)
+            data.setdefault("accounts", {}).pop(connection_id, None)
             removed = connections.pop(connection_id, None) is not None
             return {**data, "version": 1, "connections": connections}
 
         self._mutate(transform)
         return removed
+
+    def oauth_credential(self, connection_id: str) -> tuple[str | None, str | None]:
+        data = self._read()
+        account = data.get("accounts", {}).get(connection_id, {})
+        key = data.get("connections", {}).get(connection_id)
+        if (
+            not isinstance(account, dict)
+            or account.get("provider") != "openrouter"
+            or not isinstance(account.get("accountId"), str)
+            or not account["accountId"]
+            or not isinstance(key, str)
+            or not key
+        ):
+            return None, None
+        return key, account.get("accountId")
+
+    @staticmethod
+    def _invalidate_login(data, connection_id):
+        generation = secrets.token_hex(24)
+        data.setdefault("loginGenerations", {})[connection_id] = generation
+        return generation
+
+    def begin_login(self, connection_id: str) -> str:
+        generation = None
+
+        def transform(data):
+            nonlocal generation
+            generation = self._invalidate_login(data, connection_id)
+            return data
+
+        self._mutate(transform)
+        return generation
+
+    def cancel_login(self, connection_id: str, generation: str) -> None:
+        def transform(data):
+            if data.get("loginGenerations", {}).get(connection_id) == generation:
+                self._invalidate_login(data, connection_id)
+            return data
+
+        self._mutate(transform)
+
+    def complete_login(
+        self, connection_id: str, generation: str, *, api_key: str, account_id: str
+    ) -> None:
+        if not api_key or not account_id or len(account_id) > 256:
+            raise ValueError("The provider returned an invalid account identity")
+
+        def transform(data):
+            if data.get("loginGenerations", {}).get(connection_id) != generation:
+                raise ValueError("This login was cancelled or superseded")
+            existing = data.get("accounts", {}).get(connection_id)
+            if existing and existing.get("accountId") != account_id:
+                raise ValueError(
+                    "A different account was selected. Disconnect the existing account before switching."
+                )
+            data.setdefault("connections", {})[connection_id] = api_key
+            data.setdefault("accounts", {})[connection_id] = {
+                "provider": "openrouter",
+                "accountId": account_id,
+            }
+            self._invalidate_login(data, connection_id)
+            return data
+
+        self._mutate(transform)
 
     def revision(self) -> str:
         """Return a non-secret fingerprint suitable for runtime invalidation."""
@@ -102,6 +168,9 @@ class CredentialStore:
             raise ValueError("unsupported DeepCode credentials version")
         if not isinstance(value.get("connections", {}), dict):
             raise TypeError("credentials.connections must be an object")
+        for field in ("accounts", "loginGenerations"):
+            if not isinstance(value.get(field, {}), dict):
+                raise TypeError(f"credentials.{field} must be an object")
         return value
 
     def _mutate(self, transform) -> None:
@@ -110,40 +179,12 @@ class CredentialStore:
             self._replace(updated)
 
     def _replace(self, value: dict[str, Any]) -> None:
-        ensure_private_directory(self.path.parent)
-        temporary = self.path.with_name(f".{self.path.name}.{uuid.uuid4().hex}.tmp")
-        descriptor = open_private_file(
-            temporary,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-        )
-        try:
-            payload = (json.dumps(value, indent=2, ensure_ascii=False) + "\n").encode()
-            with os.fdopen(descriptor, "wb") as handle:
-                handle.write(payload)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, self.path)
-            _fsync_directory(self.path.parent)
-        finally:
-            try:
-                temporary.unlink()
-            except FileNotFoundError:
-                pass
+        atomic_write_private_json(self.path, value)
 
 
 def _connections(data: dict[str, Any]) -> dict[str, str]:
     value = data.get("connections", {})
     return dict(value) if isinstance(value, dict) else {}
-
-
-def _fsync_directory(path: Path) -> None:
-    if os.name == "nt":
-        return
-    descriptor = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
 
 
 __all__ = ["CredentialStore", "default_credentials_path"]

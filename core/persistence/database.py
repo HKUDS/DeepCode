@@ -15,6 +15,7 @@ from core.config import deepcode_home
 from core.file_lock import exclusive_file_lock
 from core.persistence.migrations import (
     LATEST_SCHEMA_VERSION,
+    MigrationError,
     current_version,
     migrate,
 )
@@ -29,6 +30,11 @@ def default_database_path() -> Path:
     return deepcode_home() / "state" / "deepcode.sqlite3"
 
 
+# Database files whose ACLs this process already repaired — see
+# Database._harden_files for why re-hardening on every open is wrong.
+_hardened_files: set[str] = set()
+
+
 class Database:
     """Connection factory; no process-global mutable connection is retained."""
 
@@ -37,10 +43,27 @@ class Database:
             Path(path).expanduser().resolve() if path else default_database_path()
         )
 
+    @property
+    def restore_marker(self) -> Path:
+        return self.path.with_name(self.path.name + ".restore.json")
+
+    @property
+    def restore_recovery_marker(self) -> Path:
+        return self.path.with_name(self.path.name + ".restored.json")
+
     def initialize(self, *, target_version: int = LATEST_SCHEMA_VERSION) -> None:
         ensure_private_directory(self.path.parent)
         with exclusive_file_lock(self._migration_lock_path()):
+            if self.restore_marker.exists():
+                raise RuntimeError(
+                    "A state restore is pending. Resume it with deepcode service restore before starting the application."
+                )
             had_existing_database = self._has_existing_database()
+            installed = self.schema_version()
+            if installed > target_version:
+                raise MigrationError(
+                    f"database schema {installed} is newer than supported {target_version}"
+                )
             connection = self._connect()
             try:
                 self._enable_wal(connection)
@@ -61,8 +84,11 @@ class Database:
 
         if not self._has_existing_database():
             return 0
-        with self.read() as connection:
+        connection = sqlite3.connect(self.path.as_uri() + "?mode=ro", uri=True)
+        try:
             return current_version(connection)
+        finally:
+            connection.close()
 
     @staticmethod
     def _enable_wal(connection: sqlite3.Connection) -> None:
@@ -93,8 +119,38 @@ class Database:
         return connection
 
     def _harden_files(self) -> None:
+        """Repair the database files' permissions at most once per process.
+
+        ``ensure_private_file`` re-applies the Windows ACL (3 ``icacls`` spawns
+        per file), and this runs on every connect, read and transaction: the
+        suite spawned tens of thousands of ``icacls`` processes, which is both
+        slow and — because ``CreateProcess`` can stall for minutes under that
+        much spawn pressure — a way to wedge the process. It also contradicts
+        the "restrict at creation, not per open" rule this module already
+        follows (``ensure_private_directory`` restricts only what it created)
+        and the ACL tests pin (``tests/test_private_storage_acl_once.py``).
+
+        Keyed by path, deliberately without re-checking identity: a sibling that
+        SQLite deletes and recreates (``-wal``/``-shm``) is created inside the
+        already restricted directory, so it inherits the restricted ACL —
+        re-running ``icacls`` on every recreation is exactly the per-open
+        re-hardening this avoids. The parent directory is restricted first, in
+        ``_connect``/``initialize``, which is what makes that inheritance hold.
+        """
+
         for suffix in ("", "-wal", "-shm", "-journal"):
-            ensure_private_file(Path(f"{self.path}{suffix}"))
+            path = Path(f"{self.path}{suffix}")
+            key = os.fspath(path)
+            if key in _hardened_files:
+                continue
+            try:
+                path.lstat()
+            except OSError:
+                # Not created yet: it will be seen (and repaired) the first time
+                # it exists, not on every open before that.
+                continue
+            ensure_private_file(path)
+            _hardened_files.add(key)
 
     def _migration_lock_path(self) -> Path:
         return self.path.with_name(f"{self.path.name}.migration.lock")

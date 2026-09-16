@@ -60,6 +60,8 @@ def verify_runtime() -> dict[str, Any]:
         importlib.import_module(module)
     bundled_skills = _verify_bundled_skills()
     bundled_mcp_presets = [preset.id for preset in McpPresetCatalog().list()]
+    from app_server.web_surface import ASSET_DIRECTORY, read_web_build
+
     return {
         "ok": True,
         "modules": list(RUNTIME_MODULES),
@@ -70,4 +72,7 @@ def verify_runtime() -> dict[str, Any]:
         "skillCreator": "skill-creator" in bundled_skills,
         "bundledMcpPresets": bundled_mcp_presets,
         "version": __version__,
+        "webAssets": bool(
+            read_web_build() and (ASSET_DIRECTORY / "index.html").is_file()
+        ),
     }

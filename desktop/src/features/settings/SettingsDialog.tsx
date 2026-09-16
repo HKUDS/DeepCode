@@ -17,7 +17,7 @@ import type {
   SettingsSnapshot,
 } from "../../generated/app-server";
 import { useEscapeLayer } from "../../app/escapeLayer";
-import type { DesktopRuntime } from "../../rpc/contracts";
+import type { ClientRuntime } from "../../rpc/contracts";
 import {
   SETTINGS_SECTIONS,
   type SettingsSectionId,
@@ -25,7 +25,7 @@ import {
 import styles from "./SettingsDialog.module.css";
 
 interface SettingsDialogProps {
-  runtime: DesktopRuntime;
+  runtime: ClientRuntime;
   project: Project | null;
   settings: SettingsSnapshot | null;
   busy: boolean;
@@ -135,7 +135,7 @@ export function SettingsDialog({
               onClick={() => void openConfigFile()}
             >
               <FileText size={14} />
-              {t("settings.openConfig", "Open configuration file")}
+              {runtime.host?.nativeOpen === false ? "Copy configuration path" : t("settings.openConfig", "Open configuration file")}
             </button>
             <button
               className={styles.close}

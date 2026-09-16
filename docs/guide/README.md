@@ -1,26 +1,32 @@
-# DeepCode Guides
+# Using DeepCode
 
-Task-oriented, teaching-style documentation. Every command, flag, and output
-shown here is taken from the current source tree, not from memory — each page
-names the module that makes it true.
+New to DeepCode? Start with [Your first coding task](getting-started.md). You
+will connect a model, write and test a small program, and learn how to continue
+the conversation later.
 
-| Guide | You will learn |
+Once installed, choose the interface you prefer:
+
+| Where you want to work | Command |
 |---|---|
-| [Getting started](getting-started.md) | Install, connect a model, trust a folder, run your first session — and read what the agent shows you |
-| [The terminal UI](the-tui.md) | Every slash command, pickers, `@file` and `$skill` references, transcript detail, interrupting, approvals |
-| [Sessions](sessions.md) | Resume, work across two windows, compact a long conversation, what lives on disk |
-| [Models and providers](models.md) | Connections, declared models, switching mid-conversation, reasoning effort |
-| [Skills and memory](skills-and-memory.md) | Reusable playbooks, project instructions, durable notes, plugins |
-| [Goals, automation, and headless runs](goals-and-headless.md) | Durable goals, the verify-loop, `deepcode exec --json`, schedules, MCP serving |
+| In your terminal | `deepcode` |
+| In the desktop app | `deepcode desktop` |
+| In your browser | `deepcode web` |
 
-Two other surfaces share everything these guides describe:
+Your projects and conversations are available across all three interfaces.
+For installation options, see the [quick start](../../README.md#quick-start).
 
-- **Desktop** — a Tauri app over the same runtime. A Desktop *thread* and a CLI
-  *session* are the same record with the same id; start in one, continue in
-  the other.
-- **Headless** — `deepcode exec` runs one task and exits; `--json` streams
-  structured events for scripts and CI.
+## Find what you need
 
-Reference documents (architecture, contracts, deep dives) remain in
-[`docs/`](../). The Paper2Code research pipeline keeps its own documentation:
-see the [README's Paper2Code section](../../README.md#paper2code).
+| I want to… | Guide |
+|---|---|
+| Complete my first task | [Getting started](getting-started.md) |
+| Connect another provider or use a local model | [Models and providers](models.md) |
+| Attach files, use shortcuts, or control a running task | [The terminal UI](the-tui.md) |
+| Resume a conversation or manage long chats | [Sessions](sessions.md) |
+| Add project conventions and reusable instructions | [Skills and memory](skills-and-memory.md) |
+| Work toward a larger goal or schedule recurring tasks | [Goals and automation](goals-and-headless.md) |
+| Fix a startup or connection problem | [Troubleshooting](troubleshooting.md) |
+
+Looking to reproduce a paper? See the [Paper2Code guide](../../README.md#paper2code-1).
+Developers extending DeepCode can find architecture and integration references
+in [`docs/`](../).

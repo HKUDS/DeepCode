@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type {
-  DesktopRuntime,
+  ClientRuntime,
   DesktopUpdateInfo,
   DesktopUpdateProgress,
 } from "../../../rpc/contracts";
@@ -13,13 +13,17 @@ import styles from "../../management/ManagementWorkspace.module.css";
 
 type UpdateState = "idle" | "checking" | "current" | "available" | "installing";
 
-export function UpdatesCard({ runtime }: { runtime: DesktopRuntime }) {
+export function UpdatesCard({ runtime }: { runtime: ClientRuntime }) {
   const { t } = useTranslation();
   const [updateInfo, setUpdateInfo] = useState<DesktopUpdateInfo | null>(null);
   const [updateState, setUpdateState] = useState<UpdateState>("idle");
   const [updateProgress, setUpdateProgress] =
     useState<DesktopUpdateProgress | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
+
+  if (runtime.host?.updates === false) return <section className={styles.section}>
+    <h2>Service updates</h2><p>Update DeepCode on the service machine, then open a fresh link with <code>deepcode web</code>. Reload this page after updating.</p>
+  </section>;
 
   const checkForUpdate = async () => {
     setUpdateState("checking");

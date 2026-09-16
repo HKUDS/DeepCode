@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from dataclasses import dataclass
-from datetime import datetime
 
+from cli.thread_client import ThreadListing, TurnDelivery, turn_access_summary
 from cli.project_trust import (
     open_workspace_project,
     require_project_trusted,
@@ -27,7 +26,6 @@ from core.domain.event import DomainEvent
 from core.domain.execution_profile import ExecutionProfile, ExecutionSelection
 from core.domain.execution_security import (
     ExecutionAccessPreset,
-    ExecutionSecurityProfile,
 )
 from core.domain.message_provenance import ClientSurface
 from core.domain.project import TrustState
@@ -36,24 +34,6 @@ from core.domain.turn import Turn, TurnStatus
 from core.events import Event
 from core.harness.permissions import PermissionMode
 from core.sessions import SessionStore, get_default_store
-
-
-@dataclass(frozen=True, slots=True)
-class TuiDelivery:
-    kind: str
-    turn: Turn
-
-
-@dataclass(frozen=True, slots=True)
-class ThreadListing:
-    """One row of the resume picker — display data only."""
-
-    session_id: str
-    title: str
-    message_count: int
-    updated_at: datetime
-    workspace: str
-    is_current: bool
 
 
 class TuiThreadClient:
@@ -123,6 +103,28 @@ class TuiThreadClient:
             self.application.close()
             raise
 
+    runtime_mode = "compatibility"
+
+    @property
+    def llm(self):
+        return self.application.llm
+
+    @property
+    def skills(self):
+        return self.application.skills
+
+    @property
+    def plugins(self):
+        return self.application.plugins
+
+    @property
+    def mcp(self):
+        return self.application.mcp
+
+    @property
+    def goals(self):
+        return self.application.goals
+
     @property
     def session_id(self) -> str:
         return self.thread.id
@@ -162,8 +164,8 @@ class TuiThreadClient:
         )
         queued = tuple(turn for turn in turns if turn.status is TurnStatus.QUEUED)
         return (
-            _turn_access_summary(current) if current is not None else None,
-            tuple(_turn_access_summary(turn) for turn in queued),
+            turn_access_summary(current) if current is not None else None,
+            tuple(turn_access_summary(turn) for turn in queued),
         )
 
     def set_event_loop(self, loop: asyncio.AbstractEventLoop) -> None:
@@ -211,7 +213,7 @@ class TuiThreadClient:
         prompt: str,
         *,
         skill_ids: tuple[str, ...] = (),
-    ) -> TuiDelivery:
+    ) -> TurnDelivery:
         active = self.application.turns.executing_for_thread(self.thread.id)
         result: InteractiveTurnResult = self.router.send(
             self.thread.id,
@@ -225,14 +227,14 @@ class TuiThreadClient:
             InteractiveDelivery.QUEUED,
         }:
             self._title_from_first_prompt(prompt)
-        return TuiDelivery(result.delivery.value, result.turn)
+        return TurnDelivery(result.delivery.value, result.turn)
 
     def queue(
         self,
         prompt: str,
         *,
         skill_ids: tuple[str, ...] = (),
-    ) -> TuiDelivery:
+    ) -> TurnDelivery:
         snapshot = self.application.turns.enqueue(
             self.thread.id,
             prompt=prompt,
@@ -241,7 +243,7 @@ class TuiThreadClient:
             client_surface=ClientSurface.CLI,
         )
         self._title_from_first_prompt(prompt)
-        return TuiDelivery("queued", snapshot.turn)
+        return TurnDelivery("queued", snapshot.turn)
 
     def has_active_turn(self) -> bool:
         return self.application.turns.active_for_thread(self.thread.id) is not None
@@ -568,16 +570,4 @@ class TuiThreadClient:
             )
 
 
-def _turn_access_summary(turn: Turn) -> str:
-    profile: ExecutionSecurityProfile | None = turn.execution_security_profile
-    if profile is not None:
-        if profile.access_preset is not None:
-            return profile.access_preset.value.replace("_", " ")
-        sandbox = "sandboxed" if profile.command_sandbox else "unsandboxed"
-        return f"legacy {profile.permission_mode.value.replace('_', ' ')} · {sandbox}"
-    if turn.execution_permission_mode is not None:
-        return f"legacy {turn.execution_permission_mode.value.replace('_', ' ')}"
-    return "legacy unknown"
-
-
-__all__ = ["TuiDelivery", "TuiThreadClient"]
+__all__ = ["TuiThreadClient"]

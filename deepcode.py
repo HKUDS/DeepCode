@@ -162,6 +162,22 @@ def main():
             from cli.provider_cli import run as provider_run
 
             raise SystemExit(provider_run(sys.argv[2:]))
+        elif sys.argv[1] == "service":
+            from cli.service_cli import run as service_run
+
+            raise SystemExit(service_run(sys.argv[2:]))
+        elif sys.argv[1] == "desktop":
+            from cli.desktop_cli import run as desktop_run
+
+            raise SystemExit(desktop_run(sys.argv[2:]))
+        elif sys.argv[1] == "web":
+            from cli.web_cli import run as web_run
+
+            raise SystemExit(web_run(sys.argv[2:]))
+        elif sys.argv[1] == "serve":
+            from app_server.service import main as serve_main
+
+            raise SystemExit(serve_main(sys.argv[2:]))
         elif sys.argv[1] in {"session", "sessions"}:
             from cli.session_cli import run as session_run
 
@@ -197,7 +213,9 @@ def main():
                     [
                         "",
                         "Usage:",
-                        row("deepcode", "Interactive coding agent (TUI, default)"),
+                        row("deepcode", "Open the terminal coding agent (TUI)"),
+                        row("deepcode desktop", "Open the native desktop client"),
+                        row("deepcode web", "Open the local browser client"),
                         row(
                             "deepcode init",
                             "Set up ~/.deepcode so deepcode runs anywhere",
@@ -205,7 +223,15 @@ def main():
                         row("deepcode test <paper>", "Test paper reproduction"),
                         row("deepcode test <paper> --fast", "Test paper (fast mode)"),
                         row("deepcode mcp serve", "Expose DeepCode as an MCP server"),
-                        row("deepcode mcp list|add|remove", "Manage MCP clients"),
+                        row(
+                            "deepcode service <command>",
+                            "Manage the background service",
+                        ),
+                        row(
+                            "deepcode serve --foreground",
+                            "Run the service in this terminal",
+                        ),
+                        row("deepcode mcp <command>", "Connect and manage MCP tools"),
                         row(
                             "deepcode skill <command>",
                             "List, inspect, import, and manage Agent Skills",
@@ -243,28 +269,19 @@ def main():
                             "Manage durable Agent Automations",
                         ),
                         "",
-                        "   More agent entry points:",
-                        row(
-                            'python -m cli.exec_cli "<task>" -w .',
-                            "Headless one-shot run",
-                        ),
-                        row(
-                            'python -m cli.loop_cli "<goal>"',
-                            "Headless durable Goal",
-                        ),
-                        row(
-                            "python -m cli.loop_cli --resume <session-id>",
-                            "Resume a durable Goal without replacing history",
-                        ),
-                        row(
-                            "python -m cli.schedule_cli ...",
-                            "Scheduled / keepalive runs",
-                        ),
-                        "",
                         "Examples:",
-                        row("deepcode", "Drop into the interactive agent"),
+                        row("deepcode --trust", "Start in a project you trust"),
+                        row(
+                            "deepcode --resume <session-id>",
+                            "Continue a saved conversation",
+                        ),
+                        row("deepcode provider list", "Show model connections"),
+                        row("deepcode service status", "Check the background service"),
                         row("deepcode test rice", "Test RICE paper reproduction"),
                         row("deepcode test rice --fast", "Test RICE paper (fast mode)"),
+                        "",
+                        "Run 'deepcode <command> --help' for command options.",
+                        "Run 'deepcode chat --help' for TUI options.",
                         "",
                         "Available papers:",
                     ]

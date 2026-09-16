@@ -130,6 +130,22 @@ class GoalExtension(GoalRuntimeHandler):
             turn_id=turn_id,
         )
 
+    def execution_settled(self, goal: ThreadGoal) -> bool:
+        """A terminal Goal is ready only after its deciding Turn is accounted."""
+        if goal.status is ThreadGoalStatus.ACTIVE:
+            return False
+        outcome = self.read_outcome(goal.thread_id)
+        deciding_turn_id = outcome.decided_by_turn_id if outcome else None
+        if deciding_turn_id is None:
+            return True
+        try:
+            turn = self.turns.read(deciding_turn_id).turn
+        except TurnNotFoundError:
+            return True
+        return turn.status.is_terminal and self.is_turn_accounted(
+            goal.thread_id, goal_id=goal.id, turn_id=turn.id
+        )
+
     def are_turns_accounted(
         self,
         thread_id: str,

@@ -14,22 +14,25 @@ import json_repair
 from core.observability import log_llm_call
 from core.providers.base import (
     LLMProvider,
+    ProviderCapabilityError,
+    ProviderConfigurationError,
     LLMResponse,
     ReasoningDeltaCallback,
     ToolCallRequest,
 )
+from core.providers.protocol_config import ProviderCompat
 from core.providers.reasoning import (
     ANTHROPIC_THINKING_BLOCKS,
     infer_reasoning_capabilities,
     normalize_reasoning_effort,
 )
-from core.reasoning import ReasoningChannel
 from core.providers.timeouts import (
     StreamIdleTimeoutError,
     iter_with_stream_idle_timeout,
     resolve_stream_idle_timeout_s,
     wait_for_stream_activity,
 )
+from core.reasoning import ReasoningChannel
 
 _ALNUM = string.ascii_letters + string.digits
 
@@ -87,16 +90,20 @@ class AnthropicProvider(LLMProvider):
         api_base: str | None = None,
         default_model: str = "claude-sonnet-4-20250514",
         extra_headers: dict[str, str] | None = None,
+        compat: ProviderCompat | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
+        self.compat = compat or ProviderCompat()
+        self.compat.validate_protocol("anthropic_messages")
 
         from anthropic import AsyncAnthropic
 
         client_kw: dict[str, Any] = {}
         if api_key:
             client_kw["api_key"] = api_key
+            client_kw["auth_token"] = ""
         if api_base:
             client_kw["base_url"] = api_base
         if extra_headers:
@@ -104,9 +111,28 @@ class AnthropicProvider(LLMProvider):
         # Keep retries centralized in LLMProvider._run_with_retry to avoid retry amplification.
         client_kw["max_retries"] = 0
         self._client = AsyncAnthropic(**client_kw)
+        if api_key:
+            self._client.auth_token = None
+
+    async def aclose(self) -> None:
+        await self._client.close()
+
+    def _set_runtime_credential(self, key: str | None) -> None:
+        self.api_key = key
+        self._client.api_key = key
+        self._client.auth_token = None
 
     @classmethod
     def _handle_error(cls, e: Exception) -> LLMResponse:
+        if isinstance(e, (ProviderCapabilityError, ProviderConfigurationError)):
+            return LLMResponse(
+                content=str(e),
+                finish_reason="error",
+                error_kind="capability"
+                if isinstance(e, ProviderCapabilityError)
+                else "configuration",
+                error_should_retry=False,
+            )
         response = getattr(e, "response", None)
         headers = getattr(response, "headers", None)
         payload = (
@@ -460,6 +486,7 @@ class AnthropicProvider(LLMProvider):
         tool_choice: str | dict[str, Any] | None,
         supports_caching: bool = True,
     ) -> dict[str, Any]:
+        self.validate_request_capabilities(messages, tools)
         model_name = self._strip_prefix(model or self.default_model)
         system, anthropic_msgs = self._convert_messages(
             self._sanitize_empty_content(messages)
@@ -475,7 +502,12 @@ class AnthropicProvider(LLMProvider):
 
         max_tokens = max(1, max_tokens)
         effort = normalize_reasoning_effort(reasoning_effort)
-        summarized_thinking = self._uses_summarized_thinking(model_name, effort)
+        if self.reasoning_supported is False:
+            effort = None
+        summarized_thinking = (
+            self.reasoning_supported is not False
+            and self._uses_summarized_thinking(model_name, effort)
+        )
         thinking_enabled = summarized_thinking or effort not in {None, "auto", "none"}
 
         kwargs: dict[str, Any] = {
@@ -501,6 +533,15 @@ class AnthropicProvider(LLMProvider):
             kwargs["temperature"] = 1.0
         else:
             kwargs["temperature"] = temperature
+
+        if self.compat.temperature is False:
+            kwargs.pop("temperature", None)
+        elif self.compat.temperature is True:
+            kwargs.setdefault("temperature", temperature)
+        if "temperature" in kwargs:
+            # SDK 1.x removed the typed parameter. The documented extra_body
+            # path preserves the same legacy wire value on both SDK generations.
+            kwargs["extra_body"] = {"temperature": kwargs.pop("temperature")}
 
         if anthropic_tools:
             kwargs["tools"] = anthropic_tools
@@ -630,18 +671,20 @@ class AnthropicProvider(LLMProvider):
         model_name = self._strip_prefix(model or self.default_model)
         effort = normalize_reasoning_effort(reasoning_effort)
         summarized_thinking = self._uses_summarized_thinking(model_name, effort)
-        kwargs = self._build_kwargs(
-            messages,
-            tools,
-            model,
-            max_tokens,
-            temperature,
-            reasoning_effort,
-            tool_choice,
-        )
         started = time.monotonic()
         result: LLMResponse | None = None
         try:
+            await self.refresh_request_credentials()
+            kwargs = self._build_kwargs(
+                messages,
+                tools,
+                model,
+                max_tokens,
+                temperature,
+                reasoning_effort,
+                tool_choice,
+            )
+
             response = await self._client.messages.create(**kwargs)
             result = self._parse_response(
                 response,
@@ -649,7 +692,9 @@ class AnthropicProvider(LLMProvider):
             )
             return result
         except Exception as e:
-            result = self._handle_error(e)
+            result = self.redact_error(
+                self._handle_error(e), e, [self.api_key, *self.extra_headers.values()]
+            )
             return result
         finally:
             self._emit_observability(
@@ -675,19 +720,21 @@ class AnthropicProvider(LLMProvider):
         model_name = self._strip_prefix(model or self.default_model)
         effort = normalize_reasoning_effort(reasoning_effort)
         summarized_thinking = self._uses_summarized_thinking(model_name, effort)
-        kwargs = self._build_kwargs(
-            messages,
-            tools,
-            model,
-            max_tokens,
-            temperature,
-            reasoning_effort,
-            tool_choice,
-        )
         idle_timeout_s = resolve_stream_idle_timeout_s()
         started = time.monotonic()
         result: LLMResponse | None = None
         try:
+            await self.refresh_request_credentials()
+            kwargs = self._build_kwargs(
+                messages,
+                tools,
+                model,
+                max_tokens,
+                temperature,
+                reasoning_effort,
+                tool_choice,
+            )
+
             async with self._client.messages.stream(**kwargs) as stream:
                 async for event in iter_with_stream_idle_timeout(
                     stream, timeout_s=idle_timeout_s
@@ -724,7 +771,9 @@ class AnthropicProvider(LLMProvider):
             )
             return result
         except Exception as e:
-            result = self._handle_error(e)
+            result = self.redact_error(
+                self._handle_error(e), e, [self.api_key, *self.extra_headers.values()]
+            )
             return result
         finally:
             self._emit_observability(

@@ -68,7 +68,6 @@ from core.persistence.thread_repository import ThreadRepository
 from core.persistence.workflow_repository import ArtifactRepository, WorkflowRepository
 from core.sessions import SessionStore
 
-
 SUPPORTED_KINDS = frozenset({"paper2code"})
 SUPPORTED_SOURCE_TYPES = frozenset({"local", "url", "repository", "requirement"})
 MAX_SOURCE_LENGTH = 16_384
@@ -853,28 +852,32 @@ class WorkflowService:
                 load_config_for_workspace(workspace),
                 credential_store=self.llm_configuration.credentials,
                 phase_execution_profiles=_execution_profiles(run.input),
+                config_loader=lambda: load_config_for_workspace(workspace),
             )
-            with use_runtime(runtime):
-                outcome = await self.runner.run(
-                    request,
-                    WorkflowCallbacks(
-                        progress=lambda stage, current, total, message, metadata: (
-                            self._progress(
+            try:
+                with use_runtime(runtime):
+                    outcome = await self.runner.run(
+                        request,
+                        WorkflowCallbacks(
+                            progress=lambda stage, current, total, message, metadata: (
+                                self._progress(
+                                    run.id,
+                                    stage=stage,
+                                    current=current,
+                                    total=total,
+                                    message=message,
+                                    metadata=metadata,
+                                )
+                            ),
+                            interact=lambda interaction: self._interact(
                                 run.id,
-                                stage=stage,
-                                current=current,
-                                total=total,
-                                message=message,
-                                metadata=metadata,
-                            )
+                                interaction,
+                                claim=claim,
+                            ),
                         ),
-                        interact=lambda interaction: self._interact(
-                            run.id,
-                            interaction,
-                            claim=claim,
-                        ),
-                    ),
-                )
+                    )
+            finally:
+                await runtime.aclose()
             if outcome.status == "completed":
                 self._finish(
                     run.id,

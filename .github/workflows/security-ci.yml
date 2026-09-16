@@ -14,7 +14,7 @@ permissions:
 
 concurrency:
   group: security-ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   secret-scan:
@@ -39,13 +39,22 @@ jobs:
           ./gitleaks git --redact --no-banner --exit-code 1
 
   dependency-audit:
+    # Advisory databases change on their own schedule. Running this on every
+    # push turned main red for upstream advisories unrelated to the change,
+    # so it runs weekly and on demand and reports through an issue instead.
     name: Dependency and license audit
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -65,6 +74,12 @@ jobs:
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust audit tools
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+          key: audit-0.22.2
 
       - name: Audit Node dependencies
         working-directory: desktop
@@ -86,6 +101,11 @@ jobs:
             --python desktop/build/python-audit-env/bin/python \
             --output desktop/build/security/python-sbom.json
           rm -rf desktop/build/python-audit-env
+
+      - name: Audit pinned CI dependencies
+        run: >-
+          python -m pip_audit --requirement scripts/ci/requirements.lock
+          --no-deps --disable-pip
 
       - name: Audit locked App Server environment
         working-directory: desktop
@@ -113,6 +133,22 @@ jobs:
             desktop/build/licenses/dependencies.json
           if-no-files-found: error
           retention-days: 30
+
+      - name: Open or update the audit issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Dependency audit failed on main"
+          existing="$(gh issue list --state open --label dependencies \
+            --search "\"$title\" in:title" --json number --jq '.[0].number')"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "The scheduled audit failed again: $RUN_URL"
+          else
+            gh issue create --title "$title" --label dependencies \
+              --body "A scheduled dependency or license audit found a new advisory. See the failing step in $RUN_URL and bump the affected lockfile."
+          fi
 
   dependency-review:
     name: Pull request dependency review

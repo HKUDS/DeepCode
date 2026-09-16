@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { MethodParams, MethodResults } from "../../generated/app-server";
-import type { DesktopRuntime } from "../../rpc/contracts";
+import type { ClientRuntime } from "../../rpc/contracts";
 
 type AutomationInventory = MethodResults["automation/list"];
 type AutomationRunPage = MethodResults["automation/runs"];
@@ -14,7 +14,7 @@ function message(error: unknown): string {
 }
 
 export function useAutomations(
-  runtime: DesktopRuntime,
+  runtime: ClientRuntime,
   projectId: string | null,
   expandedRunAutomationId: string | null = null,
 ) {

@@ -77,11 +77,10 @@
 *在可视化工作台中使用 DeepCode，管理 Session 和目标，并查看工具活动、代码修改与验证过程。*
 </div>
 
-DeepCode 只有一套 Agent 运行时，同时提供两种使用界面：面向终端
-工作流的交互式 CLI，以及用于 Session、审查和设置的 Tauri Desktop。
-两端打开同一份本地 Project、Session 历史、模型、Skills、权限、Goals 与
-Automations。从源码启动请参考
-[`Desktop 运行指南`](desktop/README.md)。
+DeepCode 提供 TUI、Desktop 和 Web 三种客户端，连接同一个本地共享后台，
+共用 Project、Session 历史、模型、Skills、权限、Goals 与 Automations。
+分别使用 `deepcode`、`deepcode desktop` 和 `deepcode web` 启动；安装及首次任务
+见[快速开始](#快速开始)。
 
 ---
 
@@ -132,6 +131,14 @@ Automations。从源码启动请参考
   - [让可重复的工程工作自动化](#让可重复的工程工作自动化)
   - [Paper2Code](#paper2code)
 - [⚡ 快速开始](#快速开始)
+  - [三种启动入口](#三种启动入口)
+  - [安装 DeepCode](#安装-deepcode)
+  - [配置并选择模型](#配置并选择模型)
+  - [启动 TUI](#启动-tui)
+  - [启动 Desktop](#启动-desktop)
+  - [启动 Web](#启动-web)
+  - [完成并验收第一个任务](#完成并验收第一个任务)
+  - [管理共享后台与排查问题](#管理共享后台与排查问题)
 - [🧭 使用 DeepCode](#使用-deepcode)
 - [⚙️ Headless 与 Automation](docs/HEADLESS_AND_AUTOMATION.md#中文)
 - [🔬 Paper2Code](#paper2code-1)
@@ -149,6 +156,25 @@ Automations。从源码启动请参考
 </p>
 
 ## 新闻
+
+**2026-09-09 · TUI、Desktop 与 Web 共用一个本地后台**
+
+- **选择你习惯的界面。** 运行 `deepcode` 启动 TUI，`deepcode desktop`
+  打开桌面应用，或用 `deepcode web` 在浏览器中打开工作台。三种界面连接
+  同一个本地后台，Web 无需注册 DeepCode 账号。
+- **换个界面，继续同一个任务。** 关闭客户端后，正在执行的任务继续在后台
+  运行。你可以从其他界面重新连接，查看同一段对话、工具活动并处理审批。
+  任务继续执行需要电脑保持唤醒，遇到审批时仍需你确认。
+- **配置模型，并验证它能否正常工作。** 保存的云端或本地模型连接可在三种
+  界面中使用。你可以查看可用模型、发送简短请求检查响应，并在使用自定义
+  模型服务前验证流式输出和工具调用。参见[模型与服务商指南](docs/guide/models.md)。
+- **管理后台，为升级做好准备。** 使用 `deepcode service` 命令查看状态和
+  日志，或等待当前任务完成后停止服务。升级前可以创建运行时数据快照，
+  需要时再恢复；项目文件仍使用你原有的版本管理或备份方式。
+  参见[升级与恢复指南](docs/UPGRADE_AND_RESTORE.md)。
+
+从更新后的[快速开始](#快速开始)和[第一个编程任务教程](docs/guide/getting-started.md)
+开始使用。（[#212](https://github.com/HKUDS/DeepCode/pull/212)）
 
 **2026-09-06 · DeepCode v2.2.0：Session 上下文窗口上限、会留下记忆的压缩，以及完整本地化的 Desktop**
 
@@ -497,7 +523,7 @@ DeepCode 的目标不是让 Agent 显得更忙，而是帮助你更可靠地完�
 
 ## 核心能力
 
-DeepCode 提供完整的本地 Coding Agent 工作流。CLI 和 Desktop 只是两种使用方式，它们共享同一套 Agent、Session、模型、Skills、权限和任务状态。
+DeepCode 提供完整的本地 Coding Agent 工作流。TUI、Desktop 和 Web 通过共享后台，使用同一套 Agent、Session、模型、Skills、权限和任务状态。
 
 <p align="center">
   <img src="assets/readme/verification-loop.png" alt="DeepCode Agent Harness 与验证循环" width="1080" />
@@ -584,150 +610,171 @@ Paper2Code 是 DeepCode 最初的研究方向，也是当前产品中专门面�
 
 ## 快速开始
 
-DeepCode 提供两种界面，并且对应两条独立安装路径。任选一种即可开始；两端
-使用相同的 Agent 运行时和规范 Session 历史。
+你可以用 DeepCode 阅读项目代码、开发功能、修复问题和运行测试。选择习惯的终端、
+桌面应用或浏览器即可，项目和对话可以在三端继续使用。
 
-> `uv tool install --python 3.12 deepcode-hku` 安装的是 CLI 和共享 Python
-> 运行时，**不会**安装 Tauri Desktop 应用。
+### 三种启动入口
 
-### 方案 A：安装 CLI
+安装后，选择一种方式打开 DeepCode：
 
-如果尚未安装 `uv`，请先安装。Windows PowerShell 使用：
+| 界面 | 启动命令 |
+|---|---|
+| **TUI**：在终端中工作 | `deepcode` |
+| **Desktop**：使用桌面应用 | `deepcode desktop` |
+| **Web**：在浏览器中工作 | `deepcode web` |
 
-```powershell
-winget install --id astral-sh.uv --exact
-```
+DeepCode 会自动启动本地后台。你可以关闭界面，下次再回来继续同一段对话。
 
-首次安装 `uv` 后重新打开终端，再执行：
+### 安装 DeepCode
+
+#### 安装已发布版本
+
+准备好 `uv` 后，在终端运行：
 
 ```console
 uv tool install --python 3.12 deepcode-hku
 deepcode init
 ```
 
-这里显式选择 Python 是有意的：DeepCode 要求 Python 3.12+，不能在旧解释器上
-回退安装已经不受支持的历史版本。
-如果现有 uv tool 环境仍安装着 DeepCode 1.x，可执行
-`uv tool upgrade --python 3.12 deepcode-hku` 完成迁移。
+Windows 用户可以先运行 `winget install --id astral-sh.uv --exact` 安装 `uv`，
+再重新打开终端。DeepCode 需要 Python 3.12 或更高版本。
 
-首次创建模型连接。`--api-key` 会打开不回显的安全输入：
+如果想使用桌面应用，还需要从 [GitHub Releases](https://github.com/HKUDS/DeepCode/releases)
+安装 DeepCode Desktop。想体验尚未发布的更新，可以使用下面的源码安装方式。
 
-```console
-deepcode provider set personal-openrouter --template openrouter --label "OpenRouter · Personal" --api-key
-deepcode provider models personal-openrouter --refresh
-deepcode provider test personal-openrouter --model <model-id>
-```
+<details>
+<summary>从源码安装</summary>
 
-进入希望 DeepCode 操作的仓库，然后启动交互式 Agent：
+#### 安装当前源码版本
+
+准备 Git、`uv` 和 Node.js 22 或更高版本，然后运行：
 
 ```console
-cd <你的项目>
-deepcode
-```
-
-`deepcode init` 会在 `~/.deepcode/` 下创建最小用户配置。凭证单独保存在
-用户私有存储中，不会进入 Session 历史。也可以在合适的 Python 3.12+
-环境中使用 `pipx install deepcode-hku` 或 `pip install deepcode-hku`。
-
-### 方案 B：安装 Desktop
-
-Desktop 安装包与 Python 包分开发布。先检查
-[GitHub Releases](https://github.com/HKUDS/DeepCode/releases) 是否提供当前
-平台的签名安装包；如果没有，请使用下面的源码安装流程。
-
-#### macOS 与 Linux 源码安装
-
-请先根据 [Tauri 2 前置依赖指南](https://v2.tauri.app/start/prerequisites/)
-安装平台依赖，并准备 Git、Python 3.12+、`uv`、Node.js 22+ 和稳定版 Rust。
-然后执行：
-
-```bash
 git clone https://github.com/HKUDS/DeepCode.git
 cd DeepCode
-uv venv --python 3.12
-uv pip install --python .venv/bin/python -e .
-.venv/bin/deepcode init
-cd desktop
-npm ci
-npm run setup:sidecar
-npm run build:sidecar
-cd ..
-mkdir -p ~/.local/bin
-ln -sf "$(pwd)/scripts/deepcode-desktop" ~/.local/bin/deepcode-desktop
-export PATH="$HOME/.local/bin:$PATH"
-deepcode-desktop
+npm --prefix desktop ci
+npm --prefix desktop run build:web
+uv tool install --python 3.12 --force .
+deepcode init
 ```
 
-以上步骤会完成一次性的源码启动器安装。以后只要 `~/.local/bin` 已加入
-`PATH`，就可以从任意目录运行 `deepcode-desktop` 启动这个源码版本。如果
-Shell 尚未配置该路径，请把上述 export 写入 Shell profile。命令只负责启动
-Desktop；需要操作的仓库仍应在 Project 侧边栏中添加或选择。
+已有仓库时，从仓库根目录开始，跳过克隆步骤。安装完成后，可在任意目录运行
+`deepcode`。如果还要运行源码版 Desktop，请按照 [Desktop 指南](desktop/README.md)
+准备 Rust 和对应平台的依赖。
 
-#### Windows 源码安装
+</details>
 
-Windows 必须安装 Microsoft Edge WebView2，以及 Visual Studio 2022 Build
-Tools 的 **Desktop development with C++** 工作负载。Build Tools 弹出 UAC
-提示时请选择“是”：
+如果终端提示找不到 `deepcode`，运行 `uv tool update-shell`，再重新打开终端。
 
-```powershell
-winget install --id Git.Git --exact
-winget install --id astral-sh.uv --exact
-winget install --id OpenJS.NodeJS.LTS --exact
-winget install --id Rustlang.Rustup --exact
-winget install --id Microsoft.VisualStudio.2022.BuildTools --exact `
-  --override "--wait --passive --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
-```
+### 配置并选择模型
 
-关闭 PowerShell，重新打开一个窗口并验证工具链：
+你可以在图形界面中配置，也可以使用终端命令，任选一种即可。
 
-```powershell
-git --version
-uv --version
-node --version
-rustup default stable-msvc
-rustc --version
-cargo --version
-```
-
-克隆、准备并启动 Desktop：
-
-```powershell
-git clone https://github.com/HKUDS/DeepCode.git
-Set-Location DeepCode
-uv venv --python 3.12
-uv pip install --python .venv\Scripts\python.exe -e .
-.venv\Scripts\deepcode.exe init
-Set-Location desktop
-npm ci
-$env:DEEPCODE_PYTHON = (Resolve-Path ..\.venv\Scripts\python.exe)
-npm run setup:sidecar
-npm run build:sidecar
-npm run tauri -- dev
-```
-
-Desktop 运行期间请保持这个 PowerShell 窗口开启。后续启动和故障排查请参考
-[Desktop 源码运行指南](desktop/README.md#windows-powershell)。
-
-#### 配置 Desktop 模型
-
-Desktop 启动后，打开 **Settings → AI providers**。
+**在 Desktop 或 Web 中：** 打开 **Settings → AI providers**，点击 **Add provider**，
+选择模型服务并填写 API Key。点击 **Save and check** 获取模型列表；在 **Agent model**
+中选择模型，再点击 **Save and verify model** 发送一条简短请求，检查模型是否可用。
+随后在对话输入框中选择要使用的连接和模型。
 
 <div align="center">
-  <img src="assets/setting_model.png" alt="在 DeepCode Desktop 中配置 AI Provider 与模型" width="100%" style="border-radius: 10px; box-shadow: 0 8px 20px rgba(45,55,72,0.2); margin: 15px 0;"/>
-
-  <sub>在同一个 Desktop 流程中完成凭证保存、模型发现和真实推理验证。</sub>
+  <img src="assets/setting_model.png" alt="在 DeepCode 设置中选择模型服务和模型" width="100%" style="border-radius: 10px; box-shadow: 0 8px 20px rgba(45,55,72,0.2); margin: 15px 0;"/>
 </div>
 
-1. 点击 **Add provider**，选择模型服务，并输入 API Key 或保存它的环境变量名。
-2. 点击 **Save and check**，检查凭证并读取 Provider 的模型目录；这一阶段不会
-   发送项目内容。
-3. 在 **Agent model** 中选择准确的模型 ID，然后点击 **Save and verify
-   model**；最后一步只会发送一次极小的真实推理请求。
-4. 添加或打开 Project，创建 Session，选择模型、Thinking 档位和权限，然后
-   用自然语言描述任务。
+**在终端中：** 下面以 OpenRouter 为例。按提示输入 API Key，输入内容不会显示在终端上。
 
-> 使用界面只改变工作的呈现方式，不改变背后的 Agent、策略、配置和 Session
-> 历史。
+```console
+deepcode provider set my-openrouter --template openrouter --api-key
+deepcode provider models my-openrouter --refresh
+```
+
+从列表中选择一个模型，将下文中的 `MODEL_ID` 替换为它的完整 ID，再测试连接：
+
+```console
+deepcode provider test my-openrouter --model MODEL_ID
+```
+
+配置好的连接可以在三端使用。其他模型服务、本地模型和工具调用检查，见
+[模型配置指南](docs/guide/models.md)。
+
+### 启动 TUI
+
+进入希望 DeepCode 帮你处理的项目目录。第一次使用该目录时，加上 `--trust`，
+表示你信任这个项目并允许 DeepCode 在其中工作。使用上面配置的连接启动：
+
+```console
+cd /path/to/your-project
+deepcode --trust --connection my-openrouter --model MODEL_ID
+```
+
+将路径替换为你的项目目录；Windows 路径例如 `C:\projects\my-app`。以后回到这个
+目录，运行 `deepcode` 即可打开 TUI。输入 `/model` 选择连接和模型，输入 `/help`
+查看可用命令。
+
+### 启动 Desktop
+
+```console
+deepcode desktop
+```
+
+添加你的项目文件夹，确认信任后，点击 **New thread** 开始对话。在输入框中选择
+模型，然后描述你希望完成的任务。
+
+如果从源码安装，该命令会打开开发版应用。首次启动需要准备依赖，可能花费较长时间；
+使用期间请保持启动终端开启。平台依赖和自定义安装位置见 [Desktop 指南](desktop/README.md)。
+
+### 启动 Web
+
+```console
+deepcode web
+```
+
+DeepCode 会自动打开浏览器页面。添加这台电脑上的项目目录，确认信任，创建对话，
+选择模型后即可开始使用，无需 DeepCode 账号。
+
+如果希望自己复制链接打开，运行 `deepcode web --no-open`。请在 60 秒内打开生成的
+访问链接；链接过期或页面提示重新授权时，再运行一次 `deepcode web` 即可。
+
+### 完成并验收第一个任务
+
+进入项目后，可以先让 DeepCode 帮你了解代码：
+
+```text
+介绍这个项目的目录结构、主要模块，以及应该如何运行测试。先不要修改文件。
+```
+
+了解项目后，再提出一个具体的小任务，说明期望的行为和检查方法。例如：
+
+```text
+为配置加载模块补充缺少配置项、配置值不合法时的测试。沿用项目现有的测试风格，
+运行相关测试，并说明修改了哪些文件、测试结果如何。
+```
+
+请按你的项目调整任务内容。DeepCode 工作时，你可以查看工具调用、处理审批，
+并检查文件修改和测试输出。需要调整方向时，直接发送补充消息；需要中断时，
+点击停止按钮，或在 TUI 输入 `/stop`。
+
+对话会自动保存。在 Desktop/Web 中，从项目的对话列表重新打开；在 TUI 中，
+输入 `/resume` 选择历史对话。换一个界面，也可以接着做同一个任务。
+
+如果想从空目录开始练习，请阅读[第一个编程任务](docs/guide/getting-started.md)：
+跟着创建一个 Python 函数、运行测试，再学习如何恢复对话。
+更多用法见[使用指南目录](docs/guide/README.md)。
+
+### 管理共享后台与排查问题
+
+关闭界面后，已经开始的任务会继续在后台运行；遇到待审批操作时，仍需你回来处理。
+执行期间请保持电脑运行，避免休眠。
+
+日常直接打开你喜欢的界面即可。需要检查或停止后台时，按需使用以下命令：
+
+| 你想做什么 | 命令 |
+|---|---|
+| 检查 DeepCode 是否正在运行 | `deepcode service status` |
+| 查看最近的运行日志 | `deepcode service logs --lines 100` |
+| 等当前工作结束后停止后台 | `deepcode service stop --drain --timeout 60` |
+| 登录电脑后自动启动后台 | `deepcode service install --at-login` |
+
+更新版本和备份数据时，参考[升级与恢复指南](docs/UPGRADE_AND_RESTORE.md)。
+遇到启动、模型连接或页面断线问题，先查看[故障排查](docs/guide/troubleshooting.md)。
 
 ## 使用 DeepCode
 
@@ -735,9 +782,11 @@ Desktop 启动后，打开 **Settings → AI providers**。
 
 每项工作都保存在与原始 Project 关联的持久 Session 中。在 Desktop 打开
 Project，或者从项目目录启动 `deepcode`，然后创建新 Session 或恢复历史。
-同一份历史可以直接在 Desktop 与 CLI 之间继续，无需导出或转换。
+同一份历史可以在 TUI、Desktop 和 Web 中继续，无需导出或转换。共享后台统一执行
+任务；执行中发送的普通消息用于引导当前 Turn，显式排队用于后续 Turn。
+多个客户端可同时查看同一 Session，并处理其中的审批。
 
-| 需要完成的操作 | Desktop | 交互式 CLI |
+| 需要完成的操作 | Desktop / Web | 交互式 CLI |
 |---|---|---|
 | 创建 Session | **New thread** | `/new [标题]` |
 | 恢复当前项目历史 | 在 Project 下选择 Session | `/resume` |
@@ -1032,6 +1081,8 @@ uv pip install -e .
 Windows PowerShell 请使用 `.\.venv\Scripts\Activate.ps1` 激活环境。
 
 ### 验证
+
+复现 CI 的 Python 环境、了解各项检查及排查失败，请参考 [CI 指南](docs/CI.md)。
 
 ```bash
 uvx pre-commit run --all-files

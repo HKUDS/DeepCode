@@ -16,8 +16,11 @@ declaring a projection conflict on every noted Turn.
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
+
+import pytest
 
 from core.application import DeepCodeApplication
 from core.domain.automation import AutomationScheduleKind
@@ -146,3 +149,133 @@ def test_context_notes_do_not_poison_projection_pair_matching(
         ]
     finally:
         application.close()
+
+
+@pytest.mark.parametrize("delivery", ["current_turn", "next_turn"])
+def test_user_input_provenance_survives_projection_rebuild(tmp_path, delivery):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = SessionStore(tmp_path / "sessions")
+    session = store.create_session(
+        title="User input", metadata={"workspace": str(workspace)}
+    )
+    store.append_message(
+        session.session_id,
+        "user",
+        "implement the change",
+        metadata={
+            "schemaVersion": 3,
+            "client": "web",
+            "delivery": delivery,
+            "source": "start",
+        },
+    )
+    store.append_message(
+        session.session_id,
+        "user",
+        "internal runtime reminder",
+        metadata={
+            "delivery": "between_turns",
+            "source": "repeat_guard",
+        },
+    )
+    store.append_message(session.session_id, "assistant", "implemented")
+
+    app = DeepCodeApplication.open(tmp_path / "state.sqlite3", session_store=store)
+    try:
+        app.threads.read(session.session_id)
+        app.threads.reconcile()
+        with app.database.read() as connection:
+            messages = ItemRepository(connection).conversation_for_thread(
+                session.session_id
+            )
+            assert [item.payload["text"] for item in messages] == [
+                "implement the change",
+                "implemented",
+            ]
+            assert not EventRepository(connection).has_type(
+                session.session_id, "thread.projection_conflict"
+            )
+    finally:
+        app.close()
+
+
+def test_actual_transcript_disagreement_remains_visible(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = SessionStore(tmp_path / "sessions")
+    session = _seed_session(store, workspace)
+    app = DeepCodeApplication.open(tmp_path / "state.sqlite3", session_store=store)
+    try:
+        with app.database.transaction() as connection:
+            item = ItemRepository(connection).conversation_for_thread(
+                session.session_id
+            )[0]
+            connection.execute(
+                "UPDATE items SET payload_json = ? WHERE id = ?",
+                (json.dumps({"text": "a different user input"}), item.id),
+            )
+        app.threads.read(session.session_id)
+        app.threads.read(session.session_id)
+        with app.database.read() as connection:
+            events = EventRepository(connection).replay(session.session_id)
+            assert sum(e.type == "thread.projection_conflict" for e in events) == 1
+            projected = ItemRepository(connection).conversation_for_thread(
+                session.session_id
+            )
+            assert projected[0].payload["text"] == "a different user input"
+        assert (
+            store.get_session(session.session_id).messages[0].content == "remember this"
+        )
+    finally:
+        app.close()
+
+
+def test_tool_only_assistant_record_does_not_conflict_with_visible_conversation(
+    tmp_path,
+):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = SessionStore(tmp_path / "sessions")
+    session = store.create_session(
+        title="Tool-only response", metadata={"workspace": str(workspace)}
+    )
+    store.append_message(session.session_id, "user", "inspect a file")
+    store.append_message(
+        session.session_id,
+        "assistant",
+        "",
+        metadata={
+            "toolCalls": [
+                {
+                    "id": "read-1",
+                    "type": "function",
+                    "function": {"name": "read", "arguments": "{}"},
+                }
+            ],
+        },
+    )
+    store.append_message(
+        session.session_id,
+        "tool",
+        "file contents",
+        metadata={"name": "read", "toolCallId": "read-1"},
+    )
+    store.append_message(session.session_id, "assistant", "file inspected")
+    app = DeepCodeApplication.open(tmp_path / "state.sqlite3", session_store=store)
+    try:
+        app.threads.read(session.session_id)
+        app.threads.reconcile()
+        with app.database.read() as connection:
+            assert not EventRepository(connection).has_type(
+                session.session_id, "thread.projection_conflict"
+            )
+            # The tool record still belongs to the reconstructed timeline.
+            count = connection.execute(
+                "SELECT COUNT(*) FROM items WHERE thread_id = ? AND kind = 'tool_call'",
+                (session.session_id,),
+            ).fetchone()[0]
+            assert count == 1
+        assert len(store.get_session(session.session_id).messages) == 4
+    finally:
+        app.close()

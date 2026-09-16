@@ -23,7 +23,7 @@ import type {
   McpServerInfo,
   Project,
 } from "../../generated/app-server";
-import type { DesktopRuntime } from "../../rpc/contracts";
+import type { ClientRuntime } from "../../rpc/contracts";
 import styles from "../management/ManagementWorkspace.module.css";
 import { useMcpCatalog } from "./useMcpCatalog";
 
@@ -82,7 +82,7 @@ export function McpPage({
   runtime,
   project,
 }: {
-  runtime: DesktopRuntime;
+  runtime: ClientRuntime;
   project: Project | null;
 }) {
   const catalog = useMcpCatalog(runtime, project);

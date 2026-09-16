@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    # Weekly release-style bundle build; pushes and PRs only run the quality gates.
+    - cron: "0 3 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -12,7 +15,7 @@ permissions:
 
 concurrency:
   group: desktop-ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   quality:
@@ -28,37 +31,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Detect desktop-impacting changes
+      - name: Classify changes
         id: scope
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BEFORE_SHA: ${{ github.event.before }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            echo "desktop_changed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if [[ "$EVENT_NAME" == "pull_request" ]]; then
-            compare_from="$BASE_SHA"
-          else
-            compare_from="$BEFORE_SHA"
-          fi
-
-          if [[ -z "$compare_from" || "$compare_from" =~ ^0+$ ]]; then
-            echo "desktop_changed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if ! git cat-file -e "${compare_from}^{commit}" 2>/dev/null; then
-            echo "desktop_changed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          git diff --no-renames --name-only -z "$compare_from" "$HEAD_SHA" \
-            | python3 scripts/desktop_ci_scope.py >> "$GITHUB_OUTPUT"
+        uses: ./.github/actions/ci-scope
 
       - name: Skip unaffected Desktop checks
         if: steps.scope.outputs.desktop_changed != 'true'
@@ -128,6 +103,12 @@ jobs:
         with:
           components: clippy, rustfmt
 
+      - name: Cache Rust dependencies
+        if: steps.scope.outputs.desktop_changed == 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
       - name: Install frontend dependencies
         if: steps.scope.outputs.desktop_changed == 'true'
         working-directory: desktop
@@ -154,13 +135,17 @@ jobs:
         working-directory: desktop/src-tauri
         run: |
           cargo fmt --check
-          cargo clippy --all-targets -- -D warnings
-          cargo test --all-targets
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked --all-targets
 
   bundle:
+    # Full platform bundles take up to 90 minutes per OS and are what the
+    # release workflow builds anyway, so they run weekly and on demand, not
+    # on every push. Trigger manually before a desktop release if needed.
     name: Bundle ${{ matrix.name }}
     needs: quality
     if: >-
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
       needs.quality.result == 'success' &&
       needs.quality.outputs.desktop_changed == 'true'
     strategy:
@@ -253,6 +238,11 @@ jobs:
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
 
       - name: Install frontend dependencies
         working-directory: desktop

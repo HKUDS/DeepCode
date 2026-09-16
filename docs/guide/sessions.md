@@ -1,80 +1,83 @@
-# Sessions
+# Save and resume your work
 
-A session is the durable record of one conversation — what was said *and what
-the agent did*. It survives restarts, moves between the CLI and Desktop, and
-can be resumed weeks later with the agent's own actions intact.
+DeepCode saves your conversations so you can return to a task without explaining
+it again. Each conversation belongs to a project folder and includes your
+messages, DeepCode's replies, and its tool activity. The TUI calls this a
+**Session**; Desktop and Web call it a **thread**.
 
 ## Resume
 
+Open DeepCode in your project folder and enter:
+
+```text
+/resume
+```
+
+Choose a conversation from the list. To search conversations from other projects,
+use `/resume all`. In Desktop/Web, select a saved thread under its Project.
+
+If you know the Session ID, you can open it directly from your terminal:
+
 ```console
-deepcode --resume 3f2a91c0     # from the shell
+deepcode --resume SESSION_ID
 ```
 
-or inside the TUI, just:
+Replace `SESSION_ID` with the ID shown for your conversation. Read the latest
+messages, then tell DeepCode what you want to do next.
+
+## Multiple clients, one Session
+
+You can start a task in the TUI and open the same conversation in Desktop or Web.
+On the same computer, use the same DeepCode version and configuration directory
+so all three interfaces show your projects and history.
+
+While DeepCode is working, send a message to adjust the current task. To save a
+separate instruction for afterward, use `/queue` in the TUI:
 
 ```text
-› /resume
+/queue When the current fix is finished, update the README example to match.
 ```
 
-`/resume` with no argument opens a picker of this directory's sessions —
-titles first, ids on the dim detail line. `/resume all` lifts the directory
-filter and shows where each session came from. On resume the tail of the
-conversation replays dimmed, so you see where you left off.
+You can also handle an approval from another open interface. Closing a window
+leaves running work in the background; use `/stop` or the stop button to interrupt
+it. If you are using a [Goal](goals-and-headless.md), pause the Goal to prevent it
+from continuing automatically.
 
-**What makes resume trustworthy here:** the canonical record stores tool calls
-and tool results, not only the chat text. A resumed agent can answer *"what
-did you just run?"* because the record actually contains what it ran. A test
-(`tests/test_model_visible_is_logged.py`) pins the rule: every request the
-model ever saw must be rebuildable from the session file alone.
+After a connection problem, return to the conversation and check where the work
+stopped before sending it again. See [Troubleshooting](troubleshooting.md).
 
-## Two windows, one session
+## Long conversations: `/compact`
 
-Desktop and the CLI share sessions by id — start over lunch in the terminal,
-continue in Desktop later. Both may hold the same session open; what's
-serialized is *execution*:
+When a conversation becomes long, use `/compact` to summarize its older messages
+and make room for more work. DeepCode keeps the recent messages and tool results,
+and saves the summary for the next time you open the conversation.
 
-```text
-› quick question about the config
-This Session is currently running a turn in desktop (pid 4821). Wait for it
-to finish there, or continue in that window.
-```
-
-One live writer per session, enforced with an OS lock held only while a turn
-runs. Alternate freely; collide mid-turn and you get that sentence — not a
-crashed process. If the holding process dies, the lock dies with it.
-
-## When the conversation gets long: `/compact`
-
-```text
-› /compact
-Compacted: 9 → 5 messages (~704 chars of older turns replaced by a summary).
-```
-
-Compaction replaces the *older* range with a checkpoint and keeps the recent
-tail verbatim — including the agent's recent tool results, so it doesn't
-forget what it just did. The checkpoint speaks as the agent's own history
-("this is your own earlier conversation, compacted"), and it persists: resume
-after compacting and the compacted shape replays, not the original giant.
-
-Compaction also fires automatically under context pressure, measured against
-the prompt size the provider actually reports — not a character-count guess.
+DeepCode also compacts automatically as the conversation approaches the model's
+context limit. To use a smaller limit, see [context settings](models.md#context-window-cap).
 
 ## Housekeeping
 
-| | |
-|---|---|
-| `/rename Fix flaky auth tests` | Title the session something findable |
-| `/delete 3f2a91c0` | Permanently delete a stored session |
-| `deepcode session delete <id> --yes` | Same, from the shell |
-| `/clear` | Keep the session, drop the conversation context |
-
-## On disk, if you're curious
+Give conversations descriptive names so they are easy to find:
 
 ```text
-~/.deepcode/sessions/<id>/session.jsonl   ← the canonical record (line-per-entry JSON)
-~/.deepcode/state/deepcode.sqlite3        ← a rebuildable projection for Desktop views
-<workspace>/.deepcode/tool-results/       ← oversized tool outputs, referenced from the record
+/rename Fix flaky auth tests
 ```
 
-`session.jsonl` is deliberately plain — `jq` and `tail -f` read it. Delete the
-SQLite projection and it rebuilds from the JSONL; the JSONL is the truth.
+Use `/new` to start another task. Use `/clear` when you want to keep the current
+Session but clear its conversation context.
+
+To remove a saved conversation, use `/delete SESSION_ID` or the delete action in
+Desktop/Web. This permanently removes its records while keeping your project
+files. Finish or stop its active work before deleting it.
+
+## Storage and recovery
+
+DeepCode normally stores your conversation files in `~/.deepcode/sessions/` and
+its task, approval, and Automation data in `~/.deepcode/state/deepcode.sqlite3`.
+Large tool outputs may also be stored in your project's `.deepcode/tool-results/`
+directory. Keep these files when backing up work you want to resume.
+
+For a consistent backup or to recover an earlier installation, follow the
+[backup and restore guide](../UPGRADE_AND_RESTORE.md). Back up your project files
+separately. Keep the database during troubleshooting: conversation files alone
+cannot restore all of its saved information.

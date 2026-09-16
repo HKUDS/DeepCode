@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from typing import Any
 
@@ -15,6 +16,7 @@ from app_server.errors import (
 from app_server.protocol import methods as rpc_methods
 from app_server.protocol.codec import DEFAULT_MAX_MESSAGE_BYTES
 from app_server.protocol.models import Request
+from app_server.protocol.retry import retry_capabilities
 from core.agent_presets import METADATA_KEY as PRESET_METADATA_KEY
 from core.agent_presets import list_agent_presets
 from core.application.application import DeepCodeApplication
@@ -207,10 +209,12 @@ class Dispatcher:
         connection: ConnectionState,
         *,
         max_message_bytes: int = DEFAULT_MAX_MESSAGE_BYTES,
+        service_info: dict[str, Any] | None = None,
     ) -> None:
         self.application = application
         self.connection = connection
         self.max_message_bytes = max_message_bytes
+        self.service_info = service_info
         self._handlers: dict[str, Handler] = {
             rpc_methods.INITIALIZE: self._initialize,
             rpc_methods.SHUTDOWN: self._shutdown,
@@ -225,6 +229,10 @@ class Dispatcher:
             rpc_methods.PROVIDER_UPSERT: self._provider_upsert,
             rpc_methods.PROVIDER_REMOVE: self._provider_remove,
             rpc_methods.PROVIDER_TEST: self._provider_test,
+            rpc_methods.PROVIDER_LOGIN_START: self._provider_login_start,
+            rpc_methods.PROVIDER_LOGIN_POLL: self._provider_login_poll,
+            rpc_methods.PROVIDER_LOGIN_CANCEL: self._provider_login_cancel,
+            rpc_methods.PROVIDER_LOGOUT: self._provider_logout,
             rpc_methods.PROVIDER_DISCOVER: self._provider_discover,
             rpc_methods.MODEL_LIST: self._model_list,
             rpc_methods.PRESET_LIST: self._preset_list,
@@ -262,6 +270,11 @@ class Dispatcher:
             rpc_methods.THREAD_RESUME: self._thread_resume,
             rpc_methods.THREAD_LIST: self._thread_list,
             rpc_methods.THREAD_READ: self._thread_read,
+            rpc_methods.THREAD_EXECUTION_READ: self._thread_execution_read,
+            rpc_methods.THREAD_CONTEXT_CLEAR: self._thread_context_clear,
+            rpc_methods.THREAD_CONTEXT_COMPACT: self._thread_context_compact,
+            rpc_methods.TURN_LIST: self._turn_list,
+            rpc_methods.MODEL_REASONING: self._model_reasoning,
             rpc_methods.THREAD_RENAME: self._thread_rename,
             rpc_methods.THREAD_MODEL: self._thread_model,
             rpc_methods.THREAD_EXECUTION_UPDATE: self._thread_execution_update,
@@ -279,6 +292,7 @@ class Dispatcher:
             rpc_methods.TURN_ENQUEUE: self._turn_enqueue,
             rpc_methods.TURN_STEER: self._turn_steer,
             rpc_methods.TURN_READ: self._turn_read,
+            rpc_methods.TURN_INPUT_READ: self._turn_input_read,
             rpc_methods.TURN_INTERRUPT: self._turn_interrupt,
             rpc_methods.TURN_RETRY: self._turn_retry,
             rpc_methods.WORKFLOW_START: self._workflow_start,
@@ -300,6 +314,8 @@ class Dispatcher:
             rpc_methods.GIT_WORKTREE_CREATE: self._git_worktree_create,
             rpc_methods.GIT_WORKTREE_REMOVE: self._git_worktree_remove,
             rpc_methods.TERMINAL_CREATE: self._terminal_create,
+            rpc_methods.TERMINAL_LIST: self._terminal_list,
+            rpc_methods.TERMINAL_READ: self._terminal_read,
             rpc_methods.TERMINAL_WRITE: self._terminal_write,
             rpc_methods.TERMINAL_RESIZE: self._terminal_resize,
             rpc_methods.TERMINAL_CLOSE: self._terminal_close,
@@ -348,6 +364,11 @@ class Dispatcher:
         self.connection.initialize(str(client_name), client_surface)
         return {
             "protocolVersion": PROTOCOL_VERSION,
+            **(
+                {"serviceInfo": self.service_info}
+                if self.service_info is not None
+                else {}
+            ),
             "serverInfo": {"name": "deepcode-app-server", "version": SERVER_VERSION},
             "clientInfo": {
                 "name": client_name,
@@ -359,6 +380,11 @@ class Dispatcher:
                 "eventReplay": True,
                 "liveEvents": True,
                 "maxMessageBytes": self.max_message_bytes,
+                **(
+                    {"requestRetry": retry_capabilities()}
+                    if self.service_info is not None
+                    else {}
+                ),
             },
         }
 
@@ -466,22 +492,46 @@ class Dispatcher:
             expected_revision=params.string("expectedRevision", required=False),
         )
 
+    def _provider_login_start(self, params: Params) -> dict:
+        params.only("connectionId", "openBrowser")
+        return self.application.llm.login_start(
+            str(params.string("connectionId")),
+            open_browser=params.boolean("openBrowser", default=False),
+        )
+
+    def _provider_login_poll(self, params: Params) -> dict:
+        params.only("flowId")
+        return self.application.llm.login_poll(str(params.string("flowId")))
+
+    def _provider_login_cancel(self, params: Params) -> dict:
+        params.only("flowId")
+        return self.application.llm.login_cancel(str(params.string("flowId")))
+
+    def _provider_logout(self, params: Params) -> dict:
+        params.only("connectionId")
+        return self.application.llm.logout(str(params.string("connectionId")))
+
     def _provider_test(self, params: Params) -> dict[str, Any]:
-        params.only("connectionId", "projectId", "model")
+        params.only("connectionId", "projectId", "model", "connection", "mode")
         return self.application.llm.test(
             str(params.string("connectionId")),
             project_id=params.string("projectId", required=False),
             model_id=params.string("model", required=False),
+            draft=params.object("connection", required=False),
+            mode=params.string("mode", required=False) or "quick",
         )
 
     def _provider_discover(self, params: Params) -> dict[str, Any]:
-        params.only("connectionId", "template", "apiBase", "apiKey", "projectId")
+        params.only(
+            "connectionId", "template", "apiBase", "apiKey", "projectId", "connection"
+        )
         return self.application.llm.discover_models(
             connection_id=params.string("connectionId", required=False),
             template=params.string("template", required=False),
             api_base=params.string("apiBase", required=False),
             api_key=params.string("apiKey", required=False),
             project_id=params.string("projectId", required=False),
+            draft=params.object("connection", required=False),
         )
 
     def _model_list(self, params: Params) -> dict[str, Any]:
@@ -927,6 +977,12 @@ class Dispatcher:
             project_id,
             title=str(params.string("title")),
             mode=mode,
+            session_kind="tui"
+            if self.client_surface is ClientSurface.CLI
+            else "headless"
+            if self.client_surface is ClientSurface.HEADLESS
+            else "desktop",
+            inherit_default_preset=self.client_surface is not ClientSurface.HEADLESS,
             connection_id=connection_id,
             model=model,
             reasoning_effort=reasoning_effort,
@@ -955,6 +1011,63 @@ class Dispatcher:
             workspace_path=params.string("workspacePath", required=False),
         )
         return {"thread": thread_view(thread)}
+
+    def _thread_execution_read(self, params: Params) -> dict[str, Any]:
+        params.only("threadId")
+        thread = self.application.threads.read(str(params.string("threadId")))
+        profile = self.application.llm.resolve(
+            thread.workspace_path,
+            ExecutionSelection(
+                connection_id=thread.connection_id,
+                model_id=thread.model,
+                reasoning_effort=thread.reasoning_effort,
+                context_window=thread.context_window,
+            ),
+        )
+        security = self.application.turns.execution_security_policy.resolve(thread)
+        return {
+            "executionProfile": profile.to_dict(),
+            "securityProfile": security.to_dict(),
+        }
+
+    def _thread_context_clear(self, params: Params) -> dict[str, Any]:
+        params.only("threadId")
+        self.application.turns.clear_live_context(str(params.string("threadId")))
+        return {}
+
+    def _thread_context_compact(self, params: Params) -> dict[str, Any]:
+        params.only("threadId")
+        return asyncio.run(
+            self.application.turns.compact_live_context(str(params.string("threadId")))
+        )
+
+    def _turn_list(self, params: Params) -> dict[str, Any]:
+        params.only("threadId", "limit", "offset", "state")
+        thread_id = str(params.string("threadId"))
+        self.application.threads.read(thread_id)
+        limit = params.integer("limit", default=100, minimum=1, maximum=500)
+        offset = params.integer("offset", default=0, maximum=1_000_000)
+        state = params.string("state", required=False) or "all"
+        if state not in {"all", "active", "executing"}:
+            raise InvalidParams("state must be all, active, or executing")
+        turns = self.application.turns.list_for_thread(
+            thread_id, limit=limit + 1, offset=offset, state=state
+        )
+        return {
+            "turns": [turn_view(turn) for turn in turns[:limit]],
+            "hasMore": len(turns) > limit,
+        }
+
+    def _model_reasoning(self, params: Params) -> dict[str, Any]:
+        params.only("projectId", "connectionId", "model")
+        capabilities = self.application.llm.model_reasoning(
+            str(params.string("connectionId")),
+            str(params.string("model")),
+            project_id=params.string("projectId", required=False),
+        )
+        return {
+            "reasoning": capabilities.to_dict() if capabilities is not None else None
+        }
 
     def _thread_read(self, params: Params) -> dict[str, Any]:
         params.only("threadId")
@@ -1098,7 +1211,12 @@ class Dispatcher:
         params.only("threadId")
         thread_id = str(params.string("threadId"))
         goal = self.application.goals.read(thread_id)
-        return self._goal_result(thread_id, goal)
+        return {
+            **self._goal_result(thread_id, goal),
+            "executionSettled": (
+                goal is None or self.application.goals.execution_settled(goal)
+            ),
+        }
 
     def _thread_goal_set(self, params: Params) -> dict[str, Any]:
         params.only(
@@ -1181,21 +1299,31 @@ class Dispatcher:
         return self._goal_result(thread_id, goal)
 
     def _thread_goal_resume(self, params: Params) -> dict[str, Any]:
-        params.only("threadId", "expectedGoalId")
+        params.only(
+            "threadId", "expectedGoalId", "connectionId", "model", "reasoningEffort"
+        )
         thread_id = str(params.string("threadId"))
         goal = self.application.goals.resume(
             thread_id,
             expected_goal_id=str(params.string("expectedGoalId")),
             client_surface=self.client_surface,
+            connection_id=params.string("connectionId", required=False),
+            model=params.string("model", required=False),
+            reasoning_effort=params.string("reasoningEffort", required=False),
         )
         return self._goal_result(thread_id, goal)
 
     def _thread_goal_continue(self, params: Params) -> dict[str, Any]:
-        params.only("threadId", "expectedGoalId")
+        params.only(
+            "threadId", "expectedGoalId", "connectionId", "model", "reasoningEffort"
+        )
         result = self.application.goals.continue_goal(
             str(params.string("threadId")),
             expected_goal_id=str(params.string("expectedGoalId")),
             client_surface=self.client_surface,
+            connection_id=params.string("connectionId", required=False),
+            model=params.string("model", required=False),
+            reasoning_effort=params.string("reasoningEffort", required=False),
         )
         return {
             **self._goal_result(result.goal.thread_id, result.goal),
@@ -1296,9 +1424,18 @@ class Dispatcher:
         return {
             "messageId": receipt.message_id,
             "delivery": receipt.delivery,
+            "deliveryState": "accepted",
             "duplicate": receipt.duplicate,
             "turn": turn_view(receipt.turn),
         }
+
+    def _turn_input_read(self, params: Params) -> dict[str, Any]:
+        params.only("threadId", "messageId")
+        item = self.application.turns.read_input(
+            str(params.string("threadId")),
+            str(params.string("messageId")),
+        )
+        return {"item": item_view(item) if item is not None else None}
 
     def _turn_read(self, params: Params) -> dict[str, Any]:
         params.only("turnId")
@@ -1416,18 +1553,20 @@ class Dispatcher:
         return {"approval": approval_view(approval)}
 
     def _event_replay(self, params: Params) -> dict[str, Any]:
-        params.only("threadId", "after", "limit")
+        params.only("threadId", "after", "limit", "through")
         thread_id = str(params.string("threadId"))
         self.application.threads.read(thread_id)
         page = self.application.events.replay_page(
             thread_id,
             after=params.integer("after", default=0, maximum=2**63 - 1),
             limit=params.integer("limit", default=500, minimum=1, maximum=1000),
+            through=params.optional_integer("through", maximum=2**63 - 1),
         )
         return {
             "events": [event_view(event) for event in page.events],
             "nextAfter": page.next_after,
             "hasMore": page.has_more,
+            "headSequence": page.head_sequence,
         }
 
     def _file_list(self, params: Params) -> dict[str, Any]:
@@ -1515,6 +1654,24 @@ class Dispatcher:
             rows=params.integer("rows", default=30, minimum=5, maximum=200),
         )
         return {"terminal": terminal_info_view(info)}
+
+    def _terminal_list(self, params: Params) -> dict[str, Any]:
+        params.only("threadId")
+        return {
+            "terminals": self.application.terminals.list(str(params.string("threadId")))
+        }
+
+    def _terminal_read(self, params: Params) -> dict[str, Any]:
+        params.only("threadId", "terminalId", "offset", "limit", "through")
+        return self.application.terminals.read(
+            str(params.string("threadId")),
+            str(params.string("terminalId")),
+            offset=params.integer("offset", default=0, maximum=2**53 - 1),
+            limit=params.integer(
+                "limit", default=16 * 1024, minimum=4, maximum=64 * 1024
+            ),
+            through=params.optional_integer("through", maximum=2**53 - 1),
+        )
 
     def _terminal_write(self, params: Params) -> dict[str, Any]:
         params.only("threadId", "terminalId", "data")

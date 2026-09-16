@@ -1,6 +1,6 @@
 import type { Project, SkillInfo, Thread } from "../../generated/app-server";
 import type { DesktopDestination } from "../../app/useDesktopUi";
-import type { DesktopRuntime } from "../../rpc/contracts";
+import type { ClientRuntime } from "../../rpc/contracts";
 import { AutomationsPage } from "../automations/AutomationsPage";
 import { SkillsPage } from "../extensions/SkillsPage";
 import { PluginsPage } from "../plugins/PluginsPage";
@@ -8,7 +8,7 @@ import { McpPage } from "../mcp/McpPage";
 
 interface ManagementWorkspaceProps {
   destination: DesktopDestination;
-  runtime: DesktopRuntime;
+  runtime: ClientRuntime;
   project: Project | null;
   onThreadCreated(thread: Thread): void;
   onOpenThread(threadId: string): void;

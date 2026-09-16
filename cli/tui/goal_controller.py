@@ -7,7 +7,6 @@ import signal
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from core.application.application import DeepCodeApplication
 from core.application.errors import ApplicationError
 from core.config import ConfigError
 from core.domain.message_provenance import ClientSurface
@@ -211,15 +210,15 @@ class TuiGoalController:
             refresh_session=True,
         )
 
-    def _context(self) -> tuple[DeepCodeApplication, str]:
+    def _context(self):
         return (
-            self.owner.thread_client.application,
+            self.owner.thread_client,
             self.owner.thread_client.session_id,
         )
 
     @staticmethod
     def _required(
-        application: DeepCodeApplication,
+        application,
         thread_id: str,
     ) -> ThreadGoal:
         goal = application.goals.read(thread_id)

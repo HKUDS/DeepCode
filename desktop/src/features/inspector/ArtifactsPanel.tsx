@@ -4,7 +4,7 @@ import type {
   Artifact,
   WorkflowRun,
 } from "../../generated/app-server";
-import type { DesktopRuntime } from "../../rpc/contracts";
+import type { ClientRuntime } from "../../rpc/contracts";
 import { InspectorEmpty } from "./InspectorEmpty";
 import { formatBytes } from "./inspectorFormat";
 import styles from "./Inspector.module.css";
@@ -17,7 +17,7 @@ interface ArtifactPreview {
 }
 
 interface ArtifactsPanelProps {
-  runtime: DesktopRuntime;
+  runtime: ClientRuntime;
   workflow: WorkflowRun | null;
   artifacts: Artifact[];
 }

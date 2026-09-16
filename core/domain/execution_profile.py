@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -58,8 +59,35 @@ class ExecutionProfile:
     temperature: float
     reasoning_effort: str | None
     config_revision: str
+    protocol: str = "auto"
+    provider_revision: str | None = None
+    input_modalities: tuple[str, ...] | None = None
+    tool_calling: bool | None = None
+    reasoning_supported: bool | None = None
 
     def __post_init__(self) -> None:
+        if self.provider_revision is not None and (
+            not isinstance(self.provider_revision, str)
+            or not re.fullmatch(r"[a-f0-9]{64}", self.provider_revision)
+        ):
+            raise ValueError("invalid provider revision")
+        if self.reasoning_supported is not None and not isinstance(
+            self.reasoning_supported, bool
+        ):
+            raise ValueError("reasoning_supported must be a boolean")
+        if self.protocol not in {
+            "auto",
+            "openai_chat",
+            "openai_responses",
+            "anthropic_messages",
+        }:
+            raise ValueError("invalid provider protocol")
+        if self.input_modalities is not None and (
+            not self.input_modalities or set(self.input_modalities) - {"text", "image"}
+        ):
+            raise ValueError("invalid input modalities")
+        if self.tool_calling is not None and not isinstance(self.tool_calling, bool):
+            raise ValueError("tool_calling must be a boolean")
         for value, name in (
             (self.connection_id, "connection_id"),
             (self.provider_name, "provider_name"),
@@ -90,6 +118,27 @@ class ExecutionProfile:
             "temperature": self.temperature,
             "reasoningEffort": self.reasoning_effort,
             "configRevision": self.config_revision,
+            **({"protocol": self.protocol} if self.protocol != "auto" else {}),
+            **(
+                {"providerRevision": self.provider_revision}
+                if self.provider_revision is not None
+                else {}
+            ),
+            **(
+                {"inputModalities": list(self.input_modalities)}
+                if self.input_modalities is not None
+                else {}
+            ),
+            **(
+                {"toolCalling": self.tool_calling}
+                if self.tool_calling is not None
+                else {}
+            ),
+            **(
+                {"reasoningSupported": self.reasoning_supported}
+                if self.reasoning_supported is not None
+                else {}
+            ),
         }
 
     @classmethod
@@ -114,6 +163,13 @@ class ExecutionProfile:
                     else None
                 ),
                 config_revision=str(value["configRevision"]),
+                protocol=value.get("protocol", "auto"),
+                provider_revision=value.get("providerRevision"),
+                input_modalities=tuple(value["inputModalities"])
+                if value.get("inputModalities") is not None
+                else None,
+                tool_calling=value.get("toolCalling"),
+                reasoning_supported=value.get("reasoningSupported"),
             )
         except (KeyError, TypeError, ValueError):
             return None

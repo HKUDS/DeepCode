@@ -17,9 +17,10 @@ even though the underlying loader is now nanobot-style JSON.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -38,7 +39,6 @@ from core.providers.base import LLMProvider
 from core.providers.catalog_service import ModelCatalogService
 from core.providers.credentials import CredentialStore
 from core.providers.profiles import ConnectionResolver
-
 
 _runtime_lock = threading.Lock()
 _runtime: "DeepCodeRuntime | None" = None
@@ -74,14 +74,18 @@ class DeepCodeRuntime:
         *,
         credential_store: CredentialStore | None = None,
         phase_execution_profiles: dict[str, ExecutionProfile] | None = None,
+        config_loader: Callable[[], DeepCodeConfig] | None = None,
     ) -> None:
         self.config = config
         self.credential_store = credential_store or CredentialStore()
-        self.connection_resolver = ConnectionResolver(config, self.credential_store)
+        self.connection_resolver = ConnectionResolver(
+            config, self.credential_store, config_loader=config_loader
+        )
         self.model_catalog = ModelCatalogService()
         self.phase_execution_profiles = dict(phase_execution_profiles or {})
         self.logger = logger
         self._provider_cache: dict[tuple[str, ...], LLMProvider] = {}
+        self._closed = False
         # MCP servers materialised on construction so legacy callers can
         # mutate ``args`` in place (workflows.environment, plugin code, ...).
         self._mcp_servers = config.mcp_servers
@@ -92,7 +96,10 @@ class DeepCodeRuntime:
     @classmethod
     def load(cls, config_path: str | None = None) -> "DeepCodeRuntime":
         """Read ``deepcode_config.json`` and build a fresh runtime."""
-        return cls(load_config(config_path=config_path))
+        return cls(
+            load_config(config_path=config_path),
+            config_loader=lambda: load_config(config_path=config_path),
+        )
 
     def provider_for(
         self,
@@ -104,6 +111,8 @@ class DeepCodeRuntime:
         execution_profile: ExecutionProfile | None = None,
     ) -> LLMProvider:
         """Return a cached :class:`LLMProvider` for the requested combination."""
+        if self._closed:
+            raise RuntimeError("The provider runtime is closed")
         if execution_profile is None and connection_id is None and model is None:
             execution_profile = self.phase_execution_profiles.get(phase)
         if execution_profile is not None or connection_id is not None:
@@ -120,6 +129,10 @@ class DeepCodeRuntime:
                 profile.connection_id,
                 profile.model_id,
                 profile.config_revision,
+                profile.provider_revision or "",
+                repr(profile.input_modalities),
+                repr(profile.tool_calling),
+                repr(profile.reasoning_supported),
                 credential_revision,
                 str(profile.max_tokens),
                 repr(profile.temperature),
@@ -147,6 +160,31 @@ class DeepCodeRuntime:
         )
         self._provider_cache[cache_key] = provider
         return provider
+
+    async def aclose(self) -> None:
+        """Close only this runtime's pools after its sessions and children finish."""
+        self._closed = True
+        providers = list(
+            {
+                id(provider): provider for provider in self._provider_cache.values()
+            }.values()
+        )
+        results = await asyncio.gather(
+            *(provider.aclose() for provider in providers), return_exceptions=True
+        )
+        failed = {
+            id(provider)
+            for provider, result in zip(providers, results, strict=True)
+            if isinstance(result, BaseException)
+        }
+        self._provider_cache = {
+            key: provider
+            for key, provider in self._provider_cache.items()
+            if id(provider) in failed
+        }
+        errors = [result for result in results if isinstance(result, BaseException)]
+        if errors:
+            raise BaseExceptionGroup("Provider cleanup failed", errors)
 
     def resolve_execution_profile(
         self,

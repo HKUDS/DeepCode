@@ -48,14 +48,16 @@ def test_app_server_entrypoint_opts_into_resident_scheduler(monkeypatch) -> None
             assert isinstance(sink, io.BytesIO)
             return 17
 
-    monkeypatch.setattr(entrypoint, "DeepCodeApplication", _Application)
-    monkeypatch.setattr(entrypoint, "AppServer", _Server)
+    monkeypatch.setattr(
+        "core.application.application.DeepCodeApplication", _Application
+    )
+    monkeypatch.setattr("app_server.server.AppServer", _Server)
     monkeypatch.setattr(
         entrypoint,
         "isolate_protocol_streams",
         lambda: (io.BytesIO(), io.BytesIO()),
     )
 
-    assert entrypoint.main([]) == 17
+    assert entrypoint.main([], shared_service=False) == 17
     assert captured["host_surface"] == "app_server"
     assert captured["run_automation_scheduler"] is True

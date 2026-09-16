@@ -44,13 +44,12 @@ from cli.project_trust import (
     require_project_trusted,
     set_project_trusted,
 )
+from cli.thread_client import ThreadClient
 from cli.tui import commands, theme
 from cli.tui.goal_controller import TuiGoalController
 from cli.tui.input import InputInterrupted, InputReader, expand_file_refs
 from cli.tui.renderer import EventRenderer
 from cli.tui.session_bridge import SessionBridge
-from cli.tui.thread_client import TuiThreadClient
-from core.application.application import DeepCodeApplication
 from core.application.errors import ApplicationError
 from core.config import ConfigError
 from core.domain.approval import ApprovalStatus
@@ -59,7 +58,6 @@ from core.domain.execution_security import ExecutionAccessPreset
 from core.domain.project import TrustState
 from core.file_lock import FileLease
 from core.providers.reasoning import normalize_reasoning_effort
-
 
 _MODEL_CATALOG_PREVIEW = 4  # models shown per connection in /model
 # Sentinel: switch_model keeps the session's effort unless told otherwise.
@@ -82,6 +80,7 @@ class TuiApp:
         trust_workspace: bool = False,
         access_preset: ExecutionAccessPreset | None = None,
         resume_id: str | None = None,
+        shared_service: bool = True,
     ) -> None:
         self.workspace = os.path.abspath(workspace)
         self.max_iterations = max_iterations
@@ -94,6 +93,8 @@ class TuiApp:
             activity_probe=self.renderer.is_working,
         )
         self._exit_requested = False
+        self._external_refresh_task: asyncio.Task | None = None
+        self._external_refresh_dirty = False
         self._last_send_delivered = True
         self._requested_model = model
         self._requested_connection = connection_id
@@ -106,7 +107,15 @@ class TuiApp:
         self.selected_skill_ids: list[str] = []
         self._session_activity: FileLease | None = None
         self._leased_session_id: str | None = None
-        self.thread_client = TuiThreadClient(
+        if shared_service:
+            from cli.service_thread_client import ServiceThreadClient
+
+            client_type = ServiceThreadClient
+        else:
+            from cli.tui.thread_client import TuiThreadClient
+
+            client_type = TuiThreadClient
+        self.thread_client: ThreadClient = client_type(
             workspace=self.workspace,
             model=self._requested_model,
             connection_id=self._requested_connection,
@@ -257,7 +266,7 @@ class TuiApp:
         Turn resolves its capabilities from, so the picker never advertises
         a ladder the switch would reject.
         """
-        capabilities = self.thread_client.application.llm.model_reasoning(
+        capabilities = self.thread_client.llm.model_reasoning(
             connection_id or self.thread_client.execution_profile.connection_id,
             model_id,
             project_id=self.thread_client.project.id,
@@ -292,9 +301,7 @@ class TuiApp:
         self._requested_context_window = context_window
 
     def connection_views(self) -> list[dict]:
-        data = self.thread_client.application.llm.list_connections(
-            self.thread_client.project.id
-        )
+        data = self.thread_client.llm.list_connections(self.thread_client.project.id)
         return list(data.get("connections", []))
 
     def model_overview(self) -> str:
@@ -328,7 +335,7 @@ class TuiApp:
                 extra = len(models) - _MODEL_CATALOG_PREVIEW
                 catalog = shown + (f", +{extra} more" if extra > 0 else "")
             else:
-                catalog = "no catalog configured — any model id accepted"
+                catalog = f"browse models with deepcode provider models {view['id']}"
             marker = " · current" if view.get("id") == profile.connection_id else ""
             lines.append(f"  {str(view.get('id', '')):<{width}}  {catalog}{marker}")
         return "\n".join(lines)
@@ -342,7 +349,7 @@ class TuiApp:
         offer one directory. A connection whose catalog cannot be read
         contributes nothing instead of failing the whole picker.
         """
-        llm = self.thread_client.application.llm
+        llm = self.thread_client.llm
         catalog: list[tuple[str, list[dict]]] = []
         for view in self.connection_views():
             if not (view.get("configured") and view.get("enabled")):
@@ -479,7 +486,7 @@ class TuiApp:
 
     def list_skills(self) -> str:
         try:
-            skills = self.thread_client.application.skills.list(
+            skills = self.thread_client.skills.list(
                 self.thread_client.project.id
             ).skills
         except (ApplicationError, OSError, ValueError) as exc:
@@ -495,7 +502,7 @@ class TuiApp:
 
     def select_skill(self, identifier: str) -> str:
         try:
-            skill = self.thread_client.application.skills.select(
+            skill = self.thread_client.skills.select(
                 self.thread_client.project.id,
                 identifier,
             )
@@ -511,7 +518,7 @@ class TuiApp:
 
     def remove_skill(self, identifier: str) -> str:
         try:
-            skills = self.thread_client.application.skills.list(
+            skills = self.thread_client.skills.list(
                 self.thread_client.project.id
             ).skills
         except (ApplicationError, OSError, ValueError) as exc:
@@ -532,9 +539,7 @@ class TuiApp:
         return f"removed {skill.name} from the next turn"
 
     def _completion_skills(self):
-        return self.thread_client.application.skills.list(
-            self.thread_client.project.id
-        ).skills
+        return self.thread_client.skills.list(self.thread_client.project.id).skills
 
     def _complete_command_argument(self, name: str, prefix: str) -> tuple[str, ...]:
         command = commands.REGISTRY.get(name)
@@ -551,7 +556,7 @@ class TuiApp:
 
     def list_plugins(self) -> str:
         try:
-            discovery = self.thread_client.application.plugins.list()
+            discovery = self.thread_client.plugins.list()
         except (ApplicationError, OSError, ValueError) as exc:
             return f"Plugin error: {exc}"
         if not discovery.plugins:
@@ -570,9 +575,7 @@ class TuiApp:
 
     def list_mcp_servers(self) -> str:
         try:
-            inventory = self.thread_client.application.mcp.list(
-                self.thread_client.project.id
-            )
+            inventory = self.thread_client.mcp.list(self.thread_client.project.id)
         except (ApplicationError, OSError, ValueError) as exc:
             return f"MCP error: {exc}"
         if not inventory.servers:
@@ -601,7 +604,7 @@ class TuiApp:
             return usage
         try:
             if action == "presets":
-                presets = self.thread_client.application.mcp.list_presets(project_id)
+                presets = self.thread_client.mcp.list_presets(project_id)
                 lines = ["", "Bundled MCP presets (add with /mcp add <id>):"]
                 for preset in presets.presets:
                     status = "configured" if preset.configured else "available"
@@ -618,7 +621,7 @@ class TuiApp:
                 return usage
             if action == "add":
                 await asyncio.to_thread(
-                    self.thread_client.application.mcp.add_preset,
+                    self.thread_client.mcp.add_preset,
                     target,
                     project_id=project_id,
                 )
@@ -628,7 +631,7 @@ class TuiApp:
                 )
             if action == "test":
                 result = await asyncio.to_thread(
-                    self.thread_client.application.mcp.probe,
+                    self.thread_client.mcp.probe,
                     target,
                     project_id=project_id,
                 )
@@ -640,7 +643,7 @@ class TuiApp:
                 )
             if action == "login":
                 flow = await asyncio.to_thread(
-                    self.thread_client.application.mcp.oauth_start,
+                    self.thread_client.mcp.oauth_start,
                     target,
                     project_id=project_id,
                     open_browser=True,
@@ -655,7 +658,7 @@ class TuiApp:
                 return f"Browser authorization started for {target}.{suffix}"
             if action == "logout":
                 removed = await asyncio.to_thread(
-                    self.thread_client.application.mcp.oauth_logout,
+                    self.thread_client.mcp.oauth_logout,
                     target,
                     project_id=project_id,
                 )
@@ -666,7 +669,7 @@ class TuiApp:
                 )
             if action == "cancel":
                 await asyncio.to_thread(
-                    self.thread_client.application.mcp.oauth_cancel,
+                    self.thread_client.mcp.oauth_cancel,
                     target,
                     project_id=project_id,
                 )
@@ -675,13 +678,13 @@ class TuiApp:
                 if action != "remove":
                     enabled = action == "enable"
                     await asyncio.to_thread(
-                        self.thread_client.application.mcp.set_enabled,
+                        self.thread_client.mcp.set_enabled,
                         target,
                         enabled=enabled,
                         project_id=project_id,
                     )
                     return f"{'enabled' if enabled else 'disabled'} MCP server {target}"
-                inventory = self.thread_client.application.mcp.list(project_id)
+                inventory = self.thread_client.mcp.list(project_id)
                 matches = [
                     server
                     for server in inventory.servers
@@ -694,7 +697,7 @@ class TuiApp:
                     return "Plugin MCP servers are managed through /plugins"
                 scope = "project" if server.source == "project" else "user"
                 await asyncio.to_thread(
-                    self.thread_client.application.mcp.remove,
+                    self.thread_client.mcp.remove,
                     name=server.name,
                     scope=scope,
                     project_id=project_id,
@@ -711,8 +714,17 @@ class TuiApp:
         return result.message
 
     async def _reload_current_session(self) -> None:
-        self.thread_client.refresh_thread()
+        await asyncio.to_thread(self.thread_client.refresh_thread)
         self._sync_thread_state()
+
+    async def reconnect_service(self) -> str:
+        if self.thread_client.runtime_mode != "service":
+            return "This connection does not support reconnection."
+        try:
+            await self.thread_client.reconnect()
+            return "Reconnected to the shared service."
+        except (RuntimeError, OSError) as exc:
+            return f"Reconnect failed: {exc}"
 
     def request_exit(self) -> None:
         self._exit_requested = True
@@ -807,6 +819,31 @@ class TuiApp:
         return f"Approval {outcome}."
 
     def _on_domain_event(self, event: DomainEvent) -> None:
+        if self.thread_client.runtime_mode == "service" and event.type.startswith(
+            "thread."
+        ):
+            thread = event.payload.get("thread")
+            if (
+                isinstance(thread, dict)
+                and thread.get("id") == self.thread_client.session_id
+            ):
+                self._external_refresh_dirty = True
+                if (
+                    self._external_refresh_task is None
+                    or self._external_refresh_task.done()
+                ):
+
+                    async def refresh():
+                        try:
+                            while self._external_refresh_dirty:
+                                self._external_refresh_dirty = False
+                                await self._reload_current_session()
+                        except (ApplicationError, OSError, ValueError) as exc:
+                            self.console.print(
+                                f"Service state refresh failed: {escape(str(exc))}"
+                            )
+
+                    self._external_refresh_task = asyncio.create_task(refresh())
         if event.type != "approval.requested":
             return
         approval = event.payload.get("approval")
@@ -858,6 +895,7 @@ class TuiApp:
         )
         self.console.print(
             f" [{theme.META_STYLE}]session {escape(self.bridge.session_id)} · "
+            f"runtime {self.thread_client.runtime_mode} · "
             f"access {escape(self.thread_client.access_summary())} · "
             f"effort {escape(self.requested_reasoning_effort)}[/]",
             soft_wrap=True,
@@ -876,6 +914,7 @@ class TuiApp:
         if self.reader.interactive:
             self._banner()
         try:
+            self.render_resume_tail()
             while not self._exit_requested:
                 try:
                     line = await self.reader.read()
@@ -929,6 +968,11 @@ class TuiApp:
                 self.console.print(f"[{theme.META_STYLE}]bye[/]")
             return 0
         finally:
+            if self._external_refresh_task is not None:
+                self._external_refresh_task.cancel()
+                await asyncio.gather(
+                    self._external_refresh_task, return_exceptions=True
+                )
             self.goal_controller.close()
             await self.thread_client.close()
             if self._session_activity is not None:
@@ -937,7 +981,7 @@ class TuiApp:
                 self._leased_session_id = None
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, shared_service: bool = True) -> int:
     parser = argparse.ArgumentParser(
         prog="deepcode",
         description="Interactive DeepCode coding agent (multi-turn TUI).",
@@ -949,16 +993,17 @@ def main(argv: list[str] | None = None) -> int:
     add_access_preset_argument(parser)
     add_workspace_trust_argument(parser)
     parser.add_argument("--resume", "-r", default=None, help="Session id to resume.")
-    parser.add_argument(
-        "--max-iterations",
-        type=int,
-        default=None,
-        help="Optional model-sampling limit for diagnostics (unlimited by default).",
-    )
+    parser.set_defaults(max_iterations=None)
+    if not shared_service:
+        parser.add_argument(
+            "--max-iterations", type=int, help="Optional model-sampling limit."
+        )
     args = parser.parse_args(argv)
     _bootstrap_quiet_logging()
 
-    if not _prepare_workspace_trust(args.workspace, grant=args.trust):
+    if not shared_service and not _prepare_workspace_trust(
+        args.workspace, grant=args.trust
+    ):
         return 1
 
     try:
@@ -971,6 +1016,7 @@ def main(argv: list[str] | None = None) -> int:
             trust_workspace=args.trust,
             access_preset=parse_access_preset(args.access),
             resume_id=args.resume,
+            shared_service=shared_service,
         )
     except ConfigError as exc:
         print(format_config_error(exc), file=sys.stderr)
@@ -1033,6 +1079,8 @@ def _silence_console_logging() -> None:
 
 def _prepare_workspace_trust(workspace: str, *, grant: bool) -> bool:
     """Persist trust before creating a Session, avoiding empty denied threads."""
+
+    from core.application.application import DeepCodeApplication
 
     application = DeepCodeApplication.open(
         host_surface="cli-trust",

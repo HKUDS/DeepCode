@@ -28,12 +28,10 @@
 }
 
 .copy span {
-  overflow: hidden;
   color: var(--text-secondary);
   font-size: var(--text-xs);
   line-height: 1.45;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .actions {
@@ -73,9 +71,5 @@
   .notice {
     right: 8px;
     width: calc(100vw - 16px);
-  }
-
-  .copy span {
-    white-space: normal;
   }
 }

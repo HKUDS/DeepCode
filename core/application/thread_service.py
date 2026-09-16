@@ -61,6 +61,15 @@ _MISSING_WORKSPACE_DIR = ".missing-workspaces"
 _UNSET = object()
 
 
+def _visible_conversation_items(items: list[Item]) -> list[Item]:
+    """Match the canonical text conversation, retaining tool-only timeline items.
+
+    An assistant record carrying toolCalls can have no text. Its reconstructed
+    item belongs to the timeline, but neither side counts it as spoken text.
+    """
+    return [item for item in items if str(item.payload.get("text", item.summary))]
+
+
 def _projected_item_kind(message: SessionMessage) -> ItemKind:
     """The item kind a rebuilt-from-JSONL record should carry.
 
@@ -85,7 +94,22 @@ def _projected_item_kind(message: SessionMessage) -> ItemKind:
 def _projected_item_payload(message: SessionMessage) -> dict[str, object]:
     """Payload matching what the live projection stores for the same kind."""
     if message.role != "tool":
-        return {"text": message.content, "projectedFromSession": True}
+        payload = {"text": message.content, "projectedFromSession": True}
+        if message.role == "user":
+            # Keep admission receipts when rebuilding disposable SQLite state.
+            metadata = message.metadata or {}
+            for key in (
+                "messageId",
+                "requestFingerprint",
+                "expectedTurnId",
+                "deliveryState",
+                "source",
+                "delivery",
+                "client",
+            ):
+                if isinstance(metadata.get(key), str):
+                    payload[key] = metadata[key]
+        return payload
     metadata = message.metadata or {}
     name = str(metadata.get("name") or "tool")
     return {
@@ -781,7 +805,9 @@ class ThreadService:
             if message.role in {"user", "assistant"} and message.content
         ]
         items = ItemRepository(connection)
-        projected_items = items.conversation_for_thread(thread.id)
+        projected_items = _visible_conversation_items(
+            items.conversation_for_thread(thread.id)
+        )
         projected = [
             (
                 "user" if item.kind is ItemKind.USER_MESSAGE else "assistant",
@@ -1381,7 +1407,12 @@ class ThreadService:
         projection conflict.
         """
         metadata = message.metadata or {}
-        return "delivery" in metadata
+        # User input also carries delivery provenance (current_turn/next_turn).
+        # Only the context-note sink's markers identify internal user-role notes.
+        return message.role == "user" and metadata.get("delivery") in (
+            "mid_turn",
+            "between_turns",
+        )
 
     def _merge_projection_tail(
         self,
@@ -1390,6 +1421,7 @@ class ThreadService:
         *,
         projection_thread_id: str,
     ) -> bool:
+        projected_items = _visible_conversation_items(projected_items)
         canonical_pairs = [
             (message.role, message.content)
             for message in canonical.messages

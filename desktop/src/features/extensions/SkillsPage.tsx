@@ -6,13 +6,13 @@ import type {
   Project,
   SkillInfo,
 } from "../../generated/app-server";
-import type { DesktopRuntime } from "../../rpc/contracts";
+import type { ClientRuntime } from "../../rpc/contracts";
 import styles from "../management/ManagementWorkspace.module.css";
 import { MarkdownContent } from "../thread/MarkdownContent";
 import { useSkillManagement } from "./useSkillManagement";
 
 interface SkillsPageProps {
-  runtime: DesktopRuntime;
+  runtime: ClientRuntime;
   project: Project | null;
   onCreateSkill(skill: SkillInfo): Promise<void>;
 }

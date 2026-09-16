@@ -16,8 +16,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from cli.transcript import TranscriptMode
 from cli.execution_options import parse_context_window
+from cli.transcript import TranscriptMode
 from cli.tui import theme
 from cli.tui.picker import Picker, PickerItem, PickerScope, PickerVariant
 from cli.tui.text import fit_head, short_path
@@ -39,6 +39,10 @@ class Command:
 
 
 _HELP_USAGE_COLUMN_CAP = 30
+
+
+async def _cmd_reconnect(app, args: str) -> str:
+    return await app.reconnect_service()
 
 
 async def _cmd_help(app, args: str) -> str | None:
@@ -681,9 +685,7 @@ async def _cmd_skills(app, args: str) -> str | None:
 
 async def _skill_via_picker(app) -> str | None:
     try:
-        skills = app.thread_client.application.skills.list(
-            app.thread_client.project.id
-        ).skills
+        skills = app.thread_client.skills.list(app.thread_client.project.id).skills
     except (OSError, RuntimeError, ValueError) as exc:
         return f"Skill listing failed: {exc}"
     selected = set(app.selected_skill_ids)
@@ -760,6 +762,9 @@ REGISTRY: dict[str, Command] = {
     c.name: c
     for c in (
         Command("help", "/help", "show this help", _cmd_help),
+        Command(
+            "reconnect", "/reconnect", "Reconnect to the shared service", _cmd_reconnect
+        ),
         Command("new", "/new [title]", "start a new conversation", _cmd_new),
         Command(
             "resume",

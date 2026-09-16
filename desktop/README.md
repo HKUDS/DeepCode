@@ -10,6 +10,20 @@ approvals, Git review, files, terminals, tests, Artifacts, and provider
 settings. Work started in one interface can be resumed in the other without
 converting or copying its Session.
 
+## Start Desktop
+
+After installing the CLI, run:
+
+```console
+deepcode desktop
+```
+
+A local-source CLI installation launches its recorded checkout and prepares
+missing development resources. A published CLI opens an installed Desktop app.
+Use `deepcode desktop --source /path/to/DeepCode` to choose a checkout explicitly,
+or `deepcode desktop --app /path/to/application` for a custom app location.
+See the [main installation guide](../README.md#install-the-runtime) for setup.
+
 ## Run from source
 
 ### Requirements
@@ -61,64 +75,50 @@ rustc --version
 cargo --version
 ```
 
-#### 3. Prepare the repository
+#### 3. Install the source checkout
 
-Run these commands from the repository root:
+From the repository root, build Web assets and register the global CLI:
 
 ```powershell
-uv venv --python 3.12
-uv pip install --python .venv\Scripts\python.exe -e .
-Set-Location desktop
-npm ci
-$env:DEEPCODE_PYTHON = (Resolve-Path ..\.venv\Scripts\python.exe)
-npm run setup:sidecar
-npm run build:sidecar
+npm --prefix desktop ci
+npm --prefix desktop run build:web
+uv tool install --python 3.12 --force .
+deepcode init
 ```
 
-The explicit interpreter path prevents an active Conda or other environment
-from receiving the editable DeepCode installation.
+If `deepcode` is not on PATH, run `uv tool update-shell` and reopen PowerShell.
 
 #### 4. Start DeepCode Desktop
 
-From the same `desktop` directory and PowerShell window:
-
 ```powershell
-npm run tauri -- dev
+deepcode desktop
 ```
 
-Keep the terminal open while Desktop is running. Press `Ctrl+C` in that terminal
-to stop the development application. On later launches, set `DEEPCODE_PYTHON`
-again if using a new PowerShell window:
-
-```powershell
-Set-Location desktop
-$env:DEEPCODE_PYTHON = (Resolve-Path ..\.venv\Scripts\python.exe)
-npm run tauri -- dev
-```
+The first launch prepares missing Desktop resources. Later launches reuse them.
+Keep this development terminal open while Desktop is running. Closing the
+window or pressing Ctrl+C closes the client; the shared service remains running.
 
 ### macOS and Linux
 
-After installing the platform dependencies from the Tauri prerequisite guide,
-run the following commands from the repository root:
+Install the platform dependencies from the Tauri prerequisite guide. From the
+repository root, install the current checkout once:
 
 ```bash
-uv venv --python 3.12
-uv pip install --python .venv/bin/python -e .
-cd desktop
-npm ci
-npm run setup:sidecar
-npm run build:sidecar
-cd ..
-./scripts/deepcode-desktop
+npm --prefix desktop ci
+npm --prefix desktop run build:web
+uv tool install --python 3.12 --force .
+deepcode init
 ```
 
-To use `deepcode-desktop` from any working directory, link the launcher into a
-directory on `PATH` once:
+Then start the application from any directory:
 
 ```bash
-mkdir -p ~/.local/bin
-ln -sf "$(pwd)/scripts/deepcode-desktop" ~/.local/bin/deepcode-desktop
+deepcode desktop
 ```
+
+Use `deepcode desktop --setup` to rebuild source dependencies and Desktop
+resources. To select a different checkout explicitly, use
+`deepcode desktop --source /path/to/DeepCode`.
 
 ### Development sidecar
 
@@ -152,6 +152,10 @@ runtime dependencies.
    public model catalog cannot be mistaken for usable model access.
 6. Open a Session to inherit the default, or use its composer picker to switch
    the connection/model for future Turns.
+
+The model check above is minimal inference. To also check streaming and a local
+tool round trip, run `deepcode provider test CONNECTION_ID --model MODEL_ID --agent`
+with the configured IDs. See [Models and providers](../docs/guide/models.md).
 
 API keys are written to `~/.deepcode/credentials.json` in user-private storage.
 Desktop receives only configured/missing status and never reads a stored key
@@ -223,6 +227,20 @@ deepcode provider test personal-openrouter --model <model-id>
 deepcode -c personal-openrouter -m <model-id> --effort auto
 ```
 
+### Appearance and imported themes
+
+**Settings → Appearance** controls the machine-local theme, conversation width,
+and typography. **Import VS Code theme** accepts one local `.json` or `.jsonc`
+color-theme file, validates every value in its `colors` object, and maps the
+supported workbench colors onto DeepCode's complete palette. Unmapped tokens
+come from the inferred light or dark base, so an imported theme never leaves a
+component on an unrelated fallback palette.
+
+Only the normalized palette and display name are persisted. DeepCode does not
+retain the source path or raw file, execute theme content, discover extension
+packages, import syntax `tokenColors`, or follow `include` chains. Invalid
+colors are reported in the Appearance panel and leave the current theme intact.
+
 ### Run a durable Goal
 
 Use **Set a Goal** above the Session composer to define one natural-language
@@ -257,12 +275,13 @@ the next explicit page with stable ID deduplication. Live notifications refresh
 the first page; an overflow warning also resets the visible pages safely rather
 than presenting a partial cache as complete.
 
-Interval schedules execute while a scheduler-enabled Desktop or App Server is
-active. If several compatible processes share the database, one holds the
-scheduler leader lease and the others remain available for takeover. Agent and
-Workflow Turns still use the shared cross-process capacity and workspace
-fences, so another Session cannot mutate the same canonical checkout at the
-same time.
+The shared background service owns interval scheduling and its scheduler
+leadership lease. Schedules continue after Desktop, TUI, and Web close, provided
+the service and computer remain running. Agent and Workflow Turns still obey
+execution capacity and workspace fences, preventing concurrent mutations of the
+same canonical checkout. Inspect the service with `deepcode service status`;
+see [Automations](../docs/guide/goals-and-headless.md#persistent-interval-automations)
+for manual runs and pausing future submissions.
 
 Automation instructions never grant trust or elevated permissions. Each Turn
 captures the workspace's explicit permission setting or the safe default, and

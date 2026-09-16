@@ -23,7 +23,8 @@ def decode_request(
         raise ParseError("message is not valid UTF-8") from exc
     try:
         value = json.loads(text)
-    except json.JSONDecodeError as exc:
+    except (ValueError, RecursionError) as exc:
+        # Includes Python's integer-length guard as well as malformed JSON.
         raise ParseError("invalid JSON") from exc
     if not isinstance(value, dict) or value.get("jsonrpc") != "2.0":
         raise InvalidRequest("expected a JSON-RPC 2.0 object")

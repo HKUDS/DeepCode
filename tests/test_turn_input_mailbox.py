@@ -17,6 +17,39 @@ from core.agent_runtime.injections import (
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["commit", "cancel", "deactivate"])
+async def test_duplicate_reservation_waits_for_actual_acceptance(outcome):
+    mailbox = TurnInputMailbox()
+    mailbox.activate("turn_current")
+    value = UserSteer("shared", "turn_current", "one instruction")
+    first = mailbox.reserve(value)
+    duplicate = asyncio.create_task(asyncio.to_thread(mailbox.reserve, value))
+    try:
+        await asyncio.sleep(0.03)
+        assert not duplicate.done()
+    finally:
+        if outcome == "deactivate":
+            mailbox.deactivate("turn_current")
+        else:
+            getattr(mailbox, outcome)(first)
+    if outcome == "deactivate":
+        with pytest.raises(TurnInputClosedError):
+            await asyncio.wait_for(duplicate, 2)
+    else:
+        second = await asyncio.wait_for(duplicate, 2)
+        if outcome == "commit":
+            assert second is None
+            # Producer cleanup after an acknowledgement failure cannot retract
+            # an input which the runner may already have consumed.
+            mailbox.cancel(first)
+        else:
+            assert second is not None
+            mailbox.commit(second)
+        assert await mailbox.drain() == [value]
+        assert await mailbox.drain() == []
+
+
+@pytest.mark.asyncio
 async def test_mailbox_only_drains_committed_typed_input() -> None:
     mailbox = TurnInputMailbox()
     mailbox.activate("turn_current")

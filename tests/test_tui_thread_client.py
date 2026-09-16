@@ -514,6 +514,7 @@ async def test_goal_commands_reuse_the_cli_application(
 
     monkeypatch.setattr(DeepCodeApplication, "open", classmethod(counted_open))
     app = TuiApp(
+        shared_service=False,
         workspace=str(workspace),
         model=None,
         max_iterations=20,
@@ -556,6 +557,7 @@ async def test_interrupting_a_turn_settles_the_animated_status_line(
     _patch_provider(monkeypatch, provider)
 
     app = TuiApp(
+        shared_service=False,
         workspace=str(workspace),
         model=None,
         max_iterations=20,

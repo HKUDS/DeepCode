@@ -1,10 +1,10 @@
 import { FolderInput, Power, RefreshCw, Trash2 } from "lucide-react";
 
-import type { DesktopRuntime } from "../../rpc/contracts";
+import type { ClientRuntime } from "../../rpc/contracts";
 import styles from "../management/ManagementWorkspace.module.css";
 import { usePluginCatalog } from "./usePluginCatalog";
 
-export function PluginsPage({ runtime }: { runtime: DesktopRuntime }) {
+export function PluginsPage({ runtime }: { runtime: ClientRuntime }) {
   const catalog = usePluginCatalog(runtime);
 
   const addPlugin = async () => {

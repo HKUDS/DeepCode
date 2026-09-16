@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import os
 import re
 import subprocess
@@ -243,7 +244,43 @@ def verify_artifacts(
         expected_version=expected_version,
         source=sdist,
     )
+    with zipfile.ZipFile(wheel) as archive:
+        verify_web_assets(
+            archive.read, archive.namelist(), "app_server/web_assets/", expected_version
+        )
+    with tarfile.open(sdist, "r:gz") as archive:
+        names = archive.getnames()
+        root = names[0].split("/", 1)[0]
+
+        def read(name):
+            member = archive.extractfile(name)
+            if member is None:
+                raise DistributionVerificationError(f"missing web resource: {name}")
+            return member.read()
+
+        verify_web_assets(
+            read, names, root + "/app_server/web_assets/", expected_version
+        )
     return VerifiedArtifacts(wheel=wheel, sdist=sdist, version=expected_version)
+
+
+def verify_web_assets(read, names, prefix: str, version: str) -> None:
+    """A release containing only the Python API is not a complete Web release."""
+    try:
+        manifest = json.loads(read(prefix + "web-build.json"))
+        index = read(prefix + "index.html").decode()
+        if manifest.get("version") != version or not manifest.get("buildId"):
+            raise ValueError("web build/version mismatch")
+        resources = re.findall(r'(?:src|href)="/(assets/[^"<>]+)"', index)
+        if not any(path.endswith(".js") for path in resources):
+            raise ValueError("web entry script is missing")
+        for resource in resources:
+            if prefix + resource not in names:
+                raise ValueError(f"web resource missing: {resource}")
+    except (KeyError, OSError, ValueError) as exc:
+        raise DistributionVerificationError(
+            f"packaged browser client is invalid: {exc}"
+        ) from exc
 
 
 def _venv_python(root: Path) -> Path:

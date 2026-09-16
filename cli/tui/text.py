@@ -81,5 +81,8 @@ def workspace_path(path: str, workspace: str | None) -> str:
         except ValueError:
             pass
         else:
-            return str(relative) or "."
+            # Display form: forward slashes on every platform, so a path reads
+            # the same on Windows as it does in the transcript examples (and in
+            # what the user types: ``tools/foo.py``).
+            return relative.as_posix() or "."
     return short_path(candidate)

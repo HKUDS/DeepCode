@@ -100,3 +100,15 @@ def test_bridge_reports_the_real_call_site(tmp_path: Path) -> None:
         assert "test_stdlib_logging_bridge" in origin
     finally:
         _restore_defaults(tmp_path)
+
+
+def test_headless_sink_keeps_one_shared_route_for_both_logging_apis(tmp_path):
+    sink = io.StringIO()
+    setup_logging(LoggerConfig(transports=["console"]), console_sink=sink, force=True)
+    try:
+        logging.getLogger("service.test").warning("stdlib service message")
+        loguru_logger.warning("loguru service message")
+        assert sink.getvalue().count("stdlib service message") == 1
+        assert sink.getvalue().count("loguru service message") == 1
+    finally:
+        _restore_defaults(tmp_path)

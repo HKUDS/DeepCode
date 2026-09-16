@@ -6,7 +6,7 @@ import type {
 } from "../../generated/app-server";
 import type {
   AnyRpcNotification,
-  DesktopRuntime,
+  ClientRuntime,
 } from "../../rpc/contracts";
 
 interface SkillCatalogState extends SkillCatalogResult {
@@ -33,7 +33,7 @@ const emptyCatalog: SkillCatalogState = {
   error: null,
 };
 
-const stores = new WeakMap<DesktopRuntime, SkillCatalogStore>();
+const stores = new WeakMap<ClientRuntime, SkillCatalogStore>();
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -49,7 +49,7 @@ class SkillCatalogStore {
   private notificationGeneration = 0;
   private unsubscribeNotifications: (() => void) | null = null;
 
-  constructor(private readonly runtime: DesktopRuntime) {}
+  constructor(private readonly runtime: ClientRuntime) {}
 
   snapshot(projectId: string | null): SkillCatalogState {
     return projectId ? this.entry(projectId).state : emptyCatalog;
@@ -179,7 +179,7 @@ class SkillCatalogStore {
   }
 }
 
-function storeFor(runtime: DesktopRuntime): SkillCatalogStore {
+function storeFor(runtime: ClientRuntime): SkillCatalogStore {
   let store = stores.get(runtime);
   if (!store) {
     store = new SkillCatalogStore(runtime);
@@ -189,7 +189,7 @@ function storeFor(runtime: DesktopRuntime): SkillCatalogStore {
 }
 
 export function useSkillCatalog(
-  runtime: DesktopRuntime,
+  runtime: ClientRuntime,
   projectId: string | null,
 ) {
   const store = useMemo(() => storeFor(runtime), [runtime]);

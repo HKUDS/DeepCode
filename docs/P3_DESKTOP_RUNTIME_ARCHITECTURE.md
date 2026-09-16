@@ -10,16 +10,15 @@ React Command Center
 Rust RPC bridge / sidecar supervisor
         │ newline JSON-RPC 2.0 over private stdio
         ▼
-Python App Server → application services → Agent kernel
+Native stdio relay → authenticated shared App Server → Agent kernel
                          │                    │
                          ▼                    ▼
                 SQLite projection      canonical Session JSONL
 ```
 
-The CLI remains independent of Tauri and Node. It continues to assemble the
-same Agent kernel directly. P3 changes neither CLI command routing nor provider
-execution; it adds an App Server/Desktop adapter over the shared Agent kernel
-and `SessionStore` without making CLI depend on `core/application`.
+The CLI remains independent of Tauri and Node. Desktop, TUI, headless and MCP
+execution connect to the same application service and Agent kernel. The native
+relay owns only its connection; the service owns execution and scheduling.
 
 ## Sidecar build and launch
 
@@ -68,8 +67,7 @@ Launch resolution is deterministic:
 1. explicit `DEEPCODE_APP_SERVER_PATH`;
 2. in debug builds only, repository `.venv` source runtime;
 3. bundled `app-server/` resource;
-4. in debug builds only, source `onedir` output and the legacy external-binary
-   path.
+4. in debug builds only, source `onedir` output.
 
 An invalid explicit path fails closed instead of silently choosing another
 binary. Release builds never inspect a compiled-in repository path, load an
@@ -93,8 +91,8 @@ a newly restarted process as crashed.
   first-install validation and imports;
 - EOF rejects all pending requests and exposes a crashed state;
 - restart performs protocol shutdown, bounded wait, then kill as a fallback;
-- application exit sends `shutdown`, waits, and reaps the process, so no
-  sidecar remains orphaned.
+- application exit sends `shutdown`, waits, and reaps the relay; the shared
+  service and its accepted tasks continue running.
 
 Rust does not parse domain payloads beyond JSON-RPC success/error correlation.
 Stable application error codes and retryability are preserved for the UI.
@@ -173,7 +171,7 @@ P3 validation covers:
   strict verification of the sealed resource tree;
 - release desktop launch against an isolated SQLite database, successful schema
   and Session home, successful schema initialization/handshake, application
-  quit, and confirmation that both host and sidecar exit without an orphan.
+  quit, and confirmation that the relay exits while the shared service stays ready.
 
 CI additionally builds architecture-native macOS arm64/x64, Windows x64, and
 Linux x64 bundles. Formal release jobs fail closed on missing updater/platform

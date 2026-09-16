@@ -1,0 +1,9 @@
+# Resolve the package's actual runtime and test extras, plus CI-only tooling.
+# Use the same runtime versions as the packaged App Server where they overlap.
+-c ../../desktop/sidecar-requirements.lock
+-e .[test]
+build
+pre-commit
+setuptools
+twine
+wheel

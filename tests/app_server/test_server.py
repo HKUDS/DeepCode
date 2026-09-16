@@ -1507,63 +1507,63 @@ def test_live_event_is_pushed_while_server_waits_for_input(tmp_path: Path) -> No
         output_reader.close()
 
 
-def test_stdio_process_reopens_the_same_state(tmp_path: Path) -> None:
+def test_stdio_process_reopens_the_same_state(tmp_path: Path, request) -> None:
+    from app_server.service_state import ServiceFiles
+    from cli.service_cli import start_service, stop_service
+
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    database = tmp_path / "state.sqlite3"
+    files = ServiceFiles(tmp_path / "state.sqlite3")
+    status = start_service(files, port=0)
+    request.addfinalizer(lambda: stop_service(files, timeout=3, cancel_running=True))
 
-    first = _start_server(database)
-    try:
-        _send(
-            first,
-            1,
-            "initialize",
-            {
-                "protocolVersion": "1.0",
-                "clientInfo": {"name": "pytest", "version": "1.0"},
-            },
-        )
-        assert _read(first)["result"]["protocolVersion"] == "1.0"
-        _send(first, 2, "project/add", {"path": str(workspace)})
-        project = _read(first)["result"]["project"]
-        _send(
-            first,
-            3,
-            "thread/start",
-            {"projectId": project["id"], "title": "Across restart"},
-        )
-        thread = _read(first)["result"]["thread"]
-        assert _read(first)["method"] == "thread.updated"
-        _send(first, 4, "shutdown", {})
-        assert _read(first)["result"]["accepted"] is True
-        assert first.wait(timeout=5) == 0
-    finally:
-        if first.poll() is None:
-            first.kill()
+    def call(process, request_id, method, params):
+        _send(process, request_id, method, params)
+        while True:
+            message = _read(process)
+            if message.get("id") == request_id:
+                assert "error" not in message, message
+                return message["result"]
 
-    second = _start_server(database)
-    try:
-        _send(
-            second,
-            1,
-            "initialize",
-            {
-                "protocolVersion": "1.0",
-                "clientInfo": {"name": "pytest", "version": "1.0"},
-            },
-        )
-        _read(second)
-        _send(second, 2, "thread/read", {"threadId": thread["id"]})
-        assert _read(second)["result"]["thread"]["title"] == "Across restart"
-        _send(second, 3, "event/replay", {"threadId": thread["id"]})
-        replay = _read(second)["result"]["events"]
-        assert [event["sequence"] for event in replay] == [1]
-        _send(second, 4, "shutdown", {})
-        _read(second)
-        assert second.wait(timeout=5) == 0
-    finally:
-        if second.poll() is None:
-            second.kill()
+    for index in range(2):
+        process = _start_server(files.database)
+        try:
+            info = call(
+                process,
+                1,
+                "initialize",
+                {
+                    "protocolVersion": "1.0",
+                    "clientInfo": {"name": "pytest", "version": "1.0"},
+                },
+            )
+            assert info["serviceInfo"]["instanceId"] == status["instanceId"]
+            if index == 0:
+                project = call(process, 2, "project/add", {"path": str(workspace)})[
+                    "project"
+                ]
+                thread = call(
+                    process,
+                    3,
+                    "thread/start",
+                    {"projectId": project["id"], "title": "Across restart"},
+                )["thread"]
+            else:
+                restored = call(process, 2, "thread/read", {"threadId": thread["id"]})[
+                    "thread"
+                ]
+                assert restored["title"] == "Across restart"
+                events = call(process, 3, "event/replay", {"threadId": thread["id"]})[
+                    "events"
+                ]
+                assert [event["sequence"] for event in events] == [1]
+            assert call(process, 4, "shutdown", {})["accepted"] is True
+            assert process.wait(timeout=5) == 0
+            assert files.running()
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
 
 
 class _ApprovalSession:

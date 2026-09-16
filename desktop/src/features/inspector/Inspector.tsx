@@ -9,7 +9,7 @@ import type {
   Turn,
   WorkflowRun,
 } from "../../generated/app-server";
-import type { DesktopRuntime } from "../../rpc/contracts";
+import type { ClientRuntime } from "../../rpc/contracts";
 import type { DesktopInspectorTab } from "../../app/useDesktopUi";
 import { TerminalPanel } from "../workbench/TerminalPanel";
 import { useCodeWorkbench } from "../workbench/useCodeWorkbench";
@@ -21,7 +21,7 @@ import { TestsPanel } from "./TestsPanel";
 import styles from "./Inspector.module.css";
 
 interface InspectorProps {
-  runtime: DesktopRuntime;
+  runtime: ClientRuntime;
   thread: Thread | null;
   trusted: boolean;
   turns: Turn[];
@@ -159,6 +159,7 @@ export function Inspector({
         ) : null}
         {tab === "files" ? (
           <FilesPanel
+            onDownload={runtime.downloadFile && thread ? (path) => runtime.downloadFile!(thread.id, path) : undefined}
             trusted={trusted}
             hasActiveTurn={hasActiveTurn}
             workbench={workbench}

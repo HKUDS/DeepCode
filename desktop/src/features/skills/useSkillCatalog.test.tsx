@@ -9,7 +9,7 @@ import type {
 } from "../../generated/app-server";
 import type {
   AnyRpcNotification,
-  DesktopRuntime,
+  ClientRuntime,
   RpcMethod,
 } from "../../rpc/contracts";
 import { useSkillCatalog } from "./useSkillCatalog";
@@ -96,7 +96,7 @@ function Consumer({
   runtime,
   label,
 }: {
-  runtime: DesktopRuntime;
+  runtime: ClientRuntime;
   label: string;
 }) {
   const state = useSkillCatalog(runtime, projectId);
@@ -105,7 +105,7 @@ function Consumer({
 
 test("shares one catalog request across Desktop consumers", async () => {
   const backend = new CatalogRuntime();
-  const runtime = backend as unknown as DesktopRuntime;
+  const runtime = backend as unknown as ClientRuntime;
   render(
     <>
       <Consumer runtime={runtime} label="composer" />
@@ -120,7 +120,7 @@ test("shares one catalog request across Desktop consumers", async () => {
 
 test("refreshes every consumer after skills.changed", async () => {
   const backend = new CatalogRuntime();
-  const runtime = backend as unknown as DesktopRuntime;
+  const runtime = backend as unknown as ClientRuntime;
   const view = render(
     <>
       <Consumer runtime={runtime} label="composer" />

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
 import pytest
-
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPOSITORY_ROOT / "scripts" / "verify_python_distribution.py"
@@ -97,3 +97,17 @@ def test_distribution_metadata_rejects_a_version_mismatch(tmp_path):
 def test_release_tag_must_match_the_canonical_version(tmp_path):
     with pytest.raises(release.DistributionVerificationError, match="does not match"):
         release.verify_artifacts(tmp_path, release_tag="v1.3.0")
+
+
+def test_packaged_web_manifest_requires_its_entry_assets():
+    files = {
+        "web/web-build.json": json.dumps(
+            {"version": "2.2.0", "buildId": "build"}
+        ).encode(),
+        "web/index.html": b'<script src="/assets/app.js"></script>',
+        "web/assets/app.js": b"console.log('test')",
+    }
+    release.verify_web_assets(files.__getitem__, list(files), "web/", "2.2.0")
+    del files["web/assets/app.js"]
+    with pytest.raises(release.DistributionVerificationError, match="resource missing"):
+        release.verify_web_assets(files.__getitem__, list(files), "web/", "2.2.0")

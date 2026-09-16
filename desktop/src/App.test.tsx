@@ -1,7 +1,9 @@
 import {
   cleanup,
+  act,
   fireEvent,
   render,
+  renderHook,
   screen,
   waitFor,
   within,
@@ -28,12 +30,13 @@ import type {
   WorkflowRun,
 } from "./generated/app-server";
 import { App } from "./App";
+import { useWorkspaceController } from "./app/useWorkspaceController";
 import { __resetComposerBehaviorForTests } from "./app/composerBehavior";
 import { __resetEscapeLayersForTests } from "./app/escapeLayer";
 import { __setLocaleForTests } from "./app/i18n";
 import type {
   AnyRpcNotification,
-  DesktopRuntime,
+  ClientRuntime,
   DesktopUpdateInfo,
   DesktopUpdateProgress,
   RpcMethod,
@@ -227,7 +230,9 @@ const diagnostics: DiagnosticsSnapshot = {
   ],
 };
 
-class TestRuntime implements DesktopRuntime {
+class TestRuntime implements ClientRuntime {
+  readonly notifications = new Set<(notification: AnyRpcNotification) => void>();
+  readonly statuses = new Set<(status: SidecarStatus) => void>();
   readonly calls: string[] = [];
   readonly requests: Array<{ method: string; params: unknown }> = [];
   readonly diagnosticsExports: DiagnosticsSnapshot[] = [];
@@ -1004,12 +1009,19 @@ class TestRuntime implements DesktopRuntime {
           },
         } as unknown as MethodResults[M];
       }
-      case "event/replay":
+      case "event/replay": {
+        const { threadId, after = 0, through, limit = 500 } = params as MethodParams["event/replay"];
+        const history = this.events.filter((event) => event.threadId === threadId);
+        const headSequence = Math.min(through ?? Infinity, history.at(-1)?.sequence ?? 0);
+        const remaining = history.filter((event) => event.sequence > after && event.sequence <= headSequence);
+        const events = remaining.slice(0, limit);
         return {
-          events: this.events,
-          nextAfter: null,
-          hasMore: false,
+          events,
+          nextAfter: remaining.length > limit ? events.at(-1)!.sequence : null,
+          hasMore: remaining.length > limit,
+          headSequence,
         } as MethodResults[M];
+      }
       case "file/list":
         return { entries: [], truncated: false } as unknown as MethodResults[M];
       case "git/status":
@@ -1076,13 +1088,13 @@ class TestRuntime implements DesktopRuntime {
   }
 
   async onNotification(listener: (notification: AnyRpcNotification) => void) {
-    void listener;
-    return () => undefined;
+    this.notifications.add(listener);
+    return () => { this.notifications.delete(listener); };
   }
 
   async onStatus(listener: (status: SidecarStatus) => void) {
-    void listener;
-    return () => undefined;
+    this.statuses.add(listener);
+    return () => { this.statuses.delete(listener); };
   }
 
   async onLog(listener: (message: string) => void) {
@@ -1274,6 +1286,160 @@ const recoveryEvents: Event[] = [
     },
   },
 ];
+
+function liveDelta(sequence: number, delta: string): Event {
+  return {
+    ...recoveryEvents[1],
+    eventId: `event-${sequence}`,
+    sequence,
+    type: "item.delta",
+    payload: { delta },
+  };
+}
+
+describe("workspace event recovery", () => {
+  it("repairs skipped deltas and a dropped approval without resetting the selected item", async () => {
+    const events = [...recoveryEvents];
+    const runtime = new TestRuntime([project], [thread], events);
+    const { result } = renderHook(() => useWorkspaceController(runtime));
+    await waitFor(() => expect(result.current.state.items).toHaveLength(1));
+    act(() => result.current.selectItem("item-1"));
+    events.push(liveDelta(3, " A"), liveDelta(4, "B"));
+    act(() =>
+      runtime.notifications.forEach((receive) =>
+        receive({ jsonrpc: "2.0", method: "item.delta", params: events[3] }),
+      ),
+    );
+    await waitFor(() =>
+      expect(result.current.state.items[0].payload.text).toBe(
+        "Recovered final answer AB",
+      ),
+    );
+    expect(result.current.state.selectedItemId).toBe("item-1");
+    const approval = {
+      ...recoveryEvents[0],
+      eventId: "event-5",
+      sequence: 5,
+      type: "approval.requested",
+      payload: { approval: pendingApproval as unknown as JsonValue },
+    };
+    events.push(approval);
+    act(() =>
+      runtime.notifications.forEach((receive) =>
+        receive({
+          jsonrpc: "2.0",
+          method: "server.warning",
+          params: {
+            code: "EVENT_QUEUE_OVERFLOW",
+            dropped: 1,
+            replayRequired: true,
+          },
+        }),
+      ),
+    );
+    await waitFor(() => expect(result.current.state.approvals).toHaveLength(1));
+    expect(result.current.state.selectedItemId).toBe("item-1");
+    const replayRequests = runtime.requests.filter(
+      (request) => request.method === "event/replay",
+    );
+    expect(
+      replayRequests.map(
+        (request) => (request.params as MethodParams["event/replay"]).after,
+      ),
+    ).toEqual([0, 2, 4]);
+  });
+
+  it("holds a newer live delta until its replayed base exists", async () => {
+    const events = [...recoveryEvents];
+    const runtime = new TestRuntime([project], [thread], events);
+    const original = runtime.request.bind(runtime);
+    let resolve!: (value: MethodResults["event/replay"]) => void;
+    const first = new Promise<MethodResults["event/replay"]>((yes) => {
+      resolve = yes;
+    });
+    let paused = false;
+    vi.spyOn(runtime, "request").mockImplementation(async (method, params) => {
+      if (method === "event/replay" && !paused) {
+        paused = true;
+        return first as Promise<MethodResults[typeof method]>;
+      }
+      return original(method, params);
+    });
+    const { result } = renderHook(() => useWorkspaceController(runtime));
+    await waitFor(() => expect(paused).toBe(true));
+    const delta = liveDelta(3, " appended once");
+    events.push(delta);
+    act(() =>
+      runtime.notifications.forEach((receive) =>
+        receive({ jsonrpc: "2.0", method: "item.delta", params: delta }),
+      ),
+    );
+    expect(result.current.state.items).toHaveLength(0);
+    await act(async () =>
+      resolve({
+        events: recoveryEvents,
+        nextAfter: null,
+        hasMore: false,
+        headSequence: 2,
+      }),
+    );
+    await waitFor(() =>
+      expect(result.current.state.items[0]?.payload.text).toBe(
+        "Recovered final answer appended once",
+      ),
+    );
+    act(() =>
+      runtime.notifications.forEach((receive) =>
+        receive({ jsonrpc: "2.0", method: "item.delta", params: delta }),
+      ),
+    );
+    expect(result.current.state.items[0].payload.text).toBe(
+      "Recovered final answer appended once",
+    );
+  });
+
+  it.each(["stopped", "starting"] as const)(
+    "replays missed events when a %s runtime becomes ready again",
+    async (phase) => {
+      const events = [...recoveryEvents];
+      const runtime = new TestRuntime([project], [thread], events);
+      const { result } = renderHook(() => useWorkspaceController(runtime));
+      await waitFor(() => expect(runtime.calls).toContain("settings/read"));
+      act(() =>
+        runtime.statuses.forEach((receive) =>
+          receive({ ...readyStatus, phase }),
+        ),
+      );
+      events.push(liveDelta(3, " after reconnect"));
+      act(() => runtime.statuses.forEach((receive) => receive(readyStatus)));
+      await waitFor(() =>
+        expect(result.current.state.items[0]?.payload.text).toBe(
+          "Recovered final answer after reconnect",
+        ),
+      );
+      expect(
+        runtime.calls.filter((method) => method === "project/list"),
+      ).toHaveLength(2);
+    },
+  );
+
+  it("cleans up a notification subscription that resolves after unmount", async () => {
+    const runtime = new TestRuntime();
+    let resolve!: (cleanup: () => void) => void;
+    vi.spyOn(runtime, "onNotification").mockImplementation(
+      () =>
+        new Promise((yes) => {
+          resolve = yes;
+        }),
+    );
+    const cleanup = vi.fn();
+    const { unmount } = renderHook(() => useWorkspaceController(runtime));
+    unmount();
+    await act(async () => resolve(cleanup));
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(runtime.calls).toEqual([]);
+  });
+});
 
 const presentationItems: Item[] = [
   {
@@ -1932,6 +2098,54 @@ describe("desktop command center", () => {
     expect(document.documentElement.getAttribute("data-theme")).toBeNull();
   });
 
+  it("imports one VS Code theme and reports invalid colors", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const dialog = await screen.findByRole("dialog", { name: "Settings" });
+    const input = within(dialog).getByLabelText(
+      "Import VS Code theme",
+    ) as HTMLInputElement;
+    const valid = new File(["theme"], "ocean-color-theme.jsonc", {
+      type: "application/json",
+    });
+    Object.defineProperty(valid, "text", {
+      value: () =>
+        Promise.resolve(`{
+          // local JSONC only
+          "name": "Ocean",
+          "colors": {
+            "editor.background": "#102030",
+            "editor.foreground": "#f0f4f8",
+          },
+        }`),
+    });
+
+    fireEvent.change(input, { target: { files: [valid] } });
+
+    await waitFor(() =>
+      expect(document.documentElement.getAttribute("data-theme")).toBe(
+        "imported",
+      ),
+    );
+    expect(
+      document.documentElement.style.getPropertyValue("--surface-canvas"),
+    ).toBe("#102030");
+    expect(within(dialog).getByRole("option", { name: /Ocean/ })).toBeTruthy();
+
+    const invalid = new File(["theme"], "invalid.json");
+    Object.defineProperty(invalid, "text", {
+      value: () =>
+        Promise.resolve('{"colors":{"editor.background":"not-a-color"}}'),
+    });
+    fireEvent.change(input, { target: { files: [invalid] } });
+    expect((await within(dialog).findByRole("alert")).textContent).toContain(
+      "Invalid color for editor.background",
+    );
+  });
+
   it("lets plain Enter queue while busy when the preference says queue", async () => {
     localStorage.setItem(
       "deepcode.desktop.composer.v1",
@@ -2429,7 +2643,7 @@ describe("desktop command center", () => {
     const discoverParams = runtime.requests.find(
       (request) => request.method === "provider/discover",
     )?.params as MethodParams["provider/discover"];
-    expect(discoverParams.connectionId).toBe("openai");
+    expect(discoverParams.connection).toMatchObject({ id: "openai", protocol: "auto", auth: "api_key" });
 
     fireEvent.click(screen.getByRole("button", { name: "Save and check" }));
     await waitFor(() => {
@@ -2479,7 +2693,7 @@ describe("desktop command center", () => {
         model: "gpt-5",
       });
     });
-    expect(await screen.findByText("Ready for agent work")).toBeTruthy();
+    expect(await screen.findByText("Model request verified")).toBeTruthy();
     const methods = runtime.requests.map((request) => request.method);
     expect(methods.indexOf("settings/update")).toBeLessThan(
       methods.indexOf("provider/test"),

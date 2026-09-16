@@ -136,7 +136,10 @@ class ConfiguredAgentSessionFactory:
                 options["tool_filter"] = preset_filter
             if agent_preset.allow_spawn is not None:
                 options["allow_spawn"] = agent_preset.allow_spawn
-        runtime = DeepCodeRuntime(load_config_for_workspace(workspace))
+        runtime = DeepCodeRuntime(
+            load_config_for_workspace(workspace),
+            config_loader=lambda: load_config_for_workspace(workspace),
+        )
         plugin_mcp_servers = (
             self._plugin_mcp_provider(Path(workspace))
             if self._plugin_mcp_provider is not None
@@ -163,6 +166,7 @@ class ConfiguredAgentSessionFactory:
                 else None
             ),
             runtime=runtime,
+            provider_cleanup=runtime.aclose,
             project_trusted=True,
             plugin_mcp_servers=plugin_mcp_servers,
             mcp_status_observer=self._mcp_status_observer,
@@ -189,6 +193,12 @@ class ConfiguredAgentSessionFactory:
             (
                 execution_profile.connection_id,
                 execution_profile.config_revision,
+                execution_profile.provider_revision,
+                execution_profile.protocol,
+                execution_profile.model_id,
+                execution_profile.input_modalities,
+                execution_profile.tool_calling,
+                execution_profile.reasoning_supported,
                 execution_profile.context_window,
                 execution_profile.max_output_tokens,
                 execution_profile.max_tokens,

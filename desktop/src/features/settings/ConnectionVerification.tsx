@@ -20,21 +20,33 @@ const STAGE_LABELS: Record<ProviderVerificationStage["id"], string> = {
   credential: "Credential",
   catalog: "Model catalog",
   model: "Model request",
+  stream: "Streaming",
+  tool: "Tool call",
+  continuation: "Tool result continuation",
+  reasoning: "Reasoning",
+  image: "Image input",
 };
 
 export function ConnectionVerification({
   result,
   compact = false,
 }: ConnectionVerificationProps) {
+  const label =
+    result.status === "ready" &&
+    result.stages.some(
+      (stage) => stage.id === "continuation" && stage.status === "passed",
+    )
+      ? "Agent tool round trip verified"
+      : statusLabel(result.status);
   return (
     <section
       className={styles.verification}
       data-status={result.status}
       data-compact={compact}
-      aria-label={`Connection status: ${statusLabel(result.status)}`}
+      aria-label={`Connection status: ${label}`}
     >
       <header>
-        <strong>{statusLabel(result.status)}</strong>
+        <strong>{label}</strong>
         <span>{result.latencyMs} ms total</span>
       </header>
       <div className={styles.stages}>
@@ -62,7 +74,7 @@ function StageIcon({ stage }: { stage: ProviderVerificationStage }) {
 function statusLabel(status: ProviderTestResult["status"]): string {
   switch (status) {
     case "ready":
-      return "Ready for agent work";
+      return "Model request verified";
     case "connected":
       return "Catalog connected";
     case "limited":

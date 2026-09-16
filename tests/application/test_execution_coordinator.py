@@ -244,6 +244,37 @@ def test_same_workspace_waits_without_registry_slot_while_other_workspace_runs(
     coordinator.close()
 
 
+def test_paused_admission_keeps_claims_live_and_resumes_queued_work(tmp_path):
+    database = Database(tmp_path / "state.sqlite3")
+    database.initialize()
+    registry = FakeRegistry()
+    coordinator = ExecutionCoordinator(database, registry.start)
+    worker = coordinator.start(background=False)
+    try:
+        first_project = _add_project(database, tmp_path, "running")
+        second_project = _add_project(database, tmp_path, "queued")
+        _add_turn(database, first_project, suffix="running", home_worker_id=worker.id)
+        running = coordinator.dispatch_once()
+        assert len(running) == 1
+        coordinator.pause_admission()
+        _, queued = _add_turn(
+            database, second_project, suffix="queued", home_worker_id=worker.id
+        )
+        assert coordinator.dispatch_once() == ()
+        assert coordinator.heartbeat() == ()
+        assert len(coordinator.active_claims) == 1
+        _finish_turn(database, coordinator, running[0], completed_at=utc_now())
+        assert coordinator.dispatch_once() == ()
+        coordinator.resume_admission()
+        resumed = coordinator.dispatch_once()
+        assert [dispatch.turn_id for dispatch in resumed] == [queued.id]
+        _finish_turn(database, coordinator, resumed[0], completed_at=utc_now())
+    finally:
+        for claim in coordinator.active_claims:
+            coordinator.release(claim, reason="test_cleanup")
+        coordinator.close()
+
+
 def test_managed_worktree_runs_in_parallel_with_its_canonical_project(
     tmp_path: Path,
 ) -> None:

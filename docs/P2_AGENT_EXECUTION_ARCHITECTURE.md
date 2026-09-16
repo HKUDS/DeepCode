@@ -5,6 +5,10 @@ and the existing Agent kernel. CLI and Desktop share the Agent assembly, policy
 engine, and canonical `SessionStore`, while retaining independent client and
 lifecycle adapters.
 
+The RPC layer now separates the application host from each client connection;
+see [App Server host lifecycle](APP_SERVER_HOST_LIFECYCLE.md). The stdio
+entrypoint connects to the shared service; EOF/shutdown detaches that client.
+
 ## Dependency and ownership model
 
 ```text

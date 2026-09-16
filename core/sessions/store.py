@@ -80,6 +80,12 @@ class SessionStore:
         self._disk_signatures: dict[str, tuple[int, int, int, int]] | None = None
         self._deletions = SessionDeletionJournal(self.root)
 
+    def close(self) -> None:
+        """Release this store's index connection before offline file operations."""
+        with self._lock:
+            if self._index is not None:
+                self._index.close()
+
     # ------------------------------------------------------------------
     # Path helpers
     # ------------------------------------------------------------------

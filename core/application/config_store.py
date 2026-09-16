@@ -6,14 +6,17 @@ import hashlib
 import json
 import os
 import threading
-import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from core.config import DeepCodeConfig, home_config_path
-from core.private_storage import ensure_private_directory, open_private_file
+from core.private_storage import (
+    atomic_write_private_json,
+    ensure_private_directory,
+    open_private_file,
+)
 
 
 class ConfigRevisionConflict(RuntimeError):
@@ -85,29 +88,7 @@ class ConfigStore:
             return updated
 
     def _replace(self, value: dict[str, Any]) -> None:
-        ensure_private_directory(self.path.parent)
-        temporary = self.path.with_name(f".{self.path.name}.{uuid.uuid4().hex}.tmp")
-        payload = (json.dumps(value, indent=2, ensure_ascii=False) + "\n").encode()
-        descriptor = open_private_file(
-            temporary,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-        )
-        try:
-            with os.fdopen(descriptor, "wb") as handle:
-                handle.write(payload)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, self.path)
-            try:
-                os.chmod(self.path, 0o600)
-            except OSError:
-                pass
-            _fsync_directory(self.path.parent)
-        finally:
-            try:
-                temporary.unlink()
-            except FileNotFoundError:
-                pass
+        atomic_write_private_json(self.path, value)
 
 
 def deep_merge(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
@@ -149,15 +130,5 @@ def _file_lock(path: Path) -> Iterator[None]:
                 yield
             finally:
                 fcntl.flock(descriptor, fcntl.LOCK_UN)
-    finally:
-        os.close(descriptor)
-
-
-def _fsync_directory(path: Path) -> None:
-    if os.name == "nt":
-        return
-    descriptor = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
     finally:
         os.close(descriptor)

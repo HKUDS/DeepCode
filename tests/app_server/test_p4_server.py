@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from app_server.server import AppServer
+from app_server.protocol.codec import encode_message
 from core.application import DeepCodeApplication
 from core.domain import TrustState
 from core.persistence.event_repository import EventRepository
@@ -194,7 +195,10 @@ def test_oversized_result_returns_a_protocol_error_without_stopping_server(
     )
     sink = io.BytesIO()
 
-    assert AppServer(application, max_message_bytes=2_048).serve(source, sink) == 0
+    # The growing complete method catalog needs more than 2 KiB; the 10 KiB
+    # result still exceeds this strictly enforced 4 KiB test transport budget.
+    assert AppServer(application, max_message_bytes=4_096).serve(source, sink) == 0
+    assert all(len(line) + 1 <= 4_096 for line in sink.getvalue().splitlines())
     messages = [json.loads(line) for line in sink.getvalue().splitlines()]
     by_id = {message.get("id"): message for message in messages if "id" in message}
     assert by_id[1]["result"]["protocolVersion"] == "1.0"
@@ -227,7 +231,7 @@ def test_event_replay_is_split_into_byte_bounded_cursor_pages(tmp_path: Path) ->
     reader = os.fdopen(output_read, "rb", buffering=0)
     sink = os.fdopen(output_write, "wb", buffering=0)
     server = threading.Thread(
-        target=AppServer(application, max_message_bytes=2_048).serve,
+        target=AppServer(application, max_message_bytes=4_096).serve,
         args=(source, sink),
         daemon=True,
     )
@@ -244,25 +248,34 @@ def test_event_replay_is_split_into_byte_bounded_cursor_pages(tmp_path: Path) ->
             )
         )
         initialized = _until(reader, lambda message: message.get("id") == 1)
-        assert initialized["result"]["capabilities"]["maxMessageBytes"] == 2_048
+        assert initialized["result"]["capabilities"]["maxMessageBytes"] == 4_096
 
         collected: list[int] = []
         after = 0
         page_count = 0
         request_id = 2
+        cutoff = None
         while True:
             writer.write(
                 _request(
                     request_id,
                     "event/replay",
-                    {"threadId": thread.id, "after": after, "limit": 1000},
+                    {
+                        "threadId": thread.id,
+                        "after": after,
+                        "limit": 1000,
+                        **({"through": cutoff} if cutoff is not None else {}),
+                    },
                 )
             )
             response = _until(
                 reader, lambda message, target=request_id: message.get("id") == target
             )
             assert "error" not in response
+            assert len(encode_message(response)) <= 4_096
             page = response["result"]
+            cutoff = cutoff if cutoff is not None else page["headSequence"]
+            assert page["headSequence"] == cutoff
             page_count += 1
             collected.extend(event["sequence"] for event in page["events"])
             if not page["hasMore"]:
@@ -328,8 +341,30 @@ def test_single_replay_event_larger_than_transport_limit_is_reported(
     )
     sink = io.BytesIO()
 
-    assert AppServer(application, max_message_bytes=2_048).serve(source, sink) == 0
+    assert AppServer(application, max_message_bytes=4_096).serve(source, sink) == 0
     messages = [json.loads(line) for line in sink.getvalue().splitlines()]
     by_id = {message.get("id"): message for message in messages if "id" in message}
     assert by_id[2]["error"]["data"]["code"] == "RESPONSE_TOO_LARGE"
     assert by_id[3]["result"]["accepted"] is True
+
+
+def test_rejected_small_handshake_does_not_initialize_the_connection(tmp_path):
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    source = io.BytesIO(
+        _request(
+            1,
+            "initialize",
+            {"protocolVersion": "1.0", "clientInfo": {"name": "small", "version": "1"}},
+        )
+        + _request(2, "project/list", {})
+    )
+    sink = io.BytesIO()
+    assert AppServer(application, max_message_bytes=512).serve(source, sink) == 0
+    messages = {
+        row["id"]: row
+        for row in map(json.loads, sink.getvalue().splitlines())
+        if "id" in row
+    }
+    assert messages[1]["error"]["data"]["code"] == "RESPONSE_TOO_LARGE"
+    assert messages[2]["error"]["data"]["code"] == "NOT_INITIALIZED"
+    assert all(len(line) + 1 <= 512 for line in sink.getvalue().splitlines())

@@ -8,7 +8,7 @@ import type {
   MethodResults,
   Project,
 } from "../../generated/app-server";
-import type { DesktopRuntime, RpcMethod } from "../../rpc/contracts";
+import type { ClientRuntime, RpcMethod } from "../../rpc/contracts";
 import { McpPage } from "./McpPage";
 
 const project: Project = {
@@ -202,7 +202,7 @@ test("adds a credential-bound stdio MCP server through the shared RPC", async ()
   const runtime = new McpRuntime();
   render(
     <McpPage
-      runtime={runtime as unknown as DesktopRuntime}
+      runtime={runtime as unknown as ClientRuntime}
       project={project}
     />,
   );
@@ -283,7 +283,7 @@ test("shows Plugin MCP servers without exposing native edit actions", async () =
 
   render(
     <McpPage
-      runtime={runtime as unknown as DesktopRuntime}
+      runtime={runtime as unknown as ClientRuntime}
       project={project}
     />,
   );
@@ -298,7 +298,7 @@ test("adds a bundled preset disabled, tests it, then enables agent use", async (
   const runtime = new McpRuntime();
   render(
     <McpPage
-      runtime={runtime as unknown as DesktopRuntime}
+      runtime={runtime as unknown as ClientRuntime}
       project={project}
     />,
   );

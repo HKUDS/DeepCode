@@ -15,12 +15,12 @@ import type {
   SettingsSnapshot,
   Thread,
 } from "../../generated/app-server";
-import type { DesktopRuntime } from "../../rpc/contracts";
+import type { ClientRuntime } from "../../rpc/contracts";
 import { useConnectionCatalog } from "../settings/useConnectionCatalog";
 import styles from "./ModelPicker.module.css";
 
 interface ModelPickerProps {
-  runtime: DesktopRuntime;
+  runtime: ClientRuntime;
   project: Project | null;
   thread: Thread | null;
   settings: SettingsSnapshot | null;

@@ -18,7 +18,7 @@ import type {
 } from "../../generated/app-server";
 import type {
   AnyRpcNotification,
-  DesktopRuntime,
+  ClientRuntime,
   DesktopUpdateInfo,
   DesktopUpdateProgress,
   RpcMethod,
@@ -98,7 +98,7 @@ function completedRun(automation: Automation): AutomationRun {
   };
 }
 
-class AutomationRuntime implements DesktopRuntime {
+class AutomationRuntime implements ClientRuntime {
   readonly requests: Array<{ method: RpcMethod; params: unknown }> = [];
   automations = [definition()];
   runs = [completedRun(this.automations[0])];

@@ -446,7 +446,7 @@ def test_human_output_discloses_pagination_and_live_runtime(
         == 0
     )
     output = capsys.readouterr().out
-    assert "scheduler-enabled DeepCode Desktop or App Server" in output
+    assert "DeepCode background service is running" in output
     assert "continue with --offset 8" in output
 
     application.closed = False
@@ -466,7 +466,7 @@ def test_human_output_discloses_pagination_and_live_runtime(
         )
         == 0
     )
-    assert "scheduler-enabled DeepCode Desktop or App Server" in capsys.readouterr().out
+    assert "DeepCode background service is running" in capsys.readouterr().out
 
     application.closed = False
     assert (

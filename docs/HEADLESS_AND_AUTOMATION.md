@@ -72,8 +72,6 @@ deepcode exec "Review this change" \
 - `--skill` is repeatable and selects Skills for this Turn.
 - `--resume` keeps the original Session and stored workspace unless an explicit
   `--workspace` override is supplied for this process.
-- `--max-iterations` is a diagnostic sampling limit; it is unlimited by
-  default.
 
 In non-interactive **Ask** mode, an approval that cannot be answered is denied.
 Use `--access read-only` for inspection. Use `--access full-access` only in a
@@ -105,8 +103,6 @@ deepcode loop --resume <session-id>
 
 Connection, model, and Thinking overrides affect only the next Turn started by
 the command. `--token-budget` is optional; omit it for an unbudgeted Goal.
-`--max-iterations` remains an optional diagnostic limit rather than a product
-default.
 
 ### Automation management
 
@@ -148,7 +144,7 @@ deepcode automation delete <automation-id>
 `automation run` accepts `--request-id <key>` as an idempotency key when a
 caller may retry the same request. Deleting an Automation retires its
 definition while retaining its durable Run history. Interval schedules execute
-while a scheduler-enabled Desktop or App Server runtime is active; disabling an
+while the background service is running, including with all clients closed; disabling an
 interval does not remove the **Run now** path.
 
 Add `--json` to Automation commands for machine-readable output. List and Run
@@ -345,7 +341,6 @@ deepcode exec "检查本次修改" \
 - `--skill` 可以重复传入，为本 Turn 选择多个 Skills。
 - `--resume` 保留原 Session 与记录的 workspace；只有显式传入
   `--workspace` 才会为本进程临时覆盖执行目录。
-- `--max-iterations` 是可选诊断限制，默认不限制。
 
 无交互的 **Ask** 模式无法回答审批时会拒绝该工具调用。只读检查请使用
 `--access read-only`。只有明确接受本地无限制执行风险时才使用
@@ -374,8 +369,7 @@ deepcode loop --resume <session-id>
 ```
 
 连接、模型和 Thinking 覆盖只影响该命令启动的下一个 Turn。
-`--token-budget` 是可选项；不传入就是无预算 Goal。`--max-iterations` 同样只是
-可选诊断限制，不是产品默认上限。
+`--token-budget` 是可选项；不传入就是无预算 Goal。
 
 ### Automation 管理
 

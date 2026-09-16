@@ -226,10 +226,37 @@ class TurnRepository:
         ).fetchall()
         return [self._from_row(row) for row in rows]
 
-    def list_for_thread(self, thread_id: str) -> list[Turn]:
-        rows = self.connection.execute(
-            "SELECT * FROM turns WHERE thread_id = ? ORDER BY ordinal", (thread_id,)
-        ).fetchall()
+    def list_for_thread(
+        self,
+        thread_id: str,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+        state: str = "all",
+    ) -> list[Turn]:
+        filters = {
+            "all": "",
+            "active": " AND status IN ('queued', 'running', 'waiting_approval')",
+            "executing": " AND status IN ('running', 'waiting_approval')",
+        }
+        if state not in filters or offset < 0 or (limit is not None and limit < 1):
+            raise ValueError("Invalid Turn page")
+        order = (
+            "CASE status WHEN 'running' THEN 0 WHEN 'waiting_approval' THEN 0 ELSE 1 END, ordinal"
+            if state == "active"
+            else "ordinal"
+        )
+        query = (
+            "SELECT * FROM turns WHERE thread_id = ?"
+            + filters[state]
+            + " ORDER BY "
+            + order
+        )
+        arguments = [thread_id]
+        if limit is not None:
+            query += " LIMIT ? OFFSET ?"
+            arguments.extend((limit, offset))
+        rows = self.connection.execute(query, arguments).fetchall()
         return [self._from_row(row) for row in rows]
 
     def list_for_goal(self, thread_id: str, goal_id: str) -> list[Turn]:

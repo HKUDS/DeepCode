@@ -6,8 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "npm run check:version && npm run check:tauri && npm run check:protocol && tsc --noEmit && vite build",
+    "build:web": "npm run check:protocol && tsc --noEmit && vite build --mode web",
+    "test:web": "npm run build:web && playwright test",
     "setup:sidecar": "node scripts/run-python.mjs scripts/setup-sidecar-env.py",
-    "build:sidecar": "node scripts/run-python.mjs scripts/build-sidecar.py",
+    "build:sidecar": "npm run build:web && node scripts/run-python.mjs scripts/build-sidecar.py",
     "audit:licenses": "node scripts/run-python.mjs scripts/audit-licenses.py --output build/licenses/dependencies.json",
     "check:version": "node scripts/check-version.mjs",
     "check:tauri": "node scripts/check-tauri-config.mjs",
@@ -29,6 +31,7 @@
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "i18next": "^26.3.6",
+    "jsonc-parser": "^3.3.1",
     "lucide-react": "^0.468.0",
     "monaco-editor": "0.53.0",
     "prism-react-renderer": "^2.4.1",
@@ -40,6 +43,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.58.2",
     "@tauri-apps/cli": "^2.11.4",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^24.10.1",
@@ -55,7 +59,7 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.64.0",
     "vite": "^8.1.4",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "overrides": {
     "nanoid": "3.3.18"

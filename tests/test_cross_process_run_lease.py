@@ -6,7 +6,7 @@ sleeps), process B submits against the same Session while A is mid-flight.
 B must receive the human-readable refusal and exit cleanly; A must finish
 undisturbed; the canonical record must hold exactly A's work.
 
-This drives the real TUI entry point in real subprocesses; it takes a few
+This exercises the recovery launcher's process-owned TUI in real subprocesses; it takes a few
 seconds by design.
 """
 
@@ -60,7 +60,7 @@ agent_setup.get_runtime = lambda: type(
 )()
 sys.stdin = io.StringIO(os.environ["SCRIPT"])
 sys.argv = ["tui"]
-raise SystemExit(tui_app.main(json.loads(os.environ["ARGV"])))
+raise SystemExit(tui_app.main(json.loads(os.environ["ARGV"]), shared_service=False))
 """
 
 

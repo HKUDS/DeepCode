@@ -1,4 +1,4 @@
-"""Notify a connection when the user configuration file changes on disk."""
+"""Notify the RPC host when the user configuration file changes on disk."""
 
 from __future__ import annotations
 
@@ -40,7 +40,11 @@ class ConfigFileWatcher:
             name="deepcode-config-watch",
             daemon=True,
         )
-        self._thread.start()
+        try:
+            self._thread.start()
+        except BaseException:
+            self._thread = None
+            raise
 
     def stop(self) -> None:
         self._stop.set()

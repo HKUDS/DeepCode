@@ -7,7 +7,7 @@ import type {
   McpProbeResult,
   Project,
 } from "../../generated/app-server";
-import type { DesktopRuntime, RpcMethod } from "../../rpc/contracts";
+import type { ClientRuntime, RpcMethod } from "../../rpc/contracts";
 import { useMcpCatalog } from "./useMcpCatalog";
 
 function deferred<Value>() {
@@ -78,7 +78,7 @@ describe("useMcpCatalog project ownership", () => {
     const runtime = {
       request,
       onNotification: async () => () => undefined,
-    } as unknown as DesktopRuntime;
+    } as unknown as ClientRuntime;
 
     const { result, rerender } = renderHook(
       ({ selectedProject }) => useMcpCatalog(runtime, selectedProject),

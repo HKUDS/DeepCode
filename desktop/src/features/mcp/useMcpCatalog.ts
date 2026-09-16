@@ -9,7 +9,7 @@ import type {
   McpProbeResult,
   Project,
 } from "../../generated/app-server";
-import type { DesktopRuntime } from "../../rpc/contracts";
+import type { ClientRuntime } from "../../rpc/contracts";
 
 interface McpCatalogState {
   key: string;
@@ -19,7 +19,7 @@ interface McpCatalogState {
   error: string | null;
 }
 
-export function useMcpCatalog(runtime: DesktopRuntime, project: Project | null) {
+export function useMcpCatalog(runtime: ClientRuntime, project: Project | null) {
   const projectId = project?.id;
   const catalogKey = projectId ?? "__user__";
   const generation = useRef(0);

@@ -35,6 +35,7 @@ class ReplayPage:
     events: tuple[DomainEvent, ...]
     next_after: int | None
     has_more: bool
+    head_sequence: int | None = None
 
 
 @dataclass(slots=True)
@@ -174,15 +175,28 @@ class EventService:
         return list(self.replay_page(thread_id, after=after, limit=limit).events)
 
     def replay_page(
-        self, thread_id: str, *, after: int = 0, limit: int = 500
+        self,
+        thread_id: str,
+        *,
+        after: int = 0,
+        limit: int = 500,
+        through: int | None = None,
     ) -> ReplayPage:
         if after < 0:
             raise ValueError("after must not be negative")
         if not 1 <= limit <= 1000:
             raise ValueError("limit must be between 1 and 1000")
+        if through is not None and through < 0:
+            raise ValueError("through must not be negative")
         with self.database.read() as connection:
-            events = EventRepository(connection).replay(
-                thread_id, after=after, limit=limit + 1
+            repository = EventRepository(connection)
+            # Capture the cutoff before reading the page. Later commits cannot
+            # extend this replay round; clients carry the cutoff to later pages.
+            head = repository.sequence_head(thread_id)
+            if through is not None:
+                head = min(head, through)
+            events = repository.replay(
+                thread_id, after=after, limit=limit + 1, through=head
             )
         has_more = len(events) > limit
         page = tuple(events[:limit])
@@ -190,6 +204,7 @@ class EventService:
             events=page,
             next_after=page[-1].sequence if has_more and page else None,
             has_more=has_more,
+            head_sequence=head,
         )
 
 

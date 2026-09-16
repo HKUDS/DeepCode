@@ -8,7 +8,7 @@ import type {
 } from "../../generated/app-server";
 import type {
   AnyRpcNotification,
-  DesktopRuntime,
+  ClientRuntime,
   RpcMethod,
 } from "../../rpc/contracts";
 import { PluginsPage } from "./PluginsPage";
@@ -96,7 +96,7 @@ afterEach(() => {
 test("adds, disables, and unregisters a local Plugin", async () => {
   const runtime = new PluginRuntime();
   vi.spyOn(window, "confirm").mockReturnValue(true);
-  render(<PluginsPage runtime={runtime as unknown as DesktopRuntime} />);
+  render(<PluginsPage runtime={runtime as unknown as ClientRuntime} />);
 
   expect(screen.getByText(/MCP servers join the shared tool runtime/)).toBeTruthy();
   await screen.findByText(/No Plugins registered/);
@@ -120,7 +120,7 @@ test("adds, disables, and unregisters a local Plugin", async () => {
 
 test("reloads the registry after plugins.changed", async () => {
   const runtime = new PluginRuntime();
-  render(<PluginsPage runtime={runtime as unknown as DesktopRuntime} />);
+  render(<PluginsPage runtime={runtime as unknown as ClientRuntime} />);
   await screen.findByText(/No Plugins registered/);
   runtime.catalog = { ...runtime.catalog, plugins: [plugin] };
 

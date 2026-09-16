@@ -8,6 +8,7 @@ import pytest
 from core.providers.anthropic import AnthropicProvider
 from core.providers.openai_compat import OpenAICompatProvider
 from core.providers.openai_responses import parse_response_output
+from core.providers.protocol_config import ProviderCompat
 from core.providers.reasoning import (
     ANTHROPIC_THINKING_BLOCKS,
     OPENAI_RESPONSE_REASONING_ITEMS,
@@ -23,8 +24,12 @@ def _openai_compatible_provider(
     spec = find_by_name(provider_name)
     assert spec is not None
     provider = object.__new__(OpenAICompatProvider)
+    provider.api_key = None
+    provider.extra_headers = {}
     provider.default_model = default_model
     provider._spec = spec
+    provider.protocol = "auto"
+    provider.compat = ProviderCompat()
     provider._effective_base = spec.default_api_base or None
     provider._responses_failures = {}
     provider._responses_tripped_at = {}
@@ -44,8 +49,10 @@ def _anthropic_provider() -> AnthropicProvider:
     # the default development environment, so these tests do not construct a
     # network client.
     provider = object.__new__(AnthropicProvider)
+    provider.api_key = None
     provider.default_model = "claude-opus-4-6"
     provider.extra_headers = {}
+    provider.compat = ProviderCompat()
     return provider
 
 
@@ -258,7 +265,7 @@ def test_anthropic_none_disables_thinking() -> None:
     )
 
     assert "thinking" not in kwargs
-    assert kwargs["temperature"] == 0.1
+    assert kwargs["extra_body"]["temperature"] == 0.1
 
 
 def test_anthropic_summary_is_safe_while_signed_block_is_replayable() -> None:
@@ -327,7 +334,7 @@ async def test_anthropic_reasoning_events_keep_stream_alive_without_becoming_tex
                 event = next(self._events)
             except StopIteration as exc:
                 raise StopAsyncIteration from exc
-            await asyncio.sleep(0.006)
+            await asyncio.sleep(0.04)
             return event
 
         async def get_final_message(self):
@@ -344,7 +351,9 @@ async def test_anthropic_reasoning_events_keep_stream_alive_without_becoming_tex
     provider._client = SimpleNamespace(messages=FakeMessages())
     provider._build_kwargs = lambda *args, **kwargs: {}
     provider._emit_observability = lambda **kwargs: None
-    monkeypatch.setenv("DEEPCODE_STREAM_IDLE_TIMEOUT_S", "0.01")
+    # Three events span 120 ms, above the 80 ms idle limit, while each
+    # 40 ms gap leaves real scheduler margin on loaded/containerized hosts.
+    monkeypatch.setenv("DEEPCODE_STREAM_IDLE_TIMEOUT_S", "0.08")
 
     async def on_content(delta: str) -> None:
         visible_deltas.append(delta)

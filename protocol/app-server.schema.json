@@ -355,6 +355,7 @@
       "enum": [
         "cli",
         "desktop",
+        "web",
         "headless",
         "automation",
         "app_server",
@@ -474,6 +475,31 @@
         "configRevision": {
           "type": "string",
           "minLength": 1
+        },
+        "protocol": {
+          "$ref": "#/$defs/ProviderProtocol"
+        },
+        "providerRevision": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "inputModalities": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "text",
+              "image"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true
+        },
+        "toolCalling": {
+          "type": "boolean"
+        },
+        "reasoningSupported": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -1150,6 +1176,32 @@
             },
             "maxMessageBytes": {
               "type": "integer"
+            },
+            "requestRetry": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "default": {
+                  "const": "never"
+                },
+                "readMethods": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "keyedMethods": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "default",
+                "readMethods",
+                "keyedMethods"
+              ]
             }
           },
           "required": [
@@ -1157,6 +1209,36 @@
             "eventReplay",
             "liveEvents",
             "maxMessageBytes"
+          ]
+        },
+        "serviceInfo": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "frontendBuildId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "instanceId": {
+              "type": "string"
+            },
+            "schemaVersion": {
+              "type": "integer"
+            },
+            "transport": {
+              "const": "websocket"
+            },
+            "shutdownScope": {
+              "const": "connection"
+            }
+          },
+          "required": [
+            "instanceId",
+            "schemaVersion",
+            "transport",
+            "shutdownScope"
           ]
         }
       },
@@ -1409,7 +1491,8 @@
             "credential_store",
             "legacy_config",
             "not_required",
-            "missing"
+            "missing",
+            "oauth"
           ]
         },
         "local": {
@@ -1420,6 +1503,26 @@
         },
         "explicit": {
           "type": "boolean"
+        },
+        "protocol": {
+          "$ref": "#/$defs/ProviderProtocol"
+        },
+        "auth": {
+          "type": "string",
+          "enum": [
+            "api_key",
+            "none",
+            "oauth"
+          ]
+        },
+        "compat": {
+          "$ref": "#/$defs/ProviderCompat"
+        },
+        "accountId": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -1554,82 +1657,7 @@
           "minLength": 1
         },
         "connection": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "id": {
-              "type": "string",
-              "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
-            },
-            "label": {
-              "type": "string"
-            },
-            "template": {
-              "type": "string"
-            },
-            "adapter": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "enum": [
-                "openai_compat",
-                "anthropic",
-                null
-              ]
-            },
-            "apiBase": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "apiKeyEnv": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "apiKey": {
-              "type": "string"
-            },
-            "clearApiKey": {
-              "type": "boolean"
-            },
-            "extraHeaders": {
-              "$ref": "#/$defs/JsonObject"
-            },
-            "modelCatalog": {
-              "type": "string",
-              "enum": [
-                "auto",
-                "openrouter",
-                "openai",
-                "anthropic",
-                "manual"
-              ]
-            },
-            "manualModels": {
-              "type": "array",
-              "items": {
-                "oneOf": [
-                  {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  {
-                    "$ref": "#/$defs/ManualModelEntry"
-                  }
-                ]
-              }
-            },
-            "enabled": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "id"
-          ]
+          "$ref": "#/$defs/ConnectionMutation"
         }
       },
       "required": [
@@ -1697,6 +1725,29 @@
               "type": "null"
             }
           ]
+        },
+        "compat": {
+          "$ref": "#/$defs/ProviderCompat"
+        },
+        "inputModalities": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "enum": [
+              "text",
+              "image"
+            ]
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "toolCalling": {
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       },
       "required": [
@@ -1724,6 +1775,9 @@
         "projectId": {
           "type": "string",
           "pattern": "^proj_"
+        },
+        "connection": {
+          "$ref": "#/$defs/ConnectionMutation"
         }
       }
     },
@@ -1764,6 +1818,16 @@
         "model": {
           "type": "string",
           "minLength": 1
+        },
+        "connection": {
+          "$ref": "#/$defs/ConnectionMutation"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "quick",
+            "agent"
+          ]
         }
       },
       "required": [
@@ -1859,6 +1923,27 @@
               "type": "null"
             }
           ]
+        },
+        "inputModalities": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "enum": [
+              "text",
+              "image"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true
+        },
+        "toolCalling": {
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       },
       "required": [
@@ -1920,7 +2005,12 @@
           "enum": [
             "credential",
             "catalog",
-            "model"
+            "model",
+            "stream",
+            "tool",
+            "continuation",
+            "reasoning",
+            "image"
           ]
         },
         "status": {
@@ -2001,7 +2091,7 @@
         "stages": {
           "type": "array",
           "minItems": 3,
-          "maxItems": 3,
+          "maxItems": 7,
           "items": {
             "$ref": "#/$defs/ProviderVerificationStage"
           }
@@ -2210,41 +2300,82 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "projectId": {"type": "string", "pattern": "^proj_"},
-        "name": {"type": "string", "minLength": 1}
+        "projectId": {
+          "type": "string",
+          "pattern": "^proj_"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
       },
-      "required": ["name"]
+      "required": [
+        "name"
+      ]
     },
     "McpPresetAddParams": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "projectId": {"type": "string", "pattern": "^proj_"},
-        "presetId": {"type": "string", "minLength": 1},
-        "enabled": {"type": "boolean"}
+        "projectId": {
+          "type": "string",
+          "pattern": "^proj_"
+        },
+        "presetId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "enabled": {
+          "type": "boolean"
+        }
       },
-      "required": ["presetId"]
+      "required": [
+        "presetId"
+      ]
     },
     "McpSetEnabledParams": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "projectId": {"type": "string", "pattern": "^proj_"},
-        "name": {"type": "string", "minLength": 1},
-        "enabled": {"type": "boolean"}
+        "projectId": {
+          "type": "string",
+          "pattern": "^proj_"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "enabled": {
+          "type": "boolean"
+        }
       },
-      "required": ["name", "enabled"]
+      "required": [
+        "name",
+        "enabled"
+      ]
     },
     "McpOAuthStartParams": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "projectId": {"type": "string", "pattern": "^proj_"},
-        "name": {"type": "string", "minLength": 1},
-        "openBrowser": {"type": "boolean"},
-        "resetCredentials": {"type": "boolean"}
+        "projectId": {
+          "type": "string",
+          "pattern": "^proj_"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "openBrowser": {
+          "type": "boolean"
+        },
+        "resetCredentials": {
+          "type": "boolean"
+        }
       },
-      "required": ["name"]
+      "required": [
+        "name"
+      ]
     },
     "SkillInfo": {
       "type": "object",
@@ -2291,14 +2422,23 @@
         },
         "originKind": {
           "type": "string",
-          "enum": ["local", "bundled", "provider"]
+          "enum": [
+            "local",
+            "bundled",
+            "provider"
+          ]
         },
         "originLabel": {
           "type": "string"
         },
         "providerKind": {
           "type": "string",
-          "enum": ["local", "executor", "orchestrator", "custom"]
+          "enum": [
+            "local",
+            "executor",
+            "orchestrator",
+            "custom"
+          ]
         },
         "providerId": {
           "type": "string"
@@ -2342,22 +2482,40 @@
           ]
         },
         "displayName": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "shortDescription": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "iconSmall": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "iconLarge": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "brandColor": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "defaultPrompt": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "allowImplicitInvocation": {
           "type": "boolean"
@@ -2449,14 +2607,23 @@
         },
         "originKind": {
           "type": "string",
-          "enum": ["local", "bundled", "provider"]
+          "enum": [
+            "local",
+            "bundled",
+            "provider"
+          ]
         },
         "originLabel": {
           "type": "string"
         },
         "providerKind": {
           "type": "string",
-          "enum": ["local", "executor", "orchestrator", "custom"]
+          "enum": [
+            "local",
+            "executor",
+            "orchestrator",
+            "custom"
+          ]
         },
         "providerId": {
           "type": "string"
@@ -2500,22 +2667,40 @@
           ]
         },
         "displayName": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "shortDescription": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "iconSmall": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "iconLarge": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "brandColor": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "defaultPrompt": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "allowImplicitInvocation": {
           "type": "boolean"
@@ -2591,7 +2776,10 @@
           "pattern": "^sha256:"
         },
         "authoringSkillId": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "pattern": "^sk_[0-9a-f]{24}$"
         }
       },
@@ -2611,7 +2799,9 @@
           "pattern": "^plg_[0-9a-f]{24}$"
         }
       },
-      "required": ["pluginId"]
+      "required": [
+        "pluginId"
+      ]
     },
     "PluginAddParams": {
       "type": "object",
@@ -2622,7 +2812,9 @@
           "minLength": 1
         }
       },
-      "required": ["path"]
+      "required": [
+        "path"
+      ]
     },
     "PluginSetEnabledParams": {
       "type": "object",
@@ -2636,25 +2828,54 @@
           "type": "boolean"
         }
       },
-      "required": ["pluginId", "enabled"]
+      "required": [
+        "pluginId",
+        "enabled"
+      ]
     },
     "PluginDiagnostic": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "code": {"type": "string", "minLength": 1},
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
         "severity": {
           "type": "string",
-          "enum": ["warning", "error"]
+          "enum": [
+            "warning",
+            "error"
+          ]
         },
-        "message": {"type": "string"},
+        "message": {
+          "type": "string"
+        },
         "component": {
-          "type": ["string", "null"],
-          "enum": ["skills", "mcp", null]
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "skills",
+            "mcp",
+            null
+          ]
         },
-        "resource": {"type": ["string", "null"]}
+        "resource": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       },
-      "required": ["code", "severity", "message", "component", "resource"]
+      "required": [
+        "code",
+        "severity",
+        "message",
+        "component",
+        "resource"
+      ]
     },
     "PluginComponent": {
       "type": "object",
@@ -2662,57 +2883,121 @@
       "properties": {
         "kind": {
           "type": "string",
-          "enum": ["skills", "mcp"]
+          "enum": [
+            "skills",
+            "mcp"
+          ]
         },
         "status": {
           "type": "string",
-          "enum": ["ready", "unsupported", "invalid"]
+          "enum": [
+            "ready",
+            "unsupported",
+            "invalid"
+          ]
         },
-        "resource": {"type": ["string", "null"]},
-        "itemCount": {"type": ["integer", "null"], "minimum": 0},
+        "resource": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "itemCount": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
         "diagnostics": {
           "type": "array",
-          "items": {"$ref": "#/$defs/PluginDiagnostic"}
+          "items": {
+            "$ref": "#/$defs/PluginDiagnostic"
+          }
         }
       },
-      "required": ["kind", "status", "resource", "itemCount", "diagnostics"]
+      "required": [
+        "kind",
+        "status",
+        "resource",
+        "itemCount",
+        "diagnostics"
+      ]
     },
     "PluginInfo": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "id": {"type": "string"},
-        "name": {"type": "string"},
-        "version": {"type": ["string", "null"]},
-        "description": {"type": "string"},
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
         "status": {
           "type": "string",
-          "enum": ["active", "disabled", "invalid"]
+          "enum": [
+            "active",
+            "disabled",
+            "invalid"
+          ]
         },
-        "enabled": {"type": "boolean"},
-        "source": {"const": "linked-directory"},
-        "path": {"type": "string"},
+        "enabled": {
+          "type": "boolean"
+        },
+        "source": {
+          "const": "linked-directory"
+        },
+        "path": {
+          "type": "string"
+        },
         "schema": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "enum": [
             "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
             null
           ]
         },
-        "manifestPath": {"type": "string"},
+        "manifestPath": {
+          "type": "string"
+        },
         "manifestRevision": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "pattern": "^sha256:"
         },
         "components": {
           "type": "array",
-          "items": {"$ref": "#/$defs/PluginComponent"}
+          "items": {
+            "$ref": "#/$defs/PluginComponent"
+          }
         },
         "diagnostics": {
           "type": "array",
-          "items": {"$ref": "#/$defs/PluginDiagnostic"}
+          "items": {
+            "$ref": "#/$defs/PluginDiagnostic"
+          }
         },
-        "error": {"type": ["string", "null"]}
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       },
       "required": [
         "id",
@@ -2737,18 +3022,26 @@
       "properties": {
         "plugins": {
           "type": "array",
-          "items": {"$ref": "#/$defs/PluginInfo"}
+          "items": {
+            "$ref": "#/$defs/PluginInfo"
+          }
         },
         "diagnostics": {
           "type": "array",
-          "items": {"$ref": "#/$defs/PluginDiagnostic"}
+          "items": {
+            "$ref": "#/$defs/PluginDiagnostic"
+          }
         },
         "revision": {
           "type": "string",
           "pattern": "^sha256:"
         }
       },
-      "required": ["plugins", "diagnostics", "revision"]
+      "required": [
+        "plugins",
+        "diagnostics",
+        "revision"
+      ]
     },
     "HookInfo": {
       "type": "object",
@@ -2857,8 +3150,14 @@
           ]
         },
         "auth": {
-          "type": ["string", "null"],
-          "enum": ["oauth", null]
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "oauth",
+            null
+          ]
         },
         "enabled": {
           "type": "boolean"
@@ -2918,11 +3217,15 @@
         },
         "requiredEnvKeys": {
           "type": "array",
-          "items": {"type": "string"}
+          "items": {
+            "type": "string"
+          }
         },
         "missingEnvKeys": {
           "type": "array",
-          "items": {"type": "string"}
+          "items": {
+            "type": "string"
+          }
         },
         "credentialEnvKeys": {
           "type": "array",
@@ -2959,16 +3262,38 @@
         },
         "authState": {
           "type": "string",
-          "enum": ["not_required", "login_required", "authorizing", "authenticated"]
+          "enum": [
+            "not_required",
+            "login_required",
+            "authorizing",
+            "authenticated"
+          ]
         },
         "runtimeState": {
           "type": "string",
-          "enum": ["stopped", "connecting", "tested", "connected", "failed"]
+          "enum": [
+            "stopped",
+            "connecting",
+            "tested",
+            "connected",
+            "failed"
+          ]
         },
-        "runtimeMessage": {"type": "string"},
-        "toolCount": {"type": "integer", "minimum": 0},
-        "resourceCount": {"type": "integer", "minimum": 0},
-        "promptCount": {"type": "integer", "minimum": 0}
+        "runtimeMessage": {
+          "type": "string"
+        },
+        "toolCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "resourceCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "promptCount": {
+          "type": "integer",
+          "minimum": 0
+        }
       },
       "required": [
         "id",
@@ -3036,75 +3361,205 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "id": {"type": "string"},
-        "displayName": {"type": "string"},
-        "category": {"type": "string"},
-        "description": {"type": "string"},
-        "docsUrl": {"type": "string"},
-        "transport": {"type": "string", "enum": ["stdio", "sse", "streamableHttp"]},
-        "auth": {"type": ["string", "null"], "enum": ["oauth", null]},
-        "requires": {"type": "string"},
-        "note": {"type": "string"},
-        "requiredEnvironment": {"type": "array", "items": {"type": "string"}},
-        "missingEnvironment": {"type": "array", "items": {"type": "string"}},
-        "configured": {"type": "boolean"}
+        "id": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "docsUrl": {
+          "type": "string"
+        },
+        "transport": {
+          "type": "string",
+          "enum": [
+            "stdio",
+            "sse",
+            "streamableHttp"
+          ]
+        },
+        "auth": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "oauth",
+            null
+          ]
+        },
+        "requires": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        },
+        "requiredEnvironment": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "missingEnvironment": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "configured": {
+          "type": "boolean"
+        }
       },
       "required": [
-        "id", "displayName", "category", "description", "docsUrl",
-        "transport", "auth", "requires", "note", "requiredEnvironment",
-        "missingEnvironment", "configured"
+        "id",
+        "displayName",
+        "category",
+        "description",
+        "docsUrl",
+        "transport",
+        "auth",
+        "requires",
+        "note",
+        "requiredEnvironment",
+        "missingEnvironment",
+        "configured"
       ]
     },
     "McpPresetInventory": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "presets": {"type": "array", "items": {"$ref": "#/$defs/McpPresetInfo"}},
-        "source": {"type": "string"},
-        "sourceRevision": {"type": "string"}
+        "presets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/McpPresetInfo"
+          }
+        },
+        "source": {
+          "type": "string"
+        },
+        "sourceRevision": {
+          "type": "string"
+        }
       },
-      "required": ["presets", "source", "sourceRevision"]
+      "required": [
+        "presets",
+        "source",
+        "sourceRevision"
+      ]
     },
     "McpProbeResult": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "serverId": {"type": "string"},
-        "name": {"type": "string"},
-        "ok": {"type": "boolean"},
-        "transport": {"type": "string", "enum": ["stdio", "sse", "streamableHttp"]},
-        "toolCount": {"type": "integer", "minimum": 0},
-        "resourceCount": {"type": "integer", "minimum": 0},
-        "promptCount": {"type": "integer", "minimum": 0},
-        "elapsedSeconds": {"type": "number", "minimum": 0},
-        "error": {"type": ["string", "null"]}
+        "serverId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "transport": {
+          "type": "string",
+          "enum": [
+            "stdio",
+            "sse",
+            "streamableHttp"
+          ]
+        },
+        "toolCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "resourceCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "promptCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "elapsedSeconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       },
       "required": [
-        "serverId", "name", "ok", "transport", "toolCount", "resourceCount",
-        "promptCount", "elapsedSeconds", "error"
+        "serverId",
+        "name",
+        "ok",
+        "transport",
+        "toolCount",
+        "resourceCount",
+        "promptCount",
+        "elapsedSeconds",
+        "error"
       ]
     },
     "McpOAuthFlow": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "flowId": {"type": "string"},
-        "serverId": {"type": "string"},
-        "name": {"type": "string"},
+        "flowId": {
+          "type": "string"
+        },
+        "serverId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
         "status": {
           "type": "string",
           "enum": [
-            "starting", "authorization_required", "connecting", "authenticated",
-            "failed", "cancelled", "logged_out"
+            "starting",
+            "authorization_required",
+            "connecting",
+            "authenticated",
+            "failed",
+            "cancelled",
+            "logged_out"
           ]
         },
-        "authorizationUrl": {"type": ["string", "null"]},
-        "expiresInSeconds": {"type": "integer", "minimum": 0},
-        "error": {"type": ["string", "null"]}
+        "authorizationUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expiresInSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       },
       "required": [
-        "flowId", "serverId", "name", "status", "authorizationUrl",
-        "expiresInSeconds", "error"
+        "flowId",
+        "serverId",
+        "name",
+        "status",
+        "authorizationUrl",
+        "expiresInSeconds",
+        "error"
       ]
     },
     "DiagnosticsCheck": {
@@ -3672,7 +4127,10 @@
         },
         "contextWindow": {
           "description": "Optional Session cap for future Turns. Omit or pass null to follow the model's published window.",
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 4096,
           "maximum": 10000000
         },
@@ -4150,6 +4608,10 @@
               "type": "null"
             }
           ]
+        },
+        "executionSettled": {
+          "type": "boolean",
+          "description": "Whether the terminal Goal deciding Turn has finished and its usage is durably accounted."
         }
       },
       "required": [
@@ -4237,6 +4699,9 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "deliveryState": {
+          "const": "accepted"
+        },
         "messageId": {
           "type": "string",
           "minLength": 1
@@ -4259,6 +4724,42 @@
         "delivery",
         "duplicate",
         "turn"
+      ]
+    },
+    "TurnInputReadParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "threadId",
+        "messageId"
+      ]
+    },
+    "TurnInputReadResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "item": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Item"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "item"
       ]
     },
     "TurnReadParams": {
@@ -4488,6 +4989,10 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "through": {
+          "type": "integer",
+          "minimum": 0
+        },
         "threadId": {
           "type": "string",
           "minLength": 1,
@@ -4985,6 +5490,149 @@
         "dirty"
       ]
     },
+    "TerminalReadParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "terminalId": {
+          "type": "string",
+          "pattern": "^term_"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 65536
+        },
+        "through": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "threadId",
+        "terminalId"
+      ]
+    },
+    "TerminalReadResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "terminalId": {
+          "type": "string",
+          "pattern": "^term_"
+        },
+        "data": {
+          "type": "string"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "nextOffset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "availableFrom": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "headOffset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "hasMore": {
+          "type": "boolean"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "exited": {
+          "type": "boolean"
+        },
+        "exitCode": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "threadId",
+        "terminalId",
+        "data",
+        "offset",
+        "nextOffset",
+        "availableFrom",
+        "headOffset",
+        "hasMore",
+        "truncated",
+        "exited",
+        "exitCode"
+      ]
+    },
+    "TerminalListParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        }
+      },
+      "required": [
+        "threadId"
+      ]
+    },
+    "TerminalListResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "terminals": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "terminal": {
+                "$ref": "#/$defs/TerminalInfo"
+              },
+              "exited": {
+                "type": "boolean"
+              },
+              "exitCode": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "terminal",
+              "exited",
+              "exitCode"
+            ]
+          }
+        }
+      },
+      "required": [
+        "terminals"
+      ]
+    },
     "TerminalCreateParams": {
       "type": "object",
       "additionalProperties": false,
@@ -5180,7 +5828,11 @@
         },
         "trust": {
           "type": "string",
-          "enum": ["system", "user", "project"]
+          "enum": [
+            "system",
+            "user",
+            "project"
+          ]
         },
         "name": {
           "type": "string"
@@ -5189,13 +5841,19 @@
           "type": "string"
         },
         "tools": {
-          "type": ["array", "null"],
+          "type": [
+            "array",
+            "null"
+          ],
           "items": {
             "type": "string"
           }
         },
         "broken": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -5253,7 +5911,10 @@
       "additionalProperties": false,
       "properties": {
         "agentPreset": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -5269,7 +5930,10 @@
           "minLength": 1
         },
         "agentPreset": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -5282,7 +5946,10 @@
       "additionalProperties": false,
       "properties": {
         "agentPreset": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -5471,10 +6138,10 @@
           "$ref": "#/$defs/GoalIdentityParams"
         },
         "thread/goal/resume": {
-          "$ref": "#/$defs/GoalIdentityParams"
+          "$ref": "#/$defs/GoalContinuationParams"
         },
         "thread/goal/continue": {
-          "$ref": "#/$defs/GoalIdentityParams"
+          "$ref": "#/$defs/GoalContinuationParams"
         },
         "thread/goal/clear": {
           "$ref": "#/$defs/GoalIdentityParams"
@@ -5551,6 +6218,12 @@
         "git/worktree/remove": {
           "$ref": "#/$defs/WorktreeRemoveParams"
         },
+        "terminal/list": {
+          "$ref": "#/$defs/TerminalListParams"
+        },
+        "terminal/read": {
+          "$ref": "#/$defs/TerminalReadParams"
+        },
         "terminal/create": {
           "$ref": "#/$defs/TerminalCreateParams"
         },
@@ -5571,6 +6244,36 @@
         },
         "thread/resume": {
           "$ref": "#/$defs/ThreadResumeParams"
+        },
+        "turn/input/read": {
+          "$ref": "#/$defs/TurnInputReadParams"
+        },
+        "thread/execution/read": {
+          "$ref": "#/$defs/ThreadReadParams"
+        },
+        "thread/context/clear": {
+          "$ref": "#/$defs/ThreadReadParams"
+        },
+        "thread/context/compact": {
+          "$ref": "#/$defs/ThreadReadParams"
+        },
+        "turn/list": {
+          "$ref": "#/$defs/TurnListParams"
+        },
+        "model/reasoning": {
+          "$ref": "#/$defs/ModelReasoningParams"
+        },
+        "provider/login/start": {
+          "$ref": "#/$defs/ProviderLoginStartParams"
+        },
+        "provider/login/poll": {
+          "$ref": "#/$defs/ProviderLoginFlowParams"
+        },
+        "provider/login/cancel": {
+          "$ref": "#/$defs/ProviderLoginFlowParams"
+        },
+        "provider/logout": {
+          "$ref": "#/$defs/ProviderLogoutParams"
         }
       },
       "required": [
@@ -5661,12 +6364,24 @@
         "git/discard",
         "git/worktree/create",
         "git/worktree/remove",
+        "terminal/list",
+        "terminal/read",
         "terminal/create",
         "terminal/write",
         "terminal/resize",
         "terminal/close",
         "test/discover",
-        "test/run"
+        "test/run",
+        "turn/input/read",
+        "thread/execution/read",
+        "thread/context/clear",
+        "thread/context/compact",
+        "turn/list",
+        "model/reasoning",
+        "provider/login/start",
+        "provider/login/poll",
+        "provider/login/cancel",
+        "provider/logout"
       ]
     },
     "MethodResults": {
@@ -5860,10 +6575,17 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "removed": {"type": "boolean"},
-            "plugin": {"$ref": "#/$defs/PluginInfo"}
+            "removed": {
+              "type": "boolean"
+            },
+            "plugin": {
+              "$ref": "#/$defs/PluginInfo"
+            }
           },
-          "required": ["removed", "plugin"]
+          "required": [
+            "removed",
+            "plugin"
+          ]
         },
         "hooks/list": {
           "type": "object",
@@ -5918,14 +6640,26 @@
         "mcp/oauth/cancel": {
           "type": "object",
           "additionalProperties": false,
-          "properties": {"cancelled": {"type": "boolean"}},
-          "required": ["cancelled"]
+          "properties": {
+            "cancelled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "cancelled"
+          ]
         },
         "mcp/oauth/logout": {
           "type": "object",
           "additionalProperties": false,
-          "properties": {"removed": {"type": "boolean"}},
-          "required": ["removed"]
+          "properties": {
+            "removed": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "removed"
+          ]
         },
         "diagnostics/read": {
           "type": "object",
@@ -6359,6 +7093,10 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
+            "headSequence": {
+              "type": "integer",
+              "minimum": 0
+            },
             "events": {
               "type": "array",
               "items": {
@@ -6473,6 +7211,12 @@
         },
         "git/worktree/remove": {
           "$ref": "#/$defs/WorktreeResult"
+        },
+        "terminal/list": {
+          "$ref": "#/$defs/TerminalListResult"
+        },
+        "terminal/read": {
+          "$ref": "#/$defs/TerminalReadResult"
         },
         "terminal/create": {
           "type": "object",
@@ -6593,6 +7337,36 @@
           "required": [
             "thread"
           ]
+        },
+        "turn/input/read": {
+          "$ref": "#/$defs/TurnInputReadResult"
+        },
+        "thread/execution/read": {
+          "$ref": "#/$defs/ThreadExecutionReadResult"
+        },
+        "thread/context/clear": {
+          "$ref": "#/$defs/EmptyParams"
+        },
+        "thread/context/compact": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "turn/list": {
+          "$ref": "#/$defs/TurnListResult"
+        },
+        "model/reasoning": {
+          "$ref": "#/$defs/ModelReasoningResult"
+        },
+        "provider/login/start": {
+          "$ref": "#/$defs/ProviderLoginFlow"
+        },
+        "provider/login/poll": {
+          "$ref": "#/$defs/ProviderLoginFlow"
+        },
+        "provider/login/cancel": {
+          "$ref": "#/$defs/ProviderLoginFlow"
+        },
+        "provider/logout": {
+          "$ref": "#/$defs/ProviderLogoutResult"
         }
       },
       "required": [
@@ -6683,12 +7457,24 @@
         "git/discard",
         "git/worktree/create",
         "git/worktree/remove",
+        "terminal/list",
+        "terminal/read",
         "terminal/create",
         "terminal/write",
         "terminal/resize",
         "terminal/close",
         "test/discover",
-        "test/run"
+        "test/run",
+        "turn/input/read",
+        "thread/execution/read",
+        "thread/context/clear",
+        "thread/context/compact",
+        "turn/list",
+        "model/reasoning",
+        "provider/login/start",
+        "provider/login/poll",
+        "provider/login/cancel",
+        "provider/logout"
       ]
     },
     "Notifications": {
@@ -6753,6 +7539,14 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "nextOffset": {
+              "type": "integer",
+              "minimum": 0
+            },
             "terminalId": {
               "type": "string",
               "pattern": "^term_"
@@ -6776,6 +7570,10 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
+            "nextOffset": {
+              "type": "integer",
+              "minimum": 0
+            },
             "terminalId": {
               "type": "string",
               "pattern": "^term_"
@@ -6900,6 +7698,479 @@
       },
       "required": [
         "sessionId"
+      ]
+    },
+    "ThreadExecutionReadResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "executionProfile": {
+          "$ref": "#/$defs/ExecutionProfile"
+        },
+        "securityProfile": {
+          "$ref": "#/$defs/ExecutionSecurityProfile"
+        }
+      },
+      "required": [
+        "executionProfile",
+        "securityProfile"
+      ]
+    },
+    "TurnListParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "state": {
+          "enum": [
+            "all",
+            "active",
+            "executing"
+          ]
+        }
+      },
+      "required": [
+        "threadId"
+      ]
+    },
+    "TurnListResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "turns": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Turn"
+          }
+        },
+        "hasMore": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "turns",
+        "hasMore"
+      ]
+    },
+    "ModelReasoningParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^proj_"
+        },
+        "connectionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "connectionId",
+        "model"
+      ]
+    },
+    "ModelReasoningResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reasoning": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReasoningCapabilities"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "reasoning"
+      ]
+    },
+    "ProviderProtocol": {
+      "type": "string",
+      "enum": [
+        "auto",
+        "openai_chat",
+        "openai_responses",
+        "anthropic_messages"
+      ]
+    },
+    "ProviderCompat": {
+      "additionalProperties": false,
+      "properties": {
+        "tokenLimitField": {
+          "anyOf": [
+            {
+              "enum": [
+                "max_tokens",
+                "max_completion_tokens"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tokenlimitfield"
+        },
+        "temperature": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Temperature"
+        },
+        "systemRole": {
+          "anyOf": [
+            {
+              "enum": [
+                "system",
+                "developer",
+                "user"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Systemrole"
+        },
+        "reasoningField": {
+          "anyOf": [
+            {
+              "enum": [
+                "reasoning_effort",
+                "reasoning",
+                "omit"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reasoningfield"
+        },
+        "reasoningContent": {
+          "anyOf": [
+            {
+              "enum": [
+                "preserve",
+                "empty",
+                "omit"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reasoningcontent"
+        },
+        "toolMessageName": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Toolmessagename"
+        },
+        "parallelToolCalls": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Paralleltoolcalls"
+        }
+      },
+      "title": "ProviderCompat",
+      "type": "object"
+    },
+    "ConnectionMutation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+        },
+        "label": {
+          "type": "string"
+        },
+        "template": {
+          "type": "string"
+        },
+        "adapter": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "openai_compat",
+            "anthropic",
+            null
+          ]
+        },
+        "apiBase": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "apiKeyEnv": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "apiKey": {
+          "type": "string"
+        },
+        "clearApiKey": {
+          "type": "boolean"
+        },
+        "extraHeaders": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "modelCatalog": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "openrouter",
+            "openai",
+            "anthropic",
+            "manual"
+          ]
+        },
+        "manualModels": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "$ref": "#/$defs/ManualModelEntry"
+              }
+            ]
+          }
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "protocol": {
+          "$ref": "#/$defs/ProviderProtocol"
+        },
+        "auth": {
+          "type": "string",
+          "enum": [
+            "api_key",
+            "none",
+            "oauth"
+          ]
+        },
+        "compat": {
+          "$ref": "#/$defs/ProviderCompat"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "ProviderLoginStartParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "connectionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "openBrowser": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "connectionId"
+      ]
+    },
+    "ProviderLoginFlowParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "flowId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "flowId"
+      ]
+    },
+    "ProviderLogoutParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "connectionId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "connectionId"
+      ]
+    },
+    "ProviderLoginFlow": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "flowId": {
+          "type": "string"
+        },
+        "connectionId": {
+          "type": "string"
+        },
+        "provider": {
+          "const": "openrouter"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "starting",
+            "pending",
+            "exchanging",
+            "authenticated",
+            "cancelled",
+            "expired",
+            "failed"
+          ]
+        },
+        "authorizationUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expiresInSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "accountId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "refreshSupported": {
+          "const": false
+        }
+      },
+      "required": [
+        "flowId",
+        "connectionId",
+        "provider",
+        "status",
+        "authorizationUrl",
+        "expiresInSeconds",
+        "error",
+        "accountId",
+        "refreshSupported"
+      ]
+    },
+    "ProviderLogoutResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "disconnected": {
+          "type": "boolean"
+        },
+        "remoteRevoked": {
+          "const": false
+        },
+        "manageUrl": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "disconnected",
+        "remoteRevoked",
+        "manageUrl"
+      ]
+    },
+    "GoalContinuationParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "expectedGoalId": {
+          "type": "string",
+          "pattern": "^goal_"
+        },
+        "connectionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reasoningEffort": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "threadId",
+        "expectedGoalId"
       ]
     }
   }

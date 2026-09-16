@@ -250,6 +250,7 @@ async def consume_sdk_stream(
     tool_calls: list[ToolCallRequest] = []
     tool_call_buffers: dict[str, dict[str, Any]] = {}
     finish_reason = "stop"
+    terminal_seen = False
     usage: dict[str, int] = {}
     reasoning_content: str | None = None
     reasoning_items: list[dict[str, Any]] = []
@@ -316,7 +317,8 @@ async def consume_sdk_stream(
                         arguments=args,
                     )
                 )
-        elif event_type == "response.completed":
+        elif event_type in {"response.completed", "response.incomplete"}:
+            terminal_seen = True
             resp = getattr(event, "response", None)
             status = getattr(resp, "status", None) if resp else None
             finish_reason = map_finish_reason(status)
@@ -351,6 +353,8 @@ async def consume_sdk_stream(
             )
             raise RuntimeError(f"Response failed: {str(detail)[:500]}")
 
+    if not terminal_seen:
+        raise RuntimeError("Responses stream ended before its terminal event")
     provider_state = (
         {OPENAI_RESPONSE_REASONING_ITEMS: reasoning_items} if reasoning_items else None
     )

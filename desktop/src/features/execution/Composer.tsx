@@ -29,7 +29,7 @@ import {
   turnExecutionAccessLabel,
   turnExecutionAccessState,
 } from "../../app/accessPreset";
-import type { DesktopRuntime } from "../../rpc/contracts";
+import type { ClientRuntime } from "../../rpc/contracts";
 import type { TranscriptMode } from "../thread/transcriptMode";
 import { PresetPicker } from "../presets/PresetPicker";
 import { usePresetCatalog } from "../presets/usePresetCatalog";
@@ -53,7 +53,7 @@ interface ComposerProps {
   conversationStarted: boolean;
   executingTurn: Turn | null;
   queuedTurns: readonly Turn[];
-  runtime: DesktopRuntime;
+  runtime: ClientRuntime;
   project: Project | null;
   thread: Thread | null;
   settings: SettingsSnapshot | null;
@@ -281,15 +281,19 @@ export function Composer({
 
   const pickContextFiles = async () => {
     setContextError(null);
-    const selected = await onPickContextFiles();
-    const workspace = thread?.workspacePath;
-    const accepted = workspace
-      ? selected.filter((path) => isInsideWorkspace(path, workspace))
-      : [];
-    if (accepted.length !== selected.length) {
-      setContextError("Only files inside this Session workspace can be attached.");
+    try {
+      const selected = await onPickContextFiles();
+      const workspace = thread?.workspacePath;
+      const accepted = workspace
+        ? selected.filter((path) => isInsideWorkspace(path, workspace))
+        : [];
+      if (accepted.length !== selected.length) {
+        setContextError("Only files inside this Session workspace can be attached.");
+      }
+      addAttachments(accepted);
+    } catch (error) {
+      setContextError(error instanceof Error ? error.message : String(error));
     }
-    addAttachments(accepted);
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {

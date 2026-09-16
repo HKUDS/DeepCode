@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 
+from cli.thread_client import HeadlessTurnOptions, HeadlessTurnResult
 from cli.project_trust import (
     open_workspace_project,
     require_project_trusted,
@@ -17,33 +17,9 @@ from core.application.application import DeepCodeApplication
 from core.domain.approval import Approval, ApprovalStatus
 from core.domain.common import new_id
 from core.domain.execution_profile import ExecutionSelection
-from core.domain.execution_security import ExecutionAccessPreset
 from core.domain.message_provenance import ClientSurface
-from core.domain.turn import Turn, TurnStatus
 from core.events import Event
 from core.harness.permissions import PermissionMode
-
-
-@dataclass(frozen=True, slots=True)
-class HeadlessTurnOptions:
-    prompt: str
-    workspace: str | None = None
-    resume_id: str | None = None
-    connection_id: str | None = None
-    model: str | None = None
-    reasoning_effort: str | None = None
-    skill_identifiers: tuple[str, ...] = ()
-    max_iterations: int | None = None
-    trust_workspace: bool = False
-    access_preset: ExecutionAccessPreset | None = None
-    agent_preset: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class HeadlessTurnResult:
-    turn: Turn
-    session_id: str
-    workspace: str
 
 
 EventHook = Callable[[Event], None]
@@ -210,15 +186,4 @@ def run_headless_turn(
         application.close()
 
 
-def succeeded(result: HeadlessTurnResult) -> bool:
-    return result.turn.status is TurnStatus.COMPLETED
-
-
-__all__ = [
-    "ApprovalDecider",
-    "EventHook",
-    "HeadlessTurnOptions",
-    "HeadlessTurnResult",
-    "run_headless_turn",
-    "succeeded",
-]
+__all__ = ["run_headless_turn"]

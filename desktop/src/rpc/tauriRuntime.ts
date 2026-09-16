@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, confirm } from "@tauri-apps/plugin-dialog";
+import { setConfirmHandler } from "../platform/confirmAction";
 
 import type {
   DiagnosticsSnapshot,
@@ -10,7 +11,7 @@ import type {
 import type {
   AnyRpcNotification,
   BridgeError,
-  DesktopRuntime,
+  ClientRuntime,
   DesktopUpdateInfo,
   DesktopUpdateProgress,
   RpcMethod,
@@ -38,7 +39,8 @@ export function normalizeBridgeError(error: unknown): DesktopRuntimeError {
     const candidate = error as Partial<BridgeError>;
     if (typeof candidate.message === "string") {
       return new DesktopRuntimeError({
-        code: typeof candidate.code === "string" ? candidate.code : "DESKTOP_ERROR",
+        code:
+          typeof candidate.code === "string" ? candidate.code : "DESKTOP_ERROR",
         message: candidate.message,
         retryable: candidate.retryable === true,
         data: candidate.data,
@@ -68,7 +70,19 @@ export function normalizeUpdaterError(error: unknown): DesktopRuntimeError {
   return normalized;
 }
 
-class TauriDesktopRuntime implements DesktopRuntime {
+export function configureNativeDialogs(): void {
+  setConfirmHandler((message, options) =>
+    confirm(message, {
+      title: options.title ?? "DeepCode",
+      kind: options.kind ?? "warning",
+      okLabel: options.confirmLabel ?? "Continue",
+      cancelLabel: options.cancelLabel ?? "Cancel",
+    }),
+  );
+}
+
+class TauriDesktopRuntime implements ClientRuntime {
+  readonly host = { kind: "desktop" as const, nativeOpen: true, updates: true };
   private pendingUpdate: Update | null = null;
 
   async request<M extends RpcMethod>(
@@ -84,6 +98,20 @@ class TauriDesktopRuntime implements DesktopRuntime {
 
   async status(): Promise<SidecarStatus> {
     return invoke<SidecarStatus>("sidecar_status");
+  }
+
+  async serviceStatus() {
+    return invoke<{ phase: string; activeTurns: number; queuedTurns: number; terminals: number }>(
+      "rpc_request", { method: "service/status", params: {} },
+    ).catch((error) => { throw normalizeBridgeError(error); });
+  }
+
+  async stopService(): Promise<void> {
+    try {
+      await invoke("rpc_request", { method: "service/stop", params: {} });
+    } catch (error) {
+      throw normalizeBridgeError(error);
+    }
   }
 
   async restart(): Promise<SidecarStatus> {
@@ -194,12 +222,17 @@ class TauriDesktopRuntime implements DesktopRuntime {
   async onNotification(
     listener: (notification: AnyRpcNotification) => void,
   ): Promise<() => void> {
-    return listen<AnyRpcNotification>("deepcode://rpc-notification", (event) => {
-      listener(event.payload);
-    });
+    return listen<AnyRpcNotification>(
+      "deepcode://rpc-notification",
+      (event) => {
+        listener(event.payload);
+      },
+    );
   }
 
-  async onStatus(listener: (status: SidecarStatus) => void): Promise<() => void> {
+  async onStatus(
+    listener: (status: SidecarStatus) => void,
+  ): Promise<() => void> {
     return listen<SidecarStatus>("deepcode://sidecar-state", (event) => {
       listener(event.payload);
     });
@@ -212,4 +245,4 @@ class TauriDesktopRuntime implements DesktopRuntime {
   }
 }
 
-export const tauriRuntime: DesktopRuntime = new TauriDesktopRuntime();
+export const tauriRuntime: ClientRuntime = new TauriDesktopRuntime();

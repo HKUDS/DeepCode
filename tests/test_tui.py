@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
+
+pytestmark = pytest.mark.usefixtures("shared_cli_service")
 from rich.cells import cell_len
 from rich.console import Console
 
@@ -631,6 +633,7 @@ def test_banner_draws_the_logo_and_falls_back_on_a_narrow_terminal(
     monkeypatch.setattr(store_mod, "_DEFAULT_STORE", None)
 
     app = tui_app.TuiApp(
+        shared_service=False,
         workspace=str(workspace),
         model=None,
         max_iterations=20,
@@ -1202,12 +1205,9 @@ def test_goal_edit_uses_stable_identity_without_a_revision_retry_loop():
             return self.goal
 
     extension = GoalExtension()
-    application = SimpleNamespace(
-        goals=extension,
-    )
     owner = SimpleNamespace(
         thread_client=SimpleNamespace(
-            application=application,
+            goals=extension,
             session_id=thread_id,
         )
     )
@@ -1259,7 +1259,7 @@ def test_goal_continue_command_uses_the_shared_goal_extension():
     controller = TuiGoalController(
         SimpleNamespace(
             thread_client=SimpleNamespace(
-                application=SimpleNamespace(goals=GoalExtension()),
+                goals=GoalExtension(),
                 session_id=thread_id,
             )
         )
@@ -1382,6 +1382,38 @@ def test_session_persisted_and_resumable(monkeypatch, tmp_path, capsys):
     assert rc2 == 0
     out = capsys.readouterr().out
     assert f"resumed {sid}" in out
+
+
+def test_startup_resume_shows_history_without_running_another_turn(
+    monkeypatch, tmp_path, capsys
+):
+    from core.sessions.store import SessionStore
+
+    rc, provider = _run_tui(
+        monkeypatch,
+        tmp_path,
+        "Remember this greeting task\n/exit\n",
+        ["Greeting tests passed"],
+    )
+    assert rc == 0
+    store = SessionStore(tmp_path / "sessions")
+    session = store.list_sessions()[0]
+    capsys.readouterr()
+    monkeypatch.setattr("sys.stdin", io.StringIO("/exit\n"))
+
+    assert (
+        tui_app.main(
+            ["--workspace", str(tmp_path / "ws"), "--resume", session.session_id]
+        )
+        == 0
+    )
+
+    output = capsys.readouterr().out
+    assert "Remember this greeting task" in output
+    assert "Greeting tests passed" in output
+    assert provider.calls == 1
+    assert len(store.list_sessions()) == 1
+    assert store.list_sessions()[0].message_count == session.message_count
 
 
 def test_resume_without_arg_lists_sessions(monkeypatch, tmp_path, capsys):

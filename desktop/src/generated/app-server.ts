@@ -1,6 +1,6 @@
 /* AUTO-GENERATED from protocol/app-server.schema.json. DO NOT EDIT. */
 
-export type ClientSurface = "cli" | "desktop" | "headless" | "automation" | "app_server" | "internal";
+export type ClientSurface = "cli" | "desktop" | "web" | "headless" | "automation" | "app_server" | "internal";
 export type TrustState = "untrusted" | "trusted";
 export type JsonValue =
   | null
@@ -12,6 +12,14 @@ export type JsonValue =
       [k: string]: JsonValue;
     };
 export type ConfigScope = "user" | "project";
+export type Tokenlimitfield = ("max_tokens" | "max_completion_tokens") | null;
+export type Temperature = boolean | null;
+export type Systemrole = ("system" | "developer" | "user") | null;
+export type Reasoningfield = ("reasoning_effort" | "reasoning" | "omit") | null;
+export type Reasoningcontent = ("preserve" | "empty" | "omit") | null;
+export type Toolmessagename = boolean | null;
+export type Paralleltoolcalls = boolean | null;
+export type ProviderProtocol = "auto" | "openai_chat" | "openai_responses" | "anthropic_messages";
 export type SkillReadParams = SkillReadParams1 & {
   projectId: string;
   skillId?: string;
@@ -142,8 +150,8 @@ export interface MethodParams {
   "thread/goal/get": ThreadReadParams;
   "thread/goal/set": GoalSetParams;
   "thread/goal/pause": GoalIdentityParams;
-  "thread/goal/resume": GoalIdentityParams;
-  "thread/goal/continue": GoalIdentityParams;
+  "thread/goal/resume": GoalContinuationParams;
+  "thread/goal/continue": GoalContinuationParams;
   "thread/goal/clear": GoalIdentityParams;
   "turn/start": TurnStartParams;
   "turn/enqueue": TurnStartParams;
@@ -169,6 +177,8 @@ export interface MethodParams {
   "git/discard": GitDiscardParams;
   "git/worktree/create": ThreadReadParams;
   "git/worktree/remove": WorktreeRemoveParams;
+  "terminal/list": TerminalListParams;
+  "terminal/read": TerminalReadParams;
   "terminal/create": TerminalCreateParams;
   "terminal/write": TerminalWriteParams;
   "terminal/resize": TerminalResizeParams;
@@ -176,6 +186,16 @@ export interface MethodParams {
   "test/discover": ThreadReadParams;
   "test/run": TestRunParams;
   "thread/resume": ThreadResumeParams;
+  "turn/input/read": TurnInputReadParams;
+  "thread/execution/read": ThreadReadParams;
+  "thread/context/clear": ThreadReadParams;
+  "thread/context/compact": ThreadReadParams;
+  "turn/list": TurnListParams;
+  "model/reasoning": ModelReasoningParams;
+  "provider/login/start": ProviderLoginStartParams;
+  "provider/login/poll": ProviderLoginFlowParams;
+  "provider/login/cancel": ProviderLoginFlowParams;
+  "provider/logout": ProviderLogoutParams;
 }
 export interface InitializeParams {
   protocolVersion: "1.0";
@@ -220,20 +240,24 @@ export interface SettingsUpdateParams {
 }
 export interface ProviderUpsertParams {
   expectedRevision?: string;
-  connection: {
-    id: string;
-    label?: string;
-    template?: string;
-    adapter?: "openai_compat" | "anthropic" | null;
-    apiBase?: string | null;
-    apiKeyEnv?: string | null;
-    apiKey?: string;
-    clearApiKey?: boolean;
-    extraHeaders?: JsonObject;
-    modelCatalog?: "auto" | "openrouter" | "openai" | "anthropic" | "manual";
-    manualModels?: (string | ManualModelEntry)[];
-    enabled?: boolean;
-  };
+  connection: ConnectionMutation;
+}
+export interface ConnectionMutation {
+  id: string;
+  label?: string;
+  template?: string;
+  adapter?: "openai_compat" | "anthropic" | null;
+  apiBase?: string | null;
+  apiKeyEnv?: string | null;
+  apiKey?: string;
+  clearApiKey?: boolean;
+  extraHeaders?: JsonObject;
+  modelCatalog?: "auto" | "openrouter" | "openai" | "anthropic" | "manual";
+  manualModels?: (string | ManualModelEntry)[];
+  enabled?: boolean;
+  protocol?: ProviderProtocol;
+  auth?: "api_key" | "none" | "oauth";
+  compat?: ProviderCompat;
 }
 export interface ManualModelEntry {
   id: string;
@@ -241,6 +265,21 @@ export interface ManualModelEntry {
   contextWindow?: number | null;
   maxOutputTokens?: number | null;
   reasoningEfforts?: string[] | false | null;
+  compat?: ProviderCompat;
+  /**
+   * @minItems 1
+   */
+  inputModalities?: ["text" | "image", ...("text" | "image")[]] | null;
+  toolCalling?: boolean | null;
+}
+export interface ProviderCompat {
+  tokenLimitField?: Tokenlimitfield;
+  temperature?: Temperature;
+  systemRole?: Systemrole;
+  reasoningField?: Reasoningfield;
+  reasoningContent?: Reasoningcontent;
+  toolMessageName?: Toolmessagename;
+  parallelToolCalls?: Paralleltoolcalls;
 }
 export interface ConnectionIdentityParams {
   connectionId: string;
@@ -250,6 +289,8 @@ export interface ProviderTestParams {
   connectionId: string;
   projectId?: string;
   model?: string;
+  connection?: ConnectionMutation;
+  mode?: "quick" | "agent";
 }
 export interface ProviderDiscoverParams {
   connectionId?: string;
@@ -257,6 +298,7 @@ export interface ProviderDiscoverParams {
   apiBase?: string;
   apiKey?: string;
   projectId?: string;
+  connection?: ConnectionMutation;
 }
 export interface ModelListParams {
   connectionId: string;
@@ -452,6 +494,13 @@ export interface GoalIdentityParams {
   threadId: string;
   expectedGoalId: string;
 }
+export interface GoalContinuationParams {
+  threadId: string;
+  expectedGoalId: string;
+  connectionId?: string;
+  model?: string;
+  reasoningEffort?: string;
+}
 export interface TurnStartParams {
   threadId: string;
   prompt: string;
@@ -518,6 +567,7 @@ export interface ApprovalRespondParams {
   message?: string;
 }
 export interface EventReplayParams {
+  through?: number;
   threadId: string;
   after?: number;
   limit?: number;
@@ -555,6 +605,16 @@ export interface WorktreeRemoveParams {
   force?: boolean;
   deleteBranch?: boolean;
 }
+export interface TerminalListParams {
+  threadId: string;
+}
+export interface TerminalReadParams {
+  threadId: string;
+  terminalId: string;
+  offset?: number;
+  limit?: number;
+  through?: number;
+}
 export interface TerminalCreateParams {
   threadId: string;
   columns?: number;
@@ -584,6 +644,31 @@ export interface TestRunParams {
 export interface ThreadResumeParams {
   sessionId: string;
   workspacePath?: string;
+}
+export interface TurnInputReadParams {
+  threadId: string;
+  messageId: string;
+}
+export interface TurnListParams {
+  threadId: string;
+  limit?: number;
+  offset?: number;
+  state?: "all" | "active" | "executing";
+}
+export interface ModelReasoningParams {
+  projectId?: string;
+  connectionId: string;
+  model: string;
+}
+export interface ProviderLoginStartParams {
+  connectionId: string;
+  openBrowser?: boolean;
+}
+export interface ProviderLoginFlowParams {
+  flowId: string;
+}
+export interface ProviderLogoutParams {
+  connectionId: string;
 }
 export interface MethodResults {
   initialize: InitializeResult;
@@ -760,6 +845,7 @@ export interface MethodResults {
     approval: Approval;
   };
   "event/replay": {
+    headSequence?: number;
     events: Event[];
     nextAfter: number | null;
     hasMore: boolean;
@@ -786,6 +872,8 @@ export interface MethodResults {
   };
   "git/worktree/create": WorktreeResult;
   "git/worktree/remove": WorktreeResult;
+  "terminal/list": TerminalListResult;
+  "terminal/read": TerminalReadResult;
   "terminal/create": {
     terminal: TerminalInfo;
   };
@@ -814,6 +902,16 @@ export interface MethodResults {
   "thread/resume": {
     thread: Thread;
   };
+  "turn/input/read": TurnInputReadResult;
+  "thread/execution/read": ThreadExecutionReadResult;
+  "thread/context/clear": EmptyParams;
+  "thread/context/compact": JsonObject;
+  "turn/list": TurnListResult;
+  "model/reasoning": ModelReasoningResult;
+  "provider/login/start": ProviderLoginFlow;
+  "provider/login/poll": ProviderLoginFlow;
+  "provider/login/cancel": ProviderLoginFlow;
+  "provider/logout": ProviderLogoutResult;
 }
 export interface InitializeResult {
   protocolVersion: "1.0";
@@ -824,6 +922,20 @@ export interface InitializeResult {
     eventReplay: boolean;
     liveEvents: boolean;
     maxMessageBytes: number;
+    requestRetry?: {
+      default: "never";
+      readMethods: string[];
+      keyedMethods: {
+        [k: string]: string;
+      };
+    };
+  };
+  serviceInfo?: {
+    frontendBuildId?: string | null;
+    instanceId: string;
+    schemaVersion: number;
+    transport: "websocket";
+    shutdownScope: "connection";
   };
 }
 export interface ConnectionCatalogResult {
@@ -843,10 +955,14 @@ export interface ConnectionInfo {
   manualModels: string[];
   manualModelEntries: ManualModelEntry[];
   configured: boolean;
-  credentialSource: "environment" | "credential_store" | "legacy_config" | "not_required" | "missing";
+  credentialSource: "environment" | "credential_store" | "legacy_config" | "not_required" | "missing" | "oauth";
   local: boolean;
   enabled: boolean;
   explicit: boolean;
+  protocol?: ProviderProtocol;
+  auth?: "api_key" | "none" | "oauth";
+  compat?: ProviderCompat;
+  accountId?: string | null;
 }
 export interface ConnectionTemplate {
   name: string;
@@ -873,12 +989,38 @@ export interface ProviderTestResult {
   error: string | null;
   /**
    * @minItems 3
-   * @maxItems 3
+   * @maxItems 7
    */
-  stages: [ProviderVerificationStage, ProviderVerificationStage, ProviderVerificationStage];
+  stages:
+    | [ProviderVerificationStage, ProviderVerificationStage, ProviderVerificationStage]
+    | [ProviderVerificationStage, ProviderVerificationStage, ProviderVerificationStage, ProviderVerificationStage]
+    | [
+        ProviderVerificationStage,
+        ProviderVerificationStage,
+        ProviderVerificationStage,
+        ProviderVerificationStage,
+        ProviderVerificationStage
+      ]
+    | [
+        ProviderVerificationStage,
+        ProviderVerificationStage,
+        ProviderVerificationStage,
+        ProviderVerificationStage,
+        ProviderVerificationStage,
+        ProviderVerificationStage
+      ]
+    | [
+        ProviderVerificationStage,
+        ProviderVerificationStage,
+        ProviderVerificationStage,
+        ProviderVerificationStage,
+        ProviderVerificationStage,
+        ProviderVerificationStage,
+        ProviderVerificationStage
+      ];
 }
 export interface ProviderVerificationStage {
-  id: "credential" | "catalog" | "model";
+  id: "credential" | "catalog" | "model" | "stream" | "tool" | "continuation" | "reasoning" | "image";
   status: "passed" | "failed" | "skipped" | "not_run";
   detail: string;
   latencyMs: number | null;
@@ -896,6 +1038,12 @@ export interface CatalogModel {
   maxOutputTokens: number;
   supportedParameters: string[];
   reasoning: ReasoningCapabilities | null;
+  /**
+   * @minItems 1
+   * @maxItems 2
+   */
+  inputModalities?: ["text" | "image"] | ["text" | "image", "text" | "image"] | null;
+  toolCalling?: boolean | null;
 }
 export interface ReasoningCapabilities {
   supportedEfforts: string[];
@@ -1309,10 +1457,23 @@ export interface ExecutionProfile {
   temperature: number;
   reasoningEffort: string | null;
   configRevision: string;
+  protocol?: ProviderProtocol;
+  providerRevision?: string;
+  /**
+   * @minItems 1
+   * @maxItems 2
+   */
+  inputModalities?: ["text" | "image"] | ["text" | "image", "text" | "image"];
+  toolCalling?: boolean;
+  reasoningSupported?: boolean;
 }
 export interface GoalResult {
   goal: Goal | null;
   outcome: GoalOutcome | null;
+  /**
+   * Whether the terminal Goal deciding Turn has finished and its usage is durably accounted.
+   */
+  executionSettled?: boolean;
 }
 export interface Goal {
   id: string;
@@ -1468,6 +1629,7 @@ export interface Approval {
   resolvedAt: string | null;
 }
 export interface TurnSteerResult {
+  deliveryState?: "accepted";
   messageId: string;
   delivery: "current_turn";
   duplicate: boolean;
@@ -1586,6 +1748,13 @@ export interface WorktreeResult {
   disposition: "created" | "reclaimed" | "kept" | "cleaned";
   dirty: boolean;
 }
+export interface TerminalListResult {
+  terminals: {
+    terminal: TerminalInfo;
+    exited: boolean;
+    exitCode: number | null;
+  }[];
+}
 export interface TerminalInfo {
   terminalId: string;
   threadId: string;
@@ -1594,10 +1763,53 @@ export interface TerminalInfo {
   rows: number;
   workspacePath: string;
 }
+export interface TerminalReadResult {
+  threadId: string;
+  terminalId: string;
+  data: string;
+  offset: number;
+  nextOffset: number;
+  availableFrom: number;
+  headOffset: number;
+  hasMore: boolean;
+  truncated: boolean;
+  exited: boolean;
+  exitCode: number | null;
+}
 export interface TestCommand {
   id: string;
   label: string;
   argv: string[];
+}
+export interface TurnInputReadResult {
+  item: Item | null;
+}
+export interface ThreadExecutionReadResult {
+  executionProfile: ExecutionProfile;
+  securityProfile: ExecutionSecurityProfile;
+}
+export interface TurnListResult {
+  turns: Turn[];
+  hasMore: boolean;
+}
+export interface ModelReasoningResult {
+  reasoning: ReasoningCapabilities | null;
+}
+export interface ProviderLoginFlow {
+  flowId: string;
+  connectionId: string;
+  provider: "openrouter";
+  status: "starting" | "pending" | "exchanging" | "authenticated" | "cancelled" | "expired" | "failed";
+  authorizationUrl: string | null;
+  expiresInSeconds: number;
+  error: string | null;
+  accountId: string | null;
+  refreshSupported: false;
+}
+export interface ProviderLogoutResult {
+  disconnected: boolean;
+  remoteRevoked: false;
+  manageUrl: string;
 }
 export interface Notifications {
   "thread.updated": Event;
@@ -1619,11 +1831,14 @@ export interface Notifications {
   "goal.updated": Event;
   "turn.plan.updated": TurnPlanUpdatedEvent;
   "terminal.output": {
+    offset?: number;
+    nextOffset?: number;
     terminalId: string;
     threadId: string;
     data: string;
   };
   "terminal.exit": {
+    nextOffset?: number;
     terminalId: string;
     threadId: string;
     exitCode: number | null;

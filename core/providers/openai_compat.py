@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
 import importlib.util
+import json
 import os
 import secrets
 import string
@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 
 import json_repair
 from loguru import logger
+from openai import Omit
 
 from core.observability import log_llm_call
 
@@ -33,6 +34,8 @@ else:
 
 from core.providers.base import (
     LLMProvider,
+    ProviderCapabilityError,
+    ProviderConfigurationError,
     LLMResponse,
     ReasoningDeltaCallback,
     ToolCallRequest,
@@ -44,13 +47,17 @@ from core.providers.openai_responses import (
     convert_tools,
     parse_response_output,
 )
-from core.providers.reasoning import OPENROUTER_REASONING_DETAILS
-from core.reasoning import ReasoningChannel
+from core.providers.protocol_config import ProviderCompat, apply_chat_compat
+from core.providers.reasoning import (
+    OPENROUTER_REASONING_DETAILS,
+    infer_reasoning_capabilities,
+)
 from core.providers.timeouts import (
     StreamIdleTimeoutError,
     iter_with_stream_idle_timeout,
     resolve_stream_idle_timeout_s,
 )
+from core.reasoning import ReasoningChannel
 
 if TYPE_CHECKING:
     from core.providers.registry import ProviderSpec
@@ -259,11 +266,20 @@ class OpenAICompatProvider(LLMProvider):
         default_model: str = "gpt-4o",
         extra_headers: dict[str, str] | None = None,
         spec: ProviderSpec | None = None,
+        protocol: str = "auto",
+        compat: ProviderCompat | None = None,
+        auth_mode: str = "api_key",
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
         self._spec = spec
+        if protocol not in {"auto", "openai_chat", "openai_responses"}:
+            raise ValueError("Unsupported OpenAI-compatible protocol")
+        self.protocol = protocol
+        self.auth_mode = auth_mode
+        self.compat = compat or ProviderCompat()
+        self.compat.validate_protocol(protocol)
 
         # The credential travels only on this instance and its client. It is
         # deliberately never exported to os.environ: in a long-lived App
@@ -282,9 +298,17 @@ class OpenAICompatProvider(LLMProvider):
             default_headers.update(_DEFAULT_AIMLAPI_HEADERS)
         if extra_headers:
             default_headers.update(extra_headers)
+        if auth_mode == "none":
+            # Omit is the SDK's supported way to remove a default header.
+            # An empty key is rejected by some SDK versions at construction.
+            default_headers = {
+                key: value
+                for key, value in default_headers.items()
+                if key.lower() != "authorization"
+            }
 
         self._client = AsyncOpenAI(
-            api_key=api_key or "no-key",
+            api_key="no-key" if auth_mode == "none" else api_key or "no-key",
             base_url=effective_base,
             default_headers=default_headers,
             max_retries=0,
@@ -295,6 +319,16 @@ class OpenAICompatProvider(LLMProvider):
         # probe again after _RESPONSES_PROBE_INTERVAL_S seconds.
         self._responses_failures: dict[str, int] = {}
         self._responses_tripped_at: dict[str, float] = {}
+
+    async def aclose(self) -> None:
+        await self._client.close()
+
+    def _set_runtime_credential(self, key: str | None) -> None:
+        self.api_key = key
+        self._client.api_key = "no-key" if self.auth_mode == "none" else key or "no-key"
+
+    def _request_headers(self) -> dict:
+        return {"Authorization": Omit()} if self.auth_mode == "none" else {}
 
     @classmethod
     def _apply_cache_control(
@@ -457,6 +491,7 @@ class OpenAICompatProvider(LLMProvider):
         :func:`resolve_model_compat`; this method only assembles the payload
         from that value — no ``model_name.lower()`` branching inline.
         """
+        self.validate_request_capabilities(messages, tools)
         model_name = model or self.default_model
         spec = self._spec
 
@@ -512,14 +547,26 @@ class OpenAICompatProvider(LLMProvider):
                 if msg.get("role") == "assistant" and "reasoning_content" not in msg:
                     msg["reasoning_content"] = ""
 
-        return kwargs
+        return apply_chat_compat(
+            kwargs,
+            self.compat.model_copy(update={"reasoning_field": "omit"})
+            if self.reasoning_supported is False
+            else self.compat,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            reasoning_effort=reasoning_effort,
+        )
 
     def _should_use_responses_api(
         self,
         model: str | None,
         reasoning_effort: str | None,
     ) -> bool:
-        """Use Responses API only for direct OpenAI requests that benefit from it."""
+        """Explicit choices are authoritative; auto retains the legacy heuristic."""
+        if self.protocol == "openai_responses":
+            return True
+        if self.protocol == "openai_chat":
+            return False
         if self._spec and self._spec.name != "openai":
             return False
         if not _is_direct_openai_base(self._effective_base):
@@ -603,7 +650,8 @@ class OpenAICompatProvider(LLMProvider):
         reasoning_effort: str | None,
         tool_choice: str | dict[str, Any] | None,
     ) -> dict[str, Any]:
-        """Build a Responses API body for direct OpenAI requests."""
+        """Build a Responses API body for the explicitly selected or legacy route."""
+        self.validate_request_capabilities(messages, tools)
         model_name = model or self.default_model
         sanitized_messages = self._sanitize_messages(
             self._sanitize_empty_content(messages), preserve_provider_state=True
@@ -625,10 +673,22 @@ class OpenAICompatProvider(LLMProvider):
         compat = resolve_model_compat(
             model_name=model_name, spec=self._spec, reasoning_effort=reasoning_effort
         )
-        if compat.include_temperature:
+        if self.compat.temperature is True or (
+            self.compat.temperature is None and compat.include_temperature
+        ):
             body["temperature"] = temperature
 
-        if self._should_use_responses_api(model, reasoning_effort):
+        wants_reasoning = (
+            self.protocol == "auto"
+            or self.compat.reasoning_field == "reasoning"
+            or reasoning_effort not in {None, "auto", "none"}
+            or infer_reasoning_capabilities(model_name) is not None
+        )
+        if (
+            wants_reasoning
+            and self.compat.reasoning_field != "omit"
+            and self.reasoning_supported is not False
+        ):
             body["reasoning"] = {"summary": "auto"}
             if reasoning_effort:
                 body["reasoning"]["effort"] = reasoning_effort.lower()
@@ -637,6 +697,8 @@ class OpenAICompatProvider(LLMProvider):
         if tools:
             body["tools"] = convert_tools(tools)
             body["tool_choice"] = tool_choice or "auto"
+            if self.compat.parallel_tool_calls is not None:
+                body["parallel_tool_calls"] = self.compat.parallel_tool_calls
 
         return body
 
@@ -1135,6 +1197,15 @@ class OpenAICompatProvider(LLMProvider):
         spec: ProviderSpec | None = None,
         api_base: str | None = None,
     ) -> LLMResponse:
+        if isinstance(e, (ProviderCapabilityError, ProviderConfigurationError)):
+            return LLMResponse(
+                content=str(e),
+                finish_reason="error",
+                error_kind="capability"
+                if isinstance(e, ProviderCapabilityError)
+                else "configuration",
+                error_should_retry=False,
+            )
         body = (
             getattr(e, "doc", None)
             or getattr(e, "body", None)
@@ -1191,6 +1262,7 @@ class OpenAICompatProvider(LLMProvider):
         started = time.monotonic()
         response: LLMResponse | None = None
         try:
+            await self.refresh_request_credentials()
             if self._should_use_responses_api(model, reasoning_effort):
                 try:
                     body = self._build_responses_body(
@@ -1203,13 +1275,20 @@ class OpenAICompatProvider(LLMProvider):
                         tool_choice,
                     )
                     result = parse_response_output(
-                        await self._client.responses.create(**body)
+                        await self._client.responses.create(
+                            **body, extra_headers=self._request_headers()
+                        )
                     )
                     self._record_responses_success(model, reasoning_effort)
                     response = result
                     return result
                 except Exception as responses_error:
-                    if not self._should_fallback_from_responses_error(responses_error):
+                    if (
+                        self.protocol == "openai_responses"
+                        or not self._should_fallback_from_responses_error(
+                            responses_error
+                        )
+                    ):
                         raise
                     self._record_responses_failure(model, reasoning_effort)
 
@@ -1222,10 +1301,18 @@ class OpenAICompatProvider(LLMProvider):
                 reasoning_effort,
                 tool_choice,
             )
-            response = self._parse(await self._client.chat.completions.create(**kwargs))
+            response = self._parse(
+                await self._client.chat.completions.create(
+                    **kwargs, extra_headers=self._request_headers()
+                )
+            )
             return response
         except Exception as e:
-            response = self._handle_error(e, spec=self._spec, api_base=self.api_base)
+            response = self.redact_error(
+                self._handle_error(e, spec=self._spec, api_base=self.api_base),
+                e,
+                [self.api_key, *self.extra_headers.values()],
+            )
             return response
         finally:
             self._emit_observability(
@@ -1251,7 +1338,9 @@ class OpenAICompatProvider(LLMProvider):
         idle_timeout_s = resolve_stream_idle_timeout_s()
         started = time.monotonic()
         response: LLMResponse | None = None
+        stream = None
         try:
+            await self.refresh_request_credentials()
             if self._should_use_responses_api(model, reasoning_effort):
                 try:
                     body = self._build_responses_body(
@@ -1264,7 +1353,9 @@ class OpenAICompatProvider(LLMProvider):
                         tool_choice,
                     )
                     body["stream"] = True
-                    stream = await self._client.responses.create(**body)
+                    stream = await self._client.responses.create(
+                        **body, extra_headers=self._request_headers()
+                    )
 
                     async def _timed_stream():
                         async for event in iter_with_stream_idle_timeout(
@@ -1295,7 +1386,13 @@ class OpenAICompatProvider(LLMProvider):
                     )
                     return response
                 except Exception as responses_error:
-                    if not self._should_fallback_from_responses_error(responses_error):
+                    if (
+                        stream is not None
+                        or self.protocol == "openai_responses"
+                        or not self._should_fallback_from_responses_error(
+                            responses_error
+                        )
+                    ):
                         raise
                     self._record_responses_failure(model, reasoning_effort)
 
@@ -1310,7 +1407,9 @@ class OpenAICompatProvider(LLMProvider):
             )
             kwargs["stream"] = True
             kwargs["stream_options"] = {"include_usage": True}
-            stream = await self._client.chat.completions.create(**kwargs)
+            stream = await self._client.chat.completions.create(
+                **kwargs, extra_headers=self._request_headers()
+            )
             chunks: list[Any] = []
             async for chunk in iter_with_stream_idle_timeout(
                 stream, timeout_s=idle_timeout_s
@@ -1325,6 +1424,12 @@ class OpenAICompatProvider(LLMProvider):
                         chunk.choices[0].delta,
                         on_reasoning_delta,
                     )
+            if not any(
+                choice.finish_reason is not None
+                for chunk in chunks
+                for choice in chunk.choices
+            ):
+                raise RuntimeError("Chat stream ended before its terminal event")
             response = self._parse_chunks(chunks)
             return response
         except StreamIdleTimeoutError:
@@ -1338,9 +1443,15 @@ class OpenAICompatProvider(LLMProvider):
             )
             return response
         except Exception as e:
-            response = self._handle_error(e, spec=self._spec, api_base=self.api_base)
+            response = self.redact_error(
+                self._handle_error(e, spec=self._spec, api_base=self.api_base),
+                e,
+                [self.api_key, *self.extra_headers.values()],
+            )
             return response
         finally:
+            if stream is not None:
+                await stream.close()
             self._emit_observability(
                 model=model,
                 messages=messages,

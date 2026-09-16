@@ -147,6 +147,8 @@ class ExecutionCoordinator:
         )
 
         self._lock = threading.RLock()
+        self._admission_lock = threading.RLock()
+        self._admission_paused = False
         self._stop = threading.Event()
         self._wake = threading.Event()
         self._thread: threading.Thread | None = None
@@ -287,7 +289,28 @@ class ExecutionCoordinator:
     ) -> tuple[ExecutionDispatch, ...]:
         """Claim eligible work, then send admitted Turns to the injected starter."""
 
-        self._require_dispatchable()
+        with self._admission_lock:
+            self._require_dispatchable()
+            if self._admission_paused:
+                return ()
+            return self._dispatch_once(candidate_limit=candidate_limit)
+
+    def pause_admission(self) -> None:
+        """Fence new starts while keeping heartbeat and cancellation processing."""
+
+        with self._admission_lock:
+            self._require_dispatchable()
+            self._admission_paused = True
+
+    def resume_admission(self) -> None:
+        """Resume after a cancelled or timed-out drain."""
+
+        with self._admission_lock:
+            self._require_dispatchable()
+            self._admission_paused = False
+        self.offer()
+
+    def _dispatch_once(self, *, candidate_limit: int) -> tuple[ExecutionDispatch, ...]:
         now = self._now()
         claimed: list[ExecutionDispatch] = []
         with self.database.transaction() as connection:

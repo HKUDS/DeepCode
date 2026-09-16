@@ -15,7 +15,7 @@ import type {
   Project,
   SettingsSnapshot,
 } from "../../generated/app-server";
-import type { DesktopRuntime } from "../../rpc/contracts";
+import type { ClientRuntime } from "../../rpc/contracts";
 import { GeneralSection } from "./sections/GeneralSection";
 import { ModelsSection } from "./sections/ModelsSection";
 import { PluginsSection } from "./sections/PluginsSection";
@@ -25,7 +25,7 @@ export type SettingsSectionId = "general" | "models" | "plugins" | "agent-preset
 
 /** Everything a section may need; each uses the subset it cares about. */
 export interface SettingsSectionProps {
-  runtime: DesktopRuntime;
+  runtime: ClientRuntime;
   project: Project | null;
   settings: SettingsSnapshot | null;
   busy: boolean;

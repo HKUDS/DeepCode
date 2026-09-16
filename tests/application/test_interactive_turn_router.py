@@ -6,6 +6,8 @@ import pytest
 
 from core.application.errors import (
     ExpectedTurnMismatchError,
+    InputDeliveryPendingError,
+    InputDeliveryUncertainError,
     NoActiveTurnError,
     TurnAlreadyRunningError,
     TurnNotSteerableError,
@@ -80,6 +82,22 @@ def test_cached_active_routes_plain_text_to_strict_steer() -> None:
     assert [name for name, _kwargs in turns.calls] == ["steer"]
     assert turns.calls[0][1]["expected_turn_id"] == "turn_active"
     assert turns.calls[0][1]["prompt"] == "停止使用缓存，但继续完成当前任务。"
+
+
+@pytest.mark.parametrize(
+    "error_type", [InputDeliveryPendingError, InputDeliveryUncertainError]
+)
+def test_unconfirmed_steer_never_falls_back_to_another_turn(error_type):
+    turns = ScriptedTurns([error_type("unconfirmed")])
+    router = InteractiveTurnRouter(turns)
+    with pytest.raises(error_type):
+        router.send(
+            "session-1",
+            prompt="follow-up",
+            message_id="message-1",
+            cached_active_turn_id="turn_active",
+        )
+    assert [name for name, _kwargs in turns.calls] == ["steer"]
 
 
 def test_no_active_race_starts_once_with_the_same_message_id() -> None:

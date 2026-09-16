@@ -225,7 +225,12 @@ impl RpcBridge {
     }
 
     pub fn request(&self, method: &str, params: Value) -> PendingResult {
-        self.request_with_timeout(method, params, REQUEST_TIMEOUT)
+        let timeout = if method == "provider/test" {
+            Duration::from_secs(125)
+        } else {
+            REQUEST_TIMEOUT
+        };
+        self.request_with_timeout(method, params, timeout)
     }
 
     pub fn restart(self: &Arc<Self>) -> Result<SidecarStatus, BridgeError> {
@@ -241,11 +246,9 @@ impl RpcBridge {
         self.update_phase(SidecarPhase::Stopping, None);
         let _ = self.request_with_timeout("shutdown", json!({}), SHUTDOWN_REQUEST_TIMEOUT);
 
-        // The App Server acknowledges shutdown before its application-level
-        // cleanup finishes. Give that cleanup one independent grace period:
-        // coordinator quiescing, scheduler release, live Turn cancellation,
-        // terminal process groups, and the lifetime lease all complete before
-        // the Python process exits.
+        // The child is a native RPC attachment. Shutdown closes its connection;
+        // allow pipe and transport cleanup to finish before reaping the relay.
+        // The shared service retains the application and accepted tasks.
         let deadline = Instant::now() + SHUTDOWN_EXIT_GRACE;
         loop {
             let exited = {
@@ -510,7 +513,7 @@ impl RpcBridge {
             phase: SidecarPhase::Crashed,
             message: Some(message),
             launch_source: self.status().launch_source,
-            server_info: None,
+            server_info: self.status().server_info,
         });
     }
 
@@ -629,22 +632,6 @@ fn resolve_launch_spec(app: &AppHandle) -> Result<LaunchSpec, BridgeError> {
             .join(&binary_name);
         if source_bundle.is_file() {
             return Ok(binary_launch(source_bundle, "source App Server bundle"));
-        }
-
-        let target = env!("DEEPCODE_TARGET_TRIPLE");
-        let source_name = if cfg!(windows) {
-            format!("deepcode-app-server-{target}.exe")
-        } else {
-            format!("deepcode-app-server-{target}")
-        };
-        let source_binary = repository
-            .join("desktop/src-tauri/binaries")
-            .join(source_name);
-        if source_binary.is_file() {
-            return Ok(binary_launch(
-                source_binary,
-                "legacy source external binary",
-            ));
         }
     }
 

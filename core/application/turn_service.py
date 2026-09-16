@@ -51,6 +51,7 @@ from core.application.goal_turn_port import (
     GoalTurnAssociation,
 )
 from core.application.llm_configuration_service import LLMConfigurationService
+from core.application.input_identity import submission_fingerprint
 from core.application.session_runtime import SessionRuntimeRegistry
 from core.application.turn_input_service import (
     TurnInputReceipt,
@@ -350,6 +351,7 @@ class TurnService:
                 queue_if_busy=False,
                 event_observer=event_observer,
                 input_message_id=message_id,
+                requested_skill_ids=skill_ids,
                 client_surface=client_surface,
                 input_source=input_source,
                 input_delivery=TurnInputDelivery.CURRENT_TURN,
@@ -455,6 +457,7 @@ class TurnService:
                 queue_if_busy=True,
                 event_observer=event_observer,
                 input_message_id=message_id,
+                requested_skill_ids=skill_ids,
                 client_surface=client_surface,
                 input_source=TurnInputSource.QUEUE,
                 input_delivery=TurnInputDelivery.NEXT_TURN,
@@ -485,6 +488,7 @@ class TurnService:
         goal_id: str | None = None,
         goal_turn_settlement_ids: frozenset[str] = frozenset(),
         input_message_id: str | None = None,
+        requested_skill_ids: tuple[str, ...] | None = None,
         client_surface: ClientSurface = ClientSurface.INTERNAL,
         input_source: TurnInputSource = TurnInputSource.START,
         input_delivery: TurnInputDelivery = TurnInputDelivery.CURRENT_TURN,
@@ -509,6 +513,24 @@ class TurnService:
                 )
         except (TypeError, ValueError) as exc:
             raise InvalidArgumentError(str(exc)) from exc
+        fingerprint = (
+            submission_fingerprint(
+                prompt=clean_prompt,
+                skill_ids=requested_skill_ids
+                if requested_skill_ids is not None
+                else clean_skill_ids,
+                connection_id=connection_id,
+                model=model,
+                reasoning_effort=reasoning_effort,
+                source=input_source,
+                delivery=input_delivery,
+                execution_class=execution_class,
+                security_override=execution_security_profile_override,
+                permission_override=execution_permission_mode_override,
+            )
+            if input_message_id is not None
+            else None
+        )
         events: list[DomainEvent] = []
         schedule_now = False
         participant_contribution: (
@@ -565,6 +587,11 @@ class TurnService:
                     if (
                         existing_item.payload.get("text") != clean_prompt
                         or existing_item.payload.get("source") != input_source.value
+                        or (
+                            existing_item.payload.get("requestFingerprint") is not None
+                            and existing_item.payload["requestFingerprint"]
+                            != fingerprint
+                        )
                     ):
                         raise DuplicateMessageConflictError(
                             "messageId was already used with different content"
@@ -574,6 +601,23 @@ class TurnService:
                         raise DuplicateMessageConflictError(
                             "idempotent input references a missing Turn"
                         )
+                    if existing_item.payload.get("requestFingerprint") is None:
+                        # Older receipts did not preserve the requested selection.
+                        # Check supplied selectors against their execution snapshot;
+                        # omitted defaults continue to refer to the original Turn.
+                        profile = existing_turn.execution_profile
+                        if clean_skill_ids != existing_turn.skill_ids or any(
+                            value is not None
+                            and (profile is None or value != getattr(profile, name))
+                            for value, name in (
+                                (connection_id, "connection_id"),
+                                (model, "model_id"),
+                                (reasoning_effort, "reasoning_effort"),
+                            )
+                        ):
+                            raise DuplicateMessageConflictError(
+                                "messageId was already used with a different selection"
+                            )
                     return _TurnSubmission(
                         TurnSnapshot(
                             existing_turn,
@@ -653,7 +697,7 @@ class TurnService:
                 "delivery": input_delivery.value,
                 "source": input_source.value,
                 **(
-                    {"messageId": input_message_id}
+                    {"messageId": input_message_id, "requestFingerprint": fingerprint}
                     if input_message_id is not None
                     else {}
                 ),
@@ -1051,13 +1095,22 @@ class TurnService:
                 raise ThreadNotFoundError(f"thread not found: {thread_id}")
             return TurnRepository(connection).executing_for_thread(thread_id)
 
-    def list_for_thread(self, thread_id: str) -> tuple[Turn, ...]:
+    def list_for_thread(
+        self,
+        thread_id: str,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+        state: str = "all",
+    ) -> tuple[Turn, ...]:
         """Return the durable Turn queue in ordinal order for client status UI."""
 
         with self.database.read() as connection:
             if ThreadRepository(connection).get(thread_id) is None:
                 raise ThreadNotFoundError(f"thread not found: {thread_id}")
-            turns = TurnRepository(connection).list_for_thread(thread_id)
+            turns = TurnRepository(connection).list_for_thread(
+                thread_id, limit=limit, offset=offset, state=state
+            )
         return tuple(turns)
 
     def list_for_goal(self, thread_id: str, goal_id: str) -> tuple[Turn, ...]:
@@ -1078,6 +1131,9 @@ class TurnService:
                 and item.payload.get("source") == "queue"
                 for item in ItemRepository(connection).list_for_turn(turn.id)
             )
+
+    def read_input(self, thread_id: str, message_id: str) -> Item | None:
+        return self.turn_inputs.read(thread_id, message_id)
 
     def steer(
         self,
@@ -1331,7 +1387,13 @@ class TurnService:
             initial_input_metadata = (
                 {
                     key: initial_item.payload[key]
-                    for key in ("messageId", "client", "delivery", "source")
+                    for key in (
+                        "messageId",
+                        "requestFingerprint",
+                        "client",
+                        "delivery",
+                        "source",
+                    )
                     if key in initial_item.payload
                 }
                 if initial_item is not None
@@ -1839,6 +1901,7 @@ class TurnService:
                         payload={"turnId": turn_id},
                     )
                 )
+            events.extend(self.turn_inputs.settle_pending(connection, turn_id))
             if recover_active:
                 approvals = ApprovalRepository(connection)
                 for approval in approvals.pending_for_turn(turn_id):
@@ -2035,6 +2098,7 @@ class TurnService:
                 if turn.status is TurnStatus.QUEUED and should_resume(turn):
                     continue
                 now = utc_now()
+                events.extend(self.turn_inputs.settle_pending(connection, turn.id))
                 for approval in approvals.pending_for_turn(turn.id):
                     cancelled = replace(
                         approval,

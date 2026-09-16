@@ -15,13 +15,16 @@ import type {
   ConnectionInfo,
   ManualModelEntry,
   ProviderTestResult,
-  ProviderUpsertParams,
 } from "../../generated/app-server";
 import { useEscapeLayer } from "../../app/escapeLayer";
 import { confirmAction } from "../../platform/confirmAction";
 import type { ConnectionCatalogController } from "./useConnectionCatalog";
 import { ConnectionVerification } from "./ConnectionVerification";
 import { ModelListEditor } from "./ModelListEditor";
+import { type Draft, emptyDraft, connectionMutation } from "./connectionDraft";
+import { ProtocolSettings } from "./ProtocolSettings";
+import { ConnectionProbe } from "./ConnectionProbe";
+import { ProviderLogin } from "./ProviderLogin";
 import styles from "./ConnectionSettings.module.css";
 
 interface ConnectionSettingsProps {
@@ -33,40 +36,6 @@ interface ConnectionSettingsProps {
   scope: ConfigScope;
 }
 
-interface Draft {
-  id: string;
-  label: string;
-  template: string;
-  adapter: "openai_compat" | "anthropic";
-  apiBase: string;
-  /** Environment-variable reference — the advanced alternative to a
-   * stored key (the write-only input is the primary path, dsh style). */
-  apiKeyEnv: string;
-  apiKey: string;
-  clearApiKey: boolean;
-  modelCatalog: "auto" | "openrouter" | "openai" | "anthropic" | "manual";
-  manualModels: ManualModelEntry[];
-  /** True when the launch environment currently provides this key: it
-   * outranks a pasted key, so the form must say so instead of letting a
-   * paste silently lose. */
-  environmentShadows: boolean;
-  shadowingEnvName: string;
-}
-
-const emptyDraft: Draft = {
-  id: "",
-  label: "",
-  template: "",
-  adapter: "openai_compat",
-  apiBase: "",
-  apiKeyEnv: "",
-  apiKey: "",
-  clearApiKey: false,
-  modelCatalog: "auto",
-  manualModels: [],
-  environmentShadows: false,
-  shadowingEnvName: "",
-};
 
 export function ConnectionSettings({
   controller,
@@ -126,6 +95,9 @@ export function ConnectionSettings({
       label: connection.label,
       template: connection.providerName,
       adapter: connection.adapter,
+      protocol: connection.protocol ?? "auto",
+      auth: connection.auth ?? "api_key",
+      compat: connection.compat ?? {},
       apiBase: connection.apiBase ?? "",
       apiKeyEnv: connection.apiKeyEnv ?? "",
       apiKey: "",
@@ -155,6 +127,14 @@ export function ConnectionSettings({
       template: template.name,
       adapter: template.adapter === "anthropic" ? "anthropic" : "openai_compat",
       apiBase: template.defaultApiBase ?? "",
+      protocol: "auto",
+      auth: template.local ? "none" : "api_key",
+      compat: {},
+      apiKey: "",
+      apiKeyEnv: "",
+      clearApiKey: false,
+      environmentShadows: false,
+      shadowingEnvName: "",
       modelCatalog: "auto",
       manualModels: [],
     }));
@@ -165,24 +145,7 @@ export function ConnectionSettings({
     setSaving(true);
     try {
       const connectionId = editing.id.trim().toLocaleLowerCase();
-      const connection: ProviderUpsertParams["connection"] = {
-        id: connectionId,
-        label: editing.label.trim() || editing.id.trim(),
-        template: editing.template,
-        adapter: editing.adapter,
-        apiBase: editing.apiBase.trim() || null,
-        apiKeyEnv: editing.apiKeyEnv.trim() || null,
-        modelCatalog: editing.modelCatalog,
-        manualModels: editing.manualModels
-          .map((entry) => ({ ...entry, id: entry.id.trim() }))
-          .filter((entry) => entry.id)
-          .map((entry) => (hasDeclarations(entry) ? entry : entry.id)),
-        enabled: true,
-      };
-      if (editing.apiKey.trim()) {
-        connection.apiKey = editing.apiKey.trim();
-      }
-      if (editing.clearApiKey) connection.clearApiKey = true;
+      const connection = connectionMutation(editing);
       await controller.upsert(connection);
       setEditing(null);
       setTestingId(connectionId);
@@ -231,13 +194,7 @@ export function ConnectionSettings({
     try {
       // Probe THE FORM AS SHOWN (dsh's rule): an unsaved base URL or a key
       // typed but not yet stored takes part; nothing is written.
-      const result = await controller.discover({
-        ...(editingExisting
-          ? { connectionId: editing.id.trim().toLocaleLowerCase() }
-          : { template: editing.template }),
-        ...(editing.apiBase.trim() ? { apiBase: editing.apiBase.trim() } : {}),
-        ...(editing.apiKey.trim() ? { apiKey: editing.apiKey.trim() } : {}),
-      });
+      const result = await controller.discover({ connection: connectionMutation(editing) });
       setModelFetchState({
         editorId: editingId,
         loading: false,
@@ -412,6 +369,7 @@ export function ConnectionSettings({
                     {modelFaceLabel(connection, result)}
                   </small>
                 </p>
+                {connection.auth === "oauth" ? <ProviderLogin connection={connection} controller={controller} /> : null}
                 {result ? (
                   <ConnectionVerification result={result} compact />
                 ) : testingId === connection.id ? (
@@ -530,7 +488,8 @@ export function ConnectionSettings({
                     </small>
                   </label>
                 ) : null}
-                {!selectedTemplate?.local ? (
+                <ProtocolSettings draft={editing} onChange={setEditing} />
+                {editing.auth === "api_key" ? (
                   <fieldset className={`${styles.credentials} ${styles.wide}`}>
                     <legend>Credential</legend>
                     {editing.environmentShadows ? (
@@ -646,6 +605,7 @@ export function ConnectionSettings({
                       </>
                     ) : null}
                     <ModelListEditor
+                      protocol={editing.protocol}
                       entries={editing.manualModels}
                       onChange={(manualModels) =>
                         setEditing({ ...editing, manualModels })
@@ -658,6 +618,7 @@ export function ConnectionSettings({
                     </small>
                   </fieldset>
                 ) : null}
+                <ConnectionProbe key={editing.id} connection={connectionMutation(editing)} controller={controller} />
                 <details className={`${styles.advanced} ${styles.wide}`}>
                   <summary>
                     <SlidersHorizontal size={14} /> Advanced connection settings
@@ -809,14 +770,6 @@ export function ConnectionSettings({
   );
 }
 
-function hasDeclarations(entry: ManualModelEntry): boolean {
-  return (
-    entry.label != null ||
-    entry.contextWindow != null ||
-    entry.maxOutputTokens != null ||
-    entry.reasoningEfforts != null
-  );
-}
 
 function modelFaceLabel(
   connection: ConnectionInfo,
@@ -843,6 +796,8 @@ function credentialLabel(connection: ConnectionInfo): string {
       return "legacy config";
     case "not_required":
       return "no key required";
+    case "oauth":
+      return "signed-in account";
     default:
       return "no key";
   }
@@ -856,6 +811,8 @@ function connectionStatus(
   if (result?.status === "connected") return "Catalog connected";
   if (result?.status === "limited") return "Model check needed";
   if (result?.status === "error") return "Needs attention";
+  if (connection.auth === "none") return "No authentication required";
+  if (connection.auth === "oauth") return connection.configured ? "Signed in" : "Sign-in required";
   return connection.configured ? "Credential saved" : "Needs credential";
 }
 

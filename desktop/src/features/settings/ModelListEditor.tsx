@@ -4,8 +4,8 @@
  * row's own disclosure. Capacity fields accept K/M suffixes (1M = 1000K)
  * and store plain counts; text that does not parse stays on screen so the
  * save-time rejection names a row that is still visible. Rows are the
- * config file's own entries — unknown future fields survive because plain
- * ids stay plain and objects are edited field-wise, never rebuilt.
+ * config file's own entries; supported declarations are edited field-wise
+ * while an entry with only an id stays a plain id when saved.
  *
  * Effort declarations (`reasoningEfforts`) are config-file-only, exactly
  * as in dsh: a per-model ladder is a capability statement, not a form
@@ -21,19 +21,32 @@
 import { Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
-import type { ManualModelEntry } from "../../generated/app-server";
+import { useTranslation } from "react-i18next";
+import { CompatEditor } from "./ProtocolSettings";
+import type {
+  ManualModelEntry,
+  ProviderProtocol,
+} from "../../generated/app-server";
 import { capacityText, parseCapacity } from "./modelCapacity";
 import styles from "./ConnectionSettings.module.css";
 
 interface ModelListEditorProps {
+  protocol?: ProviderProtocol;
   entries: ManualModelEntry[];
   onChange(entries: ManualModelEntry[]): void;
 }
 
-export function ModelListEditor({ entries, onChange }: ModelListEditorProps) {
+export function ModelListEditor({
+  entries,
+  onChange,
+  protocol = "auto",
+}: ModelListEditorProps) {
+  const { t } = useTranslation();
   const update = (index: number, patch: Partial<ManualModelEntry>) => {
     onChange(
-      entries.map((entry, at) => (at === index ? { ...entry, ...patch } : entry)),
+      entries.map((entry, at) =>
+        at === index ? { ...entry, ...patch } : entry,
+      ),
     );
   };
 
@@ -64,9 +77,7 @@ export function ModelListEditor({ entries, onChange }: ModelListEditorProps) {
               type="button"
               className={styles.modelRowRemove}
               aria-label={`Remove model ${entry.id || index + 1}`}
-              onClick={() =>
-                onChange(entries.filter((_, at) => at !== index))
-              }
+              onClick={() => onChange(entries.filter((_, at) => at !== index))}
             >
               <Trash2 size={13} />
             </button>
@@ -87,6 +98,68 @@ export function ModelListEditor({ entries, onChange }: ModelListEditorProps) {
                 }
               />
             </div>
+          </details>
+          <details>
+            <summary>
+              {t("provider.capabilities", "Model capabilities")}
+            </summary>
+            <label>
+              {t("provider.inputModalities", "Input modalities")}
+              <select
+                value={entry.inputModalities?.join(",") ?? ""}
+                onChange={(event) =>
+                  update(index, {
+                    inputModalities: event.target.value
+                      ? (event.target.value.split(",") as [
+                          "text" | "image",
+                          ...("text" | "image")[],
+                        ])
+                      : null,
+                  })
+                }
+              >
+                <option value="">{t("provider.inherit", "Inherit")}</option>
+                <option value="text">
+                  {t("provider.textOnly", "Text only")}
+                </option>
+                <option value="text,image">
+                  {t("provider.textImage", "Text and image")}
+                </option>
+                {entry.inputModalities &&
+                !["text", "text,image"].includes(
+                  entry.inputModalities.join(","),
+                ) ? (
+                  <option value={entry.inputModalities.join(",")}>
+                    {entry.inputModalities.join(", ")}
+                  </option>
+                ) : null}
+              </select>
+            </label>
+            <label>
+              {t("provider.toolCalling", "Tool calling")}
+              <select
+                value={
+                  entry.toolCalling == null ? "" : String(entry.toolCalling)
+                }
+                onChange={(event) =>
+                  update(index, {
+                    toolCalling:
+                      event.target.value === ""
+                        ? null
+                        : event.target.value === "true",
+                  })
+                }
+              >
+                <option value="">{t("provider.inherit", "Inherit")}</option>
+                <option value="true">{t("provider.yes", "Yes")}</option>
+                <option value="false">{t("provider.no", "No")}</option>
+              </select>
+            </label>
+            <CompatEditor
+              protocol={protocol}
+              value={entry.compat ?? {}}
+              onChange={(compat) => update(index, { compat })}
+            />
           </details>
         </div>
       ))}

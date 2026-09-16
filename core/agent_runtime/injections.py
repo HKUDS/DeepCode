@@ -255,6 +255,9 @@ class TurnInputMailbox:
                 return
             self._active_turn_id = None
             self._state = MailboxState.CLOSED
+            for entry in self._pending:
+                if not entry.ready:
+                    self._seen.pop(entry.message_id, None)
             self._pending.clear()
             self._pending_by_id.clear()
             self._pending_chars = 0
@@ -273,13 +276,17 @@ class TurnInputMailbox:
                 # message is appended. Wait for that ordering boundary rather
                 # than rejecting a valid early Steer or persisting it first.
                 self._condition.wait()
-            previous = self._seen.get(clean_value.message_id)
-            if previous is not None:
+            while (previous := self._seen.get(clean_value.message_id)) is not None:
                 if previous != digest:
                     raise TurnInputConflictError(
                         "message_id was already used with different content"
                     )
-                return None
+                pending = self._pending_by_id.get(clean_value.message_id)
+                if pending is None or pending.ready:
+                    return None
+                # A reservation is not an acceptance. Wait for commit/cancel,
+                # releasing the condition so the original producer can finish.
+                self._condition.wait()
             if self._state is not MailboxState.OPEN:
                 raise TurnInputClosedError(self._state)
             if self._active_turn_id != clean_value.target_turn_id:
@@ -319,9 +326,10 @@ class TurnInputMailbox:
 
     def cancel(self, reservation: TurnInputReservation) -> None:
         with self._condition:
-            entry = self._pending_by_id.pop(reservation.message_id, None)
-            if entry is None:
+            entry = self._pending_by_id.get(reservation.message_id)
+            if entry is None or entry.ready:
                 return
+            self._pending_by_id.pop(reservation.message_id)
             self._pending = deque(
                 candidate
                 for candidate in self._pending

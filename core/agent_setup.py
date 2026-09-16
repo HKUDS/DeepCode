@@ -17,6 +17,7 @@ about.
 from __future__ import annotations
 
 import inspect
+from collections.abc import Awaitable, Callable
 import os
 from typing import Any
 
@@ -258,6 +259,7 @@ def build_agent_session(
     permission_mode_override: PermissionMode | None = None,
     execution_security_profile: ExecutionSecurityProfile | None = None,
     runtime: DeepCodeRuntime | None = None,
+    provider_cleanup: Callable[[], Awaitable[None]] | None = None,
     skill_runtime: Any | None = None,
     project_trusted: bool = False,
     plugin_mcp_servers: tuple[Any, ...] = (),
@@ -499,6 +501,7 @@ def build_agent_session(
             goal_runtime.closure_prompt if goal_runtime is not None else None
         ),
         mcp_runtime=mcp_runtime,
+        provider_cleanup=provider_cleanup,
     )
     if control is not None:
         # `session.history` is a @property (a list), so it must be wrapped in a

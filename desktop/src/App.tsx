@@ -15,8 +15,7 @@ import {
 import { DesktopSidebar } from "./features/navigation/DesktopSidebar";
 import { ThreadHeader } from "./features/thread/ThreadHeader";
 import { useTranscriptMode } from "./features/thread/transcriptMode";
-import type { DesktopRuntime } from "./rpc/contracts";
-import { tauriRuntime } from "./rpc/tauriRuntime";
+import type { ClientRuntime } from "./rpc/contracts";
 import { initI18n } from "./app/i18n";
 import styles from "./App.module.css";
 
@@ -67,7 +66,7 @@ function LoadingSurface({
   );
 }
 
-export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
+export function App({ runtime }: { runtime: ClientRuntime }) {
   const controller = useWorkspaceController(runtime);
   // Mounted for its effect: paints saved appearance preferences at startup.
   useAppearance();
@@ -190,6 +189,7 @@ export function App({ runtime = tauriRuntime }: { runtime?: DesktopRuntime }) {
 
       <section className={styles.workspace} aria-labelledby="thread-title">
         <RuntimeNotice
+          reconnectOnly={runtime.host?.kind === "browser"}
           runtime={state.runtime}
           error={state.error}
           busy={state.busy}

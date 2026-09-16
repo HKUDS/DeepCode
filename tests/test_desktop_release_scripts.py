@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_ROOT = REPOSITORY_ROOT / "desktop" / "scripts"
 
@@ -175,7 +174,14 @@ def test_sidecar_bundles_every_file_backed_runtime_resource():
     }
 
     assert ("core/mcp/presets.json", "core/mcp") in bundled
-    assert all(source.exists() for source, _destination in sidecar_build.BUNDLED_DATA)
+    assert ("app_server/web_assets", "app_server/web_assets") in bundled
+    # The frontend is a generated release input; source-only Python test jobs
+    # need not have run npm. build-sidecar itself requires it before packaging.
+    assert all(
+        source.exists()
+        for source, destination in sidecar_build.BUNDLED_DATA
+        if destination != "app_server/web_assets"
+    )
 
 
 def test_python_audit_preserves_virtualenv_executable_symlink(
@@ -214,3 +220,101 @@ def test_python_audit_preserves_virtualenv_executable_symlink(
     assert python_audit.main() == 0
     assert captured == [venv_python.absolute()]
     assert captured[0] != base_python.resolve()
+
+
+@pytest.mark.parametrize("cleanup_failure", [None, "exit", "timeout"])
+def test_packaged_startup_failure_reports_service_log_and_cleans_up(
+    tmp_path, monkeypatch, cleanup_failure
+):
+    import json
+    import subprocess
+
+    monkeypatch.setattr(sidecar_build, "BUILD_ROOT", tmp_path)
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        if "--verify-runtime" in command:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout=json.dumps(
+                    {
+                        "ok": True,
+                        "skillCreator": True,
+                        "bundledMcpPresets": ["test"],
+                        "webAssets": True,
+                    }
+                ),
+            )
+        if "start" in command:
+            log = tmp_path / "smoke/state.sqlite3.service/service.log"
+            log.parent.mkdir(parents=True)
+            log.write_text("Concrete startup failure from the worker", encoding="utf-8")
+            raise subprocess.CalledProcessError(
+                1, command, output="startup failed", stderr="launcher detail"
+            )
+        if cleanup_failure == "exit":
+            raise subprocess.CalledProcessError(2, command, stderr="stop failed")
+        if cleanup_failure == "timeout":
+            raise subprocess.TimeoutExpired(command, 35)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(sidecar_build.subprocess, "run", run)
+    with pytest.raises(
+        RuntimeError, match="Concrete startup failure from the worker"
+    ) as error:
+        sidecar_build._verify_bundle(tmp_path / "deepcode-app-server")
+    if cleanup_failure:
+        assert any("cleanup failed" in note for note in error.value.__notes__)
+    assert any("stop" in command for command in calls)
+    assert not (tmp_path / "smoke").exists()
+
+
+@pytest.mark.parametrize("valid_response", [False, True])
+def test_packaged_protocol_error_survives_cleanup_failure(
+    tmp_path, monkeypatch, valid_response
+):
+    import json
+    import subprocess
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(sidecar_build, "BUILD_ROOT", tmp_path)
+
+    def run(command, **kwargs):
+        if "stop" in command:
+            raise subprocess.CalledProcessError(2, command, stderr="stop failed")
+        if "start" in command:
+            (tmp_path / "smoke").mkdir()
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps(
+                {
+                    "ok": True,
+                    "skillCreator": True,
+                    "bundledMcpPresets": ["test"],
+                    "webAssets": True,
+                }
+            ),
+        )
+
+    response = (
+        '{"result":{"protocolVersion":"1.0"}}\n{"result":{}}\n'
+        if valid_response
+        else "{}\n{}\n"
+    )
+    monkeypatch.setattr(sidecar_build.subprocess, "run", run)
+    monkeypatch.setattr(
+        sidecar_build.subprocess,
+        "Popen",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0, communicate=lambda *args, **kwargs: (response, "")
+        ),
+    )
+    message = "cleanup failed" if valid_response else "invalid RPC responses"
+    with pytest.raises(RuntimeError, match=message) as error:
+        sidecar_build._verify_bundle(tmp_path / "deepcode-app-server")
+    if not valid_response:
+        assert any("cleanup failed" in note for note in error.value.__notes__)
+    assert not (tmp_path / "smoke").exists()

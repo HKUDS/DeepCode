@@ -36,13 +36,18 @@ from pathlib import Path
 from typing import Any, Literal
 
 from loguru import logger
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
 from core.agent_runtime.tools.mcp import MCPServerConfig
 from core.mcp.models import McpServerDefinition
 from core.providers.base import GenerationSettings, LLMProvider
+from core.providers.protocol_config import (
+    ProviderCompat,
+    ProviderProtocol,
+    protocol_adapter,
+)
 from core.providers.registry import (
     PROVIDERS,
     ProviderSpec,
@@ -67,6 +72,7 @@ class _Base(BaseModel):
         alias_generator=to_camel,
         populate_by_name=True,
         extra="ignore",
+        hide_input_in_errors=True,
     )
 
 
@@ -145,6 +151,18 @@ class ProviderConfig(_Base):
     api_key: str | None = None
     api_base: str | None = None
     extra_headers: dict[str, str] | None = None
+    protocol: ProviderProtocol = "auto"
+    compat: ProviderCompat = Field(default_factory=ProviderCompat)
+    auth: Literal["api_key", "none"] = "api_key"
+
+    @model_validator(mode="after")
+    def validate_wire(self):
+        self.compat.validate_protocol(self.protocol)
+        if self.auth == "none" and self.protocol == "anthropic_messages":
+            raise ValueError(
+                "Unauthenticated endpoints currently require an OpenAI protocol"
+            )
+        return self
 
 
 class ManualModelConfig(_Base):
@@ -167,6 +185,19 @@ class ManualModelConfig(_Base):
     context_window: int | None = None
     max_output_tokens: int | None = None
     reasoning_efforts: list[str] | Literal[False] | None = None
+    input_modalities: list[Literal["text", "image"]] | None = Field(
+        default=None, min_length=1, max_length=2
+    )
+    tool_calling: bool | None = None
+    compat: ProviderCompat = Field(default_factory=ProviderCompat)
+
+    @model_validator(mode="after")
+    def validate_modalities(self):
+        if self.input_modalities is not None and len(set(self.input_modalities)) != len(
+            self.input_modalities
+        ):
+            raise ValueError("Input modalities must be unique")
+        return self
 
 
 class ConnectionProfileConfig(_Base):
@@ -179,6 +210,9 @@ class ConnectionProfileConfig(_Base):
     label: str = ""
     template: str = "custom"
     adapter: Literal["openai_compat", "anthropic"] | None = None
+    protocol: ProviderProtocol = "auto"
+    auth: Literal["api_key", "none", "oauth"] = "api_key"
+    compat: ProviderCompat = Field(default_factory=ProviderCompat)
     api_base: str | None = None
     api_key_env: str | None = None
     extra_headers: dict[str, str] = Field(default_factory=dict)
@@ -187,6 +221,48 @@ class ConnectionProfileConfig(_Base):
     )
     manual_models: list[str | ManualModelConfig] = Field(default_factory=list)
     enabled: bool = True
+
+    @model_validator(mode="after")
+    def validate_wire(self):
+        spec = find_by_name(self.template)
+        legacy = self.adapter or (spec.backend if spec else "openai_compat")
+        effective = protocol_adapter(self.protocol, legacy)
+        if (
+            self.protocol != "auto"
+            and self.adapter is not None
+            and self.adapter != effective
+        ):
+            raise ValueError(
+                "Explicit protocol and legacy adapter disagree; clear the adapter or select the matching protocol"
+            )
+        if self.auth == "none" and effective == "anthropic":
+            raise ValueError(
+                "Unauthenticated endpoints currently require an OpenAI protocol"
+            )
+        if self.auth == "oauth" and (
+            self.template != "openrouter"
+            or self.protocol not in {"auto", "openai_chat"}
+            or effective != "openai_compat"
+            or self.api_base
+            not in {
+                None,
+                "https://openrouter.ai/api/v1",
+                "https://openrouter.ai/api/v1/",
+            }
+            or self.api_key_env
+            or any(
+                key.lower() in {"authorization", "x-api-key"}
+                for key in self.extra_headers
+            )
+        ):
+            raise ValueError(
+                "OAuth currently requires the official OpenRouter Chat endpoint without credential overrides"
+            )
+        self.compat.validate_protocol(self.protocol)
+        for model in self.manual_models:
+            if isinstance(model, ManualModelConfig):
+                model.compat.validate_protocol(self.protocol)
+        return self
 
 
 class ProvidersConfig(_Base):
@@ -199,6 +275,7 @@ class ProvidersConfig(_Base):
     forge: ProviderConfig = Field(default_factory=ProviderConfig)
     requesty: ProviderConfig = Field(default_factory=ProviderConfig)
     aimlapi: ProviderConfig = Field(default_factory=ProviderConfig)
+    bedrock: ProviderConfig = Field(default_factory=ProviderConfig)
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     deepseek: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -880,12 +957,18 @@ def make_llm_provider(
             "Set agents.defaults.provider or fill in the matching providers.<name>.apiKey."
         )
 
-    backend = spec.backend
+    protocol = provider_cfg.protocol if provider_cfg else "auto"
+    backend = protocol_adapter(protocol, spec.backend)
     api_key = provider_cfg.api_key if provider_cfg else None
     api_base = provider_cfg.api_base if provider_cfg else None
     extra_headers = provider_cfg.extra_headers if provider_cfg else None
 
-    needs_key = not (spec.is_oauth or spec.is_local or spec.is_direct)
+    auth_mode = provider_cfg.auth if provider_cfg else "api_key"
+    if auth_mode == "none" and backend == "anthropic":
+        raise ConfigError("Anthropic Messages requires an API key")
+    needs_key = auth_mode != "none" and not (
+        spec.is_oauth or spec.is_local or spec.is_direct
+    )
     if needs_key and not api_key:
         raise ConfigError(
             f"Provider '{spec.name}' (phase '{phase}') requires providers.{spec.name}.apiKey "
@@ -902,6 +985,7 @@ def make_llm_provider(
             api_base=effective_base,
             default_model=chosen_model,
             extra_headers=extra_headers,
+            compat=provider_cfg.compat if provider_cfg else None,
         )
     elif backend == "openai_compat":
         from core.providers.openai_compat import OpenAICompatProvider
@@ -912,6 +996,9 @@ def make_llm_provider(
             default_model=chosen_model,
             extra_headers=extra_headers,
             spec=spec,
+            protocol=protocol,
+            compat=provider_cfg.compat if provider_cfg else None,
+            auth_mode=auth_mode,
         )
     else:
         raise ValueError(

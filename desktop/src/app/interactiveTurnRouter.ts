@@ -3,7 +3,7 @@ import type {
   Turn,
   TurnStartParams,
 } from "../generated/app-server";
-import type { BridgeError, DesktopRuntime } from "../rpc/contracts";
+import type { BridgeError, ClientRuntime } from "../rpc/contracts";
 
 export type InteractiveDelivery = "started" | "steered" | "queued";
 
@@ -43,7 +43,7 @@ export interface InteractiveTurnInput {
  * the user's input.
  */
 export async function sendInteractiveTurn(
-  runtime: DesktopRuntime,
+  runtime: ClientRuntime,
   input: InteractiveTurnInput,
 ): Promise<InteractiveTurnResult> {
   const messageId = input.messageId ?? `desktop-${crypto.randomUUID()}`;
@@ -86,7 +86,7 @@ export function latestExecutingTurn(
 }
 
 async function start(
-  runtime: DesktopRuntime,
+  runtime: ClientRuntime,
   input: InteractiveTurnInput,
   messageId: string,
 ): Promise<InteractiveTurnResult> {
@@ -108,7 +108,7 @@ async function start(
 }
 
 async function startOrSteerOnce(
-  runtime: DesktopRuntime,
+  runtime: ClientRuntime,
   input: InteractiveTurnInput,
   messageId: string,
 ): Promise<InteractiveTurnResult> {
@@ -126,7 +126,7 @@ async function startOrSteerOnce(
 }
 
 async function enqueue(
-  runtime: DesktopRuntime,
+  runtime: ClientRuntime,
   input: InteractiveTurnInput,
   messageId: string,
 ): Promise<InteractiveTurnResult> {
@@ -148,7 +148,7 @@ async function enqueue(
 }
 
 async function steerOrEnqueue(
-  runtime: DesktopRuntime,
+  runtime: ClientRuntime,
   input: InteractiveTurnInput,
   expectedTurnId: string,
   messageId: string,
@@ -164,7 +164,7 @@ async function steerOrEnqueue(
 }
 
 async function steer(
-  runtime: DesktopRuntime,
+  runtime: ClientRuntime,
   input: InteractiveTurnInput,
   expectedTurnId: string,
   messageId: string,

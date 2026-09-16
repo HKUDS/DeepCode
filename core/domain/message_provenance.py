@@ -8,6 +8,7 @@ from enum import StrEnum
 class ClientSurface(StrEnum):
     CLI = "cli"
     DESKTOP = "desktop"
+    WEB = "web"
     HEADLESS = "headless"
     AUTOMATION = "automation"
     APP_SERVER = "app_server"
@@ -29,8 +30,17 @@ class TurnInputDelivery(StrEnum):
     NEXT_TURN = "next_turn"
 
 
+class InputDeliveryState(StrEnum):
+    """Confirmation that a durable Steer was accepted by its live mailbox."""
+
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    UNKNOWN = "unknown"
+
+
 __all__ = [
     "ClientSurface",
     "TurnInputDelivery",
+    "InputDeliveryState",
     "TurnInputSource",
 ]
