@@ -67,11 +67,20 @@ VERIFIER = _load_verifier()
 
 
 @pytest.fixture(autouse=True)
-def _clean_chain_state():
-    """Drop cached chain tails so each test starts from a cold process."""
+def _clean_chain_state(monkeypatch):
+    """Enable the chain (it is opt-in) and drop cached tails between tests."""
+    monkeypatch.setenv("DEEPCODE_TRANSPARENCY_LOG", "1")
     bus.reset_transparency_chain()
     yield
     bus.reset_transparency_chain()
+
+
+def test_chain_is_off_by_default(tmp_path, monkeypatch):
+    monkeypatch.delenv("DEEPCODE_TRANSPARENCY_LOG", raising=False)
+    assert not bus.transparency_log_enabled()
+    _emit(tmp_path, "t-off", response="plain")
+    (entry,) = _entries(_llm_path(tmp_path))
+    assert "entry_hash" not in entry and "prev_hash" not in entry
 
 
 def _llm_path(tmp_path: Path) -> Path:

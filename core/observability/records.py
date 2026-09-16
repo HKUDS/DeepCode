@@ -4,8 +4,8 @@ These are kept as :class:`dataclasses.dataclass` (not Pydantic) so the
 hot logging path has zero validation overhead. They serialise to plain
 JSON via :meth:`to_jsonl` for ``*.jsonl`` sinks.
 
-``LLMLogRecord`` additionally carries the fields of the append-only
-transparency log (P1-1 in ``docs/ROUTER_SUPPLY_CHAIN_HARDENING.md``): a
+``LLMLogRecord`` additionally carries the fields of the optional append-only
+transparency log (``DEEPCODE_TRANSPARENCY_LOG=1``): a
 malicious model "router" between the harness and the provider can rewrite
 the tool calls we receive and can read every credential we send. No
 client-side check can prove such a relay is honest, but a hash chain over

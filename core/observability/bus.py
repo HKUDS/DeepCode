@@ -17,7 +17,8 @@ LLM and MCP records are emitted via :func:`log_llm_call` /
 :func:`log_mcp_call` directly (they bypass loguru because their schemas
 are richer and they need their own files).
 
-``llm.jsonl`` is also the home of the append-only transparency log (P1-1):
+``llm.jsonl`` is also the home of the optional append-only transparency log
+(``DEEPCODE_TRANSPARENCY_LOG=1``):
 every :class:`LLMLogRecord` we append is linked into a hash chain
 (``prev_hash`` -> ``entry_hash``) *at write time* — the link depends on the
 target file, so it cannot live in the record constructor. MCP and system
@@ -26,7 +27,7 @@ the forensic question is about credential flow to the model endpoint, and
 mixing three schemas into one chain would make the verifier's line numbers
 meaningless. Telemetry stays local (console + JSONL sinks only); do not add
 a network exporter here — ``MCPLogRecord.arguments_preview`` can contain
-credentials (see the P1-1 note in ``docs/ROUTER_SUPPLY_CHAIN_HARDENING.md``).
+credentials.
 """
 
 from __future__ import annotations
@@ -540,27 +541,24 @@ def _recover_tail_entry_hash(path: Path) -> str:
 
 
 def transparency_log_enabled() -> bool:
-    """Whether LLM log lines carry a hash chain. On unless disabled.
+    """Whether LLM log lines carry a hash chain. Off unless enabled.
 
-    On by default because the chain's whole value is forensic and it is worth
-    nothing retroactively: an operator who discovers a suspect relay cannot go
-    back and chain the sessions that already ran. The cost is two short hex
-    fields per line.
-
-    The escape hatch exists for a real limitation rather than for tidiness.
-    ``_append_llm_record`` serialises threads within one process but not
-    separate processes, so two processes appending to the same ``llm.jsonl``
-    will legitimately fork the chain and the verifier will report a fork that
-    is not an attack. A deployment that runs several writers against one log
-    file should set ``DEEPCODE_TRANSPARENCY_LOG=0``, or give each writer its
-    own task directory, rather than learn to ignore the verifier.
+    Opt in with ``DEEPCODE_TRANSPARENCY_LOG=1``. The chain is forensic: it
+    lets an operator prove afterwards that a local ``llm.jsonl`` was not
+    edited and see which endpoint each call went to. It is off by default
+    because ``_append_llm_record`` serialises threads within one process but
+    not separate processes: two processes appending to the same ``llm.jsonl``
+    (a common shape for the shared local runtime) fork the chain, and the
+    verifier would report a fork that is not an attack. A deployment that
+    wants the chain should enable it and give each writer its own task
+    directory.
     """
 
-    return os.environ.get("DEEPCODE_TRANSPARENCY_LOG", "").strip().lower() not in {
-        "0",
-        "false",
-        "off",
-        "no",
+    return os.environ.get("DEEPCODE_TRANSPARENCY_LOG", "").strip().lower() in {
+        "1",
+        "true",
+        "on",
+        "yes",
     }
 
 
