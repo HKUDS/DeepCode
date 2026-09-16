@@ -20,11 +20,16 @@ Two rules keep this usable:
   ``extra_env``, which merges *after* the scrub. The scrub is a default, not a
   cage — but forwarding a secret becomes a deliberate act.
 
-The escape hatch for whole-process opt-out is
-``DEEPCODE_BASH_FULL_ENV=1``, honoured at the call sites that spawn shells
-(see :mod:`core.harness.tools.shell`). It exists because some build scripts
-read credentials from the environment and cannot be fixed quickly; it is
-deliberately not the default.
+Where the scrub applies by default. External agent CLIs
+(:mod:`core.harness.agents.external_backend`) have always received the
+scrubbed environment and still do. The agent's own shell, hook commands and
+the code-mode runtime keep the full environment unless the operator opts in
+with ``DEEPCODE_BASH_SCRUB_ENV=1``: everyday work such as ``gh``, ``aws``,
+``huggingface-cli`` or a private package index reads its token from the
+environment, and silently dropping it would break those workflows for every
+user to defend against a relay that rewrites tool calls.
+``DEEPCODE_BASH_FULL_ENV=1`` remains the explicit "give children everything"
+override and wins over the opt-in.
 """
 
 from __future__ import annotations
@@ -34,7 +39,10 @@ import re
 
 __all__ = [
     "FULL_ENV_ENV_VAR",
+    "SCRUB_ENV_VAR",
     "SENSITIVE_ENV_PATTERN",
+    "child_env",
+    "env_scrub_requested",
     "full_env_requested",
     "scrubbed_parent_env",
 ]
@@ -45,16 +53,36 @@ SENSITIVE_ENV_PATTERN = re.compile(r"KEY|PASSWORD|SECRET|TOKEN", re.IGNORECASE)
 # Opt-out: give a child the untouched parent environment.
 FULL_ENV_ENV_VAR = "DEEPCODE_BASH_FULL_ENV"
 
+# Opt-in: scrub the environment handed to the agent's shell, hook commands and
+# the code-mode runtime. Off by default; see the module docstring.
+SCRUB_ENV_VAR = "DEEPCODE_BASH_SCRUB_ENV"
+
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
 
 def full_env_requested() -> bool:
     """Whether the operator explicitly asked for the untouched environment."""
 
-    return os.environ.get(FULL_ENV_ENV_VAR, "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    return os.environ.get(FULL_ENV_ENV_VAR, "").strip().lower() in _TRUTHY
+
+
+def env_scrub_requested() -> bool:
+    """Whether the operator opted the shell, hooks and code mode into the scrub."""
+
+    return os.environ.get(SCRUB_ENV_VAR, "").strip().lower() in _TRUTHY
+
+
+def child_env(extra_env: dict[str, str] | None = None) -> dict[str, str]:
+    """Environment for the agent's shell, a hook command or the code-mode runtime.
+
+    The full parent environment by default; the credential scrub applies only
+    when :data:`SCRUB_ENV_VAR` is set, and :data:`FULL_ENV_ENV_VAR` still wins.
+    ``extra_env`` merges last either way.
+    """
+
+    return scrubbed_parent_env(
+        extra_env, force_full=not env_scrub_requested() or full_env_requested()
+    )
 
 
 def scrubbed_parent_env(

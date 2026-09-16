@@ -48,6 +48,7 @@ __all__ = [
     "screen_command",
     "screen_egress",
     "screen_install",
+    "strict_screens_enabled",
 ]
 
 # Shell control operators that separate one simple command from the next.
@@ -243,6 +244,13 @@ _ALLOW_REMOTE_SCRIPT_ENV = "DEEPCODE_ALLOW_REMOTE_SCRIPT"
 # Environment variable that turns the new screens off wholesale.
 _SCREEN_DISABLE_ENV = "DEEPCODE_COMMAND_SCREEN"
 
+# ``DEEPCODE_COMMAND_SCREEN=strict`` additionally enables the egress and
+# install screens in front of the agent's shell. They stay off by default:
+# ``curl ... | sh`` installers and third-party package mirrors are everyday
+# tools, and refusing them for every user is a worse trade than the relay
+# threat they guard against. The destructive-command screen is always on.
+_STRICT_SCREEN_VALUE = "strict"
+
 # Package managers, mapped to the sub-commands that install something.
 _INSTALL_SUBCOMMANDS: dict[str, frozenset[str]] = {
     "pip": frozenset({"install"}),
@@ -316,6 +324,16 @@ _DEFAULT_TRUSTED_INDEXES = frozenset(
         "proxy.golang.org",
         "rubygems.org",
         "repo.maven.apache.org",
+        # Widely used mirrors of the same indexes.
+        "pypi.tuna.tsinghua.edu.cn",
+        "mirrors.tuna.tsinghua.edu.cn",
+        "mirrors.aliyun.com",
+        "pypi.mirrors.ustc.edu.cn",
+        "mirrors.ustc.edu.cn",
+        "mirrors.cloud.tencent.com",
+        "mirrors.huaweicloud.com",
+        "registry.npmmirror.com",
+        "pypi.doubanio.com",
     }
 )
 
@@ -356,6 +374,14 @@ def _screens_disabled() -> bool:
         "off",
         "no",
     }
+
+
+def strict_screens_enabled() -> bool:
+    """Whether the operator turned on the egress and install screens."""
+
+    return (
+        os.environ.get(_SCREEN_DISABLE_ENV, "").strip().lower() == _STRICT_SCREEN_VALUE
+    )
 
 
 def _remote_script_allowed() -> bool:
@@ -638,20 +664,22 @@ def screen_all(
 ) -> str | None:
     """Run every screen and return the first reason, or ``None``.
 
-    Order matters only for the quality of the message: the destructive check is
-    the cheapest and the most certain, so it speaks first.
+    The destructive-command screen always runs. The egress and install screens
+    run only under ``DEEPCODE_COMMAND_SCREEN=strict`` (see
+    :func:`strict_screens_enabled`). Order matters only for the quality of the
+    message: the destructive check is the cheapest and the most certain, so it
+    speaks first.
     """
 
-    return (
-        screen_command(command)
-        or screen_egress(
-            command,
-            allowed_domains=allowed_domains,
-            blocked_domains=blocked_domains,
-        )
-        or screen_install(
-            command,
-            known_packages=known_packages,
-            allowed_indexes=allowed_indexes,
-        )
+    reason = screen_command(command)
+    if reason or not strict_screens_enabled():
+        return reason
+    return screen_egress(
+        command,
+        allowed_domains=allowed_domains,
+        blocked_domains=blocked_domains,
+    ) or screen_install(
+        command,
+        known_packages=known_packages,
+        allowed_indexes=allowed_indexes,
     )

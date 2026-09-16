@@ -6,20 +6,19 @@ Large output is capped and spilled to a temp file with an inline preview, so
 a chatty command never blows the context. A small declarative preflight
 refuses known-interactive scaffolds that would otherwise hang the agent.
 
-Two screens run before the command reaches the shell, and they exist because
-the command text is not necessarily the model's own: an intermediary between
-us and the provider can rewrite a tool call on its way back. ``screen_all``
-(:mod:`core.harness.command_guard`) catches destructive argv, remote scripts
-piped into an interpreter, and one-edit package names. The child also gets a
-credential-scrubbed environment (:mod:`core.harness.env_sanitize`) so a plain
-``env`` no longer copies every provider key into the transcript — and from
-there into the next request the model sends, where a relay reads it in
-plaintext.
+``screen_all`` (:mod:`core.harness.command_guard`) runs before the command
+reaches the shell. The destructive-command screen is always on. With
+``DEEPCODE_COMMAND_SCREEN=strict`` it also refuses remote scripts piped into an
+interpreter, installs from unknown package indexes and one-edit package names,
+which matters when the command text may not be the model's own (an
+intermediary between us and the provider can rewrite a tool call on its way
+back). With ``DEEPCODE_BASH_SCRUB_ENV=1`` the child gets a credential-scrubbed
+environment (:mod:`core.harness.env_sanitize`) so a plain ``env`` cannot copy
+provider keys into the transcript. Both are opt-in because everyday work
+(``curl | sh`` installers, package mirrors, ``gh``/``aws`` reading tokens from
+the environment) would otherwise break for every user.
 
-Neither screen is the security boundary. The sandbox is. Both are cheap first
-passes that fail closed on shapes we can recognise, and both are waivable on
-purpose (``DEEPCODE_ALLOW_REMOTE_SCRIPT``, ``DEEPCODE_BASH_FULL_ENV``,
-``DEEPCODE_COMMAND_SCREEN``).
+None of this is the security boundary. The sandbox is.
 """
 
 from __future__ import annotations
@@ -37,7 +36,7 @@ from core.agent_runtime.processes import (
 )
 from core.agent_runtime.tools.base import Tool, ToolResult, tool_parameters
 from core.harness.command_guard import screen_all
-from core.harness.env_sanitize import scrubbed_parent_env
+from core.harness.env_sanitize import child_env
 from core.harness.sandbox import build_exec_command
 
 _MAX_OUTPUT_CHARS = 30_000
@@ -185,11 +184,9 @@ class BashTool(Tool):
         if refusal:
             return f"Error: {refusal}"
 
-        # Fail closed on shapes we can recognise: destructive argv, a remote
-        # script piped into an interpreter, a package one edit from a declared
-        # dependency, or an install from a non-canonical index. The rewritten
-        # tool call an intermediary would deliver is schema-valid, so the
-        # arguments are the only place it can show.
+        # Destructive argv is always refused; under DEEPCODE_COMMAND_SCREEN=strict
+        # so are remote scripts piped into an interpreter, installs from unknown
+        # indexes and one-edit package names (see command_guard.screen_all).
         screened = screen_all(command, known_packages=self._known_packages())
         if screened:
             return (
@@ -206,10 +203,9 @@ class BashTool(Tool):
             proc = await asyncio.create_subprocess_exec(
                 *wrapped.argv,
                 cwd=self._workspace,
-                # Credential-shaped variables are dropped so a plain `env` (or
-                # any command that echoes one) cannot copy provider keys into
-                # the transcript and from there into the next outbound request.
-                env=scrubbed_parent_env(),
+                # Full environment unless DEEPCODE_BASH_SCRUB_ENV=1 drops the
+                # credential-shaped variables (see env_sanitize.child_env).
+                env=child_env(),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 **subprocess_group_kwargs(),
