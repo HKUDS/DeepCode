@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import stat
+import threading
 import time
 import uuid
 from collections.abc import Iterator
@@ -20,6 +22,7 @@ from core.persistence.migrations import (
     migrate,
 )
 from core.private_storage import (
+    UnsafePrivateFileError,
     ensure_private_directory,
     ensure_private_file,
     open_private_file,
@@ -36,12 +39,71 @@ _hardened_files: set[str] = set()
 
 
 class Database:
-    """Connection factory; no process-global mutable connection is retained."""
+    """Connection factory plus one idle *anchor* connection per instance.
+
+    Every ``read()``/``transaction()`` still gets its own short-lived
+    connection. The anchor never runs queries; it only keeps the WAL open so
+    ``-wal``/``-shm`` are not checkpointed, unlinked and recreated on every
+    last-connection close (see :meth:`_ensure_anchor`).
+
+    Invariant (POSIX): **never open and close a separate descriptor on the
+    database file while any connection in this process may be open.** POSIX
+    fcntl locks are per process; ``close()`` of *any* descriptor for the file
+    drops every lock the process holds on it, including the SHARED lock a
+    WAL-mode connection keeps for its whole lifetime. Another process then
+    sees no readers, checkpoints, and unlinks ``-wal``/``-shm`` underneath
+    the still-open connections: ``SQLITE_IOERR_SHORT_READ`` ("disk I/O
+    error"), commits written to an unlinked WAL (rows that a later read
+    cannot see, hence FOREIGN KEY failures), and checkpoints of stale frames
+    ("database disk image is malformed" / "file is not a database").
+    """
 
     def __init__(self, path: Path | str | None = None) -> None:
         self.path = (
             Path(path).expanduser().resolve() if path else default_database_path()
         )
+        self._anchor: sqlite3.Connection | None = None
+        self._anchor_lock = threading.Lock()
+
+    def close(self) -> None:
+        """Release the anchor connection. Idempotent; ``read()`` still works after."""
+
+        with self._anchor_lock:
+            anchor, self._anchor = self._anchor, None
+        if anchor is not None:
+            anchor.close()
+
+    def _ensure_anchor(self) -> None:
+        if self._anchor is not None:
+            return
+        with self._anchor_lock:
+            if self._anchor is not None:
+                return
+            # check_same_thread=False: closed from whichever thread runs
+            # shutdown; it never executes statements after this point.
+            anchor = sqlite3.connect(
+                self.path,
+                timeout=10.0,
+                isolation_level=None,
+                check_same_thread=False,
+            )
+            try:
+                anchor.execute("PRAGMA busy_timeout = 10000")
+                # One read opens the WAL and, in WAL mode, retains the SHARED
+                # lock and the wal-index mapping until close.
+                anchor.execute("SELECT 1 FROM sqlite_schema LIMIT 1").fetchall()
+                mode = anchor.execute("PRAGMA journal_mode").fetchone()[0]
+            except BaseException:
+                anchor.close()
+                raise
+            if str(mode).lower() != "wal":
+                # Fresh database before initialize() switched it to WAL: a
+                # rollback-journal connection anchors nothing. Retry on the
+                # next connect.
+                anchor.close()
+                return
+            self._anchor = anchor
+            self._harden_files()
 
     @property
     def restore_marker(self) -> Path:
@@ -104,8 +166,7 @@ class Database:
 
     def _connect(self) -> sqlite3.Connection:
         ensure_private_directory(self.path.parent)
-        descriptor = open_private_file(self.path, os.O_RDWR | os.O_CREAT)
-        os.close(descriptor)
+        self._ensure_database_file()
         connection = sqlite3.connect(
             self.path,
             timeout=10.0,
@@ -116,7 +177,30 @@ class Database:
         connection.execute("PRAGMA busy_timeout = 10000")
         connection.execute("PRAGMA synchronous = NORMAL")
         self._harden_files()
+        self._ensure_anchor()
         return connection
+
+    def _ensure_database_file(self) -> None:
+        """Create the database file user-private if absent, without ever
+        opening a second descriptor on an existing one (see class docstring).
+
+        The regular-file / no-symlink guarantee that ``open_private_file``
+        gave via ``O_NOFOLLOW`` is kept with ``lstat``; ``sqlite3.connect``
+        would follow a link.
+        """
+
+        try:
+            metadata = self.path.lstat()
+        except FileNotFoundError:
+            # First creation only: no connection can be open on a file that
+            # does not exist, so this close() cannot drop any lock. The
+            # O_EXCL-then-open dance inside open_private_file makes a
+            # concurrent creator safe.
+            descriptor = open_private_file(self.path, os.O_RDWR | os.O_CREAT)
+            os.close(descriptor)
+            return
+        if not stat.S_ISREG(metadata.st_mode):
+            raise UnsafePrivateFileError("database path must be a regular file")
 
     def _harden_files(self) -> None:
         """Repair the database files' permissions at most once per process.

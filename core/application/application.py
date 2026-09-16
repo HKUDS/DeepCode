@@ -424,6 +424,7 @@ class DeepCodeApplication:
                 self._application_lease = None
                 if lease is not None:
                     attempt("application lifetime lease", lease.close)
+            attempt("database anchor connection", self.database.close)
 
         if len(errors) == 1:
             raise errors[0]
