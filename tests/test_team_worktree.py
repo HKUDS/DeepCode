@@ -119,3 +119,20 @@ def test_team_exclude_is_local_idempotent_and_reverted(tmp_path):
     text = exclude.read_text()
     assert _EXCLUDE_BEGIN not in text  # our block gone
     assert "user-secret.txt" in text  # the user's rule preserved
+
+
+def test_team_exclude_keeps_non_ascii_user_rules(tmp_path):
+    m = _mgr(tmp_path)
+    m.ensure_base()
+    exclude = m.base / ".git" / "info" / "exclude"
+    m.cleanup_all()
+    # Users write their own exclude rules as UTF-8. Such a rule must survive
+    # install/remove whatever the locale encoding is: cp1252, the Windows
+    # default, cannot even decode these bytes.
+    original = "数据/\n".encode() + exclude.read_bytes()
+    exclude.write_bytes(original)
+
+    m.ensure_base()
+    assert "数据/" in exclude.read_text(encoding="utf-8")
+    m.cleanup_all()
+    assert exclude.read_bytes().splitlines() == original.splitlines()
