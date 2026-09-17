@@ -6,6 +6,7 @@ from contextlib import AsyncExitStack
 from typing import Any
 
 from core.agent_runtime.tools.base import Tool
+from core.agent_runtime.tools.semantic_hint import build_miss_message
 
 
 class ToolRegistry:
@@ -82,11 +83,16 @@ class ToolRegistry:
 
         tool = self._tools.get(name)
         if not tool:
+            # A misremembered name gets the closest registered names first;
+            # the full list still follows so the model can pick from it. The
+            # hint never widens what is callable: execution still needs the
+            # exact registered name.
             return (
                 None,
                 params,
                 (
-                    f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"
+                    f"Error: {build_miss_message(name, self.tool_names)} "
+                    f"Available: {', '.join(self.tool_names)}"
                 ),
             )
 
