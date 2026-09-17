@@ -426,6 +426,12 @@ def _catalog_request(connection: ResolvedConnection) -> tuple[str, dict[str, str
         base = connection.api_base.rstrip("/")
     if connection.api_key:
         headers["Authorization"] = f"Bearer {connection.api_key}"
+    if connection.provider_name == "aimlapi":
+        # AI/ML API serves one directory for every endpoint family it hosts:
+        # 936 rows, of which only 353 are chat models — the rest are image,
+        # video, speech and embedding endpoints that a chat request rejects,
+        # and ids repeat across families. Ask for the chat surface only.
+        return f"{base}/models?type=openai%2Fchat-completions", headers
     return f"{base}/models", headers
 
 
@@ -438,15 +444,21 @@ def _parse_model(value: dict[str, Any]) -> CatalogModel | None:
     top_provider = (
         value.get("top_provider") if isinstance(value.get("top_provider"), dict) else {}
     )
+    # Some gateways (AI/ML API) nest the descriptive fields one level down
+    # instead of publishing OpenRouter's flat keys. Read it after the flat
+    # names so a provider that has both keeps winning at the top level.
+    info = value.get("info") if isinstance(value.get("info"), dict) else {}
     context = (
         value.get("context_length")
         or value.get("context_window")
         or value.get("max_input_tokens")
+        or info.get("contextLength")
         or fallback.context_window
     )
     output = (
         value.get("max_output_tokens")
         or top_provider.get("max_completion_tokens")
+        or info.get("outputMax")
         or fallback.max_output_tokens
     )
     supported = value.get("supported_parameters", [])
@@ -463,7 +475,12 @@ def _parse_model(value: dict[str, Any]) -> CatalogModel | None:
         )
     return CatalogModel(
         id=model_id,
-        name=str(value.get("name") or value.get("display_name") or model_id),
+        name=str(
+            value.get("name")
+            or value.get("display_name")
+            or info.get("name")
+            or model_id
+        ),
         context_window=max(1, int(context)),
         max_output_tokens=max(1, int(output)),
         supported_parameters=supported_parameters,
