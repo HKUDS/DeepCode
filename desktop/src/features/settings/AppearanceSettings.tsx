@@ -1,5 +1,5 @@
 import { Monitor, Moon, Sun } from "lucide-react";
-import { useMemo, useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 
 import {
   APPEARANCE_DEFAULTS,
@@ -11,6 +11,7 @@ import {
 import {
   appendFamily,
   availableFontCandidates,
+  type FontCandidate,
 } from "../../app/fontCandidates";
 import { useAppearance } from "../../app/useAppearance";
 import { parseVsCodeTheme, ThemeImportError } from "../../app/importedTheme";
@@ -82,9 +83,13 @@ export function AppearanceSettings() {
   const { t } = useTranslation();
   const fieldId = useId();
   const [importError, setImportError] = useState<string | null>(null);
-  // Probed once per mount: the set of installed fonts does not change while
-  // the settings page is open.
-  const installed = useMemo(() => availableFontCandidates(), []);
+  // The installed set is probed once per mount — it does not change while the
+  // settings page is open — and the probe is asynchronous because the engine's
+  // only reliable answer, a `local()` font load, is.
+  const [installed, setInstalled] = useState<FontCandidate[]>([]);
+  useEffect(() => {
+    void availableFontCandidates().then(setInstalled);
+  }, []);
   const isDefault = APPEARANCE_SETTINGS.every(
     (setting) => appearance[setting.key] === APPEARANCE_DEFAULTS[setting.key],
   ) && appearance.importedTheme === null;
