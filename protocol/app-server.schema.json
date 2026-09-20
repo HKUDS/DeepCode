@@ -6274,6 +6274,12 @@
         },
         "provider/logout": {
           "$ref": "#/$defs/ProviderLogoutParams"
+        },
+        "dictation/status": {
+          "$ref": "#/$defs/EmptyParams"
+        },
+        "dictation/transcribe": {
+          "$ref": "#/$defs/DictationTranscribeParams"
         }
       },
       "required": [
@@ -6381,7 +6387,9 @@
         "provider/login/start",
         "provider/login/poll",
         "provider/login/cancel",
-        "provider/logout"
+        "provider/logout",
+        "dictation/status",
+        "dictation/transcribe"
       ]
     },
     "MethodResults": {
@@ -7367,6 +7375,12 @@
         },
         "provider/logout": {
           "$ref": "#/$defs/ProviderLogoutResult"
+        },
+        "dictation/status": {
+          "$ref": "#/$defs/DictationStatusResult"
+        },
+        "dictation/transcribe": {
+          "$ref": "#/$defs/DictationTranscribeResult"
         }
       },
       "required": [
@@ -7474,7 +7488,9 @@
         "provider/login/start",
         "provider/login/poll",
         "provider/login/cancel",
-        "provider/logout"
+        "provider/logout",
+        "dictation/status",
+        "dictation/transcribe"
       ]
     },
     "Notifications": {
@@ -8171,6 +8187,65 @@
       "required": [
         "threadId",
         "expectedGoalId"
+      ]
+    },
+    "DictationStatusResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "model": {
+          "type": ["string", "null"]
+        },
+        "maxAudioSeconds": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "maximum": 600
+        }
+      },
+      "required": [
+        "available",
+        "model",
+        "maxAudioSeconds"
+      ]
+    },
+    "DictationTranscribeParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "audio": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mimeType": {
+          "type": "string",
+          "minLength": 1
+        },
+        "language": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": [
+        "audio",
+        "mimeType"
+      ]
+    },
+    "DictationTranscribeResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "model"
       ]
     }
   }

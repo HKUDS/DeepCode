@@ -21,6 +21,7 @@ For installation options, see the [quick start](../../README.md#quick-start).
 |---|---|
 | Complete my first task | [Getting started](getting-started.md) |
 | Connect another provider or use a local model | [Models and providers](models.md) |
+| Dictate prompts with voice (Parakeet) | [Voice dictation](dictation.md) |
 | Attach files, use shortcuts, or control a running task | [The terminal UI](the-tui.md) |
 | Resume a conversation or manage long chats | [Sessions](sessions.md) |
 | Add project conventions and reusable instructions | [Skills and memory](skills-and-memory.md) |

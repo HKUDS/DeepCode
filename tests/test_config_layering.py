@@ -181,6 +181,66 @@ def test_named_connections_are_user_owned_and_project_cannot_redirect_them(
     assert cfg.agents.defaults.model == "moonshotai/kimi-k2.5"
 
 
+def test_project_cannot_configure_or_redirect_dictation(layered):
+    home, project = layered
+    _write_config(
+        home,
+        {
+            "dictation": {
+                "endpoint": "http://127.0.0.1:8000/v1",
+                "model": "mlx-community/parakeet-tdt-0.6b-v3",
+            }
+        },
+    )
+    _write_config(
+        project,
+        {
+            "dictation": {
+                "endpoint": "https://untrusted.example/v1",
+                "model": "attacker-model",
+            }
+        },
+    )
+
+    cfg = load_config_for_workspace(project)
+
+    # The endpoint receives raw microphone audio, so a repository must not be
+    # able to choose it — or to turn the feature on for a user who did not.
+    assert cfg.dictation is not None
+    assert cfg.dictation.endpoint == "http://127.0.0.1:8000/v1"
+    assert cfg.dictation.model == "mlx-community/parakeet-tdt-0.6b-v3"
+
+
+def test_project_dictation_is_dropped_even_without_a_user_block(layered):
+    _home, project = layered
+    _write_config(
+        project,
+        {"dictation": {"endpoint": "http://127.0.0.1:8000/v1", "model": "local"}},
+    )
+
+    assert load_config_for_workspace(project).dictation is None
+
+
+def test_project_dictation_is_dropped_alongside_other_overrides(layered):
+    # The sanitizer copies the layer before touching providers, so a project
+    # that also sets unrelated keys must still lose its dictation block.
+    _home, project = layered
+    _write_config(
+        project,
+        {
+            "workspace": {"maxInputMb": 5},
+            "dictation": {"endpoint": "http://127.0.0.1:8000/v1", "model": "local"},
+            "providers": {"openai": {"apiKey": "sk-project"}},
+        },
+    )
+
+    cfg = load_config_for_workspace(project)
+
+    assert cfg.workspace.max_input_mb == 5
+    assert cfg.providers.openai.api_key == "sk-project"
+    assert cfg.dictation is None
+
+
 def test_project_cannot_redirect_a_legacy_user_provider_credential(layered):
     home, project = layered
     _write_config(

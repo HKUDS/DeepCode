@@ -269,3 +269,49 @@ class TerminalNotFoundError(ApplicationError):
 
 class NotSupportedApplicationError(ApplicationError):
     code = "NOT_SUPPORTED"
+
+
+class DictationNotConfiguredError(ApplicationError):
+    """Voice input was requested but no ``dictation`` block exists.
+
+    Permanent as long as the config is: the endpoint is user-owned and cannot
+    be supplied per request, so this is not worth retrying from the UI.
+    """
+
+    code = "DICTATION_NOT_CONFIGURED"
+
+    def __init__(self, message: str = "dictation is not configured") -> None:
+        super().__init__(
+            message,
+            user_message=(
+                "Voice input is not configured. Add a dictation block with the "
+                "Parakeet endpoint to your DeepCode config."
+            ),
+        )
+
+
+class DictationUnavailableError(ApplicationError):
+    """The configured endpoint could not produce a transcript.
+
+    Covers every runtime failure on the remote side: unreachable, timed out,
+    refused, or answered with an error. ``retryable`` mirrors the client's
+    judgement (5xx and timeouts yes, 4xx no) rather than being hardcoded, so
+    the UI can offer "try again" only when it would be honest.
+    """
+
+    code = "DICTATION_UNAVAILABLE"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool = True,
+    ) -> None:
+        super().__init__(
+            message,
+            user_message=(
+                "Voice input could not be transcribed. Check that the dictation "
+                "endpoint is running, then try again."
+            ),
+        )
+        self.retryable = retryable

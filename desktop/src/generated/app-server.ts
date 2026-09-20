@@ -196,6 +196,8 @@ export interface MethodParams {
   "provider/login/poll": ProviderLoginFlowParams;
   "provider/login/cancel": ProviderLoginFlowParams;
   "provider/logout": ProviderLogoutParams;
+  "dictation/status": EmptyParams;
+  "dictation/transcribe": DictationTranscribeParams;
 }
 export interface InitializeParams {
   protocolVersion: "1.0";
@@ -670,6 +672,11 @@ export interface ProviderLoginFlowParams {
 export interface ProviderLogoutParams {
   connectionId: string;
 }
+export interface DictationTranscribeParams {
+  audio: string;
+  mimeType: string;
+  language?: string | null;
+}
 export interface MethodResults {
   initialize: InitializeResult;
   shutdown: {
@@ -912,6 +919,8 @@ export interface MethodResults {
   "provider/login/poll": ProviderLoginFlow;
   "provider/login/cancel": ProviderLoginFlow;
   "provider/logout": ProviderLogoutResult;
+  "dictation/status": DictationStatusResult;
+  "dictation/transcribe": DictationTranscribeResult;
 }
 export interface InitializeResult {
   protocolVersion: "1.0";
@@ -1810,6 +1819,15 @@ export interface ProviderLogoutResult {
   disconnected: boolean;
   remoteRevoked: false;
   manageUrl: string;
+}
+export interface DictationStatusResult {
+  available: boolean;
+  model: string | null;
+  maxAudioSeconds: number | null;
+}
+export interface DictationTranscribeResult {
+  text: string;
+  model: string;
 }
 export interface Notifications {
   "thread.updated": Event;

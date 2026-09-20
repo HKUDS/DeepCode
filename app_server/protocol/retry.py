@@ -17,6 +17,9 @@ READ_METHODS = frozenset(
         "mcp/list",
         "mcp/presets",
         "diagnostics/read",
+        # Status is a pure config read; transcription is deliberately absent —
+        # it is a long, expensive call that must be re-issued by the user.
+        "dictation/status",
         "automation/list",
         "automation/runs",
         "thread/list",

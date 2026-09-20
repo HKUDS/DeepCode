@@ -321,6 +321,8 @@ class Dispatcher:
             rpc_methods.TERMINAL_CLOSE: self._terminal_close,
             rpc_methods.TEST_DISCOVER: self._test_discover,
             rpc_methods.TEST_RUN: self._test_run,
+            rpc_methods.DICTATION_STATUS: self._dictation_status,
+            rpc_methods.DICTATION_TRANSCRIBE: self._dictation_transcribe,
         }
 
     @property
@@ -1057,6 +1059,24 @@ class Dispatcher:
             "turns": [turn_view(turn) for turn in turns[:limit]],
             "hasMore": len(turns) > limit,
         }
+
+    def _dictation_status(self, params: Params) -> dict[str, Any]:
+        params.only("projectId")
+        return self.application.dictation.status(
+            project_id=params.string("projectId", required=False)
+        )
+
+    def _dictation_transcribe(self, params: Params) -> dict[str, Any]:
+        params.only("audio", "mimeType", "language", "projectId")
+        language = (
+            params.nullable_string("language") if "language" in params.values else None
+        )
+        return self.application.dictation.transcribe(
+            audio=str(params.string("audio")),
+            mime_type=str(params.string("mimeType")),
+            language=language,
+            project_id=params.string("projectId", required=False),
+        )
 
     def _model_reasoning(self, params: Params) -> dict[str, Any]:
         params.only("projectId", "connectionId", "model")
