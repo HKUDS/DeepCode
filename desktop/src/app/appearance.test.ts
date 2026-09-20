@@ -147,3 +147,49 @@ describe("applyAppearance", () => {
     expect(root().style.getPropertyValue("--font-size-base")).toBe("");
   });
 });
+
+describe("monospace font preference", () => {
+  it("reaches the monospace stack, not the interface one", () => {
+    applyAppearance(
+      {
+        ...APPEARANCE_DEFAULTS,
+        fontFamily: "Inter",
+        fontFamilyMono: "Cascadia Code",
+      },
+      root(),
+    );
+    expect(root().style.getPropertyValue("--font-ui-preferred")).toBe("Inter,");
+    expect(root().style.getPropertyValue("--font-mono-preferred")).toBe(
+      "Cascadia Code,",
+    );
+  });
+
+  it("leaves the other list's variable untouched", () => {
+    // Both lists are edited through the same control, so a picker wired to the
+    // wrong key would quietly push a monospace face into the UI stack.
+    applyAppearance(
+      { ...APPEARANCE_DEFAULTS, fontFamilyMono: "JetBrains Mono" },
+      root(),
+    );
+    expect(root().style.getPropertyValue("--font-ui-preferred")).toBe("");
+  });
+
+  it("falls back to the default for a list of the wrong type", () => {
+    expect(sanitizeAppearance({ fontFamilyMono: 42 }).fontFamilyMono).toBe("");
+  });
+
+  it("carries each list's field copy on its own table row", () => {
+    // The picker reads its placeholder and its note from the row it was reached
+    // through. Copy that moved back into the renderer, or a row that lost it,
+    // would render an unlabelled control instead of failing anywhere.
+    const rows = APPEARANCE_SETTINGS.filter((setting) => setting.noteKey);
+    expect(rows.map((setting) => setting.key)).toEqual([
+      "fontFamily",
+      "fontFamilyMono",
+    ]);
+    for (const row of rows) {
+      expect(row.placeholder?.key).toMatch(/^settings\.appearance\.font/);
+      expect(row.placeholder?.fallback).toBeTruthy();
+    }
+  });
+});

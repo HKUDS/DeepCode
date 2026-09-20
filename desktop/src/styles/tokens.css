@@ -3,13 +3,16 @@
   background: #e4e9e5;
   color-scheme: light dark;
 
-  /* Appearance preferences (src/app/appearance.ts) override the three
+  /* Appearance preferences (src/app/appearance.ts) override the four
      variables below on the root element. They are declared here so the app
      works untouched when nothing has been customised, and so the defaults
      stay in the stylesheet rather than being duplicated in TypeScript. */
 
-  /* Empty by default; the preference prepends families to the stack. */
+  /* Empty by default; the preference prepends families to the stack. Declared
+     empty rather than omitted: `var()` with no fallback would make the whole
+     declaration invalid at computed-value time. */
   --font-ui-preferred: ;
+  --font-mono-preferred: ;
   --font-size-base: 14px;
   /* Width of the conversation column, its composer, and the goal rail —
      one value so the three cannot drift apart. */
@@ -27,7 +30,8 @@
     ui-rounded, "SF Pro Rounded", "Avenir Next", "Segoe UI Variable Display",
     -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono:
-    "SFMono-Regular", ui-monospace, "Cascadia Code", Consolas, monospace;
+    var(--font-mono-preferred) "SFMono-Regular", ui-monospace, "Cascadia Code",
+    Consolas, monospace;
 
   /* Type scale.
      Every step is `rem`, so it resolves against the root font-size — which is
