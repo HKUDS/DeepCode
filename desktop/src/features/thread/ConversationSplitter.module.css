@@ -1,0 +1,65 @@
+/* Drag handle on the right edge of the centred conversation column (#151).
+
+   It reads the same --conversation-width the column, its composer and the goal
+   rail read, so the strip sits on the edge all three share: half its own width
+   to the right of it, which is what measureColumnWidth() reads back off the DOM
+   to turn a drag into a share of the workspace. The one caveat — the strip is
+   anchored to the workspace while the column is centred inside the scroller, so
+   a scrollbar moves the true edge by a few pixels without moving that offset —
+   is documented in conversationWidthResize.ts. */
+.splitter {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(50% + var(--conversation-width) * 0.5);
+  width: 12px;
+  margin-left: -6px;
+  border-radius: var(--radius-pill);
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.splitter::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 1px;
+  height: min(180px, 40%);
+  transform: translate(-50%, -50%);
+  border-radius: var(--radius-pill);
+  background: var(--border-strong);
+  opacity: 0.55;
+  /* Not repeated in a reduced-motion block: tokens.css already forces
+     `transition-duration: 0.01ms` on everything under that preference. */
+  transition:
+    width 120ms ease,
+    opacity 120ms ease,
+    background 120ms ease;
+}
+
+.splitter:hover::before,
+.splitter:focus-visible::before,
+.splitter[data-dragging="true"]::before {
+  width: 2px;
+  background: var(--border-emphasis);
+  opacity: 1;
+}
+
+/* tokens.css outlines the form controls and nothing else; this is a
+   role="separator" div, so it brings its own ring. */
+.splitter:focus-visible {
+  outline: 3px solid var(--signal-soft);
+  outline-offset: 1px;
+}
+
+/* Under this width the workspace is at or below the 820px cap the default stands
+   for — 1080px window − 248px sidebar − 12px workspace margins (an open
+   inspector, or a topic rail, narrows it further) — so the column already spans
+   the space and the strip would sit on the scrollbar. The settings slider still
+   resizes the column there. */
+@media (max-width: 1080px) {
+  .splitter {
+    display: none;
+  }
+}

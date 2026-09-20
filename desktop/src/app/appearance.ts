@@ -100,6 +100,18 @@ function clampNumber(value: unknown, min: number, max: number, fallback: number)
   return Math.min(max, Math.max(min, Math.round(parsed)));
 }
 
+/**
+ * The conversation column's own slider domain. Exported because the drag
+ * handle that resizes the same column reads its floor, ceiling and step from
+ * here rather than restating them.
+ */
+export const CONVERSATION_WIDTH_RANGE = {
+  min: 40,
+  max: 100,
+  step: 5,
+  unit: "%",
+} as const;
+
 const CONVERSATION_WIDTH: AppearanceSetting<"conversationWidth"> = {
   key: "conversationWidth",
   label: "Conversation width",
@@ -107,9 +119,14 @@ const CONVERSATION_WIDTH: AppearanceSetting<"conversationWidth"> = {
     "How much of the window the conversation column fills. The default keeps " +
     "lines short for readability; widen it to use more of a large display.",
   cssVariable: "--conversation-width",
-  range: { min: 40, max: 100, step: 5, unit: "%" },
+  range: CONVERSATION_WIDTH_RANGE,
   sanitize: (value) =>
-    clampNumber(value, 40, 100, APPEARANCE_DEFAULTS.conversationWidth),
+    clampNumber(
+      value,
+      CONVERSATION_WIDTH_RANGE.min,
+      CONVERSATION_WIDTH_RANGE.max,
+      APPEARANCE_DEFAULTS.conversationWidth,
+    ),
   // 100% restores the built-in cap rather than stretching edge to edge, so
   // the default stays exactly what it was before this setting existed.
   toCss: (value) => (value >= 100 ? "min(820px, 100%)" : `${value}%`),
@@ -198,16 +215,39 @@ export function writeAppearance(state: AppearanceState): void {
  * Push the state onto `root`, clearing anything left at its default so the
  * stylesheet's own value shows through instead of a duplicate copy of it.
  */
+/**
+ * Push one setting onto `root`, clearing it when it sits at its default so the
+ * stylesheet's own value shows through instead of a duplicate copy of it.
+ *
+ * Exported for the conversation pane's drag handle (#151): a drag previews its
+ * own setting on every pointermove, and that preview must not restyle the theme
+ * dozens of times a second to move one column.
+ */
+export function applyAppearanceSetting<K extends keyof AppearanceState>(
+  key: K,
+  value: AppearanceState[K],
+  root: HTMLElement,
+): void {
+  // Matched by key, so narrowing the table's union to this key is sound.
+  const setting = APPEARANCE_SETTINGS.find((candidate) => candidate.key === key) as
+    | AppearanceSetting<K>
+    | undefined;
+  if (!setting?.cssVariable) return;
+  const rendered = setting.toCss ? setting.toCss(value) : String(value);
+  if (rendered === "" || value === APPEARANCE_DEFAULTS[key]) {
+    root.style.removeProperty(setting.cssVariable);
+  } else {
+    root.style.setProperty(setting.cssVariable, rendered);
+  }
+}
+
+/**
+ * Push the state onto `root` — one pass over the table, in table order.
+ */
 export function applyAppearance(state: AppearanceState, root: HTMLElement): void {
   for (const setting of APPEARANCE_SETTINGS) {
     if (!setting.cssVariable) continue;
-    const value = state[setting.key] as never;
-    const rendered = setting.toCss ? setting.toCss(value) : String(value);
-    if (rendered === "" || value === APPEARANCE_DEFAULTS[setting.key]) {
-      root.style.removeProperty(setting.cssVariable);
-    } else {
-      root.style.setProperty(setting.cssVariable, rendered);
-    }
+    applyAppearanceSetting(setting.key, state[setting.key], root);
   }
 
   applyImportedTheme(state.theme === "imported" ? state.importedTheme : null, root);

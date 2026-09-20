@@ -13,6 +13,7 @@ import {
   type ComposerLaunchIntent,
 } from "./features/execution/Composer";
 import { DesktopSidebar } from "./features/navigation/DesktopSidebar";
+import { ConversationSplitter } from "./features/thread/ConversationSplitter";
 import { ThreadHeader } from "./features/thread/ThreadHeader";
 import { useTranscriptMode } from "./features/thread/transcriptMode";
 import type { ClientRuntime } from "./rpc/contracts";
@@ -417,6 +418,7 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
             />
           </Suspense>
         )}
+        {showingThreads && selectedThread ? <ConversationSplitter /> : null}
       </section>
 
       {inspectorVisible ? (

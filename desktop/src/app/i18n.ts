@@ -198,6 +198,8 @@ const ZH_CN: Record<string, string> = {
   "thread.review": "审查",
   "thread.closeReview": "关闭审查面板",
   "thread.openReview": "打开审查面板",
+  "thread.splitterLabel": "调整对话宽度",
+  "thread.splitterHint": "拖动调整对话宽度 · 双击恢复默认",
   // Approval card
   "approval.label": "需要审批",
   "approval.decision": "决定: {{status}}",
