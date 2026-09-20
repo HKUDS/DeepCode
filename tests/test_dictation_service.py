@@ -111,6 +111,20 @@ def test_status_reports_the_configured_endpoint(tmp_path):
     }
 
 
+def test_status_and_transcribe_support_local_endpoint(tmp_path):
+    service = _service(
+        tmp_path,
+        {"dictation": {"endpoint": "local", "model": MODEL}},
+        client_factory=lambda cfg, key, lang: type(
+            "StubLocal", (), {"transcribe": lambda *a, **k: "local ok"}
+        )(),
+    )
+
+    assert service.status()["available"] is True
+    res = service.transcribe(audio=_clip(), mime_type="audio/webm")
+    assert res == {"text": "local ok", "model": MODEL}
+
+
 def test_status_defaults_the_audio_cap(tmp_path):
     assert _service(tmp_path, _dictation_config()).status()["maxAudioSeconds"] == 120
 

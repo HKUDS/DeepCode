@@ -27,8 +27,10 @@ from core.dictation.client import (
     SpeechToTextClient,
     TranscriptionFailed,
 )
+from core.dictation.local_runner import LocalParakeetClient
 
 __all__ = [
+    "LocalParakeetClient",
     "MAX_AUDIO_BYTES",
     "MAX_ENCODED_AUDIO_BYTES",
     "SUPPORTED_MIME_TYPES",

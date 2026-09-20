@@ -5,15 +5,37 @@ DeepCode supports push-to-talk voice input directly in the composer. Spoken text
 ## Overview
 
 - **No audio leaves without configuration.** The microphone button only appears when a `dictation` block is declared in your configuration.
-- **Local first.** With a local engine such as `mlx-audio`, recordings stay entirely on your machine.
+- **Two operational modes:**
+  - **In-process local runner (`endpoint: "local"`):** Runs transcription directly on your machine via `parakeet-mlx` without starting or maintaining any background server.
+  - **OpenAI-compatible server (`endpoint: "http://..."`):** For remote endpoints or local servers such as `mlx_audio.server`.
 - **Composer integration.** The transcribed text lands in the composer draft at the current cursor position so you can review, edit, or append to it before starting or steering a turn.
 - **Escape to discard.** Pressing `Escape` (or clicking the discard button) while recording drops the audio immediately without making a request.
 
 ---
 
-## Setting up a Local Parakeet Server
+## Option 1: Zero-Server Local Dictation (Recommended)
 
-You can run NVIDIA Parakeet locally on Apple Silicon using `mlx-audio`:
+If you have `parakeet-mlx` installed on your machine (`pip install parakeet-mlx`), DeepCode can transcribe clips directly in-process without any daemon.
+
+Add to `~/.deepcode/deepcode_config.json`:
+
+```json
+{
+  "dictation": {
+    "endpoint": "local",
+    "model": "mlx-community/parakeet-tdt-0.6b-v3",
+    "language": "pt"
+  }
+}
+```
+
+That's it! No daemon or separate terminal needs to be kept open.
+
+---
+
+## Option 2: Setting up a Local Parakeet HTTP Server
+
+You can also run NVIDIA Parakeet as a standalone HTTP server using `mlx-audio`:
 
 ```bash
 # 1. Install mlx-audio in an isolated environment

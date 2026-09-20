@@ -466,9 +466,12 @@ class DictationConfig(_Base):
         endpoint = self.endpoint.strip()
         if not endpoint:
             raise ValueError("dictation.endpoint must not be empty")
+        if endpoint == "local":
+            self.endpoint = "local"
+            return self
         if not endpoint.startswith(("http://", "https://")):
             raise ValueError(
-                "dictation.endpoint must be an absolute http:// or https:// URL"
+                "dictation.endpoint must be 'local' or an absolute http:// or https:// URL"
             )
         parsed = urlsplit(endpoint)
         if not parsed.netloc:

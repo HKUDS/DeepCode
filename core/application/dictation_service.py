@@ -48,6 +48,7 @@ from core.dictation.audio import (
     decode_audio,
 )
 from core.dictation.client import SpeechToTextClient, TranscriptionFailed
+from core.dictation.local_runner import LocalParakeetClient
 from core.providers.egress import (
     WARN,
     evaluate_provider_egress,
@@ -57,14 +58,20 @@ from core.providers.egress import (
 #: Builds the client for one request from the resolved endpoint config, the API
 #: key (or ``None``), and the language hint to send. Injectable so tests can
 #: substitute a client without patching process-global state.
-ClientFactory = Callable[[DictationConfig, str | None, str | None], SpeechToTextClient]
+ClientFactory = Callable[[DictationConfig, str | None, str | None], Any]
 
 
 def _default_client_factory(
     config: DictationConfig,
     api_key: str | None,
     language: str | None,
-) -> SpeechToTextClient:
+) -> Any:
+    if config.endpoint == "local":
+        return LocalParakeetClient(
+            config.model,
+            language=language,
+            timeout_seconds=config.timeout_seconds,
+        )
     return SpeechToTextClient(
         config.endpoint,
         config.model,
@@ -204,6 +211,8 @@ class DictationService:
         ``providers.<name>.apiBase``, and the operator needs to be pointed at
         the key this endpoint actually lives under.
         """
+        if config.endpoint == "local":
+            return None
 
         policy = resolve_egress_policy(loaded)
         decision = evaluate_provider_egress(
