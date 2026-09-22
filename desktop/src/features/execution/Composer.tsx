@@ -1,6 +1,7 @@
 import {
   ArrowUp,
   Check,
+  Mic,
   Paperclip,
   ShieldCheck,
   Sparkles,
@@ -41,6 +42,7 @@ import {
   type ComposerCommand,
 } from "./commands";
 import styles from "./Composer.module.css";
+import { useDictation } from "./useDictation";
 import { usePromptDraft } from "./usePromptDraft";
 import { ModelPicker } from "./ModelPicker";
 import { TranscriptModePicker } from "./TranscriptModePicker";
@@ -147,6 +149,7 @@ export function Composer({
     initialLaunch?.prompt,
   );
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const caretRef = useRef<number | null>(null);
   const [contextError, setContextError] = useState<string | null>(null);
   const [commandError, setCommandError] = useState<string | null>(null);
   const [skillPickerOpen, setSkillPickerOpen] = useState(false);
@@ -155,6 +158,10 @@ export function Composer({
     initialLaunch?.skillIds ?? [],
   );
   const [deliveryNotice, setDeliveryNotice] = useState<string | null>(null);
+  const dictation = useDictation({
+    runtime,
+    onTranscript: insertDictation,
+  });
   const skillCatalog = useSkillCatalog(runtime, project?.id ?? null);
   const presetCatalog = usePresetCatalog(
     runtime,
@@ -205,6 +212,13 @@ export function Composer({
     if (!textarea) return;
     textarea.style.height = "0px";
     textarea.style.height = `${Math.min(textarea.scrollHeight, 190)}px`;
+    // A dictated transcript is inserted mid-text, so the caret has to be put
+    // back where the text ended instead of jumping to the end of the draft.
+    const caret = caretRef.current;
+    if (caret !== null) {
+      caretRef.current = null;
+      textarea.setSelectionRange(caret, caret);
+    }
   }, [prompt]);
 
   useEffect(() => {
@@ -212,6 +226,27 @@ export function Composer({
     textareaRef.current?.focus();
     onLaunchIntentConsumed();
   }, [initialLaunch, onLaunchIntentConsumed]);
+
+  /**
+   * Insert a transcript at the caret.
+   *
+   * Function declaration (not a const) because `useDictation` is constructed
+   * above it and only calls back after the user speaks.
+   */
+  function insertDictation(text: string): void {
+    const textarea = textareaRef.current;
+    const start = textarea ? textarea.selectionStart : prompt.length;
+    const end = textarea ? textarea.selectionEnd : prompt.length;
+    const before = prompt.slice(0, start);
+    const after = prompt.slice(end);
+    const separator = before && !/\s$/.test(before) ? " " : "";
+    const insertion = `${separator}${text}`;
+    setPrompt(`${before}${insertion}${after}`);
+    caretRef.current = start + insertion.length;
+    setCommandError(null);
+    setDeliveryNotice(null);
+    textarea?.focus();
+  }
 
   const submit = async () => {
     const value = prompt.trim();
@@ -278,6 +313,13 @@ export function Composer({
     setSkillPickerOpen(false);
   };
   const commandSuggestions = matchingCommands(prompt);
+  const dictationStatus = dictation.recording
+    ? t("composer.dictation.recording", "Recording {{seconds}}s · stop to transcribe", {
+        seconds: dictation.elapsedSeconds,
+      })
+    : dictation.transcribing
+      ? t("composer.dictation.transcribing", "Transcribing…")
+      : null;
 
   const pickContextFiles = async () => {
     setContextError(null);
@@ -297,6 +339,11 @@ export function Composer({
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Escape" && dictation.recording) {
+      event.preventDefault();
+      dictation.cancel();
+      return;
+    }
     if (
       event.key === "Enter" &&
       !event.shiftKey &&
@@ -570,6 +617,41 @@ export function Composer({
               <Sparkles size={14} />
               {selectedSkills.length ? <b>{selectedSkills.length}</b> : null}
             </button>
+            {dictation.available ? (
+              <button
+                className={styles.dictationButton}
+                data-recording={dictation.recording}
+                type="button"
+                onClick={dictation.toggle}
+                disabled={
+                  dictation.transcribing || (!editable && !dictation.recording)
+                }
+                aria-pressed={dictation.recording}
+                aria-label={
+                  dictation.recording
+                    ? t("composer.dictation.stop", "Stop and transcribe")
+                    : t("composer.dictation.start", "Start voice input")
+                }
+                title={
+                  dictation.recording
+                    ? t("composer.dictation.stop", "Stop and transcribe")
+                    : t("composer.dictation.start", "Start voice input")
+                }
+              >
+                {dictation.recording ? <Square size={12} /> : <Mic size={14} />}
+              </button>
+            ) : null}
+            {dictation.recording ? (
+              <button
+                className={styles.dictationCancel}
+                type="button"
+                onClick={dictation.cancel}
+                aria-label={t("composer.dictation.cancel", "Discard recording")}
+                title={t("composer.dictation.cancel", "Discard recording")}
+              >
+                <X size={12} />
+              </button>
+            ) : null}
             <span title={thread?.workspacePath ?? project?.canonicalPath}>
               {thread?.mode === "paper" ? "Paper2Code" : "Local"}
             </span>
@@ -670,7 +752,9 @@ export function Composer({
       <p className={styles.hint}>
         {commandError ??
           contextError ??
+          dictation.error ??
           deliveryNotice ??
+          dictationStatus ??
           disabledReason ??
           "DeepCode may ask before sensitive tools run."}
         <span>

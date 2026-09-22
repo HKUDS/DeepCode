@@ -437,6 +437,45 @@
   position: relative;
 }
 
+.dictationButton,
+.dictationCancel {
+  display: grid;
+  width: 31px;
+  height: 31px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+}
+
+.dictationButton:hover:not(:disabled),
+.dictationCancel:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+/* Recording is a state, not a hover: it has to stay visible while the user
+   speaks, including when the cursor moved away. */
+.dictationButton[data-recording="true"],
+.dictationButton[data-recording="true"]:hover:not(:disabled) {
+  background: var(--danger-soft);
+  color: var(--danger);
+  animation: dictation-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes dictation-pulse {
+  50% {
+    box-shadow: 0 0 0 4px var(--danger-soft);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dictationButton[data-recording="true"],
+  .dictationButton[data-recording="true"]:hover:not(:disabled) {
+    animation: none;
+  }
+}
+
 .skillButton b {
   position: absolute;
   top: 1px;

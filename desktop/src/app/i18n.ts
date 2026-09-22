@@ -182,6 +182,11 @@ const ZH_CN: Record<string, string> = {
   "composer.hint.queueSteer": "↵ 排队 · ⌘↵ 引导",
   "composer.hint.newline": "⇧↵ 换行",
   "composer.queueNext": "排队下一个",
+  "composer.dictation.start": "开始语音输入",
+  "composer.dictation.stop": "停止录音并转写",
+  "composer.dictation.cancel": "丢弃录音",
+  "composer.dictation.recording": "正在录音 {{seconds}} 秒 · 停止后转写",
+  "composer.dictation.transcribing": "正在转写…",
   // Thread header
   "thread.startThread": "开始本地编码会话",
   "thread.folderUnavailable": "文件夹不可用",

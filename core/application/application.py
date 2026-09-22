@@ -17,6 +17,7 @@ from core.application.automation_schedule_policy import AutomationSchedulePolicy
 from core.application.automation_scheduler import AutomationScheduler
 from core.application.automation_service import AutomationService
 from core.application.diagnostics_service import DiagnosticsService
+from core.application.dictation_service import DictationService
 from core.application.errors import UpgradeRequiresExclusiveAccessError
 from core.application.event_service import (
     DEFAULT_RELAY_BATCH_SIZE,
@@ -100,6 +101,7 @@ class DeepCodeApplication:
             self.projects,
             credential_store=self.credentials,
         )
+        self.dictation = DictationService(self.projects)
         self.skill_hosts = SkillWorkspaceRegistry()
         self.plugins = PluginService(LocalPluginHost(self.skill_hosts))
         effective_session_factory = session_factory or DefaultAgentSessionFactory()

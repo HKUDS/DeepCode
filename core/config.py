@@ -20,7 +20,7 @@ Public API:
 - :class:`AgentDefaults`, :class:`AgentPhase`, :class:`ProviderConfig`,
   :class:`ToolsConfig`, :class:`WorkspaceConfig`,
   :class:`DocumentSegmentationConfig`, :class:`LoggerConfig`,
-  :class:`LLMLoggerConfig` – sub-models
+  :class:`DictationConfig`, :class:`LLMLoggerConfig` – sub-models
 - :func:`load_config` – read JSON and resolve ``${ENV_VAR}`` references
 - :func:`make_llm_provider` – build the right
   :class:`core.providers.base.LLMProvider` for a workflow phase
@@ -34,6 +34,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 from loguru import logger
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
@@ -405,6 +406,76 @@ class WorkspaceConfig(_Base):
     max_input_mb: int = 100
 
 
+class DictationConfig(_Base):
+    """Voice input for the prompt box, transcribed by a Parakeet-style server.
+
+    Dictation is opt-in by presence: with no ``dictation`` block the prompt box
+    offers no microphone and the app server reports the capability as
+    unavailable, so nothing changes for an install that does not want it.
+
+    ``endpoint`` is the *trust boundary* of this feature — a voice recording is
+    a verbatim copy of what the user said, so the host that terminates the
+    connection reads all of it (and is subject to ``providers.egress`` like any
+    other model endpoint). It speaks the OpenAI transcription contract, which
+    local Parakeet servers (``mlx_audio.server``) implement, so the audio can
+    stay on the machine:
+
+    - ``endpoint``: base URL without a trailing slash, e.g.
+      ``http://127.0.0.1:8000/v1``. The client posts to
+      ``<endpoint>/audio/transcriptions``.
+    - ``model``: the model name the server should transcribe with, e.g.
+      ``mlx-community/parakeet-tdt-0.6b-v3``. Required: the server decides what
+      an unknown or empty name means, so guessing one here would silently pick
+      a model the user did not choose.
+    - ``language``: optional pass-through for endpoints that take a language
+      hint. Parakeet v3 detects the language itself, so ``None`` (the default)
+      sends no hint at all.
+    - ``apiKeyEnv``: name of the environment variable holding the bearer token.
+      The secret is deliberately never read from the config file — a project
+      config is a file the user's repository controls.
+    - ``timeoutSeconds``: whole-request budget. The first request usually loads
+      the model on the server, so the default is generous.
+    - ``maxAudioSeconds``: cap the clients enforce by stopping the recording.
+
+    A project-level config cannot set any of this (see
+    :func:`_project_runtime_layer`): a repository must not be able to redirect
+    the microphone.
+    """
+
+    endpoint: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    language: str | None = None
+    api_key_env: str | None = None
+    timeout_seconds: float = Field(default=60.0, gt=0, le=600)
+    max_audio_seconds: int = Field(default=120, ge=1, le=600)
+
+    @model_validator(mode="after")
+    def validate_endpoint(self):
+        endpoint = self.endpoint.strip()
+        if not endpoint:
+            raise ValueError("dictation.endpoint must not be empty")
+        if endpoint == "local":
+            self.endpoint = "local"
+            return self
+        if not endpoint.startswith(("http://", "https://")):
+            raise ValueError(
+                "dictation.endpoint must be 'local' or an absolute http:// or https:// URL"
+            )
+        parsed = urlsplit(endpoint)
+        if not parsed.netloc:
+            raise ValueError("dictation.endpoint must name a host")
+        if parsed.username or parsed.password:
+            raise ValueError(
+                "dictation.endpoint must not embed credentials; use apiKeyEnv"
+            )
+        if parsed.query or parsed.fragment:
+            raise ValueError("dictation.endpoint must not carry a query or fragment")
+        # Normalized once here so the request path is a plain concatenation and
+        # a trailing slash cannot produce `//audio/transcriptions`.
+        self.endpoint = endpoint.rstrip("/")
+        return self
+
+
 class DocumentSegmentationConfig(_Base):
     enabled: bool = True
     size_threshold_chars: int = 50000
@@ -497,6 +568,11 @@ class DeepCodeConfig(BaseSettings):
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     workspace: WorkspaceConfig = Field(default_factory=WorkspaceConfig)
+    # Absent means "voice input is off"; present means the user picked an
+    # endpoint for it. A default *instance* could not tell those apart, and a
+    # disabled microphone that still ships an endpoint would be a config that
+    # reads as configured while doing nothing.
+    dictation: DictationConfig | None = None
     document_segmentation: DocumentSegmentationConfig = Field(
         default_factory=DocumentSegmentationConfig,
         validation_alias=AliasChoices("documentSegmentation", "document_segmentation"),
@@ -770,12 +846,18 @@ def _project_runtime_layer(raw: dict[str, Any]) -> dict[str, Any]:
     environment. For legacy compatibility a project-level literal ``apiKey``
     remains readable against the registry provider's trusted default endpoint;
     all routing fields are discarded.
+
+    ``dictation`` is discarded for the same reason: its endpoint receives raw
+    microphone audio, so a cloned repository must not be able to point it at a
+    host of its own choosing.
     """
 
+    sanitized = dict(raw)
+    if sanitized.pop("dictation", None) is not None:
+        logger.trace("Ignoring project dictation endpoint; dictation is user-owned")
     providers = raw.get("providers")
     if not isinstance(providers, dict):
-        return raw
-    sanitized = dict(raw)
+        return sanitized
     sanitized_providers: dict[str, Any] = {}
     for name, value in providers.items():
         if name == "profiles" or not isinstance(value, dict):
@@ -1123,6 +1205,7 @@ __all__ = [
     "ConnectionProfileConfig",
     "ManualModelConfig",
     "DeepCodeConfig",
+    "DictationConfig",
     "DocumentSegmentationConfig",
     "EgressPolicyConfig",
     "LLMLoggerConfig",
