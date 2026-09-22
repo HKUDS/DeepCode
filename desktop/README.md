@@ -230,7 +230,12 @@ deepcode -c personal-openrouter -m <model-id> --effort auto
 ### Appearance and imported themes
 
 **Settings → Appearance** controls the machine-local theme, conversation width,
-and typography. **Import VS Code theme** accepts one local `.json` or `.jsonc`
+and typography. The conversation column also has a drag handle on its right
+edge: dragging resizes it, the arrow keys step by 5%, Home and End jump to the
+ends of the range, and a double click restores the default. Each of those writes
+the same stored preference the slider edits — a drag stays below 100, which is
+the built-in cap rather than "fill the workspace". **Import VS Code theme**
+accepts one local `.json` or `.jsonc`
 color-theme file, validates every value in its `colors` object, and maps the
 supported workbench colors onto DeepCode's complete palette. Unmapped tokens
 come from the inferred light or dark base, so an imported theme never leaves a

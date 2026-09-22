@@ -3,6 +3,7 @@ import { useCallback, useSyncExternalStore } from "react";
 import {
   APPEARANCE_DEFAULTS,
   applyAppearance,
+  applyAppearanceSetting,
   readAppearance,
   writeAppearance,
   type AppearanceState,
@@ -30,6 +31,22 @@ function root(): HTMLElement | null {
 function flush(): void {
   const element = root();
   if (element) applyAppearance(state, element);
+}
+
+/**
+ * Paint a width that is not stored yet — a drag in progress — or put the stored
+ * one back with `null`.
+ *
+ * Storage is untouched either way and only the width property moves, so this
+ * stays one apply path rather than a second one: the next `commit` repaints
+ * everything from `state`, which also means a commit made during a drag wins
+ * until the next pointermove previews again.
+ */
+function previewConversationWidth(value: number | null): void {
+  const element = root();
+  if (element) {
+    applyAppearanceSetting("conversationWidth", value ?? state.conversationWidth, element);
+  }
 }
 
 function subscribe(listener: () => void): () => void {
@@ -61,6 +78,8 @@ export interface AppearanceController {
   /** Update related preferences atomically (used when importing a palette). */
   update(patch: Partial<AppearanceState>): void;
   reset(): void;
+  /** Show an in-progress width without storing it; `null` restores the stored one. */
+  previewConversationWidth(value: number | null): void;
 }
 
 export function useAppearance(): AppearanceController {
@@ -80,7 +99,7 @@ export function useAppearance(): AppearanceController {
 
   const reset = useCallback(() => commit({ ...APPEARANCE_DEFAULTS }), []);
 
-  return { appearance, set, update, reset };
+  return { appearance, set, update, reset, previewConversationWidth };
 }
 
 /** Reset module state between tests. */
