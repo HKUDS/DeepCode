@@ -131,12 +131,12 @@ class WorktreeManager:
         info = common / "info"
         info.mkdir(parents=True, exist_ok=True)
         exclude = info / "exclude"
-        existing = exclude.read_text() if exclude.exists() else ""
+        existing = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
         if _EXCLUDE_BEGIN in existing:
             return  # already installed
         block = "\n".join((_EXCLUDE_BEGIN, *_TEAM_EXCLUDE, _EXCLUDE_END))
         sep = "" if not existing or existing.endswith("\n") else "\n"
-        exclude.write_text(f"{existing}{sep}{block}\n")
+        exclude.write_text(f"{existing}{sep}{block}\n", encoding="utf-8")
 
     def create(self, worker_id: str) -> str:
         """Create an isolated worktree on a fresh branch for ``worker_id``."""
@@ -241,10 +241,10 @@ class WorktreeManager:
         exclude = common / "info" / "exclude"
         if not exclude.exists():
             return
-        text = exclude.read_text()
+        text = exclude.read_text(encoding="utf-8")
         if _EXCLUDE_BEGIN not in text:
             return
         before, _, rest = text.partition(_EXCLUDE_BEGIN)
         _, _, after = rest.partition(_EXCLUDE_END)
         cleaned = (before.rstrip("\n") + "\n" + after.lstrip("\n")).strip("\n")
-        exclude.write_text(cleaned + "\n" if cleaned else "")
+        exclude.write_text(cleaned + "\n" if cleaned else "", encoding="utf-8")
