@@ -100,6 +100,10 @@ class SpeechToTextClient:
             with httpx.Client(
                 timeout=httpx.Timeout(self._timeout_seconds),
                 follow_redirects=False,
+                # The endpoint passed the egress policy by hostname; an
+                # ambient HTTP(S)_PROXY must not silently re-route the audio
+                # (and a bearer token) to another host.
+                trust_env=False,
                 transport=self._transport,
             ) as client:
                 response = client.post(

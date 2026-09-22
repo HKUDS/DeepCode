@@ -97,7 +97,7 @@ class FakeRecorder {
 
   constructor(
     readonly stream: FakeStream,
-    readonly options?: { mimeType?: string },
+    readonly options?: { mimeType?: string; audioBitsPerSecond?: number },
   ) {
     this.mimeType = FakeRecorder.recordedType ?? options?.mimeType ?? "";
     FakeRecorder.created.push(this);
@@ -250,7 +250,10 @@ test("reports the browser's container when the preferred one is unsupported", as
   const { result, onTranscript } = await ready(backend);
 
   await act(async () => result.current.toggle());
-  expect(FakeRecorder.created[0].options).toBeUndefined();
+  // No preferred container: the recorder picks its own, but the bitrate cap
+  // that keeps a full clip under the payload limit is always requested.
+  expect(FakeRecorder.created[0].options?.mimeType).toBeUndefined();
+  expect(FakeRecorder.created[0].options?.audioBitsPerSecond).toBe(32_000);
 
   await act(async () => result.current.toggle());
   await flush();

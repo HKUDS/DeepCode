@@ -430,9 +430,10 @@ def test_schema_requires_the_dictation_audio_payload():
     definitions = schema["$defs"]
     params = definitions["MethodParams"]["properties"]
 
-    assert params["dictation/status"] == {"$ref": "#/$defs/EmptyParams"}
+    assert params["dictation/status"] == {"$ref": "#/$defs/OptionalProjectParams"}
     transcribe = definitions["DictationTranscribeParams"]
     assert transcribe["required"] == ["audio", "mimeType"]
+    assert transcribe["properties"]["projectId"]["pattern"] == "^proj_"
     assert transcribe["properties"]["audio"]["minLength"] == 1
     assert transcribe["properties"]["language"]["type"] == ["string", "null"]
     assert definitions["MethodResults"]["properties"]["dictation/transcribe"] == {

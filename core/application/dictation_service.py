@@ -144,7 +144,9 @@ class DictationService:
             raise InvalidArgumentError(str(exc)) from exc
 
         client = self._client_factory(
-            config, self._api_key(config), config.language or (language or None)
+            config,
+            None if config.endpoint == "local" else self._api_key(config),
+            config.language or (language or None),
         )
         try:
             text = client.transcribe(

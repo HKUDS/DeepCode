@@ -122,22 +122,10 @@ class AgentPhase(_Base):
     reasoning_effort: str | None = None
 
 
-# Named per-phase blocks of ``agents``. A phase listed here may override any
-# :class:`AgentPhase` field; anything else resolves straight to ``defaults``.
-# Settings writes and the runtime both read this one list, so a new phase can
-# never be configurable in one place and rejected in the other.
-AGENT_PHASES: frozenset[str] = frozenset({"planning", "implementation", "subagent"})
-
-
 class AgentsConfig(_Base):
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
     planning: AgentPhase = Field(default_factory=AgentPhase)
     implementation: AgentPhase = Field(default_factory=AgentPhase)
-    # Delegation tier. Sub-agents are separate conversations, so routing them to
-    # a cheaper model neither rides nor invalidates the parent's provider-side
-    # prefix cache. Unset (the default) means a spawned child inherits the
-    # parent Session's resolved profile exactly as before.
-    subagent: AgentPhase = Field(default_factory=AgentPhase)
 
 
 @dataclass(frozen=True, slots=True)
@@ -635,32 +623,16 @@ class DeepCodeConfig(BaseSettings):
 
     # ---- phase resolution ----
 
-    def phase_override(self, phase: str = "default") -> AgentPhase | None:
-        """Return ``phase``'s configured block, or ``None`` for ``defaults``."""
-        name = (phase or "default").strip().lower()
-        if name not in AGENT_PHASES:
-            return None
-        return getattr(self.agents, name)
-
-    def phase_is_overridden(self, phase: str = "default") -> bool:
-        """True when ``phase`` changes anything relative to ``agents.defaults``.
-
-        Optional phases (``subagent``) must leave every existing config on its
-        previous path: a caller that would otherwise resolve a profile for such
-        a phase checks this first and inherits the parent's profile verbatim
-        instead of resolving an equivalent-but-distinct one.
-        """
-        override = self.phase_override(phase)
-        if override is None:
-            return False
-        return any(
-            getattr(override, name) is not None for name in AgentPhase.model_fields
-        )
-
     def resolve_phase(self, phase: str = "default") -> ResolvedAgentSettings:
         """Merge ``agents.defaults`` with the phase override (if any)."""
         defaults = self.agents.defaults
-        override = self.phase_override(phase)
+        override: AgentPhase | None
+        if phase == "planning":
+            override = self.agents.planning
+        elif phase == "implementation":
+            override = self.agents.implementation
+        else:
+            override = None
 
         def _pick(name: str) -> Any:
             if override is not None:
@@ -1225,16 +1197,15 @@ def make_llm_provider(
 
 
 __all__ = [
-    "AGENT_PHASES",
     "DEEPCODE_HOME_ENV",
     "AgentDefaults",
     "AgentPhase",
     "AgentsConfig",
     "ConfigError",
     "ConnectionProfileConfig",
+    "ManualModelConfig",
     "DeepCodeConfig",
     "DictationConfig",
-    "ManualModelConfig",
     "DocumentSegmentationConfig",
     "EgressPolicyConfig",
     "LLMLoggerConfig",

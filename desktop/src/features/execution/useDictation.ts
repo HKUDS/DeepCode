@@ -221,10 +221,12 @@ export function useDictation({
     const mimeType = preferredMimeType();
     let recorder: MediaRecorder;
     try {
-      recorder = new MediaRecorder(
-        stream,
-        mimeType ? { mimeType } : undefined,
-      );
+      // 32 kbit/s keeps a full-length clip (120 s by default) inside the
+      // 512 KiB payload cap the app server enforces; speech stays intelligible.
+      recorder = new MediaRecorder(stream, {
+        ...(mimeType ? { mimeType } : {}),
+        audioBitsPerSecond: 32_000,
+      });
     } catch (cause) {
       stream.getTracks().forEach((track) => track.stop());
       setError(`Recording could not start (${messageOf(cause)}).`);

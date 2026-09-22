@@ -196,7 +196,7 @@ export interface MethodParams {
   "provider/login/poll": ProviderLoginFlowParams;
   "provider/login/cancel": ProviderLoginFlowParams;
   "provider/logout": ProviderLogoutParams;
-  "dictation/status": EmptyParams;
+  "dictation/status": OptionalProjectParams;
   "dictation/transcribe": DictationTranscribeParams;
 }
 export interface InitializeParams {
@@ -676,6 +676,7 @@ export interface DictationTranscribeParams {
   audio: string;
   mimeType: string;
   language?: string | null;
+  projectId?: string;
 }
 export interface MethodResults {
   initialize: InitializeResult;

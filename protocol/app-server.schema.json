@@ -6276,7 +6276,7 @@
           "$ref": "#/$defs/ProviderLogoutParams"
         },
         "dictation/status": {
-          "$ref": "#/$defs/EmptyParams"
+          "$ref": "#/$defs/OptionalProjectParams"
         },
         "dictation/transcribe": {
           "$ref": "#/$defs/DictationTranscribeParams"
@@ -8197,10 +8197,16 @@
           "type": "boolean"
         },
         "model": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "maxAudioSeconds": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 1,
           "maximum": 600
         }
@@ -8224,7 +8230,14 @@
           "minLength": 1
         },
         "language": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "projectId": {
+          "type": "string",
+          "pattern": "^proj_"
         }
       },
       "required": [

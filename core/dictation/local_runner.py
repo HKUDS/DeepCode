@@ -1,11 +1,10 @@
-"""Local Speech-to-Text inference runner for Parakeet.
+"""Local speech-to-text runner backed by the ``parakeet-mlx`` command line.
 
-Runs Parakeet models directly on Apple Silicon / local machine without requiring
-a separate HTTP daemon.
-
-Tries loading the model via:
-1. Direct Python in-process worker / `parakeet-mlx` if available.
-2. CLI fallback via `parakeet-mlx` command binary.
+``dictation.endpoint = "local"`` transcribes without any HTTP server: the clip
+is written to a private temporary directory and handed to ``parakeet-mlx``
+(``pip install parakeet-mlx``), which writes a JSON transcript next to it. The
+CLI is located on every call, so installing it does not require a restart, and
+the child gets a minimal environment rather than the harness's provider keys.
 """
 
 from __future__ import annotations
@@ -19,9 +18,37 @@ from pathlib import Path
 
 from core.dictation.client import TranscriptionFailed
 
-_PARAKEET_CLI = shutil.which("parakeet-mlx") or os.path.expanduser(
-    "~/.local/bin/parakeet-mlx"
+_CLI_NAME = "parakeet-mlx"
+# Variables a CLI needs to run and to find its model cache; nothing else from
+# the harness environment (provider keys in particular) is forwarded.
+_CHILD_ENV_KEYS = (
+    "PATH",
+    "HOME",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "HF_HOME",
+    "HF_HUB_CACHE",
+    "HF_HUB_OFFLINE",
+    "XDG_CACHE_HOME",
 )
+
+
+def _find_cli() -> str | None:
+    """The executable path of ``parakeet-mlx``, or ``None`` when absent."""
+    found = shutil.which(_CLI_NAME)
+    if found:
+        return found
+    fallback = Path.home() / ".local" / "bin" / _CLI_NAME
+    if fallback.is_file() and os.access(fallback, os.X_OK):
+        return str(fallback)
+    return None
+
+
+def _child_env() -> dict[str, str]:
+    env = {key: os.environ[key] for key in _CHILD_ENV_KEYS if key in os.environ}
+    env["NUMBA_DISABLE_JIT"] = "1"
+    return env
 
 
 class LocalParakeetClient:
@@ -44,8 +71,8 @@ class LocalParakeetClient:
 
     def transcribe(self, audio: bytes, *, filename: str, mime_type: str) -> str:
         """Run local transcription on the clip."""
-        cli = _PARAKEET_CLI
-        if not (cli and (os.path.isfile(cli) and os.access(cli, os.X_OK))):
+        cli = _find_cli()
+        if cli is None:
             raise TranscriptionFailed(
                 "Local dictation requires 'parakeet-mlx' installed and available in PATH. "
                 "Run: pip install parakeet-mlx",
@@ -67,8 +94,9 @@ class LocalParakeetClient:
                 "--output-dir",
                 tmpdir,
             ]
-            env = dict(os.environ)
-            env["NUMBA_DISABLE_JIT"] = "1"
+            if self._language:
+                cmd += ["--language", self._language]
+            env = _child_env()
 
             try:
                 proc = subprocess.run(

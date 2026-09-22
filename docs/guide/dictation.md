@@ -6,7 +6,7 @@ DeepCode supports push-to-talk voice input directly in the composer. Spoken text
 
 - **No audio leaves without configuration.** The microphone button only appears when a `dictation` block is declared in your configuration.
 - **Two operational modes:**
-  - **In-process local runner (`endpoint: "local"`):** Runs transcription directly on your machine via `parakeet-mlx` without starting or maintaining any background server.
+  - **Local CLI runner (`endpoint: "local"`):** Runs transcription on your machine by invoking the `parakeet-mlx` command line (`pip install parakeet-mlx`); no background server is needed.
   - **OpenAI-compatible server (`endpoint: "http://..."`):** For remote endpoints or local servers such as `mlx_audio.server`.
 - **Composer integration.** The transcribed text lands in the composer draft at the current cursor position so you can review, edit, or append to it before starting or steering a turn.
 - **Escape to discard.** Pressing `Escape` (or clicking the discard button) while recording drops the audio immediately without making a request.
