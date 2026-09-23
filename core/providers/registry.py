@@ -234,6 +234,21 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=True,
     ),
     ProviderSpec(
+        name="aimlapi",
+        keywords=("aimlapi",),
+        env_key="AIMLAPI_API_KEY",
+        # The vendor writes its own name lowercase, with the TLD.
+        display_name="aimlapi.com",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_base_keyword="aimlapi",
+        default_api_base="https://api.aimlapi.com/v1",
+        # ``vendor/model`` ids like the OpenRouter-style gateways above, not
+        # Forge's bare ids. ``cache_control`` markers are honoured and the
+        # gateway reports ``cached_tokens`` back in usage.
+        supports_prompt_caching=True,
+    ),
+    ProviderSpec(
         name="bedrock",
         keywords=("bedrock",),
         env_key="AWS_BEARER_TOKEN_BEDROCK",
