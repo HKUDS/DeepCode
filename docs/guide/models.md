@@ -105,6 +105,25 @@ This first integration sends the configured value as a bearer token through
 Bedrock's OpenAI-compatible Chat Completions API. It does **not** implement AWS
 SigV4 signing, IAM role/profile discovery, SSO, or the native Converse API.
 
+### Cheaper Inference
+
+[Cheaper Inference](https://cheaperinference.com) is an OpenAI-compatible
+gateway to models from several labs. Each model costs 15–60% less than the
+list price of its lab. Create a key at
+[cheaperinference.com/signup](https://cheaperinference.com/signup) and expose
+it through `CHEAPER_INFERENCE_API_KEY`:
+
+```console
+deepcode provider set my-cheaperinference --template cheaperinference \
+  --api-key-env CHEAPER_INFERENCE_API_KEY
+deepcode provider models my-cheaperinference --refresh
+deepcode provider test my-cheaperinference --model gpt-5.4-mini --agent
+```
+
+The template uses `https://api.cheaperinference.com/v1`. Model IDs are bare,
+for example `gpt-5.4-mini`, `gpt-5.4` or `claude-sonnet-5`. Cheaper Inference
+serves chat models only; it has no embeddings endpoint.
+
 ## Declared models and capacities
 
 If your server's model is missing from the list, add it manually. You can also
