@@ -234,6 +234,19 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=True,
     ),
     ProviderSpec(
+        name="cheaperinference",
+        keywords=("cheaperinference",),
+        env_key="CHEAPER_INFERENCE_API_KEY",
+        display_name="Cheaper Inference",
+        backend="openai_compat",
+        is_gateway=True,
+        endpoint_class="gateway",
+        detect_by_base_keyword="cheaperinference.com",
+        default_api_base="https://api.cheaperinference.com/v1",
+        # Cheaper Inference resolves bare model ids, like Forge.
+        strip_model_prefix=True,
+    ),
+    ProviderSpec(
         name="bedrock",
         keywords=("bedrock",),
         env_key="AWS_BEARER_TOKEN_BEDROCK",
