@@ -8,6 +8,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tarfile
 import tempfile
 import venv
@@ -22,6 +23,20 @@ from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+
+# ``python scripts/verify_python_distribution.py`` puts ``scripts/`` on
+# ``sys.path``, so the repository root is added explicitly before importing the
+# shared subprocess policy. Duplicating that policy here is how the verifier and
+# the runtime it checks would drift apart.
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
+from core.platform_compat import (
+    configure_utf8_stdio,
+    subprocess_env,
+    subprocess_text_kwargs,
+)
+
 PACKAGE_NAME = "deepcode-hku"
 MINIMUM_MCP_VERSION = Version("1.29")
 UNSUPPORTED_MCP_VERSION = Version("2")
@@ -294,11 +309,12 @@ def _run(
     stdin=None,
     timeout: int = 180,
 ) -> None:
-    environment = {
-        **os.environ,
-        "PIP_DISABLE_PIP_VERSION_CHECK": "1",
-        "PYTHONNOUSERSITE": "1",
-    }
+    environment = subprocess_env(
+        {
+            "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+            "PYTHONNOUSERSITE": "1",
+        }
+    )
     try:
         subprocess.run(
             command,
@@ -307,7 +323,7 @@ def _run(
             stdin=stdin,
             check=True,
             capture_output=True,
-            text=True,
+            **subprocess_text_kwargs(),
             timeout=timeout,
         )
     except subprocess.CalledProcessError as exc:
@@ -381,6 +397,7 @@ def smoke_installed_wheel(wheel: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_utf8_stdio()
     parser = argparse.ArgumentParser(
         description="Verify DeepCode Python artifacts and their installed runtime."
     )

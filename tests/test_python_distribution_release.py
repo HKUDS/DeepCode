@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -111,3 +112,50 @@ def test_packaged_web_manifest_requires_its_entry_assets():
     del files["web/assets/app.js"]
     with pytest.raises(release.DistributionVerificationError, match="resource missing"):
         release.verify_web_assets(files.__getitem__, list(files), "web/", "2.2.0")
+
+
+def test_smoke_failure_reports_output_that_the_reader_cannot_decode(tmp_path):
+    """A rejected byte used to wipe out the whole diagnostic.
+
+    Reading without ``encoding`` decoded the child with the locale codec, so a
+    rejected byte raised inside subprocess's reader thread; the thread died, the
+    process result stayed clean, and ``_run`` reported the command with no
+    output at all. ``0x91`` is invalid UTF-8 and cp936, so the byte is rejected
+    on every runner.
+    """
+
+    code = (
+        "import sys; "
+        "sys.stdout.buffer.write(b'partial \\x91 output\\n'); "
+        "sys.stdout.buffer.flush(); "
+        "sys.exit(3)"
+    )
+    with pytest.raises(release.DistributionVerificationError) as failure:
+        release._run([sys.executable, "-c", code], cwd=tmp_path)
+
+    message = str(failure.value)
+    assert "partial" in message
+    assert "output" in message
+    assert "\ufffd" in message
+
+
+def test_smoke_children_are_told_to_write_utf8(monkeypatch, tmp_path):
+    """The read side declares UTF-8, so the child has to speak it too.
+
+    Otherwise CJK output from pip or the CLI degrades into replacement
+    characters that the release report cannot be read from.
+    """
+
+    observed = {}
+
+    def fake_run(command, **kwargs):
+        observed.update(kwargs)
+        raise subprocess.CalledProcessError(1, command, output="out", stderr="err")
+
+    monkeypatch.setattr(release.subprocess, "run", fake_run)
+    with pytest.raises(release.DistributionVerificationError, match="boom"):
+        release._run(["boom"], cwd=tmp_path)
+
+    assert observed["encoding"] == "utf-8"
+    assert observed["errors"] == "replace"
+    assert observed["env"]["PYTHONIOENCODING"] == "utf-8"
