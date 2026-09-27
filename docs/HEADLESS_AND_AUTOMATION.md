@@ -245,6 +245,11 @@ deepcode mcp add local-tools --approval writes --command python3 server.py
 deepcode mcp remove local-tools
 ```
 
+`mcp list` flags each server that is disabled, is missing a required
+environment variable, or is handed a stored credential, and ends with a one-line
+count of enabled servers that still expose every tool or add no MCP approval
+gate (`auto` or `approve`).
+
 Place `--command` last because the remaining values are passed to the stdio
 server. Use `--workspace <path> --scope project --trust` for an explicitly
 trusted project layer. Bind stored user credentials with
