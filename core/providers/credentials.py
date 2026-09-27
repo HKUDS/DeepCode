@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import os
 import secrets
 import threading
 from pathlib import Path
 from typing import Any
+
+from loguru import logger
 
 from core.config import deepcode_home
 from core.file_lock import exclusive_file_lock
@@ -17,9 +20,29 @@ from core.private_storage import (
     open_existing_private_file,
 )
 
+# Opt-in OS-keychain backend for reads. ``keyring`` is deliberately not a
+# declared dependency, so this is off by default and every import/backend
+# failure degrades to the credential file. The file stays the source of truth
+# and the only write target — ``set``/``clear`` never touch the keychain, which
+# keeps ``revision``'s mtime/size fingerprint meaningful.
+KEYRING_ENV_VAR = "DEEPCODE_KEYRING"
+KEYRING_SERVICE = "deepcode"
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
 
 def default_credentials_path() -> Path:
     return deepcode_home() / "credentials.json"
+
+
+def _keyring_backend() -> Any:
+    """Return the ``keyring`` module when opted in and importable, else ``None``."""
+    if os.environ.get(KEYRING_ENV_VAR, "").strip().lower() not in _TRUTHY:
+        return None
+    try:
+        return importlib.import_module("keyring")
+    except Exception:  # pragma: no cover - depends on the host's backends
+        logger.debug("{} is set but keyring is unavailable", KEYRING_ENV_VAR)
+        return None
 
 
 class CredentialStore:
@@ -39,6 +62,25 @@ class CredentialStore:
 
     def get(self, connection_id: str) -> str | None:
         value = self._read().get("connections", {}).get(connection_id)
+        if isinstance(value, str) and value:
+            return value
+        return self._keyring_value(connection_id)
+
+    def _keyring_value(self, connection_id: str) -> str | None:
+        """Read-only OS-keychain fallback consulted only when the file has none.
+
+        Every failure mode — package absent, no backend, locked or denied
+        keychain — returns ``None`` so the resolver simply falls through to
+        ``legacy_config``; turning the knob on cannot break a working setup.
+        """
+        backend = _keyring_backend()
+        if backend is None:
+            return None
+        try:
+            value = backend.get_password(KEYRING_SERVICE, connection_id)
+        except Exception:  # pragma: no cover - depends on the host's backends
+            logger.debug("keyring lookup failed for {}", connection_id, exc_info=True)
+            return None
         return value if isinstance(value, str) and value else None
 
     def configured(self, connection_id: str) -> bool:
@@ -187,4 +229,9 @@ def _connections(data: dict[str, Any]) -> dict[str, str]:
     return dict(value) if isinstance(value, dict) else {}
 
 
-__all__ = ["CredentialStore", "default_credentials_path"]
+__all__ = [
+    "KEYRING_ENV_VAR",
+    "KEYRING_SERVICE",
+    "CredentialStore",
+    "default_credentials_path",
+]

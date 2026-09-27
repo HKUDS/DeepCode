@@ -173,6 +173,19 @@ deepcode provider set work-openrouter \
   --api-key-env OPENROUTER_API_KEY
 ```
 
+On a workstation you can keep a key in the operating system keychain instead.
+Install the optional `keyring` package, set `DEEPCODE_KEYRING=1`, and store the
+key under the service `deepcode` with the connection id as the user name:
+
+```console
+python -m pip install keyring
+keyring set deepcode work-openrouter
+```
+
+DeepCode reads the keychain only when the credential store has no key for that
+connection, and never writes to it; `--api-key` still saves to the credential
+store. Any keychain error falls back to the next source instead of failing.
+
 Connect an OpenAI-compatible gateway:
 
 ```console
