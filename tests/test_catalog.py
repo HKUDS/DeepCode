@@ -6,6 +6,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -90,3 +92,66 @@ def test_snapshot_skips_entries_without_context(tmp_path, monkeypatch):
     snap.write_text(json.dumps({"weird-model": {"cost": {"input": 1.0}}}))
     monkeypatch.setattr(catalog, "_SNAPSHOT", {})
     assert catalog.load_catalog_snapshot(snap) == 0
+
+
+# Vendor page read 2026-09-27: https://api-docs.deepseek.com/quick_start/pricing
+# ``deepseek-flash`` is the current name for V4.1-Flash; ``deepseek-v4-flash`` is
+# a retired alias the vendor still accepts and still bills at the Flash price.
+# Both must carry the vendor row instead of falling through to the
+# ``deepseek`` family rule, which also handed V4 a 128K window.
+@pytest.mark.parametrize("model_id", ["deepseek-flash", "deepseek-v4-flash"])
+def test_deepseek_v4_flash_ids_carry_the_vendor_row(model_id):
+    info = catalog.resolve_model_info(model_id)
+
+    assert info.source == "seed"
+    assert info.context_window == 1_000_000
+    assert info.max_output_tokens == 384_000
+
+
+def test_deepseek_v4_tiers_are_priced_apart():
+    # Regression: both V4 tiers used to fall through to the ``deepseek`` family
+    # rule and take ``deepseek-v3``'s price, so pro and flash were one row in
+    # the cost ledger (found by the layer-④ cost census). V4 is priced by time of
+    # day; the seeded numbers are the peak rate, i.e. the upper bound.
+    flash = catalog.resolve_model_info("deepseek-v4-flash")
+    pro = catalog.resolve_model_info("deepseek-v4-pro")
+    v3 = catalog.resolve_model_info("deepseek-v3")
+
+    assert flash.source == "seed"
+    assert pro.source == "seed"
+    assert pro.input_cost_per_1m > flash.input_cost_per_1m
+    assert pro.output_cost_per_1m > flash.output_cost_per_1m
+    assert flash.input_cost_per_1m != v3.input_cost_per_1m
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        "deepseek-v4-flash",
+        "deepseek/deepseek-v4-flash",
+        "deepseek-ai/DeepSeek-V4-Flash",
+    ],
+)
+def test_observed_gateway_spellings_fold_onto_one_seed_row(spelling):
+    # All three spellings appear in the gateway log for the same logical model.
+    # Prefix-stripping must fold them onto a single id, or cost accounting
+    # fragments by spelling instead of by model.
+    info = catalog.resolve_model_info(spelling)
+
+    assert info.id == "deepseek-v4-flash"
+    assert info.source == "seed"
+
+
+@pytest.mark.parametrize(
+    ("model_id", "expected_source"),
+    [
+        ("deepseek-v4-turbo", "family:deepseek-v4"),
+        ("deepseek-flash-turbo", "family:deepseek-flash"),
+    ],
+)
+def test_unseeded_point_release_does_not_inherit_v3(model_id, expected_source):
+    info = catalog.resolve_model_info(model_id)
+    v3 = catalog.resolve_model_info("deepseek-v3")
+
+    assert info.source == expected_source
+    assert info.input_cost_per_1m != v3.input_cost_per_1m
