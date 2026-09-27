@@ -43,6 +43,10 @@ from core.agent_runtime.token_meter import (
     DEFAULT_TOKEN_METER_FACTORY,
     TokenMeter,
 )
+from core.agent_runtime.evidence_ledger import (
+    DEFAULT_NO_PROGRESS_THRESHOLD,
+    EvidenceLedger,
+)
 from core.agent_runtime.hook import AgentHook, AgentHookContext
 from core.agent_runtime.pruner import ToolResultPruner
 from core.agent_runtime.repeat_guard import (
@@ -156,6 +160,14 @@ class AgentRunSpec:
     # run lengths of identical consecutive tool calls that earn an escalating
     # reminder instead of a hard stop. ``None`` disables the guard.
     repeat_call_thresholds: tuple[int, ...] | None = DEFAULT_REPEAT_THRESHOLDS
+    # Advisory no-progress reminders (see core.agent_runtime.evidence_ledger):
+    # how often one call may hand back the SAME result — consecutive or
+    # interleaved — before a reminder is injected. Complements
+    # ``repeat_call_thresholds``, which only sees consecutive identical calls
+    # and is therefore structurally blind to an A, B, A, B, ... stall. A call
+    # the tracker already flagged is left to the tracker, so one iteration
+    # injects at most one reminder per call. ``None`` disables the ledger.
+    evidence_ledger_threshold: int | None = DEFAULT_NO_PROGRESS_THRESHOLD
     # Model-visible means logged (the dsh session-log rule): mid-turn messages
     # the runner itself adds to the PERSISTED model history — injected
     # sub-agent results, Goal updates, repeat-call reminders, length-recovery
@@ -470,6 +482,11 @@ class AgentRunner:
             if spec.repeat_call_thresholds is not None
             else None
         )
+        evidence_ledger = (
+            EvidenceLedger(spec.evidence_ledger_threshold)
+            if spec.evidence_ledger_threshold is not None
+            else None
+        )
         empty_content_retries = 0
         length_recovery_count = 0
         overflow_recoveries = 0
@@ -651,18 +668,41 @@ class AgentRunner:
                     }
                     messages.append(tool_message)
                     completed_tool_results.append(tool_message)
-                if repeat_tracker is not None:
+                if repeat_tracker is not None or evidence_ledger is not None:
                     # Observed at the result boundary so denied and failed
                     # calls count too — a model hammering a rejected call is
                     # exactly the loop worth interrupting. The reminder rides
                     # a user message AFTER the results, so the model reads
                     # what happened and then why it should change course.
-                    reminders = [
-                        reminder
-                        for tc in response.tool_calls
-                        if (reminder := repeat_tracker.observe(tc.name, tc.arguments))
-                        is not None
-                    ]
+                    reminders: list[str] = []
+                    flagged: set[str] = set()
+                    if repeat_tracker is not None:
+                        for tc in response.tool_calls:
+                            reminder = repeat_tracker.observe(tc.name, tc.arguments)
+                            if reminder is not None:
+                                reminders.append(reminder)
+                                flagged.add(tc.id)
+                    if evidence_ledger is not None:
+                        # The evidence half: a call that keeps returning the
+                        # same result without ever repeating consecutively is
+                        # invisible to the tracker above. Calls it already
+                        # flagged stay with it, so each call contributes at
+                        # most one reminder to this batch. Both halves share
+                        # this one message (and so one note source): stacking
+                        # consecutive user turns would not survive providers
+                        # that require alternating roles.
+                        for tc, result_message in zip(
+                            response.tool_calls, completed_tool_results
+                        ):
+                            if tc.id in flagged:
+                                continue
+                            reminder = evidence_ledger.observe(
+                                tc.name,
+                                tc.arguments,
+                                result_message.get("content", ""),
+                            )
+                            if reminder is not None:
+                                reminders.append(reminder)
                     if reminders:
                         reminder_text = "\n\n".join(reminders)
                         messages.append(
