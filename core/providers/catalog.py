@@ -249,6 +249,28 @@ _SEED: dict[str, ModelInfo] = {
     "deepseek-r1": ModelInfo(
         "deepseek-r1", 128_000, 65_536, 0.55, 2.19, reasoning=_REASONING_ALWAYS_ON
     ),
+    # DeepSeek V4 — source: https://api-docs.deepseek.com/quick_start/pricing
+    # (read 2026-09-27). Every V4 id used to fall through to the ``deepseek``
+    # family rule below, which got two things wrong:
+    #   * window — V4 is 1M with 384K max output, not V3's 128K / 8K, so
+    #     anything compacting against this catalog fired ~8x too early.
+    #   * price — V3's 0.27/1.10 was inherited by *both* tiers, so a pro/flash
+    #     split was invisible to anything that accounts by model id.
+    # V4 is priced by time of day and a row holds one number, so the **peak**
+    # rate is used: the upper bound is the safe direction for a budget guard.
+    # Off-peak is exactly half.
+    # ``deepseek-flash`` is the vendor's current name for V4.1-Flash;
+    # ``deepseek-v4-flash`` is a retired alias that still resolves and is billed
+    # at the Flash price (vendor footnote 1) — same row, both ids.
+    "deepseek-flash": ModelInfo(
+        "deepseek-flash", 1_000_000, 384_000, 0.30, 1.20, reasoning=_REASONING_TOGGLE
+    ),
+    "deepseek-v4-flash": ModelInfo(
+        "deepseek-v4-flash", 1_000_000, 384_000, 0.30, 1.20, reasoning=_REASONING_TOGGLE
+    ),
+    "deepseek-v4-pro": ModelInfo(
+        "deepseek-v4-pro", 1_000_000, 384_000, 1.32, 3.96, reasoning=_REASONING_TOGGLE
+    ),
     # Alibaba Qwen.
     "qwen3-max": ModelInfo(
         "qwen3-max", 256_000, 32_768, 1.2, 6.0, reasoning=_REASONING_TOGGLE
@@ -325,6 +347,13 @@ _FAMILY_RULES: tuple[tuple[str, ModelInfo], ...] = (
     ("kimi-latest", _SEED["kimi-k3"]),
     ("kimi", _SEED["kimi-k2.6"]),
     ("deepseek-r", _SEED["deepseek-r1"]),
+    # V4 tiers are seeded now, so an unseen point release inherits the
+    # **cheapest** tier rather than silently taking v3's rate — over-charging a
+    # cheap model is the failure mode that matters for a budget guard. The
+    # vendor's current name gets its own rule so ``deepseek-flash-*`` cannot
+    # fall to v3 either.
+    ("deepseek-flash", _SEED["deepseek-flash"]),
+    ("deepseek-v4", _SEED["deepseek-v4-flash"]),
     ("deepseek", _SEED["deepseek-v3"]),
     ("qwen", _SEED["qwen3-max"]),
     ("grok", _SEED["grok-4"]),
