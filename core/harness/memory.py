@@ -401,11 +401,16 @@ _RESTRICT_CLAUSE = (
 )
 
 
-_DATA_BLOCK_ESCAPES = (
-    ("</untrusted-data>", "&lt;/untrusted-data&gt;"),
-    ("<untrusted-data>", "&lt;untrusted-data&gt;"),
-    (_REMINDER_CLOSE, _REMINDER_CLOSE_ESCAPED),
-    (_REMINDER_OPEN, "&lt;system-reminder&gt;"),
+# Tags a note must not be able to spell. Matched case-insensitively, and
+# tolerating whitespace inside the delimiters, because a tag reader accepts
+# those spellings as the same tag — escaping only the exact lower-case form
+# lets a note end the boundary early (see
+# ``test_memory_note_cannot_close_the_boundary_in_any_tag_spelling``).
+_DATA_BLOCK_ESCAPES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"</\s*untrusted-data\s*>", re.IGNORECASE), "&lt;/untrusted-data&gt;"),
+    (re.compile(r"<\s*untrusted-data\s*>", re.IGNORECASE), "&lt;untrusted-data&gt;"),
+    (re.compile(r"</\s*system-reminder\s*>", re.IGNORECASE), _REMINDER_CLOSE_ESCAPED),
+    (re.compile(r"<\s*system-reminder\s*>", re.IGNORECASE), "&lt;system-reminder&gt;"),
 )
 
 
@@ -414,10 +419,12 @@ def _escape_data_block(text: str) -> str:
 
     The agent writes MEMORY.md, but so can anyone with the repository, so a
     note must not be able to end the boundary early or open a
-    ``<system-reminder>`` block of its own.
+    ``<system-reminder>`` block of its own. Every spelling a tag reader accepts
+    is rewritten to one canonical escaped form, so the framed block keeps
+    exactly one literal closing tag: the boundary's own.
     """
-    for raw, escaped in _DATA_BLOCK_ESCAPES:
-        text = text.replace(raw, escaped)
+    for pattern, escaped in _DATA_BLOCK_ESCAPES:
+        text = pattern.sub(escaped, text)
     return text
 
 
