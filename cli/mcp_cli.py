@@ -335,17 +335,88 @@ def _pairs(values: list[str], *, option: str) -> dict[str, str]:
     return result
 
 
+#: Operator-facing labels for the CONCERNS column, in the order they are emitted.
+_MCP_CONCERN_LABELS = {
+    "off": "disabled",
+    "env": "missing-env",
+    "cred": "sends-credential",
+}
+
+
+def _mcp_concerns(server: dict[str, Any]) -> tuple[str, ...]:
+    """Posture facts an operator should look at before trusting a server.
+
+    Only facts about explicit configuration or actual breakage are reported.
+    The remaining two readings -- an absent ``enabledTools`` (every tool
+    exposed) and an ``approvalMode`` that adds no gate -- are the documented
+    defaults, so they hold for every server that never made the choice;
+    :func:`_posture_summary` states them once instead of repeating them on
+    every row. Only key *names* are ever read, never credential values (see
+    ``core.config._resolve_env_refs``).
+    """
+    concerns: list[str] = []
+    if not server["enabled"]:
+        concerns.append("off")
+    if server["missingEnvKeys"]:
+        concerns.append("env")
+    if server["credentialEnvKeys"]:
+        concerns.append("cred")
+    return tuple(concerns)
+
+
+def _posture_summary(servers: list[dict[str, Any]]) -> str | None:
+    """Name how many enabled servers still sit on the permissive defaults.
+
+    A disabled server exposes nothing and is left out of both counts, and so is
+    one whose configuration could not be parsed: ``_invalid_server_info`` fills
+    such a row's ``enabledTools``/``approvalMode`` with defaults nobody chose, so
+    counting them would state a posture that was never configured. An empty
+    ``enabledTools`` resolves to every tool (``core.config`` substitutes
+    ``["*"]``), and ``auto``/``approve`` both leave the global permission
+    decision untouched (``core.harness.permissions``); those are the defaults
+    an operator inherits by not choosing.
+    """
+    readable = [
+        server
+        for server in servers
+        if server["enabled"] and server["configurationState"] != "invalid"
+    ]
+    if not readable:
+        return None
+    all_tools = sum(1 for server in readable if not server["enabledTools"])
+    no_gate = sum(
+        1 for server in readable if server["approvalMode"] in {"auto", "approve"}
+    )
+    if not all_tools and not no_gate:
+        return None
+    return (
+        f"Default posture among {len(readable)} enabled servers: "
+        f"{all_tools} expose all tools, {no_gate} add no MCP approval gate."
+    )
+
+
 def _print_inventory(result: dict[str, Any]) -> None:
     servers = result["servers"]
     if not servers:
         print("No MCP client servers configured for this workspace.")
         return
-    print(f"{'CONFIG':<20} {'AUTH':<16} {'RUNTIME':<12} {'SCOPE':<9} NAME")
+    name_width = min(max(len(server["name"]) for server in servers), 32)
+    print(
+        f"{'CONFIG':<20} {'AUTH':<16} {'RUNTIME':<12} {'SCOPE':<9} "
+        f"{'NAME':<{name_width}} CONCERNS"
+    )
     for server in servers:
+        concerns = ", ".join(
+            _MCP_CONCERN_LABELS[concern] for concern in _mcp_concerns(server)
+        )
         print(
             f"{server['configurationState']:<20} {server['authState']:<16} "
-            f"{server['runtimeState']:<12} {server['source']:<9} {server['name']}"
+            f"{server['runtimeState']:<12} {server['source']:<9} "
+            f"{server['name']:<{name_width}} {concerns or '-'}"
         )
+    summary = _posture_summary(servers)
+    if summary is not None:
+        print(summary)
 
 
 def _print_presets(result: dict[str, Any]) -> None:

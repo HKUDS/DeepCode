@@ -200,3 +200,75 @@ def test_mcp_cli_returns_failure_for_a_failed_real_probe(
 
     assert run(["test", "broken", "--json"]) == 1
     assert _json_output(capsys)["ok"] is False
+
+
+def test_mcp_list_names_concerns_and_states_default_posture_once(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+    monkeypatch.delenv("DEEPCODE_TEST_UNSET_TOKEN", raising=False)
+    (home / "deepcode_config.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "plain": {
+                        "type": "stdio",
+                        "command": "python3",
+                        "args": ["plain.py"],
+                    },
+                    "scoped": {
+                        "type": "stdio",
+                        "command": "python3",
+                        "args": ["scoped.py"],
+                        "enabledTools": ["search"],
+                        "approvalMode": "prompt",
+                    },
+                    "credentialed": {
+                        "type": "stdio",
+                        "command": "python3",
+                        "args": ["cred.py"],
+                        "credentialEnv": {
+                            "DEMO_API_KEY": {"credentialRef": "provider:openrouter"}
+                        },
+                        "requiredEnvVars": ["DEEPCODE_TEST_UNSET_TOKEN"],
+                    },
+                    "retired": {
+                        "type": "stdio",
+                        "command": "python3",
+                        "args": ["old.py"],
+                        "enabled": False,
+                    },
+                    # ``type`` is required, so this row never parses.
+                    "broken": {"command": "python3", "args": ["broken.py"]},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert run(["list"]) == 0
+    header, *rows, summary = capsys.readouterr().out.splitlines()
+    assert header.split() == ["CONFIG", "AUTH", "RUNTIME", "SCOPE", "NAME", "CONCERNS"]
+    concerns: dict[str, str] = {}
+    for row in rows:
+        fields = row.split(maxsplit=5)
+        concerns[fields[4]] = fields[5]
+    assert concerns == {
+        "broken": "-",
+        "credentialed": "missing-env, sends-credential",
+        "plain": "-",
+        "retired": "disabled",
+        "scoped": "-",
+    }
+    # ``plain`` inherits both permissive defaults while ``scoped`` opts out of
+    # both, so neither adds a per-row label and the defaults are counted once.
+    # ``broken`` never parsed: the defaults on its row were never configured, so
+    # it stays out of the counts.
+    assert summary == (
+        "Default posture among 3 enabled servers: "
+        "2 expose all tools, 2 add no MCP approval gate."
+    )
