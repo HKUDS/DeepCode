@@ -454,6 +454,17 @@ deepcode provider set work-openrouter \
   --api-key-env OPENROUTER_API_KEY
 ```
 
+在个人电脑上，也可以把密钥放在操作系统钥匙串里。安装可选的 `keyring` 包，设置
+`DEEPCODE_KEYRING=1`，再以 `deepcode` 为服务名、连接 ID 为用户名保存密钥：
+
+```console
+python -m pip install keyring
+keyring set deepcode work-openrouter
+```
+
+只有凭据存储里没有该连接的密钥时，DeepCode 才会读取钥匙串，而且从不写入钥匙串；
+`--api-key` 仍然保存到凭据存储。钥匙串出错时会回退到下一个来源，不会导致失败。
+
 接入 OpenAI-compatible 网关：
 
 ```console
@@ -519,6 +530,10 @@ deepcode mcp list
 deepcode mcp add local-tools --approval writes --command python3 server.py
 deepcode mcp remove local-tools
 ```
+
+`mcp list` 会标出已停用、缺少必需环境变量或被传入已存凭据的 server，并在末尾
+用一行统计仍然暴露全部工具、或没有额外 MCP 审批关口（`auto` 或 `approve`）的
+已启用 server 数量。
 
 `--command` 之后的参数会原样传给 stdio server，因此应放在最后。用户凭据用
 `--credential-env NAME=connection-id` 绑定，不要把 secret 写进 JSON。Desktop
