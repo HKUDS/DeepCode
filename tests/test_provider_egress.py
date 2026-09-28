@@ -200,6 +200,7 @@ def test_invalid_policy_entry_fails_closed():
         ("openai", "first_party"),
         ("openrouter", "gateway"),
         ("requesty", "gateway"),
+        ("opper", "gateway"),
         ("forge", "gateway"),
         ("zhipu", "aggregator"),
         ("dashscope", "aggregator"),

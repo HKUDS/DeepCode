@@ -220,6 +220,23 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         supports_prompt_caching=True,
     ),
     ProviderSpec(
+        name="opper",
+        keywords=("opper",),
+        env_key="OPPER_API_KEY",
+        display_name="Opper",
+        backend="openai_compat",
+        is_gateway=True,
+        endpoint_class="gateway",
+        detect_by_base_keyword="opper.ai",
+        default_api_base="https://api.opper.ai/v3/compat",
+        # Opper serves Anthropic models and prices cached input separately, so
+        # the Anthropic cache-control markers are worth sending.
+        supports_prompt_caching=True,
+        # Ids are bare pool names such as ``claude-sonnet-4-6``, but a
+        # ``provider/model`` id like ``azure/gpt-5.5`` deliberately pins one
+        # route, so the prefix must survive rather than be stripped.
+    ),
+    ProviderSpec(
         name="forge",
         keywords=("forge",),
         env_key="FORGE_API_KEY",
