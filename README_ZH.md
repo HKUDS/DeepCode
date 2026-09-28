@@ -157,7 +157,7 @@ DeepCode 提供 TUI、Desktop 和 Web 三种客户端，连接同一个本地共
 
 ## 新闻
 
-**2026-09-28 · 语音输入、Opper 与 Bedrock、Desktop 细节打磨，以及可选的安全加固**
+**2026-09-28 · DeepCode v2.3.0：语音输入、Opper 与 Bedrock、Desktop 细节打磨，以及可选的安全加固**
 
 - **用语音输入提示词。** 在配置中加入 `dictation` 后，Desktop 与 Web 的输入框
   会出现麦克风。参见[语音输入指南](docs/guide/dictation.md)。（#240）

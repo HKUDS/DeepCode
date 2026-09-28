@@ -158,7 +158,7 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
 
 ## News
 
-**2026-09-28 · Voice dictation, Opper and Bedrock, Desktop polish, and opt-in hardening**
+**2026-09-28 · DeepCode v2.3.0: voice dictation, Opper and Bedrock, Desktop polish, and opt-in hardening**
 
 - **Dictate your prompt.** Add a `dictation` block to your config and the
   Desktop and Web composer gains a microphone. See
