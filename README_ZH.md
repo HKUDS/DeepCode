@@ -157,6 +157,24 @@ DeepCode 提供 TUI、Desktop 和 Web 三种客户端，连接同一个本地共
 
 ## 新闻
 
+**2026-09-28 · 语音输入、Opper 与 Bedrock、Desktop 细节打磨，以及可选的安全加固**
+
+- **用语音输入提示词。** 在配置中加入 `dictation` 后，Desktop 与 Web 的输入框
+  会出现麦克风。参见[语音输入指南](docs/guide/dictation.md)。（#240）
+- **更多服务商与模型。** Opper 与 Amazon Bedrock 加入服务商模板，DeepSeek V4
+  用上自己的 100 万上下文与价格。（#242、#208、#249）
+- **Desktop 细节打磨。** 拖动会话区边缘即可调宽，可以导入 VS Code 配色主题，
+  字体选择只列出本机已安装的字体。（#238、#207、#239）
+- **可选的安全加固。** `providers.egress` 限定哪些主机能收到提示词，
+  `DEEPCODE_COMMAND_SCREEN=strict` 拦截高风险命令，`DEEPCODE_BASH_SCRUB_ENV=1`
+  不把服务商密钥交给 shell 命令，`DEEPCODE_KEYRING=1` 从系统钥匙串读取密钥。
+  （#229、#230、#232、#246）
+- **更轻的记忆与更清楚的提示。** `MEMORY.md` 可以是一份主题文件的简短索引，
+  `mcp list` 会标出值得再看一眼的 server，同一调用反复返回相同结果时 Agent
+  会收到提醒。（#233、#241、#247）
+- **各平台更稳定。** 多个 DeepCode 进程共用状态数据库时不再丢失锁，另有一批
+  Windows 修复。（#210、#235、#236、#237）
+
 **2026-09-09 · TUI、Desktop 与 Web 共用一个本地后台**
 
 - **选择你习惯的界面。** 运行 `deepcode` 启动 TUI，`deepcode desktop`
@@ -185,6 +203,9 @@ DeepCode 提供 TUI、Desktop 和 Web 三种客户端，连接同一个本地共
   后台线程写入工作区记忆；注入的记忆内容包在 `<untrusted-data>` 边界里，
   闭合标签会被转义，被投毒的笔记无法伪造指令。（#204）
 - **外观设置也说简体中文了**，Desktop 外壳的 zh-CN 覆盖至此完整。（#202）
+
+<details>
+<summary><strong>2026 年 8 月至 9 月初的更早更新</strong></summary>
 
 **2026-09-03 · Desktop 目录竞态、更诚实的命令筛查、GLM-5.2 与两项依赖升级**
 
@@ -313,9 +334,6 @@ DeepCode 提供 TUI、Desktop 和 Web 三种客户端，连接同一个本地共
   打错字不再杀死 REPL，`/compact` 用你实际选中的模型做摘要。新动词：
   `/rename`、`/delete`、`/retry`，并为 session id、记录模式、权限预设和
   强度档位提供 Tab 补全。
-
-<details>
-<summary><strong>2026 年 8 月更早的更新</strong></summary>
 
 **2026-08-14 · 子代理运行时、压缩与单向持久化**
 

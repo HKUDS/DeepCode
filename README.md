@@ -158,6 +158,29 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
 
 ## News
 
+**2026-09-28 · Voice dictation, Opper and Bedrock, Desktop polish, and opt-in hardening**
+
+- **Dictate your prompt.** Add a `dictation` block to your config and the
+  Desktop and Web composer gains a microphone. See
+  [Voice dictation](docs/guide/dictation.md). (#240)
+- **More providers and models.** Opper and Amazon Bedrock join the provider
+  templates, and DeepSeek V4 gets its own 1M context window and pricing.
+  (#242, #208, #249)
+- **Desktop polish.** Drag the conversation's edge to resize it, import a
+  VS Code color theme, and choose from fonts that are actually installed.
+  (#238, #207, #239)
+- **Opt-in hardening.** `providers.egress` limits which hosts receive your
+  prompts, `DEEPCODE_COMMAND_SCREEN=strict` screens risky commands,
+  `DEEPCODE_BASH_SCRUB_ENV=1` keeps provider keys out of shell commands, and
+  `DEEPCODE_KEYRING=1` reads keys from the OS keychain. (#229, #230, #232,
+  #246)
+- **Leaner memory and clearer signals.** `MEMORY.md` can be a short index of
+  topic files, `mcp list` flags servers worth a second look, and the agent is
+  reminded when a call keeps returning the same result. (#233, #241, #247)
+- **Steadier everywhere.** The state database keeps its locks when several
+  DeepCode processes share it, and a round of Windows fixes landed. (#210,
+  #235, #236, #237)
+
 **2026-09-09 · TUI, Desktop, and Web share one local background service**
 
 - **Choose your interface.** Run `deepcode` for the TUI, `deepcode desktop`
@@ -195,6 +218,9 @@ Start with the updated [Quick start](#quick-start) and
   note cannot forge instructions. (#204)
 - **Appearance settings speak Simplified Chinese too**, completing the
   Desktop shell's zh-CN coverage. (#202)
+
+<details>
+<summary><strong>Earlier updates, August to early September 2026</strong></summary>
 
 **2026-09-03 · Desktop catalog race, an honest command screen, GLM-5.2, and two dependency bumps**
 
@@ -359,9 +385,6 @@ Start with the updated [Quick start](#quick-start) and
   `/compact` summarizes with the model you actually selected. New verbs:
   `/rename`, `/delete`, `/retry`, with tab completion for session ids,
   transcript modes, permission presets, and effort levels.
-
-<details>
-<summary><strong>Earlier August 2026 updates</strong></summary>
 
 **2026-08-14 · Subagent runtime, compaction, and one-way persistence**
 
