@@ -318,6 +318,7 @@ class ProvidersConfig(_Base):
     forge: ProviderConfig = Field(default_factory=ProviderConfig)
     requesty: ProviderConfig = Field(default_factory=ProviderConfig)
     opper: ProviderConfig = Field(default_factory=ProviderConfig)
+    api_route: ProviderConfig = Field(default_factory=ProviderConfig)
     bedrock: ProviderConfig = Field(default_factory=ProviderConfig)
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
