@@ -312,7 +312,7 @@ class GitService:
                 FileDiff(entry.path, entry.original_path, status, True, 0, 0, ()),
                 raw,
             )
-        source_lines = text.splitlines()
+        source_lines = _split_git_lines(text)
         lines = tuple(
             DiffLine(kind="addition", text=line, old_line=None, new_line=index)
             for index, line in enumerate(source_lines, start=1)
@@ -460,6 +460,11 @@ def _entry_in_scope(entry: GitStatusEntry, scope: str) -> bool:
     return entry.worktree_status not in {" ", "!"} or entry.kind == "untracked"
 
 
+def _split_git_lines(text: str) -> list[str]:
+    # Git delimits records with LF; other control characters are file content.
+    return text.removesuffix("\n").split("\n") if text else []
+
+
 def _parse_file_patch(entry: GitStatusEntry, raw: bytes) -> FileDiff:
     text = raw.decode("utf-8", errors="replace")
     binary = "GIT binary patch" in text or "Binary files " in text
@@ -486,7 +491,7 @@ def _parse_file_patch(entry: GitStatusEntry, raw: bytes) -> FileDiff:
         current_header = None
         current_lines = []
 
-    for line in text.splitlines():
+    for line in _split_git_lines(text):
         match = _HUNK_HEADER.match(line)
         if match:
             flush()

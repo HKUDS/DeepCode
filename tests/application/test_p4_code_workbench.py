@@ -16,6 +16,7 @@ from core.application.errors import (
     WorkspaceOutOfScopeError,
 )
 from core.application.file_service import MAX_READ_LIMIT
+from core.application.git_service import DiffLine
 from core.domain import TrustState
 from core.domain.item import ItemKind, ItemStatus
 from core.domain.turn import Turn, TurnStatus
@@ -49,6 +50,86 @@ def _application(tmp_path: Path, workspace: Path) -> tuple[DeepCodeApplication, 
     project = application.projects.add(str(workspace), trust_state=TrustState.TRUSTED)
     thread = application.threads.start(project.id, title="P4 workbench")
     return application, thread.id
+
+
+@pytest.mark.parametrize(
+    "separator", ["\r", "\v", "\f", "\x1c", "\x85", "\u2028", "\u2029"]
+)
+def test_git_diff_preserves_non_lf_characters_inside_lines(
+    tmp_path: Path, separator: str
+) -> None:
+    workspace = tmp_path / "workspace"
+    _repository(workspace)
+    tracked = workspace / "tracked.txt"
+    tracked.write_bytes(f"before{separator}old\nkeep{separator}value\n".encode())
+    _git(workspace, "add", "tracked.txt")
+    _git(workspace, "commit", "-q", "-m", "line boundaries")
+    tracked.write_bytes(f"before{separator}new\nkeep{separator}value\nend\n".encode())
+    application, thread_id = _application(tmp_path, workspace)
+    try:
+        diff = application.git.diff(thread_id, path="tracked.txt")[0]
+        assert (diff.additions, diff.deletions) == (2, 1)
+        assert _git(workspace, "diff", "--numstat", "--", "tracked.txt").startswith(
+            "2\t1\t"
+        )
+        assert diff.hunks[0].lines == (
+            DiffLine("deletion", f"before{separator}old", 1, None),
+            DiffLine("addition", f"before{separator}new", None, 1),
+            DiffLine("context", f"keep{separator}value", 2, 2),
+            DiffLine("addition", "end", None, 3),
+        )
+    finally:
+        application.close()
+
+
+@pytest.mark.parametrize(
+    "separator", ["\r", "\v", "\f", "\x1c", "\x85", "\u2028", "\u2029"]
+)
+def test_untracked_git_diff_preserves_non_lf_characters_inside_lines(
+    tmp_path: Path, separator: str
+) -> None:
+    workspace = tmp_path / "workspace"
+    _repository(workspace)
+    (workspace / "new.txt").write_bytes(f"alpha{separator}beta\nnext\n".encode())
+    application, thread_id = _application(tmp_path, workspace)
+    try:
+        diff = application.git.diff(thread_id, path="new.txt")[0]
+        assert (diff.additions, diff.deletions) == (2, 0)
+        assert diff.hunks[0].lines == (
+            DiffLine("addition", f"alpha{separator}beta", None, 1),
+            DiffLine("addition", "next", None, 2),
+        )
+    finally:
+        application.close()
+
+
+@pytest.mark.parametrize(
+    "content,expected",
+    [
+        (b"", []),
+        (b"\n", [""]),
+        (b"one", ["one"]),
+        (b"one\n", ["one"]),
+        (b"one\n\n", ["one", ""]),
+        (b"one\r\n", ["one\r"]),
+    ],
+)
+def test_untracked_git_diff_handles_final_newlines(
+    tmp_path: Path, content: bytes, expected: list[str]
+) -> None:
+    workspace = tmp_path / "workspace"
+    _repository(workspace)
+    (workspace / "new.txt").write_bytes(content)
+    application, thread_id = _application(tmp_path, workspace)
+    try:
+        diff = application.git.diff(thread_id, path="new.txt")[0]
+        assert diff.additions == len(expected)
+        assert [line.text for line in diff.hunks[0].lines] == expected
+        assert [line.new_line for line in diff.hunks[0].lines] == list(
+            range(1, len(expected) + 1)
+        )
+    finally:
+        application.close()
 
 
 def test_file_tree_read_and_optimistic_edit_stay_inside_workspace(
