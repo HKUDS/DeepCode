@@ -241,6 +241,31 @@ class EventRenderer:
             self._emit_stream_line(self._stream_tail)
             self._stream_tail = ""
 
+    def _settle_streamed(self, text: str) -> bool:
+        """Finish a streamed segment against its authoritative text.
+
+        Returns True when the terminal now shows ``text``. Printed lines can
+        never be rewritten, so a final text that merely extends what streamed
+        (the stream ended early, or its last chunk was still in flight) is
+        completed by printing only the missing suffix. Anything else is left
+        to the caller, which prints the full text.
+        """
+
+        streamed = self._streamed
+        if not streamed:
+            return False
+        if streamed.strip() == text.strip():
+            self._close_line()
+            return True
+        if not text.startswith(streamed):
+            return False
+        self._stream_tail += text[len(streamed) :]
+        while "\n" in self._stream_tail:
+            line, self._stream_tail = self._stream_tail.split("\n", 1)
+            self._emit_stream_line(line)
+        self._close_line()
+        return True
+
     def _begin_block(self) -> None:
         """Settle the stream and open one blank line before a card.
 
@@ -332,6 +357,9 @@ class EventRenderer:
         interrupt is the one that knows, so it says so here instead of the
         status line spinning forever on a turn that is already over.
         """
+        # Print the held partial line now, so the caller's status note lands
+        # below the interrupted text instead of above it.
+        self._close_line()
         self._turn_active = False
         self._streaming_message = False
         self._tool_calls.clear()
@@ -448,9 +476,7 @@ class EventRenderer:
         """Settle one streamed response segment without duplicating it later."""
 
         if self.transcript_mode is not TranscriptMode.SUMMARY:
-            if self._streamed.strip() == (msg.text or "").strip():
-                self._close_line()
-            else:
+            if not self._settle_streamed(msg.text or ""):
                 self._close_line()
                 self._emit_gap()
                 self.console.print(Markdown(msg.text or ""))
@@ -473,9 +499,9 @@ class EventRenderer:
             self.console.print(Markdown(text))
         elif already_completed:
             self._close_line()
-        elif self._streamed and self._streamed.strip() == text.strip():
-            # Already fully shown as deltas — just settle the line.
-            self._close_line()
+        elif self._settle_streamed(text):
+            # Shown as deltas, completed with any missing suffix.
+            pass
         else:
             self._close_line()
             self._emit_gap()

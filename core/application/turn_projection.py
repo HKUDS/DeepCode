@@ -83,6 +83,15 @@ class TurnEventProjector:
 
     def project(self, event: Event) -> None:
         message = event.msg
+        # Throttled text must reach clients before anything that follows it,
+        # or a client sees a completion, tool card or other stream before the
+        # end of the text it already started showing.
+        if isinstance(message, AgentMessageDelta):
+            self._flush_reasoning_streams()
+        elif isinstance(message, AgentReasoningDelta):
+            self._flush_assistant_streams()
+        else:
+            self._flush_pending_streams()
         if isinstance(message, TurnStarted):
             for invocation in message.skill_invocations:
                 self._skill_invocations[invocation.skill_id] = invocation.to_metadata()
@@ -288,18 +297,24 @@ class TurnEventProjector:
     def close_open_items(self, *, interrupted: bool) -> None:
         """Ensure an interrupted/failed turn leaves no misleading live cards."""
 
+        # Persist text that was streamed but still held by the throttle, so the
+        # closed item keeps everything the model produced before it stopped.
+        self._flush_pending_streams()
         with self.database.transaction() as connection:
             items = ItemRepository(connection)
             active = items.list_active_for_turn(self.turn_id)
             event_repo = EventRepository(connection)
             events: list[DomainEvent] = []
             for item in active:
+                payload = {**item.payload, "interrupted": interrupted}
+                if "streaming" in payload:
+                    payload["streaming"] = False
                 updated = replace(
                     item,
                     status=ItemStatus.DECLINED
                     if item.kind is ItemKind.APPROVAL_REQUEST
                     else ItemStatus.FAILED,
-                    payload={**item.payload, "interrupted": interrupted},
+                    payload=payload,
                     updated_at=utc_now(),
                 )
                 items.update(updated)
@@ -396,6 +411,9 @@ class TurnEventProjector:
         phase: AgentMessagePhase = AgentMessagePhase.FINAL_ANSWER,
     ) -> None:
         key = self._assistant_key(message_id)
+        # Deliver the throttled tail as a delta first: a client that printed
+        # the stream can then match the completed text instead of reprinting.
+        self._flush_assistant_stream(key)
         self._assistant_texts[key] = text
         item_id = self._assistant_item_ids.get(key)
         payload = {
@@ -422,6 +440,61 @@ class TurnEventProjector:
         self._last_flushed_length[key] = len(text)
         if phase is AgentMessagePhase.FINAL_ANSWER:
             self._saw_final_assistant = True
+
+    def _flush_assistant_stream(self, key: str) -> None:
+        """Publish assistant text the throttle is still holding, if any."""
+
+        item_id = self._assistant_item_ids.get(key)
+        if item_id is None:
+            return
+        text = self._assistant_texts.get(key, "")
+        flushed = self._last_flushed_length.get(key, 0)
+        if len(text) <= flushed:
+            return
+        updated = self._append_item_delta(
+            item_id,
+            delta=text[flushed:],
+            summary=text[:160],
+        )
+        if updated is None:
+            return
+        self._last_delta_flush[key] = monotonic()
+        self._last_flushed_length[key] = len(text)
+
+    def _flush_assistant_streams(self) -> None:
+        for key in tuple(self._assistant_item_ids):
+            self._flush_assistant_stream(key)
+
+    def _flush_reasoning_stream(self, reasoning_id: str) -> None:
+        """Publish reasoning text the throttle is still holding, per channel."""
+
+        item_id = self._reasoning_item_ids.get(reasoning_id)
+        payload = self._reasoning_payloads.get(reasoning_id)
+        if item_id is None or payload is None:
+            return
+        for channel in ReasoningChannel:
+            key = (reasoning_id, channel)
+            text = payload.text_for(channel)
+            flushed = self._reasoning_last_length.get(key, 0)
+            if len(text) <= flushed:
+                continue
+            updated = self._append_reasoning_item_delta(
+                item_id,
+                channel=channel,
+                delta=text[flushed:],
+            )
+            if updated is None:
+                continue
+            self._reasoning_last_flush[key] = monotonic()
+            self._reasoning_last_length[key] = len(text)
+
+    def _flush_reasoning_streams(self) -> None:
+        for reasoning_id in tuple(self._reasoning_item_ids):
+            self._flush_reasoning_stream(reasoning_id)
+
+    def _flush_pending_streams(self) -> None:
+        self._flush_assistant_streams()
+        self._flush_reasoning_streams()
 
     def _start_reasoning(
         self,
@@ -487,6 +560,7 @@ class TurnEventProjector:
                 message.reasoning_id,
                 effort=message.effort,
             )
+        self._flush_reasoning_stream(message.reasoning_id)
         payload = ReasoningPayload(
             summary_text=message.summary_text,
             trace_text=message.trace_text,

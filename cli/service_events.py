@@ -36,8 +36,19 @@ class ServiceEventRenderer:
         self._started = set()
         self._skills = set()
 
-    def seed(self, items):
+    def seed(self, items, *, turn_id=None):
+        """Adopt a Turn that was already running before the replay cursor.
+
+        Only items still in progress can receive further deltas, so completed
+        ones are not remembered. ``turn_id`` marks the Turn as one this
+        renderer follows, so its terminal event is rendered.
+        """
+
+        if turn_id is not None:
+            self._started.add(turn_id)
         for item in items:
+            if item.status.value not in {"in_progress", "pending"}:
+                continue
             self._remember(
                 item.id,
                 item.kind.value,
@@ -73,6 +84,7 @@ class ServiceEventRenderer:
             "turn.interrupted",
             "turn.recovered",
         }:
+            followed = event.turn_id in self._started
             self._started.discard(event.turn_id)
             self._skills = {key for key in self._skills if key[0] != event.turn_id}
             self._items = {
@@ -80,6 +92,11 @@ class ServiceEventRenderer:
                 for key, value in self._items.items()
                 if value[2] != event.turn_id
             }
+            if not followed:
+                # A Turn this client never saw start (a queued Turn cancelled
+                # elsewhere, or one that ended before the replay cursor) must
+                # not settle the Turn that is currently streaming.
+                return []
             return [
                 TaskComplete(
                     None, turn.get("stopReason") or turn.get("status") or "interrupted"

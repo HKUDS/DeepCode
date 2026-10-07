@@ -193,7 +193,7 @@ class ServiceThreadClient:
         renderer = ServiceEventRenderer()
         active = self.turns.executing_for_thread(thread.id)
         if active:
-            renderer.seed(self.turns.read(active.id).items)
+            renderer.seed(self.turns.read(active.id).items, turn_id=active.id)
         self.thread, self.project = thread, project
         self.execution_profile, self._security = execution, security
         self._sequence, self._renderer = sequence, renderer
