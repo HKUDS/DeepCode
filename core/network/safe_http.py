@@ -50,6 +50,11 @@ class NetworkTransportError(SafeHttpError):
 
 DEFAULT_MAX_URL_CHARACTERS = 8_192
 
+# IPv6 prefixes that tunnel an IPv4 target instead of naming a public host.
+_NAT64_WELL_KNOWN = ipaddress.IPv6Network("64:ff9b::/96")  # RFC 6052
+_NAT64_LOCAL_USE = ipaddress.IPv6Network("64:ff9b:1::/48")  # RFC 8215
+_IPV4_COMPATIBLE = ipaddress.IPv6Network("::/96")  # RFC 4291, deprecated form
+
 
 @dataclass(frozen=True, slots=True)
 class SafeHttpPolicy:
@@ -128,8 +133,19 @@ def is_public_ip(value: str | ipaddress.IPv4Address | ipaddress.IPv6Address) -> 
     address = _as_ip(value) if isinstance(value, str) else value
     if address is None:
         return False
-    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
-        address = address.ipv4_mapped
+    if isinstance(address, ipaddress.IPv6Address):
+        if address.ipv4_mapped is not None:
+            address = address.ipv4_mapped
+        elif address in _NAT64_LOCAL_USE:
+            # RFC 8215 local-use prefix: never a public destination.
+            return False
+        elif address in _NAT64_WELL_KNOWN or address in _IPV4_COMPATIBLE:
+            # NAT64 (RFC 6052 /96 layout) and the deprecated IPv4-compatible
+            # form both tunnel an IPv4 target, so ``64:ff9b::127.0.0.1`` and
+            # ``::127.0.0.1`` would otherwise pass as global. Classify the
+            # embedded address instead (CVE-2026-85740 bypass class). The
+            # address used for connecting is unchanged.
+            address = ipaddress.IPv4Address(int(address) & 0xFFFFFFFF)
     return address.is_global
 
 
