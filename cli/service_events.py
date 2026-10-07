@@ -35,6 +35,7 @@ class ServiceEventRenderer:
         self._items = {}
         self._started = set()
         self._skills = set()
+        self._turns_with_error_items = set()
 
     def seed(self, items, *, turn_id=None):
         """Adopt a Turn that was already running before the replay cursor.
@@ -85,7 +86,9 @@ class ServiceEventRenderer:
             "turn.recovered",
         }:
             followed = event.turn_id in self._started
+            reported_error = event.turn_id in self._turns_with_error_items
             self._started.discard(event.turn_id)
+            self._turns_with_error_items.discard(event.turn_id)
             self._skills = {key for key in self._skills if key[0] != event.turn_id}
             self._items = {
                 key: value
@@ -97,11 +100,18 @@ class ServiceEventRenderer:
                 # elsewhere, or one that ended before the replay cursor) must
                 # not settle the Turn that is currently streaming.
                 return []
-            return [
+            messages = []
+            error_message = (turn.get("errorMessage") or "").strip()
+            if turn.get("status") == "failed" and error_message and not reported_error:
+                # Some failures (protocol or projection errors) record no error
+                # item; without this the user sees only a bare stop reason.
+                messages.append(ErrorEvent(error_message))
+            messages.append(
                 TaskComplete(
                     None, turn.get("stopReason") or turn.get("status") or "interrupted"
                 )
-            ]
+            )
+            return messages
         if event.type == "turn.usage.recorded":
             return [
                 ModelUsageRecorded(
@@ -119,7 +129,10 @@ class ServiceEventRenderer:
         if event.type == "item.delta":
             state = self._items.get(event.item_id)
             if state is None:
-                raise RuntimeError("A streamed item is missing its initial state")
+                # The item began before this client's cursor (it attached
+                # mid-stream or raced a Turn ending). Its completion carries
+                # the full text, so skipping the fragment loses nothing.
+                return []
             kind, message_id, _ = state
             if kind == "assistant_message":
                 return [AgentMessageDelta(payload["delta"], message_id)]
@@ -225,14 +238,19 @@ class ServiceEventRenderer:
                     )
                 ]
             if not running:
+                preview = data.get("resultPreview", "")
+                if data.get("interrupted") and not preview:
+                    preview = "Interrupted"
                 return [
                     ToolCompleted(
                         data["callId"],
                         data["name"],
                         data.get("isError", item["status"] != "completed"),
-                        data.get("resultPreview", ""),
+                        preview,
                     )
                 ]
         if kind == "error":
+            if event.turn_id is not None:
+                self._turns_with_error_items.add(event.turn_id)
             return [ErrorEvent(data.get("message") or item["summary"])]
         return []

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import os
 import sys
 
@@ -59,6 +60,8 @@ from core.domain.project import TrustState
 from core.file_lock import FileLease
 from core.providers.reasoning import normalize_reasoning_effort
 
+logger = logging.getLogger(__name__)
+
 _MODEL_CATALOG_PREVIEW = 4  # models shown per connection in /model
 # Sentinel: switch_model keeps the session's effort unless told otherwise.
 _KEEP_EFFORT: object = object()
@@ -96,6 +99,10 @@ class TuiApp:
         self._external_refresh_task: asyncio.Task | None = None
         self._external_refresh_dirty = False
         self._last_send_delivered = True
+        # Approval prompts shown in this terminal, and those it answered, so a
+        # resolution made elsewhere can be reported instead of misread.
+        self._prompted_approval_ids: set[str] = set()
+        self._answered_approval_ids: set[str] = set()
         self._requested_model = model
         self._requested_connection = connection_id
         self._requested_reasoning_effort = (
@@ -783,7 +790,24 @@ class TuiApp:
         )
 
     def stop_turn(self) -> str:
-        result = self.thread_client.interrupt()
+        try:
+            result = self.thread_client.interrupt()
+        except (RuntimeError, OSError) as exc:  # ApplicationError included
+            return f"Could not stop the turn: {_error_text(exc)}"
+        return self._settle_interrupt(result)
+
+    async def stop_turn_async(self) -> str:
+        """Interrupt without blocking rendering while the service waits."""
+
+        if self.thread_client.runtime_mode != "service":
+            return self.stop_turn()
+        try:
+            result = await asyncio.to_thread(self.thread_client.interrupt)
+        except (RuntimeError, OSError) as exc:  # ApplicationError included
+            return f"Could not stop the turn: {_error_text(exc)}"
+        return self._settle_interrupt(result)
+
+    def _settle_interrupt(self, result) -> str:
         if result is None:
             self.renderer.settle_turn()
             return "no active Turn"
@@ -797,9 +821,6 @@ class TuiApp:
         return "Interrupted the turn." if accepted else "The turn had already stopped."
 
     def _respond_to_pending_approval(self, text: str) -> str | None:
-        approval = self.thread_client.pending_approval()
-        if approval is None:
-            return None
         decision = {
             "y": ApprovalStatus.APPROVED_ONCE,
             "yes": ApprovalStatus.APPROVED_ONCE,
@@ -810,13 +831,56 @@ class TuiApp:
         }.get(text.strip().casefold())
         if decision is None:
             return None
-        resolved = self.thread_client.respond_to_approval(approval.id, decision)
+        approval = self.thread_client.pending_approval()
+        if approval is None:
+            if self._prompted_approval_ids:
+                # The prompt this reply was meant for is gone (answered in
+                # another client, or timed out). Sending "y" to the model as
+                # a message would be wrong, so say what happened instead.
+                self._prompted_approval_ids.clear()
+                return (
+                    "No approval is waiting any more; it was answered elsewhere "
+                    "or timed out."
+                )
+            return None
+        self._answered_approval_ids.add(approval.id)
+        self._prompted_approval_ids.discard(approval.id)
+        try:
+            resolved = self.thread_client.respond_to_approval(approval.id, decision)
+        except ApplicationError as exc:
+            return f"Could not answer the approval: {exc.user_message}"
         outcome = {
             ApprovalStatus.APPROVED_ONCE: "approved once",
             ApprovalStatus.APPROVED_SESSION: "approved for this Session",
             ApprovalStatus.DENIED: "denied",
         }.get(resolved.status, resolved.status.value.replace("_", " "))
         return f"Approval {outcome}."
+
+    def _on_approval_resolved(self, approval) -> None:
+        if not isinstance(approval, dict) or not isinstance(approval.get("id"), str):
+            return
+        approval_id = approval["id"]
+        if approval_id in self._answered_approval_ids:
+            self._answered_approval_ids.discard(approval_id)
+            return
+        if approval_id not in self._prompted_approval_ids:
+            return
+        self._prompted_approval_ids.discard(approval_id)
+        status = str(approval.get("status") or "resolved").replace("_", " ")
+        self.console.print(
+            f"[{theme.META_STYLE}]Approval {escape(status)} elsewhere.[/]",
+            soft_wrap=True,
+            highlight=False,
+        )
+
+    def _print_status(self, status: str) -> None:
+        # escape(): statuses carry user data (paths, titles) that must never be
+        # parsed as rich markup. soft_wrap: long paths must not hard-wrap.
+        self.console.print(
+            f"[{theme.META_STYLE}]{escape(status)}[/]",
+            soft_wrap=True,
+            highlight=False,
+        )
 
     def _on_domain_event(self, event: DomainEvent) -> None:
         if self.thread_client.runtime_mode == "service" and event.type.startswith(
@@ -844,11 +908,16 @@ class TuiApp:
                             )
 
                     self._external_refresh_task = asyncio.create_task(refresh())
+        if event.type == "approval.resolved":
+            self._on_approval_resolved(event.payload.get("approval"))
+            return
         if event.type != "approval.requested":
             return
         approval = event.payload.get("approval")
         if not isinstance(approval, dict):
             return
+        if isinstance(approval.get("id"), str):
+            self._prompted_approval_ids.add(approval["id"])
         request = approval.get("request")
         request = request if isinstance(request, dict) else {}
         tool = str(request.get("toolName") or "tool")
@@ -907,6 +976,28 @@ class TuiApp:
         )
         self.console.print()
 
+    async def _handle_line(self, text: str) -> None:
+        if text.startswith("/"):
+            status = await commands.dispatch(self, text)
+            if status:
+                self._print_status(status)
+            return
+        approval_status = self._respond_to_pending_approval(text)
+        if approval_status is not None:
+            self._print_status(approval_status)
+            return
+        expanded = expand_file_refs(text, self.workspace)
+        status = self.send_turn(expanded)
+        if status:
+            self._print_status(status)
+        if not self.reader.interactive and self._last_send_delivered:
+            # "Idle" is a property of the shared Thread, which another
+            # process's turn keeps busy. A refused submission started
+            # nothing here, so there is nothing of ours to wait for —
+            # waiting would make a piped run stand guard over the
+            # other process's work.
+            await self.thread_client.wait_until_idle()
+
     async def repl(self) -> int:
         loop = asyncio.get_running_loop()
         self.thread_client.set_event_loop(loop)
@@ -919,51 +1010,21 @@ class TuiApp:
                 try:
                     line = await self.reader.read()
                 except InputInterrupted:
-                    status = self.stop_turn()
-                    self.console.print(
-                        f"[{theme.META_STYLE}]{escape(status)}[/]",
-                        soft_wrap=True,
-                        highlight=False,
-                    )
+                    self._print_status(await self.stop_turn_async())
                     continue
                 if line is None:
                     break
                 text = line.strip()
                 if not text:
                     continue
-                if text.startswith("/"):
-                    status = await commands.dispatch(self, text)
-                    if status:
-                        # escape(): statuses carry user data (paths, titles) that
-                        # must never be parsed as rich markup. soft_wrap: long
-                        # paths must not be hard-wrapped mid-line.
-                        self.console.print(
-                            f"[{theme.META_STYLE}]{escape(status)}[/]",
-                            soft_wrap=True,
-                            highlight=False,
-                        )
-                    continue
-                approval_status = self._respond_to_pending_approval(text)
-                if approval_status is not None:
-                    self.console.print(
-                        f"[{theme.META_STYLE}]{escape(approval_status)}[/]"
-                    )
-                    continue
-                expanded = expand_file_refs(text, self.workspace)
-                status = self.send_turn(expanded)
-                if status:
-                    self.console.print(
-                        f"[{theme.META_STYLE}]{escape(status)}[/]",
-                        soft_wrap=True,
-                        highlight=False,
-                    )
-                if not self.reader.interactive and self._last_send_delivered:
-                    # "Idle" is a property of the shared Thread, which another
-                    # process's turn keeps busy. A refused submission started
-                    # nothing here, so there is nothing of ours to wait for —
-                    # waiting would make a piped run stand guard over the
-                    # other process's work.
-                    await self.thread_client.wait_until_idle()
+                try:
+                    await self._handle_line(text)
+                except (RuntimeError, OSError) as exc:  # ApplicationError included
+                    # A service that is down, draining or that refuses one
+                    # request must cost this line, not the whole session.
+                    if not isinstance(exc, ApplicationError):
+                        logger.exception("TUI request failed")
+                    self._print_status(f"Request failed: {_error_text(exc)}")
             if self.reader.interactive:
                 self.console.print(f"[{theme.META_STYLE}]bye[/]")
             return 0
@@ -1024,9 +1085,18 @@ def main(argv: list[str] | None = None, *, shared_service: bool = True) -> int:
     except ApplicationError as exc:
         print(exc.user_message, file=sys.stderr)
         return 1
+    except (RuntimeError, OSError) as exc:
+        print(f"DeepCode could not start: {exc}", file=sys.stderr)
+        return 1
     if app.reader.interactive:
         _silence_console_logging()
     return asyncio.run(app.repl())
+
+
+def _error_text(exc: BaseException) -> str:
+    if isinstance(exc, ApplicationError):
+        return exc.user_message
+    return str(exc) or type(exc).__name__
 
 
 def _bootstrap_quiet_logging() -> None:

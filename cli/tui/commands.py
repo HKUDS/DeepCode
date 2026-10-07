@@ -750,7 +750,7 @@ async def _cmd_queue(app, args: str) -> str | None:
 
 
 async def _cmd_stop(app, args: str) -> str | None:
-    return app.stop_turn()
+    return await app.stop_turn_async()
 
 
 async def _cmd_exit(app, args: str) -> str | None:

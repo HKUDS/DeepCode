@@ -95,7 +95,9 @@ class BlockingServiceClient:
                     raise error_type(str(exc), details=details) from exc
             raise RemoteApplicationError(exc) from exc
 
-    def reconnect(self, previous=None):
+    def reconnect(self, previous=None, *, start: bool = False):
+        """Replace the transport; ``start`` also launches a stopped service."""
+
         with self._connection_lock:
             if self._closed:
                 raise RuntimeError("Service client is closed")
@@ -113,7 +115,8 @@ class BlockingServiceClient:
                             "version": "1",
                             "surface": self.surface,
                         },
-                    }
+                    },
+                    start=start,
                 )
             )
             self.client = candidate

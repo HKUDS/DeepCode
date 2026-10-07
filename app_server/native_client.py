@@ -50,8 +50,10 @@ class NativeRpcClient:
         if record.version != __version__:
             raise RpcError(
                 -32003,
-                "The running service and this client have different versions. "
-                "Finish active work and upgrade/restart the service explicitly.",
+                "The running service and this client have different versions "
+                f"(service {record.version}, client {__version__}). Finish active "
+                "work, then run `deepcode service restart` to start the service "
+                "from this installation.",
                 stable_code="SERVICE_VERSION_MISMATCH",
             )
         self._session = aiohttp.ClientSession(

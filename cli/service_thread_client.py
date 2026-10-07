@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 from pathlib import Path
 
 from app_server.blocking_client import BlockingServiceClient
@@ -31,6 +33,12 @@ from core.domain.thread import Thread
 from core.events import ErrorEvent, Event
 from core.persistence.database import default_database_path
 from core.sessions import SessionStore
+
+logger = logging.getLogger(__name__)
+
+# How long the event pump keeps retrying an unreachable service before it
+# stops and points the user at /reconnect (which can start it again).
+_RECONNECT_WINDOW_S = 120.0
 
 
 class ServiceThreadClient:
@@ -190,10 +198,7 @@ class ServiceThreadClient:
         sequence = self.rpc.call("event/replay", {"threadId": thread.id, "limit": 1})[
             "headSequence"
         ]
-        renderer = ServiceEventRenderer()
-        active = self.turns.executing_for_thread(thread.id)
-        if active:
-            renderer.seed(self.turns.read(active.id).items, turn_id=active.id)
+        renderer = self._fresh_renderer(thread.id)
         self.thread, self.project = thread, project
         self.execution_profile, self._security = execution, security
         self._sequence, self._renderer = sequence, renderer
@@ -444,18 +449,54 @@ class ServiceThreadClient:
         pass
 
     def _consume_page(self, page):
+        resynced = False
         for value in page["events"]:
             event = from_view(DomainEvent, value)
             if event.sequence <= self._sequence:
                 continue
             if event.sequence != self._sequence + 1:
-                raise RuntimeError("Thread event replay is not contiguous")
-            if self._domain_sink:
-                self._domain_sink(event)
-            for rendered in self._renderer.convert(event):
-                if self._event_sink:
-                    self._event_sink(rendered)
+                self._resync(
+                    f"events {self._sequence + 1}-{event.sequence - 1} were missing",
+                    announce=not resynced,
+                )
+                resynced = True
+            try:
+                if self._domain_sink:
+                    self._domain_sink(event)
+                for rendered in self._renderer.convert(event):
+                    if self._event_sink:
+                        self._event_sink(rendered)
+            except Exception as exc:  # noqa: BLE001 - one bad event must not stop the TUI
+                logger.exception("could not render service event %s", event.type)
+                self._resync(
+                    f"a {event.type} event could not be shown ({type(exc).__name__})",
+                    announce=not resynced,
+                )
+                resynced = True
             self._sequence = event.sequence
+
+    def _fresh_renderer(self, thread_id):
+        """A renderer that follows whatever Turn is running right now."""
+
+        renderer = ServiceEventRenderer()
+        try:
+            active = self.turns.executing_for_thread(thread_id)
+            if active:
+                renderer.seed(self.turns.read(active.id).items, turn_id=active.id)
+        except (RuntimeError, OSError):
+            logger.exception("could not read the running Turn while resyncing")
+        return renderer
+
+    def _resync(self, reason, *, announce=True):
+        self._renderer = self._fresh_renderer(self.thread.id)
+        if announce:
+            self._notify_connection(
+                f"The display was resynchronized with the service: {reason}."
+            )
+
+    def _notify_connection(self, message):
+        if self._event_sink:
+            self._event_sink(Event("connection", ErrorEvent(message)))
 
     def drain_events(self):
         through = None
@@ -494,6 +535,7 @@ class ServiceThreadClient:
         async def pump():
             through = None
             failures = 0
+            first_failure = None
             while True:
                 thread_id, generation = self.thread.id, self._selection_generation
                 params = {"threadId": thread_id, "after": self._sequence, "limit": 100}
@@ -504,29 +546,30 @@ class ServiceThreadClient:
                         self.rpc.call, "event/replay", params
                     )
                     failures = 0
+                    first_failure = None
                 except (RuntimeError, OSError) as exc:
-                    failures += 1
-                    if failures == 1 and self._event_sink:
-                        self._event_sink(
-                            Event(
-                                "connection",
-                                ErrorEvent(
-                                    f"Service disconnected: {exc}. Admitted tasks may still be running."
-                                ),
-                            )
+                    if getattr(exc, "code", None) == "THREAD_NOT_FOUND":
+                        self._notify_connection(
+                            "This Session no longer exists in the service; it may "
+                            "have been deleted elsewhere. Use /new or /resume."
                         )
-                    if failures >= 6:
-                        if self._event_sink:
-                            self._event_sink(
-                                Event(
-                                    "connection",
-                                    ErrorEvent(
-                                        "Use /reconnect after the service is available."
-                                    ),
-                                )
-                            )
                         return
-                    await asyncio.sleep(min(4, 0.25 * 2**failures))
+                    now = time.monotonic()
+                    if first_failure is None:
+                        first_failure = now
+                        self._notify_connection(
+                            f"Lost connection to the DeepCode service ({exc}). "
+                            "Retrying for up to 2 minutes; tasks it already accepted "
+                            "keep running."
+                        )
+                    if now - first_failure >= _RECONNECT_WINDOW_S:
+                        self._notify_connection(
+                            "Still cannot reach the DeepCode service. Use /reconnect "
+                            "to start it again, or check `deepcode service status`."
+                        )
+                        return
+                    failures += 1
+                    await asyncio.sleep(min(5, 0.25 * 2**failures))
                     continue
                 if generation != self._selection_generation:
                     through = None
@@ -538,8 +581,11 @@ class ServiceThreadClient:
         self._domain_task = asyncio.create_task(pump())
 
     async def reconnect(self):
+        """Reconnect, starting the service again if it is no longer running."""
+
         await self.stop_domain_events()
-        await asyncio.to_thread(self.rpc.reconnect)
+        await asyncio.to_thread(self.rpc.reconnect, start=True)
+        self._renderer = await asyncio.to_thread(self._fresh_renderer, self.thread.id)
         await self.start_domain_events(self._domain_sink)
 
     async def stop_domain_events(self):

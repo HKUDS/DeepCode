@@ -109,6 +109,9 @@ class WebSocketTransport:
             "shutdown",
             "event/replay",
             "thread/read",
+            # Clients find the Turn awaiting approval through turn/list; the
+            # drain waits for that approval, so the lookup must stay allowed.
+            "turn/list",
             "turn/read",
             "turn/input/read",
             "approval/respond",
