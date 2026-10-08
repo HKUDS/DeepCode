@@ -729,6 +729,20 @@ class TuiApp:
         await asyncio.to_thread(self.thread_client.refresh_thread)
         self._sync_thread_state()
 
+    async def refresh_execution_state(self) -> str | None:
+        """Re-read this Session's model and access before showing them.
+
+        A change to this Session made elsewhere arrives as a thread event,
+        but a changed default (Settings, or the config file) emits nothing,
+        so a Session that follows the defaults kept showing the old model
+        and access. Returns a message when the service could not be read.
+        """
+        try:
+            await self._reload_current_session()
+        except (RuntimeError, OSError, ValueError) as exc:  # ApplicationError included
+            return f"Could not read the current settings: {_error_text(exc)}"
+        return None
+
     async def reconnect_service(self) -> str:
         if self.thread_client.runtime_mode != "service":
             return "This connection does not support reconnection."

@@ -1697,9 +1697,14 @@ def test_model_picker_offers_the_full_directory_and_switches(monkeypatch):
         ),
         ("poe", [{"id": "gpt-x", "name": "GPT X", "reasoning": None}]),
     ]
+
+    async def refresh_execution_state():
+        return None
+
     app = SimpleNamespace(
         reader=SimpleNamespace(interactive=True),
         console=SimpleNamespace(print=lambda *a, **k: None),
+        refresh_execution_state=refresh_execution_state,
         connection_model_catalog=lambda: directory,
         thread_client=SimpleNamespace(
             execution_profile=SimpleNamespace(

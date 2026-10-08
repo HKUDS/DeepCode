@@ -389,6 +389,9 @@ async def _model_via_picker(app) -> str | None:
 
 
 async def _cmd_model(app, args: str) -> str | None:
+    failure = await app.refresh_execution_state()
+    if failure is not None:
+        return failure
     wanted = args.strip()
     if not wanted:
         if app.reader.interactive:
@@ -438,6 +441,9 @@ async def _effort_via_picker(app) -> str | None:
 
 
 async def _cmd_effort(app, args: str) -> str | None:
+    failure = await app.refresh_execution_state()
+    if failure is not None:
+        return failure
     wanted = args.strip()
     if not wanted:
         if app.reader.interactive:
@@ -458,6 +464,9 @@ async def _cmd_effort(app, args: str) -> str | None:
 
 
 async def _cmd_context(app, args: str) -> str | None:
+    failure = await app.refresh_execution_state()
+    if failure is not None:
+        return failure
     wanted = args.strip()
     profile = app.thread_client.execution_profile
     if not wanted:
@@ -521,6 +530,9 @@ async def _permissions_via_picker(app) -> str | None:
 
 
 async def _cmd_permissions(app, args: str) -> str | None:
+    failure = await app.refresh_execution_state()
+    if failure is not None:
+        return failure
     wanted = args.strip().casefold()
     if not wanted:
         if app.reader.interactive:

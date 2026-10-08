@@ -320,15 +320,20 @@ class ServiceThreadClient:
 
     def new_thread(self, *, title=""):
         self._require_idle()
+        # Carry over only what this Session chose explicitly. A Session that
+        # follows the defaults starts its successor on the defaults too, as a
+        # Desktop "new task" does; passing the resolved profile pinned
+        # whatever the default model happened to be at that moment.
+        current = self.thread
         value = self.rpc.call(
             "thread/start",
             {
                 "projectId": self.project.id,
                 "title": title.strip() or "New task",
-                "connectionId": self.execution_profile.connection_id,
-                "model": self.execution_profile.model_id,
-                "reasoningEffort": self.thread.reasoning_effort,
-                "contextWindow": self.thread.context_window,
+                "connectionId": current.connection_id,
+                "model": current.model,
+                "reasoningEffort": current.reasoning_effort,
+                "contextWindow": current.context_window,
             },
         )
         self._replace_thread(from_view(Thread, value["thread"]))
