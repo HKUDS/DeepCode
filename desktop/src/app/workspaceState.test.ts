@@ -176,6 +176,75 @@ describe("workspace event projection", () => {
     expect(duplicate.items[0].payload.text).toBe("Hello world");
   });
 
+  // The server publishes its throttled tail as a delta before completing an
+  // item, so the streamed text a client has already matches the completion.
+  function delta(sequence: number, text: string): Event {
+    return {
+      eventId: `event-${sequence}`,
+      sequence,
+      type: "item.delta",
+      threadId: "thread-1",
+      turnId: turn.id,
+      itemId: "item-1",
+      timestamp: "2026-07-16T00:00:01Z",
+      payload: { delta: text, streaming: true },
+    };
+  }
+
+  it("ends a streamed message with the flushed tail and the same final text", () => {
+    let state = workspaceReducer(initialWorkspaceState, {
+      type: "event",
+      event: event(1, {
+        ...item("in_progress", "Hello "),
+        payload: { text: "Hello ", streaming: true },
+      }),
+    });
+    state = workspaceReducer(state, { type: "event", event: delta(2, "world") });
+    expect(state.items[0].payload.text).toBe("Hello world");
+
+    state = workspaceReducer(state, {
+      type: "event",
+      event: event(3, {
+        ...item("completed", "Hello world"),
+        payload: { text: "Hello world", streaming: false },
+      }),
+    });
+
+    expect(state.items[0].status).toBe("completed");
+    expect(state.items[0].payload.text).toBe("Hello world");
+    expect(state.items[0].payload.streaming).toBe(false);
+  });
+
+  it("keeps an interrupted message's full streamed text without a live cursor", () => {
+    let state = workspaceReducer(initialWorkspaceState, {
+      type: "event",
+      event: event(1, {
+        ...item("in_progress", "Hello "),
+        payload: { text: "Hello ", streaming: true },
+      }),
+    });
+    state = workspaceReducer(state, {
+      type: "event",
+      event: delta(2, "WORLD-TAIL"),
+    });
+    state = workspaceReducer(state, {
+      type: "event",
+      event: event(3, {
+        ...item("failed", "Hello WORLD-TAIL"),
+        payload: {
+          text: "Hello WORLD-TAIL",
+          streaming: false,
+          interrupted: true,
+        },
+      }),
+    });
+
+    expect(state.items[0].status).toBe("failed");
+    expect(state.items[0].payload.text).toBe("Hello WORLD-TAIL");
+    expect(state.items[0].payload.streaming).toBe(false);
+    expect(state.items[0].payload.interrupted).toBe(true);
+  });
+
   it("rebuilds typed reasoning channels without mixing them into answer text", () => {
     const reasoning: Item = {
       ...item("in_progress", "Thinking"),
