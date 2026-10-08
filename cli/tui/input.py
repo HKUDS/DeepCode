@@ -243,6 +243,9 @@ class InputReader:
                 history=FileHistory(str(history_path)),
                 completer=self._completer,
                 complete_while_typing=True,
+                # Candidates can come from the service (Session ids, Skills);
+                # a slow answer must delay only the menu, never typing.
+                complete_in_thread=True,
                 key_bindings=bindings,
                 bottom_toolbar=status_provider,
                 style=Style.from_dict(theme.STATUS_STYLE_RULES),

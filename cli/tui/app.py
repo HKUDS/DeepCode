@@ -20,10 +20,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import concurrent.futures
 import logging
 import os
 import signal
 import sys
+import threading
+import time
 from collections.abc import Callable
 
 sys.path.insert(
@@ -67,6 +70,11 @@ logger = logging.getLogger(__name__)
 _MODEL_CATALOG_PREVIEW = 4  # models shown per connection in /model
 # Sentinel: switch_model keeps the session's effort unless told otherwise.
 _KEEP_EFFORT: object = object()
+# Completion runs on every keystroke; service-backed candidate lists (Session
+# ids, Skills, effort levels) are reused this long instead of refetched, and a
+# fetch is waited on only this long before the menu shows what it already has.
+_COMPLETION_CACHE_SECONDS = 5.0
+_COMPLETION_WAIT_SECONDS = 0.15
 _RESUME_TAIL_MESSAGES = 4  # messages replayed on /resume
 _RESUME_TAIL_LINES = 3  # lines shown per replayed message
 
@@ -105,6 +113,9 @@ class TuiApp:
         # resolution made elsewhere can be reported instead of misread.
         self._prompted_approval_ids: set[str] = set()
         self._answered_approval_ids: set[str] = set()
+        self._completion_cache: dict[str, tuple[float, object]] = {}
+        self._completion_loads: dict[str, concurrent.futures.Future] = {}
+        self._completion_cache_lock = threading.Lock()
         self._requested_model = model
         self._requested_connection = connection_id
         self._requested_reasoning_effort = (
@@ -152,11 +163,16 @@ class TuiApp:
         self._requested_model = profile.model_id
         self._requested_reasoning_effort = thread.reasoning_effort
         self._requested_context_window = thread.context_window
-        self.bridge = SessionBridge(
-            store=self.thread_client.store,
-            session_id=thread.id,
-            workspace=self.workspace,
-        )
+        bridge = getattr(self, "bridge", None)
+        # Every thread event (each Turn start and end) lands here. Building a
+        # bridge re-reads the whole Session file, so keep it while the Session
+        # is the same one.
+        if bridge is None or bridge.session_id != thread.id:
+            self.bridge = SessionBridge(
+                store=self.thread_client.store,
+                session_id=thread.id,
+                workspace=self.workspace,
+            )
         self._lease_session(self.bridge.session_id)
 
     def _lease_session(self, session_id: str) -> None:
@@ -550,8 +566,61 @@ class TuiApp:
         self.selected_skill_ids.remove(skill.id)
         return f"removed {skill.name} from the next turn"
 
+    def completion_candidates(self, key: str, load: Callable[[], object]):
+        """A service-backed completion source that never holds the prompt.
+
+        Results are reused for a few seconds, since completion runs on every
+        keystroke. A fetch is waited on only briefly: prompt_toolkit waits for
+        an in-flight completion before it submits the line, so a slow service
+        would otherwise delay Enter. A fetch still running keeps going in the
+        background and serves the next keystroke. Commands never read this.
+        """
+        with self._completion_cache_lock:
+            cached = self._completion_cache.get(key)
+            if (
+                cached is not None
+                and time.monotonic() - cached[0] < _COMPLETION_CACHE_SECONDS
+            ):
+                return cached[1]
+            pending = self._completion_loads.get(key)
+            if pending is None:
+                pending = concurrent.futures.Future()
+                self._completion_loads[key] = pending
+                threading.Thread(
+                    target=self._load_completion_candidates,
+                    args=(key, load, pending),
+                    name="deepcode-completion",
+                    daemon=True,
+                ).start()
+        try:
+            return pending.result(timeout=_COMPLETION_WAIT_SECONDS)
+        except concurrent.futures.TimeoutError:
+            return cached[1] if cached is not None else ()
+
+    def _load_completion_candidates(
+        self,
+        key: str,
+        load: Callable[[], object],
+        pending: concurrent.futures.Future,
+    ) -> None:
+        try:
+            value = load()
+        except BaseException as exc:  # noqa: BLE001 - delivered to the waiter
+            pending.set_exception(exc)
+        else:
+            with self._completion_cache_lock:
+                self._completion_cache[key] = (time.monotonic(), value)
+            pending.set_result(value)
+        finally:
+            with self._completion_cache_lock:
+                self._completion_loads.pop(key, None)
+
     def _completion_skills(self):
-        return self.thread_client.skills.list(self.thread_client.project.id).skills
+        project_id = self.thread_client.project.id
+        return self.completion_candidates(
+            f"skills:{project_id}",
+            lambda: tuple(self.thread_client.skills.list(project_id).skills),
+        )
 
     def _complete_command_argument(self, name: str, prefix: str) -> tuple[str, ...]:
         command = commands.REGISTRY.get(name)
@@ -1052,7 +1121,13 @@ class TuiApp:
             self._print_status(approval_status)
             return
         expanded = expand_file_refs(text, self.workspace)
-        status = self.send_turn(expanded)
+        if self.thread_client.runtime_mode == "service":
+            # Admission is a few service round trips that can queue behind
+            # the database while another Turn streams; off the loop, typing
+            # and the status line keep moving meanwhile.
+            status = await asyncio.to_thread(self.send_turn, expanded)
+        else:
+            status = self.send_turn(expanded)
         if status:
             self._print_status(status)
         if not self.reader.interactive and self._last_send_delivered:

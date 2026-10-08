@@ -124,6 +124,20 @@ def _session_ids(app, prefix: str) -> list[str]:
     return [row.session_id for row in rows if row.session_id.startswith(prefix)]
 
 
+def _session_id_completions(app, prefix: str) -> list[str]:
+    """``_session_ids`` for the completer: same list, briefly cached."""
+    ids = app.completion_candidates(
+        "sessions",
+        lambda: tuple(
+            row.session_id
+            for row in app.thread_client.list_recent(
+                limit=_PREFIX_SCAN_LIMIT, include_all=True
+            )
+        ),
+    )
+    return [session_id for session_id in ids if session_id.startswith(prefix)]
+
+
 def _transcript_modes(app, prefix: str) -> list[str]:
     return [m.value for m in TranscriptMode if m.value.startswith(prefix)]
 
@@ -133,7 +147,11 @@ def _permission_presets(app, prefix: str) -> list[str]:
 
 
 def _effort_levels(app, prefix: str) -> list[str]:
-    levels = ("auto", "none", *app.reasoning_options(app.model))
+    model = app.model
+    published = app.completion_candidates(
+        f"efforts:{model}", lambda: tuple(app.reasoning_options(model))
+    )
+    levels = ("auto", "none", *published)
     return [level for level in levels if level.startswith(prefix)]
 
 
@@ -783,7 +801,7 @@ REGISTRY: dict[str, Command] = {
             "/resume [id|all]",
             "list this directory's sessions / resume one (id prefix ok)",
             _cmd_resume,
-            arguments=_session_ids,
+            arguments=_session_id_completions,
         ),
         Command(
             "rename",
@@ -796,7 +814,7 @@ REGISTRY: dict[str, Command] = {
             "/delete <id>",
             "permanently delete a stored session",
             _cmd_delete,
-            arguments=_session_ids,
+            arguments=_session_id_completions,
         ),
         Command(
             "model",

@@ -16,15 +16,20 @@ from app_server.service_state import ServiceFiles
 from core.version import __version__
 
 
-# Requests that wait on a model call (a provider probe, a /compact summary)
-# legitimately outlast the default budget; the server keeps working on them
-# either way, so timing out early only hides a result that is still coming.
-_MODEL_BOUND_TIMEOUTS = {"provider/test": 120.0, "thread/context/compact": 600.0}
+# Requests that wait on a model or an external process (a provider probe, a
+# /compact summary, an MCP server start that may take up to its configured
+# 300s) legitimately outlast the default budget; the server keeps working on
+# them either way, so timing out early only hides a result that is coming.
+_SLOW_METHOD_TIMEOUTS = {
+    "provider/test": 120.0,
+    "thread/context/compact": 600.0,
+    "mcp/probe": 330.0,
+}
 _DEFAULT_TIMEOUT = 25.0
 
 
 def request_timeout(method: str) -> float:
-    return _MODEL_BOUND_TIMEOUTS.get(method, _DEFAULT_TIMEOUT)
+    return _SLOW_METHOD_TIMEOUTS.get(method, _DEFAULT_TIMEOUT)
 
 
 class NativeRpcClient:
@@ -124,10 +129,9 @@ class NativeRpcClient:
         future = asyncio.get_running_loop().create_future()
         self._pending[request_id] = future
         sent = False
+        budget = timeout if timeout is not None else request_timeout(method)
         try:
-            async with asyncio.timeout(
-                timeout if timeout is not None else request_timeout(method)
-            ):
+            async with asyncio.timeout(budget):
                 # Once writing starts, failure cannot prove non-admission.
                 sent = True
                 await socket.send_str(encoded.decode())
@@ -137,13 +141,32 @@ class NativeRpcClient:
             read_only = (
                 method in policy.get("readMethods", []) or method == "initialize"
             )
+            known = read_only or not sent
+            # A timeout is a slow service, not a lost connection: the socket
+            # is still good and the answer may still come. Say so, and mark
+            # it so callers neither reconnect nor send it again.
+            timed_out = isinstance(exc, TimeoutError)
+            if not timed_out:
+                message = (
+                    "Service response was lost. Reconnect and inspect the "
+                    "current state before retrying."
+                )
+            elif known:
+                message = (
+                    f"The DeepCode service did not answer within {budget:g}s; "
+                    "it may be busy. Try again in a moment."
+                )
+            else:
+                message = (
+                    f"The DeepCode service did not confirm this request within "
+                    f"{budget:g}s; it may still complete. Check the current "
+                    "state before retrying."
+                )
             raise RpcError(
                 -32000,
-                "Service response was lost. Reconnect and inspect the current state before retrying.",
-                stable_code="CONNECTION_LOST"
-                if read_only or not sent
-                else "RESULT_UNKNOWN",
-                data={"retryable": read_only},
+                message,
+                stable_code="CONNECTION_LOST" if known else "RESULT_UNKNOWN",
+                data={"retryable": read_only, "timedOut": timed_out},
             ) from exc
         finally:
             self._pending.pop(request_id, None)

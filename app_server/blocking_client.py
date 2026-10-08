@@ -26,6 +26,7 @@ class RemoteApplicationError(ApplicationError):
         super().__init__(str(error), details=error.data.get("details"))
         self.code = error.stable_code
         self.retryable = error.data.get("retryable", False)
+        self.timed_out = bool(error.data.get("timedOut", False))
 
 
 class BlockingServiceClient:
@@ -150,8 +151,12 @@ class BlockingServiceClient:
                     timeout=request_timeout(method) + 15,
                 )
             except RemoteApplicationError as exc:
+                # A timeout is not retried: the connection is fine and the
+                # service is slow, so reconnecting and asking again only
+                # tripled the wait (and dropped the event stream twice).
                 if (
                     not safe
+                    or exc.timed_out
                     or exc.code
                     not in {
                         "CONNECTION_LOST",
