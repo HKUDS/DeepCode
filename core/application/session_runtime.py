@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import os
@@ -43,6 +44,9 @@ from core.sessions.transcript import (
     visible_kernel_history,
 )
 from core.skills.host import SkillWorkspaceRegistry
+
+# How often a Turn re-checks a Session that `/compact` is still rewriting.
+_COMPACTION_POLL_SECONDS = 0.05
 
 
 class ApprovalRouter:
@@ -86,6 +90,10 @@ class LiveSessionRuntime:
     # Held for the duration of one execution window: the cross-process
     # guarantee that only one process runs this Session at a time.
     run_lease: FileLease | None = None
+    # Set while `/compact` rewrites the resident history. Compaction runs on
+    # an RPC thread, not on the Turn worker, so a Turn that arrives meanwhile
+    # waits for it rather than running on the same agent at the same time.
+    compacting: bool = False
 
 
 class SessionRuntimeRegistry:
@@ -135,6 +143,7 @@ class SessionRuntimeRegistry:
         permission_mode_override: ExecutionPermissionMode | None = None,
         approval_callback: ApprovalCallback,
     ) -> AgentSessionPort:
+        await self._wait_for_compaction(session_id)
         canonical = self.store.get_session(session_id)
         if canonical is None:
             raise ThreadNotFoundError(f"session not found: {session_id}")
@@ -328,16 +337,44 @@ class SessionRuntimeRegistry:
             )
         if runtime.active:
             raise ConflictError(f"session runtime is active: {session_id}")
-        if execution_profile is not None:
-            runtime = await self._refresh_idle_runtime(runtime, execution_profile)
-        compact = getattr(runtime.agent, "compact", None)
-        if not callable(compact):
-            raise ConflictError(
-                "This Session's runtime does not support manual compaction."
-            )
-        report = await compact()
-        self.persist_kernel_history(session_id, runtime.agent.history)
-        return report
+        # Claim the Session the way a Turn does. The run lease refuses a Turn
+        # that would execute on it meanwhile (here or in another process);
+        # ``active`` keeps eviction, deletion and /clear away from an agent
+        # that is mid-summary; ``compacting`` makes a new Turn wait.
+        run_lease = self.store.acquire_run_lease(session_id, holder=self.holder_label)
+        if run_lease is None:
+            holder = self.store.run_holder(session_id) or "another process"
+            raise ConflictError(f"session is being run by {holder}: {session_id}")
+        runtime.active = runtime.compacting = True
+        try:
+            if execution_profile is not None:
+                runtime = await self._refresh_idle_runtime(runtime, execution_profile)
+            compact = getattr(runtime.agent, "compact", None)
+            if not callable(compact):
+                raise ConflictError(
+                    "This Session's runtime does not support manual compaction."
+                )
+            try:
+                report = await compact()
+            except RuntimeError as exc:
+                # The agent refuses with a stable reason ("No compactable
+                # history yet.", "would not shrink", a failed summary). As a
+                # bare RuntimeError the service reported it as "internal error".
+                raise ConflictError(str(exc)) from exc
+            self.persist_kernel_history(session_id, runtime.agent.history)
+            return report
+        finally:
+            runtime.active = runtime.compacting = False
+            run_lease.close()
+
+    async def _wait_for_compaction(self, session_id: str) -> None:
+        """Let an in-flight `/compact` finish before a Turn takes the agent."""
+
+        while True:
+            runtime = self._runtimes.get(session_id)
+            if runtime is None or not runtime.compacting:
+                return
+            await asyncio.sleep(_COMPACTION_POLL_SECONDS)
 
     async def discard(self, session_id: str) -> None:
         """Close and forget one idle runtime after permanent Session deletion."""
@@ -499,6 +536,9 @@ class SessionRuntimeRegistry:
             agent_preset=agent_preset,
             runtime_key=runtime_key,
         )
+        # The rebuilt runtime inherits the caller's claim before it becomes
+        # visible, so a Turn never sees it as idle mid-compaction.
+        rebuilt.active, rebuilt.compacting = runtime.active, runtime.compacting
         self._runtimes[runtime.session_id] = rebuilt
         return rebuilt
 

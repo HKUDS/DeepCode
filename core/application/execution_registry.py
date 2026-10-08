@@ -7,9 +7,15 @@ import concurrent.futures
 import logging
 import threading
 from collections.abc import Awaitable, Callable
+from typing import TypeVar
 
 JobFactory = Callable[[], Awaitable[None]]
+T = TypeVar("T")
 logger = logging.getLogger(__name__)
+
+
+class ExecutionRegistryClosed(RuntimeError):
+    """The application is shutting down; no new work is accepted."""
 
 
 class ExecutionRegistry:
@@ -40,7 +46,7 @@ class ExecutionRegistry:
     ) -> None:
         with self._lock:
             if self._closing or self._closed:
-                raise RuntimeError("execution registry is closed")
+                raise ExecutionRegistryClosed("execution registry is closed")
             if job_id in self._jobs:
                 raise ValueError(f"job is already registered: {job_id}")
             loop = self._ensure_loop_locked()
@@ -81,6 +87,23 @@ class ExecutionRegistry:
             raise RuntimeError("maintenance cannot block the execution event loop")
         future = asyncio.run_coroutine_threadsafe(job_factory(), loop)
         future.result(timeout=timeout)
+
+    def call(self, job_factory: Callable[[], Awaitable[T]]) -> T:
+        """Run one coroutine on the registry's event loop and return its result.
+
+        For on-demand work on live Agent runtimes (``/compact``): their
+        provider connections belong to this loop, and using them from a
+        throwaway loop left dead connections in the shared pool.
+        """
+
+        with self._lock:
+            if self._closing or self._closed:
+                raise ExecutionRegistryClosed("execution registry is closed")
+            loop = self._ensure_loop_locked()
+            owner = self._thread
+        if owner is threading.current_thread():
+            raise RuntimeError("cannot block the execution event loop on itself")
+        return asyncio.run_coroutine_threadsafe(job_factory(), loop).result()
 
     def close(
         self,

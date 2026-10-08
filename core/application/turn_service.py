@@ -43,7 +43,10 @@ from core.application.execution_coordinator import (
     ExecutionDispatch,
     OrphanedExecution,
 )
-from core.application.execution_registry import ExecutionRegistry
+from core.application.execution_registry import (
+    ExecutionRegistry,
+    ExecutionRegistryClosed,
+)
 from core.application.execution_security_policy import ExecutionSecurityPolicy
 from core.application.goal_turn_port import (
     GoalContextProvider,
@@ -1234,6 +1237,22 @@ class TurnService:
             thread_id,
             execution_profile=execution_profile,
         )
+
+    def run_compaction(self, thread_id: str) -> dict[str, Any]:
+        """`/compact` from a request thread, run on the Turn worker loop.
+
+        The resident agent's provider connections belong to that loop.
+        Summarizing on a throwaway loop (``asyncio.run`` on the RPC thread)
+        failed its first request on a connection from the worker loop, and
+        the retry left a dead connection that failed the next Turn's first
+        request too.
+        """
+        try:
+            return self.registry.call(lambda: self.compact_live_context(thread_id))
+        except ExecutionRegistryClosed as exc:
+            raise ConflictError(
+                "Compaction is unavailable while DeepCode is shutting down."
+            ) from exc
 
     def interrupt(
         self,

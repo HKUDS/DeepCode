@@ -16,6 +16,17 @@ from app_server.service_state import ServiceFiles
 from core.version import __version__
 
 
+# Requests that wait on a model call (a provider probe, a /compact summary)
+# legitimately outlast the default budget; the server keeps working on them
+# either way, so timing out early only hides a result that is still coming.
+_MODEL_BOUND_TIMEOUTS = {"provider/test": 120.0, "thread/context/compact": 600.0}
+_DEFAULT_TIMEOUT = 25.0
+
+
+def request_timeout(method: str) -> float:
+    return _MODEL_BOUND_TIMEOUTS.get(method, _DEFAULT_TIMEOUT)
+
+
 class NativeRpcClient:
     """One connection on one event loop; no implicit mutation replay or fallback."""
 
@@ -115,9 +126,7 @@ class NativeRpcClient:
         sent = False
         try:
             async with asyncio.timeout(
-                timeout
-                if timeout is not None
-                else (120 if method == "provider/test" else 25)
+                timeout if timeout is not None else request_timeout(method)
             ):
                 # Once writing starts, failure cannot prove non-admission.
                 sent = True

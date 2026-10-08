@@ -9,7 +9,7 @@ import threading
 import time
 
 from app_server.errors import RpcError
-from app_server.native_client import NativeRpcClient
+from app_server.native_client import NativeRpcClient, request_timeout
 from app_server.service_client import ServiceOperationError, ServiceUnavailable
 from app_server.service_state import ServiceFiles
 from core.application.errors import (
@@ -145,7 +145,9 @@ class BlockingServiceClient:
                     )
                 return self.run(
                     self.client.request(method, original),
-                    timeout=125 if method == "provider/test" else 40,
+                    # Outlive the request's own budget so its error, not
+                    # this wrapper's, reaches the caller.
+                    timeout=request_timeout(method) + 15,
                 )
             except RemoteApplicationError as exc:
                 if (

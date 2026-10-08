@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Callable
 from typing import Any
 
@@ -1039,9 +1038,7 @@ class Dispatcher:
 
     def _thread_context_compact(self, params: Params) -> dict[str, Any]:
         params.only("threadId")
-        return asyncio.run(
-            self.application.turns.compact_live_context(str(params.string("threadId")))
-        )
+        return self.application.turns.run_compaction(str(params.string("threadId")))
 
     def _turn_list(self, params: Params) -> dict[str, Any]:
         params.only("threadId", "limit", "offset", "state")

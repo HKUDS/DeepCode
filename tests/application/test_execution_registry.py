@@ -5,7 +5,10 @@ import threading
 
 import pytest
 
-from core.application.execution_registry import ExecutionRegistry
+from core.application.execution_registry import (
+    ExecutionRegistry,
+    ExecutionRegistryClosed,
+)
 
 
 async def _wait_forever(started: threading.Event) -> None:
@@ -110,3 +113,28 @@ def test_close_without_a_runtime_is_idempotent() -> None:
     registry.close()
 
     assert registry._closed is True
+
+
+def test_call_runs_on_the_job_loop_and_returns_the_result() -> None:
+    registry = ExecutionRegistry()
+    loops = []
+    started = threading.Event()
+
+    async def job() -> None:
+        loops.append(asyncio.get_running_loop())
+        started.set()
+
+    async def work() -> str:
+        loops.append(asyncio.get_running_loop())
+        return "report"
+
+    try:
+        registry.start("job", job)
+        assert started.wait(timeout=2)
+        assert registry.call(work) == "report"
+        assert loops[0] is loops[1]
+    finally:
+        registry.close()
+
+    with pytest.raises(ExecutionRegistryClosed):
+        registry.call(work)
