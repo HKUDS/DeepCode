@@ -22,7 +22,9 @@ import argparse
 import asyncio
 import logging
 import os
+import signal
 import sys
+from collections.abc import Callable
 
 sys.path.insert(
     0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -426,7 +428,10 @@ class TuiApp:
                 "They can read, modify, and execute files anywhere your account can "
                 f"access. [{theme.META_STYLE}]Type yes to continue.[/]"
             )
-            answer = await self.reader.read()
+            try:
+                answer = await self.reader.read()
+            except InputInterrupted:
+                answer = None
             if answer is None or answer.strip().casefold() != "yes":
                 return "Full access was not enabled."
         self.thread_client.set_access_preset(preset)
@@ -976,6 +981,52 @@ class TuiApp:
         )
         self.console.print()
 
+    async def _run_line(self, text: str) -> None:
+        """Run one line as a task that Ctrl-C cancels without ending the TUI.
+
+        At the prompt, Ctrl-C is a key binding; while a command runs it is a
+        SIGINT, which asyncio's runner turns into KeyboardInterrupt for the
+        whole program. Route it to the running line instead.
+        """
+
+        task = asyncio.create_task(self._handle_line(text))
+        restore = self._route_sigint_to(task)
+        try:
+            await task
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if not task.cancelled() or (current is not None and current.cancelling()):
+                raise
+            self._print_status(
+                "Stopped. Work the service already accepted may still finish."
+            )
+        finally:
+            restore()
+
+    def _route_sigint_to(self, task: asyncio.Task) -> Callable[[], None]:
+        if not self.reader.interactive:
+            return lambda: None
+        loop = asyncio.get_running_loop()
+        previous = signal.getsignal(signal.SIGINT)
+        try:
+            loop.add_signal_handler(signal.SIGINT, task.cancel)
+        except (NotImplementedError, RuntimeError, ValueError):
+            # Windows event loops have no signal handlers; keep the default.
+            return lambda: None
+
+        def restore() -> None:
+            try:
+                loop.remove_signal_handler(signal.SIGINT)
+            except (NotImplementedError, RuntimeError, ValueError):
+                pass
+            if previous is not None:
+                try:
+                    signal.signal(signal.SIGINT, previous)
+                except (TypeError, ValueError):
+                    pass
+
+        return restore
+
     async def _handle_line(self, text: str) -> None:
         if text.startswith("/"):
             status = await commands.dispatch(self, text)
@@ -1018,7 +1069,11 @@ class TuiApp:
                 if not text:
                     continue
                 try:
-                    await self._handle_line(text)
+                    await self._run_line(text)
+                except InputInterrupted:
+                    # Esc/Ctrl-C at a nested prompt (e.g. a confirmation)
+                    # cancels that command, never the session.
+                    self._print_status("Cancelled.")
                 except (RuntimeError, OSError) as exc:  # ApplicationError included
                     # A service that is down, draining or that refuses one
                     # request must cost this line, not the whole session.

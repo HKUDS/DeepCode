@@ -11,6 +11,7 @@ exercises it.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import sys
 from collections.abc import Callable, Iterable
@@ -18,7 +19,9 @@ from pathlib import Path
 from typing import Protocol
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.application.current import get_app
 from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.filters import Condition, has_completions
 from prompt_toolkit.formatted_text import StyleAndTextTuples
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
@@ -33,6 +36,8 @@ from core.private_storage import (
     ensure_private_file,
     open_private_file,
 )
+
+logger = logging.getLogger(__name__)
 
 _HISTORY_PATH: Path | None = None
 _SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv"}
@@ -84,6 +89,15 @@ class TuiCompleter(Completer):
         self._argument_provider = provider
 
     def get_completions(self, document, complete_event):
+        # Completion runs inside prompt_toolkit's event loop: an exception
+        # escaping here prints a traceback and blocks on "Press ENTER", so
+        # every completion source stays best effort.
+        try:
+            yield from self._completions(document)
+        except Exception:  # noqa: BLE001 - completion must never break typing
+            logger.debug("completion failed", exc_info=True)
+
+    def _completions(self, document):
         text = document.text_before_cursor
         if text.startswith("/") and " " not in text:
             prefix = text[1:]
@@ -136,18 +150,31 @@ class TuiCompleter(Completer):
         yield from self._path_completions(fragment)
 
     def _path_completions(self, fragment: str):
+        # @refs are expanded only for files inside the workspace
+        # (expand_file_refs), so absolute and escaping fragments complete to
+        # nothing rather than to paths the expansion would refuse.
+        if fragment.startswith(("/", "~")):
+            return
         base = self.workspace / fragment if fragment else self.workspace
         directory = base if fragment.endswith("/") else base.parent
         stem = "" if fragment.endswith("/") else base.name
-        if not directory.is_dir():
+        try:
+            workspace = self.workspace.resolve()
+            directory = directory.resolve()
+            if directory != workspace and not directory.is_relative_to(workspace):
+                return
+            if not directory.is_dir():
+                return
+            entries = sorted(directory.iterdir())
+        except OSError:
             return
         count = 0
-        for entry in sorted(directory.iterdir()):
+        for entry in entries:
             if entry.name in _SKIP_DIRS or entry.name.startswith("."):
                 continue
             if stem and not entry.name.startswith(stem):
                 continue
-            rel = entry.relative_to(self.workspace)
+            rel = entry.relative_to(workspace)
             suffix = "/" if entry.is_dir() else ""
             yield Completion(f"{rel}{suffix}", start_position=-len(fragment))
             count += 1
@@ -186,10 +213,25 @@ class InputReader:
                 os.close(descriptor)
             ensure_private_file(history_path)
             bindings = KeyBindings()
+            menu_open = has_completions
+            empty_draft = Condition(lambda: not get_app().current_buffer.text)
 
-            @bindings.add("escape")
+            # Esc interrupts the Turn only from an empty prompt. With a
+            # completion menu open it closes the menu; with a draft it is not
+            # bound, so dismissing a popup never discards text or stops work.
+            @bindings.add("escape", filter=menu_open)
+            def _close_menu(event) -> None:
+                event.current_buffer.cancel_completion()
+
+            @bindings.add("escape", filter=~menu_open & empty_draft)
             def _interrupt(event) -> None:
                 event.app.exit(exception=InputInterrupted())
+
+            # Ctrl-C clears a draft first, like a shell; from an empty prompt
+            # it interrupts the Turn (prompt_async raises KeyboardInterrupt).
+            @bindings.add("c-c", filter=~empty_draft)
+            def _clear_draft(event) -> None:
+                event.current_buffer.reset()
 
             @bindings.add("c-o")
             def _toggle_transcript(event) -> None:

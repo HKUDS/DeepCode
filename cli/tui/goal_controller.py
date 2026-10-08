@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import signal
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -14,6 +13,13 @@ from core.domain.thread_goal import GoalOutcome, ThreadGoal, ThreadGoalStatus
 
 if TYPE_CHECKING:
     from cli.tui.app import TuiApp
+
+
+# Actions that take no argument; with trailing text the line is an objective.
+_BARE_ACTIONS = frozenset(
+    {"show", "status", "wait", "pause", "resume", "continue", "clear"}
+)
+_WAIT_POLL_SECONDS = 0.25
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +37,12 @@ class TuiGoalController:
     async def execute(self, raw: str) -> GoalCommandResult:
         action, _separator, remainder = raw.strip().partition(" ")
         normalized = action.casefold()
+        if normalized in _BARE_ACTIONS and remainder.strip():
+            # These actions take no argument, so "/goal clear out the dead
+            # flags" is an objective that happens to start with a keyword.
+            # Treating it as "clear" silently discarded the current Goal.
+            normalized = "set"
+            remainder = raw.strip()
         try:
             if not action or normalized in {"show", "status"}:
                 return self._status()
@@ -147,7 +159,6 @@ class TuiGoalController:
         )
 
     def _create(self, objective: str) -> GoalCommandResult:
-        self.owner.bridge.set_title_from(objective)
         application, thread_id = self._context()
         existing = application.goals.read(thread_id)
         if existing is not None:
@@ -155,6 +166,7 @@ class TuiGoalController:
                 "this Session already has a Goal; use /goal edit, /goal "
                 "resume, /goal reopen, or /goal clear"
             )
+        self.owner.bridge.set_title_from(objective)
         selected_skills = tuple(self.owner.selected_skill_ids)
         created = application.goals.create(
             thread_id,
@@ -172,37 +184,29 @@ class TuiGoalController:
     async def _wait(self) -> GoalCommandResult:
         application, thread_id = self._context()
         current = self._required(application, thread_id)
-        stop_waiting = asyncio.Event()
-        loop = asyncio.get_running_loop()
-
-        def request_stop() -> None:
-            stop_waiting.set()
-
-        signal_installed = False
+        stopped = False
         try:
-            loop.add_signal_handler(signal.SIGINT, request_stop)
-            signal_installed = True
-        except (NotImplementedError, RuntimeError):
-            pass
-        try:
-            while (
-                current.status is ThreadGoalStatus.ACTIVE and not stop_waiting.is_set()
-            ):
-                await asyncio.sleep(0.05)
-                current = application.goals.read(thread_id) or current
-        finally:
-            if signal_installed:
-                try:
-                    loop.remove_signal_handler(signal.SIGINT)
-                except (NotImplementedError, RuntimeError, ValueError):
-                    pass
-        if not stop_waiting.is_set() and current.status is not ThreadGoalStatus.ACTIVE:
+            while current.status is ThreadGoalStatus.ACTIVE:
+                await asyncio.sleep(_WAIT_POLL_SECONDS)
+                # Off the event loop: a slow service must not freeze the UI.
+                current = (
+                    await asyncio.to_thread(application.goals.read, thread_id)
+                    or current
+                )
             # Goal completion can be persisted by a tool before its deciding
             # Turn has emitted and rendered the final tool/result events.
             await self.owner.thread_client.wait_until_idle()
+        except asyncio.CancelledError:
+            # Ctrl-C while waiting: the TUI cancels the running command (see
+            # TuiApp._run_line). Stop waiting; the Goal itself keeps running.
+            task = asyncio.current_task()
+            if task is None or not task.cancelling():
+                raise
+            task.uncancel()
+            stopped = True
         suffix = (
             "\nStopped waiting; the Goal remains active."
-            if stop_waiting.is_set() and current.status is ThreadGoalStatus.ACTIVE
+            if stopped and current.status is ThreadGoalStatus.ACTIVE
             else ""
         )
         return GoalCommandResult(
@@ -229,8 +233,8 @@ class TuiGoalController:
     @staticmethod
     def _usage() -> str:
         return (
-            "usage: /goal <text> | show | edit <text> | pause | resume | continue | "
-            "wait | reopen [text] | clear"
+            "usage: /goal <text> | set <text> | show | edit <text> | pause | "
+            "resume | continue | wait | reopen [text] | clear"
         )
 
     @staticmethod

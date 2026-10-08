@@ -842,7 +842,7 @@ REGISTRY: dict[str, Command] = {
         ),
         Command(
             "goal",
-            "/goal <text> | show | edit <text> | pause | resume | continue | wait | reopen [text] | clear",
+            "/goal <text> | set <text> | show | edit <text> | pause | resume | continue | wait | reopen [text] | clear",
             "run or manage this Session's durable, steerable Goal",
             _cmd_goal,
         ),
