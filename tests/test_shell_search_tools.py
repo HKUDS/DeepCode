@@ -255,5 +255,31 @@ async def test_glob_skips_ignored_dirs(tmp_path):
     assert "keep.py" in out and "node_modules" not in out
 
 
+@pytest.mark.parametrize("ws_name", ["build", "dist", "venv", "node_modules"])
+@pytest.mark.asyncio
+async def test_glob_prunes_skip_dirs_below_the_base_only(tmp_path, ws_name):
+    """``_SKIP_DIRS`` must prune below the search base, not the whole path.
+
+    Every path yielded by ``base.glob`` carries the workspace's own ancestors,
+    so a workspace rooted under a directory that collides with ``_SKIP_DIRS``
+    (``.../build/app``) matched on every file and glob reported "No files
+    matched." for a project that does have files. Grep walks from the root and
+    was unaffected, so the two siblings disagreed.
+    """
+    ws = tmp_path / ws_name
+    ws.mkdir()
+    (ws / "top.py").write_text("y")
+    (ws / "src").mkdir()
+    (ws / "src" / "m.py").write_text("x")
+    (ws / "node_modules").mkdir()
+    (ws / "node_modules" / "dep.py").write_text("d")
+
+    out = await GlobTool(str(ws)).execute(pattern="**/*.py")
+
+    assert "top.py" in out and "src/m.py" in out
+    # a genuine ignore directory *inside* the workspace is still pruned
+    assert "node_modules" not in out
+
+
 # (the default_coding_tools full-set assertion lives in
 # test_native_file_tools.py::test_default_coding_tools_registry)
