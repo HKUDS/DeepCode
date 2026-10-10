@@ -8,6 +8,7 @@ loop.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Mapping, Protocol
 
 from core.agent_runtime.helpers import find_legal_message_start
@@ -59,7 +60,10 @@ class CompactionStrategy(Protocol):
 
 
 def _message_chars(message: Mapping[str, Any]) -> int:
-    return len(str(message.get("content") or ""))
+    chars = len(str(message.get("content") or ""))
+    if message.get("tool_calls"):
+        chars += len(json.dumps(message["tool_calls"], ensure_ascii=False))
+    return chars
 
 
 def _unit_start(messages: list[dict[str, Any]], end: int) -> int:
