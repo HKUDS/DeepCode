@@ -52,6 +52,11 @@ When a conversation becomes long, use `/compact` to summarize its older messages
 and make room for more work. DeepCode keeps the recent messages and tool results,
 and saves the summary for the next time you open the conversation.
 
+Summarizing is a model request and can take a while. A message sent to the
+conversation in the meantime, for example from another window, starts when the
+summary is done. If there is nothing worth compacting yet, DeepCode says so and
+leaves the conversation unchanged.
+
 DeepCode also compacts automatically as the conversation approaches the model's
 context limit. To use a smaller limit, see [context settings](models.md#context-window-cap).
 
@@ -63,8 +68,12 @@ Give conversations descriptive names so they are easy to find:
 /rename Fix flaky auth tests
 ```
 
-Use `/new` to start another task. Use `/clear` when you want to keep the current
-Session but clear its conversation context.
+Use `/new` to start another task. If you changed the model, reasoning effort,
+or context cap in this conversation with `/model`, `/effort`, or `/context`, the
+new conversation keeps the current model and those settings; otherwise it
+follows your default settings, as a new task in Desktop or Web does. Use
+`/clear` when you want to keep the current Session but clear its conversation
+context.
 
 To remove a saved conversation, use `/delete SESSION_ID` or the delete action in
 Desktop/Web. This permanently removes its records while keeping your project

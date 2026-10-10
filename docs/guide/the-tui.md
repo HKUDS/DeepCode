@@ -5,11 +5,12 @@ plain language, then use the commands below to choose a model, attach files,
 and control the conversation. New to DeepCode? Follow
 [Your first coding task](getting-started.md) for setup.
 
-## The three keys
+## Keys
 
 | Key | What it does |
 |---|---|
-| `Esc` | Interrupt the running turn. The turn stops; the conversation survives. |
+| `Esc` | With an empty prompt, interrupt the running turn: the turn stops and the conversation survives. With a completion menu open, close the menu. While you are typing a message, `Esc` does nothing, so your draft is kept. |
+| `Ctrl+C` | Clear the message you are typing. With an empty prompt, interrupt the running turn, like `Esc`. While a command such as `/compact` or `/goal wait` is running, stop waiting for that command. |
 | `Ctrl+O` | Cycle transcript detail: `normal → verbose → summary`. Show more or less detail about the work. |
 | `Ctrl+D` | Close the client (same as `/exit`); running work continues in the background. |
 
@@ -70,7 +71,8 @@ You don't have to wait for a turn to finish:
 - **Type a message mid-turn** and it *steers* the running work — the agent
   sees it at the next boundary: `Steered the active turn.`
 - **`/queue`** lines up a full instruction to run *after* the current turn.
-- **`Esc`** stops the turn; what completed stays in history.
+- **`Esc`** (from an empty prompt) stops the turn; what completed stays in
+  history.
 
 ## Approvals
 

@@ -157,6 +157,21 @@ DeepCode 提供 TUI、Desktop 和 Web 三种客户端，连接同一个本地共
 
 ## 新闻
 
+**2026-10-10 · 更稳的终端界面：回答只显示一次、按键不丢草稿、`/compact` 不再抢跑**
+
+- **回答只显示一次。** 回答结束时，TUI 不再把整段重新打印一遍；被中断的回答
+  会保留已经输出的文字，各个客户端都一样。
+- **按键不丢草稿。** 只有输入框为空时 `Esc` 才中断回合，补全菜单打开时只关闭
+  菜单；`Ctrl+C` 先清空正在输入的内容。用 `Ctrl+C` 停止命令不会再让 TUI 退出。
+  参见[终端界面指南](docs/guide/the-tui.md)。
+- **后台服务变慢时依然顺畅。** 服务忙时，打字、补全和 `Ctrl+C` 照常响应；请求
+  超时会直接说明，不再连续重试三次；服务重启后，`/reconnect` 能接回原来的会话。
+- **`/compact` 不再抢跑。** 压缩期间发来的消息会等摘要完成；压缩后的第一次回答
+  不再先失败一次；被拒绝时会说明原因，而不是 "internal error"。参见
+  [会话指南](docs/guide/sessions.md)。
+- **设置及时生效，Goal 更安全。** 修改默认模型或权限后，TUI 会显示最新值；
+  `/new` 跟随默认设置；`/goal clear out …` 会设为新目标，而不是清掉当前 Goal。
+
 **2026-09-28 · DeepCode v2.3.0：语音输入、Opper 与 Bedrock、Desktop 细节打磨，以及可选的安全加固**
 
 - **用语音输入提示词。** 在配置中加入 `dictation` 后，Desktop 与 Web 的输入框
@@ -194,6 +209,9 @@ DeepCode 提供 TUI、Desktop 和 Web 三种客户端，连接同一个本地共
 从更新后的[快速开始](#快速开始)和[第一个编程任务教程](docs/guide/getting-started.md)
 开始使用。（[#212](https://github.com/HKUDS/DeepCode/pull/212)）
 
+<details>
+<summary><strong>2026 年 8 月至 9 月初的更早更新</strong></summary>
+
 **2026-09-06 · DeepCode v2.2.0：Session 上下文窗口上限、会留下记忆的压缩，以及完整本地化的 Desktop**
 
 - **给 Session 的上下文窗口设上限。** TUI 里的 `/context 64k` 或 Desktop 模型
@@ -203,9 +221,6 @@ DeepCode 提供 TUI、Desktop 和 Web 三种客户端，连接同一个本地共
   后台线程写入工作区记忆；注入的记忆内容包在 `<untrusted-data>` 边界里，
   闭合标签会被转义，被投毒的笔记无法伪造指令。（#204）
 - **外观设置也说简体中文了**，Desktop 外壳的 zh-CN 覆盖至此完整。（#202）
-
-<details>
-<summary><strong>2026 年 8 月至 9 月初的更早更新</strong></summary>
 
 **2026-09-03 · Desktop 目录竞态、更诚实的命令筛查、GLM-5.2 与两项依赖升级**
 

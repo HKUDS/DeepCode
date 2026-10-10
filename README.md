@@ -158,6 +158,26 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
 
 ## News
 
+**2026-10-10 · A steadier terminal UI: answers shown once, keys that keep your draft, and an orderly `/compact`**
+
+- **Answers appear once.** The TUI no longer prints an answer a second time
+  when it finishes, and a stopped answer keeps the text already shown, in every
+  client.
+- **Keys that keep your draft.** `Esc` interrupts only from an empty prompt and
+  otherwise closes a completion menu; `Ctrl+C` first clears what you are
+  typing. Stopping a command no longer closes the TUI. See
+  [The terminal UI](docs/guide/the-tui.md).
+- **Calm when the service is slow.** Typing, completion, and `Ctrl+C` stay
+  responsive while the background service is busy; a slow answer is reported
+  instead of retried three times, and `/reconnect` brings your conversation
+  back after a restart.
+- **`/compact` waits its turn.** A message sent during compaction waits for the
+  summary, the next reply no longer starts with a failed request, and a refusal
+  says why instead of "internal error". See [Sessions](docs/guide/sessions.md).
+- **Current settings, safer Goals.** Default model and access changes show up
+  in the TUI, `/new` follows your defaults, and `/goal clear out …` sets a new
+  objective instead of clearing the Goal.
+
 **2026-09-28 · DeepCode v2.3.0: voice dictation, Opper and Bedrock, Desktop polish, and opt-in hardening**
 
 - **Dictate your prompt.** Add a `dictation` block to your config and the
@@ -204,6 +224,9 @@ Start with the updated [Quick start](#quick-start) and
 [first coding task tutorial](docs/guide/getting-started.md).
 ([#212](https://github.com/HKUDS/DeepCode/pull/212))
 
+<details>
+<summary><strong>Earlier updates, August to early September 2026</strong></summary>
+
 **2026-09-06 · DeepCode v2.2.0: Session context-window caps, compaction that leaves a memory, and a fully localized Desktop**
 
 - **Cap a Session's context window.** `/context 64k` in the TUI or the
@@ -218,9 +241,6 @@ Start with the updated [Quick start](#quick-start) and
   note cannot forge instructions. (#204)
 - **Appearance settings speak Simplified Chinese too**, completing the
   Desktop shell's zh-CN coverage. (#202)
-
-<details>
-<summary><strong>Earlier updates, August to early September 2026</strong></summary>
 
 **2026-09-03 · Desktop catalog race, an honest command screen, GLM-5.2, and two dependency bumps**
 

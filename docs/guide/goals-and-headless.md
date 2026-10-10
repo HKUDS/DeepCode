@@ -24,10 +24,19 @@ Use `/goal show` to see progress. If you need a break, enter `/goal pause`;
 use `/goal resume` when you want to continue. To change the objective, enter
 `/goal edit` followed by the updated instructions.
 
+If your objective starts with the name of a Goal command, write `/goal set`
+before it, for example `/goal set clear out the unused feature flags`. Text
+after a command that takes no argument, such as `clear`, is also treated as a
+new objective, so `/goal clear out the unused feature flags` never clears the
+current Goal. A Session holds one Goal at a time: if it already has one, use
+`/goal edit`, or `/goal clear` first.
+
 You can close the conversation and return to the saved Goal later. DeepCode
 reports when it considers the work complete or needs help to proceed. Review
 its changes and test results before accepting the outcome. Additional controls
 include `/goal continue`, `/goal wait`, `/goal reopen`, and `/goal clear`.
+`/goal wait` follows the Goal until it finishes; press `Ctrl+C` to stop
+waiting while the Goal keeps working.
 
 ## Work on a Goal from the shell: `deepcode loop`
 
