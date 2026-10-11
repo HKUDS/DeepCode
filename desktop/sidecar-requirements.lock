@@ -93,7 +93,7 @@ macholib==1.16.4 ; sys_platform == 'darwin'
     # via pyinstaller
 mcp==1.29.0
     # via -r sidecar-requirements.in
-multidict==6.7.1
+multidict==6.9.1
     # via
     #   aiohttp
     #   yarl
@@ -134,9 +134,9 @@ pyinstaller-hooks-contrib==2026.6
     # via
     #   -r sidecar-requirements.in
     #   pyinstaller
-pyjwt==2.13.0
+pyjwt==2.15.1
     # via mcp
-pypdf==6.16.1
+pypdf==6.19.0
     # via -r sidecar-requirements.in
 python-dotenv==1.2.2
     # via pydantic-settings
@@ -194,7 +194,7 @@ typing-inspection==0.4.2
     #   mcp
     #   pydantic
     #   pydantic-settings
-urllib3==2.7.0
+urllib3==2.8.0
     # via requests
 uvicorn==0.51.0 ; sys_platform != 'emscripten'
     # via mcp
