@@ -86,6 +86,17 @@ jobs:
           cache: pip
           cache-dependency-path: scripts/ci/requirements.lock
 
+      # The runner image installs its own tools (pipx among them) into this
+      # Python, and their requirements need not match the CI lock: `pip
+      # check` then fails before any test runs. A fresh environment holds
+      # only what the lock installs, and later steps find it first on PATH.
+      - name: Create an isolated environment
+        if: steps.scope.outputs.runtime_changed == 'true'
+        shell: bash
+        run: |
+          python -m venv "$RUNNER_TEMP/ci-env"
+          cygpath -w "$RUNNER_TEMP/ci-env/Scripts" >> "$GITHUB_PATH"
+
       - name: Install package and test tools
         if: steps.scope.outputs.runtime_changed == 'true'
         shell: bash
