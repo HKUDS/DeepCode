@@ -17,6 +17,7 @@ touches a model or a terminal — this is pure protocol.
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any, Mapping, Union
@@ -376,7 +377,17 @@ def summarize_result(result: Any, limit: int = 400) -> str:
     Collapses to the leading ``limit`` characters with an elision marker.
     Pure and defensive: any value becomes a string, never raises.
     """
-    text = result if isinstance(result, str) else str(result)
+    if isinstance(result, str):
+        text = result
+    elif isinstance(result, (dict, list, tuple)):
+        # The model reads structured results as JSON; show them the same
+        # way, not as a Python repr ("{'goal': ...}").
+        try:
+            text = json.dumps(result, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            text = str(result)
+    else:
+        text = str(result)
     text = text.strip()
     if len(text) > limit:
         return text[:limit].rstrip() + " …"

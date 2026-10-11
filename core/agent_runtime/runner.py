@@ -58,6 +58,7 @@ from core.agent_runtime.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
     build_finalization_retry_message,
     build_length_recovery_message,
+    encode_structured_tool_result,
     ensure_nonempty_tool_result,
     is_blank_text,
     repeated_external_lookup_error,
@@ -1597,7 +1598,9 @@ class AgentRunner:
         tool_name: str,
         result: Any,
     ) -> Any:
-        result = ensure_nonempty_tool_result(tool_name, result)
+        result = ensure_nonempty_tool_result(
+            tool_name, encode_structured_tool_result(result)
+        )
         try:
             content = maybe_persist_tool_result(
                 spec.workspace,

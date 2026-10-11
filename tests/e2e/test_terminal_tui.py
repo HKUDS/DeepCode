@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import re
 import time
 
-from tests.e2e.fake_model import Pause, Reasoning, Reply, Text
+from tests.e2e.fake_model import Pause, Reasoning, Reply, Text, ToolCall
 from tests.e2e.terminal import CTRL_C, CTRL_O, ESC
 
 _INTERRUPTED = r"[Ii]nterrupt|[Ss]topped"
@@ -189,3 +190,35 @@ def test_ctrl_o_during_an_answer_neither_repeats_nor_drops_lines(deepcode):
     deepcode.wait_idle()
     screen = tui.text(start)
     assert {line: screen.count(line) for line in lines} == dict.fromkeys(lines, 1)
+
+
+def test_tool_results_read_as_text_not_python_values(deepcode):
+    deepcode.model.on(
+        "Finish the scripted objective",
+        Reply([ToolCall("get_goal", {})]),
+        Reply([ToolCall("update_goal", {"status": "complete", "reason": "Scripted."})]),
+        Reply([Text("The scripted objective is complete.")]),
+    )
+    tui = deepcode.open_tui("--access", "read-only")
+    start = tui.mark()
+
+    tui.submit("/goal Finish the scripted objective")
+    tui.wait_for(r"The scripted objective is complete", since=start, timeout=40)
+    deepcode.wait_idle()
+
+    screen = tui.text(start)
+    assert "⎿" in screen  # the tool cards are there ...
+    assert "{'" not in screen  # ... and none of them prints a Python dict
+
+    # The model got the Goal as JSON text, which every provider accepts,
+    # not as the undocumented [dict] it used to be wrapped into.
+    results = [
+        message["content"]
+        for request in deepcode.model.requests
+        for message in request["messages"]
+        if message.get("role") == "tool"
+    ]
+    assert results and all(isinstance(content, str) for content in results)
+    assert json.loads(results[0])["goal"]["objective"] == (
+        "Finish the scripted objective"
+    )

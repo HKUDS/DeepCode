@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from typing import Any
 
 from loguru import logger
@@ -28,6 +29,25 @@ LENGTH_RECOVERY_PROMPT = (
 
 def empty_tool_result_message(tool_name: str) -> str:
     return f"({tool_name} completed with no output)"
+
+
+# A dict of one of these types is already a message content block.
+_CONTENT_BLOCK_TYPES = frozenset(
+    {"text", "image", "image_url", "input_text", "input_image", "output_text"}
+)
+
+
+def encode_structured_tool_result(content: Any) -> Any:
+    """Send a tool's structured value to the model as JSON text.
+
+    A dict that is not itself a content block (the Goal tools return one) is
+    data. Every provider wire takes a tool result as text or as a list of
+    content blocks; a bare dict used to reach them wrapped as ``[dict]``,
+    which none of them documents.
+    """
+    if isinstance(content, dict) and content.get("type") not in _CONTENT_BLOCK_TYPES:
+        return json.dumps(content, ensure_ascii=False, default=str)
+    return content
 
 
 def ensure_nonempty_tool_result(tool_name: str, content: Any) -> Any:

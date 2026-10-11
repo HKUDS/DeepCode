@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import io
+import json
 
 import pytest
 from rich.console import Console
 
 from cli.transcript import TranscriptMode
 from cli.tui.renderer import EventRenderer
+from core.agent_runtime.runtime import encode_structured_tool_result
 from core.events import (
     AgentMessage,
     AgentMessageCompleted,
@@ -22,6 +24,7 @@ from core.events import (
     ToolStarted,
     TurnStarted,
 )
+from core.events.protocol import summarize_result
 from core.reasoning import ReasoningAvailability, ReasoningChannel
 
 
@@ -160,3 +163,27 @@ def test_colon_words_are_printed_as_written():
 
     assert "root:x:0:0 and :smile:" in output.getvalue()
     assert "grep root:x:0" in output.getvalue()
+
+
+def test_structured_tool_results_reach_the_model_as_json_text():
+    value = {
+        "goal": {"objective": "Count files", "status": "active"},
+        "canUpdate": True,
+    }
+
+    encoded = encode_structured_tool_result(value)
+
+    assert isinstance(encoded, str)
+    assert json.loads(encoded) == value
+    # Content blocks and block lists are already in a provider's shape.
+    block = {"type": "text", "text": "hello"}
+    assert encode_structured_tool_result(block) is block
+    blocks = [block]
+    assert encode_structured_tool_result(blocks) is blocks
+    assert encode_structured_tool_result("plain") == "plain"
+
+
+def test_a_structured_tool_result_preview_reads_as_json():
+    preview = summarize_result({"goal": {"status": "active"}, "canUpdate": True})
+
+    assert preview == '{"goal": {"status": "active"}, "canUpdate": true}'
