@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import re
+import time
 
-from tests.e2e.fake_model import Pause, Reply, Text
-from tests.e2e.terminal import CTRL_C, ESC
+from tests.e2e.fake_model import Pause, Reasoning, Reply, Text
+from tests.e2e.terminal import CTRL_C, CTRL_O, ESC
 
 _INTERRUPTED = r"[Ii]nterrupt|[Ss]topped"
 
@@ -115,3 +116,76 @@ def test_compact_then_the_conversation_carries_on(deepcode):
     tui.submit("third question")
     tui.wait_for(r"Third answer after compacting", since=before_compact)
     deepcode.wait_idle()
+
+
+# -- what the transcript shows -------------------------------------------------
+
+
+def test_startup_prints_no_http_request_logs(deepcode):
+    tui = deepcode.open_tui("--access", "read-only")
+
+    assert "HTTP Request" not in tui.text()
+
+
+def test_colon_words_are_shown_as_written(deepcode):
+    literal = "The entry root:x:0:0 and the word :smile: stay as written."
+    deepcode.model.on("show the passwd line", Reply([Text(literal)]))
+    tui = deepcode.open_tui("--access", "read-only")
+    start = tui.mark()
+
+    tui.submit("show the passwd line")
+    deepcode.wait_idle()
+
+    assert literal in tui.text(start)
+
+
+def test_the_reasoning_card_comes_before_the_answer(deepcode):
+    answer = _numbered_lines(8, "Reasoned")
+    deepcode.model.on(
+        "think first",
+        Reply(
+            [Reasoning("Weigh the numbers before answering."), Pause(0.4)]
+            + _slow_answer(answer, pause=0.3).parts
+        ),
+    )
+    tui = deepcode.open_tui("--access", "read-only")
+    start = tui.mark()
+
+    tui.submit("think first")
+    deepcode.wait_idle()
+
+    screen = tui.text(start)
+    card, first_line = screen.find("Thought for"), screen.find(answer[0])
+    assert 0 <= card < first_line, screen[-3000:]
+    # While the answer streams, the status line says so, not "Thinking".
+    assert "Thinking ·" not in screen[first_line:]
+
+
+def test_ctrl_o_during_an_answer_neither_repeats_nor_drops_lines(deepcode):
+    lines = _numbered_lines(16, "Toggled")
+    answer = Reply(
+        [part for line in lines for part in (Text(line + "\n\n"), Pause(0.2))]
+    )
+    deepcode.model.on("toggle while streaming", answer)
+    deepcode.model.on("toggle back while streaming", answer)
+    tui = deepcode.open_tui("--access", "read-only")
+
+    # normal -> verbose -> summary, while the first lines are on screen.
+    start = tui.mark()
+    tui.submit("toggle while streaming")
+    tui.wait_for(lines[3], since=start)
+    tui.send(CTRL_O, 0.2)
+    tui.send(CTRL_O, 0.2)
+    deepcode.wait_idle()
+    screen = tui.text(start)
+    assert {line: screen.count(line) for line in lines} == dict.fromkeys(lines, 1)
+
+    # summary -> normal, while the first lines are streaming unseen.
+    start = tui.mark()
+    tui.submit("toggle back while streaming")
+    deepcode.wait_active()
+    time.sleep(1.0)
+    tui.send(CTRL_O, 0.2)
+    deepcode.wait_idle()
+    screen = tui.text(start)
+    assert {line: screen.count(line) for line in lines} == dict.fromkeys(lines, 1)

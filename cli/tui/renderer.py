@@ -58,6 +58,9 @@ class _ReasoningState:
     started_at: float
     summary_text: str = ""
     trace_text: str = ""
+    # The card went out when the model moved on to its answer or a tool;
+    # the kernel's late completion must not print it a second time.
+    shown: bool = False
 
     @property
     def display_text(self) -> str:
@@ -185,7 +188,7 @@ class EventRenderer:
         transcript_mode: TranscriptMode = TranscriptMode.NORMAL,
         workspace: str | None = None,
     ) -> None:
-        self.console = console or Console()
+        self.console = console or Console(emoji=False)
         self.transcript_mode = transcript_mode
         # Paths are named the way the user would type them: relative to the
         # workspace they launched in. Absolute tool arguments read as noise
@@ -219,6 +222,11 @@ class EventRenderer:
         # The final message text already on screen this turn, kept for the
         # duplicate-suppression check in ``_on_error``.
         self._final_text_shown = ""
+        # The transcript mode a message segment started in. It holds until
+        # the segment settles: Ctrl+O mid-answer would otherwise reprint what
+        # already streamed (into summary) or drop it (out of summary).
+        self._segment_mode: TranscriptMode | None = None
+        self._completed_message_mode: TranscriptMode | None = None
 
     def _emit_gap(self) -> None:
         if self._gap_pending:
@@ -364,6 +372,8 @@ class EventRenderer:
         self._streaming_message = False
         self._tool_calls.clear()
         self._active_reasoning_id = None
+        self._segment_mode = None
+        self._completed_message_mode = None
 
     def status_line(self) -> str:
         """The status as plain text (no motion) — pipes, tests, fallbacks."""
@@ -432,6 +442,8 @@ class EventRenderer:
         self._stats = _TurnStats(started_at=monotonic())
         self._turn_active = True
         self._streaming_message = False
+        self._segment_mode = None
+        self._completed_message_mode = None
 
     def _on_model_usage_recorded(self, msg) -> None:
         """Accumulate provider usage for the settled-turn footer."""
@@ -456,9 +468,12 @@ class EventRenderer:
         )
 
     def _on_agent_message_delta(self, msg) -> None:
+        self._settle_reasoning()
         self._streamed += msg.delta
         self._streaming_message = True
-        if self.transcript_mode is TranscriptMode.SUMMARY:
+        if self._segment_mode is None:
+            self._segment_mode = self.transcript_mode
+        if self._segment_mode is TranscriptMode.SUMMARY:
             return
         # Whole lines only. prompt_toolkit's stdout proxy buffers an
         # unterminated tail and interleaves it badly with prompt redraws —
@@ -475,26 +490,34 @@ class EventRenderer:
     def _on_agent_message_completed(self, msg) -> None:
         """Settle one streamed response segment without duplicating it later."""
 
-        if self.transcript_mode is not TranscriptMode.SUMMARY:
+        self._settle_reasoning()
+        mode = self._segment_mode or self.transcript_mode
+        if mode is not TranscriptMode.SUMMARY:
             if not self._settle_streamed(msg.text or ""):
                 self._close_line()
                 self._emit_gap()
                 self.console.print(Markdown(msg.text or ""))
         self._completed_message_id = msg.message_id
         self._completed_message_text = msg.text or ""
+        self._completed_message_mode = mode
         self._final_text_shown = msg.text or ""
         self._streamed = ""
         self._stream_body_started = False
         self._streaming_message = False
+        self._segment_mode = None
 
     def _on_agent_message(self, msg) -> None:
+        self._settle_reasoning()
         text = msg.text or ""
         already_completed = (
             msg.message_id is not None
             and msg.message_id == self._completed_message_id
             and text == self._completed_message_text
         )
-        if self.transcript_mode is TranscriptMode.SUMMARY:
+        mode = (
+            self._completed_message_mode if already_completed else self._segment_mode
+        ) or self.transcript_mode
+        if mode is TranscriptMode.SUMMARY:
             self._close_line()
             self.console.print(Markdown(text))
         elif already_completed:
@@ -514,6 +537,8 @@ class EventRenderer:
         self._streaming_message = False
         self._completed_message_id = None
         self._completed_message_text = ""
+        self._completed_message_mode = None
+        self._segment_mode = None
 
     def _on_agent_reasoning_summary(self, msg) -> None:
         """Render legacy completed summary events."""
@@ -557,12 +582,46 @@ class EventRenderer:
         state.effort = msg.effort
         if self._active_reasoning_id == msg.reasoning_id:
             self._active_reasoning_id = None
+        if state.shown or self.transcript_mode is TranscriptMode.SUMMARY:
+            return
+        state.shown = True
+        self._print_reasoning_card(
+            state, _duration_label(msg.duration_ms), msg.availability
+        )
+
+    def _settle_reasoning(self) -> None:
+        """Show the live reasoning block once the model moves on.
+
+        The kernel completes a reasoning block only when the whole response
+        has ended, after its answer streamed. Waiting for that put the
+        "Thought for" card below the answer and kept the status line on
+        "Thinking" while the answer arrived. The model stopped thinking when
+        it began to answer or called a tool, so the card is printed then,
+        timed to that moment; the late completion only updates the record.
+        """
+        reasoning_id = self._active_reasoning_id
+        if reasoning_id is None:
+            return
+        self._active_reasoning_id = None
+        state = self._reasoning.get(reasoning_id)
+        if state is None or state.shown or not state.display_text:
+            return
+        state.shown = True
         if self.transcript_mode is TranscriptMode.SUMMARY:
             return
+        elapsed_ms = int(max(0.0, monotonic() - state.started_at) * 1000)
+        self._print_reasoning_card(
+            state, _duration_label(elapsed_ms), ReasoningAvailability.AVAILABLE
+        )
 
+    def _print_reasoning_card(
+        self,
+        state: _ReasoningState,
+        duration: str | None,
+        availability: ReasoningAvailability,
+    ) -> None:
         self._begin_block()
-        duration = _duration_label(msg.duration_ms)
-        effort = (msg.effort or "auto").title()
+        effort = (state.effort or "auto").title()
         mark = theme.THINKING_MARK
         label = (
             f"{mark} Thought for {duration}"
@@ -574,7 +633,7 @@ class EventRenderer:
         # Whatever this card prints below belongs to it; the next block —
         # the answer's prose — is a new one and owes a blank line.
         self._gap_pending = True
-        if msg.availability is ReasoningAvailability.OPAQUE:
+        if availability is ReasoningAvailability.OPAQUE:
             self.console.print(
                 f"[{theme.META_STYLE}]Details were not provided by this model.[/]"
             )
@@ -653,6 +712,7 @@ class EventRenderer:
         return fit_tail(tail, _SUBJECT_TAIL_CELLS)
 
     def _on_tool_started(self, msg) -> None:
+        self._settle_reasoning()
         label, kind, subject = self._tool_heading(msg)
         call_id = str(
             getattr(msg, "call_id", None) or f"anonymous-{len(self._tool_calls)}"
@@ -830,3 +890,5 @@ class EventRenderer:
         self._tool_calls.clear()
         self._turn_active = False
         self._streaming_message = False
+        self._segment_mode = None
+        self._completed_message_mode = None

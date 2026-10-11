@@ -97,7 +97,9 @@ class TuiApp:
     ) -> None:
         self.workspace = os.path.abspath(workspace)
         self.max_iterations = max_iterations
-        self.console = Console()
+        # emoji=False: rich would turn ":x:" in "root:x:0" into an emoji.
+        # Everything this console prints is content, never emoji shortcodes.
+        self.console = Console(emoji=False)
         self.renderer = EventRenderer(self.console, workspace=self.workspace)
         self.reader = InputReader(
             self.workspace,
@@ -1205,6 +1207,10 @@ def main(argv: list[str] | None = None, *, shared_service: bool = True) -> int:
         )
     args = parser.parse_args(argv)
     _bootstrap_quiet_logging()
+    if sys.stdin.isatty():
+        # Before connecting: opening the service client logs every HTTP
+        # request at INFO, and those lines used to land above the banner.
+        _silence_console_logging()
 
     if not shared_service and not _prepare_workspace_trust(
         args.workspace, grant=args.trust
@@ -1232,8 +1238,6 @@ def main(argv: list[str] | None = None, *, shared_service: bool = True) -> int:
     except (RuntimeError, OSError) as exc:
         print(f"DeepCode could not start: {exc}", file=sys.stderr)
         return 1
-    if app.reader.interactive:
-        _silence_console_logging()
     return asyncio.run(app.repl())
 
 
