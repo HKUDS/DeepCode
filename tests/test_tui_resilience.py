@@ -340,7 +340,6 @@ def test_failed_turn_reason_is_not_repeated_after_an_error_item() -> None:
     assert len(failed) == 1 and isinstance(failed[0], TaskComplete)
 
 
-
 def test_a_warning_item_reads_as_a_warning_and_never_hides_the_failure() -> None:
     # A failed Turn whose error item could not be saved carries only the
     # warning that some updates were lost; its reason must still be shown.
