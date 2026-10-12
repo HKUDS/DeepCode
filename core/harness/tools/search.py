@@ -195,7 +195,11 @@ class GlobTool(Tool):
             return f"Error: path not found: {kwargs.get('path')}"
         matches = []
         for p in sorted(base.glob(pattern)):
-            if any(part in _SKIP_DIRS for part in p.parts):
+            # Prune relative to the base only. ``p.parts`` also carries the
+            # workspace's own ancestors, so a workspace rooted under a
+            # directory named e.g. "build" or "venv" skipped every file.
+            rel = os.path.relpath(p, base)
+            if any(part in _SKIP_DIRS for part in Path(rel).parts):
                 continue
             if p.is_file():
                 matches.append(os.path.relpath(p, self._workspace))
