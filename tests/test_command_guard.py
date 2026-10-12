@@ -83,3 +83,50 @@ def test_unparseable_command_defers_to_sandbox():
     # Unbalanced quotes can't be tokenised; the screen must not raise and must
     # pass the command through (None) so the sandbox stays the boundary.
     assert screen_command('echo "unterminated') is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "/bin/rm -rf /",
+        "/usr/bin/rm -rf /tmp/x",
+        "/bin/rm -r -f /tmp/x",  # split flags behind a path
+        "./rm --recursive --force /tmp/x",
+        "/usr/bin/sudo reboot",
+        "/bin/dd if=/dev/zero of=/dev/sda",
+        "/sbin/mkfs.ext4 /dev/sda1",
+        "/bin/chmod 777 /etc",
+        "/usr/bin/chmod a+rwx /etc",
+        "C:/Windows/System32/shutdown.exe /s",  # Windows extension stripping
+        "/usr/bin/rm.exe -rf C:/temp",
+        "echo hi && /bin/rm -rf /",  # path-qualified stage in a sequence
+        "ls | /usr/bin/rm -rf /",  # path-qualified stage in a pipeline
+    ],
+)
+def test_blocks_path_qualified_destructive_commands(command):
+    """An absolute or relative path to the program must not defeat the screen.
+
+    ``screen_egress`` / ``screen_install`` resolve the program through
+    ``_program()``, which drops the directory and any Windows extension before
+    matching. ``screen_command`` compared ``tokens[0].lower()`` directly, so the
+    very same command was classified when typed bare and passed when typed with
+    its path — ``/bin/rm -rf /`` slipped past the check that ``rm -rf /``
+    trips.
+    """
+
+    assert screen_command(command) is not None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "/bin/ls -la",  # path-qualified but benign
+        "/usr/bin/rm notes.txt",  # plain remove stays allowed
+        "/usr/local/bin/python train.py",
+        "/bin/echo done && /bin/ls -la",  # benign path-qualified sequence
+    ],
+)
+def test_allows_path_qualified_benign_commands(command):
+    """Normalising the program must not turn every absolute path into a hit."""
+
+    assert screen_command(command) is None
