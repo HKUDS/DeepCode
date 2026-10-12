@@ -288,6 +288,8 @@ pypdf==6.19.0
     #   deepcode-hku
 pyproject-hooks==1.2.0
     # via build
+pyte==0.8.2
+    # via deepcode-hku
 pytest==9.1.1
     # via
     #   deepcode-hku
@@ -417,6 +419,7 @@ wcwidth==0.8.2
     # via
     #   -c scripts/ci/../../desktop/sidecar-requirements.lock
     #   prompt-toolkit
+    #   pyte
 websockets==16.1.1
     # via google-genai
 wheel==0.48.0

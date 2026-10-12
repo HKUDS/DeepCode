@@ -37,12 +37,11 @@ def test_a_long_streamed_answer_is_shown_exactly_once(deepcode):
     lines = _numbered_lines(40, "Streamed")
     deepcode.model.on("write forty lines", Reply([Text("\n".join(lines))], delay=0.002))
     tui = deepcode.open_tui("--access", "read-only")
-    start = tui.mark()
 
     tui.submit("write forty lines")
     deepcode.wait_idle()
 
-    screen = tui.text(start)
+    screen = tui.screen()
     counts = {line: screen.count(line) for line in lines}
     assert all(count == 1 for count in counts.values()), counts
 
@@ -178,18 +177,17 @@ def test_ctrl_o_during_an_answer_neither_repeats_nor_drops_lines(deepcode):
     tui.send(CTRL_O, 0.2)
     tui.send(CTRL_O, 0.2)
     deepcode.wait_idle()
-    screen = tui.text(start)
+    screen = tui.screen()
     assert {line: screen.count(line) for line in lines} == dict.fromkeys(lines, 1)
 
     # summary -> normal, while the first lines are streaming unseen.
-    start = tui.mark()
     tui.submit("toggle back while streaming")
     deepcode.wait_active()
     time.sleep(1.0)
     tui.send(CTRL_O, 0.2)
     deepcode.wait_idle()
-    screen = tui.text(start)
-    assert {line: screen.count(line) for line in lines} == dict.fromkeys(lines, 1)
+    screen = tui.screen()  # both answers are on it now
+    assert {line: screen.count(line) for line in lines} == dict.fromkeys(lines, 2)
 
 
 def test_tool_results_read_as_text_not_python_values(deepcode):
@@ -222,3 +220,4 @@ def test_tool_results_read_as_text_not_python_values(deepcode):
     assert json.loads(results[0])["goal"]["objective"] == (
         "Finish the scripted objective"
     )
+

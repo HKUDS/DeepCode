@@ -1,8 +1,14 @@
 """Drive the real TUI in a pseudo-terminal.
 
 The process gets a real terminal of its own (a controlling tty, a window
-size, raw-mode key handling), so what these tests see is what a user sees:
-the bytes the TUI writes, with escape sequences stripped.
+size, raw-mode key handling). Tests read it two ways:
+
+- ``text()`` — the bytes the TUI wrote, escape sequences stripped. Good for
+  "did this ever appear" and for checking where the TUI put newlines.
+- ``screen()`` — what a user sees now, scrollback included, from a terminal
+  emulator (pyte). Text that was only shown for a moment (the status line,
+  the preview of an unfinished line) is redrawn many times in the byte
+  stream but is not on this screen, so counts here are counts a user sees.
 """
 
 from __future__ import annotations
@@ -17,7 +23,10 @@ import termios
 import threading
 import time
 
+import pyte
+
 COLUMNS, ROWS = 160, 48
+_SCROLLBACK = 10_000
 
 ESC = "\x1b"
 CTRL_C = "\x03"
@@ -63,6 +72,8 @@ class Terminal:
         os.close(slave)
         self._fd = master
         self._raw = bytearray()
+        self._screen = pyte.HistoryScreen(COLUMNS, ROWS, history=_SCROLLBACK)
+        self._stream = pyte.ByteStream(self._screen)
         self._lock = threading.Lock()
         self._reader = threading.Thread(target=self._read, name="tui-pty", daemon=True)
         self._reader.start()
@@ -85,8 +96,20 @@ class Terminal:
                 os.write(self._fd, b"\x1b[1;1R")
             with self._lock:
                 self._raw += chunk
+                self._stream.feed(chunk)
 
     # -- reading ------------------------------------------------------------
+
+    def screen(self) -> str:
+        """The terminal as a user sees it now: scrollback, then the window."""
+
+        with self._lock:
+            history = [
+                "".join(line[column].data for column in range(COLUMNS))
+                for line in self._screen.history.top
+            ]
+            window = list(self._screen.display)
+        return "\n".join(line.rstrip() for line in history + window)
 
     def text(self, since: int = 0) -> str:
         """Everything shown so far, as plain text, from offset ``since``."""
@@ -122,6 +145,19 @@ class Terminal:
                 raise AssertionError(
                     f"TUI exited ({self.process.returncode}) before {pattern!r}; screen tail:\n"
                     + self.tail(since)
+                )
+            time.sleep(0.05)
+
+    def wait_for_screen(self, pattern: str, *, timeout: float = 20.0) -> re.Match:
+        deadline = time.monotonic() + timeout
+        while True:
+            match = re.search(pattern, self.screen())
+            if match:
+                return match
+            if time.monotonic() > deadline:
+                raise AssertionError(
+                    f"{pattern!r} was not on screen within {timeout}s; screen:\n"
+                    + self.screen()[-2500:]
                 )
             time.sleep(0.05)
 

@@ -74,6 +74,9 @@ setuptools.setup(
         "test": [
             "pytest>=8,<10",
             "pytest-asyncio>=1,<2",
+            # A terminal emulator for tests/e2e: assert on the screen a user
+            # sees. LGPLv3, test-only, never shipped.
+            "pyte>=0.8.2,<0.9",
         ],
     },
     include_package_data=True,
