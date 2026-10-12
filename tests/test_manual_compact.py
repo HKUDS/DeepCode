@@ -161,3 +161,53 @@ def test_summary_that_grows_the_conversation_is_rejected() -> None:
     )
     assert compacted is None
     assert "would not shrink" in reason
+
+
+def _write_heavy_history() -> list[dict[str, Any]]:
+    """Shaped like a live session: one 11k-character write_file call, then
+    two short explanations. Nearly all of its volume is the call's arguments."""
+    write = {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+            "name": "write_file",
+            "arguments": '{"path": "notes.txt", "content": "' + "x" * 11_000 + '"}',
+        },
+    }
+    return [
+        {"role": "user", "content": "Create notes.txt with 150 lines."},
+        {"role": "assistant", "content": "", "tool_calls": [write]},
+        {"role": "tool", "tool_call_id": "call_1", "content": "Wrote 11142 bytes"},
+        {"role": "assistant", "content": "done."},
+        {"role": "user", "content": "Explain B-tree indexes."},
+        {"role": "assistant", "content": "b" * 1085},
+        {"role": "user", "content": "Explain TLS handshakes."},
+        {"role": "assistant", "content": "t" * 1108},
+    ]
+
+
+def test_tool_call_arguments_count_toward_the_shrink_check() -> None:
+    """Observed live: such a session was refused as 'would not shrink',
+    because the check counted message content only."""
+    provider = _SummarizingProvider(summary="summary " + "s" * 1500)
+    runner = AgentRunner(provider)
+    compacted, reason = asyncio.run(
+        runner.compact_history(_spec(provider), _write_heavy_history())
+    )
+    assert reason == "compacted"
+    assert compacted is not None
+    assert not any(message.get("tool_calls") for message in compacted)
+
+
+def test_compact_report_counts_the_replaced_tool_call_arguments() -> None:
+    """The TUI prints chars_before - chars_after; it read about -270 live."""
+    from core.events.session import AgentSession
+
+    provider = _SummarizingProvider(summary="summary " + "s" * 1500)
+    session = AgentSession(provider, ToolRegistry(), model="fake-model")
+    session.load_history(_write_heavy_history())
+
+    report = asyncio.run(session.compact())
+
+    assert report["chars_before"] > 11_000  # the write_file arguments count
+    assert report["chars_after"] < report["chars_before"]

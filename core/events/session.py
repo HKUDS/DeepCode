@@ -29,6 +29,7 @@ from uuid import uuid4
 
 from loguru import logger
 
+from core.agent_runtime.compaction import message_chars
 from core.agent_runtime.context import EnvironmentContext
 from core.agent_runtime.hook import AgentHook, AgentHookContext
 from core.agent_runtime.runner import AgentRunner, AgentRunSpec
@@ -650,8 +651,8 @@ class AgentSession:
             "replaced_messages": len(before) - len(compacted),
             "messages_before": len(before),
             "messages_after": len(compacted),
-            "chars_before": sum(len(str(m.get("content", ""))) for m in before),
-            "chars_after": sum(len(str(m.get("content", ""))) for m in compacted),
+            "chars_before": sum(message_chars(m) for m in before),
+            "chars_after": sum(message_chars(m) for m in compacted),
         }
 
     # -- submission handling ----------------------------------------------

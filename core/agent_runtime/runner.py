@@ -30,6 +30,7 @@ from core.agent_runtime.compaction import (
     DEFAULT_COMPACTION_STRATEGY,
     SUMMARIZATION_PROMPT as _SUMMARIZATION_PROMPT,
     CompactionStrategy,
+    message_chars,
 )
 from core.agent_runtime.helpers import (
     build_assistant_message,
@@ -1910,7 +1911,9 @@ class AgentRunner:
 
     @staticmethod
     def _history_chars(messages: list[dict[str, Any]]) -> int:
-        return sum(len(str(m.get("content", ""))) for m in messages)
+        # Tool-call arguments count too: in a coding session they are most of
+        # the volume a summary replaces (a write_file call carries the file).
+        return sum(message_chars(m) for m in messages)
 
     async def compact_history(
         self,

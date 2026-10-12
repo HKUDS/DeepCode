@@ -59,7 +59,8 @@ class CompactionStrategy(Protocol):
     ) -> list[dict[str, Any]]: ...
 
 
-def _message_chars(message: Mapping[str, Any]) -> int:
+def message_chars(message: Mapping[str, Any]) -> int:
+    """A message's volume: its content plus any tool-call arguments."""
     chars = len(str(message.get("content") or ""))
     if message.get("tool_calls"):
         chars += len(json.dumps(message["tool_calls"], ensure_ascii=False))
@@ -114,7 +115,7 @@ class TailRetainingCompactionStrategy:
         non_system: list[dict[str, Any]],
         context_window_tokens: int | None,
     ) -> int:
-        total = sum(_message_chars(item) for item in non_system)
+        total = sum(message_chars(item) for item in non_system)
         budget = int(total * self.retain_ratio)
         if context_window_tokens and context_window_tokens > 0:
             window = int(context_window_tokens * self.retain_ratio * _CHARS_PER_TOKEN)
@@ -138,7 +139,7 @@ class TailRetainingCompactionStrategy:
         while index >= 0:
             start = _unit_start(non_system, index)
             chunk = non_system[start : index + 1]
-            chunk_chars = sum(_message_chars(item) for item in chunk)
+            chunk_chars = sum(message_chars(item) for item in chunk)
             # Always keep the newest indivisible unit, even when it alone
             # exceeds the budget: a history with no tail is not resumable.
             # Two floors override the budget. The newest indivisible unit
