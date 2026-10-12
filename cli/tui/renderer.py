@@ -7,8 +7,10 @@ reconciliation needs.
 
 Rendering model (Claude Code semantics, dsh grammar):
 
-- ``agent_message_delta`` — printed immediately, plain, as it arrives
-  (the live "typing" stream).
+- ``agent_message_delta`` — each completed line is rendered as Markdown at
+  its newline (a code block line by line, a table once its last row is in;
+  see :mod:`cli.tui.markdown_stream`). The unfinished line is previewed
+  above the status line until then.
 - ``tool_started`` — a bullet card ``● Label subject``.
 - ``tool_completed`` — an elbow line under the card: ``⎿ ✓`` / ``⎿ ✗``.
 - ``plan_updated`` — the plan tool's checklist, one line per step.
@@ -34,9 +36,11 @@ from rich.cells import cell_len
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.markup import escape
+from rich.text import Text
 
 from cli.transcript import TranscriptMode
 from cli.tui import animation, theme
+from cli.tui.markdown_stream import MarkdownStream
 from cli.tui.text import fit_head, fit_tail, workspace_path
 from core.events.protocol import Event
 from core.reasoning import ReasoningAvailability, ReasoningChannel
@@ -47,6 +51,7 @@ _STATUS_DETAIL_CHARS = 72
 _SUBJECT_CELLS = 88  # ceiling; the real budget is the terminal's width
 _SUBJECT_TAIL_CELLS = 32  # the elbow's "which call is this" fragment
 _ELBOW_MIN_CELLS = 24
+_PREVIEW_ROWS = 3  # the unfinished answer shown above the status line
 # Below a second, a duration is noise on every row; above it, it is the
 # most useful thing the elbow can say.
 _DURATION_FLOOR_SECONDS = 1.0
@@ -227,27 +232,49 @@ class EventRenderer:
         # already streamed (into summary) or drop it (out of summary).
         self._segment_mode: TranscriptMode | None = None
         self._completed_message_mode: TranscriptMode | None = None
+        # The streamed segment's Markdown state (open code block, held table).
+        self._markdown: MarkdownStream | None = None
+        # /raw: print the model's text exactly as written and let the
+        # terminal wrap it, for copying.
+        self.raw_output = False
 
     def _emit_gap(self) -> None:
         if self._gap_pending:
             self.console.print()
             self._gap_pending = False
 
-    def _emit_stream_line(self, line: str) -> None:
-        if not self._stream_body_started and not line.strip():
-            return
+    def _open_stream_body(self) -> None:
         self._stream_body_started = True
         self._emit_gap()
-        # Default rich wrapping (word boundaries) instead of raw terminal
-        # wrap, which used to split words mid-letter at the margin.
-        self.console.print(line, highlight=False, markup=False)
+
+    def _emit_stream_line(self, line: str) -> None:
+        if self._markdown is None:
+            self._markdown = MarkdownStream(
+                self.console, raw=self.raw_output, before_output=self._open_stream_body
+            )
+        self._markdown.feed_line(line)
+
+    def _print_text(self, text: str, *, gap: bool = True) -> None:
+        """Print a whole message that did not stream, by the same rules."""
+        stream = MarkdownStream(
+            self.console,
+            raw=self.raw_output,
+            before_output=self._emit_gap if gap else None,
+        )
+        for line in text.split("\n"):
+            stream.feed_line(line)
+        stream.finish()
 
     # -- helpers -------------------------------------------------------------
 
     def _close_line(self) -> None:
+        """End the streamed segment: print its held tail, table or block."""
         if self._stream_tail:
             self._emit_stream_line(self._stream_tail)
             self._stream_tail = ""
+        if self._markdown is not None:
+            self._markdown.finish()
+            self._markdown = None
 
     def _settle_streamed(self, text: str) -> bool:
         """Finish a streamed segment against its authoritative text.
@@ -386,6 +413,31 @@ class EventRenderer:
             parts.append(detail)
         return f" {' · '.join(parts)} "
 
+    def preview_lines(self) -> list[str]:
+        """The answer text that is written but not yet in the transcript.
+
+        A line reaches the transcript at its newline (a table at its last
+        row), and a model can spend many seconds on one long paragraph. Until
+        then its newest rows show here, above the status line, so the answer
+        is readable as it arrives and the TUI never looks stuck (Codex shows
+        the unfinished line the same way).
+        """
+        if (
+            not self._streaming_message
+            or self._segment_mode is TranscriptMode.SUMMARY
+            or self.raw_output
+        ):
+            return []
+        pending = self._markdown.held if self._markdown is not None else []
+        if self._stream_tail.strip():
+            pending.append(self._stream_tail)
+        width = max(20, self.console.width - 2)
+        rows: list[str] = []
+        for line in pending:
+            text = Text(line.replace("\r", "").replace("\t", "    "))
+            rows.extend(row.plain for row in text.wrap(self.console, width))
+        return [f" {row}" for row in rows[-_PREVIEW_ROWS:]]
+
     def status_fragments(self) -> list[tuple[str, str]]:
         """The status as prompt_toolkit fragments — the animated surface.
 
@@ -399,8 +451,11 @@ class EventRenderer:
             return [(theme.STATUS_BASE_PTK, f" {self._idle_status()} ")]
         label, elapsed, detail = activity
         fragments: list[tuple[str, str]] = [
-            (theme.STATUS_SPINNER_PTK, f" {animation.spinner_frame(elapsed)} ")
+            (theme.STATUS_PREVIEW_PTK, f"{row}\n") for row in self.preview_lines()
         ]
+        fragments.append(
+            (theme.STATUS_SPINNER_PTK, f" {animation.spinner_frame(elapsed)} ")
+        )
         fragments.extend(
             animation.shimmer(
                 label,
@@ -479,9 +534,9 @@ class EventRenderer:
         # unterminated tail and interleaves it badly with prompt redraws —
         # the first lines of a streamed reply used to be swallowed. Emitting
         # complete lines atomically (tail held until its newline or the
-        # segment settles) is redraw-safe. ``markup=False`` because
-        # assistant text is content, not markup — bracketed spans like
-        # "[a-z]" used to be silently eaten by the markup parser.
+        # segment settles) is redraw-safe. The text goes through the
+        # Markdown parser, never Rich markup — bracketed spans like "[a-z]"
+        # used to be silently eaten by the markup parser.
         self._stream_tail += msg.delta
         while "\n" in self._stream_tail:
             line, self._stream_tail = self._stream_tail.split("\n", 1)
@@ -495,8 +550,7 @@ class EventRenderer:
         if mode is not TranscriptMode.SUMMARY:
             if not self._settle_streamed(msg.text or ""):
                 self._close_line()
-                self._emit_gap()
-                self.console.print(Markdown(msg.text or ""))
+                self._print_text(msg.text or "")
         self._completed_message_id = msg.message_id
         self._completed_message_text = msg.text or ""
         self._completed_message_mode = mode
@@ -519,7 +573,7 @@ class EventRenderer:
         ) or self.transcript_mode
         if mode is TranscriptMode.SUMMARY:
             self._close_line()
-            self.console.print(Markdown(text))
+            self._print_text(text, gap=False)
         elif already_completed:
             self._close_line()
         elif self._settle_streamed(text):
@@ -527,8 +581,7 @@ class EventRenderer:
             pass
         else:
             self._close_line()
-            self._emit_gap()
-            self.console.print(Markdown(text))
+            self._print_text(text)
         self.console.print()
         self._final_text_shown = text
         self._streamed = ""

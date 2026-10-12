@@ -122,8 +122,12 @@ STATUS_STYLE_RULES = {
     "status.label": "fg:ansicyan bold",
     "status.glare": "fg:ansiwhite bold",
     "status.detail": "fg:ansibrightblack",
+    # The answer line still being written, shown above the status line until
+    # its newline commits it to the transcript: plain foreground, readable.
+    "status.preview": "",
 }
 STATUS_BASE_PTK = "class:status"
+STATUS_PREVIEW_PTK = "class:status.preview"
 STATUS_SPINNER_PTK = "class:status.spinner"
 STATUS_LABEL_PTK = "class:status.label"
 STATUS_GLARE_PTK = "class:status.glare"

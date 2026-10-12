@@ -142,6 +142,10 @@ def _transcript_modes(app, prefix: str) -> list[str]:
     return [m.value for m in TranscriptMode if m.value.startswith(prefix)]
 
 
+def _on_off(app, prefix: str) -> list[str]:
+    return [value for value in ("on", "off") if value.startswith(prefix)]
+
+
 def _permission_presets(app, prefix: str) -> list[str]:
     return [name for name in _PERMISSION_CHOICES if name.startswith(prefix)]
 
@@ -650,6 +654,14 @@ async def _cmd_transcript(app, args: str) -> str | None:
         return str(exc)
 
 
+async def _cmd_raw(app, args: str) -> str | None:
+    wanted = args.strip().lower()
+    if wanted not in {"", "on", "off"}:
+        return "usage: /raw [on|off]"
+    enabled = (not app.renderer.raw_output) if not wanted else wanted == "on"
+    return app.set_raw_output(enabled)
+
+
 async def _cmd_rename(app, args: str) -> str | None:
     title = args.strip()
     if not title:
@@ -849,6 +861,13 @@ REGISTRY: dict[str, Command] = {
             "show or switch transcript detail (ctrl-o cycles)",
             _cmd_transcript,
             arguments=_transcript_modes,
+        ),
+        Command(
+            "raw",
+            "/raw [on|off]",
+            "print answers exactly as written, unwrapped, for copying",
+            _cmd_raw,
+            arguments=_on_off,
         ),
         Command(
             "preset",

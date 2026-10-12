@@ -221,3 +221,72 @@ def test_tool_results_read_as_text_not_python_values(deepcode):
         "Finish the scripted objective"
     )
 
+
+def test_a_markdown_answer_is_rendered_as_it_streams(deepcode):
+    code = "value = compute(alpha, beta)  # stays on one line"
+    deepcode.model.on(
+        "show markdown",
+        Reply(
+            [
+                Text(
+                    "## Release notes\n\n"
+                    "The **fast** path uses `cache`.\n"
+                    "- first point\n- second point\n\n"
+                    f"```python\n{code}\n```\n\n"
+                    "| name | size |\n|---|---|\n| a.py | 12 |\n\n"
+                    "Done."
+                )
+            ]
+        ),
+    )
+    tui = deepcode.open_tui("--access", "read-only")
+
+    tui.submit("show markdown")
+    deepcode.wait_idle()
+
+    screen = tui.screen()
+    assert "Release notes" in screen and "## Release" not in screen
+    assert "The fast path uses cache." in screen
+    assert "**" not in screen and "```" not in screen
+    assert "• first point" in screen and "• second point" in screen
+    assert screen.count(code) == 1 and f"\n{code}\n" in screen  # column 0
+    assert screen.count("a.py") == 1
+
+
+def test_an_unfinished_line_is_previewed_then_printed_once(deepcode):
+    opening = "Opening words of a long paragraph"
+    deepcode.model.on(
+        "preview please",
+        Reply(
+            [Text(opening), Pause(2.5), Text(" that finally ends.\nNext line.")],
+            delay=0.03,
+        ),
+    )
+    tui = deepcode.open_tui("--access", "read-only")
+
+    tui.submit("preview please")
+    # The service sends text in batches at most 50 ms apart, released by the
+    # next piece of text, so the last words before the pause arrive after it.
+    # The words sent earlier are on screen while the model is silent.
+    tui.wait_for_screen("Opening words of a")
+    assert "finally ends" not in tui.screen()
+
+    deepcode.wait_idle()
+    screen = tui.screen()
+    assert screen.count(f"{opening} that finally ends.") == 1
+    assert screen.count(opening) == 1  # the preview is gone
+
+
+def test_a_long_url_is_never_split_by_an_inserted_newline(deepcode):
+    url = "https://example.com/" + "/".join(f"segment-{i:02d}" for i in range(20))
+    assert len(url) > 160  # wider than the test terminal
+    deepcode.model.on("give me the link", Reply([Text(f"The link: {url} works.")]))
+    tui = deepcode.open_tui("--access", "read-only")
+    start = tui.mark()
+
+    tui.submit("give me the link")
+    deepcode.wait_idle()
+
+    # The terminal wraps it on screen; the bytes keep it whole, so a copy
+    # from the scrollback or a terminal that reflows gets the real address.
+    assert f"The link: {url} works." in tui.text(start)

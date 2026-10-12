@@ -463,6 +463,12 @@ class TuiApp:
         selected = self.renderer.set_transcript_mode(mode)
         return f"transcript mode: {selected.value}"
 
+    def set_raw_output(self, enabled: bool) -> str:
+        self.renderer.raw_output = enabled
+        if enabled:
+            return "raw output on: answers print exactly as written; /raw off restores Markdown"
+        return "raw output off: answers render as Markdown"
+
     @property
     def requested_reasoning_effort(self) -> str:
         """User-facing selection; ``auto`` means provider/model default."""
