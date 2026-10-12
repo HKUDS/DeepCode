@@ -17,6 +17,17 @@ from core.version import __version__
 
 SERVICE_PROTOCOL_VERSION = 1
 SERVICE_WORKING_DIRECTORY = Path(__file__).resolve().parents[1]
+# A detached start names the instance it launches, so it can tell its own
+# service from a concurrent winner. PIDs cannot: on Windows a venv's python.exe
+# runs the interpreter as a child, so the service's PID is not the launched one.
+LAUNCH_INSTANCE_ENV = "DEEPCODE_SERVICE_INSTANCE"
+
+
+def launched_instance_id() -> str:
+    value = os.environ.pop(LAUNCH_INSTANCE_ENV, "")
+    if len(value) == 32 and all(char in "0123456789abcdef" for char in value):
+        return value
+    return secrets.token_hex(16)
 
 
 def service_command(files: ServiceFiles, port: int) -> list[str]:

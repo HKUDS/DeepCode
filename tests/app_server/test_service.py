@@ -330,6 +330,42 @@ def test_unverified_busy_owner_is_a_failure_so_supervisor_can_retry(tmp_path):
     assert files.record.exists()  # A non-owner cannot clear another owner's state.
 
 
+def test_detached_start_keeps_a_service_started_through_a_redirector(
+    tmp_path, monkeypatch
+):
+    # On Windows, a venv's python.exe runs the real interpreter as its child
+    # and takes it down when it ends, so the service's PID is not the PID
+    # start launched. Start must still recognize the service as its own.
+    import cli.service_cli as service_cli
+
+    redirector = tmp_path / "redirector.py"
+    redirector.write_text(
+        "import signal, subprocess, sys\n"
+        "child = subprocess.Popen(sys.argv[1:])\n"
+        "def stop(*_):\n"
+        "    child.kill()\n"
+        "    child.wait()\n"
+        "    sys.exit(1)\n"
+        "signal.signal(signal.SIGTERM, stop)\n"
+        "sys.exit(child.wait())\n"
+    )
+    command = service_cli.service_command
+    monkeypatch.setattr(
+        service_cli,
+        "service_command",
+        lambda files, port: [sys.executable, str(redirector), *command(files, port)],
+    )
+    files = ServiceFiles(tmp_path / "state.sqlite3")
+    try:
+        status = start_service(files, port=0, timeout=15)
+        assert files.running()
+        current = ServiceClient(files).call("status", timeout=5)
+        assert current["instanceId"] == status["instanceId"]
+    finally:
+        if files.running():
+            stop_service(files, timeout=2, cancel_running=True)
+
+
 def test_start_does_not_wait_for_a_status_probe_that_has_already_left(
     tmp_path, monkeypatch
 ):

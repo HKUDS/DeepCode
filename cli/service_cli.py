@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import secrets
 import subprocess
 import sys
 import time
@@ -16,6 +17,7 @@ from app_server.service_client import (
     ServiceUnavailable,
 )
 from app_server.service_state import (
+    LAUNCH_INSTANCE_ENV,
     ServiceFiles,
     service_command,
     service_working_directory,
@@ -122,9 +124,11 @@ def _start_detached(
 ) -> dict:
     client = ServiceClient(files)
     command = service_command(files, 3081 if port is None else port)
+    instance_id = secrets.token_hex(16)
     process = subprocess.Popen(
         command,
         cwd=service_working_directory(command),
+        env={**os.environ, LAUNCH_INSTANCE_ENV: instance_id},
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -137,7 +141,7 @@ def _start_detached(
     )
     try:
         result = _wait_ready(client, timeout, process=process, port=port)
-        if result["pid"] != process.pid:
+        if result["instanceId"] != instance_id:
             # Another concurrent launcher won. Reap our losing child before
             # returning, so it cannot become a replacement after the winner stops.
             _stop_startup_child(process)

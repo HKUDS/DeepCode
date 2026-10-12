@@ -23,7 +23,12 @@ from app_server.host import ServiceHost
 from app_server.errors import RpcError
 from app_server.protocol.codec import decode_request
 from app_server.service_client import ServiceClient, ServiceUnavailable
-from app_server.service_state import ServiceFiles, ServiceRecord, identity_proof
+from app_server.service_state import (
+    ServiceFiles,
+    ServiceRecord,
+    identity_proof,
+    launched_instance_id,
+)
 from app_server.websocket import WebSocketTransport
 from app_server.web_surface import WebSurface
 from core.application.application import DeepCodeApplication
@@ -346,7 +351,7 @@ async def serve(files: ServiceFiles, port: int) -> None:
         listener.listen(socket.SOMAXCONN)
         listener.setblocking(False)
         record = ServiceRecord(
-            secrets.token_hex(16),
+            launched_instance_id(),
             str(files.database),
             os.getpid(),
             listener.getsockname()[1],
