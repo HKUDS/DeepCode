@@ -157,7 +157,7 @@ DeepCode 提供 TUI、Desktop 和 Web 三种客户端，连接同一个本地共
 
 ## 新闻
 
-**2026-10-12 · TUI 边输出边渲染 Markdown、Windows 后台服务不再自行退出、`/compact` 能压缩写代码的会话，以及社区修复**
+**2026-10-12 · DeepCode v2.3.1：TUI 边输出边渲染 Markdown、Windows 后台服务不再自行退出、`/compact` 能压缩写代码的会话，以及社区修复**
 
 - **回答边输出边渲染成 Markdown。** 标题、列表、粗体和表格在每行写完时排好；
   代码块不缩进，DeepCode 也不会给它折行；链接显示完整地址；还没写完的那一行
