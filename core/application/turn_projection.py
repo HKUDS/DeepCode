@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable
 from dataclasses import replace
 from time import monotonic
+from typing import TypeVar
 
 from core.application.event_service import EventBroker
 from core.application.turn_usage import (
@@ -42,10 +45,22 @@ from core.reasoning import ReasoningChannel, ReasoningPayload
 
 _STREAM_FLUSH_INTERVAL_S = 0.05
 _STREAM_FLUSH_MIN_CHARS = 256
+_INCOMPLETE_NOTICE = (
+    "Some updates in this turn could not be saved, so its transcript may be "
+    "incomplete. The service log has the details."
+)
+
+logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
 
 
 class TurnEventProjector:
-    """Map live events into the rebuildable Desktop execution projection."""
+    """Map live events into the rebuildable Desktop execution projection.
+
+    A write the database refuses is logged and costs only what clients see:
+    text the throttle holds goes out with the next write, and the Turn goes
+    on. None of the public methods raise for a failed write.
+    """
 
     def __init__(
         self,
@@ -62,6 +77,8 @@ class TurnEventProjector:
         self.final_text: str | None = None
         self.stop_reason: str | None = None
         self.saw_terminal = False
+        self.failed_writes = 0
+        self._final_message_id: str | None = None
         self._assistant_item_ids: dict[str, str] = {}
         self._assistant_texts: dict[str, str] = {}
         self._last_delta_flush: dict[str, float] = {}
@@ -83,15 +100,32 @@ class TurnEventProjector:
 
     def project(self, event: Event) -> None:
         message = event.msg
+        # The Turn's outcome is noted before anything is written, so a failed
+        # write can never change it.
+        if isinstance(message, AgentMessage):
+            self.final_text = message.text
+        elif isinstance(message, TaskComplete):
+            self.saw_terminal = True
+            self.stop_reason = message.stop_reason
+            if message.final_text:
+                self.final_text = message.final_text
+        if (
+            isinstance(message, AgentMessage | AgentMessageCompleted)
+            and message.phase is AgentMessagePhase.FINAL_ANSWER
+        ):
+            self._final_message_id = message.message_id
         # Throttled text must reach clients before anything that follows it,
         # or a client sees a completion, tool card or other stream before the
         # end of the text it already started showing.
         if isinstance(message, AgentMessageDelta):
-            self._flush_reasoning_streams()
+            self._guarded(self._flush_reasoning_streams)
         elif isinstance(message, AgentReasoningDelta):
-            self._flush_assistant_streams()
+            self._guarded(self._flush_assistant_streams)
         else:
-            self._flush_pending_streams()
+            self._guarded(self._flush_pending_streams)
+        self._guarded(self._write, message)
+
+    def _write(self, message: object) -> None:
         if isinstance(message, TurnStarted):
             for invocation in message.skill_invocations:
                 self._skill_invocations[invocation.skill_id] = invocation.to_metadata()
@@ -136,7 +170,6 @@ class TurnEventProjector:
         elif isinstance(message, ModelUsageRecorded):
             self._record_usage(message)
         elif isinstance(message, AgentMessage):
-            self.final_text = message.text
             self._complete_assistant(
                 message.text,
                 message_id=message.message_id,
@@ -211,15 +244,30 @@ class TurnEventProjector:
                 payload={"message": message.message},
             )
         elif isinstance(message, TaskComplete):
-            self.saw_terminal = True
-            self.stop_reason = message.stop_reason
-            if message.final_text:
-                self.final_text = message.final_text
-                if not self._saw_final_assistant:
-                    self._complete_assistant(
-                        message.final_text,
-                        phase=AgentMessagePhase.FINAL_ANSWER,
-                    )
+            if message.final_text and not self._saw_final_assistant:
+                # Completes the answer's own item when its write failed, and
+                # adds one for a session that never streamed it.
+                self._complete_assistant(
+                    message.final_text,
+                    message_id=self._final_message_id,
+                    phase=AgentMessagePhase.FINAL_ANSWER,
+                )
+
+    def _guarded(self, write: Callable[..., _T], *args, **kwargs) -> _T | None:
+        try:
+            return write(*args, **kwargs)
+        except Exception as exc:  # noqa: BLE001 - a lost update must not end the Turn
+            self.failed_writes += 1
+            if self.failed_writes == 1:
+                logger.exception("could not save an update of turn %s", self.turn_id)
+            else:
+                logger.warning(
+                    "could not save an update of turn %s: %s: %s",
+                    self.turn_id,
+                    type(exc).__name__,
+                    exc,
+                )
+            return None
 
     def _record_usage(self, message: ModelUsageRecorded) -> None:
         ordinal = message.response_ordinal
@@ -299,7 +347,10 @@ class TurnEventProjector:
 
         # Persist text that was streamed but still held by the throttle, so the
         # closed item keeps everything the model produced before it stopped.
-        self._flush_pending_streams()
+        self._guarded(self._flush_pending_streams)
+        self._guarded(self._close_open_items, interrupted)
+
+    def _close_open_items(self, interrupted: bool) -> None:
         with self.database.transaction() as connection:
             items = ItemRepository(connection)
             active = items.list_active_for_turn(self.turn_id)
@@ -335,8 +386,9 @@ class TurnEventProjector:
         status: ItemStatus,
         stop_reason: str,
         usage: dict[str, int] | None = None,
-    ) -> Item:
-        return self._add_item(
+    ) -> Item | None:
+        return self._guarded(
+            self._add_item,
             kind=ItemKind.COMPLETION,
             status=status,
             summary=f"Turn {stop_reason.replace('_', ' ')}",
@@ -346,13 +398,20 @@ class TurnEventProjector:
             },
         )
 
-    def add_error(self, *, code: str, message: str) -> Item:
-        return self._add_item(
+    def add_error(self, *, code: str, message: str) -> Item | None:
+        return self._guarded(
+            self._add_item,
             kind=ItemKind.ERROR,
             status=ItemStatus.FAILED,
             summary=message,
             payload={"code": code, "message": message},
         )
+
+    def add_incomplete_notice(self) -> None:
+        """Tell clients this Turn's transcript lost some of its updates."""
+
+        if self.failed_writes:
+            self.add_error(code="UPDATES_NOT_SAVED", message=_INCOMPLETE_NOTICE)
 
     @staticmethod
     def _assistant_key(message_id: str | None) -> str:
@@ -413,7 +472,7 @@ class TurnEventProjector:
         key = self._assistant_key(message_id)
         # Deliver the throttled tail as a delta first: a client that printed
         # the stream can then match the completed text instead of reprinting.
-        self._flush_assistant_stream(key)
+        self._guarded(self._flush_assistant_stream, key)
         self._assistant_texts[key] = text
         item_id = self._assistant_item_ids.get(key)
         payload = {
@@ -560,7 +619,7 @@ class TurnEventProjector:
                 message.reasoning_id,
                 effort=message.effort,
             )
-        self._flush_reasoning_stream(message.reasoning_id)
+        self._guarded(self._flush_reasoning_stream, message.reasoning_id)
         payload = ReasoningPayload(
             summary_text=message.summary_text,
             trace_text=message.trace_text,

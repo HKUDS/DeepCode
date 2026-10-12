@@ -111,6 +111,11 @@ from core.skills.models import MAX_SELECTED_SKILLS, SkillInvocation, SkillSelect
 TurnSettledListener = Callable[[Turn], None]
 ParticipantResultT = TypeVar("ParticipantResultT")
 _DURABLE_STATE_POLL_INTERVAL = 0.1
+# Waits between attempts to finish a Turn the database refused to finish.
+# Each attempt already waits out SQLite's busy timeout.
+_FINISH_RETRY_DELAYS_S = (0.5, 2.0)
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1584,15 +1589,22 @@ class TurnService:
                     turn_id=turn_id,
                 )
 
+        # From here on nothing may keep the Turn from finishing: an unfinished
+        # Turn stays running, and every later prompt on its Session waits.
         if status is TurnStatus.INTERRUPTED:
-            self._record_interruption_marker(self.read(turn_id).turn)
-
-        if projection is not None:
             try:
-                turn_usage = projection.usage or turn_usage
-                projection.close_open_items(
-                    interrupted=status is TurnStatus.INTERRUPTED
+                self._record_interruption_marker(self.read(turn_id).turn)
+            except Exception:  # noqa: BLE001 - the Turn must still finish
+                logger.exception(
+                    "could not record that turn %s was interrupted", turn_id
                 )
+
+        completion_saved = False
+        if projection is not None:
+            turn_usage = projection.usage or turn_usage
+            projection.close_open_items(interrupted=status is TurnStatus.INTERRUPTED)
+            projection.add_incomplete_notice()
+            completion_saved = (
                 projection.add_completion(
                     status=ItemStatus.COMPLETED
                     if status is TurnStatus.COMPLETED
@@ -1600,22 +1612,42 @@ class TurnService:
                     stop_reason=stop_reason,
                     usage=turn_usage,
                 )
-            except Exception as exc:  # noqa: BLE001 - still persist a terminal turn
-                status = TurnStatus.FAILED
-                stop_reason = "projection_error"
-                error_code = "EVENT_PROJECTION_ERROR"
-                error_message = f"{type(exc).__name__}: {exc}"
+                is not None
+            )
         try:
-            self._finish(
+            await self._finish_ran(
                 turn_id,
                 status=status,
                 stop_reason=stop_reason,
                 error_code=error_code,
                 error_message=error_message,
                 claim=claim,
+                # The finish writes the completion the projection could not.
+                ensure_completion=projection is not None and not completion_saved,
             )
         finally:
             self._remove_observer(turn_id)
+
+    async def _finish_ran(self, turn_id: str, **finish: Any) -> None:
+        """Finish a Turn that ran, retrying while the database refuses.
+
+        The finish is one transaction, so a refused attempt leaves nothing
+        behind, and a Turn that is already finished returns at once.
+        """
+        for delay in (*_FINISH_RETRY_DELAYS_S, None):
+            try:
+                self._finish(turn_id, **finish)
+                return
+            except sqlite3.OperationalError:
+                if delay is None:
+                    raise
+                logger.warning(
+                    "could not finish turn %s; trying again in %ss",
+                    turn_id,
+                    delay,
+                    exc_info=True,
+                )
+                await asyncio.sleep(delay)
 
     def _cancel_before_start(
         self,
@@ -1719,7 +1751,7 @@ class TurnService:
             try:
                 observer(event)
             except Exception:
-                logging.getLogger(__name__).exception(
+                logger.exception(
                     "turn event observer failed for %s",
                     turn_id,
                 )
@@ -2079,7 +2111,7 @@ class TurnService:
             try:
                 listener(turn)
             except Exception:
-                logging.getLogger(__name__).exception(
+                logger.exception(
                     "turn settled listener failed for %s",
                     turn.id,
                 )
