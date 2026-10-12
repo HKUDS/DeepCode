@@ -140,7 +140,9 @@ def setup_logging(
     directory is used.
 
     ``console_sink`` lets a headless host redirect the console channel without
-    replacing the shared stdlib/loguru bridge or duplicating its routing.
+    replacing the shared stdlib/loguru bridge or duplicating its routing. A
+    stdlib handler given here gets a formatter that writes loguru's finished
+    line as is.
     """
     global _INITIALISED, _LLM_PREVIEW_CHARS, _MCP_PREVIEW_CHARS
 
@@ -178,10 +180,13 @@ def setup_logging(
         logging.basicConfig(handlers=[_StdlibBridgeHandler()], level=0, force=True)
 
         if "console" in transports or not transports:
+            to_handler = isinstance(console_sink, logging.Handler)
+            if to_handler:
+                console_sink.setFormatter(_FinishedLine())
             sid = _loguru_logger.add(
                 console_sink if console_sink is not None else sys.stderr,
                 level=level,
-                format=_console_format,
+                format=_handler_format if to_handler else _console_format,
                 backtrace=False,
                 diagnose=False,
                 enqueue=False,
@@ -195,6 +200,9 @@ def setup_logging(
             sid = _loguru_logger.add(
                 _make_global_sink(global_dir_str),
                 level=level,
+                format=_traceback_format,
+                backtrace=False,
+                diagnose=False,
                 enqueue=True,
                 catch=True,
             )
@@ -205,6 +213,9 @@ def setup_logging(
                 _per_task_sink,
                 level=level,
                 filter=_per_task_filter,
+                format=_traceback_format,
+                backtrace=False,
+                diagnose=False,
                 enqueue=True,
                 catch=True,
             )
@@ -371,23 +382,59 @@ def _inject_context(record: dict[str, Any]) -> None:
     extra.setdefault("session_id", current_session_id())
 
 
-def _console_format(record: dict[str, Any]) -> str:
-    """Human-readable console line, with task_id when present."""
+def _console_line(record: dict[str, Any]) -> str:
     task_id = record.get("extra", {}).get("task_id")
     tag = f"[task={task_id[:8]}] " if task_id else ""
     return (
         "<green>{time:HH:mm:ss}</green> | "
         f"<level>{{level: <8}}</level> | "
         f"{tag}<cyan>{{name}}</cyan>:<cyan>{{line}}</cyan> - "
-        "<level>{message}</level>\n"
+        "<level>{message}</level>"
     )
 
 
-def _serialize_record(record: dict[str, Any]) -> dict[str, Any]:
+def _console_format(record: dict[str, Any]) -> str:
+    """Human-readable console line, with task_id when present."""
+    return _console_line(record) + "\n{exception}"
+
+
+def _handler_format(record: dict[str, Any]) -> str:
+    """The console line for a stdlib handler, which ends lines itself.
+
+    loguru puts a newline before a handler sink's traceback.
+    """
+    return _console_line(record) + "{exception}"
+
+
+def _traceback_format(record: dict[str, Any]) -> str:
+    """A file sink's message is the record's traceback alone.
+
+    The file sinks are enqueued, and loguru drops the traceback object when
+    it pickles a record for the queue. The formatted text survives: loguru
+    formats a message before it queues it.
+    """
+    return "{exception}"
+
+
+class _FinishedLine(logging.Formatter):
+    """Write loguru's finished text through a stdlib handler unchanged.
+
+    loguru hands the handler the formatted line, traceback included, and sets
+    the record's ``exc_text`` to a bare newline so the traceback is not added
+    twice. The default formatter would still append that newline, and the
+    handler adds its own terminator, leaving blank lines in the file.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        return record.getMessage().rstrip("\n")
+
+
+def _serialize_record(record: dict[str, Any], traceback: str = "") -> dict[str, Any]:
     """Build a SystemLogRecord-shaped payload from a loguru record.
 
     Pure function — never mutates ``record``. Both the global file sink
     and the per-task sink use this to keep their schemas in sync.
+    ``traceback`` is the record's exception as the sink formatted it.
     """
     extra = record.get("extra", {}) or {}
     payload: dict[str, Any] = {
@@ -413,7 +460,7 @@ def _serialize_record(record: dict[str, Any]) -> dict[str, Any]:
         payload["extra"] = extra_payload
     exc = record.get("exception")
     if exc is not None:
-        payload["exception"] = repr(exc)
+        payload["exception"] = traceback.strip() or repr(exc)
     return payload
 
 
@@ -434,7 +481,7 @@ def _make_global_sink(global_dir: str):
             ts.strftime("%Y%m%d") if ts else datetime.now(UTC).strftime("%Y%m%d")
         )
         path = Path(global_dir) / f"server-{date_segment}.jsonl"
-        payload = _serialize_record(record)
+        payload = _serialize_record(record, str(message))
         _write_jsonl(path, json.dumps(payload, ensure_ascii=False, default=str))
 
     return _sink
@@ -458,7 +505,7 @@ def _per_task_sink(message: Any) -> None:
     if task_dir is None:
         return
     path = task_dir / "logs" / "system.jsonl"
-    payload = _serialize_record(record)
+    payload = _serialize_record(record, str(message))
     _write_jsonl(path, json.dumps(payload, ensure_ascii=False, default=str))
 
 
