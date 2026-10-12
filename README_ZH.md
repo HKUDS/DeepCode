@@ -157,6 +157,20 @@ DeepCode 提供 TUI、Desktop 和 Web 三种客户端，连接同一个本地共
 
 ## 新闻
 
+**2026-10-12 · Windows 后台服务不再自行退出、`/compact` 能压缩写代码的会话，以及社区修复**
+
+- **Windows 后台服务不再自行退出。** 在 Windows 上把 DeepCode 装在虚拟环境里时，
+  后台服务刚启动就会退出。现在无论由 TUI、`deepcode service start` 还是
+  `deepcode web` 启动，都能正常运行。
+- **`/compact` 能压缩写代码的会话。** 压缩时，工具调用的参数（比如 `write_file`
+  写入的整个文件）也会计入：既用于决定保留哪些消息，也用于判断摘要是否更短。
+  写过大文件的会话不再被拒绝压缩，提示里的替换字数也准确了。（#258）
+- **社区修复。** 含 Unicode 行分隔符或换页符的行在 diff 里不再被拆开（#253）；
+  网页抓取会拒绝经 NAT64 或 IPv4 兼容 IPv6 地址访问内网（#254）；危险命令筛查
+  也能识别 `/bin/rm -rf /` 这类绝对路径写法（#255）；项目放在名为 `build` 或
+  `venv` 的目录下时，`glob` 也能找到文件（#256）。
+- **安全更新。** pypdf、PyJWT、urllib3、multidict 升级到修补版本。
+
 **2026-10-10 · 更稳的终端界面：回答只显示一次、按键不丢草稿、`/compact` 不再抢跑**
 
 - **回答只显示一次。** 回答结束时，TUI 不再把整段重新打印一遍；被中断的回答
@@ -190,6 +204,9 @@ DeepCode 提供 TUI、Desktop 和 Web 三种客户端，连接同一个本地共
 - **各平台更稳定。** 多个 DeepCode 进程共用状态数据库时不再丢失锁，另有一批
   Windows 修复。（#210、#235、#236、#237）
 
+<details>
+<summary><strong>2026 年 8 月至 9 月初的更早更新</strong></summary>
+
 **2026-09-09 · TUI、Desktop 与 Web 共用一个本地后台**
 
 - **选择你习惯的界面。** 运行 `deepcode` 启动 TUI，`deepcode desktop`
@@ -208,9 +225,6 @@ DeepCode 提供 TUI、Desktop 和 Web 三种客户端，连接同一个本地共
 
 从更新后的[快速开始](#快速开始)和[第一个编程任务教程](docs/guide/getting-started.md)
 开始使用。（[#212](https://github.com/HKUDS/DeepCode/pull/212)）
-
-<details>
-<summary><strong>2026 年 8 月至 9 月初的更早更新</strong></summary>
 
 **2026-09-06 · DeepCode v2.2.0：Session 上下文窗口上限、会留下记忆的压缩，以及完整本地化的 Desktop**
 

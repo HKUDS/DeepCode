@@ -158,6 +158,24 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
 
 ## News
 
+**2026-10-12 · The Windows service stays up, `/compact` handles coding sessions, and community fixes**
+
+- **The Windows service stays up.** On a Windows install in a virtual
+  environment, the background service no longer stops right after it starts,
+  whether the TUI, `deepcode service start`, or `deepcode web` launched it.
+- **`/compact` handles coding sessions.** Tool-call arguments, such as the file
+  a `write_file` call carries, now count when compaction picks what to keep and
+  checks that the summary is smaller. Sessions that wrote large files compact
+  instead of being refused, and the report shows the characters actually
+  replaced. (#258)
+- **Community fixes.** Diff lines that contain a Unicode line separator or a
+  form feed stay whole (#253); web fetch refuses private addresses tunnelled
+  through NAT64 or IPv4-compatible IPv6 (#254); the destructive-command screen
+  also catches absolute paths such as `/bin/rm -rf /` (#255); and `glob` finds
+  files when the project sits under a directory named `build` or `venv` (#256).
+- **Security updates.** pypdf, PyJWT, urllib3, and multidict move to patched
+  releases.
+
 **2026-10-10 · A steadier terminal UI: answers shown once, keys that keep your draft, and an orderly `/compact`**
 
 - **Answers appear once.** The TUI no longer prints an answer a second time
@@ -201,6 +219,9 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
   DeepCode processes share it, and a round of Windows fixes landed. (#210,
   #235, #236, #237)
 
+<details>
+<summary><strong>Earlier updates, August to early September 2026</strong></summary>
+
 **2026-09-09 · TUI, Desktop, and Web share one local background service**
 
 - **Choose your interface.** Run `deepcode` for the TUI, `deepcode desktop`
@@ -223,9 +244,6 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
 Start with the updated [Quick start](#quick-start) and
 [first coding task tutorial](docs/guide/getting-started.md).
 ([#212](https://github.com/HKUDS/DeepCode/pull/212))
-
-<details>
-<summary><strong>Earlier updates, August to early September 2026</strong></summary>
 
 **2026-09-06 · DeepCode v2.2.0: Session context-window caps, compaction that leaves a memory, and a fully localized Desktop**
 
