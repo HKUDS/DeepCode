@@ -27,6 +27,9 @@ from core.network.safe_http import (
         "http://[::1]/",
         "http://169.254.169.254/latest/meta-data/",
         "http://10.0.0.1/",
+        "http://[64:ff9b::127.0.0.1]/",  # NAT64-tunnelled loopback
+        "http://[64:ff9b::169.254.169.254]/",  # NAT64-tunnelled metadata
+        "http://[::127.0.0.1]/",  # deprecated IPv4-compatible form
         "https://example.com:22/",
         "https://example.com\\@127.0.0.1/",
         "https://exa mple.com/",
@@ -74,6 +77,12 @@ def test_domain_policy_is_boundary_aware_and_deny_wins() -> None:
         ("169.254.169.254", False),
         ("::ffff:127.0.0.1", False),
         ("192.0.2.1", False),
+        ("64:ff9b::127.0.0.1", False),  # NAT64 + loopback
+        ("64:ff9b::100.64.0.1", False),  # NAT64 + CGNAT
+        ("64:ff9b::808:808", True),  # NAT64 + public: DNS64 result stays usable
+        ("64:ff9b:1::8.8.8.8", False),  # RFC 8215 local-use prefix
+        ("::127.0.0.1", False),  # IPv4-compatible form
+        ("::169.254.169.254", False),
     ],
 )
 def test_public_ip_classification(address: str, expected: bool) -> None:
@@ -95,6 +104,29 @@ async def test_public_resolver_rejects_if_any_resolution_is_private(
     monkeypatch.setattr(loop, "getaddrinfo", fake_getaddrinfo)
     with pytest.raises(OSError, match="non-public"):
         await PublicResolver().resolve("example.com", 443)
+
+
+@pytest.mark.asyncio
+async def test_public_resolver_rejects_nat64_tunnelled_private_address(
+    monkeypatch,
+) -> None:
+    """DNS64/NAT64 answers must be classified by their embedded IPv4 target."""
+    loop = asyncio.get_running_loop()
+
+    async def fake_getaddrinfo(*args, **kwargs):  # type: ignore[no-untyped-def]
+        return [
+            (
+                socket.AF_INET6,
+                socket.SOCK_STREAM,
+                6,
+                "",
+                ("64:ff9b::169.254.169.254", 443, 0, 0),
+            ),
+        ]
+
+    monkeypatch.setattr(loop, "getaddrinfo", fake_getaddrinfo)
+    with pytest.raises(OSError, match="non-public"):
+        await PublicResolver().resolve("metadata.example.com", 443)
 
 
 def test_cross_origin_redirect_drops_credentials_and_custom_headers() -> None:
