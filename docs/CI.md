@@ -13,7 +13,10 @@ runs cover 3.12–3.14. Desktop pushes and PRs run the quality gates; the four
 platform bundles build weekly and on demand (`workflow_dispatch`). The
 dependency and license audit consults live advisory databases, so it also runs
 weekly and on demand rather than on every push; a failure opens or updates the
-issue "Dependency audit failed on main" instead of marking the push red.
+issue "Dependency audit failed on main" instead of marking the push red. It
+audits only what ships to users (the installed package, the App Server
+environment, Desktop production npm packages, and Rust crates), not build or
+test tools.
 
 The classification lives in `scripts/ci_scope.py`, used through
 `.github/actions/ci-scope`. Runtime test jobs keep their existing check names
@@ -65,7 +68,7 @@ uv pip compile scripts/ci/requirements.in --python-version 3.12 --universal --no
 
 Add `--upgrade` when deliberately refreshing all compatible dependency pins.
 Run tests and the security checks after refreshing. The security workflow audits
-the CI lock as well as the packaged runtime. Package installation and the live
+the packaged runtime, not the CI-only tools. Package installation and the live
 package dependency audit still resolve supported dependency ranges, so the fixed
 test baseline does not replace installation compatibility checks.
 

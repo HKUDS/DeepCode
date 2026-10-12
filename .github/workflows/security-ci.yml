@@ -42,6 +42,8 @@ jobs:
     # Advisory databases change on their own schedule. Running this on every
     # push turned main red for upstream advisories unrelated to the change,
     # so it runs weekly and on demand and reports through an issue instead.
+    # It audits what ships to users. Build and test tools (npm dev
+    # dependencies, the CI lock's test tooling) never reach a user.
     name: Dependency and license audit
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
@@ -85,7 +87,7 @@ jobs:
         working-directory: desktop
         run: |
           npm ci
-          npm audit --audit-level=high
+          npm audit --omit=dev --audit-level=high
           mkdir -p build/security
           npm sbom --sbom-format cyclonedx > build/security/node-sbom.json
 
@@ -101,11 +103,6 @@ jobs:
             --python desktop/build/python-audit-env/bin/python \
             --output desktop/build/security/python-sbom.json
           rm -rf desktop/build/python-audit-env
-
-      - name: Audit pinned CI dependencies
-        run: >-
-          python -m pip_audit --requirement scripts/ci/requirements.lock
-          --no-deps --disable-pip
 
       - name: Audit locked App Server environment
         working-directory: desktop
