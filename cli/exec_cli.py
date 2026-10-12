@@ -73,7 +73,8 @@ def _emit_human(event, transcript_mode: TranscriptMode) -> None:
                 print("    provider reasoning details", flush=True)
             print(f"    {msg.trace_text}", flush=True)
     elif event_type == "error":
-        print(f"! error: {msg.message}", file=sys.stderr, flush=True)
+        label = "warning" if msg.warning else "error"
+        print(f"! {label}: {msg.message}", file=sys.stderr, flush=True)
     elif event_type == "task_complete":
         print(f"· done ({msg.stop_reason})", flush=True)
 

@@ -398,6 +398,9 @@ def summarize_result(result: Any, limit: int = 400) -> str:
 class ErrorEvent:
     message: str
     type: str = field(default="error", init=False)
+    # A warning reports a problem the Turn survived, such as updates the
+    # service could not save; it never stands for the Turn's own failure.
+    warning: bool = False
 
 
 @dataclass(frozen=True)

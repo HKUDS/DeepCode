@@ -10,6 +10,11 @@ function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+/** An error item for a problem the Turn survived, not for its failure. */
+export function isWarning(item: Item): boolean {
+  return item.kind === "error" && item.payload.severity === "warning";
+}
+
 export function presentItem(item: Item): ItemPresentation {
   const text = stringValue(item.payload.text);
   const result = stringValue(item.payload.resultPreview);
@@ -52,6 +57,8 @@ export function presentItem(item: Item): ItemPresentation {
     case "workflow_stage":
       return { stage: "Workflow", label: "Workflow stage", body: item.summary };
     case "error":
+      if (isWarning(item))
+        return { stage: "Warning", label: "Warning", body: text ?? item.summary };
       return { stage: "Error", label: "Execution error", body: text ?? item.summary };
     case "completion":
       return { stage: "Complete", label: "Turn complete", body: item.summary };

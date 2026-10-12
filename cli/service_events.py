@@ -250,7 +250,11 @@ class ServiceEventRenderer:
                     )
                 ]
         if kind == "error":
+            message = data.get("message") or item["summary"]
+            if data.get("severity") == "warning":
+                # Not the Turn's failure: its reason must still be shown.
+                return [ErrorEvent(message, warning=True)]
             if event.turn_id is not None:
                 self._turns_with_error_items.add(event.turn_id)
-            return [ErrorEvent(data.get("message") or item["summary"])]
+            return [ErrorEvent(message)]
         return []

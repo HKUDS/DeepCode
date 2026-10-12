@@ -39,6 +39,24 @@ function item(
   };
 }
 
+function renderTurn(items: Item[]) {
+  const [group] = buildConversationTurns([turn], items);
+  return render(
+    <TurnBlock
+      group={group}
+      approvalsByItem={new Map()}
+      selectedItemId={null}
+      transcriptMode="normal"
+      busy={false}
+      onSelectItem={vi.fn()}
+      onOpenInspector={vi.fn()}
+      onRespondToApproval={vi.fn()}
+      onRetryTurn={vi.fn()}
+      onCancelQueuedTurn={vi.fn()}
+    />,
+  );
+}
+
 describe("TurnBlock", () => {
   afterEach(cleanup);
 
@@ -64,22 +82,7 @@ describe("TurnBlock", () => {
         stopReason: "completed",
       }),
     ];
-    const [group] = buildConversationTurns([turn], items);
-
-    render(
-      <TurnBlock
-        group={group}
-        approvalsByItem={new Map()}
-        selectedItemId={null}
-        transcriptMode="normal"
-        busy={false}
-        onSelectItem={vi.fn()}
-        onOpenInspector={vi.fn()}
-        onRespondToApproval={vi.fn()}
-        onRetryTurn={vi.fn()}
-        onCancelQueuedTurn={vi.fn()}
-      />,
-    );
+    renderTurn(items);
 
     const commentary = screen.getByText("Progress note");
     const activity = screen.getByText("deepcode.toml");
@@ -92,5 +95,30 @@ describe("TurnBlock", () => {
       activity.compareDocumentPosition(finalAnswer) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+
+  it("shows unsaved updates as a warning, not as a failed step", () => {
+    const notice = "Some updates in this turn could not be saved.";
+    const { container } = renderTurn([
+      item("user", 1, "user_message", turn.prompt, { text: turn.prompt }),
+      item("final", 2, "assistant_message", "Repair complete", {
+        text: "Repair complete",
+        phase: "final_answer",
+      }),
+      item("notice", 3, "error", notice, {
+        code: "UPDATES_NOT_SAVED",
+        message: notice,
+        severity: "warning",
+      }),
+      item("completion", 4, "completion", "Turn complete", {
+        stopReason: "completed",
+      }),
+    ]);
+
+    const row = container.querySelector('[data-warning="true"]');
+    expect(row?.textContent).toContain(notice);
+    expect(row?.textContent).toContain("Warning");
+    expect(screen.queryByText("Execution error")).toBeNull();
+    expect(row?.textContent).not.toMatch(/completed|failed/);
   });
 });

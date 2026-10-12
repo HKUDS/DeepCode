@@ -137,6 +137,9 @@ def test_a_failed_text_write_keeps_the_turn_and_its_answer(tmp_path, monkeypatch
         ]
         notices = [i for i in snapshot.items if i.kind is ItemKind.ERROR]
         assert len(notices) == 1 and "may be incomplete" in notices[0].summary
+        # A warning: the Turn it belongs to succeeded.
+        assert notices[0].status is ItemStatus.COMPLETED
+        assert notices[0].payload["severity"] == "warning"
         assert _last_assistant_message(application, thread_id) == "Hello world"
         _assert_next_turn_runs(application, thread_id)
     finally:

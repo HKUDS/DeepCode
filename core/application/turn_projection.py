@@ -408,10 +408,23 @@ class TurnEventProjector:
         )
 
     def add_incomplete_notice(self) -> None:
-        """Tell clients this Turn's transcript lost some of its updates."""
+        """Tell clients this Turn's transcript lost some of its updates.
+
+        A warning, not an error: the Turn itself may well have succeeded.
+        """
 
         if self.failed_writes:
-            self.add_error(code="UPDATES_NOT_SAVED", message=_INCOMPLETE_NOTICE)
+            self._guarded(
+                self._add_item,
+                kind=ItemKind.ERROR,
+                status=ItemStatus.COMPLETED,
+                summary=_INCOMPLETE_NOTICE,
+                payload={
+                    "code": "UPDATES_NOT_SAVED",
+                    "message": _INCOMPLETE_NOTICE,
+                    "severity": "warning",
+                },
+            )
 
     @staticmethod
     def _assistant_key(message_id: str | None) -> str:

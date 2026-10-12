@@ -18,7 +18,8 @@ from cli.service_thread_client import ServiceThreadClient
 from core.application.errors import ApplicationError
 from core.domain.approval import ApprovalStatus
 from core.domain.event import DomainEvent
-from core.events import AgentMessageDelta, ErrorEvent, TaskComplete
+from cli.tui.renderer import EventRenderer
+from core.events import AgentMessageDelta, ErrorEvent, Event, TaskComplete
 
 THREAD = "thread-1"
 TURN = "turn_" + "a" * 26
@@ -337,6 +338,60 @@ def test_failed_turn_reason_is_not_repeated_after_an_error_item() -> None:
     ]
 
     assert len(failed) == 1 and isinstance(failed[0], TaskComplete)
+
+
+
+def test_a_warning_item_reads_as_a_warning_and_never_hides_the_failure() -> None:
+    # A failed Turn whose error item could not be saved carries only the
+    # warning that some updates were lost; its reason must still be shown.
+    renderer = ServiceEventRenderer()
+    renderer.convert(_domain(1, "turn.started", {"turn": {"status": "running"}}))
+    notice = "Some updates in this turn could not be saved."
+    warning = [
+        event.msg
+        for event in renderer.convert(
+            _domain(
+                2,
+                "item.created",
+                {
+                    "item": {
+                        "id": ITEM,
+                        "kind": "error",
+                        "status": "completed",
+                        "summary": notice,
+                        "payload": {
+                            "code": "UPDATES_NOT_SAVED",
+                            "message": notice,
+                            "severity": "warning",
+                        },
+                    }
+                },
+                item_id=ITEM,
+            )
+        )
+    ]
+    failed = [
+        event.msg
+        for event in renderer.convert(
+            _domain(
+                3,
+                "turn.failed",
+                {"turn": {"status": "failed", "errorMessage": "connection reset"}},
+            )
+        )
+    ]
+
+    assert [type(message) for message in failed] == [ErrorEvent, TaskComplete]
+    assert failed[0].message == "connection reset" and not failed[0].warning
+    assert [message.warning for message in warning] == [True]
+
+    output = io.StringIO()
+    screen = EventRenderer(Console(file=output, color_system=None, width=100))
+    for message in (*warning, failed[0]):
+        screen.on_event(Event("e", message))
+    lines = output.getvalue().splitlines()
+    assert f"warning: {notice}" in lines
+    assert "error: connection reset" in lines
 
 
 def test_interrupted_tool_reads_as_interrupted() -> None:

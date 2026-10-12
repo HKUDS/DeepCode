@@ -27,7 +27,7 @@ import type {
 } from "../../generated/app-server";
 import type { DesktopInspectorTab } from "../../app/useDesktopUi";
 import { ApprovalCard } from "../execution/ApprovalCard";
-import { presentItem } from "../execution/itemPresentation";
+import { isWarning, presentItem } from "../execution/itemPresentation";
 import {
   formatTurnDuration,
   turnDurationSeconds,
@@ -266,20 +266,27 @@ function ActivityItem({
 
   const presentation = presentItem(item);
   const activity = itemActivity(item);
+  const warning = isWarning(item);
   const body = presentation.body;
   const hasBody = Boolean(body && body.trim() && body.trim() !== item.summary.trim());
   const heading = (
     <>
-      <ActivityIcon kind={item.kind} activityKind={activity?.kind} />
+      {warning ? (
+        <AlertTriangle size={14} strokeWidth={1.8} />
+      ) : (
+        <ActivityIcon kind={item.kind} activityKind={activity?.kind} />
+      )}
       <span className={styles.runStepCopy}>
         <strong>
           {activity?.subject ?? (item.summary || presentation.label)}
         </strong>
         <small>{activity?.label ?? presentation.label}</small>
       </span>
-      <span className={styles.runStepStatus}>
-        {item.status.replaceAll("_", " ")}
-      </span>
+      {warning ? null : (
+        <span className={styles.runStepStatus}>
+          {item.status.replaceAll("_", " ")}
+        </span>
+      )}
       {hasBody ? <ChevronRight className={styles.runStepChevron} size={14} /> : null}
     </>
   );
@@ -290,6 +297,7 @@ function ActivityItem({
         className={styles.runStep}
         data-active={active}
         data-status={item.status}
+        data-warning={warning || undefined}
       >
         {heading}
       </div>
@@ -302,6 +310,7 @@ function ActivityItem({
       className={styles.runStep}
       data-active={active}
       data-status={item.status}
+      data-warning={warning || undefined}
       open={
         item.status === "in_progress" ||
         active ||

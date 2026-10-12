@@ -265,6 +265,14 @@ div.runStep {
   background: var(--danger);
 }
 
+.runStep[data-warning="true"] {
+  color: var(--attention);
+}
+
+.runStep[data-warning="true"]::before {
+  background: var(--attention);
+}
+
 .runStepCopy {
   display: grid;
   min-width: 0;

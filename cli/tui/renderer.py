@@ -906,6 +906,9 @@ class EventRenderer:
             return
         # The message is content: an error containing "[/]" used to CRASH
         # the markup parser here.
+        if msg.warning:
+            self.console.print(f"[{theme.WARNING}]warning:[/] {escape(msg.message)}")
+            return
         self.console.print(f"[{theme.ERROR_STYLE}]error:[/] {escape(msg.message)}")
 
     def _turn_footer(self) -> str:
