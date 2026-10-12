@@ -157,8 +157,12 @@ DeepCode 提供 TUI、Desktop 和 Web 三种客户端，连接同一个本地共
 
 ## 新闻
 
-**2026-10-12 · Windows 后台服务不再自行退出、`/compact` 能压缩写代码的会话，以及社区修复**
+**2026-10-12 · TUI 边输出边渲染 Markdown、Windows 后台服务不再自行退出、`/compact` 能压缩写代码的会话，以及社区修复**
 
+- **回答边输出边渲染成 Markdown。** 标题、列表、粗体和表格在每行写完时排好；
+  代码块不缩进，DeepCode 也不会给它折行；链接显示完整地址；还没写完的那一行
+  先在状态行上方预览。`/raw` 按原文输出，方便复制。推理卡片现在显示在回答之前，
+  回答途中按 `Ctrl+O` 也不会再重复或丢行。参见[终端界面指南](docs/guide/the-tui.md)。
 - **Windows 后台服务不再自行退出。** 在 Windows 上把 DeepCode 装在虚拟环境里时，
   后台服务刚启动就会退出。现在无论由 TUI、`deepcode service start` 还是
   `deepcode web` 启动，都能正常运行。

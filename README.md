@@ -158,8 +158,15 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
 
 ## News
 
-**2026-10-12 · The Windows service stays up, `/compact` handles coding sessions, and community fixes**
+**2026-10-12 · Markdown answers in the TUI, a Windows service that stays up, `/compact` for coding sessions, and community fixes**
 
+- **Answers render as Markdown while they stream.** Headings, lists, bold
+  text and tables are formatted as each line completes; code blocks are not
+  indented or wrapped by DeepCode, links show their address, and the line
+  still being written is previewed above the status line. `/raw` prints
+  answers exactly as written, for copying. The reasoning card now comes
+  before the answer, and `Ctrl+O` mid-answer no longer repeats or drops
+  lines. See [The terminal UI](docs/guide/the-tui.md).
 - **The Windows service stays up.** On a Windows install in a virtual
   environment, the background service no longer stops right after it starts,
   whether the TUI, `deepcode service start`, or `deepcode web` launched it.
