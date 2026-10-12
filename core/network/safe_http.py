@@ -143,8 +143,8 @@ def is_public_ip(value: str | ipaddress.IPv4Address | ipaddress.IPv6Address) -> 
             # NAT64 (RFC 6052 /96 layout) and the deprecated IPv4-compatible
             # form both tunnel an IPv4 target, so ``64:ff9b::127.0.0.1`` and
             # ``::127.0.0.1`` would otherwise pass as global. Classify the
-            # embedded address instead (CVE-2026-85740 bypass class). The
-            # address used for connecting is unchanged.
+            # embedded address instead. The address used for connecting is
+            # unchanged.
             address = ipaddress.IPv4Address(int(address) & 0xFFFFFFFF)
     return address.is_global
 
