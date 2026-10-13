@@ -21,6 +21,7 @@ from core.agent_runtime.goal_runtime import (
 )
 from core.application.agent_adapter import (
     AgentSessionFactory,
+    AgentSessionPort,
     DefaultAgentSessionFactory,
 )
 from core.application.approval_service import ApprovalService
@@ -1367,7 +1368,7 @@ class TurnService:
         error_code: str | None = "PROTOCOL_INCOMPLETE"
         error_message: str | None = "agent stream ended without task_complete"
         turn_usage: dict[str, int] = {}
-        save_history: Callable[[], None] | None = None
+        session: AgentSessionPort | None = None
         history_saved = False
         try:
             turn, workspace, execution_profile = self._mark_running(
@@ -1396,19 +1397,6 @@ class TurnService:
                     reason=reason,
                 )
 
-            session = await self.session_runtimes.acquire(
-                turn.thread_id,
-                workspace=workspace,
-                model=execution_profile.model_id,
-                execution_profile=execution_profile,
-                execution_security_profile=turn.execution_security_profile,
-                permission_mode_override=turn.execution_permission_mode,
-                approval_callback=approve,
-            )
-            self.session_runtimes.prepare_inputs(
-                turn.thread_id,
-                turn_id=turn.id,
-            )
             skill_invocations: dict[str, SkillInvocation] = {}
             stored_user = False
             inputs_active = False
@@ -1441,10 +1429,10 @@ class TurnService:
             )
             turn_client = _client_surface_value(initial_input_metadata.get("client"))
 
-            def save_history() -> None:
+            def save_history(history: object) -> None:
                 self.session_runtimes.persist_kernel_history(
                     turn.thread_id,
-                    getattr(session, "history", ()),
+                    history,
                     extra_metadata={
                         "schemaVersion": 3,
                         "client": turn_client,
@@ -1467,6 +1455,27 @@ class TurnService:
                     },
                 )
 
+            def record_history(history: list[dict[str, Any]]) -> None:
+                # The Turn is written as the model's history grows, in its
+                # order; nothing of it ahead of its prompt, which TurnStarted
+                # writes (whatever comes before that is written right after).
+                if stored_user:
+                    save_history(history)
+
+            session = await self.session_runtimes.acquire(
+                turn.thread_id,
+                workspace=workspace,
+                model=execution_profile.model_id,
+                execution_profile=execution_profile,
+                execution_security_profile=turn.execution_security_profile,
+                permission_mode_override=turn.execution_permission_mode,
+                approval_callback=approve,
+                history_recorder=record_history,
+            )
+            self.session_runtimes.prepare_inputs(
+                turn.thread_id,
+                turn_id=turn.id,
+            )
             async for event in session.run_stream(
                 UserInput(
                     text=turn.prompt,
@@ -1530,15 +1539,16 @@ class TurnService:
             raw_usage = getattr(session, "last_usage", {})
             if not projection.usage:
                 turn_usage = normalize_usage(raw_usage)
-            save_history()
+            # Normally all written already, as it happened.
+            save_history(getattr(session, "history", ()))
             if projection.saw_terminal:
                 if projection.final_text:
                     canonical = self.session_store.get_session(turn.thread_id)
-                    already_stored = (
-                        canonical is not None
-                        and canonical.messages
-                        and canonical.messages[-1].role == "assistant"
-                        and canonical.messages[-1].content == projection.final_text
+                    already_stored = canonical is not None and any(
+                        message.role == "assistant"
+                        and message.content == projection.final_text
+                        and (message.metadata or {}).get("turnId") == turn.id
+                        for message in canonical.messages
                     )
                     continuation_metadata = assistant_continuation_metadata(
                         getattr(session, "history", ())
@@ -1604,13 +1614,13 @@ class TurnService:
             if projection is not None:
                 projection.add_error(code=error_code, message=error_message)
         finally:
-            if save_history is not None and not history_saved:
+            if session is not None and not history_saved:
                 # The Turn stopped before it had saved what the model saw of
                 # it. Save that now, under this Turn, and have the next Turn
                 # start from the session file: anything the agent still holds
                 # from this one would otherwise be saved as the next one's.
                 try:
-                    save_history()
+                    save_history(getattr(session, "history", ()))
                 except Exception:  # noqa: BLE001 - the Turn must still finish
                     logger.exception("could not save what turn %s did", turn_id)
                 self.session_runtimes.mark_stale(turn.thread_id)

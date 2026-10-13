@@ -114,6 +114,7 @@ class _Factory:
         approval_callback,
         injection_callback=None,
         context_note_sink=None,
+        history_sink=None,
     ) -> AgentSession:
         tools = ToolRegistry()
         tools.register(self.wait)
@@ -126,6 +127,7 @@ class _Factory:
             approval_callback=approval_callback,
             injection_callback=injection_callback,
             context_note_sink=context_note_sink,
+            history_sink=history_sink,
             closure_callback=self.closure_callback,
             streaming=True,
         )
@@ -337,7 +339,7 @@ class _ReplyWrites:
         monkeypatch.setattr(store, "append_message", append_message)
 
 
-def test_a_turn_that_fails_while_saving_keeps_its_records(
+def test_a_record_that_could_not_be_written_is_written_with_the_next(
     tmp_path: Path, monkeypatch
 ) -> None:
     application, thread_id, factory = _application(
@@ -350,8 +352,10 @@ def test_a_turn_that_fails_while_saving_keeps_its_records(
     writes = _ReplyWrites(application, monkeypatch)
     writes.failures_left = 1
     try:
+        # Writing the call fails once; the Turn goes on, and the next write
+        # puts it on record, in its place and under its Turn.
         first = application.turns.start(thread_id, prompt="first")
-        _wait_for(application, first.turn.id, TurnStatus.FAILED)
+        _wait_for(application, first.turn.id, TurnStatus.COMPLETED)
         second = application.turns.start(thread_id, prompt="second")
         _wait_for(application, second.turn.id, TurnStatus.COMPLETED)
 

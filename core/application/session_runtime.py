@@ -10,6 +10,7 @@ import re
 import threading
 import uuid
 from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -75,6 +76,18 @@ class ApprovalRouter:
         return bool(result)
 
 
+class HistoryRouter:
+    """Keep a stable AgentSession history sink while Turns provide the recorder."""
+
+    def __init__(self) -> None:
+        self.current: Callable[[list[dict[str, Any]]], None] | None = None
+
+    def __call__(self, history: list[dict[str, Any]]) -> None:
+        recorder = self.current
+        if recorder is not None:
+            recorder(history)
+
+
 @dataclass(slots=True)
 class LiveSessionRuntime:
     session_id: str
@@ -85,6 +98,7 @@ class LiveSessionRuntime:
     permission_mode_override: ExecutionPermissionMode | None
     agent: AgentSessionPort
     approvals: ApprovalRouter
+    history: HistoryRouter
     canonical_message_count: int
     runtime_key: object
     inputs: TurnInputMailbox
@@ -150,7 +164,13 @@ class SessionRuntimeRegistry:
         execution_security_profile: ExecutionSecurityProfile | None = None,
         permission_mode_override: ExecutionPermissionMode | None = None,
         approval_callback: ApprovalCallback,
+        history_recorder: Callable[[list[dict[str, Any]]], None] | None = None,
     ) -> AgentSessionPort:
+        """Take the Session's agent for one Turn.
+
+        ``history_recorder`` receives the model history as the agent reports
+        it, for the Turn to record as it happens.
+        """
         await self._wait_for_compaction(session_id)
         canonical = self.store.get_session(session_id)
         if canonical is None:
@@ -214,6 +234,7 @@ class SessionRuntimeRegistry:
             )
         runtime.run_lease = run_lease
         runtime.approvals.current = approval_callback
+        runtime.history.current = history_recorder
         runtime.active = True
         self._runtimes[session_id] = runtime
         await self._evict_idle()
@@ -270,6 +291,7 @@ class SessionRuntimeRegistry:
         if runtime is None:
             return
         runtime.approvals.current = None
+        runtime.history.current = None
         runtime.active = False
         if runtime.run_lease is not None:
             runtime.run_lease.close()
@@ -465,6 +487,7 @@ class SessionRuntimeRegistry:
         agent_preset: AgentPresetSnapshot | None = None,
     ) -> LiveSessionRuntime:
         approvals = ApprovalRouter()
+        history = HistoryRouter()
         inputs = self._mailbox(canonical.session_id)
         goals = self._goal_runtime(canonical.session_id)
         create = self.factory.create
@@ -488,6 +511,8 @@ class SessionRuntimeRegistry:
             create_kwargs["active_turn_id_provider"] = lambda: inputs.active_turn_id
         if _accepts_keyword(create, "runtime_input_sink"):
             create_kwargs["runtime_input_sink"] = inputs.put_transient
+        if _accepts_keyword(create, "history_sink"):
+            create_kwargs["history_sink"] = history
         if _accepts_keyword(create, "subagent_transcript_sink"):
             # The child-autopsy channel: every sub-agent turn dumps its full
             # conversation under the parent Session's own directory, where
@@ -523,6 +548,7 @@ class SessionRuntimeRegistry:
             permission_mode_override=permission_mode_override,
             agent=agent,
             approvals=approvals,
+            history=history,
             canonical_message_count=len(canonical.messages),
             runtime_key=runtime_key,
             inputs=inputs,
@@ -718,8 +744,10 @@ class SessionRuntimeRegistry:
             already_in_history: bool = True,
             message_id: str | None = None,
         ) -> None:
-            text = str(content or "").strip()
-            if not text:
+            # Kept exactly as the model reads it, or the record would not be
+            # recognized as this message and would be written a second time.
+            text = str(content or "")
+            if not text.strip():
                 return
             metadata: dict[str, Any] = {
                 "schemaVersion": 3,
@@ -799,6 +827,7 @@ def _accepts_keyword(callable_object, name: str) -> bool:
 
 __all__ = [
     "ApprovalRouter",
+    "HistoryRouter",
     "LiveSessionRuntime",
     "SessionRuntimeRegistry",
 ]
