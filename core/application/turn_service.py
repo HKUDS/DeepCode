@@ -113,9 +113,10 @@ from core.skills.models import MAX_SELECTED_SKILLS, SkillInvocation, SkillSelect
 TurnSettledListener = Callable[[Turn], None]
 ParticipantResultT = TypeVar("ParticipantResultT")
 _DURABLE_STATE_POLL_INTERVAL = 0.1
-# Waits between attempts to finish a Turn the database refused to finish.
-# Each attempt already waits out SQLite's busy timeout.
-_FINISH_RETRY_DELAYS_S = (0.5, 2.0)
+# Waits between attempts to finish a Turn the database refused to finish;
+# the last one repeats until it lands. Each attempt already waits out
+# SQLite's busy timeout.
+_FINISH_RETRY_DELAYS_S = (0.5, 2.0, 10.0)
 
 logger = logging.getLogger(__name__)
 
@@ -1666,15 +1667,19 @@ class TurnService:
         """Finish a Turn that ran, retrying while the database refuses.
 
         The finish is one transaction, so a refused attempt leaves nothing
-        behind, and a Turn that is already finished returns at once.
+        behind, and a Turn that is already finished returns at once. It does
+        not give up: nothing else finishes a Turn whose process is alive, so
+        one left running would hold its Session, and the execution claim the
+        heartbeat keeps renewing, until the service restarted.
         """
-        for delay in (*_FINISH_RETRY_DELAYS_S, None):
+        delays = iter(_FINISH_RETRY_DELAYS_S)
+        delay = 0.0
+        while True:
             try:
                 self._finish(turn_id, **finish)
                 return
             except sqlite3.OperationalError:
-                if delay is None:
-                    raise
+                delay = next(delays, delay)
                 logger.warning(
                     "could not finish turn %s; trying again in %ss",
                     turn_id,

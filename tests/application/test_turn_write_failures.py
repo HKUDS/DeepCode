@@ -208,3 +208,27 @@ def test_finishing_a_turn_retries_a_locked_database(tmp_path, monkeypatch):
         _assert_next_turn_runs(application, thread_id)
     finally:
         application.close()
+
+
+def test_a_turn_finishes_once_the_database_takes_the_write_again(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        turn_service_module, "_FINISH_RETRY_DELAYS_S", (0.01,), raising=False
+    )
+    application, thread_id = _application(tmp_path, _answer, _answer)
+    finish = application.turns._finish
+    refused = []
+
+    def finish_after_a_while(turn_id, **kwargs):
+        # The database keeps refusing for a while, not for a set number of tries.
+        if len(refused) < 20:
+            refused.append(turn_id)
+            _locked()
+        return finish(turn_id, **kwargs)
+
+    monkeypatch.setattr(application.turns, "_finish", finish_after_a_while)
+    try:
+        started = application.turns.start(thread_id, prompt="Say hello")
+        _wait_for(application, started.turn.id, TurnStatus.COMPLETED)
+        _assert_next_turn_runs(application, thread_id)
+    finally:
+        application.close()
