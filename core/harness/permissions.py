@@ -110,6 +110,10 @@ _SENSITIVE_HOME_PATHS: tuple[str, ...] = (
     ".pypirc",
     ".git-credentials",
 )
+# What in ~/.ssh is not secret and lets ssh reach a host through an agent
+# (SSH_AUTH_SOCK): its config, the host keys it trusts and public keys. Every
+# other file there, private keys whatever their name, stays out of reach.
+_SSH_PUBLIC_FILES = ("config", "config.d/*", "known_hosts*", "*.pub")
 
 # Argument keys inspected to find the "path" a tool touches.
 _PATH_ARG_KEYS = ("file_path", "path", "root", "workspace_path", "target", "filename")
@@ -205,6 +209,13 @@ def sensitive_locations() -> tuple[str, ...]:
         str(deepcode / "credentials.json"),
         str(deepcode / "deepcode_config.json"),
     )
+
+
+def public_files_in_sensitive_locations() -> tuple[str, ...]:
+    """Glob patterns for files in :func:`sensitive_locations` that a sandboxed
+    command may still read (never write)."""
+    ssh = Path.home() / ".ssh"
+    return tuple(str(ssh / name) for name in _SSH_PUBLIC_FILES)
 
 
 _SHELL_TOOL_NAMES = ("bash", "exec", "execute_bash", "execute_commands")

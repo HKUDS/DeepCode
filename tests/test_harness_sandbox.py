@@ -201,6 +201,70 @@ def test_policy_for_workspace_keeps_credential_stores_unreadable(tmp_path):
     assert str(deepcode_home() / "credentials.json") in unreadable
 
 
+def test_policy_for_workspace_leaves_public_ssh_files_readable(tmp_path):
+    readable = SandboxPolicy.for_workspace(tmp_path).readable
+    ssh = Path.home() / ".ssh"
+
+    assert {str(ssh / "config"), str(ssh / "known_hosts*"), str(ssh / "*.pub")} <= set(
+        readable
+    )
+    assert not any("id_" in pattern for pattern in readable)
+
+
+def _ssh_store(home: Path) -> SandboxPolicy:
+    ssh = home / ".ssh"
+    (ssh / "config.d").mkdir(parents=True)
+    (ssh / "id_ed25519").write_text("FAKE-PRIVATE-KEY")
+    (ssh / "github").write_text("FAKE-OTHER-KEY")
+    (ssh / "id_ed25519.pub").write_text("ssh-ed25519 PUBLIC")
+    (ssh / "known_hosts").write_text("host ssh-ed25519 HOSTKEY")
+    (ssh / "config").write_text("Host x\n")
+    (ssh / "config.d" / "work").write_text("Host y\n")
+    return SandboxPolicy(
+        writable_roots=(str(home),),
+        unreadable=(str(ssh),),
+        readable=tuple(
+            str(ssh / name)
+            for name in ("config", "config.d/*", "known_hosts*", "*.pub")
+        ),
+    )
+
+
+@pytest.mark.skipif(not _seatbelt, reason="seatbelt sandbox not available")
+def test_seatbelt_lets_ssh_read_only_its_public_files(tmp_path):
+    # ssh through an agent needs its config, known hosts and public keys;
+    # every private key, whatever its name, stays out of reach.
+    home = tmp_path / "home"
+    policy = _ssh_store(home)
+
+    for public in ("config", "config.d/work", "known_hosts", "id_ed25519.pub"):
+        proc = _run(f"cat .ssh/{public}", policy, cwd=home)
+        assert proc.returncode == 0, (public, proc.stderr)
+    for secret in ("id_ed25519", "github", "ID_ED25519"):
+        proc = _run(f"cat .ssh/{secret}", policy, cwd=home)
+        assert proc.returncode != 0 and "FAKE" not in proc.stdout, secret
+    # Nothing in the store becomes writable either.
+    assert _run("echo x >> .ssh/known_hosts", policy, cwd=home).returncode != 0
+    assert _run("echo x > .ssh/new.pub", policy, cwd=home).returncode != 0
+
+
+def test_bwrap_shows_only_public_ssh_files(monkeypatch, tmp_path):
+    monkeypatch.setattr("core.harness.sandbox.sandbox_backend", lambda: "bwrap")
+    home = tmp_path / "home"
+    policy = _ssh_store(home)
+    ssh = home / ".ssh"
+
+    joined = "\0".join(wrap_shell_command("true", policy).argv)
+
+    # The store is hidden, then each public file is mounted back read-only.
+    hidden = joined.index("\0".join(["--tmpfs", str(ssh)]))
+    for public in ("config", "config.d/work", "known_hosts", "id_ed25519.pub"):
+        path = str(ssh / public)
+        assert joined.index("\0".join(["--ro-bind", path, path])) > hidden
+    assert str(ssh / "id_ed25519") + "\0" not in joined + "\0"
+    assert str(ssh / "github") not in joined
+
+
 @pytest.mark.skipif(not _seatbelt, reason="seatbelt sandbox not available")
 def test_seatbelt_denies_credential_locations(tmp_path):
     # A stand-in home: the policy names its own locations, so no real

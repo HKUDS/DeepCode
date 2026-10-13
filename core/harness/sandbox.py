@@ -39,13 +39,17 @@ bwrap backends; the Windows Job Object backend does not gate the network
 
 from __future__ import annotations
 
+import glob
 import os
 import platform
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from core.harness.permissions import sensitive_locations
+from core.harness.permissions import (
+    public_files_in_sensitive_locations,
+    sensitive_locations,
+)
 from core.platform_compat import script_command
 
 # Absolute path — never resolved via PATH (PATH-injection defense).
@@ -64,11 +68,13 @@ class SandboxPolicy:
     everything else on disk is read-only. Reads are unrestricted (agents
     routinely need to read system headers, site-packages, etc.) except for
     ``unreadable``: credential stores the command may neither read nor write.
+    ``readable`` names files inside them (glob patterns) it may still read.
     """
 
     writable_roots: tuple[str, ...] = ()
     allow_network: bool = False
     unreadable: tuple[str, ...] = ()
+    readable: tuple[str, ...] = ()
 
     @classmethod
     def for_workspace(
@@ -79,6 +85,7 @@ class SandboxPolicy:
             writable_roots=(root,),
             allow_network=allow_network,
             unreadable=sensitive_locations(),
+            readable=public_files_in_sensitive_locations(),
         )
 
     def normalized_roots(self) -> list[str]:
@@ -279,6 +286,35 @@ def _sbpl_string(path: str) -> str:
     return '"' + path.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def _sbpl_regex(directory: str, name_glob: str) -> str:
+    """A seatbelt regex for ``name_glob`` (``*`` only) inside ``directory``.
+
+    Each character that is not plainly literal goes in a bracket: seatbelt's
+    regex dialect rejects some backslash escapes (``\\-``).
+    """
+
+    def literal(text: str) -> str:
+        return "".join(
+            ch
+            if ch.isalnum() or ch in "/_-~ ,:@%="
+            else {"^": "\\^", "]": "[]]", "\\": "[\\]"}.get(ch, f"[{ch}]")
+            for ch in text
+        )
+
+    pattern = "[^/]*".join(literal(part) for part in name_glob.split("*"))
+    return f"^{literal(directory)}/{pattern}$"
+
+
+def _public_in(store: str, readable) -> list[str]:
+    """The ``readable`` patterns inside ``store``, relative to it."""
+    prefix = os.path.abspath(store) + os.sep
+    return [
+        pattern[len(prefix) :]
+        for pattern in map(os.path.abspath, readable)
+        if pattern.startswith(prefix)
+    ]
+
+
 def _as_resolved(paths) -> list[str]:
     """Each path as given and resolved. Seatbelt matches the resolved path (in
     the filesystem's case), so naming where a path really is also covers it
@@ -332,12 +368,27 @@ def _seatbelt_profile(policy: SandboxPolicy) -> str:
         parts[-1] += ")"
     if policy.unreadable:
         parts.append("")
-        parts.append("; credential stores: neither readable nor writable")
-        parts.append("(deny file-read* file-write*")
+        parts.append("; credential stores: not writable, and not readable")
+        parts.append("; except for the files the policy names as public")
+        parts.append("(deny file-write*")
         parts.extend(
             f"  (subpath {_sbpl_string(path)})"
             for path in _as_resolved(policy.unreadable)
         )
+        parts[-1] += ")"
+        parts.append("(deny file-read*")
+        for store in policy.unreadable:
+            public = _public_in(store, policy.readable)
+            for path in _as_resolved([store]):
+                keep = "".join(
+                    f' (require-not (regex #"{_sbpl_regex(path, name)}"))'
+                    for name in public
+                )
+                parts.append(
+                    f"  (require-all (subpath {_sbpl_string(path)}){keep})"
+                    if keep
+                    else f"  (subpath {_sbpl_string(path)})"
+                )
         parts[-1] += ")"
     if policy.allow_network:
         parts.append(_SEATBELT_NETWORK_POLICY.rstrip())
@@ -405,9 +456,15 @@ def wrap_argv_command(
         # root. bwrap can only mount over what exists; a store that does not
         # exist has nothing to hide. A symlinked store (dotfile managers) is
         # masked where it really is: bwrap would not follow the link there.
-        for path in map(os.path.realpath, policy.unreadable):
+        for store in policy.unreadable:
+            path = os.path.realpath(store)
             if os.path.isdir(path):
                 argv += ["--tmpfs", path]
+                # ... with the files the policy names as public back in it.
+                for name in _public_in(store, policy.readable):
+                    for public in sorted(glob.glob(os.path.join(path, name))):
+                        if os.path.isfile(public):
+                            argv += ["--ro-bind", public, public]
             elif os.path.exists(path):
                 argv += ["--ro-bind", "/dev/null", path]
         if not policy.allow_network:
