@@ -10,6 +10,8 @@ from core.application.workflow_adapter import (
     WorkflowCallbacks,
     WorkflowExecutionRequest,
 )
+from core.compat.runtime import DeepCodeRuntime, use_runtime
+from core.config import ConfigError, DeepCodeConfig
 from workflows import agent_orchestration_engine as engine
 from workflows.planning_runtime import extract_yaml_candidate, validate_plan_text
 
@@ -91,13 +93,96 @@ async def test_desktop_workflow_adapter_always_requests_strict_outcomes(
         options={"planReview": False},
         workspace=tmp_path,
     )
-    outcome = await DefaultWorkflowRunner().run(
-        request,
-        WorkflowCallbacks(progress=progress, interact=interact),
-    )
+    with use_runtime(
+        _runtime_with_mcp_servers("code-implementation", "command-executor")
+    ):
+        outcome = await DefaultWorkflowRunner().run(
+            request,
+            WorkflowCallbacks(progress=progress, interact=interact),
+        )
 
     assert outcome.status == "completed"
     assert captured["strict_outcomes"] is True
+
+
+def _runtime_with_mcp_servers(*names: str) -> DeepCodeRuntime:
+    servers = {name: {"command": "python", "args": ["-V"]} for name in names}
+    return DeepCodeRuntime(
+        DeepCodeConfig.model_validate({"tools": {"mcpServers": servers}})
+    )
+
+
+_ALWAYS = ["code-implementation", "command-executor"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source_type", "options", "missing"),
+    [
+        ("local", {}, _ALWAYS),
+        ("requirement", {}, _ALWAYS),
+        ("requirement", {"enableIndexing": True}, [*_ALWAYS, "code-reference-indexer"]),
+        (
+            "url",
+            {"enableIndexing": True},
+            [
+                *_ALWAYS,
+                "code-reference-indexer",
+                "fetch",
+                "filesystem",
+                "github-downloader",
+            ],
+        ),
+    ],
+)
+async def test_workflow_refuses_to_start_without_the_mcp_servers_it_uses(
+    tmp_path, monkeypatch, source_type, options, missing
+) -> None:
+    """Unconfigured servers were only logged deep in the run, whose agents
+    then worked with no tools and wrote nothing."""
+    started = []
+
+    async def run_pipeline(*args, **_kwargs):
+        started.append(args)
+        return {"status": "completed", "summary": "", "paper_dir": str(tmp_path)}
+
+    monkeypatch.setattr(engine, "execute_multi_agent_research_pipeline", run_pipeline)
+    monkeypatch.setattr(engine, "execute_chat_based_planning_pipeline", run_pipeline)
+    reported = []
+
+    async def progress(*args):
+        reported.append(args)
+
+    async def interact(_request):
+        return {"decision": "approve"}
+
+    request = WorkflowExecutionRequest(
+        run_id="run-1",
+        kind="paper2code",
+        source_type=source_type,
+        source="https://example.com/paper.pdf" if source_type == "url" else "Build it",
+        options=options,
+        workspace=tmp_path,
+    )
+    with use_runtime(_runtime_with_mcp_servers()):
+        with pytest.raises(ConfigError) as refused:
+            await DefaultWorkflowRunner().run(
+                request, WorkflowCallbacks(progress=progress, interact=interact)
+            )
+
+    message = str(refused.value)
+    assert "tools" in message and "mcpServers" in message
+    for name in missing:
+        assert f'"{name}"' in message
+    assert message.count('"command"') == len(missing)
+    assert started == [] and reported == []
+
+    # Configured, the same request runs.
+    with use_runtime(_runtime_with_mcp_servers(*missing)):
+        await DefaultWorkflowRunner().run(
+            request, WorkflowCallbacks(progress=progress, interact=interact)
+        )
+    assert len(started) == 1
 
 
 def test_the_chat_plan_format_passes_plan_validation() -> None:

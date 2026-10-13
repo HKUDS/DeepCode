@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -73,6 +75,7 @@ class DefaultWorkflowRunner:
         )
         from workflows.plan_review_runtime import PlanReviewCancelled
 
+        _require_mcp_servers(request)
         workflow_root = request.workspace / ".deepcode" / "workflows"
         task_id = str(request.checkpoint.get("taskId") or request.run_id)
         await callbacks.progress(
@@ -165,6 +168,63 @@ class DefaultWorkflowRunner:
             result=_json_result(normalized),
             artifacts=artifacts,
         )
+
+
+def _require_mcp_servers(request: WorkflowExecutionRequest) -> None:
+    """Refuse a run whose MCP servers (``tools.mcpServers``) are missing.
+
+    The kernel only logs a missing server, deep in the run, and its agent then
+    works with no tools: no file tree is created and no code is written. No
+    default configuration ships, so say what to add.
+    """
+    from core.compat.runtime import get_runtime
+    from core.config import ConfigError, home_config_path
+
+    required = ["code-implementation", "command-executor"]
+    if request.options.get("enableIndexing"):
+        required.append("code-reference-indexer")
+        if request.source_type in {"local", "url"}:
+            # Reference analysis and repository download.
+            required += ["fetch", "filesystem", "github-downloader"]
+    configured = get_runtime().config.mcp_servers
+    missing = [name for name in required if name not in configured]
+    if not missing:
+        return
+    examples = _mcp_server_examples(request.workspace)
+    raise ConfigError(
+        "Paper2Code needs MCP servers that are not configured: "
+        f'{", ".join(missing)}. Add them under "tools" > "mcpServers" in '
+        f"{home_config_path()}, for example:\n"
+        + ",\n".join(
+            f"  {json.dumps(name)}: {json.dumps(examples[name])}" for name in missing
+        )
+    )
+
+
+def _mcp_server_examples(workspace: Path) -> dict[str, JsonObject]:
+    """A working ``tools.mcpServers`` entry for each server the kernel uses."""
+
+    # The bundled servers live in the ``tools`` package beside ``core``.
+    root = str(Path(__file__).resolve().parents[2])
+
+    def bundled(module: str) -> JsonObject:
+        return {
+            "command": sys.executable,
+            "args": ["-m", module],
+            "env": {"PYTHONPATH": root},
+        }
+
+    return {
+        "code-implementation": bundled("tools.code_implementation_server"),
+        "command-executor": bundled("tools.command_executor"),
+        "code-reference-indexer": bundled("tools.code_reference_indexer"),
+        "github-downloader": bundled("tools.git_command"),
+        "fetch": {"command": "uvx", "args": ["mcp-server-fetch"]},
+        "filesystem": {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-filesystem", str(workspace)],
+        },
+    }
 
 
 def _stage_for_progress(percent: int) -> str:
