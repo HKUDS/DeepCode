@@ -44,7 +44,6 @@ from core.persistence.database import Database
 from core.persistence.event_repository import EventRepository
 from core.persistence.execution_repository import ItemRepository, TurnRepository
 from core.persistence.thread_repository import ThreadRepository
-from core.sessions import SessionStore
 
 EventPublisher = Callable[[list[DomainEvent]], None]
 logger = logging.getLogger(__name__)
@@ -65,12 +64,10 @@ class TurnInputService:
         self,
         database: Database,
         session_runtimes: SessionRuntimeRegistry,
-        session_store: SessionStore,
         publish: EventPublisher,
     ) -> None:
         self.database = database
         self.session_runtimes = session_runtimes
-        self.session_store = session_store
         self._publish = publish
 
     def steer(
@@ -167,8 +164,18 @@ class TurnInputService:
                 client_surface=client_surface,
             )
             self._publish(events)
-            self._append_canonical_input(item)
-            self.session_runtimes.commit_input(thread_id, reservation)
+            # Accepted once the mailbox holds it; the canonical Session gets
+            # the Steer when the Turn reads it, where the model reads it.
+            self.session_runtimes.commit_input(
+                thread_id,
+                reservation,
+                record={
+                    "client": item.payload["client"],
+                    "turnId": item.turn_id,
+                    "delivery": TurnInputDelivery.CURRENT_TURN.value,
+                    "expectedTurnId": item.turn_id,
+                },
+            )
             self._set_delivery_state(item.id, InputDeliveryState.ACCEPTED)
         except BaseException as exc:
             self.session_runtimes.cancel_input(thread_id, reservation)
@@ -410,30 +417,6 @@ class TurnInputService:
                 )
             )
         return item, events
-
-    def _append_canonical_input(self, item: Item) -> None:
-        stored = self.session_store.append_message(
-            item.thread_id,
-            "user",
-            item.payload["text"],
-            metadata={
-                "schemaVersion": 3,
-                "client": item.payload["client"],
-                "turnId": item.turn_id,
-                "messageId": item.payload["messageId"],
-                "delivery": TurnInputDelivery.CURRENT_TURN.value,
-                "source": TurnInputSource.STEER.value,
-                "expectedTurnId": item.turn_id,
-                # A transcript proves persistence, not mailbox acceptance. A
-                # rebuilt projection must not fabricate delivery confirmation.
-                "deliveryState": InputDeliveryState.UNKNOWN.value,
-            },
-        )
-        if stored is None:
-            raise ThreadNotFoundError(
-                f"canonical session disappeared: {item.thread_id}"
-            )
-        self.session_runtimes.mark_persisted(item.thread_id)
 
     def _set_delivery_state(self, item_id: str, state: InputDeliveryState) -> None:
         with self.database.transaction() as connection:

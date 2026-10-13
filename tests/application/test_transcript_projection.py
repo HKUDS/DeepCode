@@ -34,11 +34,13 @@ class _Model:
     def __init__(self, script: list[LLMResponse | Exception | None]) -> None:
         self.script = list(script)
         self.called = threading.Event()
+        self.requests: list[list[dict[str, Any]]] = []
 
     def get_default_model(self) -> str:
         return "scripted"
 
-    async def chat_with_retry(self, **_kwargs: Any) -> LLMResponse:
+    async def chat_with_retry(self, **kwargs: Any) -> LLMResponse:
+        self.requests.append([dict(message) for message in kwargs["messages"]])
         self.called.set()
         response = self.script.pop(0)
         if response is None:

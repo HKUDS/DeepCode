@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from core.agent_runtime.injections import runtime_input_to_provider_message
+from core.agent_runtime.injections import UserSteer, runtime_input_to_provider_message
 from core.application import DeepCodeApplication
 from core.application.errors import (
     DuplicateMessageConflictError,
@@ -28,9 +28,12 @@ from core.persistence.execution_repository import ItemRepository
 
 
 class _SteeringAgent:
-    def __init__(self, factory: _SteeringFactory, injection_callback) -> None:
+    def __init__(
+        self, factory: _SteeringFactory, injection_callback, context_note_sink
+    ) -> None:
         self.factory = factory
         self.injection_callback = injection_callback
+        self.context_note_sink = context_note_sink
         self.history: list[dict] = []
         self.last_usage: dict[str, int] = {}
 
@@ -44,6 +47,12 @@ class _SteeringAgent:
         while not self.factory.release.is_set():
             await asyncio.sleep(0.01)
         injected = await self.injection_callback(limit=10)
+        for message in injected:
+            # As the kernel does: a Steer is reported when it is read.
+            if isinstance(message, UserSteer) and self.context_note_sink is not None:
+                self.context_note_sink(
+                    message.text, "steer", message_id=message.message_id
+                )
         provider_messages = [
             runtime_input_to_provider_message(message) for message in injected
         ]
@@ -73,9 +82,10 @@ class _SteeringFactory:
         model,
         approval_callback,
         injection_callback,
+        context_note_sink=None,
     ):
         del workspace, model, approval_callback
-        return _SteeringAgent(self, injection_callback)
+        return _SteeringAgent(self, injection_callback, context_note_sink)
 
 
 class _ClosingAgent:
@@ -173,16 +183,16 @@ def test_concurrent_retry_observes_pending_until_delivery_confirmed(
     live_input, monkeypatch
 ):
     app, factory, thread_id, turn_id = live_input
-    service = app.turns.turn_inputs
-    append = service._append_canonical_input
+    runtimes = app.turns.turn_inputs.session_runtimes
+    commit = runtimes.commit_input
     entered, release = threading.Event(), threading.Event()
 
-    def pause(item):
+    def pause(*args, **kwargs):
         entered.set()
         assert release.wait(5)
-        append(item)
+        commit(*args, **kwargs)
 
-    monkeypatch.setattr(service, "_append_canonical_input", pause)
+    monkeypatch.setattr(runtimes, "commit_input", pause)
     with ThreadPoolExecutor(2) as pool:
         first = pool.submit(_steer, app, thread_id, turn_id)
         try:
@@ -213,8 +223,6 @@ def test_concurrent_retry_observes_pending_until_delivery_confirmed(
     "stage",
     [
         "intent",
-        "canonical_before",
-        "canonical_after",
         "commit_before",
         "commit_after",
         "confirmation",
@@ -228,8 +236,6 @@ def test_delivery_failures_do_not_acknowledge_or_repeat_input(
     service = app.turns.turn_inputs
     if stage == "intent":
         target, method = EventRepository, "append"
-    elif stage.startswith("canonical"):
-        target, method = app.session_store, "append_message"
     elif stage.startswith("commit"):
         target, method = service.session_runtimes, "commit_input"
     elif stage == "confirmation":
@@ -326,12 +332,10 @@ def test_steer_receipt_restart_preserves_only_confirmed_evidence(
     try:
         item = reopened.turns.read_input(thread_id, "stable-steer")
         assert item.payload["expectedTurnId"] == turn_id
-        assert item.payload["deliveryState"] == ("unknown" if rebuild else "accepted")
-        if rebuild:
-            with pytest.raises(InputDeliveryUncertainError):
-                _steer(reopened, thread_id, turn_id)
-        else:
-            assert _steer(reopened, thread_id, turn_id).duplicate
+        # Rebuilt from the session file, which records a Steer when the Turn
+        # read it: that is proof of delivery, and a retry is a duplicate.
+        assert item.payload["deliveryState"] == "accepted"
+        assert _steer(reopened, thread_id, turn_id).duplicate
     finally:
         reopened.close()
 

@@ -35,14 +35,14 @@ if __name__ == "__main__":
     def open_for_test(*args, **kwargs):
         app = original_open(*args, session_factory=CheckpointFactory(), **kwargs)
         if "--pause-steer" in sys.argv:
-            append = app.turns.turn_inputs._append_canonical_input
+            runtimes = app.turns.turn_inputs.session_runtimes
 
-            def pause_steer(item):
-                append(item)
+            def pause_steer(*_args, **_kwargs):
+                # The receipt is recorded; the mailbox has not taken it yet.
                 (Path(sys.argv[1]).parent / "steer-pending").touch()
                 threading.Event().wait()
 
-            app.turns.turn_inputs._append_canonical_input = pause_steer
+            runtimes.commit_input = pause_steer
         return app
 
     # Only this child process substitutes the Agent. Listener, leases, executor,

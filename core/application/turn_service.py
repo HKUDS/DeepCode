@@ -240,7 +240,6 @@ class TurnService:
         self.turn_inputs = TurnInputService(
             database,
             self.session_runtimes,
-            session_store,
             self._publish,
         )
         self._observer_lock = threading.Lock()

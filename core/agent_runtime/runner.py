@@ -182,8 +182,9 @@ class AgentRunSpec:
     # compaction instruction) are exempt: they never enter persisted history,
     # so resident and canonical state already agree without a note.
     # This optional callable ``(content: str, source: str) -> None`` lets the
-    # host record each one as it happens. A sink failure is logged and
-    # swallowed: persistence trouble must not abort the run it documents.
+    # host record each one as it happens; a user Steer is reported too, with
+    # source "steer" and its ``message_id`` keyword. A sink failure is logged
+    # and swallowed: persistence trouble must not abort the run it documents.
     context_note_sink: Any | None = None
     # The model history itself, as it grows: ``(messages) -> None`` is called
     # with the run's current history before every model request, before a
@@ -390,9 +391,10 @@ class AgentRunner:
                 )
         for item, message in injections:
             if isinstance(item, UserSteer):
-                # Steering is appended to the canonical Session by the
-                # service that accepted it.
-                messages.append(message)
+                # Written where the model reads it, with its receipt.
+                self._enter_noted(
+                    spec, messages, message, "steer", message_id=item.message_id
+                )
             else:
                 self._enter_noted(
                     spec,
@@ -425,6 +427,7 @@ class AgentRunner:
         messages: list[dict[str, Any]],
         message: dict[str, Any],
         source: str,
+        **note: Any,
     ) -> None:
         """Add a runner-written user message to the history, noted.
 
@@ -435,7 +438,7 @@ class AgentRunner:
         cls._report_history(spec, messages)
         if spec.context_note_sink is not None:
             try:
-                spec.context_note_sink(str(message.get("content", "")), source)
+                spec.context_note_sink(str(message.get("content", "")), source, **note)
             except Exception:
                 # Persistence trouble must not abort the run it documents.
                 logger.exception("context_note_sink failed (source={})", source)

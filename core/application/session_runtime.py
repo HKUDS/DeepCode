@@ -41,6 +41,7 @@ from core.application.errors import (
 from core.domain.execution_permission import ExecutionPermissionMode
 from core.domain.execution_profile import ExecutionProfile
 from core.domain.execution_security import ExecutionSecurityProfile
+from core.domain.message_provenance import InputDeliveryState, TurnInputSource
 from core.file_lock import FileLease
 from core.sessions import Session, SessionStore
 from core.sessions.transcript import (
@@ -125,6 +126,9 @@ class SessionRuntimeRegistry:
         self._runtimes: OrderedDict[str, LiveSessionRuntime] = OrderedDict()
         self._mailbox_lock = threading.Lock()
         self._mailboxes: dict[str, TurnInputMailbox] = {}
+        # The record a committed Steer is written with when the Turn reads
+        # it, by (session, message id); a Steer never read leaves no record.
+        self._steer_records: dict[tuple[str, str], dict[str, Any]] = {}
         self._goal_handler: GoalRuntimeHandler | None = None
         self._goal_runtimes: dict[str, GoalRuntimeRouter] = {}
 
@@ -259,6 +263,10 @@ class SessionRuntimeRegistry:
         if turn_id is not None:
             self._mailbox(session_id).deactivate(turn_id)
             self._goal_runtime(session_id).deactivate(turn_id)
+            with self._mailbox_lock:
+                for key, record in tuple(self._steer_records.items()):
+                    if key[0] == session_id and record.get("turnId") == turn_id:
+                        del self._steer_records[key]
         if runtime is None:
             return
         runtime.approvals.current = None
@@ -280,7 +288,18 @@ class SessionRuntimeRegistry:
         self,
         session_id: str,
         reservation: TurnInputReservation,
+        *,
+        record: dict[str, Any] | None = None,
     ) -> None:
+        """Hand reserved input to the Turn; ``record`` is a Steer's metadata.
+
+        The Steer is written to the canonical Session with it when the Turn
+        reads it, in the place the model reads it.
+        """
+
+        if record is not None:
+            with self._mailbox_lock:
+                self._steer_records[(session_id, reservation.message_id)] = record
         self._mailbox(session_id).commit(reservation)
 
     def cancel_input(
@@ -289,6 +308,8 @@ class SessionRuntimeRegistry:
         reservation: TurnInputReservation,
     ) -> None:
         self._mailbox(session_id).cancel(reservation)
+        with self._mailbox_lock:
+            self._steer_records.pop((session_id, reservation.message_id), None)
 
     def inject_transient(
         self,
@@ -690,24 +711,39 @@ class SessionRuntimeRegistry:
     def _context_note_sink(self, session_id: str, inputs: TurnInputMailbox):
         """The runner's mid-turn persistence callback for one live Session."""
 
-        def note(content: str, source: str, *, already_in_history: bool = True) -> None:
+        def note(
+            content: str,
+            source: str,
+            *,
+            already_in_history: bool = True,
+            message_id: str | None = None,
+        ) -> None:
             text = str(content or "").strip()
             if not text:
                 return
+            metadata: dict[str, Any] = {
+                "schemaVersion": 3,
+                "delivery": ("mid_turn" if already_in_history else "between_turns"),
+                "source": source,
+                **({"turnId": inputs.active_turn_id} if inputs.active_turn_id else {}),
+            }
+            if source == TurnInputSource.STEER.value and message_id is not None:
+                # A Steer is user input, not a note: it keeps the receipt it
+                # was accepted with, and it was delivered since it is read now.
+                with self._mailbox_lock:
+                    record = self._steer_records.pop((session_id, message_id), None)
+                metadata = {
+                    "schemaVersion": 3,
+                    "messageId": message_id,
+                    "source": source,
+                    **(record or {}),
+                    "deliveryState": InputDeliveryState.ACCEPTED.value,
+                }
             stored = self.store.append_message(
                 session_id,
                 "user",
                 text,
-                metadata={
-                    "schemaVersion": 3,
-                    "delivery": ("mid_turn" if already_in_history else "between_turns"),
-                    "source": source,
-                    **(
-                        {"turnId": inputs.active_turn_id}
-                        if inputs.active_turn_id
-                        else {}
-                    ),
-                },
+                metadata=metadata,
             )
             if stored is None:
                 return
