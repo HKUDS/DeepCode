@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Iterable, Mapping
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
@@ -38,6 +39,8 @@ from core.skills.provider import (
     SkillSearchRequest,
     SkillSearchResult,
 )
+
+logger = logging.getLogger(__name__)
 
 MAX_SKILLS_PER_TURN = 8
 MAX_INJECTED_SKILL_CHARS = 48_000
@@ -79,9 +82,22 @@ class SkillTurnContext:
         )
         self.loaded[identity] = invocation
         self.loaded_records[identity] = record
-        if record.allowed_tools:
+        declared = {tool.casefold() for tool in record.allowed_tools}
+        if self.capability_tools is not None and declared - self.capability_tools:
+            # A name this Session has no tool for, such as another agent's
+            # WebSearch, matches nothing. Beside a known name it is harmless
+            # (and a deferred MCP tool may still appear), but on its own it
+            # would leave the Turn without tools, so it restricts nothing.
+            logger.warning(
+                "Skill %s: allowed-tools names unknown tools: %s",
+                record.name,
+                ", ".join(sorted(declared - self.capability_tools)),
+            )
+            if not declared & self.capability_tools:
+                declared = set()
+        if declared:
             self.has_tool_restriction = True
-            self.allowed_tools.update(tool.casefold() for tool in record.allowed_tools)
+            self.allowed_tools.update(declared)
         if self.on_invocation is not None:
             self.on_invocation(invocation)
         return invocation, True

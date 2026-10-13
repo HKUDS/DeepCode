@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import replace
 from enum import StrEnum
 from pathlib import Path
@@ -51,6 +51,10 @@ _TEXT_MENTION_RE = re.compile(
     re.UNICODE,
 )
 _AGENT_SKILL_NAME_RE = re.compile(r"^(?!.*--)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
+# A separator inside Claude-style `Tool(argument pattern)` belongs to the pattern.
+_ALLOWED_TOOLS_CSV_RE = re.compile(r",(?![^()]*\))")
+_ALLOWED_TOOLS_SPACED_RE = re.compile(r"\s+(?![^()]*\))")
+_ALLOWED_TOOL_RE = re.compile(r"([^\s(),]+)(?:\((.*)\))?", re.DOTALL)
 
 
 class SkillValidationProfile(StrEnum):
@@ -575,7 +579,7 @@ def read_skill_candidate(
             revision_payload += b"\0agents/openai.yaml\0" + metadata_payload
         revision = f"sha256:{hashlib.sha256(revision_payload).hexdigest()}"
         text = payload.decode("utf-8")
-        name, description, instructions, allowed_tools = _parse_text(
+        name, description, instructions, allowed_tools, tool_warnings = _parse_text(
             text,
             fallback_name=fallback_name,
             path=skill_file,
@@ -597,7 +601,10 @@ def read_skill_candidate(
             revision=revision,
             status=SkillStatus.ACTIVE,
             byte_size=byte_size,
-            metadata=metadata,
+            metadata=replace(
+                metadata,
+                warnings=(*metadata.warnings, *tool_warnings),
+            ),
         )
     except (OSError, ValueError) as exc:
         skill_file = unresolved_file.absolute()
@@ -653,7 +660,7 @@ def _parse_text(
     fallback_name: str,
     path: Path,
     validation_profile: SkillValidationProfile,
-) -> tuple[str, str, str, tuple[str, ...]]:
+) -> tuple[str, str, str, tuple[str, ...], tuple[str, ...]]:
     match = _FRONTMATTER_RE.match(text)
     if not match:
         raise SkillValidationError(
@@ -667,7 +674,7 @@ def _parse_text(
         raise SkillValidationError(f"{path}: frontmatter must be a mapping")
 
     if validation_profile is SkillValidationProfile.AGENT_SKILLS_V1:
-        name, description, allowed_tools = _parse_agent_skills_metadata(
+        name, description, allowed_tools, tool_warnings = _parse_agent_skills_metadata(
             metadata,
             directory_name=fallback_name,
             path=path,
@@ -682,14 +689,14 @@ def _parse_text(
             raise SkillValidationError(
                 f"{path}: description exceeds {MAX_DESCRIPTION_CHARS} characters"
             )
-        allowed_tools = _coerce_tools(
+        allowed_tools, tool_warnings = _coerce_tools(
             metadata.get("allowed-tools", metadata.get("allowed_tools")),
             path=path,
         )
     instructions = text[match.end() :].strip()
     if not instructions:
         raise SkillValidationError(f"{path}: Skill {name!r} has no instructions")
-    return name, description, instructions, allowed_tools
+    return name, description, instructions, allowed_tools, tool_warnings
 
 
 def _parse_agent_skills_metadata(
@@ -697,7 +704,7 @@ def _parse_agent_skills_metadata(
     *,
     directory_name: str,
     path: Path,
-) -> tuple[str, str, tuple[str, ...]]:
+) -> tuple[str, str, tuple[str, ...], tuple[str, ...]]:
     """Validate the portable Agent Skills frontmatter contract."""
 
     name = metadata.get("name")
@@ -754,7 +761,7 @@ def _parse_agent_skills_metadata(
     return (
         name,
         description,
-        _coerce_agent_tools(
+        *_coerce_agent_tools(
             metadata.get("allowed-tools"),
             path=path,
         ),
@@ -772,48 +779,75 @@ def _validate_name(name: str, path: Path) -> None:
         )
 
 
-def _coerce_tools(value: Any, *, path: Path) -> tuple[str, ...]:
+def _coerce_tools(
+    value: Any,
+    *,
+    path: Path,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
     if not value:
-        return ()
+        return (), ()
     if isinstance(value, str):
-        raw = value.split(",")
+        raw = _ALLOWED_TOOLS_CSV_RE.split(value)
     elif isinstance(value, (list, tuple)):
-        raw = value
+        raw = [str(item) for item in value]
     else:
         raise SkillValidationError(f"{path}: allowed-tools must be a list or CSV")
-    tools: list[str] = []
-    seen: set[str] = set()
-    for item in raw:
-        tool = str(item).strip()
-        if not tool or any(character.isspace() for character in tool):
-            raise SkillValidationError(f"{path}: invalid allowed-tools entry")
-        if tool not in seen:
-            tools.append(tool)
-            seen.add(tool)
-    if len(tools) > MAX_ALLOWED_TOOLS:
-        raise SkillValidationError(
-            f"{path}: allowed-tools exceeds {MAX_ALLOWED_TOOLS} entries"
-        )
-    return tuple(tools)
+    return _tool_names(raw, path=path)
 
 
-def _coerce_agent_tools(value: Any, *, path: Path) -> tuple[str, ...]:
+def _coerce_agent_tools(
+    value: Any,
+    *,
+    path: Path,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
     if value is None:
-        return ()
+        return (), ()
     if not isinstance(value, str):
         raise SkillValidationError(
             f"{path}: Agent Skill allowed-tools must be a space-delimited string"
         )
-    tools = tuple(dict.fromkeys(value.split()))
-    if not tools:
+    if not value.split():
         raise SkillValidationError(
             f"{path}: Agent Skill allowed-tools cannot be empty when declared"
         )
+    return _tool_names(_ALLOWED_TOOLS_SPACED_RE.split(value.strip()), path=path)
+
+
+def _tool_names(
+    entries: Iterable[str],
+    *,
+    path: Path,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Reduce allowed-tools entries to tool names, warning instead of failing.
+
+    Skill policy narrows a Turn by tool name only, so a Claude-style
+    `Bash(git status:*)` admits the whole bash tool; every command still goes
+    through the normal permission and approval policy.
+    """
+
+    names: list[str] = []
+    warnings: list[str] = []
+    for raw in entries:
+        entry = raw.strip()
+        if not entry:
+            continue
+        match = _ALLOWED_TOOL_RE.fullmatch(entry)
+        if match is None:
+            warnings.append(f"{path}: ignored allowed-tools entry {entry!r}")
+            continue
+        tool, pattern = match.groups()
+        if pattern is not None:
+            warnings.append(
+                f"{path}: allowed-tools entry {entry!r} allows all of {tool}; "
+                "argument patterns are not enforced"
+            )
+        names.append(tool)
+    tools = tuple(dict.fromkeys(names))
     if len(tools) > MAX_ALLOWED_TOOLS:
         raise SkillValidationError(
             f"{path}: allowed-tools exceeds {MAX_ALLOWED_TOOLS} entries"
         )
-    return tools
+    return tools, tuple(warnings)
 
 
 # Compatibility for code that imported the original cache-oriented name.

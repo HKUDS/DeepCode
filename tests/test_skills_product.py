@@ -255,6 +255,65 @@ async def test_skill_policy_denies_unexposed_tool_even_if_model_requests_it(
     assert "not allowed" in completed.result_preview
 
 
+def test_claude_style_allowed_tools_keep_the_skill_usable(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    root = workspace / ".claude" / "skills"
+    _write_skill(
+        root,
+        "commit",
+        allowed_tools="Bash(git status:*), Bash(git diff:*), Read, not a tool",
+    )
+    _write_skill(root, "research", allowed_tools="WebSearch")
+    runtime = SkillRuntime(workspace, include_user=False, include_system=False)
+    catalog = runtime.catalog()
+    commit = catalog.get_active("commit")
+    assert commit is not None, catalog.warnings
+    assert commit.allowed_tools == ("Bash", "Read")
+    assert any(
+        "Bash(git status:*)" in warning and "not enforced" in warning
+        for warning in catalog.warnings
+    )
+    assert any("'not a tool'" in warning for warning in catalog.warnings)
+    registered = ("bash", "read", "write", "skill")
+
+    _context, token = runtime.begin_turn("$commit", available_tools=registered)
+    try:
+        assert runtime.visible_tool_names(registered) == {"bash", "read", "skill"}
+    finally:
+        runtime.end_turn(token)
+    # A tool DeepCode does not have must not leave the Turn without tools.
+    _context, token = runtime.begin_turn("$research", available_tools=registered)
+    try:
+        assert runtime.visible_tool_names(registered) is None
+    finally:
+        runtime.end_turn(token)
+
+
+def test_agent_skill_allowed_tools_accept_argument_patterns(tmp_path: Path) -> None:
+    root = tmp_path / "skills"
+    directory = root / "commit"
+    directory.mkdir(parents=True)
+    (directory / "SKILL.md").write_text(
+        "---\nname: commit\ndescription: Commit changes\n"
+        "allowed-tools: Bash(git status:*) Read\n---\nCommit the change.\n",
+        encoding="utf-8",
+    )
+
+    record = read_skill_candidate(
+        root=root,
+        directory=directory,
+        scope=SkillScope.USER,
+        source_root=SkillSourceRoot.AGENTS,
+        trust_boundary=root,
+        writable=False,
+        validation_profile=SkillValidationProfile.AGENT_SKILLS_V1,
+    )
+
+    assert record.status is SkillStatus.ACTIVE, record.error
+    assert record.allowed_tools == ("Bash", "Read")
+
+
 @pytest.mark.asyncio
 async def test_stale_selection_fails_before_provider_and_does_not_enter_history(
     tmp_path: Path,
