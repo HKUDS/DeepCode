@@ -2,7 +2,6 @@
 """DeepCode command-line entry point."""
 
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -27,10 +26,7 @@ if _cached_cli is not None and not (
     for _name in [n for n in list(sys.modules) if n == "cli" or n.startswith("cli.")]:
         del sys.modules[_name]
 
-from core.platform_compat import (
-    configure_utf8_stdio,
-    subprocess_env,
-)
+from core.platform_compat import configure_utf8_stdio
 from core.version import __version__
 
 configure_utf8_stdio()
@@ -50,39 +46,6 @@ def print_banner():
     bottom = "╚" + "═" * width + "╝"
     body = "\n".join("║" + ln.ljust(width)[:width] + "║" for ln in lines)
     print("\n" + top + "\n" + body + "\n" + bottom + "\n")
-
-
-def launch_paper_test(paper_name: str, fast_mode: bool = False):
-    """Launch paper testing mode"""
-    try:
-        print("\nLaunching Paper Test Mode")
-        print(f"Paper: {paper_name}")
-        print(f"Fast mode: {'enabled' if fast_mode else 'disabled'}")
-        print("=" * 60)
-
-        # Run the test setup
-        setup_cmd = [sys.executable, "test_paper.py", paper_name]
-        if fast_mode:
-            setup_cmd.append("--fast")
-
-        result = subprocess.run(setup_cmd, check=True, env=subprocess_env())
-
-        if result.returncode == 0:
-            print("\n[ok] Paper test setup completed successfully!")
-            print("Files are ready in deepcode_lab/papers/")
-            print("\nNext steps:")
-            print(" 1. Install MCP dependencies: pip install -r requirements.txt")
-            print(
-                f" 2. Run full pipeline: python -m workflows.paper_test_engine --paper {paper_name}"
-                + (" --fast" if fast_mode else "")
-            )
-
-    except subprocess.CalledProcessError as e:
-        print(f"\n[x] Paper test setup failed: {e}")
-        sys.exit(1)
-    except Exception as e:  # noqa: BLE001 - top-level CLI error boundary
-        print(f"\n[x] Unexpected error: {e}")
-        sys.exit(1)
 
 
 def _bootstrap_logging() -> None:
@@ -130,14 +93,16 @@ def main():
         if sys.argv[1] in {"--version", "-V"}:
             print(f"DeepCode {__version__}")
             return
-        if sys.argv[1] == "test" and len(sys.argv) >= 3:
-            # Paper testing mode: python deepcode.py test rice [--fast]
-            paper_name = sys.argv[2]
-            fast_mode = "--fast" in sys.argv or "-f" in sys.argv
-
-            print_banner()
-            launch_paper_test(paper_name, fast_mode)
-            return
+        if sys.argv[1] == "test":
+            # It ran a test_paper.py script that was never part of the
+            # package, so it could only fail. Paper2Code runs in the clients.
+            print(
+                "`deepcode test` has been removed. Run Paper2Code from the "
+                "desktop or browser client instead: start `deepcode desktop` "
+                "or `deepcode web`, then use /paper.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         elif sys.argv[1] == "init":
             # One-time setup: create the user-level config base (~/.deepcode) so
             # `deepcode` runs in any directory. Cross-platform (Win/mac/Linux).
@@ -220,8 +185,6 @@ def main():
                             "deepcode init",
                             "Set up ~/.deepcode so deepcode runs anywhere",
                         ),
-                        row("deepcode test <paper>", "Test paper reproduction"),
-                        row("deepcode test <paper> --fast", "Test paper (fast mode)"),
                         row("deepcode mcp serve", "Expose DeepCode as an MCP server"),
                         row(
                             "deepcode service <command>",
@@ -277,30 +240,12 @@ def main():
                         ),
                         row("deepcode provider list", "Show model connections"),
                         row("deepcode service status", "Check the background service"),
-                        row("deepcode test rice", "Test RICE paper reproduction"),
-                        row("deepcode test rice --fast", "Test RICE paper (fast mode)"),
                         "",
                         "Run 'deepcode <command> --help' for command options.",
                         "Run 'deepcode chat --help' for TUI options.",
                         "",
-                        "Available papers:",
                     ]
                 )
-            )
-
-            # List available papers
-            papers_dir = "papers"
-            if os.path.exists(papers_dir):
-                for item in os.listdir(papers_dir):
-                    item_path = os.path.join(papers_dir, item)
-                    if os.path.isdir(item_path):
-                        paper_md = os.path.join(item_path, "paper.md")
-                        addendum_md = os.path.join(item_path, "addendum.md")
-                        status = "ok" if os.path.exists(paper_md) else "--"
-                        addendum = " (+addendum)" if os.path.exists(addendum_md) else ""
-                        print(f"   [{status}] {item}{addendum}")
-            print(
-                "\n   Legend: [ok] = paper.md exists, (+addendum) = addendum.md exists"
             )
             return
         elif sys.argv[1].startswith("-"):
