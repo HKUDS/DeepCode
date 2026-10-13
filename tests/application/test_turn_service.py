@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import threading
 import time
 from dataclasses import replace
@@ -496,15 +497,15 @@ def test_admission_check_never_keeps_this_process_from_running_the_session(
     """
     application, thread_id = _application(tmp_path, ScriptedFactory())
     holding = threading.Event()
-    write_text = Path.write_text
+    os_replace = os.replace
 
-    def slow_holder_write(path: Path, data: str, *args, **kwargs) -> int:
-        if path.parent.name == ".running" and not holding.is_set():
+    def slow_holder_write(source, destination, *args, **kwargs):
+        if Path(destination).parent.name == ".running" and not holding.is_set():
             holding.set()
             time.sleep(0.3)
-        return write_text(path, data, *args, **kwargs)
+        return os_replace(source, destination, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "write_text", slow_holder_write)
+    monkeypatch.setattr(os, "replace", slow_holder_write)
     check = threading.Thread(
         target=application.turns._refuse_if_running_elsewhere, args=(thread_id,)
     )

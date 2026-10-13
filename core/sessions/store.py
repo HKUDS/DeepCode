@@ -69,6 +69,25 @@ from core.sessions.models import (
 _run_lease_lock = threading.Lock()
 
 
+class _RunLease(FileLease):
+    """A run lease that takes its holder's name with it when released."""
+
+    holder_file: Path | None = None
+
+    def close(self) -> None:
+        # Remove the name while still holding the lock: no later holder can
+        # have written its own yet, and no check in this process sees the
+        # lease held without its name.
+        with _run_lease_lock:
+            holder_file, self.holder_file = self.holder_file, None
+            if holder_file is not None:
+                try:
+                    holder_file.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            super().close()
+
+
 class SessionStore:
     """Read/write JSONL sessions under a configurable root directory."""
 
@@ -170,6 +189,12 @@ class SessionStore:
         safe_id = self._validated_session_id(session_id)
         return self.root / ".running" / f"{safe_id}.lock"
 
+    def _run_holder(self, session_id: str) -> Path:
+        # Beside the lock, not in it: on Windows a held lock keeps the locked
+        # file from being read or written through any other handle.
+        safe_id = self._validated_session_id(session_id)
+        return self.root / ".running" / f"{safe_id}.holder"
+
     def acquire_run_lease(self, session_id: str, *, holder: str) -> FileLease | None:
         """Claim the exclusive right to EXECUTE a turn on this Session.
 
@@ -184,18 +209,34 @@ class SessionStore:
         """
         safe_id = self._validated_session_id(session_id)
         with _run_lease_lock:
-            lease = FileLease.acquire(
+            lease = _RunLease.acquire(
                 self._run_lock(safe_id), shared=False, blocking=False
             )
             if lease is None:
                 return None
+            # Best-effort holder note for the other side's error message. We
+            # hold the exclusive lock, so this write cannot race another
+            # holder, and it is replaced whole, so a reader in another process
+            # never sees it half written.
+            path = self._run_holder(safe_id)
+            temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
             try:
-                # Best-effort holder note for the other side's error message.
-                # We hold the exclusive lock, so this write cannot race another
-                # holder; readers only ever see it advisorily.
-                self._run_lock(safe_id).write_text(holder[:256], encoding="utf-8")
+                descriptor = open_private_file(
+                    temporary,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                )
+                with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                    handle.write(holder[:256])
+                os.replace(temporary, path)
             except OSError:
                 pass
+            finally:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            # Also when the write failed: any note there is a stale one.
+            lease.holder_file = path
         return lease
 
     def run_holder(self, session_id: str) -> str | None:
@@ -215,7 +256,7 @@ class SessionStore:
                 return None
             try:
                 text = (
-                    self._run_lock(safe_id)
+                    self._run_holder(safe_id)
                     .read_text(encoding="utf-8", errors="replace")
                     .strip()
                 )
