@@ -209,6 +209,23 @@ def test_a_newer_client_restarts_an_idle_older_service(running_service):
     assert record.port == older.port
 
 
+def test_reconnect_starts_a_stopped_service_on_the_port_it_had(running_service):
+    """The TUI's /reconnect started it on the default port instead, away from
+    the address its other clients (a browser tab, --port) were using."""
+    from app_server.blocking_client import BlockingServiceClient
+    from cli.service_cli import stop_service
+
+    port = running_service.read()[0].port
+    rpc = BlockingServiceClient(running_service, start=False)
+    try:
+        stop_service(running_service, timeout=5, cancel_running=True)
+        rpc.reconnect(start=True)
+        assert running_service.read()[0].port == port
+        assert rpc.call("project/list", {})["projects"] == []
+    finally:
+        rpc.close()
+
+
 def test_an_older_client_never_restarts_a_newer_service(running_service):
     # The newer service may have migrated the database past what we can open.
     newer = _claim_version(running_service, "999.0.0")

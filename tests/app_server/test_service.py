@@ -469,6 +469,29 @@ def test_same_port_restart_after_server_closes_a_live_connection(tmp_path, monke
             stop_service(files, timeout=5, cancel_running=True)
 
 
+def test_a_service_manager_starts_on_its_own_port_not_the_previous_one(
+    tmp_path, monkeypatch
+):
+    import cli.service_cli as service_cli
+
+    started = []
+
+    class Agent:
+        path = tmp_path / "agent.plist"
+
+        def start(self, *, port=None):
+            started.append(port)
+
+    Agent.path.write_text("")
+    monkeypatch.setattr(service_cli, "_service_manager", lambda _files: Agent())
+    monkeypatch.setattr(service_cli, "_wait_ready", lambda *_a, **_k: {})
+
+    start_service(ServiceFiles(tmp_path / "state.sqlite3"), previous_port=4123)
+
+    # It was installed with a port; asking for another one is refused.
+    assert started == [None]
+
+
 def test_probe_errors_identify_transport_failure_without_echoing_secrets(monkeypatch):
     from types import SimpleNamespace
 

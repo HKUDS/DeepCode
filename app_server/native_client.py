@@ -62,6 +62,7 @@ class NativeRpcClient:
         self.notify = notify or (lambda _: None)
         self._on_close = on_close or (lambda: None)
         self.info: dict[str, Any] | None = None
+        self.port: int | None = None  # of the service this connection reached
         self._session: aiohttp.ClientSession | None = None
         self._socket: aiohttp.ClientWebSocketResponse | None = None
         self._reader: asyncio.Task | None = None
@@ -70,14 +71,21 @@ class NativeRpcClient:
         self.closed = asyncio.Event()
 
     async def connect(
-        self, initialize: dict, *, start: bool = False, port: int | None = None
+        self,
+        initialize: dict,
+        *,
+        start: bool = False,
+        port: int | None = None,
+        previous_port: int | None = None,
     ) -> dict:
         if self._session is not None:
             raise RuntimeError("connection already opened")
         if start:
             from cli.service_cli import start_service
 
-            await asyncio.to_thread(start_service, self.files, port=port)
+            await asyncio.to_thread(
+                start_service, self.files, port=port, previous_port=previous_port
+            )
         record, token, status = await self._discover()
         if record.version != __version__:
             await self._restart_older_service(record, status, allowed=start)
@@ -112,6 +120,7 @@ class NativeRpcClient:
                 raise ServiceUnavailable(
                     "Service handshake does not match the authenticated instance"
                 )
+            self.port = record.port
             return self.info
         except BaseException:
             await self.close()

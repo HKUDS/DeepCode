@@ -133,6 +133,7 @@ class BlockingServiceClient:
                         },
                     },
                     start=start,
+                    previous_port=old.port,
                 )
             )
             self.client = candidate

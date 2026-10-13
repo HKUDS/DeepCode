@@ -46,13 +46,27 @@ def _service_manager(files: ServiceFiles):
 
 
 def start_service(
-    files: ServiceFiles, *, port: int | None = None, timeout: float = 30.0
+    files: ServiceFiles,
+    *,
+    port: int | None = None,
+    timeout: float = 30.0,
+    previous_port: int | None = None,
 ) -> dict:
+    """``previous_port`` is where a stopped service listened; a detached one
+    started without ``port`` comes back there instead of on the default."""
     with exclusive_file_lock(files.directory / "management.lock"):
-        return _start_service(files, port=port, timeout=timeout)
+        return _start_service(
+            files, port=port, timeout=timeout, previous_port=previous_port
+        )
 
 
-def _start_service(files: ServiceFiles, *, port: int | None, timeout: float) -> dict:
+def _start_service(
+    files: ServiceFiles,
+    *,
+    port: int | None,
+    timeout: float,
+    previous_port: int | None = None,
+) -> dict:
     if files.running():
         status = _wait_ready(
             ServiceClient(files), timeout, port=port, existing_only=True
@@ -67,7 +81,10 @@ def _start_service(files: ServiceFiles, *, port: int | None, timeout: float) -> 
         except BaseException:
             agent.unload()
             raise
-    return _start_detached(files, port=port, timeout=timeout)
+    # A detached service keeps its address; a service manager keeps its own.
+    return _start_detached(
+        files, port=previous_port if port is None else port, timeout=timeout
+    )
 
 
 def restart_service(
