@@ -62,6 +62,8 @@ from workflows.agents.memory_agent_concise import ConciseMemoryAgent  # noqa: E4
 # Model-visible tool surfaces. These mirror the curated lists the deleted
 # ``config/mcp_tool_definitions*.py`` used to hardcode — but the schemas
 # now come from the MCP servers themselves (single source of truth).
+# ``set_workspace`` is the workflow's own call: the workspace is the write
+# fence, so the model must not be able to move it.
 _STANDARD_TOOL_NAMES = [
     "read_file",
     "read_multiple_files",
@@ -73,7 +75,6 @@ _STANDARD_TOOL_NAMES = [
     "get_file_structure",
     "search_code_references",
     "get_indexes_overview",
-    "set_workspace",
 ]
 _INDEXED_TOOL_NAMES = [
     "write_file",
@@ -288,6 +289,23 @@ class _InstrumentedTool(AliasedTool):
                     f"{info['files_completed']}/{info['total_files']} files completed"
                 )
         return result
+
+
+class _PinnedWorkingDirectory(AliasedTool):
+    """A command-executor tool that runs where the workflow says.
+
+    The server fences writes to the ``working_directory`` it is given; left to
+    the model, that fence goes wherever the model points it.
+    """
+
+    def __init__(self, inner, directory: str):
+        super().__init__(inner, inner.name)
+        self._directory = directory
+
+    async def execute(self, **kwargs: Any) -> Any:
+        return await self._inner.execute(
+            **{**kwargs, "working_directory": self._directory}
+        )
 
 
 class _ImplementationHook(AgentHook):
@@ -663,7 +681,13 @@ class CodeImplementationWorkflow:
             server_names=["command-executor"],
         )
 
+        code_dir = os.path.join(target_directory, "generate_code")
         async with structure_agent:
+            registry = structure_agent.tool_registry
+            for name in registry.tool_names:
+                tool = registry.get(name)
+                if "working_directory" in tool.parameters.get("properties", {}):
+                    registry.register(_PinnedWorkingDirectory(tool, code_dir))
             creator = await attach_workflow_llm(
                 structure_agent,
                 phase="implementation",
@@ -691,7 +715,6 @@ Requirements:
             result = await creator.generate_str(message=message)
             self.logger.info(f"LLM response: {result[:200]}...")
 
-            code_dir = os.path.join(target_directory, "generate_code")
             if not os.path.exists(code_dir):
                 self.logger.warning(
                     "LLM did not create directory, creating manually..."

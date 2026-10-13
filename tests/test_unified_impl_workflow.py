@@ -413,3 +413,63 @@ async def test_legacy_public_workflow_keeps_p0_completion_semantics(
     assert result["status"] == "success"
     assert result["inner_status"] == "completed"
     assert result["verification"] == []
+
+
+@pytest.mark.parametrize("enable_indexing", [False, True])
+def test_model_cannot_move_the_mcp_workspace(enable_indexing):
+    """The workflow sets the workspace itself; a model that could call
+    set_workspace would move the write fence anywhere."""
+
+    workflow = CodeImplementationWorkflow(enable_indexing=enable_indexing)
+    assert "set_workspace" not in workflow._model_tool_names()
+
+
+@pytest.mark.asyncio
+async def test_file_tree_commands_run_in_the_code_directory(tmp_path, monkeypatch):
+    """The model names the commands, not where they run (and are fenced)."""
+
+    import workflows.code_implementation_workflow as module
+
+    seen: list[str] = []
+    registry = ToolRegistry()
+    registry.register(
+        FakeMcpTool(
+            "mcp_command-executor_execute_commands",
+            lambda params: seen.append(params["working_directory"]) or "ok",
+            {
+                "type": "object",
+                "properties": {
+                    "commands": {"type": "string"},
+                    "working_directory": {"type": "string"},
+                },
+            },
+        )
+    )
+
+    class StructureAgent:
+        def __init__(self, **_kwargs):
+            self.tool_registry = registry
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc):
+            return None
+
+    class Model:
+        async def generate_str(self, message):
+            await registry.execute(
+                "mcp_command-executor_execute_commands",
+                {"commands": "touch x.py", "working_directory": str(Path.home())},
+            )
+            return "done"
+
+    async def attach(_agent, **_kwargs):
+        return Model()
+
+    monkeypatch.setattr(module, "Agent", StructureAgent)
+    monkeypatch.setattr(module, "attach_workflow_llm", attach)
+
+    await CodeImplementationWorkflow().create_file_structure("plan", str(tmp_path))
+
+    assert seen == [str(tmp_path / "generate_code")]

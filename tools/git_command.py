@@ -139,9 +139,11 @@ async def check_git_installed() -> bool:
 async def clone_repository(repo_url: str, target_path: str) -> Dict[str, any]:
     """执行git clone命令"""
     try:
+        # ``--``: a target taken from free text must not become an option.
         proc = await asyncio.create_subprocess_exec(
             "git",
             "clone",
+            "--",
             repo_url,
             target_path,
             stdout=asyncio.subprocess.PIPE,
@@ -304,6 +306,10 @@ async def git_clone(
     Returns:
         Status message about the clone operation
     """
+    # An option for a URL (``--upload-pack=<cmd>``) would run <cmd> here.
+    if repo_url.startswith("-"):
+        return f"❌ Error: Not a repository URL: {repo_url}"
+
     # 检查Git是否安装
     if not await check_git_installed():
         return "❌ Error: Git is not installed or not in system PATH"
@@ -325,7 +331,7 @@ async def git_clone(
     cmd = ["git", "clone"]
     if branch:
         cmd.extend(["-b", branch])
-    cmd.extend([repo_url, target_path])
+    cmd.extend(["--", repo_url, target_path])
 
     # 执行克隆
     try:
