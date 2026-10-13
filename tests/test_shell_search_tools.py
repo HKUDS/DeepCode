@@ -387,5 +387,29 @@ async def test_glob_prunes_skip_dirs_below_the_base_only(tmp_path, ws_name):
     assert "node_modules" not in out
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ripgrep", [True, False])
+async def test_search_results_stay_workspace_relative_under_a_symlinked_root(
+    tmp_path, monkeypatch, ripgrep
+):
+    """On macOS /tmp is a link to /private/tmp. The search base was resolved
+    and the workspace was not, so a workspace given as /tmp/... listed every
+    result as ../../../private/tmp/..."""
+    if ripgrep and shutil.which("rg") is None:
+        pytest.skip("needs ripgrep")
+    if not ripgrep:
+        monkeypatch.setattr("core.harness.tools.search.shutil.which", lambda _: None)
+    real = tmp_path / "real"
+    (real / "src").mkdir(parents=True)
+    (real / "src" / "m.py").write_text("needle\n")
+    link = tmp_path / "link"
+    link.symlink_to(real, target_is_directory=True)
+
+    assert await GlobTool(str(link)).execute(pattern="**/*.py") == "src/m.py"
+    found = await GrepTool(str(link)).execute(pattern="needle")
+    assert found.startswith("src/m.py:1:"), found
+
+
 # (the default_coding_tools full-set assertion lives in
 # test_native_file_tools.py::test_default_coding_tools_registry)

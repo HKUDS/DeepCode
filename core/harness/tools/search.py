@@ -46,7 +46,9 @@ class GrepTool(Tool):
     """Search file contents by regex, returning ``path:line: text`` matches."""
 
     def __init__(self, workspace: str):
-        self._workspace = str(workspace)
+        # Resolved like the search roots below, so results are relative to it
+        # even when the workspace is reached through a link (/tmp on macOS).
+        self._workspace = str(Path(workspace).resolve())
 
     @property
     def name(self) -> str:
@@ -179,7 +181,9 @@ class GlobTool(Tool):
     """List files matching a glob pattern, workspace-relative."""
 
     def __init__(self, workspace: str):
-        self._workspace = str(workspace)
+        # Resolved like the search roots below, so results are relative to it
+        # even when the workspace is reached through a link (/tmp on macOS).
+        self._workspace = str(Path(workspace).resolve())
 
     @property
     def name(self) -> str:
