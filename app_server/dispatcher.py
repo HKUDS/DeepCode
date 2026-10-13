@@ -1229,9 +1229,9 @@ class Dispatcher:
     def _thread_goal_get(self, params: Params) -> dict[str, Any]:
         params.only("threadId")
         thread_id = str(params.string("threadId"))
-        goal = self.application.goals.read(thread_id)
+        goal, outcome = self.application.goals.read_with_outcome(thread_id)
         return {
-            **self._goal_result(thread_id, goal),
+            **self._goal_view(goal, outcome),
             "executionSettled": (
                 goal is None or self.application.goals.execution_settled(goal)
             ),
@@ -1284,7 +1284,7 @@ class Dispatcher:
                 raise InvalidParams(
                     "expectedGoalId must be null or omitted when creating a Goal"
                 )
-            goal = self.application.goals.create(
+            self.application.goals.create(
                 thread_id,
                 objective=objective,
                 token_budget=token_budget,
@@ -1297,7 +1297,7 @@ class Dispatcher:
                 raise InvalidParams(
                     "expectedGoalId is required when editing an existing Goal"
                 )
-            goal = self.application.goals.edit(
+            self.application.goals.edit(
                 thread_id,
                 expected_goal_id=expected_goal_id,
                 objective=objective,
@@ -1306,23 +1306,23 @@ class Dispatcher:
                 continue_work=start,
                 client_surface=self.client_surface,
             )
-        return self._goal_result(thread_id, goal)
+        return self._goal_result(thread_id)
 
     def _thread_goal_pause(self, params: Params) -> dict[str, Any]:
         params.only("threadId", "expectedGoalId")
         thread_id = str(params.string("threadId"))
-        goal = self.application.goals.pause(
+        self.application.goals.pause(
             thread_id,
             expected_goal_id=str(params.string("expectedGoalId")),
         )
-        return self._goal_result(thread_id, goal)
+        return self._goal_result(thread_id)
 
     def _thread_goal_resume(self, params: Params) -> dict[str, Any]:
         params.only(
             "threadId", "expectedGoalId", "connectionId", "model", "reasoningEffort"
         )
         thread_id = str(params.string("threadId"))
-        goal = self.application.goals.resume(
+        self.application.goals.resume(
             thread_id,
             expected_goal_id=str(params.string("expectedGoalId")),
             client_surface=self.client_surface,
@@ -1330,7 +1330,7 @@ class Dispatcher:
             model=params.string("model", required=False),
             reasoning_effort=params.string("reasoningEffort", required=False),
         )
-        return self._goal_result(thread_id, goal)
+        return self._goal_result(thread_id)
 
     def _thread_goal_continue(self, params: Params) -> dict[str, Any]:
         params.only(
@@ -1345,7 +1345,7 @@ class Dispatcher:
             reasoning_effort=params.string("reasoningEffort", required=False),
         )
         return {
-            **self._goal_result(result.goal.thread_id, result.goal),
+            **self._goal_result(result.goal.thread_id),
             "disposition": result.disposition.value,
             "turnId": result.turn_id,
         }
@@ -1359,10 +1359,14 @@ class Dispatcher:
         )
         return {"goal": None, "outcome": None}
 
-    def _goal_result(self, thread_id: str, goal) -> dict[str, Any]:
-        outcome = (
-            self.application.goals.read_outcome(thread_id) if goal is not None else None
-        )
+    def _goal_result(self, thread_id: str) -> dict[str, Any]:
+        # Read back after the change, Goal and outcome together: a Turn may
+        # settle as soon as the change commits, and pairing the changed Goal
+        # with that Turn's outcome would describe no state that existed.
+        return self._goal_view(*self.application.goals.read_with_outcome(thread_id))
+
+    @staticmethod
+    def _goal_view(goal, outcome) -> dict[str, Any]:
         return {
             "goal": thread_goal_view(goal) if goal is not None else None,
             "outcome": (goal_outcome_view(outcome) if outcome is not None else None),

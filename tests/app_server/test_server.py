@@ -244,8 +244,9 @@ def test_thread_goal_continue_has_one_explicit_typed_rpc() -> None:
     )
 
     class Goals:
-        def read_outcome(self, thread_id: str):
+        def read_with_outcome(self, thread_id: str):
             assert thread_id == goal.thread_id
+            return goal, None
 
         def continue_goal(
             self,
@@ -536,6 +537,48 @@ def test_thread_goal_protocol_edits_and_resumes_the_same_identity(
         assert responses[3]["outcome"] is None
         assert responses[4]["goal"] == responses[3]["goal"]
         assert responses[4]["outcome"] is None
+    finally:
+        application.close()
+
+
+def test_thread_goal_get_reads_the_goal_and_its_outcome_together(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # A Turn settling while the response is built must not pair the Goal as
+    # it was with the outcome that Turn just recorded.
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    try:
+        project = application.projects.add(
+            str(workspace), trust_state=TrustState.TRUSTED
+        )
+        thread = application.threads.start(project.id, title="Torn read")
+        goal = application.goals.create(thread.id, objective="Ship", start=False)
+        store = application.thread_goal_store
+        read_record = store.read_record
+
+        def read_then_settle(thread_id: str):
+            record = read_record(thread_id)
+            monkeypatch.setattr(store, "read_record", read_record)
+            store.update(
+                thread_id,
+                expected_goal_id=goal.id,
+                transform=lambda current: current.agent_transition(
+                    ThreadGoalStatus.COMPLETE
+                ),
+                reason="Shipped.",
+                source="agent",
+            )
+            return record
+
+        monkeypatch.setattr(store, "read_record", read_then_settle)
+        result = Dispatcher(application, SimpleNamespace())._thread_goal_get(
+            Params({"threadId": thread.id})
+        )
+
+        assert result["goal"]["status"] == ThreadGoalStatus.ACTIVE.value
+        assert result["outcome"] is None
     finally:
         application.close()
 

@@ -164,7 +164,20 @@ class GoalExtension(GoalRuntimeHandler):
         )
 
     def read_outcome(self, thread_id: str) -> GoalOutcome | None:
-        outcome = self.store.read_record(thread_id).outcome
+        return self.read_with_outcome(thread_id)[1]
+
+    def read_with_outcome(
+        self, thread_id: str
+    ) -> tuple[ThreadGoal | None, GoalOutcome | None]:
+        """The Goal and its outcome from one ledger read, so they agree.
+
+        Read apart, a Turn settling in between paired an active Goal with
+        the outcome that Turn had just recorded.
+        """
+        record = self.store.read_record(thread_id)
+        return record.goal, self._with_evidence(record.outcome)
+
+    def _with_evidence(self, outcome: GoalOutcome | None) -> GoalOutcome | None:
         if outcome is None or outcome.decided_by_turn_id is None:
             return outcome
         try:
