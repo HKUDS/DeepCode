@@ -31,6 +31,40 @@ def _resolve(workspace: str, file_path: str) -> Path:
     return (p if p.is_absolute() else base / p).resolve()
 
 
+def _read_window(
+    target: Path, offset: int, limit: int
+) -> tuple[list[str], int, bool, bool]:
+    """Numbered lines from ``offset``, streamed from the start of the file.
+
+    Returns ``(lines, lines_seen, more, capped)``: ``more`` when lines follow
+    the window, ``capped`` when the output budget cut it short. An overlong
+    line is read in pieces and only its start kept, so memory stays bounded.
+    """
+    out: list[str] = []
+    size = 0
+    lineno = 0
+    at_line_start = True
+    with target.open("rb") as f:
+        for chunk in iter(lambda: f.readline(_MAX_READ_BYTES), b""):
+            starts_line, at_line_start = at_line_start, chunk.endswith(b"\n")
+            if not starts_line:
+                continue  # the rest of an overlong line
+            lineno += 1
+            if lineno < offset:
+                continue
+            if len(out) >= limit:
+                return out, lineno, True, False
+            line = chunk.decode("utf-8", errors="replace").removesuffix("\n")
+            if len(line) > _MAX_LINE_CHARS:
+                line = line[:_MAX_LINE_CHARS] + "… [truncated]"
+            entry = f"{lineno}: {line}"
+            size += len(entry.encode("utf-8")) + 1
+            if size > _MAX_READ_BYTES:
+                return out, lineno, True, True
+            out.append(entry)
+    return out, lineno, False, False
+
+
 def _within(workspace: str, target: Path) -> bool:
     try:
         target.relative_to(Path(workspace).resolve())
@@ -84,7 +118,7 @@ class ReadTool(Tool):
     async def execute(self, **kwargs: Any) -> Any:
         file_path = kwargs.get("file_path", "")
         offset = max(1, int(kwargs.get("offset") or 1))
-        limit = int(kwargs.get("limit") or _DEFAULT_READ_LIMIT)
+        limit = max(1, int(kwargs.get("limit") or _DEFAULT_READ_LIMIT))
         target = _resolve(self._workspace, file_path)
         if not target.exists():
             return f"Error: file not found: {file_path}"
@@ -94,23 +128,27 @@ class ReadTool(Tool):
             )
             return f"Directory {file_path}:\n" + "\n".join(entries)
         try:
-            raw = target.read_bytes()[:_MAX_READ_BYTES]
-            text = raw.decode("utf-8", errors="replace")
+            out, lines_seen, more, capped = _read_window(target, offset, limit)
         except OSError as exc:
             return f"Error: could not read {file_path}: {exc}"
 
-        lines = text.split("\n")
-        end = min(len(lines), offset - 1 + limit)
-        out: list[str] = []
-        for i in range(offset - 1, end):
-            line = lines[i]
-            if len(line) > _MAX_LINE_CHARS:
-                line = line[:_MAX_LINE_CHARS] + "… [truncated]"
-            out.append(f"{i + 1}: {line}")
+        if not out:
+            if lines_seen == 0:
+                return "(empty file)"
+            return (
+                f"Error: offset {offset} is past the end of {file_path} "
+                f"({lines_seen} lines)"
+            )
         result = "\n".join(out)
-        if end < len(lines):
-            result += f"\n… [{len(lines) - end} more lines; use offset/limit]"
-        return result or "(empty file)"
+        next_line = offset + len(out)
+        if capped:
+            result += (
+                f"\n… [output capped at {_MAX_READ_BYTES // 1024} KB; "
+                f"use offset={next_line} to continue]"
+            )
+        elif more:
+            result += f"\n… [more lines; use offset={next_line} to continue]"
+        return result
 
 
 @tool_parameters(

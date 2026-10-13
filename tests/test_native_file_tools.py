@@ -41,6 +41,56 @@ async def test_read_offset_limit(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_read_reaches_past_the_first_256kb(tmp_path):
+    # 4000 lines of ~100 bytes: line 3000 sits well past the first 256 KB.
+    lines = [f"line{i:05d} " + "x" * 90 for i in range(1, 4001)]
+    (tmp_path / "big.txt").write_text("\n".join(lines) + "\n")
+    r = ReadTool(str(tmp_path))
+
+    out = await r.execute(file_path="big.txt", offset=3000, limit=2)
+    assert out.startswith("3000: line03000 ")
+    assert "3001: line03001 " in out
+    assert "use offset=3002 to continue" in out
+
+    # The default window is 2000 lines; it must not stop short silently.
+    first = await r.execute(file_path="big.txt")
+    assert "2000: line02000 " in first
+    assert "use offset=2001 to continue" in first
+
+
+@pytest.mark.asyncio
+async def test_read_output_is_capped_with_a_way_to_continue(tmp_path):
+    line = "y" * 1500
+    (tmp_path / "wide.txt").write_text("\n".join([line] * 400))
+    r = ReadTool(str(tmp_path))
+
+    out = await r.execute(file_path="wide.txt")
+    shown = out.count(": " + line)
+    assert 0 < shown < 400
+    assert len(out.encode()) <= 256 * 1024 + 200
+    assert f"use offset={shown + 1} to continue" in out
+
+    # A line longer than the read budget is still one (truncated) line.
+    (tmp_path / "minified.js").write_text("a" * 600_000 + "\nb\n")
+    out = await r.execute(file_path="minified.js")
+    assert out == "1: " + "a" * 2000 + "… [truncated]\n2: b"
+
+
+@pytest.mark.asyncio
+async def test_read_offset_past_the_end_is_not_an_empty_file(tmp_path):
+    (tmp_path / "small.txt").write_text("a\nb\nc\n")
+    r = ReadTool(str(tmp_path))
+
+    out = await r.execute(file_path="small.txt", offset=10)
+    assert out.startswith("Error:")
+    assert "3 lines" in out
+    assert await r.execute(file_path="small.txt") == "1: a\n2: b\n3: c"
+
+    (tmp_path / "empty.txt").write_text("")
+    assert await r.execute(file_path="empty.txt") == "(empty file)"
+
+
+@pytest.mark.asyncio
 async def test_read_missing_file_is_error_data(tmp_path):
     r = ReadTool(str(tmp_path))
     out = await r.execute(file_path="nope.py")
