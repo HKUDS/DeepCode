@@ -67,6 +67,10 @@ _SERVER_FIELDS = frozenset(
         "description",
     }
 )
+# Maps of header / URL parameter name to environment variable name. A patch
+# carries each one whole, so it replaces the stored map: merging it key by
+# key would keep every entry the client removed.
+_REPLACED_MAPS = ("envHttpHeaders", "envUrlParams")
 _SECRET_FLAG = re.compile(
     r"(?:token|api[-_]?key|password|passwd|secret|authorization|auth|header)",
     re.IGNORECASE,
@@ -99,6 +103,8 @@ class McpServerInfo:
     missing_env_keys: tuple[str, ...]
     credential_env_keys: tuple[str, ...]
     header_keys: tuple[str, ...]
+    env_http_headers: tuple[tuple[str, str], ...]
+    env_url_params: tuple[tuple[str, str], ...]
     source: str
     configuration_state: str
     configuration_message: str
@@ -461,6 +467,9 @@ class McpService:
             existing = selected.get(clean_name, {})
             base = dict(existing) if isinstance(existing, dict) else {}
             candidate = deep_merge(base, patch)
+            for field in _REPLACED_MAPS:
+                if field in patch:
+                    candidate[field] = patch[field]
             if not base and "enabled" not in candidate:
                 candidate["enabled"] = False
             if patch.get("type") == "stdio":
@@ -786,6 +795,8 @@ def _validated_server_info(
                 }
             )
         ),
+        env_http_headers=tuple(sorted(server.env_http_headers.items())),
+        env_url_params=tuple(sorted(server.env_url_params.items())),
         source=source,
         configuration_state=state,
         configuration_message=message,
@@ -834,6 +845,8 @@ def _invalid_server_info(
         header_keys=tuple(sorted(raw.get("headers", {})))
         if isinstance(raw.get("headers"), dict)
         else (),
+        env_http_headers=(),
+        env_url_params=(),
         source=source,
         configuration_state="invalid",
         configuration_message=error[:1_000],

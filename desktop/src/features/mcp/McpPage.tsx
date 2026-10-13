@@ -144,12 +144,10 @@ export function McpPage({
         : {
             url: draft.url.trim(),
             auth: draft.auth === "oauth" ? "oauth" : null,
-            ...(draft.headerEnv.trim()
-              ? { envHttpHeaders: stringMap(draft.headerEnv) }
-              : {}),
-            ...(draft.urlParamEnv.trim()
-              ? { envUrlParams: stringMap(draft.urlParamEnv) }
-              : {}),
+            // Sent whole, and the service replaces them: a removed line is
+            // removed from the saved server.
+            envHttpHeaders: stringMap(draft.headerEnv),
+            envUrlParams: stringMap(draft.urlParamEnv),
           }),
     };
     await perform(`save:${name}`, async () => {
@@ -180,6 +178,8 @@ export function McpPage({
       envVars: server.forwardedEnvKeys.join(", "),
       requiredEnvVars: server.requiredEnvKeys.join(", "),
       credentialEnv: server.credentialEnvKeys.map((name) => `${name}=`).join("\n"),
+      headerEnv: mapLines(server.envHttpHeaders),
+      urlParamEnv: mapLines(server.envUrlParams),
       enabledTools: server.enabledTools?.join(", ") ?? "",
       disabledTools: server.disabledTools.join(", "),
       approvalMode: server.approvalMode,
@@ -533,6 +533,12 @@ function credentialMap(value: string): JsonObject {
     if (name && connection) result[name] = { credentialRef: `provider:${connection}` };
   }
   return result;
+}
+
+function mapLines(value: Record<string, string>): string {
+  return Object.entries(value)
+    .map(([name, source]) => `${name}=${source}`)
+    .join("\n");
 }
 
 function stringMap(value: string): JsonObject {

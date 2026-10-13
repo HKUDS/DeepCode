@@ -8,6 +8,7 @@ import pytest
 
 from core.application import DeepCodeApplication
 from core.application.errors import InvalidArgumentError, ProjectNotTrustedError
+from core.application.views import mcp_server_view
 from core.domain import TrustState
 from core.persistence.migrations import LATEST_SCHEMA_VERSION
 from core.plugins.registry import LocalPluginRegistry
@@ -233,6 +234,54 @@ def test_mcp_inventory_redacts_secrets_and_mutates_explicit_scope(
             name="project-server",
         )
         assert [server.name for server in inherited.servers] == ["demo"]
+    finally:
+        application.close()
+
+
+def test_mcp_upsert_replaces_header_and_url_parameter_maps(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    home.mkdir()
+    workspace.mkdir()
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+    monkeypatch.chdir(workspace)
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    project = application.projects.add(str(workspace))
+    remote = {"type": "streamableHttp", "url": "https://mcp.example.test/rpc"}
+    try:
+        application.mcp.upsert(
+            project_id=project.id,
+            scope="user",
+            name="remote",
+            patch={
+                **remote,
+                "envHttpHeaders": {"X-Team": "TEAM_HEADER", "X-Old": "OLD_HEADER"},
+                "envUrlParams": {"key": "API_KEY", "old": "OLD_PARAM"},
+            },
+        )
+        # An edit sends the maps as they now stand; a removed entry stays gone.
+        inventory = application.mcp.upsert(
+            project_id=project.id,
+            scope="user",
+            name="remote",
+            patch={
+                **remote,
+                "envHttpHeaders": {"X-Team": "TEAM_HEADER"},
+                "envUrlParams": {"key": "API_KEY"},
+            },
+        )
+        stored = json.loads((home / "deepcode_config.json").read_text())
+        assert stored["mcpServers"]["remote"]["envHttpHeaders"] == {
+            "X-Team": "TEAM_HEADER"
+        }
+        assert stored["mcpServers"]["remote"]["envUrlParams"] == {"key": "API_KEY"}
+        server = next(item for item in inventory.servers if item.name == "remote")
+        view = mcp_server_view(server)
+        assert view["envHttpHeaders"] == {"X-Team": "TEAM_HEADER"}
+        assert view["envUrlParams"] == {"key": "API_KEY"}
     finally:
         application.close()
 

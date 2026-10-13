@@ -3258,6 +3258,18 @@
             "type": "string"
           }
         },
+        "envHttpHeaders": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "envUrlParams": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
         "source": {
           "type": "string",
           "enum": [
@@ -3339,6 +3351,8 @@
         "missingEnvKeys",
         "credentialEnvKeys",
         "headerKeys",
+        "envHttpHeaders",
+        "envUrlParams",
         "source",
         "configurationState",
         "configurationMessage",

@@ -243,6 +243,8 @@ def mcp_server_view(server) -> dict[str, Any]:
         "missingEnvKeys": list(server.missing_env_keys),
         "credentialEnvKeys": list(server.credential_env_keys),
         "headerKeys": list(server.header_keys),
+        "envHttpHeaders": dict(server.env_http_headers),
+        "envUrlParams": dict(server.env_url_params),
         "source": server.source,
         "configurationState": server.configuration_state,
         "configurationMessage": server.configuration_message,

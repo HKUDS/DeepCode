@@ -135,6 +135,8 @@ class McpRuntime {
             missingEnvKeys: [],
             credentialEnvKeys: ["OPENROUTER_API_KEY"],
             headerKeys: [],
+            envHttpHeaders: {},
+            envUrlParams: {},
             source: request.scope,
             configurationState: "configured",
             configurationMessage: "Configuration is ready; connection is checked on use",
@@ -181,6 +183,8 @@ function mcpServer(
     missingEnvKeys: [],
     credentialEnvKeys: [],
     headerKeys: [],
+    envHttpHeaders: {},
+    envUrlParams: {},
     source: "user",
     configurationState: "configured",
     configurationMessage: "Configuration is ready; connection is checked on use",
@@ -273,6 +277,8 @@ test("shows Plugin MCP servers without exposing native edit actions", async () =
         missingEnvKeys: [],
         credentialEnvKeys: [],
         headerKeys: [],
+        envHttpHeaders: {},
+        envUrlParams: {},
         source: "plugin",
         configurationState: "configured",
         configurationMessage: "Configuration is ready; connection is checked on use",
@@ -378,4 +384,48 @@ test("clears a saved working directory and tool allow-list", async () => {
       server: { type: "stdio", cwd: null, enabledTools: null },
     }),
   );
+});
+
+test("removes a header or URL parameter mapping from a saved server", async () => {
+  const runtime = new McpRuntime();
+  runtime.inventory = {
+    ...runtime.inventory,
+    servers: [
+      mcpServer("remote", {
+        transport: "streamableHttp",
+        command: null,
+        url: "https://mcp.example.test/rpc",
+        envHttpHeaders: { "X-Old": "OLD_HEADER", "X-Team": "TEAM_HEADER" },
+        envUrlParams: { key: "API_KEY", old: "OLD_PARAM" },
+      }),
+    ],
+  };
+  render(
+    <McpPage
+      runtime={runtime as unknown as ClientRuntime}
+      project={project}
+    />,
+  );
+
+  await screen.findByRole("heading", { name: "remote" });
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  const headers = screen.getByLabelText(
+    "Headers from environment",
+  ) as HTMLTextAreaElement;
+  const params = screen.getByLabelText(
+    "URL parameters from environment",
+  ) as HTMLTextAreaElement;
+  expect(headers.value).toBe("X-Old=OLD_HEADER\nX-Team=TEAM_HEADER");
+  expect(params.value).toBe("key=API_KEY\nold=OLD_PARAM");
+  fireEvent.change(headers, { target: { value: "X-Team=TEAM_HEADER" } });
+  fireEvent.change(params, { target: { value: "" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+  await waitFor(() => {
+    const upsert = runtime.requests.find(
+      (request) => request.method === "mcp/upsert",
+    )?.params as MethodParams["mcp/upsert"] | undefined;
+    expect(upsert?.server.envHttpHeaders).toEqual({ "X-Team": "TEAM_HEADER" });
+    expect(upsert?.server.envUrlParams).toEqual({});
+  });
 });

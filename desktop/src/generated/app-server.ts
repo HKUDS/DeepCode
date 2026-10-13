@@ -1298,6 +1298,12 @@ export interface McpServerInfo {
   missingEnvKeys: string[];
   credentialEnvKeys: string[];
   headerKeys: string[];
+  envHttpHeaders: {
+    [k: string]: string;
+  };
+  envUrlParams: {
+    [k: string]: string;
+  };
   source: "user" | "project" | "plugin";
   configurationState: "configured" | "invalid" | "disabled" | "blocked" | "missing_credentials";
   configurationMessage: string;
