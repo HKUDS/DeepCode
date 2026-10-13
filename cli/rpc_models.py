@@ -33,6 +33,14 @@ def _input(model, value):
             if wire in value
         }
     origin, args = get_origin(model), get_args(model)
+    if (
+        origin in (list, tuple)
+        and isinstance(value, dict)
+        and args
+        and get_origin(args[0]) is tuple
+    ):
+        # A mapping sent as a JSON object, held here as (key, value) pairs.
+        return [list(item) for item in value.items()]
     if origin in (list, tuple) and isinstance(value, (list, tuple)) and args:
         return [_input(args[0], item) for item in value]
     # Optional dataclasses need field aliases too. Dict/JSON payloads remain
