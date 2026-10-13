@@ -16,11 +16,17 @@ optional — see :mod:`core.sessions.index`. Any index failure silently falls
 back to the JSONL scan.
 
 Concurrency model: :class:`threading.RLock` covers in-process
-serialisation; we additionally re-read metadata before every write so
-two processes editing the same session don't trample each other (the
-hot mutation surface — ``append_message`` / ``attach_task`` — is
-pure-append to JSONL files, which is atomic at the OS level for small
-writes and safe under typical desktop concurrency).
+serialisation and a per-session file lock covers other processes; we
+additionally re-read the session before every write so two processes
+editing the same session don't trample each other (the hot mutation
+surface — ``append_message`` / ``attach_task`` — appends to JSONL files).
+
+Durability: a write to session.jsonl is on disk when it returns. An append
+is fsynced (the JSONL is the record, so it must not be less durable than
+the SQLite index derived from it); the header is rewritten through a
+fsynced temporary file and an atomic replace. A crash can at worst cut the
+last line short: readers skip such a line, the next append starts a fresh
+one, and rewrites keep it.
 """
 
 from __future__ import annotations
@@ -836,6 +842,7 @@ class SessionStore:
 
     def _append_jsonl(self, path: Path, payload: dict) -> None:
         line = json.dumps(payload, ensure_ascii=False, default=str) + "\n"
+        created = not path.exists()
         descriptor = open_private_file(
             path,
             os.O_APPEND | os.O_CREAT | os.O_RDWR,
@@ -849,6 +856,10 @@ class SessionStore:
                 if fh.read(1) != b"\n":
                     line = "\n" + line
             fh.write(line.encode("utf-8"))
+            fh.flush()
+            os.fsync(fh.fileno())
+        if created:
+            self._fsync_directory(path.parent)
 
     @staticmethod
     def _fsync_directory(path: Path) -> None:

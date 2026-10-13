@@ -7,6 +7,7 @@ be read, such as one cut short by a crash, is kept as it is.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -78,3 +79,28 @@ def test_a_line_cut_short_by_a_crash_survives_later_writes(tmp_path: Path) -> No
         "first",
         "after the crash",
     ]
+
+
+def test_a_saved_message_or_task_is_on_disk_when_saving_returns(
+    tmp_path: Path, monkeypatch
+) -> None:
+    store = SessionStore(tmp_path / "sessions")
+    session = store.create_session(title="kept")
+    directory = store.root / session.session_id
+    synced: list[int] = []
+    fsync = os.fsync
+
+    def recording_fsync(descriptor: int) -> None:
+        synced.append(os.fstat(descriptor).st_ino)
+        fsync(descriptor)
+
+    monkeypatch.setattr(os, "fsync", recording_fsync)
+    store.append_message(session.session_id, "user", "first")
+    assert (directory / "session.jsonl").stat().st_ino in synced
+
+    synced.clear()
+    store.attach_task(session.session_id, "task-1", task_kind="paper", task_dir="t")
+    assert (directory / "tasks.jsonl").stat().st_ino in synced
+    if os.name != "nt":
+        # The first task created tasks.jsonl; its directory entry is durable too.
+        assert directory.stat().st_ino in synced
