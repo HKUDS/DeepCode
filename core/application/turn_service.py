@@ -1060,19 +1060,13 @@ class TurnService:
         The authoritative gate is the run lease taken around execution
         (`SessionRuntimeRegistry.acquire`), but by then the Turn is already
         created and marked running, so a refusal there surfaces as a failed
-        Turn. Probing at submission turns the common case into a clean
+        Turn. Checking at submission turns the common case into a clean
         refusal before anything exists. Our own process holding the lease is
         not a refusal: that is an active local Turn, and queueing behind it
         is exactly what submission is for.
         """
-        probe = self.session_store.acquire_run_lease(
-            thread_id, holder=self.holder_label
-        )
-        if probe is not None:
-            probe.close()
-            return
         holder = self.session_store.run_holder(thread_id)
-        if holder == self.holder_label:
+        if holder is None or holder == self.holder_label:
             return
         raise ConflictError(
             f"session is being run by {holder or 'another process'}: {thread_id}",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -484,6 +485,41 @@ def _wait_for(application: DeepCodeApplication, turn_id: str, status) -> Any:
     raise AssertionError(
         f"turn did not reach {status}: {application.turns.read(turn_id).turn}"
     )
+
+
+def test_admission_check_never_keeps_this_process_from_running_the_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Admission asked whether another process runs the Session by taking its
+    run lease for a moment. A Turn of this process starting its execution in
+    that moment was refused and failed as "running in another process".
+    """
+    application, thread_id = _application(tmp_path, ScriptedFactory())
+    holding = threading.Event()
+    write_text = Path.write_text
+
+    def slow_holder_write(path: Path, data: str, *args, **kwargs) -> int:
+        if path.parent.name == ".running" and not holding.is_set():
+            holding.set()
+            time.sleep(0.3)
+        return write_text(path, data, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", slow_holder_write)
+    check = threading.Thread(
+        target=application.turns._refuse_if_running_elsewhere, args=(thread_id,)
+    )
+    check.start()
+    try:
+        # Wait for the check to hold the lease, if it ever takes it.
+        holding.wait(0.5)
+        lease = application.session_store.acquire_run_lease(
+            thread_id, holder=application.turns.holder_label
+        )
+        assert lease is not None
+        lease.close()
+    finally:
+        check.join()
+        application.close()
 
 
 def test_turn_transaction_participant_commits_with_turn_and_publishes_after_commit(

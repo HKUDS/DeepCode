@@ -55,6 +55,13 @@ from core.sessions.models import (
     _utcnow_iso,
 )
 
+# Taking a run lease and writing its holder's name are two steps, and the name
+# is rewritten in place. In this process both happen under this lock, as does
+# every check of who holds a lease, so a check never catches this process
+# half-way and takes it for another one. Module-wide because every store in
+# the process shares the same lock files.
+_run_lease_lock = threading.Lock()
+
 
 class SessionStore:
     """Read/write JSONL sessions under a configurable root directory."""
@@ -170,28 +177,44 @@ class SessionStore:
         cleaning up.
         """
         safe_id = self._validated_session_id(session_id)
-        lease = FileLease.acquire(self._run_lock(safe_id), shared=False, blocking=False)
-        if lease is None:
-            return None
-        try:
-            # Best-effort holder note for the other side's error message.
-            # We hold the exclusive lock, so this write cannot race another
-            # holder; readers only ever see it advisorily.
-            self._run_lock(safe_id).write_text(holder[:256], encoding="utf-8")
-        except OSError:
-            pass
+        with _run_lease_lock:
+            lease = FileLease.acquire(
+                self._run_lock(safe_id), shared=False, blocking=False
+            )
+            if lease is None:
+                return None
+            try:
+                # Best-effort holder note for the other side's error message.
+                # We hold the exclusive lock, so this write cannot race another
+                # holder; readers only ever see it advisorily.
+                self._run_lock(safe_id).write_text(holder[:256], encoding="utf-8")
+            except OSError:
+                pass
         return lease
 
-    def run_holder(self, session_id: str) -> str:
-        """Best-effort name of the process holding the run lease."""
-        try:
-            text = (
-                self._run_lock(session_id)
-                .read_text(encoding="utf-8", errors="replace")
-                .strip()
+    def run_holder(self, session_id: str) -> str | None:
+        """Name of the process running this Session; ``None`` when none is.
+
+        Another process may be caught before it has written its name, which
+        then reads empty or stale; this process's own lease always reads as
+        its own holder.
+        """
+        safe_id = self._validated_session_id(session_id)
+        with _run_lease_lock:
+            probe = FileLease.acquire(
+                self._run_lock(safe_id), shared=False, blocking=False
             )
-        except OSError:
-            return ""
+            if probe is not None:
+                probe.close()
+                return None
+            try:
+                text = (
+                    self._run_lock(safe_id)
+                    .read_text(encoding="utf-8", errors="replace")
+                    .strip()
+                )
+            except OSError:
+                return ""
         return text[:256]
 
     def acquire_activity_lease(self, session_id: str) -> FileLease | None:
