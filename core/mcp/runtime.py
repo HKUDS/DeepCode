@@ -12,9 +12,24 @@ from loguru import logger
 from core.agent_runtime.tools.base import Tool, ToolResult
 from core.agent_runtime.tools.registry import ToolRegistry
 from core.mcp.connection import CredentialResolver, McpConnection, OAuthProviderFactory
-from core.mcp.models import McpRuntimePlan, McpStartupError
+from core.mcp.models import McpRuntimePlan, McpStartupError, ResolvedMcpServer
 from core.mcp.naming import visible_tool_name
 from core.mcp.tools import McpToolAdapter
+
+# Servers whose startup timed out in this process. Every new session would
+# otherwise hold its first Turn for the same timeout again, so later sessions
+# defer them to first use. Required servers are never recorded.
+_startup_timeouts: set[tuple[str, str, str]] = set()
+
+
+def _startup_key(server: ResolvedMcpServer) -> tuple[str, str, str]:
+    # An edited definition (a longer startupTimeoutSeconds, a fixed command)
+    # is a new server and is waited for again.
+    return (
+        str(server.workspace),
+        server.server_id,
+        server.definition.model_dump_json(),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,10 +51,12 @@ class _ActivateMcpServerTool(Tool):
         *,
         name: str,
         server_ids: tuple[str, ...],
+        timed_out_ids: tuple[str, ...] = (),
     ) -> None:
         self._runtime = runtime
         self._name = name
         self._server_ids = server_ids
+        self._timed_out_ids = timed_out_ids
 
     @property
     def name(self) -> str:
@@ -48,10 +65,16 @@ class _ActivateMcpServerTool(Tool):
     @property
     def description(self) -> str:
         available = ", ".join(self._server_ids)
-        return (
+        description = (
             "Start one configured deferred MCP server so its tools become "
             f"available to this session. Deferred server ids: {available}."
         )
+        if self._timed_out_ids:
+            description += (
+                " Startup timed out in an earlier session, so they were not "
+                f"started for this one: {', '.join(self._timed_out_ids)}."
+            )
+        return description
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -181,7 +204,12 @@ class McpSessionRuntime:
             if not self.plan.servers:
                 self._started = True
                 return
-            deferred_ids = {
+            timed_out_ids = {
+                server.server_id
+                for server in self.plan.servers
+                if _startup_key(server) in _startup_timeouts
+            }
+            deferred_ids = timed_out_ids | {
                 server.server_id
                 for server in self.plan.servers
                 if server.definition.defer_loading
@@ -202,6 +230,12 @@ class McpSessionRuntime:
                     status.source,
                     "deferred" if server_id in deferred_ids else "starting",
                     0,
+                    (
+                        "Startup timed out in an earlier session; "
+                        "starts when first needed"
+                    )
+                    if server_id in timed_out_ids
+                    else None,
                 )
             self._publish_statuses()
             try:
@@ -221,6 +255,12 @@ class McpSessionRuntime:
                 server = connection.server
                 if isinstance(result, BaseException):
                     error = f"{type(result).__name__}: {result}"
+                    if (
+                        isinstance(result, TimeoutError)
+                        and not server.definition.required
+                    ):
+                        _startup_timeouts.add(_startup_key(server))
+                        error += "; new sessions start it only when first needed"
                     self._statuses[server.server_id] = McpServerRuntimeStatus(
                         server.server_id,
                         server.name,
@@ -262,6 +302,7 @@ class McpSessionRuntime:
                         self,
                         name=activation_name,
                         server_ids=tuple(sorted(deferred_ids)),
+                        timed_out_ids=tuple(sorted(timed_out_ids)),
                     )
                 )
                 registered.append(activation_name)
@@ -272,11 +313,12 @@ class McpSessionRuntime:
     async def activate_server(self, server_id: str) -> bool:
         """Start one MCP server on demand and register its tools.
 
-        Deferred servers (``deferLoading: true``) are skipped by
-        :meth:`ensure_started`; call this to bring one up when it is actually
-        needed. Idempotent: returns ``True`` immediately when the server is
-        already ready. Returns ``False`` for unknown servers or when startup
-        fails (status is set to ``failed``).
+        Deferred servers (``deferLoading: true``, or one whose startup timed
+        out earlier in this process) are skipped by :meth:`ensure_started`;
+        call this to bring one up when it is actually needed. Idempotent:
+        returns ``True`` immediately when the server is already ready. Returns
+        ``False`` for unknown servers or when startup fails (status is set to
+        ``failed``).
         """
         if not self._started:
             if self._closed:
@@ -319,7 +361,10 @@ class McpSessionRuntime:
                     server.server_id,
                     server.name,
                     server.source.value,
-                    "deferred" if server.definition.defer_loading else "failed",
+                    "deferred"
+                    if server.definition.defer_loading
+                    or _startup_key(server) in _startup_timeouts
+                    else "failed",
                     0,
                 )
                 self._publish_statuses()

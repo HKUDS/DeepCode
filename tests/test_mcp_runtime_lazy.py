@@ -23,6 +23,7 @@ from core.mcp.models import (
     McpRuntimePlan,
     McpServerDefinition,
     McpServerSource,
+    McpStartupError,
     ResolvedMcpServer,
 )
 from core.mcp.runtime import McpSessionRuntime
@@ -46,6 +47,21 @@ FAKE_SERVER_SRC = textwrap.dedent(
                 sys.stdout)
             print(flush=True)
     """
+)
+
+# The same server, except that its first launch never answers the handshake:
+# one slow enough to time out once that then starts normally.
+HANGS_ONCE_SRC = (
+    textwrap.dedent(
+        """
+        import os, sys
+        if not os.path.exists(sys.argv[1]):
+            open(sys.argv[1], "a").close()
+            sys.stdin.read()
+            sys.exit()
+        """
+    )
+    + FAKE_SERVER_SRC
 )
 
 
@@ -199,6 +215,87 @@ class LazyActivationTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(statuses["broken1"].error)
         finally:
             await runtime.aclose()
+
+    def _hangs_once_server(
+        self,
+        server_id: str,
+        *,
+        required: bool = False,
+        startup_timeout_seconds: float = 0.5,
+    ) -> ResolvedMcpServer:
+        script = Path(self.tmp) / f"{server_id}_server.py"
+        script.write_text(HANGS_ONCE_SRC, encoding="utf-8")
+        return ResolvedMcpServer(
+            server_id=server_id,
+            name=server_id,
+            source=McpServerSource.USER,
+            definition=McpServerDefinition(
+                type="stdio",
+                command=sys.executable,
+                args=(str(script), str(Path(self.tmp) / f"{server_id}.launched")),
+                startup_timeout_seconds=startup_timeout_seconds,
+                required=required,
+            ),
+            config_dir=Path(self.tmp),
+            workspace=Path(self.tmp),
+        )
+
+    async def test_startup_timeout_defers_the_server_in_later_sessions(self) -> None:
+        plan = self._plan(self._hangs_once_server("slow1"))
+        first = McpSessionRuntime(plan, ToolRegistry())
+        try:
+            await first.ensure_started()
+            status = first.statuses[0]
+            self.assertEqual(status.state, "failed")
+            self.assertIn("timed out", status.error or "")
+            self.assertIn("new sessions", status.error or "")
+        finally:
+            await first.aclose()
+
+        # The server would start now, so a later session that started it
+        # eagerly would see it ready. It must be left to first use instead.
+        registry = ToolRegistry()
+        later = McpSessionRuntime(plan, registry)
+        try:
+            await later.ensure_started()
+            status = later.statuses[0]
+            self.assertEqual(status.state, "deferred")
+            self.assertIn("timed out", status.error or "")
+            self.assertNotIn("slow1", later.available_server_ids)
+            activation = registry.get("mcp__deepcode_runtime__activate_server")
+            self.assertIsNotNone(activation)
+            self.assertIn("timed out", activation.description)
+            result = await registry.execute(
+                "mcp__deepcode_runtime__activate_server", {"server_id": "slow1"}
+            )
+            self.assertIn("activated", str(result))
+            self.assertIn("mcp__slow1__echo", registry.tool_names)
+        finally:
+            await later.aclose()
+
+        # An edited definition, say a longer timeout, is waited for again.
+        edited = self._hangs_once_server("slow1", startup_timeout_seconds=5.0)
+        again = McpSessionRuntime(self._plan(edited), ToolRegistry())
+        try:
+            await again.ensure_started()
+            self.assertEqual(again.statuses[0].state, "ready")
+        finally:
+            await again.aclose()
+
+    async def test_required_server_is_still_waited_for_after_a_timeout(self) -> None:
+        plan = self._plan(self._hangs_once_server("needed1", required=True))
+        first = McpSessionRuntime(plan, ToolRegistry())
+        with self.assertRaises(McpStartupError):
+            await first.ensure_started()
+        await first.aclose()
+
+        later = McpSessionRuntime(plan, ToolRegistry())
+        try:
+            await later.ensure_started()
+            self.assertEqual(later.statuses[0].state, "ready")
+            self.assertIn("needed1", later.available_server_ids)
+        finally:
+            await later.aclose()
 
 
 def test_required_server_cannot_be_deferred() -> None:
