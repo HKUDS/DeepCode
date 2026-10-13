@@ -151,8 +151,14 @@ def is_public_ip(value: str | ipaddress.IPv4Address | ipaddress.IPv6Address) -> 
             # global. Classify the embedded address instead. The address used
             # for connecting is unchanged.
             address = ipaddress.IPv4Address(int(address) & 0xFFFFFFFF)
-    # ``is_global`` alone admits reserved IPv6 space outside 2000::/3.
-    return address.is_global and not address.is_reserved
+    # ``is_global`` alone admits reserved IPv6 space outside 2000::/3, the
+    # deprecated site-local fec0::/10 (an internal network) and multicast.
+    return (
+        address.is_global
+        and not address.is_reserved
+        and not address.is_multicast
+        and not getattr(address, "is_site_local", False)
+    )
 
 
 def validate_public_url(

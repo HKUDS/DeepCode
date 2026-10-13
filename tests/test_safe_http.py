@@ -89,6 +89,10 @@ def test_domain_policy_is_boundary_aware_and_deny_wins() -> None:
         ("4000::1", False),  # reserved: outside the 2000::/3 global unicast
         ("fe00::1", False),
         ("::1:0:0:1", False),
+        ("fec0::1", False),  # deprecated site-local: an internal network
+        ("ff02::1", False),  # multicast is never one host to connect to
+        ("224.0.0.1", False),
+        ("239.1.1.1", False),
     ],
 )
 def test_public_ip_classification(address: str, expected: bool) -> None:
