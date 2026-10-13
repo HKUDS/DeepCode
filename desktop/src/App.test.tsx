@@ -2487,6 +2487,33 @@ describe("desktop command center", () => {
     expect(runtime.diagnosticsExports).toEqual([diagnostics]);
   });
 
+  it("lets diagnostics run again after the first read fails", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    const original = runtime.request.bind(runtime);
+    let reads = 0;
+    vi.spyOn(runtime, "request").mockImplementation(async (method, params) => {
+      if (method === "diagnostics/read" && (reads += 1) === 1) {
+        throw new Error("Diagnostics are unavailable");
+      }
+      return original(method, params);
+    });
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(await screen.findByText("Diagnostics are unavailable")).toBeTruthy();
+    const runChecks = screen.getByRole("button", {
+      name: "Run checks",
+    }) as HTMLButtonElement;
+    await waitFor(() => expect(runChecks.disabled).toBe(false));
+
+    fireEvent.click(runChecks);
+    expect(
+      await screen.findByText("SQLite integrity check passed"),
+    ).toBeTruthy();
+    expect(screen.queryByText("Diagnostics are unavailable")).toBeNull();
+  });
+
   it("saves one coherent product access default without rewriting sandbox compatibility", async () => {
     const runtime = new TestRuntime([project], [thread], []);
     render(<App runtime={runtime} />);

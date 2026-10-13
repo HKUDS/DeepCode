@@ -49,6 +49,9 @@ export function useDiagnostics(
       })
       .catch((cause: unknown) => {
         if (generation.current !== requestGeneration) return;
+        // Settled with nothing to show, so it no longer counts as loading.
+        setDiagnostics(null);
+        setLoadedKey(resourceKey);
         setError(cause instanceof Error ? cause.message : String(cause));
       })
       .finally(() => {
