@@ -11,13 +11,14 @@ open (clean exit ∧ not done ∧ under the run cap). Two jobs:
     python -m cli.schedule_cli loop "fix the failing tests" \\
         -w ./proj -t "python -m pytest -q" --every 60 --max-runs 10
 
-``--once`` runs a single pass and exits (the default when ``--every`` is 0).
+``--once`` runs a single pass and exits (the default without ``--every``).
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import math
 import os
 import sys
 
@@ -121,8 +122,9 @@ def _loop_task(args) -> "callable":
 def _run(args: argparse.Namespace) -> int:
     workspace = os.path.abspath(args.workspace)
     os.makedirs(workspace, exist_ok=True)
-    interval = 0.0 if args.once else float(args.every)
-    max_runs = 1 if args.once else args.max_runs
+    once = args.once or args.every is None
+    interval = 0.0 if once else args.every
+    max_runs = 1 if once else args.max_runs
 
     if args.job == "autodream":
         task = _autodream_task(
@@ -164,6 +166,29 @@ def _run(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def _positive_seconds(value: str) -> float:
+    try:
+        seconds = float(value)
+    except ValueError:
+        seconds = math.nan
+    if not (math.isfinite(seconds) and seconds > 0):
+        raise argparse.ArgumentTypeError(
+            f"must be a positive number of seconds, not {value}; "
+            "leave --every out to run once"
+        )
+    return seconds
+
+
+def _positive_runs(value: str) -> int:
+    try:
+        runs = int(value)
+    except ValueError:
+        runs = 0
+    if runs < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, not {value}")
+    return runs
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="deepcode schedule",
@@ -177,9 +202,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--connection", "-c", default=None)
     add_reasoning_effort_argument(parser)
     parser.add_argument(
-        "--every", type=float, default=0, help="Interval seconds (0 = once)."
+        "--every",
+        type=_positive_seconds,
+        default=None,
+        metavar="SECONDS",
+        help="Run again every SECONDS (> 0). Without it, run once.",
     )
-    parser.add_argument("--max-runs", type=int, default=5)
+    parser.add_argument(
+        "--max-runs",
+        type=_positive_runs,
+        default=5,
+        help="With --every, stop after this many runs (default 5).",
+    )
     parser.add_argument("--token-budget", type=int, default=None)
     parser.add_argument("--once", action="store_true", help="Run a single pass.")
     args = parser.parse_args(argv)

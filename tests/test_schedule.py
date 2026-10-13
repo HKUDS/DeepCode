@@ -6,6 +6,8 @@ import asyncio
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -101,3 +103,62 @@ def test_scheduler_sleeps_between_runs_and_hooks():
     )
     assert seen == [1, 2]  # on_run fired per run
     assert slept == [5.0]  # slept once, between run 1 and run 2 (not after the last)
+
+
+# -- `deepcode schedule` -----------------------------------------------------
+
+
+@pytest.fixture
+def scheduled(monkeypatch):
+    """Record how the CLI asks the scheduler to run, without running a job."""
+    from cli import schedule_cli
+
+    calls: list[dict] = []
+
+    async def fake_run_scheduled(task, *, interval, gate, on_run=None):
+        calls.append({"interval": interval, "max_runs": gate.max_runs})
+        return [RunOutcome(goal_reached=True)]
+
+    monkeypatch.setattr(schedule_cli, "run_scheduled", fake_run_scheduled)
+    return schedule_cli, calls
+
+
+@pytest.mark.parametrize("every", ["0", "-5", "nan", "inf"])
+def test_cli_rejects_an_interval_that_is_not_a_positive_number(
+    scheduled, capsys, tmp_path, every
+):
+    schedule_cli, calls = scheduled
+    with pytest.raises(SystemExit) as exit:
+        schedule_cli.main(["loop", "goal", "-w", str(tmp_path), "--every", every])
+    assert exit.value.code == 2
+    assert "--every" in capsys.readouterr().err
+    assert calls == []
+
+
+@pytest.mark.parametrize("max_runs", ["0", "-1"])
+def test_cli_rejects_a_run_cap_below_one(scheduled, capsys, tmp_path, max_runs):
+    schedule_cli, calls = scheduled
+    with pytest.raises(SystemExit) as exit:
+        schedule_cli.main(
+            ["loop", "goal", "-w", str(tmp_path), "--every", "60"]
+            + ["--max-runs", max_runs]
+        )
+    assert exit.value.code == 2
+    assert "--max-runs" in capsys.readouterr().err
+    assert calls == []
+
+
+def test_cli_without_an_interval_runs_once(scheduled, tmp_path):
+    """The help says so; it used to run --max-runs (5) times back to back."""
+    schedule_cli, calls = scheduled
+    assert schedule_cli.main(["loop", "goal", "-w", str(tmp_path)]) == 0
+    assert calls == [{"interval": 0.0, "max_runs": 1}]
+
+
+def test_cli_with_an_interval_repeats_up_to_the_cap(scheduled, tmp_path):
+    schedule_cli, calls = scheduled
+    argv = ["loop", "goal", "-w", str(tmp_path), "--every", "60", "--max-runs", "3"]
+    assert schedule_cli.main(argv) == 0
+    assert calls == [{"interval": 60.0, "max_runs": 3}]
+    assert schedule_cli.main([*argv, "--once"]) == 0
+    assert calls[-1] == {"interval": 0.0, "max_runs": 1}
