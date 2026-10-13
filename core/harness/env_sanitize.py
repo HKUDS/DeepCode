@@ -31,10 +31,11 @@ user to defend against a relay that rewrites tool calls.
 
 What never reaches those children is what belongs to DeepCode itself rather
 than to the user's work: the variables DeepCode reads its own model-connection
-keys from (``OPENAI_API_KEY``, a connection's ``apiKeyEnv``, ...), and the
-``PYTHONPATH`` / ``VIRTUAL_ENV`` of DeepCode's own checkout or interpreter,
-which a client started from there passes on to the service and which would
-otherwise point the project's Python at DeepCode's packages.
+keys from (``OPENAI_API_KEY``, a connection's ``apiKeyEnv``, a ``${NAME}`` in
+the provider settings, ...), and the ``PYTHONPATH`` / ``VIRTUAL_ENV`` of
+DeepCode's own checkout or interpreter, which a client started from there
+passes on to the service and which would otherwise point the project's Python
+at DeepCode's packages.
 
 ``DEEPCODE_BASH_FULL_ENV=1`` remains the explicit "give children everything"
 override and wins over all of the above.
@@ -160,14 +161,8 @@ def _drop_deepcode_own(env: dict[str, str]) -> None:
 def _model_key_variables() -> set[str]:
     """The variables DeepCode reads its own model-connection keys from."""
 
+    from core.config import credential_variables
     from core.providers.registry import PROVIDERS
 
     names = {spec.env_key for spec in PROVIDERS if spec.env_key}
-    try:
-        from core.config import load_config
-
-        profiles = load_config().providers.profiles.values()
-    except Exception:  # noqa: BLE001 - a broken config must not stop a command
-        return names
-    names.update(p.api_key_env.strip() for p in profiles if p.api_key_env)
-    return names
+    return names | credential_variables()

@@ -953,6 +953,43 @@ def _resolve_env_refs(value: Any, *, path: str = "") -> Any:
     return value
 
 
+def credential_variables() -> set[str]:
+    """Environment variables DeepCode's own settings read credentials from.
+
+    Every ``apiKeyEnv`` and every ``${NAME}`` under ``providers`` and
+    ``dictation``, in the same layers :func:`load_config` merges. The raw files
+    are read, so a reference to an unset variable — which makes
+    :func:`load_config` fail — does not hide the others. An unreadable layer
+    contributes nothing.
+    """
+    names: set[str] = set()
+
+    def collect(value: Any, key: str = "") -> None:
+        if isinstance(value, dict):
+            for child_key, child in value.items():
+                collect(child, str(child_key))
+        elif isinstance(value, list):
+            for child in value:
+                collect(child, key)
+        elif isinstance(value, str):
+            if key in {"apiKeyEnv", "api_key_env"}:
+                names.add(value.strip())
+            else:
+                names.update(_ENV_REF_PATTERN.findall(value))
+
+    for path, project in ((home_config_path(), False), (default_config_path(), True)):
+        try:
+            raw = _load_raw(path)
+        except (ConfigError, OSError):
+            continue
+        if project:
+            raw = _project_runtime_layer(raw)
+        for section in ("providers", "dictation"):
+            collect(raw.get(section))
+    names.discard("")
+    return names
+
+
 def load_config(config_path: str | Path | None = None) -> DeepCodeConfig:
     """Load and parse ``deepcode_config.json``.
 
@@ -1262,6 +1299,7 @@ __all__ = [
     "ResolvedAgentSettings",
     "ToolsConfig",
     "WorkspaceConfig",
+    "credential_variables",
     "deepcode_home",
     "default_config_path",
     "home_config_path",

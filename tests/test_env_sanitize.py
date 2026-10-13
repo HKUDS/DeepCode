@@ -182,6 +182,69 @@ def test_child_env_drops_a_configured_connection_key_variable(
     assert "MY_RELAY_SECRET_VALUE" not in child_env()
 
 
+def _write_user_config(payload: dict) -> None:
+    home = Path(os.environ["DEEPCODE_HOME"])
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "deepcode_config.json").write_text(json.dumps(payload))
+
+
+def test_child_env_drops_variables_the_provider_config_references(
+    monkeypatch, clean_switches
+):
+    """``"apiKey": "${NAME}"`` reads a model key from the environment as surely
+    as ``apiKeyEnv`` does, and so does a header carrying one."""
+
+    _write_user_config(
+        {
+            "providers": {
+                "deepseek": {"apiKey": "${MY_DS_KEY}"},
+                "profiles": {
+                    "relay": {
+                        "template": "custom",
+                        "apiBase": "https://relay.example/v1",
+                        "extraHeaders": {"Authorization": "Bearer ${RELAY_BEARER}"},
+                    }
+                },
+            },
+            "dictation": {
+                "endpoint": "https://speech.example/v1",
+                "model": "parakeet",
+                "apiKeyEnv": "MY_SPEECH_KEY",
+            },
+        }
+    )
+    for name in ("MY_DS_KEY", "RELAY_BEARER", "MY_SPEECH_KEY", "UNRELATED_SETTING"):
+        monkeypatch.setenv(name, "value")
+    env = child_env()
+    assert not {"MY_DS_KEY", "RELAY_BEARER", "MY_SPEECH_KEY"} & set(env)
+    assert env["UNRELATED_SETTING"] == "value"
+
+
+def test_one_unset_reference_does_not_release_the_other_keys(
+    monkeypatch, clean_switches
+):
+    """An unset ``${NAME}`` makes the config fail to load; the names it does
+    reference must still be withheld."""
+
+    _write_user_config(
+        {
+            "providers": {
+                "openai": {"apiKey": "${NOT_SET_ANYWHERE}"},
+                "profiles": {
+                    "relay": {
+                        "template": "custom",
+                        "apiBase": "https://relay.example/v1",
+                        "apiKeyEnv": "MY_RELAY_SECRET_VALUE",
+                    }
+                },
+            }
+        }
+    )
+    monkeypatch.delenv("NOT_SET_ANYWHERE", raising=False)
+    monkeypatch.setenv("MY_RELAY_SECRET_VALUE", "deepcode-model-key")
+    assert "MY_RELAY_SECRET_VALUE" not in child_env()
+
+
 def test_child_env_survives_an_unreadable_config(monkeypatch, clean_switches):
     home = Path(os.environ["DEEPCODE_HOME"])
     home.mkdir(parents=True, exist_ok=True)
