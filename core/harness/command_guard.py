@@ -20,10 +20,10 @@ A blocklist can never be a security boundary; the sandbox is. But if we keep a
 blocklist at all, it should honestly catch what it *claims* to, rather than
 offering a false sense of coverage.
 
-So this module splits the command on the shell control operators and then
-*tokenises* each segment with :func:`shlex.split`, matching on the resulting
-argv — the command name and its flags — instead of substrings of the raw
-string. That closes the whitespace / flag-order / flag-spelling gaps without
+So this module *tokenises* the command with :mod:`shlex`, splits it into
+simple commands on the unquoted control operators, and matches on each
+resulting argv — the command name and its flags — instead of substrings of the
+raw string. That closes the whitespace / flag-order / flag-spelling gaps without
 pretending to be exhaustive.
 
 :func:`screen_command` returns a human-readable reason string when a command
@@ -51,10 +51,14 @@ __all__ = [
     "strict_screens_enabled",
 ]
 
-# Shell control operators that separate one simple command from the next.
-# We split the raw string on these *before* tokenising, because shlex.split is
-# a word splitter, not a shell parser — it would keep "x;" or "/tmp&&" as a
-# single token and hide the following command.
+# Characters of the shell control operators that separate one simple command
+# from the next. The lexer returns them as tokens of their own, so "x;" or
+# "/tmp&&" cannot hide the following command, while an operator inside quotes
+# (``bash -c 'a; b'``) stays part of its word.
+_CONTROL_CHARS = ";&|\n"
+
+# Fallback for a command the lexer cannot tokenise (an unbalanced quote): split
+# the raw text on the operators and tokenise each piece on its own.
 _OPERATOR_SPLIT = re.compile(r"(?:\|\||\||&&|&|;|\n)")
 
 
@@ -126,7 +130,37 @@ _COMMAND_WRAPPERS: dict[str, frozenset[str]] = {
     "timeout": frozenset({"-s", "--signal", "-k", "--kill-after"}),
     "command": frozenset(),
     "exec": frozenset({"-a"}),
+    "time": frozenset({"-f", "--format", "-o", "--output"}),
+    "stdbuf": frozenset({"-i", "-o", "-e", "--input", "--output", "--error"}),
+    # GNU and BSD xargs; the rest of the line is the command run on the input.
+    "xargs": frozenset(
+        {
+            "-n",
+            "-I",
+            "-L",
+            "-P",
+            "-d",
+            "-s",
+            "-E",
+            "-a",
+            "-J",
+            "-R",
+            "-S",
+            "--max-args",
+            "--max-procs",
+            "--max-chars",
+            "--delimiter",
+            "--arg-file",
+            "--process-slot-var",
+        }
+    ),
 }
+
+# Shells whose ``-c`` argument is a script of its own, screened like a command
+# line up to this many levels deep.
+_SHELLS = frozenset({"bash", "sh", "zsh", "dash"})
+_SHELL_OPTION_VALUES = frozenset({"-o", "+o", "-O", "+O", "--rcfile", "--init-file"})
+_MAX_SHELL_NESTING = 4
 
 # ``NAME=value`` before a command only sets its environment.
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
@@ -152,11 +186,76 @@ def _unwrap(tokens: list[str]) -> list[str]:
             flag = tokens.pop(0)
             if flag == "--":
                 break
-            if flag in value_flags and tokens:
+            split = _env_split_string(flag, tokens) if program == "env" else None
+            if split is not None:
+                # ``env -S`` splits its string into the arguments that follow.
+                try:
+                    tokens = shlex.split(split) + tokens
+                except ValueError:
+                    return []
+            elif flag in value_flags and tokens:
                 tokens.pop(0)
         if program == "timeout" and tokens:
             tokens = tokens[1:]  # the duration
     return tokens
+
+
+def _env_split_string(flag: str, rest: list[str]) -> str | None:
+    """The string of ``env -S STRING`` (any spelling), taken from ``rest``."""
+
+    if flag in ("-S", "--split-string"):
+        return rest.pop(0) if rest else ""
+    if flag.startswith("--split-string="):
+        return flag.partition("=")[2]
+    if flag.startswith("-S"):
+        return flag[2:]
+    return None
+
+
+def _shell_script(tokens: list[str]) -> str | None:
+    """The script of ``bash -c '<script>'`` (or sh/zsh/dash), else ``None``."""
+
+    if _program(tokens[0]) not in _SHELLS:
+        return None
+    args = tokens[1:]
+    reads_script = False
+    while args and args[0][:1] in ("-", "+") and args[0] not in ("-", "--"):
+        option = args.pop(0)
+        if option in _SHELL_OPTION_VALUES:
+            args = args[1:]
+        elif not option.startswith("--") and "c" in option[1:]:
+            reads_script = True
+    if args[:1] == ["--"]:
+        args = args[1:]
+    return args[0] if reads_script and args else None
+
+
+def _command_argvs(command: str) -> list[list[str]]:
+    """The argv of each simple command, split on unquoted control operators."""
+
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=_CONTROL_CHARS)
+    lexer.whitespace = " \t\r"
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        # Unbalanced quotes etc.: screen the pieces that still parse and
+        # don't guess at the rest; the sandbox remains the boundary.
+        pieces = []
+        for raw in _OPERATOR_SPLIT.split(command):
+            try:
+                pieces.append(shlex.split(raw, comments=False, posix=True))
+            except ValueError:
+                continue
+        return pieces
+    commands: list[list[str]] = [[]]
+    for token in tokens:
+        if token and all(char in _CONTROL_CHARS for char in token):
+            commands.append([])
+        else:
+            commands[-1].append(token)
+    return commands
 
 
 def _classify(cmd: str, args: list[str]) -> str | None:
@@ -176,31 +275,34 @@ def _classify(cmd: str, args: list[str]) -> str | None:
 def screen_command(command: str) -> str | None:
     """Return a reason string if ``command`` looks destructive, else ``None``.
 
-    The raw string is first split on the shell control operators
+    The command is tokenised and split on the unquoted shell control operators
     (``;`` ``&&`` ``||`` ``|`` ``&`` and newlines) so that a destructive stage
     hidden in a pipeline or sequence is still caught, e.g. ``echo hi && rm -rf /``
-    or ``cd /tmp; rm -rf x``. Each segment is then tokenised with
-    :func:`shlex.split` and classified on the argv it ends up running, past
-    ``NAME=value`` assignments and wrappers such as ``env``, ``nohup`` or
-    ``timeout 5``. A segment that cannot be
-    tokenised (unbalanced quotes, etc.) is skipped rather than guessed at — this
-    layer never blocks what it cannot understand, and the sandbox remains the
-    boundary.
+    or ``cd /tmp; rm -rf x``. Each simple command is classified on the argv it
+    ends up running, past ``NAME=value`` assignments and wrappers such as
+    ``env``, ``nohup``, ``timeout 5`` or ``xargs``; the script of
+    ``bash -c '...'`` is screened as a command line of its own. A piece that
+    cannot be tokenised (unbalanced quotes, etc.) is skipped rather than guessed
+    at — this layer never blocks what it cannot understand, and the sandbox
+    remains the boundary.
     """
+    return _screen_command(command, depth=0)
+
+
+def _screen_command(command: str, *, depth: int) -> str | None:
     if not command or not command.strip():
         return None
 
-    for raw_segment in _OPERATOR_SPLIT.split(command):
-        segment = raw_segment.strip()
-        if not segment:
-            continue
-        try:
-            tokens = shlex.split(segment, comments=False, posix=True)
-        except ValueError:
-            # Unbalanced quotes etc. — don't guess; defer to the sandbox.
-            continue
+    for tokens in _command_argvs(command):
         tokens = _unwrap(tokens)
         if not tokens or tokens[0].lower().endswith(_SCRIPT_SUFFIXES):
+            continue
+        script = _shell_script(tokens)
+        if script is not None:
+            if depth < _MAX_SHELL_NESTING:
+                reason = _screen_command(script, depth=depth + 1)
+                if reason is not None:
+                    return reason
             continue
         reason = _classify(_program(tokens[0]), tokens[1:])
         if reason is not None:

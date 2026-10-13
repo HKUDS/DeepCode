@@ -10,6 +10,7 @@ The screen is cheap defense-in-depth in front of the real sandbox boundary
 
 from __future__ import annotations
 
+import shlex
 import sys
 from pathlib import Path
 
@@ -191,3 +192,69 @@ def test_blocks_destructive_commands_behind_wrappers(command):
 )
 def test_allows_benign_commands_behind_wrappers(command):
     assert screen_command(command) is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "time rm -rf /",
+        "time -p rm -rf /",
+        "stdbuf -oL rm -rf /",
+        "stdbuf -o L -e 0 rm -rf /",
+        "stdbuf --output=L rm -rf /",
+        "find . -name build | xargs rm -rf",
+        "xargs -n 1 -P 4 rm -rf",
+        "xargs -I {} rm -rf {}",
+        "xargs -0 -d '\\n' rm -rf",
+        "xargs --max-args=1 rm -rf",
+        "env -S 'rm -rf /'",
+        "env -S'FOO=1 rm -rf /'",
+        "env --split-string='rm -rf /'",
+        "env --split-string 'nohup rm -rf /'",
+        "bash -c 'rm -rf /'",
+        "sh -c 'cd /tmp && rm -rf build'",
+        "bash -lc 'echo hi; sudo reboot'",
+        "zsh -c 'rm -rf ~'",
+        "dash -e -c 'rm -rf /'",
+        "bash -o pipefail -c 'rm -rf /'",
+        "/bin/sh -c 'rm -rf /'",
+        "nohup bash -c 'rm -rf /' &",
+        "echo start; bash -c 'chmod 777 /etc'",
+        "bash -c \"sh -c 'rm -rf /'\"",  # a shell inside a shell
+        'rm -rf / ; echo "unbalanced',  # the parts that parse are still screened
+    ],
+)
+def test_blocks_destructive_commands_behind_more_wrappers(command):
+    assert screen_command(command) is not None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "time make",
+        "stdbuf -oL python train.py",
+        "find . -name '*.pyc' | xargs rm -f",  # forced but not recursive
+        "xargs -I {} echo {}",
+        "env -S 'python -u train.py'",
+        "bash -c 'echo hi; ls'",
+        "bash script.sh",
+        "sh -c 'pytest -q'",
+        'git commit -m "fix; rm -rf notes"',  # operators inside quotes
+        'echo "a && rm -rf /"',
+        "bash -c 'rm -rf /",  # unbalanced: defer to the sandbox
+        "env -S 'rm -rf /",
+    ],
+)
+def test_allows_benign_commands_behind_more_wrappers(command):
+    assert screen_command(command) is None
+
+
+def test_shell_nesting_is_bounded():
+    """Each level quotes the next; past the bound the screen stops looking
+    rather than recursing without end."""
+
+    command = "rm -rf /"
+    for _ in range(12):
+        command = f"sh -c {shlex.quote(command)}"
+    assert screen_command(command) is None
+    assert screen_command(f"sh -c {shlex.quote('sh -c ' + shlex.quote('rm -rf /'))}")
