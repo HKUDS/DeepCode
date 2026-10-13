@@ -151,6 +151,9 @@ class _Factory:
         context_note_sink=None,
         history_sink=None,
     ) -> AgentSession:
+        # What the agent's sub-agent control writes through when the Turn's
+        # mailbox refuses a result.
+        self.note_sink = context_note_sink
         tools = ToolRegistry()
         tools.register(self.wait)
         tools.register(_ReadLog())

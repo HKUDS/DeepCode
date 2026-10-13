@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import logging
 import os
 import re
 import threading
@@ -50,6 +51,8 @@ from core.sessions.transcript import (
     visible_kernel_history,
 )
 from core.skills.host import SkillWorkspaceRegistry
+
+logger = logging.getLogger(__name__)
 
 # How often a Turn re-checks a Session that `/compact` is still rewriting.
 _COMPACTION_POLL_SECONDS = 0.05
@@ -143,6 +146,9 @@ class SessionRuntimeRegistry:
         # The record a committed Steer is written with when the Turn reads
         # it, by (session, message id); a Steer never read leaves no record.
         self._steer_records: dict[tuple[str, str], dict[str, Any]] = {}
+        # Notes a running Turn will not read, held until it ends (see the
+        # note sink), by session.
+        self._held_notes: dict[str, list[tuple[str, dict[str, Any]]]] = {}
         self._goal_handler: GoalRuntimeHandler | None = None
         self._goal_runtimes: dict[str, GoalRuntimeRouter] = {}
 
@@ -292,10 +298,22 @@ class SessionRuntimeRegistry:
             return
         runtime.approvals.current = None
         runtime.history.current = None
+        # Still holding the Session, so nothing another process runs next
+        # lands ahead of them.
+        self._write_held_notes(session_id)
         runtime.active = False
         if runtime.run_lease is not None:
             runtime.run_lease.close()
             runtime.run_lease = None
+
+    def _write_held_notes(self, session_id: str) -> None:
+        with self._mailbox_lock:
+            held = self._held_notes.pop(session_id, [])
+        for text, metadata in held:
+            try:
+                self.store.append_message(session_id, "user", text, metadata=metadata)
+            except Exception:  # noqa: BLE001 - releasing the Session must go on
+                logger.exception("could not write a held note for %s", session_id)
 
     def reserve_input(
         self,
@@ -767,6 +785,20 @@ class SessionRuntimeRegistry:
                     **(record or {}),
                     "deliveryState": InputDeliveryState.ACCEPTED.value,
                 }
+            runtime = self._runtimes.get(session_id)
+            if (
+                not already_in_history
+                and runtime is not None
+                and runtime.history.current is not None
+            ):
+                # A Turn is writing this Session as it happens, and will not
+                # read this (a sub-agent result its full or closing mailbox
+                # refused). Written now it could land between a tool call and
+                # its result, which providers refuse; it is written when the
+                # Turn ends, for the next Turn to read.
+                with self._mailbox_lock:
+                    self._held_notes.setdefault(session_id, []).append((text, metadata))
+                return
             stored = self.store.append_message(
                 session_id,
                 "user",

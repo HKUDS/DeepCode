@@ -22,6 +22,7 @@ from core.persistence.event_repository import EventRepository
 from core.persistence.execution_repository import TurnRepository
 from core.providers.base import LLMResponse
 from core.sessions import SessionStore
+from core.sessions.transcript import visible_kernel_history
 from tests.application.test_transcript_projection import (
     _application,
     _calls,
@@ -473,3 +474,51 @@ def test_a_turn_compacted_midway_rebuilds_and_resumes_cleanly(tmp_path: Path) ->
         _assert_valid_for_providers(request)
     finally:
         resumed.close()
+
+
+def test_a_result_the_full_mailbox_refused_waits_for_the_turn_to_end(
+    tmp_path: Path,
+) -> None:
+    application, thread_id, factory = _application(
+        tmp_path,
+        _calls_wait("Waiting for the workers."),
+        LLMResponse(content="All workers done."),
+        LLMResponse(content="Did B."),
+    )
+    try:
+        first = application.turns.start(thread_id, prompt="Do A.")
+        _wait_until_said(application, first.turn.id, "Waiting for the workers.")
+        runtimes = application.turns.session_runtimes
+
+        def result(index: int) -> SubagentMessage:
+            return SubagentMessage(
+                message_id=f"result-{index}",
+                target_turn_id=first.turn.id,
+                agent_id=f"worker-{index}",
+                payload=f"worker {index} finished",
+            )
+
+        # The mailbox fills while the tool runs; the next result is refused,
+        # and the sub-agent control writes it to the session instead.
+        assert all(runtimes.inject_transient(thread_id, result(i)) for i in range(64))
+        assert not runtimes.inject_transient(thread_id, result(64))
+        factory.note_sink("worker 64 finished", "subagent", already_in_history=False)
+        factory.wait.gate.set()
+        _wait_for(application, first.turn.id, TurnStatus.COMPLETED)
+
+        session = application.session_store.get_session(thread_id)
+        assert session is not None
+        _assert_valid_for_providers(visible_kernel_history(session.messages))
+
+        second = application.turns.start(thread_id, prompt="Do B.")
+        _wait_for(application, second.turn.id, TurnStatus.COMPLETED)
+        request = factory.model.requests[-1]
+        _assert_valid_for_providers(request)
+        # The model reads it after the Turn it arrived in, before the next.
+        assert _conversation(request)[-3:] == [
+            ("assistant", "All workers done."),
+            ("user", "worker 64 finished"),
+            ("user", "Do B."),
+        ]
+    finally:
+        application.close()
