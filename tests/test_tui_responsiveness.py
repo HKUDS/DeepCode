@@ -24,7 +24,7 @@ class _TtyStdin(io.StringIO):
         return True
 
 
-def _app_with_sessions(session_ids, *, delay=0.0):
+def _app_with_sessions(session_ids, *, delay=0.0, answer=None):
     app = object.__new__(tui_app.TuiApp)
     app._completion_cache = {}
     app._completion_loads = {}
@@ -34,6 +34,8 @@ def _app_with_sessions(session_ids, *, delay=0.0):
     def list_recent(*, limit, include_all):
         listings.append(1)
         time.sleep(delay)
+        if answer is not None:
+            answer.wait()
         return [SimpleNamespace(session_id=value) for value in session_ids]
 
     app.thread_client = SimpleNamespace(list_recent=list_recent)
@@ -43,7 +45,11 @@ def _app_with_sessions(session_ids, *, delay=0.0):
 def test_a_slow_service_holds_up_neither_typing_nor_enter(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "stdin", _TtyStdin())
     monkeypatch.setattr(tui_input, "_HISTORY_PATH", tmp_path / "history")
-    app, listings = _app_with_sessions(["abc12345"], delay=1.5)
+    # The service answers only after the line is in. Timing the typing
+    # against a 1.5s answer measured the machine instead: a busy one took
+    # over 1s to type and submit with no service wait at all.
+    answer = threading.Event()
+    app, listings = _app_with_sessions(["abc12345"], answer=answer)
 
     async def scenario():
         with (
@@ -54,19 +60,19 @@ def test_a_slow_service_holds_up_neither_typing_nor_enter(monkeypatch, tmp_path)
             reader.set_argument_provider(app._complete_command_argument)
             task = asyncio.create_task(reader.read())
             await asyncio.sleep(0.1)
-            started = time.monotonic()
             for character in "/resume abc":
                 pipe.send_text(character)
                 await asyncio.sleep(0.02)
             pipe.send_text("\r")
-            line = await asyncio.wait_for(task, 5)
-            return line, time.monotonic() - started
+            return await asyncio.wait_for(task, 10)
 
-    line, elapsed = asyncio.run(scenario())
+    try:
+        line = asyncio.run(scenario())
+    finally:
+        answer.set()
 
-    assert line == "/resume abc"
-    assert listings  # the service was asked for candidates ...
-    assert elapsed < 1.0  # ... without the keystrokes or Enter waiting on it
+    assert line == "/resume abc"  # Enter went through with no answer yet ...
+    assert listings  # ... though the service had been asked for candidates
 
 
 def test_a_slow_candidate_fetch_serves_the_next_keystroke():
