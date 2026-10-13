@@ -1146,9 +1146,10 @@ def make_llm_provider(
     (``openai_compat``, ``anthropic``, ...) is instantiated. ``GenerationSettings``
     are derived from the resolved phase settings.
 
-    The resolved endpoint passes the model-egress policy once, here — this
-    function is the single construction point for LLM providers, so gating it
-    covers every backend without teaching each SDK client about policy.
+    The resolved endpoint passes the model-egress policy once, here — as it
+    does in ``ConnectionResolver.build_provider``, the other construction
+    point — so gating construction covers every backend without teaching each
+    SDK client about policy.
     """
     provider_cfg, spec, chosen_model, settings = _resolve_spec_for_phase(
         config, phase, provider_override=provider_name, model_override=model

@@ -7,8 +7,9 @@ Covers three layers:
 2. ``core.providers.registry`` endpoint classification — including that the
    pre-existing ``is_gateway`` boolean still works, since other tests and
    callers read it.
-3. The wiring in ``core.config.make_llm_provider`` — the single provider
-   construction point — plus the ``warn`` rollout mode.
+3. The wiring in both provider construction points — the legacy
+   ``core.config.make_llm_provider`` and ``ConnectionResolver.build_provider``,
+   which sessions use — plus the ``warn`` rollout mode.
 
 No network access: an LLM provider client is constructed (lazily) but never
 used, and the deny cases raise before construction.
@@ -27,6 +28,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from core.config import ConfigError, DeepCodeConfig, make_llm_provider
+from core.domain.execution_profile import ExecutionSelection
+from core.providers.credentials import CredentialStore
 from core.providers.egress import (
     ALLOW_ENV,
     BLOCK_ENV,
@@ -36,6 +39,7 @@ from core.providers.egress import (
     parse_domain_list,
     resolve_egress_policy,
 )
+from core.providers.profiles import ConnectionResolver
 from core.providers.registry import (
     ProviderSpec,
     find_by_name,
@@ -402,3 +406,52 @@ def test_warn_mode_logs_instead_of_raising(monkeypatch: pytest.MonkeyPatch):
     assert provider is not None
     assert any("api.siliconflow.cn" in message for message in captured)
     assert any("egress blocked" in message for message in captured)
+
+
+# -- 5. wiring in ConnectionResolver.build_provider (the session path) -------
+
+
+def _session_provider(config: DeepCodeConfig, tmp_path: Path):
+    resolver = ConnectionResolver(
+        config, CredentialStore(tmp_path / "credentials.json")
+    )
+    profile = resolver.execution_profile(
+        ExecutionSelection(connection_id="deepseek", model_id="deepseek-chat"),
+        persist_revision=False,
+    )
+    return resolver.build_provider(profile)
+
+
+def test_session_provider_denies_host_outside_allow_list(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    monkeypatch.setenv(ALLOW_ENV, "api.deepseek.com")
+    config = _config(api_base="https://api.siliconflow.cn/v1")
+
+    with pytest.raises(ConfigError, match="api.siliconflow.cn"):
+        _session_provider(config, tmp_path)
+
+
+def test_session_provider_honors_config_block_list_and_warn_mode(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    config = _config(
+        api_base="https://api.deepseek.com",
+        egress={"blockedDomains": ["deepseek.com"]},
+    )
+    with pytest.raises(ConfigError, match="egress block-list"):
+        _session_provider(config, tmp_path)
+
+    monkeypatch.setenv(MODE_ENV, "warn")
+    assert _session_provider(config, tmp_path) is not None
+
+
+def test_session_provider_allows_allow_listed_host(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    monkeypatch.setenv(ALLOW_ENV, "api.deepseek.com")
+    config = _config(api_base="https://api.deepseek.com")
+
+    provider = _session_provider(config, tmp_path)
+
+    assert provider._effective_base == "https://api.deepseek.com"
