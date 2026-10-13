@@ -36,6 +36,7 @@ from core.domain.execution_security import (
     parse_access_preset_override,
 )
 from core.domain.item import Item, ItemKind, ItemStatus
+from core.domain.message_provenance import TurnInputSource
 from core.domain.project import Project, TrustState
 from core.domain.runtime_coordination import ExecutionClass
 from core.domain.thread import Thread, ThreadMode, ThreadStatus
@@ -1475,11 +1476,18 @@ class ThreadService:
         JSONL. The projection timeline tracks conversational turns only, so
         pair-matching must skip them or every noted Turn would read as a
         projection conflict.
+
+        The marker an interrupted Turn leaves for the model is the same kind
+        of record: it closes that Turn, it does not open one.
         """
         metadata = message.metadata or {}
+        if message.role != "user":
+            return False
+        if metadata.get("source") == TurnInputSource.TURN_INTERRUPT.value:
+            return True
         # User input also carries delivery provenance (current_turn/next_turn).
         # Only the context-note sink's markers identify internal user-role notes.
-        return message.role == "user" and metadata.get("delivery") in (
+        return metadata.get("delivery") in (
             "mid_turn",
             "between_turns",
         )
