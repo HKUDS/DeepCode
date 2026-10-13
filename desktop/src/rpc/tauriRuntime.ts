@@ -81,6 +81,31 @@ export function configureNativeDialogs(): void {
   );
 }
 
+/**
+ * Tauri adds a listener to the webview only after listen() resolves, so an
+ * unlisten right away (a subscriber gone while it was pending) can reject,
+ * and nothing awaits it. Stop delivering at once, unlisten only once, and
+ * retry once the registration has landed.
+ */
+async function listenTo<T>(
+  event: string,
+  receive: (payload: T) => void,
+): Promise<() => void> {
+  let listening = true;
+  const unlisten = await listen<T>(event, (message) => {
+    if (listening) receive(message.payload);
+  });
+  // Typed as returning void, but Tauri's unlisten is async.
+  const stop = () => Promise.resolve().then(unlisten);
+  return () => {
+    if (!listening) return;
+    listening = false;
+    void stop().catch(() => {
+      setTimeout(() => void stop().catch(() => undefined), 0);
+    });
+  };
+}
+
 class TauriDesktopRuntime implements ClientRuntime {
   readonly host = { kind: "desktop" as const, nativeOpen: true, updates: true };
   private pendingUpdate: Update | null = null;
@@ -222,26 +247,17 @@ class TauriDesktopRuntime implements ClientRuntime {
   async onNotification(
     listener: (notification: AnyRpcNotification) => void,
   ): Promise<() => void> {
-    return listen<AnyRpcNotification>(
-      "deepcode://rpc-notification",
-      (event) => {
-        listener(event.payload);
-      },
-    );
+    return listenTo("deepcode://rpc-notification", listener);
   }
 
   async onStatus(
     listener: (status: SidecarStatus) => void,
   ): Promise<() => void> {
-    return listen<SidecarStatus>("deepcode://sidecar-state", (event) => {
-      listener(event.payload);
-    });
+    return listenTo("deepcode://sidecar-state", listener);
   }
 
   async onLog(listener: (message: string) => void): Promise<() => void> {
-    return listen<string>("deepcode://sidecar-log", (event) => {
-      listener(event.payload);
-    });
+    return listenTo("deepcode://sidecar-log", listener);
   }
 }
 
