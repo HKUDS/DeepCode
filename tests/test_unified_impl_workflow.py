@@ -249,6 +249,71 @@ async def test_mechanical_completion_after_all_planned_files(tmp_path, monkeypat
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    [
+        json.dumps({"status": "error", "message": "Failed to write file: disk full"}),
+        "(MCP tool call failed: OSError)",
+    ],
+)
+async def test_failed_write_file_is_not_counted_as_implemented(
+    tmp_path, monkeypatch, failure
+):
+    workflow = _make_workflow(monkeypatch)
+    bar_writes = []
+
+    def write_file(params: dict[str, Any]) -> str:
+        if params.get("file_path") == "src/bar.py":
+            bar_writes.append(params)
+            if len(bar_writes) == 1:
+                return failure
+        return _write_file_result(params)
+
+    workflow.mcp_agent.tool_registry.register(
+        FakeMcpTool(
+            "mcp_code-implementation_write_file",
+            write_file,
+            {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string"},
+                    "content": {"type": "string"},
+                },
+                "required": ["file_path"],
+            },
+        )
+    )
+
+    def write(call_id: str, path: str) -> LLMResponse:
+        return LLMResponse(
+            content=f"Implementing {path}",
+            tool_calls=[
+                _tool_call(call_id, "write_file", {"file_path": path, "content": "x"})
+            ],
+            finish_reason="tool_calls",
+        )
+
+    provider = ImplScriptedProvider(
+        [
+            write("c1", "src/foo.py"),
+            write("c2", "src/bar.py"),
+            write("c3", "src/bar.py"),
+            LLMResponse(content="All files implemented", finish_reason="stop"),
+        ]
+    )
+
+    await _run(workflow, provider, tmp_path)
+
+    state = workflow._last_run_state
+    # The failed write did not finish the run; the retry did.
+    assert provider.loop_calls == 3
+    assert state["status"] == "completed"
+    assert state["files_completed"] == 2
+    # No code summary for a file that was never written.
+    assert provider.summary_calls == 2
+
+
+@pytest.mark.asyncio
 async def test_clean_slate_memory_rebuild_after_write_file(tmp_path, monkeypatch):
     workflow = _make_workflow(monkeypatch)
     provider = ImplScriptedProvider(

@@ -57,6 +57,7 @@ from prompts.code_prompts import (  # noqa: E402
 from utils.llm_utils import get_default_models  # noqa: E402
 from utils.loop_detector import LoopDetector, ProgressTracker  # noqa: E402
 from workflows.agents import CodeImplementationAgent  # noqa: E402
+from workflows.agents.code_implementation_agent import write_succeeded  # noqa: E402
 from workflows.agents.memory_agent_concise import ConciseMemoryAgent  # noqa: E402
 
 # Model-visible tool surfaces. These mirror the curated lists the deleted
@@ -276,7 +277,7 @@ class _InstrumentedTool(AliasedTool):
             tool_name=self.name, tool_input=kwargs, tool_result=result
         )
 
-        if self.name == "write_file":
+        if self.name == "write_file" and write_succeeded(result):
             filename = kwargs.get("file_path", "unknown")
             completed_first_time = state.progress_tracker.complete_file(
                 state.memory_agent.normalize_file_path(filename)

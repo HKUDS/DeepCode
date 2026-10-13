@@ -30,6 +30,21 @@ from prompts.code_prompts import (
 )
 
 
+def write_succeeded(result: Any) -> bool:
+    """Whether a ``write_file`` result says the file was written.
+
+    The code-implementation server answers ``{"status": "success", ...}``.
+    Its error JSON, and the tool layer's own text ("(MCP tool call failed:
+    ...)", "Error executing ..."), mean nothing was written.
+    """
+    if isinstance(result, str):
+        try:
+            result = json.loads(result)
+        except json.JSONDecodeError:
+            return False
+    return isinstance(result, dict) and result.get("status") == "success"
+
+
 class CodeImplementationAgent:
     """
     Code Implementation Agent for systematic file-by-file development
@@ -418,6 +433,13 @@ class CodeImplementationAgent:
             tool_call: The write_file tool call
             result: Result of the tool execution
         """
+        if not write_succeeded(result):
+            # Counting it would let the run finish with the file missing.
+            self.logger.warning(
+                f"write_file failed, not counted: {tool_call['input'].get('file_path')}"
+            )
+            return
+
         # First do the regular tracking
         self._track_file_implementation(tool_call, result)
 
