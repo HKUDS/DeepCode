@@ -7,6 +7,7 @@ import pytest
 from openai import AsyncOpenAI
 
 from core.application.config_store import ConfigStore
+from core.application.errors import InvalidArgumentError
 from core.application.llm_configuration_service import LLMConfigurationService
 from core.providers.credentials import CredentialStore
 
@@ -196,6 +197,49 @@ def test_discovery_uses_unsaved_protocol_and_none_auth_without_saving(
     assert seen[0].auth == "none"
     assert not (tmp_path / "config.json").exists()
     assert not (tmp_path / "credentials.json").exists()
+
+
+def test_a_saved_key_is_only_probed_against_its_saved_base_url(tmp_path, monkeypatch):
+    monkeypatch.setenv("DEEPCODE_HOME", str(tmp_path))
+    monkeypatch.setenv("OPENAI_API_KEY", "env-private-key")
+    service = LLMConfigurationService(
+        config_store=ConfigStore(tmp_path / "config.json"),
+        credential_store=CredentialStore(tmp_path / "credentials.json"),
+    )
+    service.upsert(
+        {
+            "id": "route",
+            "template": "custom",
+            "apiBase": "https://saved.example/v1",
+            "apiKey": "saved-private-key",
+        }
+    )
+    seen = []
+    monkeypatch.setattr(
+        service.catalog, "probe", lambda connection: seen.append(connection) or ()
+    )
+    moved = "https://other.example/v1"
+
+    for probe in (
+        lambda: service.discover_models(connection_id="route", api_base=moved),
+        lambda: service.discover_models(draft={"id": "route", "apiBase": moved}),
+        lambda: service.discover_models(template="openai", api_base=moved),
+        lambda: service.test("route", draft={"id": "route", "apiBase": moved}),
+    ):
+        with pytest.raises(InvalidArgumentError, match="API key"):
+            probe()
+    assert seen == []
+
+    service.discover_models(
+        draft={"id": "route", "apiBase": "https://saved.example/v1"}
+    )
+    service.discover_models(connection_id="route", api_base=moved, api_key="typed")
+    service.discover_models(draft={"id": "route", "apiBase": moved, "apiKey": "typed"})
+    assert [(item.api_base, item.api_key) for item in seen] == [
+        ("https://saved.example/v1", "saved-private-key"),
+        (moved, "typed"),
+        (moved, "typed"),
+    ]
 
 
 def test_image_probe_uses_a_valid_png_and_closes_its_provider():

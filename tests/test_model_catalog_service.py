@@ -4,6 +4,7 @@ import stat
 from dataclasses import replace
 from pathlib import Path
 
+import httpx
 import pytest
 
 from core.config import DeepCodeConfig
@@ -146,4 +147,42 @@ def test_cache_is_invalidated_when_connection_routing_changes(
     assert calls == [
         connection.api_base,
         "https://different.example/v1",
+    ]
+
+
+def test_catalog_fetch_follows_redirects_only_on_the_same_origin(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Anthropic sends its key as x-api-key, which httpx (unlike Authorization)
+    # keeps on a cross-origin redirect; extra headers may carry credentials too.
+    connection = replace(
+        _connection(tmp_path, catalog="anthropic"),
+        api_base="https://api.example.com",
+        extra_headers={"X-Custom-Auth": "header-secret"},
+    )
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/v1/models":
+            return httpx.Response(307, headers={"Location": "/v1/models/"})
+        if request.url.host == "api.example.com":
+            return httpx.Response(
+                302, headers={"Location": "https://elsewhere.example/v1/models"}
+            )
+        return httpx.Response(200, json={"data": [{"id": "model-a"}]})
+
+    real_client = httpx.Client
+    monkeypatch.setattr(
+        "core.providers.catalog_service.httpx.Client",
+        lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs),
+    )
+
+    with pytest.raises(ValueError, match="another host"):
+        ModelCatalogService(tmp_path / "cache.json").probe(connection)
+
+    assert [str(request.url) for request in requests] == [
+        "https://api.example.com/v1/models",
+        "https://api.example.com/v1/models/",
     ]

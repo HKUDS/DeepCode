@@ -104,7 +104,9 @@ potentially billable operation after a lost response.
 
 The editor's **Verify current settings** probes the complete visible draft,
 including unsaved protocol, endpoint, credentials and model declarations. It
-writes no configuration, credentials, catalog cache or revision. Editing the
+writes no configuration, credentials, catalog cache or revision. A saved key is
+only sent to the base URL it was saved with: to verify or fetch models from an
+unsaved base URL, enter the key in the form. Editing the
 form invalidates its displayed result. Real coding-task acceptance is separate
 from this controlled protocol probe.
 

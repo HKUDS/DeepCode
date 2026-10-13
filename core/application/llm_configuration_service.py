@@ -28,7 +28,11 @@ from core.config import (
 from core.domain.execution_profile import ExecutionProfile, ExecutionSelection
 from core.providers.catalog_service import ModelCatalogService, ModelCatalog
 from core.providers.credentials import CredentialStore
-from core.providers.profiles import ConnectionResolver, validate_connection_id
+from core.providers.profiles import (
+    ConnectionResolver,
+    ResolvedConnection,
+    validate_connection_id,
+)
 from core.providers.oauth import ProviderOAuthManager
 from core.providers.reasoning import infer_reasoning_capabilities
 from core.providers.registry import PROVIDERS, find_by_name
@@ -269,7 +273,8 @@ class LLMConfigurationService:
         """Probe an endpoint AS SHOWN in an editor form; writes nothing.
 
         An existing connection supplies the baseline (its stored key stays
-        usable); a template covers create-before-first-save. An unsaved base
+        usable against its saved base URL); a template covers
+        create-before-first-save. An unsaved base
         URL or freshly typed key overrides for this one probe only and never
         leaves memory — discovery returns candidates, adopting writes
         (the dsh rule).
@@ -298,6 +303,8 @@ class LLMConfigurationService:
         if api_key and api_key.strip():
             overrides["api_key"] = api_key.strip()
         connection = replace(base, **overrides) if overrides else base
+        if "api_key" not in overrides:
+            self._check_saved_key_endpoint(connection, project_id)
         try:
             models = self.catalog.probe(connection)
         except Exception as exc:  # noqa: BLE001 - surfaced, never raised to UI
@@ -378,6 +385,8 @@ class LLMConfigurationService:
             connection = resolver.resolve_connection(connection_id)
         except ValueError as exc:
             raise InvalidArgumentError(str(exc)) from exc
+        if draft is not None:
+            self._check_saved_key_endpoint(connection, project_id)
         if not connection.is_usable:
             detail = "No API credential is configured"
             return _verification_result(
@@ -677,6 +686,32 @@ class LLMConfigurationService:
         return ConnectionResolver(
             config, self.credentials, credential_overrides=overrides
         )
+
+    def _check_saved_key_endpoint(
+        self, connection: ResolvedConnection, project_id: str | None
+    ) -> None:
+        """Keep a saved key on the base URL it was saved with.
+
+        An editor probe may carry a base URL the user has not saved; sending
+        the connection's saved key there would hand it to whoever runs that
+        endpoint. A key typed into the request itself may go anywhere.
+        """
+        if not connection.api_key or connection.credential_source == "request":
+            return
+        try:
+            saved = self._resolver(project_id=project_id).resolve_connection(
+                connection.id
+            )
+        except ValueError:
+            return
+        if (
+            connection.api_key == saved.api_key
+            and connection.api_base != saved.api_base
+        ):
+            raise InvalidArgumentError(
+                "Enter the API key to try it with an unsaved base URL; "
+                "the saved key is only sent to the saved base URL"
+            )
 
     def _verify_agent(self, resolver, connection_id, model_id, catalog):
         selected = next((item for item in catalog.models if item.id == model_id), None)

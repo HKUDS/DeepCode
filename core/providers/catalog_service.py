@@ -267,8 +267,24 @@ class ModelCatalogService:
 
     def _fetch(self, connection: ResolvedConnection) -> tuple[CatalogModel, ...]:
         url, headers = _catalog_request(connection)
+        origin = httpx.URL(url)
+
+        def same_origin_only(request: httpx.Request) -> None:
+            # On a cross-origin redirect httpx drops Authorization but keeps
+            # x-api-key and extra headers, which carry credentials too.
+            if (request.url.scheme, request.url.host, request.url.port) != (
+                origin.scheme,
+                origin.host,
+                origin.port,
+            ):
+                raise ValueError(
+                    f"model catalog redirected to another host ({request.url.host})"
+                )
+
         with httpx.Client(
-            timeout=self.timeout_seconds, follow_redirects=True
+            timeout=self.timeout_seconds,
+            follow_redirects=True,
+            event_hooks={"request": [same_origin_only]},
         ) as client:
             response = client.get(url, headers=headers)
             response.raise_for_status()
