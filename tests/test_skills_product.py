@@ -252,7 +252,7 @@ async def test_skill_policy_denies_unexposed_tool_even_if_model_requests_it(
         event.msg for event in events if event.msg.type == "tool_completed"
     )
     assert completed.is_error is True
-    assert "not allowed" in completed.result_preview
+    assert "not available in this turn" in completed.result_preview
 
 
 def test_claude_style_allowed_tools_keep_the_skill_usable(tmp_path: Path) -> None:

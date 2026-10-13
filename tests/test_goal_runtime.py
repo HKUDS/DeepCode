@@ -237,4 +237,6 @@ async def test_terminal_request_blocks_later_tools_in_the_same_model_response() 
         for message in result.messages
         if message.get("role") == "tool" and message.get("tool_call_id") == "late-write"
     ]
-    assert denied and "not allowed" in denied[0]
+    assert denied and "not available in this turn" in denied[0]
+    assert "Skill policy" not in denied[0]  # the Goal hid it
+    assert "Available: none" in denied[0]

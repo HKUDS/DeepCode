@@ -571,6 +571,37 @@ async def test_misspelled_tool_under_a_filter_is_reported_as_unknown():
 
 
 @pytest.mark.asyncio
+async def test_a_hidden_tool_is_reported_as_unavailable_not_as_skill_policy():
+    """A Skill, a Goal or an agent definition may have narrowed the tools;
+    the filter doesn't say which, so the message must not guess."""
+    provider = ScriptedProvider(
+        [
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(id="c1", name="structured_failure", arguments={})
+                ],
+                finish_reason="tool_calls",
+            ),
+            LLMResponse(content="done", finish_reason="stop"),
+        ]
+    )
+    registry = _tool_registry()
+    registry.register(StructuredFailureTool())
+
+    result = await AgentRunner(provider).run(
+        _spec(provider, tools=registry, tool_filter=lambda: ("echo",))
+    )
+
+    content = next(m["content"] for m in result.messages if m.get("role") == "tool")
+    assert "Skill policy" not in content
+    assert content.startswith(
+        "Error: tool 'structured_failure' is not available in this turn; "
+    )
+    assert "Available: echo\n" in content
+
+
+@pytest.mark.asyncio
 async def test_ask_without_approver_is_denied():
     provider = ScriptedProvider(
         [

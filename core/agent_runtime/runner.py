@@ -1218,6 +1218,10 @@ class AgentRunner:
         _HINT = "\n\n[Analyze the error above and try a different approach.]"
         allowed = spec.allowed_tool_names()
         if allowed is not None and tool_call.name not in allowed:
+            visible = [
+                ToolRegistry._schema_name(schema) for schema in spec.tool_definitions()
+            ]
+            available = ", ".join(visible) or "none"
             registered = {
                 ToolRegistry._schema_name(schema)
                 for schema in spec.tools.get_definitions()
@@ -1225,13 +1229,9 @@ class AgentRunner:
             if tool_call.name not in registered:
                 # A misspelled name is not a policy decision. Answer it as the
                 # registry does, but offer only the tools this turn may call.
-                visible = [
-                    ToolRegistry._schema_name(schema)
-                    for schema in spec.tool_definitions()
-                ]
                 message = (
                     f"Error: {build_miss_message(tool_call.name, visible)} "
-                    f"Available: {', '.join(visible)}"
+                    f"Available: {available}"
                 )
                 return (
                     message + _HINT,
@@ -1242,16 +1242,20 @@ class AgentRunner:
                     },
                     RuntimeError(message) if spec.fail_on_tool_error else None,
                 )
+            # A Skill, the Goal runtime and a preset or sub-agent definition
+            # can each narrow the tools; the composed filter does not say which
+            # one dropped this, so the message names them without guessing.
             message = (
-                f"Error: tool {tool_call.name!r} is not allowed by the active "
-                "Skill policy"
+                f"Error: tool {tool_call.name!r} is not available in this turn; "
+                "an active Skill, Goal or agent definition limits its tools. "
+                f"Available: {available}"
             )
             return (
                 message + _HINT,
                 {
                     "name": tool_call.name,
                     "status": "denied",
-                    "detail": "blocked by active Skill policy",
+                    "detail": "not available in this turn",
                 },
                 None,
             )
