@@ -29,7 +29,7 @@ interface GoalRailProps {
   enabled: boolean;
   busy: boolean;
   skills: SkillInfo[];
-  onSet(input: GoalDefinitionInput): Promise<void>;
+  onSet(input: GoalDefinitionInput): Promise<boolean>;
   onPause(): Promise<void>;
   onResume(): Promise<void>;
   onContinue(): Promise<void>;
@@ -93,12 +93,13 @@ export function GoalRail({
     if (parsedBudget !== null && (!Number.isSafeInteger(parsedBudget) || parsedBudget < 1)) {
       return;
     }
-    await onSet({
+    const saved = await onSet({
       objective: cleanObjective,
       tokenBudget: parsedBudget,
       skillIds,
       resume: resumeAfterSave,
     });
+    if (!saved) return;
     setEditorOpen(false);
     setExpanded(false);
   };

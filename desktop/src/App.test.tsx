@@ -2007,6 +2007,38 @@ describe("desktop command center", () => {
     });
   });
 
+  it("keeps the Goal editor open when setting the Goal fails", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    const original = runtime.request.bind(runtime);
+    let failedSets = 0;
+    vi.spyOn(runtime, "request").mockImplementation(async (method, params) => {
+      if (method === "thread/goal/set") {
+        failedSets += 1;
+        throw new Error("Goal changed elsewhere");
+      }
+      return original(method, params);
+    });
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(await screen.findByRole("button", { name: /Set a Goal/ }));
+    fireEvent.change(screen.getByLabelText("Outcome"), {
+      target: { value: "Ship the implementation and verify it." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Start Goal" }));
+
+    await waitFor(() => expect(failedSets).toBe(1));
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Start Goal" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false),
+    );
+    expect(
+      (screen.getByLabelText("Outcome") as HTMLTextAreaElement).value,
+    ).toBe("Ship the implementation and verify it.");
+  });
+
   it("edits and resumes a complete Goal without changing its identity", async () => {
     const completedGoal: Goal = {
       id: "goal-completed",

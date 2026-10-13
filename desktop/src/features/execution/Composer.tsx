@@ -72,7 +72,7 @@ interface ComposerProps {
     contextWindow: number | null,
   ): void;
   onAccessPresetChange(preset: ExecutionAccessPreset | null): Promise<boolean>;
-  onSetGoal(input: GoalDefinitionInput): Promise<void>;
+  onSetGoal(input: GoalDefinitionInput): Promise<boolean>;
   onPauseGoal(): Promise<void>;
   onResumeGoal(): Promise<void>;
   onContinueGoal(): Promise<void>;

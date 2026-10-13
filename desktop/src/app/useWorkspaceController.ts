@@ -102,7 +102,8 @@ export interface WorkspaceController {
     scope?: ConfigScope,
     riskAcknowledged?: boolean,
   ): Promise<boolean>;
-  setGoal(input: GoalDefinitionInput): Promise<void>;
+  /** False when the Goal was not set (the error is already shown). */
+  setGoal(input: GoalDefinitionInput): Promise<boolean>;
   pauseGoal(): Promise<void>;
   resumeGoal(): Promise<void>;
   continueGoal(): Promise<void>;
@@ -686,9 +687,9 @@ export function useWorkspaceController(runtime: ClientRuntime): WorkspaceControl
   );
 
   const setGoal = useCallback(
-    (input: GoalDefinitionInput) =>
-      withBusy(async () => {
-        if (!selectedThread) return;
+    async (input: GoalDefinitionInput) => {
+      const applied = await withBusy(async () => {
+        if (!selectedThread) return false;
         const current = state.goal;
         let result = await runtime.request("thread/goal/set", {
           threadId: selectedThread.id,
@@ -709,7 +710,10 @@ export function useWorkspaceController(runtime: ClientRuntime): WorkspaceControl
           goal: result.goal,
           outcome: result.outcome,
         });
-      }),
+        return true;
+      });
+      return applied === true;
+    },
     [runtime, selectedThread, state.goal, withBusy],
   );
 
