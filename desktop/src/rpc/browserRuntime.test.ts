@@ -295,6 +295,41 @@ describe("BrowserRuntime connection and retry contract", () => {
     );
   });
 
+  it("waits as long as the service allows each method", async () => {
+    runtime.dispose();
+    handle = (socket, frame) => {
+      if (frame.method === "initialize")
+        socket.result(frame, {
+          ...handshake,
+          capabilities: {
+            ...handshake.capabilities,
+            requestTimeouts: {
+              defaultSeconds: 25,
+              methodSeconds: { "thread/context/compact": 600 },
+            },
+          },
+        });
+    };
+    runtime = new BrowserRuntime({
+      chooseDirectory: async () => null,
+      buildId: "build-1",
+    });
+    await runtime.status();
+    let settled = false;
+    const compact = runtime.request("thread/context/compact", {
+      threadId: "thread",
+    });
+    const rejected = expect(compact).rejects.toMatchObject({
+      code: "RESULT_UNKNOWN",
+    });
+    void compact.catch(() => undefined).finally(() => (settled = true));
+
+    await vi.advanceTimersByTimeAsync(31000);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(575000);
+    await rejected;
+  });
+
   it("settles an unknown write timeout without retrying it", async () => {
     await runtime.status();
     handle = () => {};

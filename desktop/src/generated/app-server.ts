@@ -932,6 +932,12 @@ export interface InitializeResult {
     eventReplay: boolean;
     liveEvents: boolean;
     maxMessageBytes: number;
+    requestTimeouts?: {
+      defaultSeconds: number;
+      methodSeconds: {
+        [k: string]: number;
+      };
+    };
     requestRetry?: {
       default: "never";
       readMethods: string[];

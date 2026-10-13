@@ -337,6 +337,14 @@ export class BrowserRuntime implements ClientRuntime {
     }, delays[this.reconnectAttempt++]);
   }
 
+  /** The service's budget for the method; an older service sends none. */
+  private timeoutFor(method: RpcMethod): number {
+    const budgets = this.state.serverInfo?.capabilities.requestTimeouts;
+    const seconds = budgets?.methodSeconds[method] ?? budgets?.defaultSeconds;
+    if (seconds !== undefined && seconds > 0) return seconds * 1000 + 5000;
+    return method === "provider/test" ? 120000 : 30000;
+  }
+
   private send<M extends RpcMethod>(
     method: M,
     params: MethodParams[M],
@@ -383,8 +391,7 @@ export class BrowserRuntime implements ClientRuntime {
           );
           socket.close();
         },
-        this.options.requestTimeout ??
-          (method === "provider/test" ? 120000 : 30000),
+        this.options.requestTimeout ?? this.timeoutFor(method),
       );
       this.pending.set(id, {
         socket,

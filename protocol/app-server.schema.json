@@ -1177,6 +1177,25 @@
             "maxMessageBytes": {
               "type": "integer"
             },
+            "requestTimeouts": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "defaultSeconds": {
+                  "type": "number"
+                },
+                "methodSeconds": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "number"
+                  }
+                }
+              },
+              "required": [
+                "defaultSeconds",
+                "methodSeconds"
+              ]
+            },
             "requestRetry": {
               "type": "object",
               "additionalProperties": false,

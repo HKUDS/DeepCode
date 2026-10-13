@@ -18,6 +18,7 @@ from app_server.protocol.codec import (
     encode_message,
 )
 from app_server.protocol.models import Response
+from app_server.protocol.timeouts import request_timeout
 from app_server.service_state import ServiceFiles
 
 
@@ -86,10 +87,10 @@ def serve_relay(files: ServiceFiles, source: BinaryIO, sink: BinaryIO) -> int:
     reader.start()
     writer.start()
 
-    def run(coroutine):
+    def run(coroutine, timeout: float):
         future = asyncio.run_coroutine_threadsafe(coroutine, loop)
         try:
-            return future.result(timeout=40)
+            return future.result(timeout=timeout)
         except concurrent.futures.TimeoutError:
             future.cancel()
             raise RpcError(
@@ -115,7 +116,7 @@ def serve_relay(files: ServiceFiles, source: BinaryIO, sink: BinaryIO) -> int:
                 if not initialized:
                     if request.method != "initialize":
                         raise NotInitialized()
-                    result = run(client.connect(request.params, start=True))
+                    result = run(client.connect(request.params, start=True), 40)
                     initialized = True
                 elif request.method == "shutdown":
                     result = {"accepted": True}
@@ -141,7 +142,12 @@ def serve_relay(files: ServiceFiles, source: BinaryIO, sink: BinaryIO) -> int:
                     # Native management only, bounded drain; no implicit cancel.
                     result = stop_service(files, timeout=10, cancel_running=False)
                 else:
-                    result = run(client.request(request.method, request.params))
+                    result = run(
+                        client.request(request.method, request.params),
+                        # Outlive the request's own budget (a /compact may take
+                        # minutes) so its error, not this wrapper's, is sent.
+                        request_timeout(request.method) + 15,
+                    )
                 if request.has_id:
                     emit(Response(request.id, result=result).to_dict())
                 if request.method == "shutdown":

@@ -10,7 +10,8 @@ import time
 from collections.abc import Callable
 
 from app_server.errors import RpcError
-from app_server.native_client import NativeRpcClient, request_timeout
+from app_server.native_client import NativeRpcClient
+from app_server.protocol.timeouts import request_timeout
 from app_server.service_client import ServiceOperationError, ServiceUnavailable
 from app_server.service_state import ServiceFiles
 from core.application.errors import (

@@ -17,6 +17,8 @@ use tauri::{AppHandle, Emitter, Manager};
 
 const PROTOCOL_VERSION: &str = "1.0";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+// Waited beyond the service's own budget, so its timeout message arrives first.
+const RESPONSE_MARGIN: Duration = Duration::from_secs(5);
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(45);
 const SHUTDOWN_REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
 const SHUTDOWN_EXIT_GRACE: Duration = Duration::from_secs(35);
@@ -225,11 +227,7 @@ impl RpcBridge {
     }
 
     pub fn request(&self, method: &str, params: Value) -> PendingResult {
-        let timeout = if method == "provider/test" {
-            Duration::from_secs(125)
-        } else {
-            REQUEST_TIMEOUT
-        };
+        let timeout = request_timeout(self.lock_status().server_info.as_ref(), method);
         self.request_with_timeout(method, params, timeout)
     }
 
@@ -686,9 +684,53 @@ fn database_args() -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// How long to wait for `method`, from the budgets the service sent in its
+/// `initialize` reply. A service too old to send them gets the old waits.
+fn request_timeout(server_info: Option<&Value>, method: &str) -> Duration {
+    let budgets = server_info.and_then(|info| info.pointer("/capabilities/requestTimeouts"));
+    let seconds = budgets.and_then(|budgets| {
+        budgets
+            .get("methodSeconds")
+            .and_then(|methods| methods.get(method))
+            .or_else(|| budgets.get("defaultSeconds"))
+            .and_then(Value::as_f64)
+    });
+    match seconds {
+        Some(seconds) if seconds > 0.0 && seconds <= 3600.0 => {
+            Duration::from_secs_f64(seconds) + RESPONSE_MARGIN
+        }
+        _ if method == "provider/test" => Duration::from_secs(125),
+        _ => REQUEST_TIMEOUT,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn waits_as_long_as_the_service_allows_each_method() {
+        let info = json!({"capabilities": {"requestTimeouts": {
+            "defaultSeconds": 25.0,
+            "methodSeconds": {"thread/context/compact": 600.0}
+        }}});
+        assert_eq!(
+            request_timeout(Some(&info), "thread/context/compact"),
+            Duration::from_secs(605)
+        );
+        assert_eq!(request_timeout(Some(&info), "thread/list"), REQUEST_TIMEOUT);
+
+        let older = json!({"capabilities": {}});
+        assert_eq!(
+            request_timeout(Some(&older), "provider/test"),
+            Duration::from_secs(125)
+        );
+        assert_eq!(
+            request_timeout(Some(&older), "thread/context/compact"),
+            REQUEST_TIMEOUT
+        );
+        assert_eq!(request_timeout(None, "thread/list"), REQUEST_TIMEOUT);
+    }
 
     #[test]
     fn extracts_stable_application_error() {

@@ -16,6 +16,7 @@ from app_server.protocol import methods as rpc_methods
 from app_server.protocol.codec import DEFAULT_MAX_MESSAGE_BYTES
 from app_server.protocol.models import Request
 from app_server.protocol.retry import retry_capabilities
+from app_server.protocol.timeouts import timeout_capabilities
 from core.agent_presets import METADATA_KEY as PRESET_METADATA_KEY
 from core.agent_presets import list_agent_presets
 from core.application.application import DeepCodeApplication
@@ -381,6 +382,7 @@ class Dispatcher:
                 "eventReplay": True,
                 "liveEvents": True,
                 "maxMessageBytes": self.max_message_bytes,
+                "requestTimeouts": timeout_capabilities(),
                 **(
                     {"requestRetry": retry_capabilities()}
                     if self.service_info is not None

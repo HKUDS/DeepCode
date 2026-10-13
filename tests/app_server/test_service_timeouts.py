@@ -7,14 +7,14 @@ import time
 
 import pytest
 
-import app_server.native_client as native_client
+import app_server.protocol.timeouts as timeouts
 from app_server.blocking_client import BlockingServiceClient, RemoteApplicationError
 from tests.app_server.support import control_server
 from tests.app_server.test_native_client import publish
 
 
 def test_slow_read_is_asked_once_and_keeps_the_connection(tmp_path, monkeypatch):
-    monkeypatch.setattr(native_client, "_DEFAULT_TIMEOUT", 0.2)
+    monkeypatch.setattr(timeouts, "DEFAULT_TIMEOUT", 0.2)
 
     async def scenario():
         async with control_server(tmp_path) as (control, _):
@@ -49,8 +49,8 @@ def test_slow_read_is_asked_once_and_keeps_the_connection(tmp_path, monkeypatch)
 
 
 def test_requests_that_wait_on_a_model_or_process_get_their_own_budget():
-    assert native_client.request_timeout("thread/list") == 25.0
-    assert native_client.request_timeout("provider/test") == 120.0
-    assert native_client.request_timeout("thread/context/compact") == 600.0
+    assert timeouts.request_timeout("thread/list") == 25.0
+    assert timeouts.request_timeout("provider/test") == 120.0
+    assert timeouts.request_timeout("thread/context/compact") == 600.0
     # An MCP server may be configured to take up to 300s to start.
-    assert native_client.request_timeout("mcp/probe") > 300.0
+    assert timeouts.request_timeout("mcp/probe") > 300.0

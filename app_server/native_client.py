@@ -13,6 +13,7 @@ import aiohttp
 
 from app_server.errors import RpcError
 from app_server.protocol.codec import DEFAULT_MAX_MESSAGE_BYTES, encode_message
+from app_server.protocol.timeouts import request_timeout
 from app_server.service_client import (
     ServiceClient,
     ServiceOperationError,
@@ -22,22 +23,6 @@ from app_server.service_state import ServiceFiles, ServiceRecord
 from core.version import __version__
 
 logger = logging.getLogger(__name__)
-
-
-# Requests that wait on a model or an external process (a provider probe, a
-# /compact summary, an MCP server start that may take up to its configured
-# 300s) legitimately outlast the default budget; the server keeps working on
-# them either way, so timing out early only hides a result that is coming.
-_SLOW_METHOD_TIMEOUTS = {
-    "provider/test": 120.0,
-    "thread/context/compact": 600.0,
-    "mcp/probe": 330.0,
-}
-_DEFAULT_TIMEOUT = 25.0
-
-
-def request_timeout(method: str) -> float:
-    return _SLOW_METHOD_TIMEOUTS.get(method, _DEFAULT_TIMEOUT)
 
 
 _RESTART_YOURSELF = (
