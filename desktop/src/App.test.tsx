@@ -2314,7 +2314,7 @@ describe("desktop command center", () => {
     ).toBeTruthy();
     const nav = within(screen.getByRole("dialog", { name: "设置" })).getByRole(
       "navigation",
-      { name: "Settings sections" },
+      { name: "设置分区" },
     );
     expect(
       within(nav)
@@ -2363,7 +2363,11 @@ describe("desktop command center", () => {
     render(<App runtime={runtime} />);
 
     await screen.findByRole("heading", { name: "Recovered task" });
-    expect(screen.getByLabelText("任务指令")).toBeTruthy();
+    const composer = screen.getByLabelText("任务指令");
+    fireEvent.change(composer, { target: { value: "/rename" } });
+    fireEvent.keyDown(composer, { key: "Enter" });
+    expect(await screen.findByText("用法：/rename <会话标题>")).toBeTruthy();
+    fireEvent.change(composer, { target: { value: "" } });
     expect(
       await screen.findByRole("heading", { name: "从一个任务开始。" }),
     ).toBeTruthy();

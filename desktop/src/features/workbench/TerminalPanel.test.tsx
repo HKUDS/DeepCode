@@ -12,7 +12,10 @@ import type {
   ClientRuntime,
   SidecarStatus,
 } from "../../rpc/contracts";
+import { __setLocaleForTests, initI18n } from "../../app/i18n";
 import { TerminalPanel } from "./TerminalPanel";
+
+initI18n();
 
 const state = vi.hoisted(() => ({
   instances: [] as Array<{
@@ -150,6 +153,7 @@ function harness(initial = true) {
 }
 
 beforeEach(() => {
+  __setLocaleForTests("en");
   state.instances.length = 0;
   vi.stubGlobal(
     "ResizeObserver",
@@ -243,5 +247,35 @@ describe("TerminalPanel recovery", () => {
     act(() => test.notifications.forEach((receive) => receive(warning)));
     await act(async () => {});
     expect(state.instances[0].text.match(/process exited/g)).toHaveLength(1);
+  });
+
+  it("labels the terminal and its own notes in the interface language", async () => {
+    __setLocaleForTests("zh-CN");
+    const fresh = harness(false);
+    const view = render(<TerminalPanel {...fresh.props} />);
+    expect(await screen.findByText("启动终端")).toBeTruthy();
+    expect(screen.getByText("无会话")).toBeTruthy();
+    view.unmount();
+
+    const test = harness();
+    render(<TerminalPanel {...test.props} />);
+    await waitFor(() =>
+      expect(state.instances.at(-1)?.text).toBe(test.backend.text),
+    );
+    test.backend.exited = true;
+    const warning: AnyRpcNotification = {
+      jsonrpc: "2.0",
+      method: "server.warning",
+      params: {
+        replayRequired: true,
+        code: "NOTIFICATION_QUEUE_OVERFLOW",
+        dropped: 1,
+      },
+    };
+    act(() => test.notifications.forEach((receive) => receive(warning)));
+    expect(await screen.findByText("已退出")).toBeTruthy();
+    expect(state.instances.at(-1)?.text).toBe(
+      test.backend.text + "\r\n[进程已退出 0]\r\n",
+    );
   });
 });

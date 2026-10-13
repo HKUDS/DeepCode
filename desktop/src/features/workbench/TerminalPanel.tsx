@@ -1,6 +1,7 @@
 import type { FitAddon } from "@xterm/addon-fit";
 import type { Terminal } from "@xterm/xterm";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import type { TerminalInfo } from "../../generated/app-server";
 import type { ClientRuntime } from "../../rpc/contracts";
@@ -20,6 +21,11 @@ export function TerminalPanel({
   enabled,
   active,
 }: TerminalPanelProps) {
+  const { t } = useTranslation();
+  // The notes written into the terminal come from callbacks that must keep
+  // their identity (they drive the session effects), so they read the
+  // current language through a ref.
+  const translate = useRef(t);
   const host = useRef<HTMLDivElement | null>(null);
   const terminal = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);
@@ -49,7 +55,12 @@ export function TerminalPanel({
   }, []);
 
   const finish = useCallback((code: number | null) => {
-    terminal.current?.write(`\r\n[process exited ${code ?? "unknown"}]\r\n`);
+    const exit = translate.current;
+    terminal.current?.write(
+      `\r\n${exit("terminal.processExited", "[process exited {{code}}]", {
+        code: code ?? exit("terminal.unknownCode", "unknown"),
+      })}\r\n`,
+    );
     setEnded(true);
     info.current = null;
     setTerminalInfo(null);
@@ -75,7 +86,10 @@ export function TerminalPanel({
         () => {
           terminal.current?.reset();
           terminal.current?.write(
-            "[Earlier terminal output is no longer available]\r\n",
+            `${translate.current(
+              "terminal.outputUnavailable",
+              "[Earlier terminal output is no longer available]",
+            )}\r\n`,
           );
         },
         finish,
@@ -172,6 +186,10 @@ export function TerminalPanel({
   }, []);
 
   useEffect(() => {
+    translate.current = t;
+  }, [t]);
+
+  useEffect(() => {
     activeRef.current = active;
     if (active) fit.current?.fit();
   }, [active]);
@@ -221,7 +239,10 @@ export function TerminalPanel({
           setTerminalInfo(null);
           setEnded(true);
           terminal.current?.write(
-            "\r\n[Terminal session is no longer available]\r\n",
+            `\r\n${translate.current(
+              "terminal.sessionUnavailable",
+              "[Terminal session is no longer available]",
+            )}\r\n`,
           );
         }
       }
@@ -351,10 +372,10 @@ export function TerminalPanel({
       <div className={styles.toolbar}>
         <span>
           {terminalInfo
-            ? `PID ${terminalInfo.pid}`
+            ? t("terminal.pid", "PID {{pid}}", { pid: terminalInfo.pid })
             : ended
-              ? "Exited"
-              : "No session"}
+              ? t("terminal.exited", "Exited")
+              : t("terminal.noSession", "No session")}
         </span>
         {terminalInfo ? (
           <button
@@ -362,7 +383,7 @@ export function TerminalPanel({
             disabled={busy || !connected}
             onClick={() => void close()}
           >
-            Close
+            {t("terminal.close", "Close")}
           </button>
         ) : (
           <button
@@ -370,7 +391,7 @@ export function TerminalPanel({
             onClick={() => void start()}
             disabled={!enabled || !rendererReady || !connected || busy}
           >
-            Start terminal
+            {t("terminal.start", "Start terminal")}
           </button>
         )}
       </div>

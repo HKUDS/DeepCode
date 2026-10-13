@@ -1,3 +1,5 @@
+import type { TFunction } from "i18next";
+
 import type { ExecutionAccessPreset } from "../../generated/app-server";
 
 export type ComposerCommand =
@@ -33,13 +35,27 @@ export type CommandParseResult =
   | { ok: true; command: ComposerCommand }
   | { ok: false; message: string };
 
-function requireNoArgument(name: string, argument: string): CommandParseResult | null {
+function requireNoArgument(
+  name: string,
+  argument: string,
+  t: TFunction,
+): CommandParseResult | null {
   return argument
-    ? { ok: false, message: `/${name} does not accept an argument.` }
+    ? {
+        ok: false,
+        message: t(
+          "composer.command.noArgument",
+          "/{{name}} does not accept an argument.",
+          { name },
+        ),
+      }
     : null;
 }
 
-export function parseComposerCommand(value: string): CommandParseResult | null {
+export function parseComposerCommand(
+  value: string,
+  t: TFunction,
+): CommandParseResult | null {
   const input = value.trim();
   if (!input.startsWith("/")) return null;
   const separator = input.search(/\s/);
@@ -53,13 +69,19 @@ export function parseComposerCommand(value: string): CommandParseResult | null {
     case "paper":
     case "review":
     case "fork": {
-      const error = requireNoArgument(name, argument);
+      const error = requireNoArgument(name, argument, t);
       return error ?? { ok: true, command: { type: name } };
     }
     case "rename":
       return argument
         ? { ok: true, command: { type: "rename", title: argument } }
-        : { ok: false, message: "Usage: /rename <Session title>" };
+        : {
+            ok: false,
+            message: t(
+              "composer.command.usage.rename",
+              "Usage: /rename <Session title>",
+            ),
+          };
     case "model":
       return argument
         ? {
@@ -69,7 +91,13 @@ export function parseComposerCommand(value: string): CommandParseResult | null {
               model: argument === "default" ? null : argument,
             },
           }
-        : { ok: false, message: "Usage: /model <model id | default>" };
+        : {
+            ok: false,
+            message: t(
+              "composer.command.usage.model",
+              "Usage: /model <model id | default>",
+            ),
+          };
     case "permission":
     case "permissions": {
       const aliases: Record<string, ExecutionAccessPreset | null> = {
@@ -91,12 +119,19 @@ export function parseComposerCommand(value: string): CommandParseResult | null {
           }
         : {
             ok: false,
-            message:
+            message: t(
+              "composer.command.usage.permissions",
               "Usage: /permissions <ask | read-only | full-access | inherit>",
+            ),
           };
     }
     default:
-      return { ok: false, message: `Unknown command: /${name || "…"}` };
+      return {
+        ok: false,
+        message: t("composer.command.unknown", "Unknown command: /{{name}}", {
+          name: name || "…",
+        }),
+      };
   }
 }
 

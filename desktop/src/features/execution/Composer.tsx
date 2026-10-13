@@ -190,25 +190,17 @@ export function Composer({
   const accessPresetOverride = thread?.accessPresetOverride ?? null;
   const effectiveProductAccess =
     accessPresetOverride ?? settingsProductAccessPreset(settings);
-  const defaultAccessLabel = settingsDefaultAccessLabel(settings);
+  const defaultAccessLabel = settingsDefaultAccessLabel(settings, t);
   const executingAccessLabel = executingTurn
-    ? turnExecutionAccessLabel(executingTurn)
+    ? turnExecutionAccessLabel(executingTurn, t)
     : null;
   const executingAccessState = executingTurn
     ? turnExecutionAccessState(executingTurn)
     : null;
   const queuedAccessLabels = [
-    ...new Set(queuedTurns.map(turnExecutionAccessLabel)),
+    ...new Set(queuedTurns.map((turn) => turnExecutionAccessLabel(turn, t))),
   ];
   const queuedAccessStates = queuedTurns.map(turnExecutionAccessState);
-  // Access labels come from a shared English vocabulary; the product presets
-  // among them are translated here, legacy labels stay as they are.
-  const accessText = (label: string) => {
-    const option = ACCESS_PRESET_OPTIONS.find(
-      (candidate) => candidate.label === label,
-    );
-    return option ? t(`access.preset.${option.value}`, option.label) : label;
-  };
   const queuedAccessState = queuedAccessStates.includes("full_access")
     ? "full_access"
     : new Set(queuedAccessStates).size === 1
@@ -259,7 +251,7 @@ export function Composer({
   const submit = async () => {
     const value = prompt.trim();
     if (!value || !canExecute || busy) return;
-    const parsed = parseComposerCommand(value);
+    const parsed = parseComposerCommand(value, t);
     if (parsed) {
       if (!parsed.ok) {
         setCommandError(parsed.message);
@@ -299,7 +291,7 @@ export function Composer({
   const submitQueued = async () => {
     const value = prompt.trim();
     if (!value || !canExecute || busy) return;
-    if (parseComposerCommand(value)) {
+    if (parseComposerCommand(value, t)) {
       await submit();
       return;
     }
@@ -608,12 +600,12 @@ export function Composer({
                   aria-label={t(
                     "composer.access.current",
                     "Current Turn access: {{access}}",
-                    { access: accessText(executingAccessLabel) },
+                    { access: executingAccessLabel },
                   )}
                 >
                   <strong>{t("composer.access.currentTurn", "Current Turn")}</strong>
                   <i aria-hidden="true">·</i>
-                  {accessText(executingAccessLabel)}
+                  {executingAccessLabel}
                 </span>
               ) : null}
               {queuedTurns.length ? (
@@ -623,7 +615,7 @@ export function Composer({
                   aria-label={t(
                     "composer.access.queued",
                     "Queued Turn access: {{access}}",
-                    { access: queuedAccessLabels.map(accessText).join(", ") },
+                    { access: queuedAccessLabels.join(", ") },
                   )}
                 >
                   <strong>
@@ -632,7 +624,7 @@ export function Composer({
                     })}
                   </strong>
                   <i aria-hidden="true">·</i>
-                  {queuedAccessLabels.map(accessText).join(" · ")}
+                  {queuedAccessLabels.join(" · ")}
                 </span>
               ) : null}
             </div>
@@ -763,7 +755,7 @@ export function Composer({
               >
                 <option value="">
                   {t("composer.access.default", "Default · {{access}}", {
-                    access: accessText(defaultAccessLabel),
+                    access: defaultAccessLabel,
                   })}
                 </option>
                 {ACCESS_PRESET_OPTIONS.map((option) => (

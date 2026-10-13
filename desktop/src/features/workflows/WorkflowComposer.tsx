@@ -1,4 +1,6 @@
+import type { TFunction } from "i18next";
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import type {
   JsonObject,
@@ -48,6 +50,7 @@ export function WorkflowComposer({
   onRespond,
   onInterrupt,
 }: WorkflowComposerProps) {
+  const { t } = useTranslation();
   const [sourceType, setSourceType] = useState<SourceType>("local");
   const [source, setSource] = useState("");
   const [enableIndexing, setEnableIndexing] = useState(false);
@@ -56,7 +59,10 @@ export function WorkflowComposer({
   const [fileError, setFileError] = useState<string | null>(null);
   const active =
     workflow && ["queued", "running", "waiting"].includes(workflow.status);
-  const interaction = useMemo(() => workflowInteraction(workflow), [workflow]);
+  const interaction = useMemo(
+    () => workflowInteraction(workflow, t),
+    [t, workflow],
+  );
   const progress = workflow?.progressTotal
     ? Math.round((workflow.progressCurrent / workflow.progressTotal) * 100)
     : 0;
@@ -91,7 +97,9 @@ export function WorkflowComposer({
           <div className={styles.consoleHead}>
             <div>
               <span className={styles.kicker}>
-                Paper2Code · attempt {workflow.attempt}
+                {t("workflow.attempt", "Paper2Code · attempt {{attempt}}", {
+                  attempt: workflow.attempt,
+                })}
               </span>
               <strong>
                 {workflow.currentStage?.replaceAll("_", " ") ?? workflow.status}
@@ -99,13 +107,20 @@ export function WorkflowComposer({
             </div>
             <span className={styles.percent}>{progress}%</span>
           </div>
-          <div className={styles.progress} aria-label={`${progress}% complete`}>
+          <div
+            className={styles.progress}
+            aria-label={t("workflow.progress", "{{progress}}% complete", {
+              progress,
+            })}
+          >
             <span style={{ width: `${progress}%` }} />
           </div>
           {interaction ? (
             <div className={styles.review}>
               <div>
-                <span className={styles.kicker}>Review gate</span>
+                <span className={styles.kicker}>
+                  {t("workflow.reviewGate", "Review gate")}
+                </span>
                 <h3>{interaction.title}</h3>
                 <p>{interaction.description}</p>
               </div>
@@ -115,19 +130,22 @@ export function WorkflowComposer({
               <textarea
                 value={feedback}
                 onChange={(event) => setFeedback(event.target.value)}
-                placeholder="Optional feedback for a revised plan…"
+                placeholder={t(
+                  "workflow.feedbackPlaceholder",
+                  "Optional feedback for a revised plan…",
+                )}
                 rows={2}
               />
               <div className={styles.reviewActions}>
                 <button type="button" onClick={() => void respond("cancel")}>
-                  Cancel run
+                  {t("workflow.cancelRun", "Cancel run")}
                 </button>
                 <button
                   type="button"
                   disabled={!feedback.trim() || busy}
                   onClick={() => void respond("modify")}
                 >
-                  Request changes
+                  {t("workflow.requestChanges", "Request changes")}
                 </button>
                 <button
                   className={styles.primary}
@@ -135,22 +153,24 @@ export function WorkflowComposer({
                   disabled={busy}
                   onClick={() => void respond("approve")}
                 >
-                  Approve &amp; continue
+                  {t("workflow.approve", "Approve & continue")}
                 </button>
               </div>
             </div>
           ) : (
             <div className={styles.runningRow}>
               <span>
-                The run is durable; closing the window will recover it as
-                retryable.
+                {t(
+                  "workflow.durable",
+                  "The run is durable; closing the window will recover it as retryable.",
+                )}
               </span>
               <button
                 className={styles.danger}
                 type="button"
                 onClick={onInterrupt}
               >
-                Stop workflow
+                {t("workflow.stop", "Stop workflow")}
               </button>
             </div>
           )}
@@ -160,7 +180,7 @@ export function WorkflowComposer({
           <div
             className={styles.sourceTabs}
             role="tablist"
-            aria-label="Input source"
+            aria-label={t("workflow.inputSource", "Input source")}
           >
             {sourceLabels.map(([value, label]) => (
               <button
@@ -173,7 +193,7 @@ export function WorkflowComposer({
                   setSource("");
                 }}
               >
-                {label}
+                {t(`workflow.source.${value}`, label)}
               </button>
             ))}
           </div>
@@ -182,7 +202,10 @@ export function WorkflowComposer({
               <textarea
                 value={source}
                 onChange={(event) => setSource(event.target.value)}
-                placeholder="Describe the implementation outcome and verification criteria…"
+                placeholder={t(
+                  "workflow.requirementPlaceholder",
+                  "Describe the implementation outcome and verification criteria…",
+                )}
                 rows={2}
                 disabled={!enabled}
               />
@@ -190,7 +213,7 @@ export function WorkflowComposer({
               <input
                 value={source}
                 onChange={(event) => setSource(event.target.value)}
-                placeholder={placeholderFor(sourceType)}
+                placeholder={placeholderFor(sourceType, t)}
                 readOnly={sourceType === "local"}
                 disabled={!enabled}
               />
@@ -201,7 +224,7 @@ export function WorkflowComposer({
                 onClick={() => void chooseFile()}
                 disabled={!enabled}
               >
-                Choose file
+                {t("workflow.chooseFile", "Choose file")}
               </button>
             ) : null}
           </div>
@@ -213,7 +236,7 @@ export function WorkflowComposer({
                   checked={planReview}
                   onChange={(event) => setPlanReview(event.target.checked)}
                 />
-                Review plan
+                {t("workflow.reviewPlan", "Review plan")}
               </label>
               <label>
                 <input
@@ -221,11 +244,11 @@ export function WorkflowComposer({
                   checked={enableIndexing}
                   onChange={(event) => setEnableIndexing(event.target.checked)}
                 />
-                Reference indexing
+                {t("workflow.referenceIndexing", "Reference indexing")}
               </label>
             </div>
             <div className={styles.submit}>
-              <span>{disabledReason ?? terminalSummary(workflow)}</span>
+              <span>{disabledReason ?? terminalSummary(workflow, t)}</span>
               {workflow?.status === "failed" ||
               workflow?.status === "cancelled" ? (
                 <button
@@ -233,7 +256,9 @@ export function WorkflowComposer({
                   disabled={busy}
                   onClick={() => void onRetry(workflow.id)}
                 >
-                  Retry attempt {workflow.attempt + 1}
+                  {t("workflow.retry", "Retry attempt {{attempt}}", {
+                    attempt: workflow.attempt + 1,
+                  })}
                 </button>
               ) : null}
               <button
@@ -242,7 +267,7 @@ export function WorkflowComposer({
                 disabled={!enabled || busy || !source.trim()}
                 onClick={() => void start()}
               >
-                Start Paper2Code
+                {t("workflow.start", "Start Paper2Code")}
               </button>
             </div>
           </div>
@@ -261,6 +286,7 @@ interface InteractionView {
 
 function workflowInteraction(
   workflow: WorkflowRun | null,
+  t: TFunction,
 ): InteractionView | null {
   if (!workflow || workflow.status !== "waiting") return null;
   const interaction = recordValue(workflow.checkpoint.interaction);
@@ -269,10 +295,15 @@ function workflowInteraction(
   const data = recordValue(request.data);
   return {
     id: interaction.id,
-    title: stringValue(request.title) ?? "Review implementation plan",
+    title:
+      stringValue(request.title) ??
+      t("workflow.interaction.title", "Review implementation plan"),
     description:
       stringValue(request.description) ??
-      "Approve or revise the plan before generation.",
+      t(
+        "workflow.interaction.description",
+        "Approve or revise the plan before generation.",
+      ),
     planPreview: stringValue(data?.plan_preview),
   };
 }
@@ -287,18 +318,28 @@ function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
 }
 
-function placeholderFor(sourceType: SourceType): string {
+function placeholderFor(sourceType: SourceType, t: TFunction): string {
   if (sourceType === "url") return "https://arxiv.org/abs/…";
   if (sourceType === "repository") return "https://github.com/owner/repository";
-  return "Choose a PDF, Markdown, DOCX, HTML, or text document";
+  return t(
+    "workflow.documentPlaceholder",
+    "Choose a PDF, Markdown, DOCX, HTML, or text document",
+  );
 }
 
-function terminalSummary(workflow: WorkflowRun | null): string {
+function terminalSummary(workflow: WorkflowRun | null, t: TFunction): string {
   if (!workflow)
-    return "The generated code must pass discovered tests to complete.";
+    return t(
+      "workflow.summary.idle",
+      "The generated code must pass discovered tests to complete.",
+    );
   if (workflow.status === "completed")
-    return "Last run completed with passing verification.";
+    return t(
+      "workflow.summary.completed",
+      "Last run completed with passing verification.",
+    );
   return (
-    workflow.errorMessage ?? "Last run can be retried from its checkpoint."
+    workflow.errorMessage ??
+    t("workflow.summary.retryable", "Last run can be retried from its checkpoint.")
   );
 }

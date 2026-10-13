@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { App } from "./App";
 import { BrowserRuntime } from "./rpc/browserRuntime";
 import styles from "./webShell.module.css";
@@ -6,6 +7,7 @@ import styles from "./webShell.module.css";
 declare const __WEB_BUILD_ID__: string;
 
 export function BrowserShell() {
+  const { t } = useTranslation();
   const [picker, setPicker] = useState<{
     resolve(value: string | null): void;
   } | null>(null);
@@ -45,19 +47,24 @@ export function BrowserShell() {
   return (
     <div className={styles.shell}>
       <header className={styles.bar}>
-        <span>DeepCode · Local service</span>
+        <span>{t("browser.title", "DeepCode · Local service")}</span>
         <span>{notice}</span>
         <button
           onClick={() =>
             void runtime
               .logout()
               .then(() =>
-                setNotice("Signed out · run deepcode web for a fresh link"),
+                setNotice(
+                  t(
+                    "browser.signedOut",
+                    "Signed out · run deepcode web for a fresh link",
+                  ),
+                ),
               )
               .catch((error) => setNotice(String(error)))
           }
         >
-          Sign out
+          {t("browser.signOut", "Sign out")}
         </button>
       </header>
       <div className={styles.app}>
@@ -75,12 +82,18 @@ export function BrowserShell() {
               if (path.trim()) closePicker(path.trim());
             }}
           >
-            <h2 id="directory-title">Open a project on the service machine</h2>
+            <h2 id="directory-title">
+              {t("browser.picker.title", "Open a project on the service machine")}
+            </h2>
             <p>
-              Enter the folder path on the machine running DeepCode. It will be
-              opened as untrusted until you choose to trust it.
+              {t(
+                "browser.picker.body",
+                "Enter the folder path on the machine running DeepCode. It will be opened as untrusted until you choose to trust it.",
+              )}
             </p>
-            <label htmlFor="server-folder">Project folder</label>
+            <label htmlFor="server-folder">
+              {t("browser.picker.folder", "Project folder")}
+            </label>
             <input
               id="server-folder"
               autoFocus
@@ -90,10 +103,10 @@ export function BrowserShell() {
             />
             <footer>
               <button type="button" onClick={() => closePicker(null)}>
-                Cancel
+                {t("browser.picker.cancel", "Cancel")}
               </button>
               <button disabled={!path.trim()} type="submit">
-                Open project
+                {t("browser.picker.open", "Open project")}
               </button>
             </footer>
           </form>

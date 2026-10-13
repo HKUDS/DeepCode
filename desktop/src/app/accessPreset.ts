@@ -1,3 +1,5 @@
+import type { TFunction } from "i18next";
+
 import type {
   ExecutionAccessPreset,
   ExecutionSecurityProfile,
@@ -43,48 +45,61 @@ export function hasLegacyPermissionDefault(
   );
 }
 
-export function accessPresetLabel(preset: ExecutionAccessPreset): string {
+export function accessPresetLabel(
+  preset: ExecutionAccessPreset,
+  t: TFunction,
+): string {
   const option = ACCESS_PRESET_OPTIONS.find(
     (candidate) => candidate.value === preset,
   );
   if (!option) throw new Error(`Unsupported access preset: ${preset}`);
-  return option.label;
+  return t(`access.preset.${option.value}`, option.label);
 }
 
 export function executionSecurityLabel(
   profile: ExecutionSecurityProfile,
+  t: TFunction,
 ): string {
   if (profile.accessPreset !== null) {
-    return accessPresetLabel(profile.accessPreset);
+    return accessPresetLabel(profile.accessPreset, t);
   }
-  if (profile.permissionMode === "plan") return "Legacy read only";
+  if (profile.permissionMode === "plan") {
+    return t("access.legacy.readOnly", "Legacy read only");
+  }
   if (profile.permissionMode === "full_auto") {
     return profile.commandSandbox
-      ? "Legacy auto (sandboxed)"
-      : "Legacy auto (sandbox off)";
+      ? t("access.legacy.autoSandboxed", "Legacy auto (sandboxed)")
+      : t("access.legacy.autoSandboxOff", "Legacy auto (sandbox off)");
   }
   return profile.commandSandbox
-    ? "Legacy ask (sandboxed)"
-    : "Legacy ask (sandbox off)";
+    ? t("access.legacy.askSandboxed", "Legacy ask (sandboxed)")
+    : t("access.legacy.askSandboxOff", "Legacy ask (sandbox off)");
 }
 
 /** Describe the authoritative resolved default without upgrading legacy modes. */
 export function settingsDefaultAccessLabel(
   settings: SettingsSnapshot | null,
+  t: TFunction,
 ): string {
-  if (!settings) return "Loading\u2026";
-  return executionSecurityLabel(settings.resolvedDefaultSecurityProfile);
+  if (!settings) return t("access.loading", "Loading\u2026");
+  return executionSecurityLabel(settings.resolvedDefaultSecurityProfile, t);
 }
 
 /** Present the immutable access snapshot captured when a Turn was admitted. */
-export function turnExecutionAccessLabel(turn: Turn): string {
+export function turnExecutionAccessLabel(turn: Turn, t: TFunction): string {
   if (turn.executionSecurityProfile) {
-    return executionSecurityLabel(turn.executionSecurityProfile);
+    return executionSecurityLabel(turn.executionSecurityProfile, t);
   }
-  if (turn.executionPermissionMode === "plan") return "Legacy read only";
-  if (turn.executionPermissionMode === "full_auto") return "Legacy auto";
-  if (turn.executionPermissionMode === "default") return "Legacy ask";
-  return "Access unavailable";
+  if (turn.executionPermissionMode === "plan") {
+    return t("access.legacy.readOnly", "Legacy read only");
+  }
+  if (turn.executionPermissionMode === "full_auto") {
+    return t("access.legacy.auto", "Legacy auto");
+  }
+  if (turn.executionPermissionMode === "default") {
+    return t("access.legacy.ask", "Legacy ask");
+  }
+  return t("access.unavailable", "Access unavailable");
 }
 
 export type TurnExecutionAccessState =

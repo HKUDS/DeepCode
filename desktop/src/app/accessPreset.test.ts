@@ -13,6 +13,10 @@ import {
   turnExecutionAccessLabel,
   turnExecutionAccessState,
 } from "./accessPreset";
+import { initI18n } from "./i18n";
+
+const i18n = initI18n();
+const t = i18n.getFixedT("en");
 
 function profile(
   input: Partial<ExecutionSecurityProfile> = {},
@@ -83,7 +87,7 @@ describe("access preset presentation", () => {
 
     expect(settingsProductAccessPreset(value)).toBe("read_only");
     expect(hasLegacyPermissionDefault(value)).toBe(false);
-    expect(settingsDefaultAccessLabel(value)).toBe("Read only");
+    expect(settingsDefaultAccessLabel(value, t)).toBe("Read only");
   });
 
   it("keeps resolved legacy auto distinct from canonical Full access", () => {
@@ -93,7 +97,7 @@ describe("access preset presentation", () => {
 
     expect(settingsProductAccessPreset(value)).toBeNull();
     expect(hasLegacyPermissionDefault(value)).toBe(true);
-    expect(settingsDefaultAccessLabel(value)).toBe(
+    expect(settingsDefaultAccessLabel(value, t)).toBe(
       "Legacy auto (sandboxed)",
     );
   });
@@ -109,7 +113,7 @@ describe("access preset presentation", () => {
       }),
     );
 
-    expect(settingsDefaultAccessLabel(value)).toBe("Legacy auto (sandbox off)");
+    expect(settingsDefaultAccessLabel(value, t)).toBe("Legacy auto (sandbox off)");
   });
 
   it("reads a Turn's frozen profile without consulting current Settings", () => {
@@ -123,7 +127,7 @@ describe("access preset presentation", () => {
       }),
     });
 
-    expect(turnExecutionAccessLabel(value)).toBe("Full access");
+    expect(turnExecutionAccessLabel(value, t)).toBe("Full access");
     expect(turnExecutionAccessState(value)).toBe("full_access");
   });
 
@@ -131,6 +135,7 @@ describe("access preset presentation", () => {
     expect(
       turnExecutionAccessLabel(
         turn({ executionPermissionMode: "full_auto" }),
+        t,
       ),
     ).toBe("Legacy auto");
     expect(
@@ -138,7 +143,18 @@ describe("access preset presentation", () => {
         turn({ executionPermissionMode: "full_auto" }),
       ),
     ).toBe("legacy");
-    expect(turnExecutionAccessLabel(turn())).toBe("Access unavailable");
+    expect(turnExecutionAccessLabel(turn(), t)).toBe("Access unavailable");
     expect(turnExecutionAccessState(turn())).toBe("unknown");
+  });
+
+  it("names legacy and unknown access in the interface language", () => {
+    const zh = i18n.getFixedT("zh-CN");
+    const legacy = settings(
+      profile({ accessPreset: null, permissionMode: "full_auto" }),
+    );
+
+    expect(settingsDefaultAccessLabel(legacy, zh)).toBe("旧版自动（沙箱开启）");
+    expect(settingsDefaultAccessLabel(null, zh)).toBe("加载中…");
+    expect(turnExecutionAccessLabel(turn(), zh)).toBe("权限信息不可用");
   });
 });

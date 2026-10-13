@@ -149,7 +149,10 @@ export function SettingsDialog({
         </header>
         {openError ? <p className={styles.openError}>{openError}</p> : null}
         <div className={styles.body}>
-          <nav className={styles.rail} aria-label="Settings sections">
+          <nav
+            className={styles.rail}
+            aria-label={t("settings.sectionsNav", "Settings sections")}
+          >
             {SETTINGS_SECTIONS.map((section) => {
               const Icon = section.icon;
               return (

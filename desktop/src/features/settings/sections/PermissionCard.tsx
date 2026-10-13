@@ -14,7 +14,6 @@ import type {
 } from "../../../generated/app-server";
 import {
   ACCESS_PRESET_OPTIONS,
-  accessPresetLabel,
   settingsDefaultAccessLabel,
 } from "../../../app/accessPreset";
 import { confirmAction } from "../../../platform/confirmAction";
@@ -48,11 +47,7 @@ export function PermissionCard({
       : (settings?.userAccessPreset ?? null);
   const accessPreset =
     accessPresetDraft === undefined ? configuredAccessPreset : accessPresetDraft;
-  // Product presets translate; legacy modes keep their descriptive label.
-  const resolvedPreset = settings?.resolvedDefaultSecurityProfile.accessPreset;
-  const defaultAccessLabel = resolvedPreset
-    ? t(`access.preset.${resolvedPreset}`, accessPresetLabel(resolvedPreset))
-    : settingsDefaultAccessLabel(settings);
+  const defaultAccessLabel = settingsDefaultAccessLabel(settings, t);
   const source = settings?.resolvedDefaultSecuritySource;
 
   const saveSecurity = async () => {
