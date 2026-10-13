@@ -158,6 +158,21 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
 
 ## News
 
+**2026-10-13 · Smoother streaming, a self-managing background service, and safer Web sign-in**
+
+- **Answers stream smoothly.** Live text goes straight to every client instead
+  of being saved piece by piece, so long answers keep flowing when the database
+  is busy, and a client that reconnects or reloads picks up the answer where it
+  is. The TUI follows the service's updates instead of polling it.
+- **The background service manages itself.** If port 3081 is taken, the
+  service moves to a free port. After an upgrade, a newer client restarts an
+  idle older service so both run the same version.
+- **Safer Web sign-in.** The browser session no longer travels in a cookie that
+  other programs on your computer could receive.
+- **Clearer problems, tidier projects.** An update that could not be saved
+  shows as a warning instead of a failed task, logs keep the full traceback,
+  and DeepCode no longer leaves a `logs/` folder in your project.
+
 **2026-10-12 · DeepCode v2.3.1: Markdown answers in the TUI, a Windows service that stays up, `/compact` for coding sessions, and community fixes**
 
 - **Answers render as Markdown while they stream.** Headings, lists, bold
@@ -182,6 +197,9 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
   files when the project sits under a directory named `build` or `venv` (#256).
 - **Security updates.** pypdf, PyJWT, urllib3, and multidict move to patched
   releases.
+
+<details>
+<summary><strong>Earlier updates, August to 10 October 2026</strong></summary>
 
 **2026-10-10 · A steadier terminal UI: answers shown once, keys that keep your draft, and an orderly `/compact`**
 
@@ -225,9 +243,6 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
 - **Steadier everywhere.** The state database keeps its locks when several
   DeepCode processes share it, and a round of Windows fixes landed. (#210,
   #235, #236, #237)
-
-<details>
-<summary><strong>Earlier updates, August to early September 2026</strong></summary>
 
 **2026-09-09 · TUI, Desktop, and Web share one local background service**
 
