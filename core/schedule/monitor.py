@@ -46,6 +46,7 @@ From a shell (for cron or ``deepcode schedule``)::
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hashlib
 import json
 import sqlite3
@@ -55,11 +56,15 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from difflib import unified_diff
 from pathlib import Path
-from urllib.request import Request, urlopen
 
 from core.config import deepcode_home
 from core.harness.command_guard import screen_command
-from core.network.safe_http import UnsafeUrlError, validate_public_url
+from core.network.safe_http import (
+    ResponseTooLargeError,
+    SafeHttpClient,
+    SafeHttpPolicy,
+    UnsafeUrlError,
+)
 from core.private_storage import ensure_private_directory, ensure_private_file
 
 # ── Constants ────────────────────────────────────────────────────────────────
@@ -130,21 +135,27 @@ def _fetch_monitor_url(url: str) -> tuple[str, str]:
 
     On failure returns ``('', error_description)``. The body is truncated
     to ``MAX_URL_BYTES``; exceeding the limit is reported as an error.
+    The shared safe client checks every redirect hop and every resolved
+    address, not just the URL as given.
     """
+    client = SafeHttpClient(
+        SafeHttpPolicy(
+            total_timeout_seconds=URL_TIMEOUT_SECONDS,
+            max_response_bytes=MAX_URL_BYTES,
+        )
+    )
     try:
-        safe_url = validate_public_url(url)
+        # The body is only diffed as text; JSON, XML and feeds are application/*.
+        response = asyncio.run(
+            client.get(url, accepted_content_types=("text/", "application/"))
+        )
     except UnsafeUrlError as exc:
         return "", f"URL refused by network policy: {exc}"
-    try:
-        req = Request(safe_url, method="GET")
-        with urlopen(req, timeout=URL_TIMEOUT_SECONDS) as resp:  # noqa: S310 - validated above
-            data = resp.read(MAX_URL_BYTES + 1)
-            if len(data) > MAX_URL_BYTES:
-                return "", f"Response exceeds {MAX_URL_BYTES} bytes, truncated"
-            text = data.decode("utf-8", errors="replace")
-            return text, ""
+    except ResponseTooLargeError:
+        return "", f"Response exceeds {MAX_URL_BYTES} bytes, truncated"
     except Exception as exc:  # noqa: BLE001 — network/IO errors are expected here
         return "", f"URL fetch failed: {exc}"
+    return response.body.decode("utf-8", errors="replace"), ""
 
 
 def _run_monitor_script(script: str) -> tuple[str, str]:

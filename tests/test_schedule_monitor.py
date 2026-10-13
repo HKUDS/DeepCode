@@ -14,8 +14,14 @@ Coverage:
 
 from __future__ import annotations
 
+import socket
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import pytest
+
+from core.network.safe_http import PublicResolver
 from core.schedule.monitor import (
     MAX_DIFF_CHARS,
     MonitorStore,
@@ -154,6 +160,94 @@ def test_url_monitor_refuses_private_hosts() -> None:
 
     outcome = check_monitor(monitor_url="http://127.0.0.1:9/never")
     assert not outcome.changed and "network policy" in outcome.error
+
+
+@pytest.fixture
+def private_site(monkeypatch):
+    """A loopback server that ``public.example`` resolves to at the OS level.
+
+    ``/redirect`` sends the client on to the server's own loopback address.
+    Yields ``(port, paths requested)``.
+    """
+    hits: list[str] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - http.server API
+            hits.append(self.path)
+            if self.path == "/redirect":
+                self.send_response(302)
+                self.send_header("Location", f"http://127.0.0.1:{port}/secret")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            body = b"internal secret"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args) -> None:  # type: ignore[no-untyped-def]
+            return None
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    real_getaddrinfo = socket.getaddrinfo
+
+    def fake_getaddrinfo(host, port_, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if host == "public.example":
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", port))]
+        return real_getaddrinfo(host, port_, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    for name in ("http_proxy", "HTTP_PROXY", "all_proxy", "ALL_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("no_proxy", "*")
+    try:
+        yield port, hits
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_url_monitor_refuses_a_host_that_resolves_to_a_private_address(
+    private_site,
+) -> None:
+    _port, hits = private_site
+
+    outcome = check_monitor(monitor_url="http://public.example/page")
+
+    assert not outcome.changed and outcome.error
+    assert hits == []
+
+
+def test_url_monitor_refuses_a_redirect_to_a_private_address(
+    private_site, monkeypatch
+) -> None:
+    port, hits = private_site
+
+    # Stand-in for a genuinely public answer, so the first hop is allowed.
+    async def resolve(self, host, port_=0, family=socket.AF_UNSPEC):  # type: ignore[no-untyped-def]
+        return [
+            {
+                "hostname": host,
+                "host": "127.0.0.1",
+                "port": port,
+                "family": socket.AF_INET,
+                "proto": 0,
+                "flags": socket.AI_NUMERICHOST,
+            }
+        ]
+
+    monkeypatch.setattr(PublicResolver, "resolve", resolve)
+
+    outcome = check_monitor(monitor_url="http://public.example/redirect")
+
+    assert not outcome.changed and "network policy" in outcome.error
+    assert hits == ["/redirect"]
 
 
 def test_script_monitor_refuses_destructive_commands() -> None:
