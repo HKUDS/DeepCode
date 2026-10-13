@@ -2,8 +2,18 @@
 PDF utility functions for the DeepCode agent system.
 """
 
+import re
 from pathlib import Path
 import pypdf
+
+# A PDF date is "D:YYYYMMDDHHmmSSOHH'mm'": the "D:" prefix is optional and
+# everything after the year may be left out.
+_PDF_DATE_YEAR = re.compile(r"(?:D:)?(\d{4})")
+
+
+def _pdf_year(date) -> str:
+    match = _PDF_DATE_YEAR.match(str(date or "").strip())
+    return match.group(1) if match else "Unknown Year"
 
 
 def read_pdf_metadata(file_path: Path) -> dict:
@@ -38,7 +48,7 @@ def read_pdf_metadata(file_path: Path) -> dict:
             return {
                 "title": title if title else "Unknown Title",
                 "authors": authors if authors else ["Unknown Author"],
-                "year": info.get("/CreationDate", "")[:4] if info else "Unknown Year",
+                "year": _pdf_year(info.get("/CreationDate") if info else None),
                 "first_lines": lines,
             }
 
