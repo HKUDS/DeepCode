@@ -12,6 +12,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -213,6 +215,27 @@ def test_code_mode_forwards_frozen_sandbox_choice(monkeypatch):
 
 async def _no_diagnostics(_path: str) -> list:
     return []
+
+
+def test_frozen_build_runs_code_mode_through_its_own_executable(monkeypatch):
+    """The Desktop build has no separate Python: ``[exe, _runner.py]`` would hand
+    a script path to the App Server's argument parser."""
+
+    import core.harness.code_mode.tool as code_mode_module
+
+    captured = []
+
+    def capture_build(**kwargs):
+        captured.append(kwargs["argv"])
+        raise OSError("stop before spawning")
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(code_mode_module, "build_exec_command", capture_build)
+    tool = CodeModeTool(tempfile.mkdtemp(), lambda *_args: None, _API)
+    with pytest.raises(OSError):
+        asyncio.run(tool.execute(code="print('ok')\n"))
+
+    assert captured == [[sys.executable, "--run-script", code_mode_module._RUNNER]]
 
 
 def _wired_write_code_tool(

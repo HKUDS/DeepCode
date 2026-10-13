@@ -26,6 +26,7 @@ def test_runtime_probe_imports_lazy_desktop_capabilities(monkeypatch):
     assert result["providers"] == ["anthropic", "openai_compat"]
     assert result["paperFallback"] == "pypdf"
     assert result["skillCreator"] is True
+    assert result["helperScripts"] is True
     assert len(result["bundledMcpPresets"]) == 16
     assert "playwright" in result["bundledMcpPresets"]
     assert result["bundledSkills"] == [

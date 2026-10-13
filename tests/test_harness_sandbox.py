@@ -518,3 +518,26 @@ def test_windows_never_runs_commands_in_wsl(monkeypatch, tmp_path, launcher):
     )
     with pytest.raises(FileNotFoundError, match="Git for Windows"):
         build_exec_command(command="echo hi", workspace=tmp_path, enabled=False)
+
+
+def test_frozen_build_runs_the_job_launcher_through_its_own_executable(
+    monkeypatch, tmp_path
+):
+    import core.harness.windows_sandbox as launcher
+
+    from core.harness.sandbox import build_exec_command
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr("core.harness.sandbox.sandbox_backend", lambda: "job")
+    wrapped = build_exec_command(
+        argv=["bash.exe", "-c", "echo hi"], workspace=tmp_path, enabled=True
+    )
+    assert wrapped.argv == [
+        sys.executable,
+        "--run-script",
+        launcher.__file__,
+        "--",
+        "bash.exe",
+        "-c",
+        "echo hi",
+    ]

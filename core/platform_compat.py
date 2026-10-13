@@ -22,6 +22,18 @@ UTF8_ENV: dict[str, str] = {
 
 _WINDOWS_SHELL_LAUNCHERS = frozenset(("npx", "npm", "pnpm", "yarn", "bunx"))
 
+# The frozen Desktop build has no separate Python: its executable runs one of
+# DeepCode's own helper scripts, bundled as files, when started as
+# ``<executable> --run-script <script> [args...]`` (see app_server/__main__.py).
+RUN_SCRIPT_FLAG = "--run-script"
+
+
+def script_command(script: str) -> list[str]:
+    """The argv that runs one of DeepCode's own helper scripts."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable, RUN_SCRIPT_FLAG, script]
+    return [sys.executable, script]
+
 
 def configure_utf8_stdio() -> None:
     """Prefer UTF-8 stdio and replace unencodable characters safely."""
@@ -110,7 +122,8 @@ def normalize_stdio_command(
     """Normalize MCP stdio command/env for Windows and virtualenv safety.
 
     - ``python`` / ``python3`` map to the current interpreter on every OS, so
-      MCP tool servers run in the same environment as the backend.
+      MCP tool servers run in the same environment as the backend — except in
+      the frozen build, whose executable is not a Python.
     - Windows ``.cmd``/``.bat`` launchers such as ``npx`` are wrapped in
       ``cmd.exe /d /c`` because CreateProcess does not reliably execute them
       as stdio children across environments.
@@ -122,7 +135,11 @@ def normalize_stdio_command(
 
     base = _basename(command)
     bare_command = "/" not in command and "\\" not in command
-    if bare_command and base in {"python", "python.exe", "python3", "python3.exe"}:
+    if (
+        bare_command
+        and base in {"python", "python.exe", "python3", "python3.exe"}
+        and not getattr(sys, "frozen", False)
+    ):
         command = sys.executable
         base = _basename(command)
 

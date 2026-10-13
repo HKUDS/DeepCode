@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -171,3 +172,68 @@ def test_cancelled_mcp_waiter_detaches_without_cancelling_the_task(
             time.sleep(0.05)
     finally:
         rpc.close()
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_entry_runs_the_code_mode_runner_in_place_of_python(tmp_path):
+    """The Desktop build is this entry frozen, with no separate Python, so the
+    code-mode runner is started as ``<exe> --run-script _runner.py``."""
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "app_server",
+            "--run-script",
+            str(ROOT / "core" / "harness" / "code_mode" / "_runner.py"),
+        ],
+        input=json.dumps({"code": "print(6 * 7)", "tools": []}) + "\n",
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=ROOT,
+    )
+    assert result.returncode == 0, result.stderr
+    done = json.loads(result.stdout.splitlines()[-1])
+    assert done["output"] == "42\n" and done["error"] is None
+
+
+def test_entry_passes_the_job_launcher_its_arguments():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "app_server",
+            "--run-script",
+            str(ROOT / "core" / "harness" / "windows_sandbox.py"),
+            "--",
+            sys.executable,
+            "-c",
+            "raise SystemExit(5)",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=ROOT,
+    )
+    if os.name == "nt":
+        assert result.returncode == 5, result.stderr
+    else:
+        assert result.returncode == 2
+        assert "only runs on Windows" in result.stderr
+
+
+def test_entry_runs_only_its_own_scripts(tmp_path):
+    script = tmp_path / "elsewhere.py"
+    script.write_text("print('ran')\n")
+    result = subprocess.run(
+        [sys.executable, "-m", "app_server", "--run-script", str(script)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=ROOT,
+    )
+    assert result.returncode == 2
+    assert "ran" not in result.stdout

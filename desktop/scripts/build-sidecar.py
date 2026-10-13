@@ -35,6 +35,22 @@ BUNDLED_DATA = (
         REPOSITORY_ROOT / "core" / "mcp" / "presets.json",
         "core/mcp",
     ),
+    # Helper scripts the frozen executable runs as files (--run-script): there
+    # is no separate Python in the bundle to run them.
+    (
+        REPOSITORY_ROOT / "core" / "harness" / "windows_sandbox.py",
+        "core/harness",
+    ),
+    (
+        REPOSITORY_ROOT / "core" / "harness" / "code_mode" / "_runner.py",
+        "core/harness/code_mode",
+    ),
+)
+# Nothing imports the helper scripts, so name them for analysis: their own
+# imports (ctypes.wintypes, ...) must be in the bundle.
+HIDDEN_IMPORTS = (
+    "core.harness.windows_sandbox",
+    "core.harness.code_mode._runner",
 )
 REQUIRED_IMPORTS = (
     "PyInstaller",
@@ -171,6 +187,8 @@ def main() -> int:
     ]
     for module in EXCLUDED_MODULES:
         command.extend(("--exclude-module", module))
+    for module in HIDDEN_IMPORTS:
+        command.extend(("--hidden-import", module))
     for source, destination in BUNDLED_DATA:
         if not source.exists():
             raise RuntimeError(f"required sidecar resource is missing: {source}")
@@ -201,6 +219,7 @@ def _verify_bundle(binary: Path) -> None:
         result.get("ok") is not True
         or result.get("skillCreator") is not True
         or not result.get("bundledMcpPresets")
+        or result.get("helperScripts") is not True
         or result.get("webAssets") is not True
     ):
         raise RuntimeError("packaged runtime import probe did not report success")

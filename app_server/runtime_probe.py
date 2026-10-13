@@ -53,6 +53,21 @@ def _verify_bundled_skills() -> list[str]:
     return sorted(discovered)
 
 
+# Run as files by the frozen executable (core.platform_compat.script_command),
+# so the build must ship them as data next to their modules.
+HELPER_SCRIPTS = (
+    "core/harness/windows_sandbox.py",
+    "core/harness/code_mode/_runner.py",
+)
+
+
+def _helper_scripts_present() -> bool:
+    import core
+
+    root = Path(core.__file__).resolve().parents[1]
+    return all((root / script).is_file() for script in HELPER_SCRIPTS)
+
+
 def verify_runtime() -> dict[str, Any]:
     """Import every lazy capability that a packaged Desktop can activate."""
 
@@ -71,6 +86,7 @@ def verify_runtime() -> dict[str, Any]:
         "bundledSkills": bundled_skills,
         "skillCreator": "skill-creator" in bundled_skills,
         "bundledMcpPresets": bundled_mcp_presets,
+        "helperScripts": _helper_scripts_present(),
         "version": __version__,
         "webAssets": bool(
             read_web_build() and (ASSET_DIRECTORY / "index.html").is_file()

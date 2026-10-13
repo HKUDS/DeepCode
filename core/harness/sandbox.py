@@ -47,6 +47,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from core.harness.permissions import sensitive_locations
+from core.platform_compat import script_command
 
 # Absolute path — never resolved via PATH (PATH-injection defense).
 _MACOS_SANDBOX_EXEC = "/usr/bin/sandbox-exec"
@@ -432,9 +433,7 @@ def wrap_argv_command(
         # and resumes it — the whole process tree dies with the wrapper. It
         # runs by path, not ``-m``: it needs only the standard library, and a
         # command's environment does not carry DeepCode's PYTHONPATH.
-        import sys as _sys
-
-        argv = [_sys.executable, _WINDOWS_JOB_LAUNCHER, "--", *inner_argv]
+        argv = [*script_command(_WINDOWS_JOB_LAUNCHER), "--", *inner_argv]
         return WrappedCommand(argv=argv, backend=backend)
 
     return WrappedCommand(argv=list(inner_argv), backend="none")

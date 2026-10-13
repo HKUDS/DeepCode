@@ -60,6 +60,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None, *, shared_service: bool = True) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
+    from core.platform_compat import RUN_SCRIPT_FLAG
+
+    # Checked first and only as the first argument: the script's own arguments
+    # (a whole command line, for the job launcher) may contain any flag.
+    if arguments[:1] == [RUN_SCRIPT_FLAG] and len(arguments) > 1:
+        return _run_script(arguments[1], arguments[2:])
     if "--service" in arguments:
         from cli.service_cli import run as service_cli_main
 
@@ -109,6 +115,25 @@ def main(argv: list[str] | None = None, *, shared_service: bool = True) -> int:
     )
     _trace_startup("application-ready")
     return AppServer(application).serve(source, protocol_sink)
+
+
+def _run_script(script: str, arguments: list[str]) -> int:
+    """Run one of DeepCode's helper scripts the way ``python script`` would.
+
+    The frozen build has no separate Python, so its executable stands in for
+    one (see ``core.platform_compat.script_command``), but only for scripts
+    shipped with it. Runs before stdio is touched: the scripts own it.
+    """
+    import runpy
+
+    root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
+    path = Path(script).resolve()
+    if path.suffix != ".py" or not path.is_relative_to(root.resolve()):
+        print(f"not a DeepCode helper script: {script}", file=sys.stderr)
+        return 2
+    sys.argv = [str(path), *arguments]
+    runpy.run_path(str(path), run_name="__main__")
+    return 0
 
 
 def isolate_protocol_streams():

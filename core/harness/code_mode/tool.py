@@ -18,7 +18,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,6 +30,7 @@ from core.agent_runtime.processes import (
 from core.agent_runtime.tools.base import Tool, tool_parameters
 from core.harness.env_sanitize import child_env
 from core.harness.sandbox import build_exec_command
+from core.platform_compat import script_command
 
 _RUNNER = str(Path(__file__).with_name("_runner.py"))
 _DEFAULT_TIMEOUT_S = 300.0
@@ -152,7 +152,7 @@ class CodeModeTool(Tool):
         }
 
         wrapped = build_exec_command(
-            argv=[sys.executable, _RUNNER],
+            argv=script_command(_RUNNER),
             workspace=self._workspace,
             allow_network=False,
             enabled=self._sandbox_enabled,

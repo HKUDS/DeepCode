@@ -174,6 +174,9 @@ def test_sidecar_bundles_every_file_backed_runtime_resource():
     }
 
     assert ("core/mcp/presets.json", "core/mcp") in bundled
+    # Run as files by the frozen executable (core.platform_compat.script_command).
+    assert ("core/harness/windows_sandbox.py", "core/harness") in bundled
+    assert ("core/harness/code_mode/_runner.py", "core/harness/code_mode") in bundled
     assert ("app_server/web_assets", "app_server/web_assets") in bundled
     # The frontend is a generated release input; source-only Python test jobs
     # need not have run npm. build-sidecar itself requires it before packaging.
@@ -243,6 +246,7 @@ def test_packaged_startup_failure_reports_service_log_and_cleans_up(
                         "ok": True,
                         "skillCreator": True,
                         "bundledMcpPresets": ["test"],
+                        "helperScripts": True,
                         "webAssets": True,
                     }
                 ),
@@ -294,6 +298,7 @@ def test_packaged_protocol_error_survives_cleanup_failure(
                     "ok": True,
                     "skillCreator": True,
                     "bundledMcpPresets": ["test"],
+                    "helperScripts": True,
                     "webAssets": True,
                 }
             ),
