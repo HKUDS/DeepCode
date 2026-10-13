@@ -6,12 +6,14 @@
  */
 
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import type { AgentPresetEntry } from "../../../generated/app-server";
 import type { SettingsSectionProps } from "../settingsSections";
 import styles from "../../management/ManagementWorkspace.module.css";
 
 export function PresetsSection({ runtime, project }: SettingsSectionProps) {
+  const { t } = useTranslation();
   const projectId = project?.id ?? null;
   const [roster, setRoster] = useState<{
     projectId: string;
@@ -44,24 +46,32 @@ export function PresetsSection({ runtime, project }: SettingsSectionProps) {
     <section className={styles.section}>
       <header className={styles.sectionHeader}>
         <div>
-          <p className={styles.eyebrow}>Session compositions</p>
-          <h2>Agent presets</h2>
+          <p className={styles.eyebrow}>
+            {t("settings.presets.eyebrow", "Session compositions")}
+          </p>
+          <h2>{t("settings.presets.title", "Agent presets")}</h2>
         </div>
       </header>
       <p className={styles.note}>
-        A preset bundles a system prompt and tool policy. Pick one per Session
-        from the composer before the conversation starts; the selection is
-        snapshotted into the Session so later edits to the preset file never
-        change a running conversation.
+        {t(
+          "settings.presets.description",
+          "A preset bundles a system prompt and tool policy. Pick one per Session from the composer before the conversation starts; the selection is snapshotted into the Session so later edits to the preset file never change a running conversation.",
+        )}
       </p>
       {!projectId ? (
-        <p className={styles.note}>Open a project to list its presets.</p>
+        <p className={styles.note}>
+          {t("settings.presets.openProject", "Open a project to list its presets.")}
+        </p>
       ) : error ? (
         <p className={styles.errorBanner}>{error}</p>
       ) : !entries.length ? (
         <p className={styles.note}>
-          No presets discovered. Add markdown presets under{" "}
-          <code>.deepcode/agents/</code> in the project or your home directory.
+          {t(
+            "settings.presets.noneBefore",
+            "No presets discovered. Add markdown presets under",
+          )}{" "}
+          <code>.deepcode/agents/</code>{" "}
+          {t("settings.presets.noneAfter", "in the project or your home directory.")}
         </p>
       ) : (
         <div className={styles.checkList}>
@@ -72,7 +82,11 @@ export function PresetsSection({ runtime, project }: SettingsSectionProps) {
                 <strong>
                   {entry.name} <small>[{entry.trust}]</small>
                 </strong>
-                <p>{entry.broken ?? (entry.description || "No description.")}</p>
+                <p>
+                  {entry.broken ??
+                    (entry.description ||
+                      t("settings.presets.noDescription", "No description."))}
+                </p>
               </div>
             </article>
           ))}

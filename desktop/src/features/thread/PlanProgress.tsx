@@ -11,6 +11,7 @@ import {
   useState,
   type FocusEvent,
 } from "react";
+import { useTranslation } from "react-i18next";
 
 import type { TurnPlanState } from "../../app/workspaceState";
 import type { TurnPlanStep } from "../../generated/app-server";
@@ -41,6 +42,7 @@ function StepIcon({ step }: { step: TurnPlanStep }) {
 }
 
 export function PlanProgress({ plan }: PlanProgressProps) {
+  const { t } = useTranslation();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const popoverId = useId();
   const [open, setOpen] = useState(false);
@@ -89,12 +91,12 @@ export function PlanProgress({ plan }: PlanProgressProps) {
         <section
           className={styles.popover}
           id={popoverId}
-          aria-label="Execution plan"
+          aria-label={t("thread.plan.title", "Execution plan")}
         >
           <header>
             <span>
               <ListChecks size={14} aria-hidden="true" />
-              Execution plan
+              {t("thread.plan.title", "Execution plan")}
             </span>
             <small>
               {plan.steps.filter((step) => step.status === "completed").length}/
@@ -132,7 +134,12 @@ export function PlanProgress({ plan }: PlanProgressProps) {
         <span data-complete={complete}>
           {complete ? <Check size={14} /> : <Circle size={14} />}
         </span>
-        {complete ? "Plan complete" : `Step ${index + 1} / ${plan.steps.length}`}
+        {complete
+          ? t("thread.plan.complete", "Plan complete")
+          : t("thread.plan.step", "Step {{current}} / {{total}}", {
+              current: index + 1,
+              total: plan.steps.length,
+            })}
       </button>
     </div>
   );

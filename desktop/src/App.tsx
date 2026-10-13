@@ -1,5 +1,6 @@
 import { FolderOpen, MessageSquarePlus, RotateCw } from "lucide-react";
 import { lazy, Suspense, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { projectCanExecute } from "./app/projectPresentation";
 import { latestExecutingTurn } from "./app/interactiveTurnRouter";
@@ -68,6 +69,7 @@ function LoadingSurface({
 }
 
 export function App({ runtime }: { runtime: ClientRuntime }) {
+  const { t } = useTranslation();
   const controller = useWorkspaceController(runtime);
   // Mounted for its effect: paints saved appearance preferences at startup.
   useAppearance();
@@ -108,17 +110,23 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
     composerEditable && selectedProject?.trustState === "trusted";
   const disabledReason =
     state.runtime.phase !== "ready"
-      ? "Waiting for the local App Server."
+      ? t("app.disabled.waiting", "Waiting for the local App Server.")
       : !selectedProject
-        ? "Open a project to begin."
+        ? t("app.disabled.noProject", "Open a project to begin.")
         : !workspaceAvailable
-          ? "The original folder is unavailable. This Session remains readable."
+          ? t(
+              "app.disabled.folderUnavailable",
+              "The original folder is unavailable. This Session remains readable.",
+            )
         : selectedProject.trustState !== "trusted"
-          ? "Trust this folder before agent execution."
+          ? t("app.disabled.untrusted", "Trust this folder before agent execution.")
           : !selectedThread
-            ? "Create a thread to begin."
+            ? t("app.disabled.noThread", "Create a thread to begin.")
             : threadUnreadable
-              ? "This Session's file can't be read right now."
+              ? t(
+                  "app.disabled.unreadable",
+                  "This Session's file can't be read right now.",
+                )
               : null;
   const showingThreads = ui.destination === "threads";
   const inspectorVisible = Boolean(
@@ -232,11 +240,15 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
             <section className={styles.threadViewport}>
               {!selectedProject ? (
                 <div className={styles.startState}>
-                  <p className={styles.startEyebrow}>Local coding agent</p>
-                  <h2>Open a folder to begin.</h2>
+                  <p className={styles.startEyebrow}>
+                    {t("app.start.eyebrow", "Local coding agent")}
+                  </p>
+                  <h2>{t("app.start.title", "Open a folder to begin.")}</h2>
                   <p>
-                    Continue the same Sessions from DeepCode CLI, with tools,
-                    approvals, changes, and tests kept in one local workspace.
+                    {t(
+                      "app.start.body",
+                      "Continue the same Sessions from DeepCode CLI, with tools, approvals, changes, and tests kept in one local workspace.",
+                    )}
                   </p>
                   <div className={styles.startActions}>
                     <button
@@ -250,9 +262,14 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
                       }}
                     >
                       <FolderOpen size={16} />
-                      Open project folder
+                      {t("app.start.openFolder", "Open project folder")}
                     </button>
-                    <span>Local runtime · shared Session history</span>
+                    <span>
+                      {t(
+                        "app.start.note",
+                        "Local runtime · shared Session history",
+                      )}
+                    </span>
                   </div>
                 </div>
               ) : !selectedThread ? (
@@ -260,10 +277,12 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
                   <p className={styles.startEyebrow}>
                     {selectedProject.displayName}
                   </p>
-                  <h2>No Sessions here yet.</h2>
+                  <h2>{t("app.noSessions.title", "No Sessions here yet.")}</h2>
                   <p>
-                    Start with a clear outcome and a way to verify it. DeepCode
-                    will keep the conversation and execution trail together.
+                    {t(
+                      "app.noSessions.body",
+                      "Start with a clear outcome and a way to verify it. DeepCode will keep the conversation and execution trail together.",
+                    )}
                   </p>
                   <div className={styles.startActions}>
                     <button
@@ -277,19 +296,27 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
                       }}
                     >
                       <MessageSquarePlus size={16} />
-                      New thread
+                      {t("app.noSessions.newThread", "New thread")}
                     </button>
-                    <span>⌘N from anywhere</span>
+                    <span>
+                      {t("app.noSessions.shortcut", "⌘N from anywhere")}
+                    </span>
                   </div>
                 </div>
               ) : threadUnreadable ? (
                 <div className={styles.startState} role="alert">
                   <p className={styles.startEyebrow}>{selectedThread.title}</p>
-                  <h2>This Session can't be read right now.</h2>
+                  <h2>
+                    {t(
+                      "app.unreadable.title",
+                      "This Session can't be read right now.",
+                    )}
+                  </h2>
                   <p>
-                    Its file is on disk but may be locked, still syncing, or
-                    damaged. Nothing was deleted: once the file can be read,
-                    the conversation opens as before.
+                    {t(
+                      "app.unreadable.body",
+                      "Its file is on disk but may be locked, still syncing, or damaged. Nothing was deleted: once the file can be read, the conversation opens as before.",
+                    )}
                   </p>
                   <div className={styles.startActions}>
                     <button
@@ -298,13 +325,17 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
                       onClick={() => void controller.selectThread(selectedThread.id)}
                     >
                       <RotateCw size={16} />
-                      Try again
+                      {t("app.unreadable.retry", "Try again")}
                     </button>
                   </div>
                 </div>
               ) : (
                 <Suspense
-                  fallback={<LoadingSurface>Loading Session…</LoadingSurface>}
+                  fallback={
+                    <LoadingSurface>
+                      {t("app.loading.session", "Loading Session…")}
+                    </LoadingSurface>
+                  }
                 >
                   <ThreadConversation
                     key={selectedThread.id}
@@ -333,7 +364,7 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
               <Suspense
                 fallback={
                   <LoadingSurface compact>
-                    Loading workflow controls…
+                    {t("app.loading.workflow", "Loading workflow controls…")}
                   </LoadingSurface>
                 }
               >
@@ -411,7 +442,11 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
           </>
         ) : (
           <Suspense
-            fallback={<LoadingSurface>Loading workspace…</LoadingSurface>}
+            fallback={
+              <LoadingSurface>
+                {t("app.loading.workspace", "Loading workspace…")}
+              </LoadingSurface>
+            }
           >
             <ManagementWorkspace
               destination={ui.destination}
@@ -447,8 +482,17 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
       </section>
 
       {inspectorVisible ? (
-        <section className={styles.reviewPane} aria-label="Review panel">
-          <Suspense fallback={<LoadingSurface>Loading review…</LoadingSurface>}>
+        <section
+          className={styles.reviewPane}
+          aria-label={t("app.reviewPanel", "Review panel")}
+        >
+          <Suspense
+            fallback={
+              <LoadingSurface>
+                {t("app.loading.review", "Loading review…")}
+              </LoadingSurface>
+            }
+          >
             <Inspector
               runtime={runtime}
               thread={selectedThread}

@@ -56,7 +56,7 @@ export function ModelListEditor({
         <div className={styles.modelRow} key={index}>
           <div className={styles.modelRowMain}>
             <label>
-              Model ID
+              {t("provider.models.id", "Model ID")}
               <input
                 value={entry.id}
                 onChange={(event) => update(index, { id: event.target.value })}
@@ -64,34 +64,36 @@ export function ModelListEditor({
               />
             </label>
             <label>
-              Display name
+              {t("provider.models.displayName", "Display name")}
               <input
                 value={entry.label ?? ""}
                 onChange={(event) =>
                   update(index, { label: event.target.value || null })
                 }
-                placeholder="Optional"
+                placeholder={t("provider.models.optional", "Optional")}
               />
             </label>
             <button
               type="button"
               className={styles.modelRowRemove}
-              aria-label={`Remove model ${entry.id || index + 1}`}
+              aria-label={t("provider.models.remove", "Remove model {{name}}", {
+                name: entry.id || index + 1,
+              })}
               onClick={() => onChange(entries.filter((_, at) => at !== index))}
             >
               <Trash2 size={13} />
             </button>
           </div>
           <details>
-            <summary>Capacities</summary>
+            <summary>{t("provider.models.capacities", "Capacities")}</summary>
             <div className={styles.modelRowCapacities}>
               <CapacityField
-                label="Context window"
+                label={t("provider.models.contextWindow", "Context window")}
                 value={entry.contextWindow}
                 onChange={(contextWindow) => update(index, { contextWindow })}
               />
               <CapacityField
-                label="Max output tokens"
+                label={t("provider.models.maxOutput", "Max output tokens")}
                 value={entry.maxOutputTokens}
                 onChange={(maxOutputTokens) =>
                   update(index, { maxOutputTokens })
@@ -168,7 +170,7 @@ export function ModelListEditor({
         className={styles.modelRowAdd}
         onClick={() => onChange([...entries, { id: "" }])}
       >
-        <Plus size={13} /> Add model
+        <Plus size={13} /> {t("provider.models.add", "Add model")}
       </button>
     </div>
   );
@@ -186,13 +188,14 @@ function CapacityField({
   // Controlled by the stored value, with a local draft only while the text
   // does not parse — so a value that WAS accepted can never linger on
   // screen after the row it belonged to is gone.
+  const { t } = useTranslation();
   const [draft, setDraft] = useState<string | null>(null);
   return (
     <label>
       {label}
       <input
         value={draft ?? capacityText(value)}
-        placeholder="Inherit · e.g. 128K or 1M"
+        placeholder={t("provider.models.capacityHint", "Inherit · e.g. 128K or 1M")}
         onChange={(event) => {
           const text = event.target.value;
           setDraft(text);

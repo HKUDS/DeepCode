@@ -1,5 +1,6 @@
 import { BrainCircuit, ChevronRight, CircleDashed } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { decodeReasoningPayload } from "../../app/reasoningPayload";
 import type { Item } from "../../generated/app-server";
@@ -43,6 +44,7 @@ function useReasoningDuration(item: Item, active: boolean): number | null {
 }
 
 export function ReasoningBlock({ item, mode }: ReasoningBlockProps) {
+  const { t } = useTranslation();
   const active = item.status === "in_progress";
   const payload = decodeReasoningPayload(item.payload);
   const effort = payload.effort ?? "auto";
@@ -60,12 +62,18 @@ export function ReasoningBlock({ item, mode }: ReasoningBlockProps) {
 
   const durationLabel = duration === null ? null : formatDuration(duration);
   const title = active
-    ? ["Thinking", effort !== "auto" ? effort : null, durationLabel]
+    ? [
+        t("thread.reasoning.thinking", "Thinking"),
+        effort !== "auto" ? effort : null,
+        durationLabel,
+      ]
         .filter(Boolean)
         .join(" · ")
     : durationLabel
-      ? `Thought for ${durationLabel}`
-      : "Thinking completed";
+      ? t("thread.reasoning.thoughtFor", "Thought for {{duration}}", {
+          duration: durationLabel,
+        })
+      : t("thread.reasoning.completed", "Thinking completed");
 
   return (
     <details
@@ -89,12 +97,14 @@ export function ReasoningBlock({ item, mode }: ReasoningBlockProps) {
           <strong>{title}</strong>
           <small>
             {active
-              ? "Model reasoning"
+              ? t("thread.reasoning.model", "Model reasoning")
               : opaque
-                ? "Details unavailable"
+                ? t("thread.reasoning.unavailable", "Details unavailable")
                 : effort === "auto"
-                  ? "Reasoning"
-                  : `Reasoning · ${effort}`}
+                  ? t("thread.reasoning.label", "Reasoning")
+                  : t("thread.reasoning.withEffort", "Reasoning · {{effort}}", {
+                      effort,
+                    })}
           </small>
         </span>
         <ChevronRight className={styles.chevron} size={14} aria-hidden="true" />
@@ -104,23 +114,34 @@ export function ReasoningBlock({ item, mode }: ReasoningBlockProps) {
         aria-live={active ? "polite" : undefined}
       >
         {opaque && !summary && !trace ? (
-          <p>This model completed reasoning without returning displayable details.</p>
+          <p>
+            {t(
+              "thread.reasoning.opaque",
+              "This model completed reasoning without returning displayable details.",
+            )}
+          </p>
         ) : null}
         {summary ? <MarkdownContent compact>{summary}</MarkdownContent> : null}
         {trace && (!summary || mode === "verbose") ? (
           <section className={styles.trace}>
-            {summary ? <h4>Provider reasoning details</h4> : null}
+            {summary ? (
+              <h4>{t("thread.reasoning.providerDetails", "Provider reasoning details")}</h4>
+            ) : null}
             <MarkdownContent compact>{trace}</MarkdownContent>
           </section>
         ) : null}
         {trace && summary && mode === "normal" ? (
           <details className={styles.traceDisclosure}>
-            <summary>Provider reasoning details</summary>
+            <summary>
+              {t("thread.reasoning.providerDetails", "Provider reasoning details")}
+            </summary>
             <MarkdownContent compact>{trace}</MarkdownContent>
           </details>
         ) : null}
         {active && !summary && !trace ? (
-          <p className={styles.waiting}>Waiting for reasoning details…</p>
+          <p className={styles.waiting}>
+            {t("thread.reasoning.waiting", "Waiting for reasoning details…")}
+          </p>
         ) : null}
       </div>
     </details>

@@ -99,13 +99,23 @@ export function AppearanceSettings() {
     setImportError(null);
     try {
       if (file.size > 1_000_000) {
-        throw new ThemeImportError("Theme files must be 1 MB or smaller.");
+        throw new ThemeImportError(
+          t(
+            "settings.appearance.importTooLarge",
+            "Theme files must be 1 MB or smaller.",
+          ),
+        );
       }
       const importedTheme = parseVsCodeTheme(await file.text(), file.name);
       update({ importedTheme, theme: "imported" });
     } catch (cause) {
       setImportError(
-        cause instanceof Error ? cause.message : "The theme could not be imported.",
+        cause instanceof Error
+          ? cause.message
+          : t(
+              "settings.appearance.importFailed",
+              "The theme could not be imported.",
+            ),
       );
     }
   };
@@ -166,12 +176,16 @@ export function AppearanceSettings() {
                       value={preference}
                       disabled={preference === "imported" && !appearance.importedTheme}
                     >
-                      {t(
-                        themeTranslationKey(preference),
-                        preference === "imported" && appearance.importedTheme
-                          ? `Imported — ${appearance.importedTheme.name}`
-                          : THEME_LABELS[preference],
-                      )}
+                      {preference === "imported" && appearance.importedTheme
+                        ? t(
+                            "settings.appearance.importedNamed",
+                            "Imported — {{name}}",
+                            { name: appearance.importedTheme.name },
+                          )
+                        : t(
+                            themeTranslationKey(preference),
+                            THEME_LABELS[preference],
+                          )}
                     </option>
                   ))}
                 </select>

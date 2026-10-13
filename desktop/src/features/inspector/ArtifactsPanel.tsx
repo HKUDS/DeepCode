@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import type {
   Artifact,
@@ -27,6 +28,7 @@ export function ArtifactsPanel({
   workflow,
   artifacts,
 }: ArtifactsPanelProps) {
+  const { t } = useTranslation();
   const [preview, setPreview] = useState<ArtifactPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -51,8 +53,16 @@ export function ArtifactsPanel({
     <div className={styles.content}>
       <div className={styles.heading}>
         <div>
-          <p className={styles.eyebrow}>Workflow outputs</p>
-          <h2>{workflow ? `Attempt ${workflow.attempt}` : "Artifacts"}</h2>
+          <p className={styles.eyebrow}>
+            {t("inspector.artifacts.eyebrow", "Workflow outputs")}
+          </p>
+          <h2>
+            {workflow
+              ? t("inspector.artifacts.attempt", "Attempt {{attempt}}", {
+                  attempt: workflow.attempt,
+                })
+              : t("inspector.artifacts.title", "Artifacts")}
+          </h2>
         </div>
         {workflow ? (
           <span className={styles.runStatus} data-status={workflow.status}>
@@ -80,18 +90,38 @@ export function ArtifactsPanel({
           ))}
         </div>
       ) : (
-        <InspectorEmpty label="Verified workflow outputs will appear here." compact />
+        <InspectorEmpty
+          label={t(
+            "inspector.artifacts.empty",
+            "Verified workflow outputs will appear here.",
+          )}
+          compact
+        />
       )}
       {preview ? (
         <div className={styles.artifactPreview}>
           {preview.directory ? (
-            <p>This artifact is a generated code directory. Browse it from Files.</p>
+            <p>
+              {t(
+                "inspector.artifacts.directory",
+                "This artifact is a generated code directory. Browse it from Files.",
+              )}
+            </p>
           ) : preview.content === null ? (
-            <p>Binary artifacts are recorded but not rendered as text.</p>
+            <p>
+              {t(
+                "inspector.artifacts.binary",
+                "Binary artifacts are recorded but not rendered as text.",
+              )}
+            </p>
           ) : (
             <pre>{preview.content}</pre>
           )}
-          {preview.truncated ? <small>Preview truncated at 128 KiB.</small> : null}
+          {preview.truncated ? (
+            <small>
+              {t("inspector.artifacts.truncated", "Preview truncated at 128 KiB.")}
+            </small>
+          ) : null}
         </div>
       ) : null}
     </div>

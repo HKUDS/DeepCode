@@ -12,6 +12,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
+import { useTranslation } from "react-i18next";
 
 import type { Thread } from "../../generated/app-server";
 import styles from "./SessionRow.module.css";
@@ -37,6 +38,7 @@ export function SessionRow({
   onArchive,
   onDelete,
 }: SessionRowProps) {
+  const { t } = useTranslation();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [mode, setMode] = useState<RowMode>("closed");
@@ -92,7 +94,9 @@ export function SessionRow({
             aria-hidden="true"
           />
           <label>
-            <span className={styles.srOnly}>Rename Session</span>
+            <span className={styles.srOnly}>
+              {t("session.rename", "Rename Session")}
+            </span>
             <input
               ref={inputRef}
               value={draft}
@@ -104,14 +108,14 @@ export function SessionRow({
           <button
             type="submit"
             disabled={busy || !draft.trim()}
-            aria-label="Save Session name"
+            aria-label={t("session.saveName", "Save Session name")}
           >
             <Check size={14} />
           </button>
           <button
             type="button"
             onClick={() => setMode("closed")}
-            aria-label="Cancel Session rename"
+            aria-label={t("session.cancelRename", "Cancel Session rename")}
           >
             <X size={14} />
           </button>
@@ -126,13 +130,15 @@ export function SessionRow({
               onSelect(thread.id);
             }}
             disabled={busy}
-            aria-label={`Open Session ${thread.title}`}
+            aria-label={t("session.open", "Open Session {{title}}", {
+              title: thread.title,
+            })}
             title={`${thread.title}\n${thread.workspacePath}`}
           >
             <span
               className={styles.beacon}
               data-status={thread.status}
-              aria-label={thread.status.replaceAll("_", " ")}
+              aria-label={t(`session.status.${thread.status}`, thread.status)}
             />
             <span className={styles.copy}>
               <strong>{thread.title}</strong>
@@ -143,7 +149,9 @@ export function SessionRow({
             type="button"
             onClick={() => setMode((current) => (current === "closed" ? "menu" : "closed"))}
             disabled={busy}
-            aria-label={`Session actions for ${thread.title}`}
+            aria-label={t("session.actionsFor", "Session actions for {{title}}", {
+              title: thread.title,
+            })}
             aria-expanded={mode !== "closed"}
             aria-haspopup="menu"
           >
@@ -153,7 +161,13 @@ export function SessionRow({
       )}
 
       {mode === "menu" ? (
-        <div className={styles.menu} role="menu" aria-label={`Actions for ${thread.title}`}>
+        <div
+          className={styles.menu}
+          role="menu"
+          aria-label={t("session.actions", "Actions for {{title}}", {
+            title: thread.title,
+          })}
+        >
           <button
             type="button"
             role="menuitem"
@@ -163,7 +177,7 @@ export function SessionRow({
             }}
           >
             <Pencil size={14} />
-            Rename
+            {t("session.renameAction", "Rename")}
           </button>
           <button
             type="button"
@@ -173,12 +187,15 @@ export function SessionRow({
             disabled={archiveDisabled}
             title={
               archiveDisabled
-                ? "Stop active work before archiving this Session."
+                ? t(
+                    "session.archiveBlocked",
+                    "Stop active work before archiving this Session.",
+                  )
                 : undefined
             }
           >
             <Archive size={14} />
-            Archive
+            {t("session.archive", "Archive")}
           </button>
           <button
             type="button"
@@ -188,12 +205,15 @@ export function SessionRow({
             disabled={archiveDisabled}
             title={
               archiveDisabled
-                ? "Stop active work before deleting this Session."
+                ? t(
+                    "session.deleteBlocked",
+                    "Stop active work before deleting this Session.",
+                  )
                 : undefined
             }
           >
             <Trash2 size={14} />
-            Delete permanently
+            {t("session.delete", "Delete permanently")}
           </button>
         </div>
       ) : null}
@@ -202,15 +222,19 @@ export function SessionRow({
         <div
           className={styles.confirmation}
           role="alertdialog"
-          aria-label={`Archive ${thread.title}`}
+          aria-label={t("session.archiveTitle", "Archive {{title}}", {
+            title: thread.title,
+          })}
         >
           <p>
-            Archive this Session?
-            <span>Its canonical history is preserved.</span>
+            {t("session.archiveConfirm", "Archive this Session?")}
+            <span>
+              {t("session.archiveNote", "Its canonical history is preserved.")}
+            </span>
           </p>
           <div>
             <button type="button" onClick={() => setMode("closed")}>
-              Cancel
+              {t("session.cancel", "Cancel")}
             </button>
             <button
               type="button"
@@ -221,7 +245,7 @@ export function SessionRow({
                 void onArchive(thread.id);
               }}
             >
-              Archive
+              {t("session.archive", "Archive")}
             </button>
           </div>
         </div>
@@ -231,17 +255,22 @@ export function SessionRow({
         <div
           className={styles.confirmation}
           role="alertdialog"
-          aria-label={`Delete ${thread.title}`}
+          aria-label={t("session.deleteTitle", "Delete {{title}}", {
+            title: thread.title,
+          })}
         >
           <p>
-            Permanently delete this Session?
+            {t("session.deleteConfirm", "Permanently delete this Session?")}
             <span>
-              Conversation and Goal history will be removed. Workspace files stay untouched.
+              {t(
+                "session.deleteNote",
+                "Conversation and Goal history will be removed. Workspace files stay untouched.",
+              )}
             </span>
           </p>
           <div>
             <button type="button" onClick={() => setMode("closed")}>
-              Cancel
+              {t("session.cancel", "Cancel")}
             </button>
             <button
               type="button"
@@ -252,7 +281,7 @@ export function SessionRow({
                 void onDelete(thread.id);
               }}
             >
-              Delete permanently
+              {t("session.delete", "Delete permanently")}
             </button>
           </div>
         </div>

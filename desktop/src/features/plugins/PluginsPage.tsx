@@ -1,10 +1,12 @@
 import { FolderInput, Power, RefreshCw, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import type { ClientRuntime } from "../../rpc/contracts";
 import styles from "../management/ManagementWorkspace.module.css";
 import { usePluginCatalog } from "./usePluginCatalog";
 
 export function PluginsPage({ runtime }: { runtime: ClientRuntime }) {
+  const { t } = useTranslation();
   const catalog = usePluginCatalog(runtime);
 
   const addPlugin = async () => {
@@ -16,11 +18,15 @@ export function PluginsPage({ runtime }: { runtime: ClientRuntime }) {
     <section className={styles.page} aria-labelledby="plugins-title">
       <header className={styles.pageHeader}>
         <div>
-          <p className={styles.eyebrow}>Local extensions</p>
-          <h1 id="plugins-title">Plugins</h1>
+          <p className={styles.eyebrow}>
+            {t("plugins.eyebrow", "Local extensions")}
+          </p>
+          <h1 id="plugins-title">{t("plugins.title", "Plugins")}</h1>
           <p>
-            Register trusted local Plugin folders. Their Skills join the shared
-            catalog and their MCP servers join the shared tool runtime.
+            {t(
+              "plugins.description",
+              "Register trusted local Plugin folders. Their Skills join the shared catalog and their MCP servers join the shared tool runtime.",
+            )}
           </p>
         </div>
         <div className={styles.formActions}>
@@ -31,7 +37,7 @@ export function PluginsPage({ runtime }: { runtime: ClientRuntime }) {
             onClick={() => void catalog.refresh()}
           >
             <RefreshCw size={14} />
-            Reload
+            {t("plugins.reload", "Reload")}
           </button>
           <button
             className={styles.primaryButton}
@@ -40,7 +46,7 @@ export function PluginsPage({ runtime }: { runtime: ClientRuntime }) {
             onClick={() => void addPlugin()}
           >
             <FolderInput size={14} />
-            Add local Plugin
+            {t("plugins.add", "Add local Plugin")}
           </button>
         </div>
       </header>
@@ -48,14 +54,20 @@ export function PluginsPage({ runtime }: { runtime: ClientRuntime }) {
       <div className={styles.contextBar}>
         <strong>Agent Plugins 1.0</strong>
         <span>
-          Skills and MCP remain independently configurable; a Plugin only
-          packages and enables its contributed components.
+          {t(
+            "plugins.contextNote",
+            "Skills and MCP remain independently configurable; a Plugin only packages and enables its contributed components.",
+          )}
         </span>
       </div>
       {catalog.error ? <p className={styles.errorBanner}>{catalog.error}</p> : null}
       {catalog.diagnostics.length ? (
         <details className={styles.warningBlock}>
-          <summary>{catalog.diagnostics.length} Plugin diagnostic(s)</summary>
+          <summary>
+            {t("plugins.diagnosticsSummary", "{{total}} Plugin diagnostic(s)", {
+              total: catalog.diagnostics.length,
+            })}
+          </summary>
           {catalog.diagnostics.map((diagnostic, index) => (
             <p key={`${diagnostic.code}-${index}`}>
               {diagnostic.severity}: {diagnostic.message}
@@ -76,7 +88,7 @@ export function PluginsPage({ runtime }: { runtime: ClientRuntime }) {
                 onClick={() => catalog.select(plugin.id)}
               >
                 <span className={styles.skillRowMeta}>
-                  {plugin.version ?? "unresolved"}
+                  {plugin.version ?? t("plugins.unresolved", "unresolved")}
                   <em data-status={plugin.status}>{plugin.status}</em>
                 </span>
                 <strong>{plugin.name}</strong>
@@ -85,17 +97,24 @@ export function PluginsPage({ runtime }: { runtime: ClientRuntime }) {
             ))
           ) : (
             <p className={styles.emptyCopy}>
-              No Plugins registered. Add a trusted folder containing plugin.json
-              and an optional fixed skills directory.
+              {t(
+                "plugins.empty",
+                "No Plugins registered. Add a trusted folder containing plugin.json and an optional fixed skills directory.",
+              )}
             </p>
           )}
         </div>
         <article className={styles.detailPane}>
           {catalog.selected ? (
             <>
-              <p className={styles.eyebrow}>Local Plugin</p>
+              <p className={styles.eyebrow}>
+                {t("plugins.detail.eyebrow", "Local Plugin")}
+              </p>
               <h2>{catalog.selected.name}</h2>
-              <p>{catalog.selected.description || "Manifest could not be resolved."}</p>
+              <p>
+                {catalog.selected.description ||
+                  t("plugins.detail.unresolved", "Manifest could not be resolved.")}
+              </p>
               <div className={styles.skillActions}>
                 <span className={styles.badge} data-status={catalog.selected.status}>
                   {catalog.selected.status}
@@ -111,7 +130,9 @@ export function PluginsPage({ runtime }: { runtime: ClientRuntime }) {
                   }
                 >
                   <Power size={14} />
-                  {catalog.selected.enabled ? "Disable" : "Enable"}
+                  {catalog.selected.enabled
+                    ? t("plugins.disable", "Disable")
+                    : t("plugins.enable", "Enable")}
                 </button>
                 <button
                   type="button"
@@ -122,7 +143,11 @@ export function PluginsPage({ runtime }: { runtime: ClientRuntime }) {
                     if (
                       selected &&
                       window.confirm(
-                        `Unregister “${selected.name}”? Its source files will not be deleted.`,
+                        t(
+                          "plugins.unregisterConfirm",
+                          "Unregister “{{name}}”? Its source files will not be deleted.",
+                          { name: selected.name },
+                        ),
                       )
                     ) {
                       void catalog.remove(selected.id);
@@ -130,28 +155,34 @@ export function PluginsPage({ runtime }: { runtime: ClientRuntime }) {
                   }}
                 >
                   <Trash2 size={14} />
-                  Unregister
+                  {t("plugins.unregister", "Unregister")}
                 </button>
               </div>
               <dl className={styles.metadata}>
                 <div>
-                  <dt>Version</dt>
-                  <dd>{catalog.selected.version ?? "Unavailable"}</dd>
+                  <dt>{t("plugins.detail.version", "Version")}</dt>
+                  <dd>
+                    {catalog.selected.version ??
+                      t("plugins.detail.versionUnavailable", "Unavailable")}
+                  </dd>
                 </div>
                 <div>
-                  <dt>Source</dt>
+                  <dt>{t("plugins.detail.source", "Source")}</dt>
                   <dd>{catalog.selected.path}</dd>
                 </div>
                 <div>
-                  <dt>Manifest</dt>
+                  <dt>{t("plugins.detail.manifest", "Manifest")}</dt>
                   <dd>{catalog.selected.manifestPath}</dd>
                 </div>
                 <div>
-                  <dt>Schema</dt>
-                  <dd>{catalog.selected.schema ?? "Manifest unresolved"}</dd>
+                  <dt>{t("plugins.detail.schema", "Schema")}</dt>
+                  <dd>
+                    {catalog.selected.schema ??
+                      t("plugins.detail.schemaUnresolved", "Manifest unresolved")}
+                  </dd>
                 </div>
                 <div>
-                  <dt>Components</dt>
+                  <dt>{t("plugins.detail.components", "Components")}</dt>
                   <dd>
                     {catalog.selected.components
                       .map(
@@ -162,7 +193,8 @@ export function PluginsPage({ runtime }: { runtime: ClientRuntime }) {
                               : ` (${component.itemCount})`
                           }`,
                       )
-                      .join(", ") || "No components discovered"}
+                      .join(", ") ||
+                      t("plugins.detail.noComponents", "No components discovered")}
                   </dd>
                 </div>
               </dl>
@@ -171,7 +203,9 @@ export function PluginsPage({ runtime }: { runtime: ClientRuntime }) {
               ) : null}
               {catalog.selected.diagnostics.length ? (
                 <details className={styles.warningBlock}>
-                  <summary>Package diagnostics</summary>
+                  <summary>
+                    {t("plugins.detail.packageDiagnostics", "Package diagnostics")}
+                  </summary>
                   {catalog.selected.diagnostics.map((diagnostic, index) => (
                     <p key={`${diagnostic.code}-${index}`}>
                       {diagnostic.severity}: {diagnostic.message}
@@ -182,7 +216,10 @@ export function PluginsPage({ runtime }: { runtime: ClientRuntime }) {
             </>
           ) : (
             <p className={styles.emptyCopy}>
-              Select a Plugin to inspect its manifest and activation state.
+              {t(
+                "plugins.selectHint",
+                "Select a Plugin to inspect its manifest and activation state.",
+              )}
             </p>
           )}
         </article>

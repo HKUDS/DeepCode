@@ -14,6 +14,7 @@ import type {
 } from "../../../generated/app-server";
 import {
   ACCESS_PRESET_OPTIONS,
+  accessPresetLabel,
   settingsDefaultAccessLabel,
 } from "../../../app/accessPreset";
 import { confirmAction } from "../../../platform/confirmAction";
@@ -47,18 +48,32 @@ export function PermissionCard({
       : (settings?.userAccessPreset ?? null);
   const accessPreset =
     accessPresetDraft === undefined ? configuredAccessPreset : accessPresetDraft;
+  // Product presets translate; legacy modes keep their descriptive label.
+  const resolvedPreset = settings?.resolvedDefaultSecurityProfile.accessPreset;
+  const defaultAccessLabel = resolvedPreset
+    ? t(`access.preset.${resolvedPreset}`, accessPresetLabel(resolvedPreset))
+    : settingsDefaultAccessLabel(settings);
+  const source = settings?.resolvedDefaultSecuritySource;
 
   const saveSecurity = async () => {
     if (
       accessPreset === "full_access" &&
       !(await confirmAction(
-        "Full access becomes the default for Sessions without an override. " +
-          "Tools may run without approval and outside the workspace sandbox.",
+        t(
+          "settings.permissions.fullAccessConfirm",
+          "Full access becomes the default for Sessions without an override. Tools may run without approval and outside the workspace sandbox.",
+        ),
         {
-          title: "Use Full access by default?",
+          title: t(
+            "settings.permissions.fullAccessTitle",
+            "Use Full access by default?",
+          ),
           kind: "warning",
-          confirmLabel: "Save Full access default",
-          cancelLabel: "Cancel",
+          confirmLabel: t(
+            "settings.permissions.fullAccessSave",
+            "Save Full access default",
+          ),
+          cancelLabel: t("settings.permissions.cancel", "Cancel"),
         },
       ))
     ) {
@@ -84,7 +99,7 @@ export function PermissionCard({
       </header>
       <div className={styles.formGrid}>
         <label>
-          Default Session access
+          {t("settings.permissions.label", "Default Session access")}
           <select
             value={accessPreset ?? ""}
             onChange={(event) => {
@@ -96,30 +111,42 @@ export function PermissionCard({
           >
             <option value="">
               {scope === "project"
-                ? "Inherit user default"
-                : `Use resolved fallback · ${settingsDefaultAccessLabel(settings)}`}
+                ? t("settings.permissions.inherit", "Inherit user default")
+                : t(
+                    "settings.permissions.fallback",
+                    "Use resolved fallback · {{label}}",
+                    { label: defaultAccessLabel },
+                  )}
             </option>
             {ACCESS_PRESET_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
-                {option.label}
+                {t(`access.preset.${option.value}`, option.label)}
               </option>
             ))}
           </select>
         </label>
       </div>
       <p className={styles.note}>
-        Effective default: {settingsDefaultAccessLabel(settings)} · source:{" "}
-        {settings?.resolvedDefaultSecuritySource.replaceAll("_", " ") ??
-          "loading"}
-        . Ask and Read only retain the workspace sandbox and protected-path
-        guards. Full access removes those execution boundaries after
-        confirmation. Low-level compatibility settings are available only
-        through advanced configuration.
+        {t(
+          "settings.permissions.effective",
+          "Effective default: {{label}} · source: {{source}}. Ask and Read only retain the workspace sandbox and protected-path guards. Full access removes those execution boundaries after confirmation. Low-level compatibility settings are available only through advanced configuration.",
+          {
+            label: defaultAccessLabel,
+            source: source
+              ? t(
+                  `settings.permissions.source.${source}`,
+                  source.replaceAll("_", " "),
+                )
+              : t("settings.permissions.source.loading", "loading"),
+          },
+        )}
       </p>
       <footer className={styles.formActions}>
         <span>
-          Sessions with their own access selection keep that override. New and
-          inherited Sessions use this default.
+          {t(
+            "settings.permissions.overrideNote",
+            "Sessions with their own access selection keep that override. New and inherited Sessions use this default.",
+          )}
         </span>
         <button
           className={styles.primaryButton}
@@ -127,7 +154,7 @@ export function PermissionCard({
           disabled={busy || accessPresetDraft === undefined}
           onClick={() => void saveSecurity()}
         >
-          Save safety settings
+          {t("settings.permissions.save", "Save safety settings")}
         </button>
       </footer>
     </section>

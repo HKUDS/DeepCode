@@ -1,8 +1,11 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { initI18n } from "../../app/i18n";
 import type { Item } from "../../generated/app-server";
 import { ReasoningBlock } from "./ReasoningBlock";
+
+initI18n();
 
 function reasoningItem(
   status: Item["status"],

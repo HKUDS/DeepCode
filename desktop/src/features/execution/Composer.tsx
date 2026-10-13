@@ -201,6 +201,14 @@ export function Composer({
     ...new Set(queuedTurns.map(turnExecutionAccessLabel)),
   ];
   const queuedAccessStates = queuedTurns.map(turnExecutionAccessState);
+  // Access labels come from a shared English vocabulary; the product presets
+  // among them are translated here, legacy labels stay as they are.
+  const accessText = (label: string) => {
+    const option = ACCESS_PRESET_OPTIONS.find(
+      (candidate) => candidate.label === label,
+    );
+    return option ? t(`access.preset.${option.value}`, option.label) : label;
+  };
   const queuedAccessState = queuedAccessStates.includes("full_access")
     ? "full_access"
     : new Set(queuedAccessStates).size === 1
@@ -277,10 +285,10 @@ export function Composer({
     if (!delivery) return;
     setDeliveryNotice(
       delivery === "steered"
-        ? "Update delivered to the active Turn."
+        ? t("composer.notice.steered", "Update delivered to the active Turn.")
         : delivery === "queued"
-          ? "Queued for the next Turn."
-          : "Started a new Turn.",
+          ? t("composer.notice.queued", "Queued for the next Turn.")
+          : t("composer.notice.started", "Started a new Turn."),
     );
     setPrompt("");
     clearAttachments();
@@ -306,7 +314,7 @@ export function Composer({
     );
     if (!(await onQueue(executionPrompt, selectedIds))) return;
     record(value);
-    setDeliveryNotice("Queued for the next Turn.");
+    setDeliveryNotice(t("composer.notice.queued", "Queued for the next Turn."));
     setPrompt("");
     clearAttachments();
     setSelectedSkillIds([]);
@@ -330,7 +338,12 @@ export function Composer({
         ? selected.filter((path) => isInsideWorkspace(path, workspace))
         : [];
       if (accepted.length !== selected.length) {
-        setContextError("Only files inside this Session workspace can be attached.");
+        setContextError(
+          t(
+            "composer.attachOutsideWorkspace",
+            "Only files inside this Session workspace can be attached.",
+          ),
+        );
       }
       addAttachments(accepted);
     } catch (error) {
@@ -399,7 +412,7 @@ export function Composer({
       />
       <div className={styles.composer}>
         <label className={styles.promptLabel} htmlFor="turn-prompt">
-          Task instruction
+          {t("composer.taskInstruction", "Task instruction")}
         </label>
         <textarea
           ref={textareaRef}
@@ -413,14 +426,24 @@ export function Composer({
           onKeyDown={onKeyDown}
           placeholder={
             active
-              ? "Send guidance or corrections to the active Turn…"
-              : "Ask DeepCode to build, inspect, or verify…"
+              ? t(
+                  "composer.placeholder.active",
+                  "Send guidance or corrections to the active Turn…",
+                )
+              : t(
+                  "composer.placeholder.idle",
+                  "Ask DeepCode to build, inspect, or verify…",
+                )
           }
           rows={1}
           disabled={!editable}
         />
         {commandSuggestions.length ? (
-          <div className={styles.commandMenu} role="listbox" aria-label="Commands">
+          <div
+            className={styles.commandMenu}
+            role="listbox"
+            aria-label={t("composer.commands", "Commands")}
+          >
             {commandSuggestions.map((command) => (
               <button
                 type="button"
@@ -434,22 +457,32 @@ export function Composer({
                 }}
               >
                 <code>/{command.name}</code>
-                <span>{command.description}</span>
+                <span>
+                  {t(`composer.command.${command.name}`, command.description)}
+                </span>
               </button>
             ))}
           </div>
         ) : null}
         {skillPickerOpen && !active ? (
-          <section className={styles.skillMenu} aria-label="Select Skills">
+          <section
+            className={styles.skillMenu}
+            aria-label={t("composer.skills.select", "Select Skills")}
+          >
             <header>
               <div>
-                <strong>Skills for this turn</strong>
-                <span>Choose up to 8. You can also type $name.</span>
+                <strong>{t("composer.skills.title", "Skills for this turn")}</strong>
+                <span>
+                  {t(
+                    "composer.skills.hint",
+                    "Choose up to 8. You can also type $name.",
+                  )}
+                </span>
               </div>
               <button
                 type="button"
                 onClick={() => setSkillPickerOpen(false)}
-                aria-label="Close Skill picker"
+                aria-label={t("composer.skills.close", "Close Skill picker")}
               >
                 <X size={14} />
               </button>
@@ -457,8 +490,8 @@ export function Composer({
             <input
               value={skillQuery}
               onChange={(event) => setSkillQuery(event.target.value)}
-              placeholder="Filter Skills"
-              aria-label="Filter Skills"
+              placeholder={t("composer.skills.filter", "Filter Skills")}
+              aria-label={t("composer.skills.filter", "Filter Skills")}
               autoFocus
             />
             <div className={styles.skillOptions} role="listbox" aria-multiselectable>
@@ -503,15 +536,19 @@ export function Composer({
               ) : (
                 <p>
                   {skillCatalog.loading
-                    ? "Loading Skills…"
-                    : skillCatalog.error ?? "No matching Skills."}
+                    ? t("composer.skills.loading", "Loading Skills…")
+                    : skillCatalog.error ??
+                      t("composer.skills.noMatches", "No matching Skills.")}
                 </p>
               )}
             </div>
           </section>
         ) : null}
         {selectedSkills.length ? (
-          <div className={styles.skills} aria-label="Selected Skills">
+          <div
+            className={styles.skills}
+            aria-label={t("composer.skills.selected", "Selected Skills")}
+          >
             {selectedSkills.map((skill) => (
               <span
                 key={skill.id}
@@ -526,7 +563,9 @@ export function Composer({
                       current.filter((skillId) => skillId !== skill.id),
                     )
                   }
-                  aria-label={`Remove ${skill.name}`}
+                  aria-label={t("composer.remove", "Remove {{name}}", {
+                    name: skill.name,
+                  })}
                 >
                   <X size={12} />
                 </button>
@@ -535,7 +574,10 @@ export function Composer({
           </div>
         ) : null}
         {attachments.length ? (
-          <div className={styles.attachments} aria-label="Attached context files">
+          <div
+            className={styles.attachments}
+            aria-label={t("composer.attachments", "Attached context files")}
+          >
             {attachments.map((path) => (
               <span key={path} title={path}>
                 <Paperclip size={12} />
@@ -543,7 +585,9 @@ export function Composer({
                 <button
                   type="button"
                   onClick={() => removeAttachment(path)}
-                  aria-label={`Remove ${fileName(path)}`}
+                  aria-label={t("composer.remove", "Remove {{name}}", {
+                    name: fileName(path),
+                  })}
                 >
                   <X size={12} />
                 </button>
@@ -554,36 +598,49 @@ export function Composer({
         {executingTurn || queuedTurns.length ? (
           <div
             className={styles.accessStatusRail}
-            aria-label="Frozen Turn access"
+            aria-label={t("composer.access.frozen", "Frozen Turn access")}
           >
             <div className={styles.accessStatuses}>
               {executingTurn && executingAccessLabel ? (
                 <span
                   className={styles.accessStatus}
                   data-access={executingAccessState}
-                  aria-label={`Current Turn access: ${executingAccessLabel}`}
+                  aria-label={t(
+                    "composer.access.current",
+                    "Current Turn access: {{access}}",
+                    { access: accessText(executingAccessLabel) },
+                  )}
                 >
-                  <strong>Current Turn</strong>
+                  <strong>{t("composer.access.currentTurn", "Current Turn")}</strong>
                   <i aria-hidden="true">·</i>
-                  {executingAccessLabel}
+                  {accessText(executingAccessLabel)}
                 </span>
               ) : null}
               {queuedTurns.length ? (
                 <span
                   className={styles.accessStatus}
                   data-access={queuedAccessState}
-                  aria-label={`Queued Turn access: ${queuedAccessLabels.join(
-                    ", ",
-                  )}`}
+                  aria-label={t(
+                    "composer.access.queued",
+                    "Queued Turn access: {{access}}",
+                    { access: queuedAccessLabels.map(accessText).join(", ") },
+                  )}
                 >
-                  <strong>Queued ({queuedTurns.length})</strong>
+                  <strong>
+                    {t("composer.access.queuedTurns", "Queued ({{number}})", {
+                      number: queuedTurns.length,
+                    })}
+                  </strong>
                   <i aria-hidden="true">·</i>
-                  {queuedAccessLabels.join(" · ")}
+                  {queuedAccessLabels.map(accessText).join(" · ")}
                 </span>
               ) : null}
             </div>
             <p className={styles.accessFrozenNote}>
-              Active and queued Turns keep their frozen model and access.
+              {t(
+                "composer.access.frozenNote",
+                "Active and queued Turns keep their frozen model and access.",
+              )}
             </p>
           </div>
         ) : null}
@@ -594,8 +651,8 @@ export function Composer({
               type="button"
               onClick={() => void pickContextFiles()}
               disabled={!editable || busy}
-              aria-label="Attach workspace files"
-              title="Attach workspace files"
+              aria-label={t("composer.attach", "Attach workspace files")}
+              title={t("composer.attach", "Attach workspace files")}
             >
               <Paperclip size={14} />
             </button>
@@ -607,11 +664,11 @@ export function Composer({
                 !editable || busy || active || !skillCatalog.activeSkills.length
               }
               aria-expanded={skillPickerOpen}
-              aria-label="Select Skills for this turn"
+              aria-label={t("composer.skills.open", "Select Skills for this turn")}
               title={
                 skillCatalog.activeSkills.length
-                  ? "Select Skills for this turn"
-                  : "No selectable Skills"
+                  ? t("composer.skills.open", "Select Skills for this turn")
+                  : t("composer.skills.none", "No selectable Skills")
               }
             >
               <Sparkles size={14} />
@@ -653,7 +710,9 @@ export function Composer({
               </button>
             ) : null}
             <span title={thread?.workspacePath ?? project?.canonicalPath}>
-              {thread?.mode === "paper" ? "Paper2Code" : "Local"}
+              {thread?.mode === "paper"
+                ? "Paper2Code"
+                : t("composer.local", "Local")}
             </span>
             <ModelPicker
               runtime={runtime}
@@ -680,14 +739,19 @@ export function Composer({
               data-access={effectiveProductAccess ?? "inherit"}
               title={
                 effectiveProductAccess === "full_access"
-                  ? "New submissions use Full access"
-                  : "Tool access for new submissions"
+                  ? t(
+                      "composer.access.newFullAccess",
+                      "New submissions use Full access",
+                    )
+                  : t("composer.access.newTitle", "Tool access for new submissions")
               }
             >
               <ShieldCheck size={12} />
-              <small className={styles.selectorCaption}>New</small>
+              <small className={styles.selectorCaption}>
+                {t("composer.access.newCaption", "New")}
+              </small>
               <select
-                aria-label="New submissions access"
+                aria-label={t("composer.access.newLabel", "New submissions access")}
                 value={accessPresetOverride ?? ""}
                 onChange={(event) => {
                   const value = event.target.value;
@@ -698,11 +762,13 @@ export function Composer({
                 disabled={busy || !thread}
               >
                 <option value="">
-                  Default · {defaultAccessLabel}
+                  {t("composer.access.default", "Default · {{access}}", {
+                    access: accessText(defaultAccessLabel),
+                  })}
                 </option>
                 {ACCESS_PRESET_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
-                    {option.label}
+                    {t(`access.preset.${option.value}`, option.label)}
                   </option>
                 ))}
               </select>
@@ -716,7 +782,7 @@ export function Composer({
                 onClick={() => void submit()}
                 disabled={!canExecute || busy || !prompt.trim()}
               >
-                Steer
+                {t("composer.steer", "Steer")}
               </button>
               <button
                 className={styles.queueButton}
@@ -730,10 +796,10 @@ export function Composer({
                 className={styles.stopButton}
                 type="button"
                 onClick={onInterrupt}
-                aria-label="Stop turn"
+                aria-label={t("composer.stopTurn", "Stop turn")}
               >
                 <Square size={14} fill="currentColor" />
-                Stop
+                {t("composer.stop", "Stop")}
               </button>
             </div>
           ) : (
@@ -742,7 +808,7 @@ export function Composer({
               type="button"
               onClick={() => void submit()}
               disabled={!canExecute || busy || !prompt.trim()}
-              aria-label="Run turn"
+              aria-label={t("composer.runTurn", "Run turn")}
             >
               <ArrowUp size={18} strokeWidth={2.2} />
             </button>
@@ -756,7 +822,10 @@ export function Composer({
           deliveryNotice ??
           dictationStatus ??
           disabledReason ??
-          "DeepCode may ask before sensitive tools run."}
+          t(
+            "composer.hint.sensitive",
+            "DeepCode may ask before sensitive tools run.",
+          )}
         <span>
           {active
             ? busyEnter === "queue"

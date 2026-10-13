@@ -1,4 +1,5 @@
 import { lazy, Suspense, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { useSystemDarkMode } from "../../app/useSystemDarkMode";
 import type { CodeWorkbenchController } from "../workbench/useCodeWorkbench";
@@ -23,6 +24,7 @@ export function FilesPanel({
   onOpenFile,
   onDownload,
 }: FilesPanelProps) {
+  const { t } = useTranslation();
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const darkMode = useSystemDarkMode();
   const dirty = Boolean(
@@ -31,7 +33,10 @@ export function FilesPanel({
 
   return (
     <div className={styles.filesView}>
-      <div className={styles.fileTree} aria-label="Workspace files">
+      <div
+        className={styles.fileTree}
+        aria-label={t("inspector.files.label", "Workspace files")}
+      >
         {workbench.entries.map((entry) => (
           <button
             key={entry.path}
@@ -46,7 +51,10 @@ export function FilesPanel({
         ))}
         {workbench.entriesTruncated ? (
           <p className={styles.treeNotice}>
-            File list limited to the first 750 entries.
+            {t(
+              "inspector.files.truncated",
+              "File list limited to the first 750 entries.",
+            )}
           </p>
         ) : null}
       </div>
@@ -58,11 +66,13 @@ export function FilesPanel({
               {onDownload && <button type="button" onClick={() => {
                 setDownloadError(null);
                 void onDownload(workbench.file!.path).catch((error) => setDownloadError(String(error)));
-              }}>Download</button>}
+              }}>{t("inspector.files.download", "Download")}</button>}
               {workbench.file.truncated ? (
-                <small>Truncated · read-only</small>
+                <small>
+                  {t("inspector.files.truncatedReadOnly", "Truncated · read-only")}
+                </small>
               ) : dirty ? (
-                <small>Unsaved</small>
+                <small>{t("inspector.files.unsaved", "Unsaved")}</small>
               ) : null}
               <button
                 type="button"
@@ -75,12 +85,18 @@ export function FilesPanel({
                   workbench.loading
                 }
               >
-                Save
+                {t("inspector.files.save", "Save")}
               </button>
             </div>
           </header>
           {downloadError && <p role="alert">{downloadError}</p>}
-          <Suspense fallback={<div className={styles.editorLoading}>Loading editor…</div>}>
+          <Suspense
+            fallback={
+              <div className={styles.editorLoading}>
+                {t("inspector.files.loadingEditor", "Loading editor…")}
+              </div>
+            }
+          >
             <LocalMonacoEditor
               height="100%"
               language={languageFor(workbench.file.path)}
@@ -102,12 +118,17 @@ export function FilesPanel({
           </Suspense>
           {hasActiveTurn ? (
             <p className={styles.editorNotice}>
-              Editing is locked until the active Turn finishes.
+              {t(
+                "inspector.files.locked",
+                "Editing is locked until the active Turn finishes.",
+              )}
             </p>
           ) : null}
         </div>
       ) : (
-        <InspectorEmpty label="Select a text file to inspect it." />
+        <InspectorEmpty
+          label={t("inspector.files.empty", "Select a text file to inspect it.")}
+        />
       )}
     </div>
   );

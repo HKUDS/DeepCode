@@ -24,7 +24,11 @@ import type {
   RpcMethod,
   SidecarStatus,
 } from "../../rpc/contracts";
+import { initI18n } from "../../app/i18n";
 import { AutomationsPage } from "./AutomationsPage";
+
+// Interpolated strings need an initialized i18n instance.
+initI18n();
 
 const timestamp = "2026-07-29T02:00:00Z";
 

@@ -108,9 +108,12 @@ export function Inspector({
     if (
       dirty &&
       !(await confirmAction(
-        "Discard the unsaved editor draft and open another file? Your edits cannot be recovered.",
+        t(
+          "confirm.discardDraft.openFile",
+          "Discard the unsaved editor draft and open another file? Your edits cannot be recovered.",
+        ),
         {
-          confirmLabel: "Discard draft",
+          confirmLabel: t("confirm.discardDraft.confirm", "Discard draft"),
         },
       ))
     ) {

@@ -135,7 +135,7 @@ export function SettingsDialog({
               onClick={() => void openConfigFile()}
             >
               <FileText size={14} />
-              {runtime.host?.nativeOpen === false ? "Copy configuration path" : t("settings.openConfig", "Open configuration file")}
+              {runtime.host?.nativeOpen === false ? t("settings.copyConfigPath", "Copy configuration path") : t("settings.openConfig", "Open configuration file")}
             </button>
             <button
               className={styles.close}

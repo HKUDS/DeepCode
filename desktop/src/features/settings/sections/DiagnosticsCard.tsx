@@ -86,29 +86,39 @@ export function DiagnosticsCard({
             ))}
           </div>
           <dl className={styles.diagnosticGrid}>
-            <Diagnostic label="App" value={diagnostics.diagnostics.appVersion} />
+            <Diagnostic
+              label={t("settings.diagnostics.app", "App")}
+              value={diagnostics.diagnostics.appVersion}
+            />
             <Diagnostic
               label="Python"
               value={`${diagnostics.diagnostics.pythonVersion} · ${diagnostics.diagnostics.architecture}`}
             />
             <Diagnostic
-              label="Sessions"
+              label={t("settings.diagnostics.sessions", "Sessions")}
               value={`${diagnostics.diagnostics.sessionCount} · ${diagnostics.diagnostics.sessionStorePath}`}
             />
             <Diagnostic
-              label="Desktop DB"
-              value={`schema ${diagnostics.diagnostics.databaseSchemaVersion} · ${diagnostics.diagnostics.databasePath}`}
+              label={t("settings.diagnostics.database", "Desktop DB")}
+              value={t(
+                "settings.diagnostics.schema",
+                "schema {{version}} · {{path}}",
+                {
+                  version: diagnostics.diagnostics.databaseSchemaVersion,
+                  path: diagnostics.diagnostics.databasePath,
+                },
+              )}
             />
             <Diagnostic
-              label="Platform"
+              label={t("settings.diagnostics.platform", "Platform")}
               value={diagnostics.diagnostics.platform}
             />
             <Diagnostic
-              label="Automations"
+              label={t("settings.diagnostics.automations", "Automations")}
               value={String(diagnostics.diagnostics.automationCount)}
             />
             <Diagnostic
-              label={t("settings.diagnostics.noProject", "Project config")}
+              label={t("settings.diagnostics.projectConfig", "Project config")}
               value={
                 diagnostics.diagnostics.projectConfigPath ??
                 t("settings.diagnostics.noProject", "No project selected")

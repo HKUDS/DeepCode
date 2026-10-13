@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type {
   McpInventory,
@@ -8,6 +8,7 @@ import type {
   MethodResults,
   Project,
 } from "../../generated/app-server";
+import { __setLocaleForTests, initI18n } from "../../app/i18n";
 import type { ClientRuntime, RpcMethod } from "../../rpc/contracts";
 import { McpPage } from "./McpPage";
 
@@ -193,6 +194,10 @@ function mcpServer(
   };
 }
 
+beforeEach(() => {
+  initI18n();
+  __setLocaleForTests("en");
+});
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();

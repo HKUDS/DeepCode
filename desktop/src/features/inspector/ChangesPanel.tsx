@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+
 import type { Thread } from "../../generated/app-server";
 import { confirmAction } from "../../platform/confirmAction";
 import type { CodeWorkbenchController } from "../workbench/useCodeWorkbench";
@@ -19,14 +21,18 @@ export function ChangesPanel({
   workbench,
   onOpenFile,
 }: ChangesPanelProps) {
+  const { t } = useTranslation();
   const cleanWorktree = async () => {
     const dirty = Boolean(workbench.git?.entries.length);
     if (
       dirty &&
       !(await confirmAction(
-        "This worktree has uncommitted changes. Permanently remove it and discard them?",
+        t(
+          "inspector.changes.cleanConfirm",
+          "This worktree has uncommitted changes. Permanently remove it and discard them?",
+        ),
         {
-          confirmLabel: "Remove worktree",
+          confirmLabel: t("inspector.changes.removeWorktree", "Remove worktree"),
         },
       ))
     ) {
@@ -42,9 +48,13 @@ export function ChangesPanel({
     if (
       !file ||
       !(await confirmAction(
-        `Discard every staged and unstaged change to ${path}? This cannot be undone.`,
+        t(
+          "inspector.changes.discardConfirm",
+          "Discard every staged and unstaged change to {{path}}? This cannot be undone.",
+          { path },
+        ),
         {
-          confirmLabel: "Discard changes",
+          confirmLabel: t("inspector.changes.discardChanges", "Discard changes"),
         },
       ))
     ) {
@@ -57,17 +67,22 @@ export function ChangesPanel({
     <div className={styles.content}>
       <div className={styles.heading}>
         <div>
-          <p className={styles.eyebrow}>Git workspace</p>
-          <h2>{workbench.git?.branch ?? "No Git branch"}</h2>
+          <p className={styles.eyebrow}>
+            {t("inspector.changes.eyebrow", "Git workspace")}
+          </p>
+          <h2>
+            {workbench.git?.branch ??
+              t("inspector.changes.noBranch", "No Git branch")}
+          </h2>
         </div>
         <button type="button" onClick={() => void workbench.refresh()}>
-          Refresh
+          {t("inspector.changes.refresh", "Refresh")}
         </button>
       </div>
 
       {thread?.worktreePath ? (
         <div className={styles.worktreeControl}>
-          <strong>Isolated worktree</strong>
+          <strong>{t("inspector.changes.isolated", "Isolated worktree")}</strong>
           <span>{thread.worktreePath}</span>
           <div>
             <button
@@ -75,14 +90,14 @@ export function ChangesPanel({
               disabled={!trusted || hasActiveTurn || workbench.loading}
               onClick={() => void workbench.resolveWorktree("keep")}
             >
-              Keep worktree
+              {t("inspector.changes.keepWorktree", "Keep worktree")}
             </button>
             <button
               type="button"
               disabled={!trusted || hasActiveTurn || workbench.loading}
               onClick={() => void cleanWorktree()}
             >
-              Clean worktree
+              {t("inspector.changes.cleanWorktree", "Clean worktree")}
             </button>
           </div>
         </div>
@@ -95,7 +110,7 @@ export function ChangesPanel({
             !trusted || hasActiveTurn || !workbench.git || workbench.loading
           }
         >
-          Isolate this Session in a worktree
+          {t("inspector.changes.isolate", "Isolate this Session in a worktree")}
         </button>
       )}
 
@@ -117,18 +132,20 @@ export function ChangesPanel({
                   disabled={file.binary || file.status === "deleted"}
                   onClick={() => onOpenFile(file.path)}
                 >
-                  Open in editor
+                  {t("inspector.changes.openInEditor", "Open in editor")}
                 </button>
                 <button
                   type="button"
                   disabled={!trusted || hasActiveTurn || workbench.loading}
                   onClick={() => void discardFile(file.path, file.revision)}
                 >
-                  Discard file
+                  {t("inspector.changes.discardFile", "Discard file")}
                 </button>
               </div>
               {file.binary ? (
-                <p className={styles.binaryNotice}>Binary file changed</p>
+                <p className={styles.binaryNotice}>
+                  {t("inspector.changes.binary", "Binary file changed")}
+                </p>
               ) : (
                 file.hunks.map((hunk, hunkIndex) => (
                   <div className={styles.diffHunk} key={`${file.path}-${hunkIndex}`}>
@@ -160,11 +177,17 @@ export function ChangesPanel({
           ))}
         </div>
       ) : (
-        <InspectorEmpty label="Working tree is clean." compact />
+        <InspectorEmpty
+          label={t("inspector.changes.clean", "Working tree is clean.")}
+          compact
+        />
       )}
       {hasActiveTurn ? (
         <p className={styles.note}>
-          File changes and worktree operations are locked while a Turn is active.
+          {t(
+            "inspector.changes.locked",
+            "File changes and worktree operations are locked while a Turn is active.",
+          )}
         </p>
       ) : null}
     </div>

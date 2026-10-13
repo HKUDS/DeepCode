@@ -1,5 +1,6 @@
 import { ArrowDown } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import type {
   Approval,
@@ -46,6 +47,7 @@ export function ThreadConversation({
   onRetryTurn,
   onCancelQueuedTurn,
 }: ThreadConversationProps) {
+  const { t } = useTranslation();
   const scrollViewportRef = useRef<HTMLDivElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const followingRef = useRef(true);
@@ -131,13 +133,18 @@ export function ThreadConversation({
               <i />
               <i />
             </span>
-            <h2>Start with a task.</h2>
+            <h2>{t("thread.empty.title", "Start with a task.")}</h2>
             <p>
-              Describe the outcome, the constraints, and how DeepCode should
-              verify the result.
+              {t(
+                "thread.empty.body",
+                "Describe the outcome, the constraints, and how DeepCode should verify the result.",
+              )}
             </p>
             <small>
-              Conversation, tools, approvals, and review stay in this Session.
+              {t(
+                "thread.empty.note",
+                "Conversation, tools, approvals, and review stay in this Session.",
+              )}
             </small>
           </div>
         </div>
@@ -152,7 +159,7 @@ export function ThreadConversation({
     >
       <div
         className={styles.conversationScroller}
-        aria-label="Thread conversation"
+        aria-label={t("thread.conversation", "Thread conversation")}
         ref={scrollViewportRef}
       >
         <div className={styles.conversation}>
@@ -188,7 +195,7 @@ export function ThreadConversation({
           onClick={jumpToLatest}
         >
           <ArrowDown size={14} />
-          Latest
+          {t("thread.latest", "Latest")}
         </button>
       ) : null}
     </div>

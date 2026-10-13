@@ -80,14 +80,20 @@ export function DefaultPresetCard({
       </header>
       <div className={styles.formGrid}>
         <label>
-          Default for new Sessions
+          {t("settings.preset.label", "Default for new Sessions")}
           <select
             value={selection}
             onChange={(event) => setDraft(event.target.value)}
           >
-            <option value="">None · default composition</option>
+            <option value="">
+              {t("settings.preset.none", "None · default composition")}
+            </option>
             {selection && !knownIds.has(selection) ? (
-              <option value={selection}>{selection} · not found here</option>
+              <option value={selection}>
+                {t("settings.preset.notFound", "{{id}} · not found here", {
+                  id: selection,
+                })}
+              </option>
             ) : null}
             {entries.map((entry) => (
               <option key={entry.id} value={entry.id} disabled={!!entry.broken}>
@@ -98,14 +104,17 @@ export function DefaultPresetCard({
         </label>
       </div>
       <p className={styles.note}>
-        Applies to Sessions you start from now on. Running Sessions keep the
-        preset they began with; a blank Session can still switch or clear its
-        preset from the composer.
+        {t(
+          "settings.preset.note",
+          "Applies to Sessions you start from now on. Running Sessions keep the preset they began with; a blank Session can still switch or clear its preset from the composer.",
+        )}
       </p>
       <footer className={styles.formActions}>
         <span>
-          An unresolvable name is ignored at Session creation rather than
-          blocking it.
+          {t(
+            "settings.preset.unresolvable",
+            "An unresolvable name is ignored at Session creation rather than blocking it.",
+          )}
         </span>
         <button
           className={styles.primaryButton}
@@ -113,7 +122,7 @@ export function DefaultPresetCard({
           disabled={busy || draft === undefined || draft === configured}
           onClick={() => void save()}
         >
-          Save preset default
+          {t("settings.preset.save", "Save preset default")}
         </button>
       </footer>
     </section>

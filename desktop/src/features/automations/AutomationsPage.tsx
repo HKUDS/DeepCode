@@ -8,6 +8,8 @@ import {
   Trash2,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 import type {
   Automation,
@@ -53,12 +55,22 @@ const emptyDraft: AutomationDraft = {
   enabled: true,
 };
 
+// automationIntervalSeconds reports these in English; the page shows them.
+const INTERVAL_ERROR_KEYS: Record<string, string> = {
+  "Interval value must be a positive whole number.":
+    "automations.interval.wholeNumber",
+  "Interval is too large.": "automations.interval.tooLarge",
+  "Interval must be at least 60 seconds.": "automations.interval.tooShort",
+  "Interval must not exceed 366 days.": "automations.interval.tooLong",
+};
+
 export function AutomationsPage({
   runtime,
   project,
   onThreadCreated,
   onOpenThread,
 }: AutomationsPageProps) {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState<AutomationDraft | null>(null);
   const [expandedRuns, setExpandedRuns] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -103,7 +115,8 @@ export function AutomationsPage({
         unit: draft.intervalUnit,
       });
       if (interval.error !== null) {
-        setFormError(interval.error);
+        const key = INTERVAL_ERROR_KEYS[interval.error];
+        setFormError(key ? t(key, interval.error) : interval.error);
         return;
       }
       intervalSeconds = interval.intervalSeconds;
@@ -148,9 +161,13 @@ export function AutomationsPage({
   const remove = async (automation: Automation) => {
     if (
       !(await confirmAction(
-        `Remove the automation “${automation.name}”? Its Goal Thread and Session history will be kept.`,
+        t(
+          "automations.removeConfirm",
+          "Remove the automation “{{name}}”? Its Goal Thread and Session history will be kept.",
+          { name: automation.name },
+        ),
         {
-          confirmLabel: "Remove automation",
+          confirmLabel: t("automations.removeAutomation", "Remove automation"),
         },
       ))
     ) {
@@ -166,12 +183,15 @@ export function AutomationsPage({
     <section className={styles.page} aria-labelledby="automations-title">
       <header className={styles.pageHeader}>
         <div>
-          <p className={styles.eyebrow}>Recurring local work</p>
-          <h1 id="automations-title">Automations</h1>
+          <p className={styles.eyebrow}>
+            {t("automations.eyebrow", "Recurring local work")}
+          </p>
+          <h1 id="automations-title">{t("automations.title", "Automations")}</h1>
           <p>
-            Each automation owns a canonical Goal Thread and submits ordinary
-            Agent Turns through the same permission, approval, Hook, and Session
-            lifecycle as interactive work.
+            {t(
+              "automations.description",
+              "Each automation owns a canonical Goal Thread and submits ordinary Agent Turns through the same permission, approval, Hook, and Session lifecycle as interactive work.",
+            )}
           </p>
         </div>
         <div className={styles.headerActions}>
@@ -182,7 +202,7 @@ export function AutomationsPage({
             onClick={() => void automations.refresh()}
           >
             <RefreshCw size={14} />
-            Refresh
+            {t("automations.refresh", "Refresh")}
           </button>
           <button
             className={styles.primaryButton}
@@ -194,15 +214,25 @@ export function AutomationsPage({
             }}
           >
             <Plus size={14} />
-            New automation
+            {t("automations.newAutomation", "New automation")}
           </button>
         </div>
       </header>
 
       {!project ? (
         <div className={styles.emptyState}>
-          <h2>Open a project to create an automation.</h2>
-          <p>Automations are always fenced to one trusted local project.</p>
+          <h2>
+            {t(
+              "automations.noProject",
+              "Open a project to create an automation.",
+            )}
+          </h2>
+          <p>
+            {t(
+              "automations.noProjectHint",
+              "Automations are always fenced to one trusted local project.",
+            )}
+          </p>
         </div>
       ) : (
         <>
@@ -210,13 +240,22 @@ export function AutomationsPage({
             <strong>{project.displayName}</strong>
             <span>
               {automations.inventory?.schedulerActive
-                ? "Scheduler active · scheduled work runs while a compatible DeepCode runtime is active"
-                : "Scheduler unavailable · start a scheduler-enabled DeepCode runtime to run scheduled work"}
+                ? t(
+                    "automations.schedulerActive",
+                    "Scheduler active · scheduled work runs while a compatible DeepCode runtime is active",
+                  )
+                : t(
+                    "automations.schedulerUnavailable",
+                    "Scheduler unavailable · start a scheduler-enabled DeepCode runtime to run scheduled work",
+                  )}
             </span>
           </div>
           {!canExecute ? (
             <p className={styles.warningBlock}>
-              Trust this project before creating or running unattended work.
+              {t(
+                "automations.trustRequired",
+                "Trust this project before creating or running unattended work.",
+              )}
             </p>
           ) : null}
           {automations.error ? (
@@ -233,7 +272,7 @@ export function AutomationsPage({
                   <header>
                     <div>
                       <p className={styles.eyebrow}>
-                        {scheduleLabel(automation)}
+                        {scheduleLabel(automation, t)}
                       </p>
                       <h2>{automation.name}</h2>
                     </div>
@@ -242,14 +281,18 @@ export function AutomationsPage({
                         className={styles.badge}
                         data-status={automation.status}
                       >
-                        Status: {automation.status}
+                        {t("automations.status", "Status: {{status}}", {
+                          status: automation.status,
+                        })}
                       </span>
                       {latest ? (
                         <span
                           className={styles.badge}
                           data-status={latest.status}
                         >
-                          Latest run: {latest.status}
+                          {t("automations.latestRun", "Latest run: {{status}}", {
+                            status: latest.status,
+                          })}
                         </span>
                       ) : null}
                     </div>
@@ -257,15 +300,25 @@ export function AutomationsPage({
                   <p>{automation.prompt}</p>
                   <dl className={styles.metadata}>
                     <div>
-                      <dt>Next run</dt>
-                      <dd>{dateLabel(automation.nextRunAt, "Manual only")}</dd>
+                      <dt>{t("automations.nextRun", "Next run")}</dt>
+                      <dd>
+                        {dateLabel(
+                          automation.nextRunAt,
+                          t("automations.manualOnly", "Manual only"),
+                        )}
+                      </dd>
                     </div>
                     <div>
-                      <dt>Last run</dt>
-                      <dd>{dateLabel(automation.lastRunAt, "Not run yet")}</dd>
+                      <dt>{t("automations.lastRun", "Last run")}</dt>
+                      <dd>
+                        {dateLabel(
+                          automation.lastRunAt,
+                          t("automations.notRunYet", "Not run yet"),
+                        )}
+                      </dd>
                     </div>
                     <div>
-                      <dt>Goal Thread</dt>
+                      <dt>{t("automations.goalThread", "Goal Thread")}</dt>
                       <dd>{automation.threadId}</dd>
                     </div>
                   </dl>
@@ -276,7 +329,7 @@ export function AutomationsPage({
                       onClick={() => void automations.runNow(automation.id)}
                     >
                       <Play size={14} />
-                      Run now
+                      {t("automations.runNow", "Run now")}
                     </button>
                     {automation.scheduleKind === "interval" ? (
                       <button
@@ -297,17 +350,19 @@ export function AutomationsPage({
                         ) : (
                           <Play size={14} />
                         )}
-                        {automation.status === "enabled" ? "Pause" : "Resume"}
+                        {automation.status === "enabled"
+                          ? t("automations.pause", "Pause")
+                          : t("automations.resume", "Resume")}
                       </button>
                     ) : null}
                     <button type="button" onClick={() => edit(automation)}>
-                      Edit
+                      {t("automations.edit", "Edit")}
                     </button>
                     <button
                       type="button"
                       onClick={() => onOpenThread(automation.threadId)}
                     >
-                      Open Thread
+                      {t("automations.openThread", "Open Thread")}
                     </button>
                     <button
                       type="button"
@@ -315,7 +370,7 @@ export function AutomationsPage({
                       onClick={() => void toggleRuns(automation.id)}
                     >
                       <History size={14} />
-                      Runs
+                      {t("automations.runs", "Runs")}
                     </button>
                     <button
                       type="button"
@@ -323,7 +378,7 @@ export function AutomationsPage({
                       onClick={() => void remove(automation)}
                     >
                       <Trash2 size={14} />
-                      Remove
+                      {t("automations.remove", "Remove")}
                     </button>
                   </footer>
                   {expandedRuns === automation.id ? (
@@ -335,14 +390,19 @@ export function AutomationsPage({
                             <span>
                               <strong>{run.status}</strong>
                               <small>
-                                {dateLabel(run.scheduledFor, "Unknown time")}
+                                {dateLabel(
+                                  run.scheduledFor,
+                                  t("automations.unknownTime", "Unknown time"),
+                                )}
                                 {run.detail ? ` · ${run.detail}` : ""}
                               </small>
                             </span>
                           </div>
                         ))
                       ) : (
-                        <p className={styles.emptyCopy}>No runs recorded yet.</p>
+                        <p className={styles.emptyCopy}>
+                          {t("automations.noRuns", "No runs recorded yet.")}
+                        </p>
                       )}
                       {runPage?.hasMore ? (
                         <footer className={styles.cardActions}>
@@ -355,7 +415,7 @@ export function AutomationsPage({
                               void automations.loadMoreRuns(automation.id)
                             }
                           >
-                            Load more runs
+                            {t("automations.loadMoreRuns", "Load more runs")}
                           </button>
                         </footer>
                       ) : null}
@@ -367,42 +427,53 @@ export function AutomationsPage({
             {!automations.loading &&
             !(automations.inventory?.automations.length ?? 0) ? (
               <p className={styles.emptyCopy}>
-                No automations exist for this project.
+                {t(
+                  "automations.empty",
+                  "No automations exist for this project.",
+                )}
               </p>
             ) : null}
           </div>
           {automations.inventory?.hasMore ? (
             <footer className={styles.formActions}>
               <span>
-                Showing {automations.inventory.automations.length} automations.
-                More are available.
+                {t(
+                  "automations.showing",
+                  "Showing {{shown}} automations. More are available.",
+                  { shown: automations.inventory.automations.length },
+                )}
               </span>
               <button
                 type="button"
                 disabled={automations.loadingMoreAutomations}
                 onClick={() => void automations.loadMoreAutomations()}
               >
-                Load more automations
+                {t("automations.loadMore", "Load more automations")}
               </button>
             </footer>
           ) : null}
 
           {draft ? (
-            <section className={styles.formCard} aria-label="Automation editor">
+            <section
+              className={styles.formCard}
+              aria-label={t("automations.form.label", "Automation editor")}
+            >
               <header>
                 <div>
                   <p className={styles.eyebrow}>
-                    {draft.id ? "Edit automation" : "New automation"}
+                    {draft.id
+                      ? t("automations.form.edit", "Edit automation")
+                      : t("automations.newAutomation", "New automation")}
                   </p>
-                  <h2>Goal and schedule</h2>
+                  <h2>{t("automations.form.title", "Goal and schedule")}</h2>
                 </div>
                 <button type="button" onClick={() => setDraft(null)}>
-                  Cancel
+                  {t("automations.form.cancel", "Cancel")}
                 </button>
               </header>
               <div className={styles.formGrid}>
                 <label>
-                  Name
+                  {t("automations.form.name", "Name")}
                   <input
                     value={draft.name}
                     onChange={(event) =>
@@ -411,7 +482,7 @@ export function AutomationsPage({
                   />
                 </label>
                 <label>
-                  Schedule
+                  {t("automations.form.schedule", "Schedule")}
                   <select
                     value={draft.scheduleKind}
                     onChange={(event) =>
@@ -422,14 +493,18 @@ export function AutomationsPage({
                       })
                     }
                   >
-                    <option value="manual">Manual only</option>
-                    <option value="interval">Recurring interval</option>
+                    <option value="manual">
+                      {t("automations.manualOnly", "Manual only")}
+                    </option>
+                    <option value="interval">
+                      {t("automations.form.interval", "Recurring interval")}
+                    </option>
                   </select>
                 </label>
                 {draft.scheduleKind === "interval" ? (
                   <>
                     <label>
-                      Repeat every
+                      {t("automations.form.repeatEvery", "Repeat every")}
                       <input
                         inputMode="numeric"
                         value={draft.intervalValue}
@@ -442,7 +517,7 @@ export function AutomationsPage({
                       />
                     </label>
                     <label>
-                      Unit
+                      {t("automations.form.unit", "Unit")}
                       <select
                         value={draft.intervalUnit}
                         onChange={(event) =>
@@ -453,9 +528,15 @@ export function AutomationsPage({
                           })
                         }
                       >
-                        <option value="seconds">Seconds</option>
-                        <option value="minutes">Minutes</option>
-                        <option value="hours">Hours</option>
+                        <option value="seconds">
+                          {t("automations.form.seconds", "Seconds")}
+                        </option>
+                        <option value="minutes">
+                          {t("automations.form.minutes", "Minutes")}
+                        </option>
+                        <option value="hours">
+                          {t("automations.form.hours", "Hours")}
+                        </option>
                       </select>
                     </label>
                     <label className={styles.checkboxField}>
@@ -469,19 +550,22 @@ export function AutomationsPage({
                           })
                         }
                       />
-                      Enable recurring runs
+                      {t("automations.form.enable", "Enable recurring runs")}
                     </label>
                   </>
                 ) : null}
                 <label className={styles.wideField}>
-                  Goal prompt
+                  {t("automations.form.prompt", "Goal prompt")}
                   <textarea
                     rows={7}
                     value={draft.prompt}
                     onChange={(event) =>
                       setDraft({ ...draft, prompt: event.target.value })
                     }
-                    placeholder="Describe the recurring repository task and its verification criteria."
+                    placeholder={t(
+                      "automations.form.promptPlaceholder",
+                      "Describe the recurring repository task and its verification criteria.",
+                    )}
                   />
                 </label>
               </div>
@@ -490,11 +574,13 @@ export function AutomationsPage({
               ) : null}
               <footer className={styles.formActions}>
                 <span>
-                  Scheduled runs are coalesced after downtime and never queue
-                  behind an already active Goal Turn.
+                  {t(
+                    "automations.form.note",
+                    "Scheduled runs are coalesced after downtime and never queue behind an already active Goal Turn.",
+                  )}
                 </span>
                 <button type="button" onClick={() => setDraft(null)}>
-                  Cancel
+                  {t("automations.form.cancel", "Cancel")}
                 </button>
                 <button
                   className={styles.primaryButton}
@@ -507,7 +593,7 @@ export function AutomationsPage({
                   }
                   onClick={() => void save()}
                 >
-                  Save automation
+                  {t("automations.form.save", "Save automation")}
                 </button>
               </footer>
             </section>
@@ -518,9 +604,16 @@ export function AutomationsPage({
   );
 }
 
-function scheduleLabel(automation: Automation): string {
-  if (automation.scheduleKind === "manual") return "Manual Goal";
-  return `Every ${automationIntervalLabel(automation.intervalSeconds)}`;
+function scheduleLabel(automation: Automation, t: TFunction): string {
+  if (automation.scheduleKind === "manual") {
+    return t("automations.manualGoal", "Manual Goal");
+  }
+  const { value, unit } = automationIntervalInput(automation.intervalSeconds);
+  return t(
+    `automations.every.${unit}`,
+    `Every ${automationIntervalLabel(automation.intervalSeconds)}`,
+    { value },
+  );
 }
 
 function dateLabel(value: string | null, fallback: string): string {

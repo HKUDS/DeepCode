@@ -1,5 +1,6 @@
 import { Check, ChevronDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import type { AgentPresetEntry } from "../../generated/app-server";
 import styles from "./PresetPicker.module.css";
@@ -35,6 +36,7 @@ export function PresetPicker({
   error,
   onSelect,
 }: PresetPickerProps) {
+  const { t } = useTranslation();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
 
@@ -59,7 +61,8 @@ export function PresetPicker({
   if (selectable.length === 0 && current === null) return null;
 
   const active = selectable.find((entry) => entry.id === current) ?? null;
-  const currentLabel = active?.name ?? current ?? "Default";
+  const currentLabel =
+    active?.name ?? current ?? t("presets.default", "Default");
   const pick = (presetId: string | null) => {
     setOpen(false);
     if (presetId !== (current ?? null)) onSelect(presetId);
@@ -74,22 +77,35 @@ export function PresetPicker({
         disabled={locked || busy}
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label="Agent preset"
-        title={error ?? (locked ? LOCKED_HINT : PICK_HINT)}
+        aria-label={t("presets.label", "Agent preset")}
+        title={
+          error ??
+          (locked
+            ? t("presets.lockedHint", LOCKED_HINT)
+            : t("presets.pickHint", PICK_HINT))
+        }
       >
         <span className={styles.robotIcon} aria-hidden="true" />
         <span>
-          <small>Agent</small>
+          <small>{t("presets.agent", "Agent")}</small>
           <strong>{currentLabel}</strong>
         </span>
         {locked ? null : <ChevronDown size={12} />}
       </button>
 
       {open ? (
-        <section className={styles.menu} aria-label="Choose an agent preset">
+        <section
+          className={styles.menu}
+          aria-label={t("presets.menu", "Choose an agent preset")}
+        >
           <header>
-            <strong>Agent for this session</strong>
-            <span>Persona and tools · fixed after the first message</span>
+            <strong>{t("presets.menuTitle", "Agent for this session")}</strong>
+            <span>
+              {t(
+                "presets.menuHint",
+                "Persona and tools · fixed after the first message",
+              )}
+            </span>
           </header>
           <div className={styles.options} role="listbox">
             <button
@@ -99,8 +115,8 @@ export function PresetPicker({
               onClick={() => pick(null)}
             >
               <span>
-                <strong>Default</strong>
-                <em>{DEFAULT_DESCRIPTION}</em>
+                <strong>{t("presets.default", "Default")}</strong>
+                <em>{t("presets.defaultDescription", DEFAULT_DESCRIPTION)}</em>
               </span>
               {current === null ? <Check size={12} /> : null}
             </button>

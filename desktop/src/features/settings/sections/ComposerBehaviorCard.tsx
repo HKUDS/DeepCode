@@ -32,7 +32,7 @@ export function ComposerBehaviorCard() {
       </header>
       <div className={styles.formGrid}>
         <label>
-          While a Turn is running, Enter…
+          {t("settings.composer.label", "While a Turn is running, Enter…")}
           <select
             value={busyEnter}
             onChange={(event) =>
@@ -41,15 +41,17 @@ export function ComposerBehaviorCard() {
           >
             {BUSY_ENTER_BEHAVIORS.map((behavior) => (
               <option key={behavior} value={behavior}>
-                {BEHAVIOR_LABELS[behavior]}
+                {t(`settings.composer.${behavior}`, BEHAVIOR_LABELS[behavior])}
               </option>
             ))}
           </select>
         </label>
       </div>
       <p className={styles.note}>
-        Busy only; Cmd/Ctrl+Enter uses the other behavior. When idle, Enter
-        always sends. Applies immediately on this machine.
+        {t(
+          "settings.composer.note",
+          "Busy only; Cmd/Ctrl+Enter uses the other behavior. When idle, Enter always sends. Applies immediately on this machine.",
+        )}
       </p>
     </section>
   );

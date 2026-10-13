@@ -16,6 +16,8 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 
 import type {
   ConfigScope,
@@ -85,6 +87,7 @@ export function McpPage({
   runtime: ClientRuntime;
   project: Project | null;
 }) {
+  const { t } = useTranslation();
   const catalog = useMcpCatalog(runtime, project);
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [busy, setBusy] = useState<string | null>(null);
@@ -154,7 +157,11 @@ export function McpPage({
       setDraft(EMPTY_DRAFT);
       setFeedback({
         tone: "success",
-        message: `Saved ${name}. No server process was started. Test it before enabling.`,
+        message: t(
+          "mcp.feedback.saved",
+          "Saved {{name}}. No server process was started. Test it before enabling.",
+          { name },
+        ),
       });
     });
   };
@@ -186,12 +193,15 @@ export function McpPage({
     <section className={styles.page} aria-labelledby="mcp-title">
       <header className={styles.pageHeader}>
         <div>
-          <p className={styles.eyebrow}>Agent capabilities</p>
-          <h1 id="mcp-title">MCP Servers</h1>
+          <p className={styles.eyebrow}>
+            {t("mcp.eyebrow", "Agent capabilities")}
+          </p>
+          <h1 id="mcp-title">{t("mcp.title", "MCP Servers")}</h1>
           <p>
-            Add an MCP server, test the connection, then enable it. Enabled
-            tools become available to the coding agent automatically when a
-            task needs them.
+            {t(
+              "mcp.description",
+              "Add an MCP server, test the connection, then enable it. Enabled tools become available to the coding agent automatically when a task needs them.",
+            )}
           </p>
         </div>
         <button
@@ -200,7 +210,7 @@ export function McpPage({
           disabled={catalog.loading}
           onClick={() => void catalog.refresh()}
         >
-          <RefreshCw size={14} /> Refresh
+          <RefreshCw size={14} /> {t("mcp.refresh", "Refresh")}
         </button>
       </header>
 
@@ -221,9 +231,10 @@ export function McpPage({
       ) : null}
       {authorizationUrl ? (
         <p>
-          Browser did not open?{" "}
+          {t("mcp.browserDidNotOpen", "Browser did not open?")}{" "}
           <a href={authorizationUrl} target="_blank" rel="noreferrer">
-            Continue authorization <ExternalLink size={12} />
+            {t("mcp.continueAuthorization", "Continue authorization")}{" "}
+            <ExternalLink size={12} />
           </a>
         </p>
       ) : null}
@@ -231,10 +242,16 @@ export function McpPage({
       <article className={styles.formCard}>
         <header>
           <div>
-            <p className={styles.eyebrow}>Configured servers</p>
-            <h2>Available to DeepCode</h2>
+            <p className={styles.eyebrow}>
+              {t("mcp.configured.eyebrow", "Configured servers")}
+            </p>
+            <h2>{t("mcp.configured.title", "Available to DeepCode")}</h2>
           </div>
-          <span>{servers.length} configured</span>
+          <span>
+            {t("mcp.configured.total", "{{total}} configured", {
+              total: servers.length,
+            })}
+          </span>
         </header>
         <div className={styles.cardList}>
           {servers.length ? servers.map((server) => (
@@ -250,16 +267,16 @@ export function McpPage({
             </header>
             <p>{server.configurationMessage}</p>
             <dl className={styles.metadata}>
-              <div><dt>Endpoint</dt><dd>{server.command ?? server.url}</dd></div>
-              <div><dt>Configuration</dt><dd>{server.configurationState}</dd></div>
-              <div><dt>Authentication</dt><dd>{server.authState}</dd></div>
-              <div><dt>Last check</dt><dd>{server.runtimeMessage}</dd></div>
-              <div><dt>Capabilities</dt><dd>{capabilitySummary(server.toolCount, server.resourceCount, server.promptCount)}</dd></div>
-              <div><dt>Approval</dt><dd>{server.approvalMode}</dd></div>
+              <div><dt>{t("mcp.server.endpoint", "Endpoint")}</dt><dd>{server.command ?? server.url}</dd></div>
+              <div><dt>{t("mcp.server.configuration", "Configuration")}</dt><dd>{server.configurationState}</dd></div>
+              <div><dt>{t("mcp.server.authentication", "Authentication")}</dt><dd>{server.authState}</dd></div>
+              <div><dt>{t("mcp.server.lastCheck", "Last check")}</dt><dd>{server.runtimeMessage}</dd></div>
+              <div><dt>{t("mcp.server.capabilities", "Capabilities")}</dt><dd>{capabilitySummary(t, server.toolCount, server.resourceCount, server.promptCount)}</dd></div>
+              <div><dt>{t("mcp.server.approval", "Approval")}</dt><dd>{server.approvalMode}</dd></div>
               {server.missingEnvKeys.length ? (
-                <div><dt>Missing environment</dt><dd>{server.missingEnvKeys.join(", ")}</dd></div>
+                <div><dt>{t("mcp.server.missingEnvironment", "Missing environment")}</dt><dd>{server.missingEnvKeys.join(", ")}</dd></div>
               ) : null}
-              {server.policyKey ? <div><dt>Plugin policy</dt><dd>{server.policyKey}</dd></div> : null}
+              {server.policyKey ? <div><dt>{t("mcp.server.pluginPolicy", "Plugin policy")}</dt><dd>{server.policyKey}</dd></div> : null}
             </dl>
             <div className={styles.cardActions}>
               <button
@@ -270,28 +287,49 @@ export function McpPage({
                   setFeedback({
                     tone: result.ok ? "success" : "error",
                     message: result.ok
-                      ? `${server.name} passed its connection test: ${capabilitySummary(result.toolCount, result.resourceCount, result.promptCount)}. The test connection is now closed.`
-                      : `${server.name} failed its connection test: ${result.error}`,
+                      ? t(
+                          "mcp.feedback.testPassed",
+                          "{{name}} passed its connection test: {{summary}}. The test connection is now closed.",
+                          {
+                            name: server.name,
+                            summary: capabilitySummary(t, result.toolCount, result.resourceCount, result.promptCount),
+                          },
+                        )
+                      : t(
+                          "mcp.feedback.testFailed",
+                          "{{name}} failed its connection test: {{error}}",
+                          { name: server.name, error: result.error },
+                        ),
                   });
                 })}
               >
-                <Play size={14} /> Test connection
+                <Play size={14} /> {t("mcp.testConnection", "Test connection")}
               </button>
               {server.auth === "oauth" ? (
                 server.authState === "authenticated" ? (
                   <button type="button" disabled={busy !== null} onClick={() => void perform(`logout:${server.id}`, async () => {
                     await catalog.logout(server.id);
-                    setFeedback({ tone: "success", message: `Signed out of ${server.name}.` });
+                    setFeedback({
+                      tone: "success",
+                      message: t("mcp.feedback.signedOut", "Signed out of {{name}}.", { name: server.name }),
+                    });
                   })}>
-                    <LogOut size={14} /> Logout
+                    <LogOut size={14} /> {t("mcp.logout", "Logout")}
                   </button>
                 ) : (
                   <button type="button" disabled={busy !== null || server.authState === "authorizing"} onClick={() => void perform(`login:${server.id}`, async () => {
                     const flow = await catalog.startOAuth(server.id);
                     setAuthorizationUrl(flow.authorizationUrl);
-                    setFeedback({ tone: "success", message: `Authorization started for ${server.name}. Return here after approving access.` });
+                    setFeedback({
+                      tone: "success",
+                      message: t(
+                        "mcp.feedback.authorizationStarted",
+                        "Authorization started for {{name}}. Return here after approving access.",
+                        { name: server.name },
+                      ),
+                    });
                   })}>
-                    <LogIn size={14} /> Authenticate
+                    <LogIn size={14} /> {t("mcp.authenticate", "Authenticate")}
                   </button>
                 )
               ) : null}
@@ -302,21 +340,33 @@ export function McpPage({
                     setFeedback({
                       tone: "success",
                       message: server.enabled
-                        ? `Disabled ${server.name}. It will not be offered to the agent on new turns.`
-                        : `Enabled ${server.name}. The agent can now call its tools when a task needs them.`,
+                        ? t(
+                            "mcp.feedback.disabled",
+                            "Disabled {{name}}. It will not be offered to the agent on new turns.",
+                            { name: server.name },
+                          )
+                        : t(
+                            "mcp.feedback.enabled",
+                            "Enabled {{name}}. The agent can now call its tools when a task needs them.",
+                            { name: server.name },
+                          ),
                     });
                   })}>
-                    <CirclePower size={14} /> {server.enabled ? "Disable" : "Enable"}
+                    <CirclePower size={14} />{" "}
+                    {server.enabled ? t("mcp.disable", "Disable") : t("mcp.enable", "Enable")}
                   </button>
-                  <button type="button" onClick={() => edit(server)}><Pencil size={14} /> Edit</button>
+                  <button type="button" onClick={() => edit(server)}><Pencil size={14} /> {t("mcp.edit", "Edit")}</button>
                   <button type="button" disabled={busy !== null || server.configurationState === "blocked"} onClick={() => {
-                    if (window.confirm(`Remove MCP server “${server.name}”?`)) {
+                    if (window.confirm(t("mcp.removeConfirm", "Remove MCP server “{{name}}”?", { name: server.name }))) {
                       void perform(`remove:${server.id}`, async () => {
                         await catalog.remove(server.name, server.source === "project" ? "project" : "user");
-                        setFeedback({ tone: "success", message: `Removed ${server.name}.` });
+                        setFeedback({
+                          tone: "success",
+                          message: t("mcp.feedback.removed", "Removed {{name}}.", { name: server.name }),
+                        });
                       });
                     }
-                  }}><Trash2 size={14} /> Remove</button>
+                  }}><Trash2 size={14} /> {t("mcp.remove", "Remove")}</button>
                 </>
               ) : null}
             </div>
@@ -324,8 +374,13 @@ export function McpPage({
         )) : (
           <article className={styles.card}>
             <Cable size={18} />
-            <h2>No MCP servers configured</h2>
-            <p>Add a reviewed template or configure a custom server below.</p>
+            <h2>{t("mcp.empty.title", "No MCP servers configured")}</h2>
+            <p>
+              {t(
+                "mcp.empty.hint",
+                "Add a reviewed template or configure a custom server below.",
+              )}
+            </p>
           </article>
         )}
         </div>
@@ -334,14 +389,22 @@ export function McpPage({
       <article className={styles.formCard}>
         <header>
           <div>
-            <p className={styles.eyebrow}>Bundled catalog</p>
-            <h2>Reviewed MCP templates</h2>
+            <p className={styles.eyebrow}>
+              {t("mcp.templates.eyebrow", "Bundled catalog")}
+            </p>
+            <h2>{t("mcp.templates.title", "Reviewed MCP templates")}</h2>
             <p className={styles.cardDescription}>
-              Adding a template saves configuration only. It does not download
-              a package, start a process, or enable tools.
+              {t(
+                "mcp.templates.description",
+                "Adding a template saves configuration only. It does not download a package, start a process, or enable tools.",
+              )}
             </p>
           </div>
-          <span>{presets.length} templates</span>
+          <span>
+            {t("mcp.templates.total", "{{total}} templates", {
+              total: presets.length,
+            })}
+          </span>
         </header>
         <div className={styles.cardList}>
           {presets.map((preset) => (
@@ -352,17 +415,23 @@ export function McpPage({
                   <h2>{preset.displayName}</h2>
                 </div>
                 <span className={styles.badge} data-status={preset.configured ? "configured" : "available"}>
-                  {preset.configured ? "configured" : "available"}
+                  {preset.configured
+                    ? t("mcp.templates.configured", "configured")
+                    : t("mcp.templates.available", "available")}
                 </span>
               </header>
               <p>{preset.description}</p>
               <p>{preset.requires}{preset.note ? ` · ${preset.note}` : ""}</p>
               {preset.missingEnvironment.length ? (
-                <p>Set before testing: {preset.missingEnvironment.join(", ")}</p>
+                <p>
+                  {t("mcp.templates.setBeforeTesting", "Set before testing: {{names}}", {
+                    names: preset.missingEnvironment.join(", "),
+                  })}
+                </p>
               ) : null}
               <div className={styles.cardActions}>
                 <a href={preset.docsUrl} target="_blank" rel="noreferrer">
-                  Docs <ExternalLink size={12} />
+                  {t("mcp.templates.docs", "Docs")} <ExternalLink size={12} />
                 </a>
                 <button
                   type="button"
@@ -371,11 +440,15 @@ export function McpPage({
                     await catalog.addPreset(preset.id);
                     setFeedback({
                       tone: "success",
-                      message: `Added ${preset.displayName} in disabled state. No package was downloaded and no process was started. Test it before enabling.`,
+                      message: t(
+                        "mcp.feedback.presetAdded",
+                        "Added {{name}} in disabled state. No package was downloaded and no process was started. Test it before enabling.",
+                        { name: preset.displayName },
+                      ),
                     });
                   })}
                 >
-                  <Plus size={14} /> Add server
+                  <Plus size={14} /> {t("mcp.templates.add", "Add server")}
                 </button>
               </div>
             </article>
@@ -386,42 +459,51 @@ export function McpPage({
       <article className={styles.formCard}>
         <header>
           <div>
-            <p className={styles.eyebrow}>{editing ? "Edit server" : "Custom server"}</p>
-            <h2>{editing?.name ?? "Connect an MCP server"}</h2>
+            <p className={styles.eyebrow}>
+              {editing
+                ? t("mcp.form.editEyebrow", "Edit server")
+                : t("mcp.form.customEyebrow", "Custom server")}
+            </p>
+            <h2>{editing?.name ?? t("mcp.form.title", "Connect an MCP server")}</h2>
           </div>
-          {editing ? <button type="button" onClick={() => setDraft(EMPTY_DRAFT)}>Cancel</button> : null}
+          {editing ? <button type="button" onClick={() => setDraft(EMPTY_DRAFT)}>{t("mcp.form.cancel", "Cancel")}</button> : null}
         </header>
         <div className={styles.formGrid}>
-          <Field label="Name"><input value={draft.name} onChange={(event) => update(setDraft, "name", event.target.value)} /></Field>
-          <Field label="Scope"><select value={draft.scope} onChange={(event) => update(setDraft, "scope", event.target.value as ConfigScope)}><option value="user">User</option><option value="project" disabled={!canUseProjectScope}>This project</option></select></Field>
-          <Field label="Transport"><select value={draft.transport} onChange={(event) => update(setDraft, "transport", event.target.value as Transport)}><option value="stdio">Local stdio</option><option value="streamableHttp">Streamable HTTP</option><option value="sse">SSE</option></select></Field>
-          <Field label="Approval"><select value={draft.approvalMode} onChange={(event) => update(setDraft, "approvalMode", event.target.value as Draft["approvalMode"])}><option value="writes">Ask for writes</option><option value="prompt">Always ask</option><option value="auto">Use global policy</option><option value="approve">Approved when globally allowed</option></select></Field>
+          <Field label={t("mcp.form.name", "Name")}><input value={draft.name} onChange={(event) => update(setDraft, "name", event.target.value)} /></Field>
+          <Field label={t("mcp.form.scope", "Scope")}><select value={draft.scope} onChange={(event) => update(setDraft, "scope", event.target.value as ConfigScope)}><option value="user">{t("mcp.form.scopeUser", "User")}</option><option value="project" disabled={!canUseProjectScope}>{t("mcp.form.scopeProject", "This project")}</option></select></Field>
+          <Field label={t("mcp.form.transport", "Transport")}><select value={draft.transport} onChange={(event) => update(setDraft, "transport", event.target.value as Transport)}><option value="stdio">{t("mcp.form.transportStdio", "Local stdio")}</option><option value="streamableHttp">Streamable HTTP</option><option value="sse">SSE</option></select></Field>
+          <Field label={t("mcp.form.approval", "Approval")}><select value={draft.approvalMode} onChange={(event) => update(setDraft, "approvalMode", event.target.value as Draft["approvalMode"])}><option value="writes">{t("mcp.form.approvalWrites", "Ask for writes")}</option><option value="prompt">{t("mcp.form.approvalPrompt", "Always ask")}</option><option value="auto">{t("mcp.form.approvalAuto", "Use global policy")}</option><option value="approve">{t("mcp.form.approvalApprove", "Approved when globally allowed")}</option></select></Field>
           {draft.transport === "stdio" ? (
             <>
-              <Field label="Command" wide><input value={draft.command} onChange={(event) => update(setDraft, "command", event.target.value)} placeholder="Executable or absolute path" /></Field>
-              <Field label="Arguments" wide><textarea rows={3} value={draft.args} onChange={(event) => update(setDraft, "args", event.target.value)} placeholder="One argument per line" /></Field>
-              <Field label="Working directory"><input value={draft.cwd} onChange={(event) => update(setDraft, "cwd", event.target.value)} /></Field>
-              <Field label="Forward environment"><input value={draft.envVars} onChange={(event) => update(setDraft, "envVars", event.target.value)} placeholder="OPTIONAL_NAME" /></Field>
-              <Field label="Required environment"><input value={draft.requiredEnvVars} onChange={(event) => update(setDraft, "requiredEnvVars", event.target.value)} placeholder="REQUIRED_API_KEY" /></Field>
-              <Field label="Credential bindings" wide><textarea rows={2} value={draft.credentialEnv} onChange={(event) => update(setDraft, "credentialEnv", event.target.value)} placeholder="API_KEY=openrouter" /></Field>
+              <Field label={t("mcp.form.command", "Command")} wide><input value={draft.command} onChange={(event) => update(setDraft, "command", event.target.value)} placeholder={t("mcp.form.commandPlaceholder", "Executable or absolute path")} /></Field>
+              <Field label={t("mcp.form.arguments", "Arguments")} wide><textarea rows={3} value={draft.args} onChange={(event) => update(setDraft, "args", event.target.value)} placeholder={t("mcp.form.argumentsPlaceholder", "One argument per line")} /></Field>
+              <Field label={t("mcp.form.cwd", "Working directory")}><input value={draft.cwd} onChange={(event) => update(setDraft, "cwd", event.target.value)} /></Field>
+              <Field label={t("mcp.form.forwardEnvironment", "Forward environment")}><input value={draft.envVars} onChange={(event) => update(setDraft, "envVars", event.target.value)} placeholder="OPTIONAL_NAME" /></Field>
+              <Field label={t("mcp.form.requiredEnvironment", "Required environment")}><input value={draft.requiredEnvVars} onChange={(event) => update(setDraft, "requiredEnvVars", event.target.value)} placeholder="REQUIRED_API_KEY" /></Field>
+              <Field label={t("mcp.form.credentialBindings", "Credential bindings")} wide><textarea rows={2} value={draft.credentialEnv} onChange={(event) => update(setDraft, "credentialEnv", event.target.value)} placeholder="API_KEY=openrouter" /></Field>
             </>
           ) : (
             <>
               <Field label="URL" wide><input value={draft.url} onChange={(event) => update(setDraft, "url", event.target.value)} placeholder="https://example.com/mcp" /></Field>
-              <Field label="Authentication"><select value={draft.auth} onChange={(event) => update(setDraft, "auth", event.target.value as Draft["auth"])}><option value="none">None / configured headers</option><option value="oauth">OAuth</option></select></Field>
-              <Field label="Headers from environment" wide><textarea rows={2} value={draft.headerEnv} onChange={(event) => update(setDraft, "headerEnv", event.target.value)} placeholder="Authorization=MY_HEADER_ENV" /></Field>
-              <Field label="URL parameters from environment" wide><textarea rows={2} value={draft.urlParamEnv} onChange={(event) => update(setDraft, "urlParamEnv", event.target.value)} placeholder="apiKey=MY_API_KEY" /></Field>
+              <Field label={t("mcp.form.authentication", "Authentication")}><select value={draft.auth} onChange={(event) => update(setDraft, "auth", event.target.value as Draft["auth"])}><option value="none">{t("mcp.form.authNone", "None / configured headers")}</option><option value="oauth">OAuth</option></select></Field>
+              <Field label={t("mcp.form.headerEnv", "Headers from environment")} wide><textarea rows={2} value={draft.headerEnv} onChange={(event) => update(setDraft, "headerEnv", event.target.value)} placeholder="Authorization=MY_HEADER_ENV" /></Field>
+              <Field label={t("mcp.form.urlParamEnv", "URL parameters from environment")} wide><textarea rows={2} value={draft.urlParamEnv} onChange={(event) => update(setDraft, "urlParamEnv", event.target.value)} placeholder="apiKey=MY_API_KEY" /></Field>
             </>
           )}
-          <Field label="Enabled tools"><input value={draft.enabledTools} onChange={(event) => update(setDraft, "enabledTools", event.target.value)} placeholder="Blank means all" /></Field>
-          <Field label="Disabled tools"><input value={draft.disabledTools} onChange={(event) => update(setDraft, "disabledTools", event.target.value)} /></Field>
-          <Field label="Startup timeout (seconds)"><input type="number" min="1" value={draft.startupTimeout} onChange={(event) => update(setDraft, "startupTimeout", event.target.value)} /></Field>
-          <Field label="Tool timeout (seconds)"><input type="number" min="1" value={draft.toolTimeout} onChange={(event) => update(setDraft, "toolTimeout", event.target.value)} /></Field>
-          <label className={styles.checkboxField}><input type="checkbox" checked={draft.required} onChange={(event) => update(setDraft, "required", event.target.checked)} /> Required for agent startup</label>
+          <Field label={t("mcp.form.enabledTools", "Enabled tools")}><input value={draft.enabledTools} onChange={(event) => update(setDraft, "enabledTools", event.target.value)} placeholder={t("mcp.form.enabledToolsPlaceholder", "Blank means all")} /></Field>
+          <Field label={t("mcp.form.disabledTools", "Disabled tools")}><input value={draft.disabledTools} onChange={(event) => update(setDraft, "disabledTools", event.target.value)} /></Field>
+          <Field label={t("mcp.form.startupTimeout", "Startup timeout (seconds)")}><input type="number" min="1" value={draft.startupTimeout} onChange={(event) => update(setDraft, "startupTimeout", event.target.value)} /></Field>
+          <Field label={t("mcp.form.toolTimeout", "Tool timeout (seconds)")}><input type="number" min="1" value={draft.toolTimeout} onChange={(event) => update(setDraft, "toolTimeout", event.target.value)} /></Field>
+          <label className={styles.checkboxField}><input type="checkbox" checked={draft.required} onChange={(event) => update(setDraft, "required", event.target.checked)} /> {t("mcp.form.required", "Required for agent startup")}</label>
         </div>
         <div className={styles.formActions}>
-          <span>New servers stay disabled. Saving never starts a process.</span>
-          <button className={styles.primaryButton} type="button" disabled={busy !== null || !draft.name.trim()} onClick={() => void save()}><Plus size={14} /> {editing ? "Save changes" : "Add custom server"}</button>
+          <span>
+            {t(
+              "mcp.form.note",
+              "New servers stay disabled. Saving never starts a process.",
+            )}
+          </span>
+          <button className={styles.primaryButton} type="button" disabled={busy !== null || !draft.name.trim()} onClick={() => void save()}><Plus size={14} /> {editing ? t("mcp.form.saveChanges", "Save changes") : t("mcp.form.add", "Add custom server")}</button>
         </div>
       </article>
     </section>
@@ -473,9 +555,14 @@ function serverStatus(server: McpServerInfo): string {
 }
 
 function capabilitySummary(
+  t: TFunction,
   toolCount: number,
   resourceCount: number,
   promptCount: number,
 ): string {
-  return `${toolCount} tools · ${resourceCount} resources · ${promptCount} prompts`;
+  return t(
+    "mcp.capabilitySummary",
+    "{{tools}} tools · {{resources}} resources · {{prompts}} prompts",
+    { tools: toolCount, resources: resourceCount, prompts: promptCount },
+  );
 }

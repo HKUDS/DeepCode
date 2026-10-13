@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { confirmAction } from "../platform/confirmAction";
 
@@ -41,6 +42,7 @@ export interface DesktopUiController extends DesktopUiState {
 }
 
 export function useDesktopUi(): DesktopUiController {
+  const { t } = useTranslation();
   const [destination, setDestination] = useState<DesktopDestination>("threads");
   const [sessionQuery, setSessionQuery] = useState("");
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -55,9 +57,12 @@ export function useDesktopUi(): DesktopUiController {
     if (
       inspectorDirty &&
       !(await confirmAction(
-        "Discard the unsaved editor draft and continue? Your edits cannot be recovered.",
+        t(
+          "confirm.discardDraft.continue",
+          "Discard the unsaved editor draft and continue? Your edits cannot be recovered.",
+        ),
         {
-          confirmLabel: "Discard draft",
+          confirmLabel: t("confirm.discardDraft.confirm", "Discard draft"),
         },
       ))
     ) {
@@ -65,7 +70,7 @@ export function useDesktopUi(): DesktopUiController {
     }
     setInspectorDirty(false);
     return true;
-  }, [inspectorDirty]);
+  }, [inspectorDirty, t]);
   const navigateTo = useCallback(
     async (nextDestination: DesktopDestination) => {
       if (!(await confirmDiscardInspectorDraft())) return false;

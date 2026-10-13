@@ -2357,6 +2357,51 @@ describe("desktop command center", () => {
     expect(await screen.findByRole("heading", { name: "Settings" })).toBeTruthy();
   });
 
+  it("renders the main surfaces in Chinese", async () => {
+    __setLocaleForTests("zh-CN");
+    const runtime = new TestRuntime([project], [thread], []);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    expect(screen.getByLabelText("任务指令")).toBeTruthy();
+    expect(
+      await screen.findByRole("heading", { name: "从一个任务开始。" }),
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "MCP" }));
+    expect(
+      await screen.findByRole("heading", { name: "MCP 服务器" }),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "添加自定义服务器" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "技能" }));
+    expect(await screen.findByRole("heading", { name: "技能" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "导入文件夹" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "插件" }));
+    expect(await screen.findByRole("heading", { name: "插件" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "自动化" }));
+    expect(await screen.findByRole("heading", { name: "自动化" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /新建自动化/ })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    const dialog = await screen.findByRole("dialog", { name: "设置" });
+    expect(
+      await within(dialog).findByRole("combobox", { name: "会话默认权限" }),
+    ).toBeTruthy();
+    expect(
+      within(dialog).getByRole("button", { name: "保存安全设置" }),
+    ).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "模型" }));
+    expect(
+      await within(dialog).findByRole("heading", { name: "AI 提供方" }),
+    ).toBeTruthy();
+    expect(
+      within(dialog).getByRole("heading", { name: "智能体模型" }),
+    ).toBeTruthy();
+  });
+
   it("opens Settings as a sectioned dialog and closes it again", async () => {
     const runtime = new TestRuntime([project], [thread], []);
     render(<App runtime={runtime} />);

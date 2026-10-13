@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+
 import type { Item } from "../../generated/app-server";
 import { presentItem } from "../execution/itemPresentation";
 import { InspectorEmpty } from "./InspectorEmpty";
@@ -14,10 +16,14 @@ export function DetailsPanel({
   items,
   onSelectItem,
 }: DetailsPanelProps) {
+  const { t } = useTranslation();
   if (!selected) {
     return (
       <div className={styles.content}>
-        <InspectorEmpty label="Select an activity to inspect it." compact />
+        <InspectorEmpty
+          label={t("inspector.details.empty", "Select an activity to inspect it.")}
+          compact
+        />
         {items.slice(-5).map((item) => (
           <button
             className={styles.detailShortcut}
@@ -38,23 +44,23 @@ export function DetailsPanel({
       <h2>{selected.summary}</h2>
       <dl className={styles.metadata}>
         <div>
-          <dt>Kind</dt>
+          <dt>{t("inspector.details.kind", "Kind")}</dt>
           <dd>{selected.kind.replaceAll("_", " ")}</dd>
         </div>
         <div>
-          <dt>Status</dt>
+          <dt>{t("inspector.details.status", "Status")}</dt>
           <dd>{selected.status.replaceAll("_", " ")}</dd>
         </div>
         <div>
-          <dt>Item</dt>
+          <dt>{t("inspector.details.item", "Item")}</dt>
           <dd>{selected.id}</dd>
         </div>
         <div>
-          <dt>Turn</dt>
+          <dt>{t("inspector.details.turn", "Turn")}</dt>
           <dd>{selected.turnId}</dd>
         </div>
       </dl>
-      <h3>Structured payload</h3>
+      <h3>{t("inspector.details.payload", "Structured payload")}</h3>
       <pre>{JSON.stringify(selected.payload, null, 2)}</pre>
     </div>
   );

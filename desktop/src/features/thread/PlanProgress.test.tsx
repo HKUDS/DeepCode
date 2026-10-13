@@ -1,8 +1,11 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { initI18n } from "../../app/i18n";
 import type { TurnPlanState } from "../../app/workspaceState";
 import { PlanProgress } from "./PlanProgress";
+
+initI18n();
 
 const plan: TurnPlanState = {
   turnId: "turn-1",

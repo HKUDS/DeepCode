@@ -4,6 +4,8 @@
  * machine-local appearance next, application maintenance last.
  */
 
+import { useTranslation } from "react-i18next";
+
 import { AppearanceSettings } from "../AppearanceSettings";
 import type { SettingsSectionProps } from "../settingsSections";
 import { ComposerBehaviorCard } from "./ComposerBehaviorCard";
@@ -17,6 +19,7 @@ import styles from "../../management/ManagementWorkspace.module.css";
 
 export function GeneralSection(props: SettingsSectionProps) {
   const { runtime, project, settings, busy, scope, onUpdate } = props;
+  const { t } = useTranslation();
   return (
     <div className={styles.settingsGrid}>
       <DefaultPresetCard {...props} />
@@ -32,13 +35,18 @@ export function GeneralSection(props: SettingsSectionProps) {
       <ServiceCard runtime={runtime} />
       <UpdatesCard runtime={runtime} />
       <DiagnosticsCard runtime={runtime} project={project} />
-      <aside className={styles.credits} aria-label="Visual credits">
+      <aside
+        className={styles.credits}
+        aria-label={t("settings.credits.title", "Visual credits")}
+      >
         <span className={styles.creditMark} aria-hidden="true" />
         <p>
-          <strong>Visual credits</strong>
+          <strong>{t("settings.credits.title", "Visual credits")}</strong>
           <small>
-            Selected outline accents designed by The Icon Tree from Flaticon.
-            Plugins and Skills empty-state marks from Phosphor Icons (MIT).
+            {t(
+              "settings.credits.body",
+              "Selected outline accents designed by The Icon Tree from Flaticon. Plugins and Skills empty-state marks from Phosphor Icons (MIT).",
+            )}
           </small>
         </p>
       </aside>

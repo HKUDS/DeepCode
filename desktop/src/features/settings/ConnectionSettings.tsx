@@ -7,7 +7,9 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import type { TFunction } from "i18next";
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import type {
   CatalogModel,
@@ -42,6 +44,7 @@ export function ConnectionSettings({
   busy,
   scope,
 }: ConnectionSettingsProps) {
+  const { t } = useTranslation();
   const [editing, setEditing] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
@@ -201,7 +204,10 @@ export function ConnectionSettings({
         error:
           result.models.length === 0
             ? (result.error ??
-              "The provider listed no models. Add them by hand.")
+              t(
+                "settings.connections.noModelsListed",
+                "The provider listed no models. Add them by hand.",
+              ))
             : null,
         models: result.models,
       });
@@ -251,10 +257,17 @@ export function ConnectionSettings({
   const remove = async (connection: ConnectionInfo) => {
     if (
       !(await confirmAction(
-        `Remove “${connection.label}”? Its saved API key will also be deleted. Existing Session history is kept.`,
+        t(
+          "settings.connections.removeConfirm",
+          "Remove “{{label}}”? Its saved API key will also be deleted. Existing Session history is kept.",
+          { label: connection.label },
+        ),
         {
-          title: "Remove LLM connection",
-          confirmLabel: "Remove connection",
+          title: t("settings.connections.removeTitle", "Remove LLM connection"),
+          confirmLabel: t(
+            "settings.connections.removeConnection",
+            "Remove connection",
+          ),
           kind: "warning",
         },
       ))
@@ -272,25 +285,29 @@ export function ConnectionSettings({
     <section className={styles.section} aria-labelledby="connections-title">
       <header className={styles.heading}>
         <div>
-          <p>Step 1 · Connect a provider</p>
-          <h2 id="connections-title">AI providers</h2>
+          <p>{t("settings.connections.step", "Step 1 · Connect a provider")}</p>
+          <h2 id="connections-title">
+            {t("settings.connections.title", "AI providers")}
+          </h2>
           <span>
-            Add the service that supplies your models. DeepCode keeps API keys
-            in user-private storage and shares the connection with CLI and
-            Desktop.
+            {t(
+              "settings.connections.description",
+              "Add the service that supplies your models. DeepCode keeps API keys in user-private storage and shares the connection with CLI and Desktop.",
+            )}
           </span>
           {scope === "project" ? (
             <span className={styles.scopeNote} role="note">
-              Connections and credentials are always user-scoped: they are
-              shared with the CLI and every project, so this section ignores
-              the “Selected project” write scope.
+              {t(
+                "settings.connections.userScoped",
+                "Connections and credentials are always user-scoped: they are shared with the CLI and every project, so this section ignores the “Selected project” write scope.",
+              )}
             </span>
           ) : null}
         </div>
         <div className={styles.addActions}>
           <label className={styles.addSelect}>
             <select
-              aria-label="Add provider"
+              aria-label={t("settings.connections.addProvider", "Add provider")}
               value=""
               disabled={busy || saving}
               onChange={(event) => {
@@ -300,12 +317,17 @@ export function ConnectionSettings({
                 event.target.value = "";
               }}
             >
-              <option value="">Add provider…</option>
+              <option value="">
+                {t("settings.connections.addProviderOption", "Add provider…")}
+              </option>
               {controller.catalog?.templates
                 .filter((template) => template.name !== "custom")
                 .map((template) => (
                   <option key={template.name} value={template.name}>
-                    {template.label} · {template.local ? "local" : "cloud"}
+                    {template.label} ·{" "}
+                    {template.local
+                      ? t("settings.connections.local", "local")
+                      : t("settings.connections.cloud", "cloud")}
                   </option>
                 ))}
             </select>
@@ -318,10 +340,13 @@ export function ConnectionSettings({
               chooseTemplate("custom");
             }}
             disabled={busy || saving}
-            title="Declare an OpenAI-compatible or Anthropic endpoint DeepCode does not ship"
+            title={t(
+              "settings.connections.customTooltip",
+              "Declare an OpenAI-compatible or Anthropic endpoint DeepCode does not ship",
+            )}
           >
             <Plus size={14} />
-            Add a custom provider
+            {t("settings.connections.addCustom", "Add a custom provider")}
           </button>
         </div>
       </header>
@@ -350,7 +375,7 @@ export function ConnectionSettings({
                     <code>{connection.id}</code>
                   </div>
                   <span data-status={result?.status ?? "configured"}>
-                    {connectionStatus(connection, result)}
+                    {connectionStatus(connection, result, t)}
                   </span>
                 </header>
                 <p>
@@ -361,19 +386,27 @@ export function ConnectionSettings({
                       role="img"
                       aria-label={
                         connection.configured
-                          ? "Credential configured"
-                          : "Credential missing"
+                          ? t(
+                              "settings.connections.credentialConfigured",
+                              "Credential configured",
+                            )
+                          : t(
+                              "settings.connections.credentialMissing",
+                              "Credential missing",
+                            )
                       }
                     />
-                    {credentialLabel(connection)} ·{" "}
-                    {modelFaceLabel(connection, result)}
+                    {credentialLabel(connection, t)} ·{" "}
+                    {modelFaceLabel(connection, result, t)}
                   </small>
                 </p>
                 {connection.auth === "oauth" ? <ProviderLogin connection={connection} controller={controller} /> : null}
                 {result ? (
                   <ConnectionVerification result={result} compact />
                 ) : testingId === connection.id ? (
-                  <p className={styles.loading}>Checking…</p>
+                  <p className={styles.loading}>
+                    {t("settings.connections.checking", "Checking…")}
+                  </p>
                 ) : null}
               </div>
               <div className={styles.actions}>
@@ -382,7 +415,7 @@ export function ConnectionSettings({
                   onClick={() => beginEdit(connection)}
                   disabled={busy}
                 >
-                  Edit
+                  {t("settings.connections.edit", "Edit")}
                 </button>
                 {connection.explicit ? (
                   <button
@@ -390,7 +423,10 @@ export function ConnectionSettings({
                     className={styles.removeButton}
                     onClick={() => void remove(connection)}
                     disabled={busy}
-                    title="Remove connection"
+                    title={t(
+                      "settings.connections.removeConnection",
+                      "Remove connection",
+                    )}
                   >
                     <Trash2 size={14} />
                   </button>
@@ -402,15 +438,21 @@ export function ConnectionSettings({
         {!controller.loading && !connections.some(isManagedConnection) ? (
           <div className={styles.emptyState}>
             <Server size={18} />
-            <strong>No provider connected</strong>
+            <strong>
+              {t("settings.connections.emptyTitle", "No provider connected")}
+            </strong>
             <span>
-              Pick a provider from “Add provider…” above, or declare a custom
-              endpoint, to begin.
+              {t(
+                "settings.connections.emptyBody",
+                "Pick a provider from “Add provider…” above, or declare a custom endpoint, to begin.",
+              )}
             </span>
           </div>
         ) : null}
         {controller.loading ? (
-          <p className={styles.loading}>Loading connections…</p>
+          <p className={styles.loading}>
+            {t("settings.connections.loading", "Loading connections…")}
+          </p>
         ) : null}
       </div>
 
@@ -427,15 +469,25 @@ export function ConnectionSettings({
                 <KeyRound size={16} />
                 <span>
                   <strong id="connection-editor-title">
-                    {editingExisting ? "Edit provider" : "Connect a provider"}
+                    {editingExisting
+                      ? t("settings.connections.editProvider", "Edit provider")
+                      : t("settings.connections.connectProvider", "Connect a provider")}
                   </strong>
-                  <small>One setup works in CLI and Desktop</small>
+                  <small>
+                    {t(
+                      "settings.connections.oneSetup",
+                      "One setup works in CLI and Desktop",
+                    )}
+                  </small>
                 </span>
               </div>
               <button
                 type="button"
                 onClick={() => setEditing(null)}
-                aria-label="Close connection editor"
+                aria-label={t(
+                  "settings.connections.closeEditor",
+                  "Close connection editor",
+                )}
               >
                 <X size={16} />
               </button>
@@ -453,24 +505,27 @@ export function ConnectionSettings({
                     <strong>{selectedTemplate?.label ?? editing.label}</strong>
                     <small>
                       {selectedTemplate?.local
-                        ? "Local model service"
-                        : "API provider"}
+                        ? t("settings.connections.localService", "Local model service")
+                        : t("settings.connections.apiProvider", "API provider")}
                     </small>
                   </span>
                 </div>
                 <label className={styles.wide}>
-                  Display name
+                  {t("settings.connections.displayName", "Display name")}
                   <input
                     value={editing.label}
                     onChange={(event) =>
                       setEditing({ ...editing, label: event.target.value })
                     }
-                    placeholder={selectedTemplate?.label ?? "My provider"}
+                    placeholder={
+                      selectedTemplate?.label ??
+                      t("settings.connections.myProvider", "My provider")
+                    }
                   />
                 </label>
                 {endpointRequired ? (
                   <label className={styles.wide}>
-                    API endpoint
+                    {t("settings.connections.endpoint", "API endpoint")}
                     <input
                       value={editing.apiBase}
                       onChange={(event) =>
@@ -483,22 +538,35 @@ export function ConnectionSettings({
                       aria-required="true"
                     />
                     <small>
-                      This provider has no universal endpoint. Enter the base
-                      URL of your server.
+                      {t(
+                        "settings.connections.endpointNote",
+                        "This provider has no universal endpoint. Enter the base URL of your server.",
+                      )}
                     </small>
                   </label>
                 ) : null}
                 <ProtocolSettings draft={editing} onChange={setEditing} />
                 {editing.auth === "api_key" ? (
                   <fieldset className={`${styles.credentials} ${styles.wide}`}>
-                    <legend>Credential</legend>
+                    <legend>
+                      {t("settings.connections.credential", "Credential")}
+                    </legend>
                     {editing.environmentShadows ? (
                       <p className={styles.credentialShadowNote} role="note">
                         {editing.shadowingEnvName
-                          ? `The launch environment variable ${editing.shadowingEnvName} currently provides this key and takes precedence. `
-                          : "A launch environment variable currently provides this key and takes precedence. "}
-                        Unset it in the launching shell to manage the key
-                        here.
+                          ? t(
+                              "settings.connections.shadowedBy",
+                              "The launch environment variable {{name}} currently provides this key and takes precedence. ",
+                              { name: editing.shadowingEnvName },
+                            )
+                          : t(
+                              "settings.connections.shadowed",
+                              "A launch environment variable currently provides this key and takes precedence. ",
+                            )}
+                        {t(
+                          "settings.connections.unsetToManage",
+                          "Unset it in the launching shell to manage the key here.",
+                        )}
                       </p>
                     ) : null}
                     <input
@@ -513,27 +581,34 @@ export function ConnectionSettings({
                       }
                       placeholder={
                         editing.environmentShadows
-                          ? "Provided by the launch environment (read-only)"
+                          ? t(
+                              "settings.connections.keyFromEnvironment",
+                              "Provided by the launch environment (read-only)",
+                            )
                           : editingExisting
-                            ? "Leave blank to keep the saved key"
-                            : "Paste API key"
+                            ? t(
+                                "settings.connections.keepSavedKey",
+                                "Leave blank to keep the saved key",
+                              )
+                            : t("settings.connections.pasteKey", "Paste API key")
                       }
                       autoComplete="new-password"
                       disabled={
                         editing.clearApiKey || editing.environmentShadows
                       }
-                      aria-label="API key"
+                      aria-label={t("settings.connections.apiKey", "API key")}
                     />
                     <small>
-                      Write-only: stored keys are private and never returned to
-                      the app UI. Referencing an environment variable instead
-                      is available under Advanced.
+                      {t(
+                        "settings.connections.writeOnly",
+                        "Write-only: stored keys are private and never returned to the app UI. Referencing an environment variable instead is available under Advanced.",
+                      )}
                     </small>
                   </fieldset>
                 ) : null}
                 {editing.template ? (
                   <fieldset className={`${styles.modelsField} ${styles.wide}`}>
-                    <legend>Models</legend>
+                    <legend>{t("settings.connections.models", "Models")}</legend>
                     <div className={styles.modelFetchRow}>
                       <button
                         type="button"
@@ -541,12 +616,17 @@ export function ConnectionSettings({
                         disabled={modelFetch.loading || busy}
                       >
                         {modelFetch.loading
-                          ? "Fetching…"
-                          : "Fetch models from provider"}
+                          ? t("settings.connections.fetching", "Fetching…")
+                          : t(
+                              "settings.connections.fetchModels",
+                              "Fetch models from provider",
+                            )}
                       </button>
                       <small>
-                        Probes the endpoint as filled in above — an unsaved
-                        URL or key works; picks become the manual model list.
+                        {t(
+                          "settings.connections.fetchNote",
+                          "Probes the endpoint as filled in above — an unsaved URL or key works; picks become the manual model list.",
+                        )}
                       </small>
                     </div>
                     {modelFetch.error ? (
@@ -558,7 +638,10 @@ export function ConnectionSettings({
                       <>
                         <ul
                           className={styles.modelPicker}
-                          aria-label="Discovered models"
+                          aria-label={t(
+                            "settings.connections.discovered",
+                            "Discovered models",
+                          )}
                         >
                           {modelFetch.models.map((model) => {
                             const listed = manualModelIds.has(model.id);
@@ -582,9 +665,22 @@ export function ConnectionSettings({
                                     <small>
                                       {model.id}
                                       {model.contextWindow
-                                        ? ` · ${Math.round(model.contextWindow / 1000)}K context`
+                                        ? t(
+                                            "settings.connections.contextWindow",
+                                            " · {{size}}K context",
+                                            {
+                                              size: Math.round(
+                                                model.contextWindow / 1000,
+                                              ),
+                                            },
+                                          )
                                         : ""}
-                                      {listed ? " · already listed" : ""}
+                                      {listed
+                                        ? t(
+                                            "settings.connections.alreadyListed",
+                                            " · already listed",
+                                          )
+                                        : ""}
                                     </small>
                                   </span>
                                 </label>
@@ -598,9 +694,21 @@ export function ConnectionSettings({
                           onClick={adoptPickedModels}
                           disabled={pickedModels.size === 0}
                         >
-                          Add {pickedModels.size || "selected"} model
-                          {pickedModels.size === 1 ? "" : "s"} to this
-                          connection
+                          {pickedModels.size === 0
+                            ? t(
+                                "settings.connections.addSelected",
+                                "Add selected models to this connection",
+                              )
+                            : pickedModels.size === 1
+                              ? t(
+                                  "settings.connections.addOne",
+                                  "Add 1 model to this connection",
+                                )
+                              : t(
+                                  "settings.connections.addMany",
+                                  "Add {{total}} models to this connection",
+                                  { total: pickedModels.size },
+                                )}
                         </button>
                       </>
                     ) : null}
@@ -612,20 +720,22 @@ export function ConnectionSettings({
                       }
                     />
                     <small>
-                      Per-model reasoning declarations (`reasoningEfforts`)
-                      live in the configuration file — Open configuration
-                      file edits them directly.
+                      {t(
+                        "settings.connections.reasoningNote",
+                        "Per-model reasoning declarations (`reasoningEfforts`) live in the configuration file — Open configuration file edits them directly.",
+                      )}
                     </small>
                   </fieldset>
                 ) : null}
                 <ConnectionProbe key={editing.id} connection={connectionMutation(editing)} controller={controller} />
                 <details className={`${styles.advanced} ${styles.wide}`}>
                   <summary>
-                    <SlidersHorizontal size={14} /> Advanced connection settings
+                    <SlidersHorizontal size={14} />{" "}
+                    {t("settings.connections.advanced", "Advanced connection settings")}
                   </summary>
                   <div>
                     <label>
-                      Connection ID
+                      {t("settings.connections.connectionId", "Connection ID")}
                       <input
                         value={editing.id}
                         onChange={(event) =>
@@ -637,7 +747,10 @@ export function ConnectionSettings({
                     </label>
                     {!selectedTemplate?.local ? (
                       <label>
-                        API key environment variable
+                        {t(
+                          "settings.connections.apiKeyEnv",
+                          "API key environment variable",
+                        )}
                         <input
                           value={editing.apiKeyEnv}
                           onChange={(event) =>
@@ -651,14 +764,16 @@ export function ConnectionSettings({
                           }
                         />
                         <small>
-                          Reference a launch-environment variable instead of a
-                          stored key. Leave blank to use the pasted key.
+                          {t(
+                            "settings.connections.apiKeyEnvNote",
+                            "Reference a launch-environment variable instead of a stored key. Leave blank to use the pasted key.",
+                          )}
                         </small>
                       </label>
                     ) : null}
                     {!endpointRequired ? (
                       <label>
-                        API base
+                        {t("settings.connections.apiBase", "API base")}
                         <input
                           value={editing.apiBase}
                           onChange={(event) =>
@@ -667,12 +782,15 @@ export function ConnectionSettings({
                               apiBase: event.target.value,
                             })
                           }
-                          placeholder="Use provider default"
+                          placeholder={t(
+                            "settings.connections.providerDefault",
+                            "Use provider default",
+                          )}
                         />
                       </label>
                     ) : null}
                     <label>
-                      Adapter
+                      {t("settings.connections.adapter", "Adapter")}
                       <select
                         value={editing.adapter}
                         onChange={(event) =>
@@ -682,12 +800,16 @@ export function ConnectionSettings({
                           })
                         }
                       >
-                        <option value="openai_compat">OpenAI compatible</option>
-                        <option value="anthropic">Anthropic native</option>
+                        <option value="openai_compat">
+                          {t("settings.connections.openaiCompatible", "OpenAI compatible")}
+                        </option>
+                        <option value="anthropic">
+                          {t("settings.connections.anthropicNative", "Anthropic native")}
+                        </option>
                       </select>
                     </label>
                     <label>
-                      Model catalog
+                      {t("settings.connections.modelCatalog", "Model catalog")}
                       <select
                         value={editing.modelCatalog}
                         onChange={(event) =>
@@ -698,11 +820,17 @@ export function ConnectionSettings({
                           })
                         }
                       >
-                        <option value="auto">Automatic</option>
+                        <option value="auto">
+                          {t("settings.connections.catalogAuto", "Automatic")}
+                        </option>
                         <option value="openrouter">OpenRouter</option>
-                        <option value="openai">OpenAI compatible</option>
+                        <option value="openai">
+                          {t("settings.connections.openaiCompatible", "OpenAI compatible")}
+                        </option>
                         <option value="anthropic">Anthropic</option>
-                        <option value="manual">Manual list</option>
+                        <option value="manual">
+                          {t("settings.connections.catalogManual", "Manual list")}
+                        </option>
                       </select>
                     </label>
 
@@ -713,7 +841,10 @@ export function ConnectionSettings({
                         <input
                           type="checkbox"
                           checked={editing.clearApiKey}
-                          aria-label="Remove saved API key"
+                          aria-label={t(
+                            "settings.connections.removeSavedKey",
+                            "Remove saved API key",
+                          )}
                           onChange={(event) =>
                             setEditing({
                               ...editing,
@@ -725,9 +856,17 @@ export function ConnectionSettings({
                           }
                         />
                         <span>
-                          <strong>Remove the saved API key</strong>
+                          <strong>
+                            {t(
+                              "settings.connections.removeSavedKeyTitle",
+                              "Remove the saved API key",
+                            )}
+                          </strong>
                           <small>
-                            Environment and legacy credentials are unchanged.
+                            {t(
+                              "settings.connections.removeSavedKeyNote",
+                              "Environment and legacy credentials are unchanged.",
+                            )}
                           </small>
                         </span>
                       </label>
@@ -738,15 +877,17 @@ export function ConnectionSettings({
             ) : null}
             <footer>
               <span>
-                Saving checks credentials and model discovery. It does not send
-                project content.
+                {t(
+                  "settings.connections.saveNote",
+                  "Saving checks credentials and model discovery. It does not send project content.",
+                )}
               </span>
               <button
                 type="button"
                 onClick={() => setEditing(null)}
                 disabled={saving}
               >
-                Cancel
+                {t("settings.connections.cancel", "Cancel")}
               </button>
               <button
                 type="button"
@@ -760,7 +901,9 @@ export function ConnectionSettings({
                 }
               >
                 <Save size={14} />
-                {saving ? "Saving…" : "Save and check"}
+                {saving
+                  ? t("settings.connections.saving", "Saving…")
+                  : t("settings.connections.saveCheck", "Save and check")}
               </button>
             </footer>
           </section>
@@ -774,46 +917,70 @@ export function ConnectionSettings({
 function modelFaceLabel(
   connection: ConnectionInfo,
   result: ProviderTestResult | undefined,
+  t: TFunction,
 ): string {
   if (connection.manualModels.length > 0) {
-    return `manual · ${connection.manualModels.length} model${
-      connection.manualModels.length === 1 ? "" : "s"
-    }`;
+    return connection.manualModels.length === 1
+      ? t("settings.connections.manualOne", "manual · 1 model")
+      : t("settings.connections.manualMany", "manual · {{total}} models", {
+          total: connection.manualModels.length,
+        });
   }
-  if (result?.modelCount) return `catalog · ${result.modelCount} models`;
+  if (result?.modelCount) {
+    return t("settings.connections.catalogCount", "catalog · {{total}} models", {
+      total: result.modelCount,
+    });
+  }
   return connection.modelCatalog === "auto"
-    ? "provider catalog"
-    : `${connection.modelCatalog} catalog`;
+    ? t("settings.connections.providerCatalog", "provider catalog")
+    : t("settings.connections.namedCatalog", "{{name}} catalog", {
+        name: connection.modelCatalog,
+      });
 }
 
-function credentialLabel(connection: ConnectionInfo): string {
+function credentialLabel(connection: ConnectionInfo, t: TFunction): string {
   switch (connection.credentialSource) {
     case "environment":
-      return `environment${connection.apiKeyEnv ? ` · ${connection.apiKeyEnv}` : ""}`;
+      return connection.apiKeyEnv
+        ? t("settings.credential.environmentNamed", "environment · {{name}}", {
+            name: connection.apiKeyEnv,
+          })
+        : t("settings.credential.environment", "environment");
     case "credential_store":
-      return "credential store";
+      return t("settings.credential.store", "credential store");
     case "legacy_config":
-      return "legacy config";
+      return t("settings.credential.legacy", "legacy config");
     case "not_required":
-      return "no key required";
+      return t("settings.credential.notRequired", "no key required");
     case "oauth":
-      return "signed-in account";
+      return t("settings.credential.oauth", "signed-in account");
     default:
-      return "no key";
+      return t("settings.credential.none", "no key");
   }
 }
 
 function connectionStatus(
   connection: ConnectionInfo,
   result: ProviderTestResult | undefined,
+  t: TFunction,
 ): string {
-  if (result?.status === "ready") return "Model verified";
-  if (result?.status === "connected") return "Catalog connected";
-  if (result?.status === "limited") return "Model check needed";
-  if (result?.status === "error") return "Needs attention";
-  if (connection.auth === "none") return "No authentication required";
-  if (connection.auth === "oauth") return connection.configured ? "Signed in" : "Sign-in required";
-  return connection.configured ? "Credential saved" : "Needs credential";
+  if (result?.status === "ready")
+    return t("settings.connectionStatus.ready", "Model verified");
+  if (result?.status === "connected")
+    return t("settings.connectionStatus.connected", "Catalog connected");
+  if (result?.status === "limited")
+    return t("settings.connectionStatus.limited", "Model check needed");
+  if (result?.status === "error")
+    return t("settings.connectionStatus.error", "Needs attention");
+  if (connection.auth === "none")
+    return t("settings.connectionStatus.noAuth", "No authentication required");
+  if (connection.auth === "oauth")
+    return connection.configured
+      ? t("settings.connectionStatus.signedIn", "Signed in")
+      : t("settings.connectionStatus.signInRequired", "Sign-in required");
+  return connection.configured
+    ? t("settings.connectionStatus.saved", "Credential saved")
+    : t("settings.connectionStatus.needsCredential", "Needs credential");
 }
 
 function isManagedConnection(connection: ConnectionInfo): boolean {

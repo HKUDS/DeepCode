@@ -7,6 +7,7 @@
 
 import { FlaskConical } from "lucide-react";
 import { useEffect, useId, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import type {
   ConfigScope,
@@ -81,6 +82,7 @@ export function AgentModelCard({
   connections,
   onUpdate,
 }: AgentModelCardProps) {
+  const { t } = useTranslation();
   const [agentOverrides, setAgentOverrides] = useState<Partial<AgentDraft>>({});
   const [verifyingModel, setVerifyingModel] = useState(false);
   const [modelVerification, setModelVerification] =
@@ -163,22 +165,29 @@ export function AgentModelCard({
     <section className={`${styles.formCard} ${styles.fullWidthCard}`}>
       <header>
         <div>
-          <p className={styles.eyebrow}>Default route</p>
-          <h2>Agent model</h2>
+          <p className={styles.eyebrow}>
+            {t("settings.agentModel.eyebrow", "Default route")}
+          </p>
+          <h2>{t("settings.agentModel.title", "Agent model")}</h2>
           <p className={styles.cardDescription}>
-            New Sessions inherit this model. A Session can switch models later
-            without losing its conversation history.
+            {t(
+              "settings.agentModel.description",
+              "New Sessions inherit this model. A Session can switch models later without losing its conversation history.",
+            )}
           </p>
         </div>
       </header>
       {!selectableConnections.length ? (
         <p className={styles.warningBlock}>
-          Connect a provider above before choosing an Agent model.
+          {t(
+            "settings.agentModel.connectFirst",
+            "Connect a provider above before choosing an Agent model.",
+          )}
         </p>
       ) : null}
       <div className={styles.formGrid}>
         <label>
-          Provider connection
+          {t("settings.agentModel.connection", "Provider connection")}
           <select
             value={agents.defaultConnection}
             onChange={(event) =>
@@ -188,7 +197,9 @@ export function AgentModelCard({
               })
             }
           >
-            <option value="">Choose automatically</option>
+            <option value="">
+              {t("settings.agentModel.chooseAutomatically", "Choose automatically")}
+            </option>
             {selectableConnections.map((connection) => (
               <option value={connection.id} key={connection.id}>
                 {connection.label}
@@ -197,7 +208,7 @@ export function AgentModelCard({
           </select>
         </label>
         <ModelField
-          label="Model"
+          label={t("settings.agentModel.model", "Model")}
           connectionId={verificationConnection?.id ?? ""}
           value={agents.defaultModel}
           fallbackModels={models.map((model) => model.id)}
@@ -216,7 +227,7 @@ export function AgentModelCard({
           }
         />
         <label>
-          Max output tokens
+          {t("settings.agentModel.maxTokens", "Max output tokens")}
           <input
             inputMode="numeric"
             value={agents.maxTokens}
@@ -226,16 +237,18 @@ export function AgentModelCard({
         </label>
       </div>
       <details className={styles.advancedSettings}>
-        <summary>Advanced phase routing</summary>
+        <summary>
+          {t("settings.agentModel.advanced", "Advanced phase routing")}
+        </summary>
         <p>
-          Optional phase models inherit the Agent model when left empty.
-          Paper2Code uses Planning first, then Coding & implementation.
-          Ordinary Code Sessions without a Session override use Coding &
-          implementation.
+          {t(
+            "settings.agentModel.advancedNote",
+            "Optional phase models inherit the Agent model when left empty. Paper2Code uses Planning first, then Coding & implementation. Ordinary Code Sessions without a Session override use Coding & implementation.",
+          )}
         </p>
         <div className={styles.formGrid}>
           <label>
-            Planning connection
+            {t("settings.agentModel.planningConnection", "Planning connection")}
             <select
               value={agents.planningConnection}
               onChange={(event) =>
@@ -245,7 +258,9 @@ export function AgentModelCard({
                 })
               }
             >
-              <option value="">Use Agent default</option>
+              <option value="">
+                {t("settings.agentModel.useAgentDefault", "Use Agent default")}
+              </option>
               {selectableConnections.map((connection) => (
                 <option value={connection.id} key={connection.id}>
                   {connection.label}
@@ -254,7 +269,7 @@ export function AgentModelCard({
             </select>
           </label>
           <ModelField
-            label="Planning model"
+            label={t("settings.agentModel.planningModel", "Planning model")}
             connectionId={
               agents.planningConnection || verificationConnection?.id || ""
             }
@@ -265,7 +280,10 @@ export function AgentModelCard({
             onChange={(planningModel) => updateAgents({ planningModel })}
           />
           <label>
-            Coding & implementation connection
+            {t(
+              "settings.agentModel.implementationConnection",
+              "Coding & implementation connection",
+            )}
             <select
               value={agents.implementationConnection}
               onChange={(event) =>
@@ -275,7 +293,9 @@ export function AgentModelCard({
                 })
               }
             >
-              <option value="">Use Agent default</option>
+              <option value="">
+                {t("settings.agentModel.useAgentDefault", "Use Agent default")}
+              </option>
               {selectableConnections.map((connection) => (
                 <option value={connection.id} key={connection.id}>
                   {connection.label}
@@ -284,7 +304,10 @@ export function AgentModelCard({
             </select>
           </label>
           <ModelField
-            label="Coding & implementation model"
+            label={t(
+              "settings.agentModel.implementationModel",
+              "Coding & implementation model",
+            )}
             connectionId={
               agents.implementationConnection ||
               verificationConnection?.id ||
@@ -307,8 +330,10 @@ export function AgentModelCard({
       ) : null}
       <footer className={styles.formActions}>
         <span>
-          Verification sends only a tiny “reply OK” request. No repository or
-          Session content is included.
+          {t(
+            "settings.agentModel.verificationNote",
+            "Verification sends only a tiny “reply OK” request. No repository or Session content is included.",
+          )}
         </span>
         <button
           className={styles.secondaryButton}
@@ -316,7 +341,7 @@ export function AgentModelCard({
           disabled={busy || !agents.defaultModel || !maxTokensValid}
           onClick={() => void saveAgents()}
         >
-          Save defaults
+          {t("settings.agentModel.save", "Save defaults")}
         </button>
         <button
           className={styles.primaryButton}
@@ -331,7 +356,9 @@ export function AgentModelCard({
           onClick={() => void verifyDefaultModel()}
         >
           <FlaskConical size={14} />
-          {verifyingModel ? "Verifying…" : "Save and verify model"}
+          {verifyingModel
+            ? t("settings.agentModel.verifying", "Verifying…")
+            : t("settings.agentModel.saveVerify", "Save and verify model")}
         </button>
       </footer>
     </section>
@@ -401,6 +428,7 @@ function EffortField({
   listModels: ConnectionCatalogController["models"];
   onChange(value: string): void;
 }) {
+  const { t } = useTranslation();
   const { catalog } = useModelCatalog(connectionId, listModels);
   const model = catalog?.models.find(
     (candidate) => candidate.id === modelId.trim(),
@@ -408,21 +436,31 @@ function EffortField({
   const reasoning = model?.reasoning ?? null;
   const efforts = reasoning?.supportedEfforts ?? [];
   const options = [
-    { value: "", label: "Inherit provider default" },
-    { value: "auto", label: "auto · model decides" },
-    ...(reasoning?.mandatory ? [] : [{ value: "none", label: "none · off" }]),
+    {
+      value: "",
+      label: t("settings.effort.inherit", "Inherit provider default"),
+    },
+    { value: "auto", label: t("settings.effort.auto", "auto · model decides") },
+    ...(reasoning?.mandatory
+      ? []
+      : [{ value: "none", label: t("settings.effort.none", "none · off") }]),
     ...efforts.map((effort) => ({ value: effort, label: effort })),
   ];
   // A stored value the catalog no longer advertises stays selectable so the
   // row shows the truth instead of silently blanking (advisory catalogs).
   if (value && !options.some((option) => option.value === value)) {
-    options.push({ value, label: `${value} · not advertised` });
+    options.push({
+      value,
+      label: t("settings.effort.notAdvertised", "{{value}} · not advertised", {
+        value,
+      }),
+    });
   }
   return (
     <label>
-      Reasoning effort
+      {t("settings.effort.label", "Reasoning effort")}
       <select
-        aria-label="Reasoning effort"
+        aria-label={t("settings.effort.label", "Reasoning effort")}
         value={value}
         onChange={(event) => onChange(event.target.value)}
       >
@@ -435,9 +473,17 @@ function EffortField({
       <small>
         {model
           ? efforts.length
-            ? `Published levels: ${efforts.join(", ")}`
-            : "This model publishes no named effort levels."
-          : "Pick a cataloged model to see its published levels."}
+            ? t("settings.effort.published", "Published levels: {{levels}}", {
+                levels: efforts.join(", "),
+              })
+            : t(
+                "settings.effort.noLevels",
+                "This model publishes no named effort levels.",
+              )
+          : t(
+              "settings.effort.pickModel",
+              "Pick a cataloged model to see its published levels.",
+            )}
       </small>
     </label>
   );
@@ -460,6 +506,7 @@ function ModelField({
   allowEmpty?: boolean;
   onChange(value: string): void;
 }) {
+  const { t } = useTranslation();
   const listId = useId();
   const { catalog, loading, failed } = useModelCatalog(
     connectionId,
@@ -476,7 +523,11 @@ function ModelField({
         list={listId}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        placeholder={allowEmpty ? "Use default" : "Provider model ID"}
+        placeholder={
+          allowEmpty
+            ? t("settings.modelField.useDefault", "Use default")
+            : t("settings.modelField.modelId", "Provider model ID")
+        }
       />
       <datalist id={listId}>
         {models.map((model) => (
@@ -485,14 +536,27 @@ function ModelField({
       </datalist>
       <small>
         {loading
-          ? "Loading models…"
+          ? t("settings.modelField.loading", "Loading models…")
           : failed
-            ? "Catalog unavailable · enter an exact model ID"
+            ? t(
+                "settings.modelField.unavailable",
+                "Catalog unavailable · enter an exact model ID",
+              )
             : catalog?.stale
-              ? "Using the last available model list"
+              ? t(
+                  "settings.modelField.stale",
+                  "Using the last available model list",
+                )
               : connectionId
-                ? `${models.length} models available · exact IDs are also accepted`
-                : "Choose a connection to load its models"}
+                ? t(
+                    "settings.modelField.available",
+                    "{{total}} models available · exact IDs are also accepted",
+                    { total: models.length },
+                  )
+                : t(
+                    "settings.modelField.chooseConnection",
+                    "Choose a connection to load its models",
+                  )}
       </small>
     </label>
   );

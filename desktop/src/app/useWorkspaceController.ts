@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
+import { useTranslation } from "react-i18next";
 
 import type {
   ApprovalDecision,
@@ -137,6 +138,7 @@ export interface WorkspaceController {
 }
 
 export function useWorkspaceController(runtime: ClientRuntime): WorkspaceController {
+  const { t } = useTranslation();
   const [state, dispatch] = useReducer(workspaceReducer, initialWorkspaceState);
   const selectedThreadRef = useRef<string | null>(null);
   const loadedRuntimeRef = useRef(false);
@@ -639,14 +641,17 @@ export function useWorkspaceController(runtime: ClientRuntime): WorkspaceControl
       if (
         preset === "full_access" &&
         !(await confirmAction(
-          "Full access lets tools run without approval and outside the workspace " +
-            "sandbox for this Session. DeepCode may read, modify, or execute " +
-            "files anywhere your account can access.",
+          t(
+            "confirm.fullAccess.message",
+            "Full access lets tools run without approval and outside the workspace " +
+              "sandbox for this Session. DeepCode may read, modify, or execute " +
+              "files anywhere your account can access.",
+          ),
           {
-            title: "Enable Full access?",
+            title: t("confirm.fullAccess.title", "Enable Full access?"),
             kind: "warning",
-            confirmLabel: "Enable Full access",
-            cancelLabel: "Keep current access",
+            confirmLabel: t("confirm.fullAccess.confirm", "Enable Full access"),
+            cancelLabel: t("confirm.fullAccess.cancel", "Keep current access"),
           },
         ))
       ) {
@@ -663,7 +668,7 @@ export function useWorkspaceController(runtime: ClientRuntime): WorkspaceControl
       });
       return applied === true;
     },
-    [runtime, selectedThread, withBusy],
+    [runtime, selectedThread, t, withBusy],
   );
 
   const refreshSettings = useCallback(

@@ -11,9 +11,11 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, expect, test } from "vitest";
 
+import { initI18n } from "../../app/i18n";
 import { ModelListEditor } from "./ModelListEditor";
 import type { ManualModelEntry } from "../../generated/app-server";
 
+initI18n();
 afterEach(cleanup);
 
 function Harness() {

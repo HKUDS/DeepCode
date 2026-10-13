@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+
 import type { Turn } from "../../generated/app-server";
 import type { CodeWorkbenchController } from "../workbench/useCodeWorkbench";
 import { InspectorEmpty } from "./InspectorEmpty";
@@ -16,10 +18,13 @@ export function TestsPanel({
   latestTurn,
   workbench,
 }: TestsPanelProps) {
+  const { t } = useTranslation();
   return (
     <div className={styles.content}>
-      <p className={styles.eyebrow}>Verification</p>
-      <h2>Project test commands</h2>
+      <p className={styles.eyebrow}>
+        {t("inspector.tests.eyebrow", "Verification")}
+      </p>
+      <h2>{t("inspector.tests.title", "Project test commands")}</h2>
       {workbench.tests.length ? (
         <div className={styles.testList}>
           {workbench.tests.map((command) => (
@@ -39,18 +44,30 @@ export function TestsPanel({
           ))}
         </div>
       ) : (
-        <InspectorEmpty label="No supported test command was detected." compact />
+        <InspectorEmpty
+          label={t(
+            "inspector.tests.none",
+            "No supported test command was detected.",
+          )}
+          compact
+        />
       )}
       {workbench.testError ? (
         <p className={styles.panelError}>{workbench.testError}</p>
       ) : null}
       {!latestTurn ? (
         <p className={styles.note}>
-          Complete a Turn before attaching a durable TestResult.
+          {t(
+            "inspector.tests.needTurn",
+            "Complete a Turn before attaching a durable TestResult.",
+          )}
         </p>
       ) : hasActiveTurn ? (
         <p className={styles.note}>
-          Verification is locked while a Turn is active.
+          {t(
+            "inspector.tests.locked",
+            "Verification is locked while a Turn is active.",
+          )}
         </p>
       ) : null}
       {workbench.lastTestRun ? (
@@ -66,8 +83,12 @@ export function TestsPanel({
             <strong>{workbench.lastTestRun.command.label}</strong>
             <span>
               {workbench.lastTestRun.timedOut
-                ? "Timed out"
-                : `Exit ${workbench.lastTestRun.exitCode ?? "unknown"}`}
+                ? t("inspector.tests.timedOut", "Timed out")
+                : t("inspector.tests.exit", "Exit {{code}}", {
+                    code:
+                      workbench.lastTestRun.exitCode ??
+                      t("inspector.tests.unknownCode", "unknown"),
+                  })}
               {" · "}
               {workbench.lastTestRun.durationMs} ms
             </span>
@@ -79,7 +100,12 @@ export function TestsPanel({
             <pre>{workbench.lastTestRun.stderr}</pre>
           ) : null}
           {workbench.lastTestRun.outputTruncated ? (
-            <small>Output was truncated to the bounded tail.</small>
+            <small>
+              {t(
+                "inspector.tests.truncated",
+                "Output was truncated to the bounded tail.",
+              )}
+            </small>
           ) : null}
         </section>
       ) : null}

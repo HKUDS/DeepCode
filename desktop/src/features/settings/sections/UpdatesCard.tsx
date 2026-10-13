@@ -22,7 +22,7 @@ export function UpdatesCard({ runtime }: { runtime: ClientRuntime }) {
   const [updateError, setUpdateError] = useState<string | null>(null);
 
   if (runtime.host?.updates === false) return <section className={styles.section}>
-    <h2>Service updates</h2><p>Update DeepCode on the service machine, then open a fresh link with <code>deepcode web</code>. Reload this page after updating.</p>
+    <h2>{t("settings.updates.serviceTitle", "Service updates")}</h2><p>{t("settings.updates.serviceBefore", "Update DeepCode on the service machine, then open a fresh link with")} <code>deepcode web</code>{t("settings.updates.serviceAfter", ". Reload this page after updating.")}</p>
   </section>;
 
   const checkForUpdate = async () => {

@@ -6,6 +6,7 @@ import {
   Search,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import type {
   ConnectionInfo,
@@ -41,6 +42,7 @@ export function ModelPicker({
   disabled,
   onChange,
 }: ModelPickerProps) {
+  const { t } = useTranslation();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const {
     catalog: connectionCatalog,
@@ -160,6 +162,13 @@ export function ModelPicker({
         !modelError,
     );
 
+  const effortText = (value: string) =>
+    value === "auto"
+      ? t("composer.model.effortAuto", "Auto")
+      : value === "none"
+        ? t("composer.model.effortOff", "Off")
+        : effortLabel(value);
+
   const apply = () => {
     if (!selectedConnectionId || !modelId) return;
     onChange(
@@ -208,18 +217,26 @@ export function ModelPicker({
         disabled={disabled}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label="Session model"
-        title="Connection and model for this Session"
+        aria-label={t("composer.model.label", "Session model")}
+        title={t("composer.model.title", "Connection and model for this Session")}
       >
         <Cpu size={12} />
         <span>
-          <small>{effectiveConnection?.label ?? "Automatic"}</small>
-          <strong>{effectiveModel || "Configured model"}</strong>
+          <small>
+            {effectiveConnection?.label ??
+              t("composer.model.automatic", "Automatic")}
+          </small>
+          <strong>
+            {effectiveModel ||
+              t("composer.model.configured", "Configured model")}
+          </strong>
           <em>
-            {effortLabel(effectiveEffort)} ·{" "}
+            {effortText(effectiveEffort)} ·{" "}
             {effectiveContextWindow
-              ? `${formatTokens(effectiveContextWindow)} context cap`
-              : "Auto context"}
+              ? t("composer.model.contextCap", "{{tokens}} context cap", {
+                  tokens: formatTokens(effectiveContextWindow),
+                })
+              : t("composer.model.autoContext", "Auto context")}
           </em>
         </span>
         <ChevronDown size={12} />
@@ -229,25 +246,30 @@ export function ModelPicker({
         <section
           className={styles.menu}
           role="dialog"
-          aria-label="Choose connection and model"
+          aria-label={t("composer.model.choose", "Choose connection and model")}
         >
           <header>
             <div>
-              <strong>Run future Turns with</strong>
-              <span>History stays in this Session when the model changes.</span>
+              <strong>{t("composer.model.heading", "Run future Turns with")}</strong>
+              <span>
+                {t(
+                  "composer.model.historyNote",
+                  "History stays in this Session when the model changes.",
+                )}
+              </span>
             </div>
             <button
               type="button"
               onClick={() => void refresh()}
               disabled={!selectedConnectionId || loadingModels}
-              aria-label="Refresh model catalog"
+              aria-label={t("composer.model.refresh", "Refresh model catalog")}
             >
               <RefreshCw size={14} />
             </button>
           </header>
 
           <label className={styles.connectionField}>
-            Connection
+            {t("composer.model.connection", "Connection")}
             <select
               value={selectedConnectionId}
               onChange={(event) => {
@@ -259,7 +281,9 @@ export function ModelPicker({
                 setQuery("");
               }}
             >
-              <option value="">Choose a connection</option>
+              <option value="">
+                {t("composer.model.chooseConnection", "Choose a connection")}
+              </option>
               {connectionCatalog?.connections.map((connection) => (
                 <option
                   key={connection.id}
@@ -267,7 +291,9 @@ export function ModelPicker({
                   disabled={!connection.enabled}
                 >
                   {connection.label}
-                  {connection.configured ? "" : " · credential needed"}
+                  {connection.configured
+                    ? ""
+                    : t("composer.model.credentialNeeded", " · credential needed")}
                 </option>
               ))}
             </select>
@@ -275,11 +301,11 @@ export function ModelPicker({
 
           <label className={styles.search}>
             <Search size={14} />
-            <span>Search models</span>
+            <span>{t("composer.model.search", "Search models")}</span>
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search model IDs"
+              placeholder={t("composer.model.searchPlaceholder", "Search model IDs")}
               autoFocus
             />
           </label>
@@ -304,33 +330,54 @@ export function ModelPicker({
                     <code>{model.id}</code>
                   </span>
                   <small>
-                    {formatTokens(model.contextWindow)} context
-                    {model.reasoning ? " · Thinking" : ""}
+                    {t("composer.model.contextSize", "{{tokens}} context", {
+                      tokens: formatTokens(model.contextWindow),
+                    })}
+                    {model.reasoning
+                      ? t("composer.model.thinkingTag", " · Thinking")
+                      : ""}
                     {selected ? <Check size={12} /> : null}
                   </small>
                 </button>
               );
             })}
-            {loadingModels ? <p>Loading model catalog…</p> : null}
+            {loadingModels ? (
+              <p>{t("composer.model.loading", "Loading model catalog…")}</p>
+            ) : null}
             {!loadingModels && !models.length ? (
               <p>
                 {modelError ??
                   catalog?.error ??
-                  "No matching models. Enter an exact model ID below."}
+                  t(
+                    "composer.model.noMatches",
+                    "No matching models. Enter an exact model ID below.",
+                  )}
               </p>
             ) : null}
           </div>
 
-          <section className={styles.effort} aria-label="Thinking effort">
+          <section
+            className={styles.effort}
+            aria-label={t("composer.model.effort", "Thinking effort")}
+          >
             <div>
-              <strong>Thinking</strong>
+              <strong>{t("composer.model.thinking", "Thinking")}</strong>
               <span>
                 {selectedModel?.reasoning
-                  ? "Applied to future Turns in this Session."
-                  : "This model does not publish adjustable Thinking levels."}
+                  ? t(
+                      "composer.model.effortApplies",
+                      "Applied to future Turns in this Session.",
+                    )
+                  : t(
+                      "composer.model.noEffort",
+                      "This model does not publish adjustable Thinking levels.",
+                    )}
               </span>
             </div>
-            <div role="radiogroup" aria-label="Thinking effort level">
+            <div
+              role="radiogroup"
+              aria-label={t("composer.model.effortLevel", "Thinking effort level")}
+            >
               {effortOptions.map((option) => (
                 <button
                   type="button"
@@ -339,22 +386,27 @@ export function ModelPicker({
                   key={option.value}
                   onClick={() => setReasoningEffort(option.value)}
                 >
-                  {option.label}
+                  {effortText(option.value)}
                 </button>
               ))}
             </div>
           </section>
 
-          <section className={styles.context} aria-label="Context window">
+          <section
+            className={styles.context}
+            aria-label={t("composer.model.contextWindow", "Context window")}
+          >
             <div>
-              <strong>Context</strong>
+              <strong>{t("composer.model.context", "Context")}</strong>
               <span>
-                Cap future Turns below the model&apos;s published window. Lower
-                caps compact history sooner.
+                {t(
+                  "composer.model.contextNote",
+                  "Cap future Turns below the model's published window. Lower caps compact history sooner.",
+                )}
               </span>
             </div>
             <select
-              aria-label="Context window cap"
+              aria-label={t("composer.model.contextWindowCap", "Context window cap")}
               value={contextWindow ?? ""}
               disabled={!selectedModel}
               onChange={(event) =>
@@ -364,7 +416,7 @@ export function ModelPicker({
               }
             >
               <option value="">
-                Automatic
+                {t("composer.model.automatic", "Automatic")}
                 {selectedModel
                   ? ` · ${formatTokens(selectedModel.contextWindow)}`
                   : ""}
@@ -381,8 +433,8 @@ export function ModelPicker({
             <input
               value={manualModel}
               onChange={(event) => setManualModel(event.target.value)}
-              placeholder="Exact model ID"
-              aria-label="Exact model ID"
+              placeholder={t("composer.model.exactId", "Exact model ID")}
+              aria-label={t("composer.model.exactId", "Exact model ID")}
             />
             <button
               type="button"
@@ -393,7 +445,7 @@ export function ModelPicker({
               }}
               disabled={!selectedConnectionId || !manualModel.trim()}
             >
-              Select
+              {t("composer.model.select", "Select")}
             </button>
             <button
               type="button"
@@ -401,7 +453,7 @@ export function ModelPicker({
               onClick={apply}
               disabled={!selectedConnectionId || !modelId}
             >
-              Apply
+              {t("composer.model.apply", "Apply")}
             </button>
             <button
               type="button"
@@ -411,7 +463,7 @@ export function ModelPicker({
                 setOpen(false);
               }}
             >
-              Use defaults
+              {t("composer.model.useDefaults", "Use defaults")}
             </button>
           </footer>
         </section>

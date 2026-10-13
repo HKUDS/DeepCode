@@ -1,4 +1,5 @@
 import { Rows3 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import {
   transcriptModes,
@@ -15,21 +16,27 @@ export function TranscriptModePicker({
   mode,
   onChange,
 }: TranscriptModePickerProps) {
+  const { t } = useTranslation();
   return (
     <label
       className={styles.picker}
-      title="Transcript detail · Ctrl+O cycles modes"
+      title={t(
+        "composer.transcript.title",
+        "Transcript detail · Ctrl+O cycles modes",
+      )}
     >
       <Rows3 size={12} aria-hidden="true" />
       <select
-        aria-label="Transcript detail"
+        aria-label={t("composer.transcript.label", "Transcript detail")}
         value={mode}
         onChange={(event) => onChange(event.target.value as TranscriptMode)}
       >
         {transcriptModes.map((value) => (
           <option key={value} value={value}>
-            {value[0].toUpperCase()}
-            {value.slice(1)}
+            {t(
+              `composer.transcript.${value}`,
+              value[0].toUpperCase() + value.slice(1),
+            )}
           </option>
         ))}
       </select>

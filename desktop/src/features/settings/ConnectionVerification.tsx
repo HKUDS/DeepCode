@@ -4,6 +4,8 @@ import {
   CircleDashed,
   MinusCircle,
 } from "lucide-react";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 
 import type {
   ProviderTestResult,
@@ -31,30 +33,39 @@ export function ConnectionVerification({
   result,
   compact = false,
 }: ConnectionVerificationProps) {
+  const { t } = useTranslation();
   const label =
     result.status === "ready" &&
     result.stages.some(
       (stage) => stage.id === "continuation" && stage.status === "passed",
     )
-      ? "Agent tool round trip verified"
-      : statusLabel(result.status);
+      ? t("provider.verification.roundTrip", "Agent tool round trip verified")
+      : statusLabel(result.status, t);
   return (
     <section
       className={styles.verification}
       data-status={result.status}
       data-compact={compact}
-      aria-label={`Connection status: ${label}`}
+      aria-label={t("provider.verification.status", "Connection status: {{label}}", {
+        label,
+      })}
     >
       <header>
         <strong>{label}</strong>
-        <span>{result.latencyMs} ms total</span>
+        <span>
+          {t("provider.verification.latency", "{{latency}} ms total", {
+            latency: result.latencyMs,
+          })}
+        </span>
       </header>
       <div className={styles.stages}>
         {result.stages.map((stage) => (
           <div key={stage.id} data-status={stage.status}>
             <StageIcon stage={stage} />
             <span>
-              <strong>{STAGE_LABELS[stage.id]}</strong>
+              <strong>
+                {t(`provider.verification.stage.${stage.id}`, STAGE_LABELS[stage.id])}
+              </strong>
               <small>{stage.detail}</small>
             </span>
           </div>
@@ -71,15 +82,18 @@ function StageIcon({ stage }: { stage: ProviderVerificationStage }) {
   return <CircleDashed size={14} />;
 }
 
-function statusLabel(status: ProviderTestResult["status"]): string {
+function statusLabel(
+  status: ProviderTestResult["status"],
+  t: TFunction,
+): string {
   switch (status) {
     case "ready":
-      return "Model request verified";
+      return t("provider.verification.ready", "Model request verified");
     case "connected":
-      return "Catalog connected";
+      return t("provider.verification.connected", "Catalog connected");
     case "limited":
-      return "Configured · model check needed";
+      return t("provider.verification.limited", "Configured · model check needed");
     default:
-      return "Connection needs attention";
+      return t("provider.verification.error", "Connection needs attention");
   }
 }

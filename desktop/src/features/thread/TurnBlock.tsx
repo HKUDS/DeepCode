@@ -18,7 +18,9 @@ import {
   TerminalSquare,
   Wrench,
 } from "lucide-react";
+import type { TFunction } from "i18next";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import type {
   Approval,
@@ -156,18 +158,35 @@ function ActivityIcon({
   }
 }
 
-function approvalOutcome(status: Approval["status"]): string {
+function approvalOutcome(status: Approval["status"], t: TFunction): string {
   switch (status) {
     case "approved_once":
-      return "Allowed once";
+      return t("turn.approval.allowedOnce", "Allowed once");
     case "approved_session":
-      return "Allowed for this Session";
+      return t("turn.approval.allowedSession", "Allowed for this Session");
     case "denied":
-      return "Denied";
+      return t("turn.approval.denied", "Denied");
     case "cancelled":
-      return "Cancelled";
+      return t("turn.approval.cancelled", "Cancelled");
     default:
-      return "Approval resolved";
+      return t("turn.approval.resolved", "Approval resolved");
+  }
+}
+
+function itemStatusText(status: Item["status"], t: TFunction): string {
+  switch (status) {
+    case "pending":
+      return t("turn.itemStatus.pending", "pending");
+    case "in_progress":
+      return t("turn.itemStatus.inProgress", "in progress");
+    case "completed":
+      return t("turn.itemStatus.completed", "completed");
+    case "failed":
+      return t("turn.itemStatus.failed", "failed");
+    case "declined":
+      return t("turn.itemStatus.declined", "declined");
+    default:
+      return String(status).replaceAll("_", " ");
   }
 }
 
@@ -183,23 +202,34 @@ function useElapsedNow(active: boolean): number {
   return now;
 }
 
-function runLabel(group: ConversationTurn, now: number): string {
+function runLabel(group: ConversationTurn, now: number, t: TFunction): string {
   const status = group.turn?.status;
   const duration = turnDurationSeconds(group.turn, now);
   const formatted = duration === null ? null : formatTurnDuration(duration);
+  const options = { duration: formatted };
   switch (status) {
     case "queued":
-      return "Queued";
+      return t("turn.run.queued", "Queued");
     case "running":
-      return formatted ? `Working for ${formatted}` : "Working";
+      return formatted
+        ? t("turn.run.workingFor", "Working for {{duration}}", options)
+        : t("turn.run.working", "Working");
     case "waiting_approval":
-      return formatted ? `Waiting after ${formatted}` : "Waiting for approval";
+      return formatted
+        ? t("turn.run.waitingAfter", "Waiting after {{duration}}", options)
+        : t("turn.run.waitingApproval", "Waiting for approval");
     case "failed":
-      return formatted ? `Failed after ${formatted}` : "Run failed";
+      return formatted
+        ? t("turn.run.failedAfter", "Failed after {{duration}}", options)
+        : t("turn.run.failed", "Run failed");
     case "interrupted":
-      return formatted ? `Stopped after ${formatted}` : "Run stopped";
+      return formatted
+        ? t("turn.run.stoppedAfter", "Stopped after {{duration}}", options)
+        : t("turn.run.stopped", "Run stopped");
     default:
-      return formatted ? `Worked for ${formatted}` : "Work completed";
+      return formatted
+        ? t("turn.run.workedFor", "Worked for {{duration}}", options)
+        : t("turn.run.completed", "Work completed");
   }
 }
 
@@ -229,6 +259,7 @@ function ActivityItem({
   onRespondToApproval(approvalId: string, decision: ApprovalDecision): void;
   transcriptMode: TranscriptMode;
 }) {
+  const { t } = useTranslation();
   if (item.kind === "reasoning_summary") {
     return <ReasoningBlock item={item} mode={transcriptMode} />;
   }
@@ -244,7 +275,9 @@ function ActivityItem({
           {pending ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}
           <span>
             <strong>
-              {pending ? "Approval required" : approvalOutcome(approval.status)}
+              {pending
+                ? t("approval.label", "Approval required")
+                : approvalOutcome(approval.status, t)}
             </strong>
             <small>{item.summary}</small>
           </span>
@@ -257,7 +290,9 @@ function ActivityItem({
           />
         ) : (
           <span className={styles.runApprovalDecision}>
-            Decision: {approval.status.replaceAll("_", " ")}
+            {t("approval.decision", "Decision: {{status}}", {
+              status: approval.status.replaceAll("_", " "),
+            })}
           </span>
         )}
       </section>
@@ -284,7 +319,7 @@ function ActivityItem({
       </span>
       {warning ? null : (
         <span className={styles.runStepStatus}>
-          {item.status.replaceAll("_", " ")}
+          {itemStatusText(item.status, t)}
         </span>
       )}
       {hasBody ? <ChevronRight className={styles.runStepChevron} size={14} /> : null}
@@ -331,7 +366,7 @@ function ActivityItem({
             onOpenInspector("details");
           }}
         >
-          Inspect details
+          {t("turn.inspectDetails", "Inspect details")}
         </button>
       </div>
     </details>
@@ -343,12 +378,13 @@ function RunStatus({ group }: { group: ConversationTurn }) {
     group.turn && activeTurnStatuses.has(group.turn.status),
   );
   const now = useElapsedNow(active);
+  const { t } = useTranslation();
   if (!shouldShowRunStatus(group, now)) return null;
 
   return (
     <div className={styles.runStatus} data-status={group.turn?.status}>
       <Clock3 size={14} aria-hidden="true" />
-      <span>{runLabel(group, now)}</span>
+      <span>{runLabel(group, now, t)}</span>
     </div>
   );
 }
@@ -372,6 +408,7 @@ function ExplorationGroup({
   onRespondToApproval(approvalId: string, decision: ApprovalDecision): void;
   transcriptMode: TranscriptMode;
 }) {
+  const { t } = useTranslation();
   const active = group.items.some(
     (item) => item.status === "in_progress" || item.id === selectedItemId,
   );
@@ -387,9 +424,12 @@ function ExplorationGroup({
       <summary>
         <Search size={14} aria-hidden="true" />
         <span>
-          <strong>Explored project context</strong>
+          <strong>{t("turn.explored", "Explored project context")}</strong>
           <small>
-            {completed}/{group.items.length} activities
+            {t("turn.activities", "{{completed}}/{{total}} activities", {
+              completed,
+              total: group.items.length,
+            })}
           </small>
         </span>
         <ChevronDown size={14} aria-hidden="true" />
@@ -414,6 +454,7 @@ function ExplorationGroup({
 }
 
 function AssistantMessage({ item }: { item: Item }) {
+  const { t } = useTranslation();
   const presentation = presentItem(item);
   const phase =
     item.payload.phase === "commentary" ? "commentary" : "final_answer";
@@ -424,7 +465,9 @@ function AssistantMessage({ item }: { item: Item }) {
       data-status={item.status}
     >
       <span className={styles.srOnly}>
-        {phase === "commentary" ? "DeepCode progress update" : "DeepCode response"}
+        {phase === "commentary"
+          ? t("turn.progressUpdate", "DeepCode progress update")
+          : t("turn.response", "DeepCode response")}
       </span>
       <div
         className={styles.messageBody}
@@ -434,7 +477,7 @@ function AssistantMessage({ item }: { item: Item }) {
         {item.status === "in_progress" ? (
           <span
             className={styles.streamingCursor}
-            aria-label="Agent is responding"
+            aria-label={t("turn.responding", "Agent is responding")}
           />
         ) : null}
       </div>
@@ -460,6 +503,7 @@ export function TurnBlock({
   onCancelQueuedTurn,
   transcriptMode,
 }: TurnBlockProps) {
+  const { t } = useTranslation();
   const queued = group.turn?.status === "queued";
   const turnId = group.turn?.id ?? null;
   const userMessages = group.userMessages.length
@@ -482,7 +526,10 @@ export function TurnBlock({
     group.completion?.status === "failed";
   const errorMessage =
     group.completion?.payload.stopReason === "application_restarted"
-      ? "The previous process stopped. Retry from the same prompt."
+      ? t(
+          "turn.restarted",
+          "The previous process stopped. Retry from the same prompt.",
+        )
       : group.turn?.errorMessage;
 
   return (
@@ -493,7 +540,10 @@ export function TurnBlock({
             <MarkdownContent>{message.text}</MarkdownContent>
           </div>
           {message.skills.length ? (
-            <div className={styles.userSkills} aria-label="Skills used in this turn">
+            <div
+              className={styles.userSkills}
+              aria-label={t("turn.skillsUsed", "Skills used in this turn")}
+            >
               {message.skills.map((skill) => (
                 <span
                   key={skill.skillId}
@@ -508,13 +558,13 @@ export function TurnBlock({
           {queued && turnId ? (
             <div className={styles.queueState}>
               <Clock3 size={12} />
-              <span>Queued</span>
+              <span>{t("turn.run.queued", "Queued")}</span>
               <button
                 type="button"
                 onClick={() => onCancelQueuedTurn(turnId)}
                 disabled={busy}
               >
-                Cancel
+                {t("turn.cancel", "Cancel")}
               </button>
             </div>
           ) : null}
@@ -528,7 +578,9 @@ export function TurnBlock({
           <strong>{group.turn.executionProfile.modelId}</strong>
           {group.turn.executionProfile.reasoningEffort ? (
             <small>
-              Thinking {group.turn.executionProfile.reasoningEffort}
+              {t("turn.thinking", "Thinking {{effort}}", {
+                effort: group.turn.executionProfile.reasoningEffort,
+              })}
             </small>
           ) : null}
         </div>
@@ -596,7 +648,7 @@ export function TurnBlock({
               disabled={busy}
             >
               <RotateCcw size={14} />
-              Retry
+              {t("turn.retry", "Retry")}
             </button>
           ) : null}
           {lastExecutionItem ? (
@@ -607,7 +659,7 @@ export function TurnBlock({
                 onOpenInspector("changes");
               }}
             >
-              Review changes
+              {t("turn.reviewChanges", "Review changes")}
               <ChevronRight size={14} />
             </button>
           ) : null}
