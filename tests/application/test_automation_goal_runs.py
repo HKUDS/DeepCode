@@ -10,6 +10,7 @@ from typing import Literal
 
 import pytest
 
+import core.application.goal_extension as goal_extension
 from core.agent_runtime.goal_runtime import GoalRuntimeRouter
 from core.application import DeepCodeApplication
 from core.application.errors import AutomationNotFoundError, ConflictError
@@ -371,6 +372,43 @@ def test_run_stays_open_across_turns_until_agent_completes_the_goal(
         )
     finally:
         second_turn_gate.set()
+        application.close()
+
+
+def test_run_blocks_when_its_goal_continues_unattended_too_long(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(goal_extension, "GOAL_UNATTENDED_CONTINUATION_LIMIT", 2)
+    # The Agent never decides: the initial Turn, then two continuations.
+    factory = _GoalAwareFactory(_TurnStep(None), _TurnStep(None), _TurnStep(None))
+    application, automation = _application(tmp_path, factory)
+    try:
+        execution = application.automations.run_now(
+            automation.id,
+            request_id="never-decides",
+        )
+        # Between two Turns a read may briefly report the Run idle and blocked;
+        # wait for the stop itself.
+        blocked = _wait_until(
+            lambda: next(
+                (
+                    run
+                    for run in application.automations.list_runs(automation.id).runs
+                    if run.id == execution.run.id
+                    and "Stopped after 2 automatic continuations" in run.detail
+                ),
+                None,
+            ),
+            "the Run to report the unattended continuation stop",
+        )
+
+        assert blocked.status is AutomationRunStatus.BLOCKED
+        assert len(_turns(application, automation.thread_id)) == 3
+        goal = application.goals.read(automation.thread_id)
+        assert goal is not None
+        assert goal.status is ThreadGoalStatus.BLOCKED
+    finally:
         application.close()
 
 

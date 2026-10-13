@@ -45,6 +45,10 @@ from core.skills.models import MAX_SELECTED_SKILLS, SkillSelection
 
 
 logger = logging.getLogger(__name__)
+# Without a token budget, only the model's update_goal ends a Goal. A model
+# that never calls it must not open Turns forever, so after this many
+# continuations in a row that nobody asked for, the Goal waits for the user.
+GOAL_UNATTENDED_CONTINUATION_LIMIT = 20
 _EVIDENCE_KINDS = frozenset(
     {
         ItemKind.TOOL_CALL,
@@ -776,6 +780,14 @@ class GoalExtension(GoalRuntimeHandler):
             or latest.status is not ThreadGoalStatus.ACTIVE
         ):
             return
+        if (
+            client_surface is ClientSurface.INTERNAL
+            and latest.token_budget is None
+            and self._unattended_continuations(latest)
+            >= GOAL_UNATTENDED_CONTINUATION_LIMIT
+        ):
+            self._block_unattended_locked(latest)
+            return
         try:
             self._start_continuation_locked(
                 latest,
@@ -831,6 +843,61 @@ class GoalExtension(GoalRuntimeHandler):
             goal=goal,
             disposition=GoalContinueDisposition.STARTED,
             turn_id=snapshot.turn.id,
+        )
+
+    def _unattended_continuations(self, goal: ThreadGoal) -> int:
+        """Count the latest completed Turns the runtime continued on its own.
+
+        A Turn the user started, including a continuation they requested by
+        creating, editing, resuming, or continuing the Goal, ends the run.
+        """
+
+        count = 0
+        recent = self.turns.list_for_goal(goal.thread_id, goal.id)
+        for turn in reversed(recent[-GOAL_UNATTENDED_CONTINUATION_LIMIT:]):
+            if turn.status is not TurnStatus.COMPLETED:
+                break
+            prompt = next(
+                (
+                    item
+                    for item in self.turns.read(turn.id).items
+                    if item.kind is ItemKind.USER_MESSAGE
+                ),
+                None,
+            )
+            if (
+                prompt is None
+                or prompt.payload.get("source")
+                != TurnInputSource.GOAL_CONTINUATION.value
+                or prompt.payload.get("client") != ClientSurface.INTERNAL.value
+            ):
+                break
+            count += 1
+        return count
+
+    def _block_unattended_locked(self, goal: ThreadGoal) -> None:
+        reason = (
+            f"Stopped after {GOAL_UNATTENDED_CONTINUATION_LIMIT} automatic "
+            "continuations without a Goal decision; resume the Goal to keep "
+            "working."
+        )
+        try:
+            updated = self.store.update(
+                goal.thread_id,
+                expected_goal_id=goal.id,
+                # The same runtime stop as after a failed Turn.
+                transform=lambda current: current.block_after_error(),
+                reason=reason,
+                source="runtime",
+            )
+        except ThreadGoalConflictError:
+            logger.info("Goal %s changed before it could be stopped", goal.id)
+            return
+        self._notify(goal.thread_id, updated)
+        self._emit(
+            goal.thread_id,
+            "goal.blocked",
+            {"goalId": updated.id, "reason": reason},
         )
 
     def _ensure_continuation_allowed(self, goal: ThreadGoal) -> None:

@@ -38,6 +38,12 @@ include `/goal continue`, `/goal wait`, `/goal reopen`, and `/goal clear`.
 `/goal wait` follows the Goal until it finishes; press `Ctrl+C` to stop
 waiting while the Goal keeps working.
 
+A Goal without a token budget continues on its own at most 20 times in a row
+without reporting complete or blocked. It then stops as blocked, so you can
+check its progress, and `/goal resume` lets it continue. Sending a message,
+editing, resuming, or continuing the Goal starts the count again. A Goal with
+a token budget is limited by its budget instead.
+
 ## Work on a Goal from the shell: `deepcode loop`
 
 For the trusted demo workspace from [Getting started](getting-started.md), replace

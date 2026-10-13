@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import timedelta
 
 import pytest
@@ -15,7 +15,7 @@ from core.application.goal_extension import (
 from core.domain.common import utc_now
 from core.domain.item import Item, ItemKind, ItemStatus
 from core.domain.message_provenance import ClientSurface, TurnInputSource
-from core.domain.thread_goal import ThreadGoalStatus
+from core.domain.thread_goal import GoalDecisionSource, ThreadGoalStatus
 from core.domain.turn import Turn, TurnStatus
 from core.sessions import SessionStore
 from core.sessions.thread_goal_store import ThreadGoalStore
@@ -499,6 +499,122 @@ def test_terminal_turn_error_blocks_without_retry_loop(tmp_path) -> None:
     assert outcome.reason == "provider exhausted retries"
     assert outcome.decided_by_turn_id == failed.id
     assert not turns.started
+
+
+class _RecordedTurns(_Turns):
+    """Records Goal Turns and their input provenance as TurnService does."""
+
+    def start(self, thread_id: str, *, prompt: str, **kwargs) -> _Snapshot:
+        self.started.append(prompt)
+        self.start_options.append(kwargs)
+        turn = Turn(
+            thread_id=thread_id,
+            ordinal=len(self.snapshots) + 1,
+            prompt=prompt,
+            goal_id=kwargs["expected_goal_id"],
+            status=TurnStatus.RUNNING,
+            started_at=utc_now(),
+        )
+        user_message = Item(
+            thread_id=thread_id,
+            turn_id=turn.id,
+            ordinal=1,
+            kind=ItemKind.USER_MESSAGE,
+            status=ItemStatus.COMPLETED,
+            summary=prompt[:160],
+            payload={
+                "client": kwargs["client_surface"].value,
+                "source": kwargs["input_source"].value,
+            },
+        )
+        self.active = turn
+        self.snapshots[turn.id] = _Snapshot(turn, (user_message,))
+        return self.snapshots[turn.id]
+
+    def complete_active(self) -> Turn:
+        assert self.active is not None
+        turn = replace(
+            self.active,
+            status=TurnStatus.COMPLETED,
+            completed_at=utc_now(),
+        )
+        completion = Item(
+            thread_id=turn.thread_id,
+            turn_id=turn.id,
+            ordinal=2,
+            kind=ItemKind.COMPLETION,
+            status=ItemStatus.COMPLETED,
+            summary="settled",
+            payload={"usage": {"total_tokens": 42}},
+        )
+        self.snapshots[turn.id] = _Snapshot(
+            turn,
+            (*self.snapshots[turn.id].items, completion),
+        )
+        self.active = None
+        return turn
+
+
+def _recorded_extension(tmp_path) -> tuple[GoalExtension, _RecordedTurns, str]:
+    sessions = SessionStore(tmp_path / "sessions", use_index=False)
+    session = sessions.create_session(title="Goal continuation limit test")
+    turns = _RecordedTurns()
+    return GoalExtension(ThreadGoalStore(sessions), turns), turns, session.session_id
+
+
+def test_goal_without_budget_stops_after_20_unattended_continuations(
+    tmp_path,
+) -> None:
+    goals, turns, session_id = _recorded_extension(tmp_path)
+    created = goals.create(
+        session_id,
+        objective="Ship",
+        client_surface=ClientSurface.DESKTOP,
+    )
+
+    # The model never calls update_goal: every Turn just completes.
+    for _ in range(21):
+        goals.on_turn_settled(turns.complete_active())
+
+    assert len(turns.started) == 21
+    assert turns.active is None
+    current = goals.read(session_id)
+    assert current is not None
+    assert current.status is ThreadGoalStatus.BLOCKED
+    outcome = goals.read_outcome(session_id)
+    assert outcome is not None
+    assert outcome.source is GoalDecisionSource.RUNTIME
+    assert "20 automatic continuations" in outcome.reason
+    assert goals.execution_settled(current)
+
+    # Resuming is the user's decision to go on, so the count starts over.
+    goals.resume(
+        session_id,
+        expected_goal_id=created.id,
+        client_surface=ClientSurface.DESKTOP,
+    )
+    goals.on_turn_settled(turns.complete_active())
+
+    assert len(turns.started) == 23
+    resumed = goals.read(session_id)
+    assert resumed is not None and resumed.status is ThreadGoalStatus.ACTIVE
+
+
+def test_goal_with_token_budget_keeps_continuing_until_the_budget(tmp_path) -> None:
+    goals, turns, session_id = _recorded_extension(tmp_path)
+    goals.create(
+        session_id,
+        objective="Ship",
+        token_budget=1_000_000,
+        client_surface=ClientSurface.DESKTOP,
+    )
+
+    for _ in range(25):
+        goals.on_turn_settled(turns.complete_active())
+
+    assert len(turns.started) == 26
+    current = goals.read(session_id)
+    assert current is not None and current.status is ThreadGoalStatus.ACTIVE
 
 
 def test_terminal_goal_turn_settlement_is_idempotent_across_recovery(
