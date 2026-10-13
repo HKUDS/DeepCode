@@ -122,12 +122,17 @@ class ServiceGoals:
         self.rpc = rpc
 
     def read(self, thread_id):
-        value = self.rpc.call("thread/goal/get", {"threadId": thread_id})["goal"]
-        return from_view(ThreadGoal, value) if value else None
+        return self.read_with_outcome(thread_id)[0]
 
-    def read_outcome(self, thread_id):
-        value = self.rpc.call("thread/goal/get", {"threadId": thread_id})["outcome"]
-        return from_view(GoalOutcome, value) if value else None
+    def read_with_outcome(self, thread_id):
+        # One get: two would let a Turn settle in between and pair the Goal
+        # with an outcome it never had.
+        value = self.rpc.call("thread/goal/get", {"threadId": thread_id})
+        goal, outcome = value["goal"], value["outcome"]
+        return (
+            from_view(ThreadGoal, goal) if goal else None,
+            from_view(GoalOutcome, outcome) if outcome else None,
+        )
 
     def pause(self, thread_id, *, expected_goal_id):
         value = self.rpc.call(

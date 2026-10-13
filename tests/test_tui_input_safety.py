@@ -18,9 +18,16 @@ from rich.console import Console
 
 import cli.tui.app as tui_app
 import cli.tui.input as tui_input
+from cli.service_catalogs import ServiceGoals
 from cli.tui.goal_controller import TuiGoalController
 from cli.tui.input import InputInterrupted, InputReader, TuiCompleter
-from core.domain.thread_goal import ThreadGoal, ThreadGoalStatus
+from core.application.views import goal_outcome_view, thread_goal_view
+from core.domain.thread_goal import (
+    GoalDecisionSource,
+    GoalOutcome,
+    ThreadGoal,
+    ThreadGoalStatus,
+)
 
 # -- @path completion ----------------------------------------------------------
 
@@ -191,8 +198,9 @@ class _Goals:
         self.reads += 1
         return self.current
 
-    def read_outcome(self, _thread_id):
-        return None
+    def read_with_outcome(self, _thread_id):
+        self.reads += 1
+        return self.current, None
 
     def clear(self, thread_id, *, expected_goal_id):
         self.cleared.append(expected_goal_id)
@@ -259,3 +267,86 @@ def test_cancelled_goal_wait_reports_and_keeps_the_goal() -> None:
 
     assert "Stopped waiting; the Goal remains active." in result.message
     assert goals.reads >= 2
+
+
+# -- /goal reads the Goal and its outcome together -------------------------------
+
+
+class _GoalService:
+    """thread/goal/get answers with the next state each time it is asked."""
+
+    def __init__(self, *states) -> None:
+        self.states = list(states)
+        self.gets = 0
+
+    def call(self, method, params):
+        assert method == "thread/goal/get"
+        state = self.states[min(self.gets, len(self.states) - 1)]
+        self.gets += 1
+        return state
+
+
+def _goal_state(status: ThreadGoalStatus, reason: str | None = None):
+    goal = ThreadGoal(
+        id="goal_000000000000000000000001",
+        thread_id="session-1",
+        objective="Ship the parser",
+        status=status,
+    )
+    outcome = (
+        GoalOutcome(
+            status=status,
+            reason=reason,
+            source=GoalDecisionSource.RUNTIME,
+            decided_by_turn_id=None,
+            decided_at=goal.updated_at,
+        )
+        if reason is not None
+        else None
+    )
+    return {
+        "goal": thread_goal_view(goal),
+        "outcome": goal_outcome_view(outcome) if outcome is not None else None,
+    }
+
+
+def _service_controller(service: _GoalService) -> TuiGoalController:
+    async def wait_until_idle():
+        return None
+
+    owner = SimpleNamespace(
+        thread_client=SimpleNamespace(
+            goals=ServiceGoals(service),
+            session_id="session-1",
+            wait_until_idle=wait_until_idle,
+        ),
+    )
+    return TuiGoalController(owner)
+
+
+def test_goal_show_never_pairs_a_goal_with_a_later_reason() -> None:
+    # A Turn settles between two reads: the Goal was active, then blocked.
+    service = _GoalService(
+        _goal_state(ThreadGoalStatus.ACTIVE),
+        _goal_state(ThreadGoalStatus.BLOCKED, "The build is broken."),
+    )
+
+    result = asyncio.run(_service_controller(service).execute("show"))
+
+    assert result.message.startswith("Goal active")
+    assert "Reason:" not in result.message
+    assert service.gets == 1
+
+
+def test_goal_wait_reports_the_goal_and_reason_it_ended_with() -> None:
+    # Polling sees the Goal blocked; by the final read it has been completed.
+    service = _GoalService(
+        _goal_state(ThreadGoalStatus.ACTIVE),
+        _goal_state(ThreadGoalStatus.BLOCKED, "The build is broken."),
+        _goal_state(ThreadGoalStatus.COMPLETE, "Shipped."),
+    )
+
+    result = asyncio.run(_service_controller(service).execute("wait"))
+
+    assert result.message.startswith("Goal complete")
+    assert "Reason: Shipped." in result.message

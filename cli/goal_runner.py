@@ -110,18 +110,13 @@ def _execute(options, on_progress, on_event, detached) -> GoalRunResult:
         if options.access_preset is not None:
             client.set_access_preset(options.access_preset)
         if resuming:
-            goal = client.goals.read(client.thread.id)
+            goal, outcome = client.goals.read_with_outcome(client.thread.id)
             if goal is None:
                 raise GoalNotFoundError(
                     f"no Goal is attached to Session {client.thread.id}"
                 )
             if goal.status is ThreadGoalStatus.COMPLETE:
-                return GoalRunResult(
-                    goal,
-                    client.thread.id,
-                    client.workspace,
-                    client.goals.read_outcome(client.thread.id),
-                )
+                return GoalRunResult(goal, client.thread.id, client.workspace, outcome)
             goal = _apply_budget_override(
                 client.goals, goal=goal, token_budget=options.token_budget
             )

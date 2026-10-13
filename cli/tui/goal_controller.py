@@ -74,10 +74,7 @@ class TuiGoalController:
 
     def _status(self) -> GoalCommandResult:
         application, thread_id = self._context()
-        goal = application.goals.read(thread_id)
-        outcome = (
-            application.goals.read_outcome(thread_id) if goal is not None else None
-        )
+        goal, outcome = application.goals.read_with_outcome(thread_id)
         return GoalCommandResult(self._format(goal, outcome))
 
     def _pause(self) -> GoalCommandResult:
@@ -204,13 +201,18 @@ class TuiGoalController:
                 raise
             task.uncancel()
             stopped = True
+        # Report the Goal as it is now, with its own outcome: the last poll
+        # may be stale by the time the Turn has gone idle.
+        latest, outcome = application.goals.read_with_outcome(thread_id)
+        if latest is not None:
+            current = latest
         suffix = (
             "\nStopped waiting; the Goal remains active."
             if stopped and current.status is ThreadGoalStatus.ACTIVE
             else ""
         )
         return GoalCommandResult(
-            self._format(current, application.goals.read_outcome(thread_id)) + suffix,
+            self._format(current, outcome) + suffix,
             refresh_session=True,
         )
 
