@@ -522,19 +522,20 @@ class TuiApp:
 
     def list_skills(self) -> str:
         try:
-            skills = self.thread_client.skills.list(
-                self.thread_client.project.id
-            ).skills
+            discovery = self.thread_client.skills.list(self.thread_client.project.id)
         except (ApplicationError, OSError, ValueError) as exc:
             return f"Skill error: {exc}"
+        skills = discovery.skills
+        # Invalid Skills and ignored settings explain what the list leaves out.
+        warnings = [f" warning: {warning}" for warning in discovery.warnings]
         if not skills:
-            return "no Skills discovered"
+            return "\n".join(["no Skills discovered", *warnings])
         selected = set(self.selected_skill_ids)
         lines = ["", "Skills (select with /skill <id|name>):"]
         for skill in skills:
             marker = "*" if skill.id in selected else " "
             lines.append(f" {marker} {skill.status:<9} {skill.name:<24} {skill.id}")
-        return "\n".join(lines)
+        return "\n".join([*lines, *warnings])
 
     def select_skill(self, identifier: str) -> str:
         try:

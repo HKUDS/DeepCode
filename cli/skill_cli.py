@@ -78,7 +78,12 @@ def run(argv: list[str] | None = None) -> int:
         manager = LocalSkillManager(host=skill_hosts.get(args.workspace))
         if args.command in {"list", "reload"}:
             catalog = manager.catalog(force=args.command == "reload")
-            return _print_catalog(catalog.records, catalog.revision, as_json=args.json)
+            return _print_catalog(
+                catalog.records,
+                catalog.revision,
+                catalog.warnings,
+                as_json=args.json,
+            )
         if args.command == "show":
             return _print_detail(manager.find(args.skill), as_json=args.json)
         if args.command == "import":
@@ -133,6 +138,7 @@ def run(argv: list[str] | None = None) -> int:
 def _print_catalog(
     records: tuple[SkillRecord, ...],
     revision: str,
+    warnings: tuple[str, ...],
     *,
     as_json: bool,
 ) -> int:
@@ -142,11 +148,15 @@ def _print_catalog(
                 {
                     "catalogRevision": revision,
                     "skills": [_record_view(record) for record in records],
+                    "warnings": list(warnings),
                 },
                 ensure_ascii=False,
             )
         )
         return 0
+    # Invalid Skills and ignored settings explain what the list leaves out.
+    for warning in warnings:
+        print(f"warning: {warning}", file=sys.stderr)
     if not records:
         print("No Skills discovered.")
         return 0

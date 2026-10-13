@@ -76,3 +76,33 @@ def test_skill_cli_reports_unknown_skill_without_traceback(
 
     assert result == 2
     assert "Skill not found" in _json_output(capsys)["error"]
+
+
+def test_skill_cli_list_reports_catalog_warnings(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    workspace = tmp_path / "workspace"
+    skill = workspace / ".agents" / "skills" / "commit"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\n"
+        "name: commit\n"
+        "description: Commit the change\n"
+        "allowed-tools: Bash(git status:*), Read\n"
+        "---\n"
+        "Commit with a clear message.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DEEPCODE_HOME", str(tmp_path / "deepcode-home"))
+
+    assert run(["--workspace", str(workspace), "list"]) == 0
+    printed = capsys.readouterr()
+    assert "commit" in printed.out
+    assert "warning:" in printed.err
+    assert "argument patterns are not enforced" in printed.err
+
+    assert run(["--workspace", str(workspace), "--json", "list"]) == 0
+    warnings = _json_output(capsys)["warnings"]
+    assert any("argument patterns are not enforced" in item for item in warnings)

@@ -1048,6 +1048,28 @@ def test_skill_command_is_one_turn_only_and_persists_invocation_metadata(
     assert invocation["invocation"] == "explicit"
 
 
+def test_skills_command_prints_catalog_warnings(monkeypatch, tmp_path, capsys):
+    skill = tmp_path / "ws" / ".agents" / "skills" / "commit"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\n"
+        "name: commit\n"
+        "description: Commit the change\n"
+        "allowed-tools: Bash(git status:*), Read\n"
+        "---\n"
+        "Commit with a clear message.\n",
+        encoding="utf-8",
+    )
+
+    rc, _provider = _run_tui(monkeypatch, tmp_path, "/skills\n/exit\n", [])
+
+    assert rc == 0
+    output = capsys.readouterr().out
+    assert "commit" in output
+    assert "warning:" in output
+    assert "argument patterns are not enforced" in output
+
+
 def _configure_fake_goal_provider(monkeypatch, tmp_path) -> None:
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
