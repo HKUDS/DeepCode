@@ -849,15 +849,33 @@ class ThreadService:
             and not self._is_context_note(message)
             and not _is_compaction_checkpoint(message)
         ]
+        items = ItemRepository(connection)
+        projected_items = _visible_conversation_items(
+            items.conversation_for_thread(thread.id)
+        )
+        # A Turn this service ran is projected live, and the records it wrote
+        # to JSONL carry its id. It is on both sides already, though not in
+        # the same order: steering reaches JSONL when it arrives and the
+        # Turn's replies when it ends, and what the model said before an
+        # interrupt or a failure is only in SQLite. Comparing such a Turn
+        # declares a conflict, which stops all later projection, so only the
+        # rest is compared.
+        ran_here = {item.turn_id for item in projected_items} & {
+            (message.metadata or {}).get("turnId") for message in timeline
+        }
+        timeline = [
+            message
+            for message in timeline
+            if (message.metadata or {}).get("turnId") not in ran_here
+        ]
+        projected_items = [
+            item for item in projected_items if item.turn_id not in ran_here
+        ]
         canonical = [
             message
             for message in timeline
             if message.role in {"user", "assistant"} and message.content
         ]
-        items = ItemRepository(connection)
-        projected_items = _visible_conversation_items(
-            items.conversation_for_thread(thread.id)
-        )
         projected = [
             (
                 "user" if item.kind is ItemKind.USER_MESSAGE else "assistant",
