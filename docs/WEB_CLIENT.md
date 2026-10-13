@@ -27,7 +27,9 @@ The service binds to `127.0.0.1` only; use the printed host and port. Public
 hosting and arbitrary reverse-proxy origins are not supported.
 
 `--database PATH` selects an isolated service database; `--port 0` chooses an
-available port when starting it. A running instance keeps its existing port.
+available port when starting it. Without `--port`, the service uses 3081, or a
+free port while another program holds 3081; the printed link always has the
+actual address. A running instance keeps its existing port.
 To stop the service explicitly, use the [service commands](SERVICE_RUNTIME.md).
 macOS login startup is a separate, optional OS setting.
 

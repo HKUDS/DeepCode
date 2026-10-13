@@ -16,6 +16,11 @@ from core.private_storage import open_existing_private_file, open_private_file
 from core.version import __version__
 
 SERVICE_PROTOCOL_VERSION = 1
+# A preference, not a requirement: when another program holds this port, the
+# service listens on a free one and publishes that address instead.
+DEFAULT_PORT = 3081
+# sysexits' EX_UNAVAILABLE: an explicitly requested port could not be bound.
+EXIT_PORT_UNAVAILABLE = 69
 SERVICE_WORKING_DIRECTORY = Path(__file__).resolve().parents[1]
 # A detached start names the instance it launches, so it can tell its own
 # service from a concurrent winner. PIDs cannot: on Windows a venv's python.exe

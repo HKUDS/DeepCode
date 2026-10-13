@@ -330,6 +330,52 @@ def test_unverified_busy_owner_is_a_failure_so_supervisor_can_retry(tmp_path):
     assert files.record.exists()  # A non-owner cannot clear another owner's state.
 
 
+def test_another_program_on_the_default_port_moves_the_service_aside(
+    tmp_path, monkeypatch
+):
+    import socket
+
+    from app_server import service
+    from cli.service_cli import _wait_ready
+
+    async def scenario(taken):
+        files = ServiceFiles(tmp_path / "state.sqlite3")
+        task = asyncio.create_task(service.serve(files, taken))
+        try:
+            ready = await asyncio.to_thread(_wait_ready, ServiceClient(files), 15)
+            record, _ = files.read()
+            assert record.port != taken
+            assert ready["url"] == f"http://127.0.0.1:{record.port}"
+            await asyncio.to_thread(
+                ServiceClient(files).call, "stop", {"timeout": 1, "cancelRunning": True}
+            )
+            await asyncio.wait_for(task, 5)
+        finally:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    with socket.socket() as other:
+        other.bind(("127.0.0.1", 0))
+        other.listen()
+        taken = other.getsockname()[1]
+        monkeypatch.setattr(service, "DEFAULT_PORT", taken)
+        asyncio.run(scenario(taken))
+
+
+def test_an_explicit_port_held_by_another_program_fails_and_says_so(tmp_path):
+    import socket
+
+    files = ServiceFiles(tmp_path / "state.sqlite3")
+    with socket.socket() as other:
+        other.bind(("127.0.0.1", 0))
+        other.listen()
+        taken = other.getsockname()[1]
+        with pytest.raises(ServiceUnavailable, match=f"Port {taken} is in use"):
+            start_service(files, port=taken, timeout=15)
+    assert not files.running()
+
+
 def test_detached_start_keeps_a_service_started_through_a_redirector(
     tmp_path, monkeypatch
 ):

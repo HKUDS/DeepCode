@@ -24,6 +24,8 @@ from app_server.errors import RpcError
 from app_server.protocol.codec import decode_request
 from app_server.service_client import ServiceClient, ServiceUnavailable
 from app_server.service_state import (
+    DEFAULT_PORT,
+    EXIT_PORT_UNAVAILABLE,
     ServiceFiles,
     ServiceRecord,
     identity_proof,
@@ -40,6 +42,43 @@ from core.private_storage import ensure_private_directory, open_private_file
 
 logger = logging.getLogger(__name__)
 MAX_CONTROL_BYTES = 16_384
+
+
+class PortUnavailable(Exception):
+    """An explicitly requested port could not be bound."""
+
+
+def _bound(port: int) -> socket.socket:
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        if os.name != "nt":
+            # Rebind after our old TCP connections enter TIME_WAIT. Do not use
+            # SO_REUSEPORT or Windows address sharing with another live listener.
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(("127.0.0.1", port))
+        listener.listen(socket.SOMAXCONN)
+    except BaseException:
+        listener.close()
+        raise
+    listener.setblocking(False)
+    return listener
+
+
+def _listen(port: int) -> socket.socket:
+    """Listen on loopback; another program on the default port moves us aside."""
+    try:
+        return _bound(port)
+    except OSError as exc:
+        if port != DEFAULT_PORT:
+            logger.error("Cannot listen on 127.0.0.1:%s: %s", port, exc.strerror)
+            raise PortUnavailable(port) from exc
+        # Besides a listener, Windows refuses ports reserved for Hyper-V or WSL.
+        logger.warning(
+            "Cannot listen on 127.0.0.1:%s (%s); using a free port instead",
+            port,
+            exc.strerror,
+        )
+    return _bound(0)
 
 
 class _PrivateRotatingLog(RotatingFileHandler):
@@ -328,22 +367,12 @@ async def serve(files: ServiceFiles, port: int) -> None:
     host = None
     runner = None
     control = None
+    listener = None
     installed_signals = []
-    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     loop = asyncio.get_running_loop()
     try:
         files.clear()
-        if os.name != "nt":
-            # Rebind after our old TCP connections enter TIME_WAIT. Do not use
-            # SO_REUSEPORT or Windows address sharing with another live listener.
-            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            listener.bind(("127.0.0.1", port))
-        except OSError as exc:
-            logger.error("Cannot listen on 127.0.0.1:%s: %s", port, exc.strerror)
-            raise
-        listener.listen(socket.SOMAXCONN)
-        listener.setblocking(False)
+        listener = _listen(port)
         record = ServiceRecord(
             launched_instance_id(),
             str(files.database),
@@ -409,7 +438,8 @@ async def serve(files: ServiceFiles, port: int) -> None:
                 files.clear()
                 lease.close()
             finally:
-                listener.close()
+                if listener is not None:
+                    listener.close()
                 for sig in installed_signals:
                     loop.remove_signal_handler(sig)
 
@@ -419,7 +449,7 @@ def main(argv: list[str] | None = None) -> int:
         description="Run the DeepCode service in the foreground"
     )
     parser.add_argument("--database", type=Path, default=None)
-    parser.add_argument("--port", type=int, default=3081)
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument(
         "--foreground",
         action="store_true",
@@ -448,6 +478,8 @@ def main(argv: list[str] | None = None) -> int:
         asyncio.run(serve(files, args.port))
     except KeyboardInterrupt:
         return 130
+    except PortUnavailable:
+        return EXIT_PORT_UNAVAILABLE
     except Exception as exc:
         logger.exception("DeepCode service failed (%s): %s", type(exc).__name__, exc)
         return 1

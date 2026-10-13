@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import webbrowser
 from pathlib import Path
 
-from app_server.service_client import ServiceClient
+from app_server.service_client import (
+    ServiceClient,
+    ServiceOperationError,
+    ServiceUnavailable,
+)
 from app_server.service_state import ServiceFiles
 from app_server.web_surface import read_web_build
 from cli.service_cli import start_service
@@ -31,8 +36,17 @@ def run(argv=None) -> int:
             "Web assets are missing or incompatible. Install a complete release, "
             "or run npm run build:web in desktop/."
         )
-    status = start_service(files, port=args.port)
-    ticket = ServiceClient(files).call("auth/issue", instance_id=status["instanceId"])
+    try:
+        status = start_service(files, port=args.port)
+        ticket = ServiceClient(files).call(
+            "auth/issue", instance_id=status["instanceId"]
+        )
+    except (ServiceUnavailable, ServiceOperationError, OSError) as exc:
+        if args.json:
+            print(json.dumps({"error": str(exc)}))
+        else:
+            print(f"error: {exc}", file=sys.stderr)
+        return 1
     url = status["url"] + "/#ticket=" + ticket["ticket"]
     print(
         json.dumps(

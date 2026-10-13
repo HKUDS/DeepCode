@@ -17,6 +17,8 @@ from app_server.service_client import (
     ServiceUnavailable,
 )
 from app_server.service_state import (
+    DEFAULT_PORT,
+    EXIT_PORT_UNAVAILABLE,
     LAUNCH_INSTANCE_ENV,
     ServiceFiles,
     service_command,
@@ -123,7 +125,7 @@ def _start_detached(
     files: ServiceFiles, *, port: int | None = None, timeout: float = 30.0
 ) -> dict:
     client = ServiceClient(files)
-    command = service_command(files, 3081 if port is None else port)
+    command = service_command(files, DEFAULT_PORT if port is None else port)
     instance_id = secrets.token_hex(16)
     process = subprocess.Popen(
         command,
@@ -174,7 +176,11 @@ def _wait_ready(
     while True:
         try:
             status = client.call("status", timeout=1)
-            if port not in (None, 0) and status["url"] != f"http://127.0.0.1:{port}":
+            # The default port is a preference the service may have moved off.
+            if (
+                port not in (None, 0, DEFAULT_PORT)
+                and status["url"] != f"http://127.0.0.1:{port}"
+            ):
                 raise ServiceOperationError(
                     f"Service already runs at {status['url']}; stop it before changing ports"
                 )
@@ -194,6 +200,11 @@ def _wait_ready(
             and process.poll() is not None
             and not client.files.running()
         ):
+            if process.returncode == EXIT_PORT_UNAVAILABLE:
+                raise ServiceUnavailable(
+                    f"Port {port} is in use or reserved by another program; "
+                    "choose another --port"
+                )
             raise ServiceUnavailable(
                 f"Service startup failed (exit {process.returncode}); inspect {client.files.log}"
             )
@@ -290,7 +301,12 @@ def run(argv: list[str] | None = None) -> int:
         command.add_argument("--database", type=Path)
         command.add_argument("--json", action="store_true")
         if name in {"start", "restart", "install"}:
-            command.add_argument("--port", type=int)
+            command.add_argument(
+                "--port",
+                type=int,
+                help=f"Listen on this port (default {DEFAULT_PORT}, or a free port "
+                f"while another program holds {DEFAULT_PORT})",
+            )
         if name in {"snapshot", "prepare-upgrade"}:
             command.add_argument("--output", type=Path, required=True)
         if name in {"snapshot", "prepare-upgrade", "restore"}:
@@ -375,7 +391,8 @@ def run(argv: list[str] | None = None) -> int:
             with exclusive_file_lock(files.directory / "management.lock"):
                 if args.command == "install":
                     result = agent.install(
-                        port=3081 if args.port is None else args.port, path=args.path
+                        port=DEFAULT_PORT if args.port is None else args.port,
+                        path=args.path,
                     )
                 elif args.command == "uninstall":
                     if agent.job()["loaded"]:

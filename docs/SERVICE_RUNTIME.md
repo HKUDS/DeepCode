@@ -19,9 +19,13 @@ launching terminal does not close the service. Repeated or concurrent starts
 converge on the same service; an unused child created by a competing launcher
 is reaped before that launcher returns.
 
-The default management port is 3081. `start --port 0` requests an available
-port, and status reports the actual address. An explicit occupied port fails
-with a log entry. To change the port of a running service, stop it first.
+The service prefers port 3081. When another program holds that port, or the
+system reserves it, the service listens on a free port instead and logs a
+warning; clients find the actual address in the service record, and `status`
+and `deepcode web` report it. `start --port 0` always requests a free port. Any
+other explicit port is required: if it cannot be bound, start fails and says
+the port is in use (the service exits with status 69). To change the port of a
+running service, stop it first.
 
 Every service subcommand accepts `--database <path>` to address an isolated
 database. Without it the existing `$DEEPCODE_HOME/state/deepcode.sqlite3`
