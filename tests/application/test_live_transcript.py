@@ -18,10 +18,13 @@ from core.application import DeepCodeApplication
 from core.domain import TrustState
 from core.domain.message_provenance import ClientSurface
 from core.domain.turn import TurnStatus
+from core.persistence.event_repository import EventRepository
+from core.persistence.execution_repository import TurnRepository
 from core.providers.base import LLMResponse
 from core.sessions import SessionStore
 from tests.application.test_transcript_projection import (
     _application,
+    _calls,
     _calls_wait,
     _Factory,
     _Model,
@@ -323,3 +326,150 @@ def test_a_failure_keeps_what_the_model_did_for_the_next_turn(
         ]
     finally:
         application.close()
+
+
+def _rebuilt(tmp_path: Path, application, thread_id: str, name: str):
+    """A projection rebuilt from the session file alone, in a fresh database."""
+
+    rebuilt = DeepCodeApplication.open(
+        tmp_path / f"{name}.sqlite3",
+        session_store=SessionStore(application.session_store.root),
+    )
+    rebuilt.threads.read(thread_id)
+    return rebuilt
+
+
+def _projection(application, thread_id: str) -> tuple[list, list, bool]:
+    application.threads.read(thread_id)
+    with application.database.read() as connection:
+        turns = TurnRepository(connection).list_for_thread(thread_id)
+        items = connection.execute(
+            "SELECT kind, payload_json FROM items WHERE thread_id = ? "
+            "ORDER BY created_at, ordinal",
+            (thread_id,),
+        ).fetchall()
+        conflicted = EventRepository(connection).has_type(
+            thread_id, "thread.projection_conflict"
+        )
+    return [turn.prompt for turn in turns], [tuple(row) for row in items], conflicted
+
+
+def test_a_rebuilt_projection_keeps_a_steer_in_its_turn(tmp_path: Path) -> None:
+    application, thread_id, factory = _application(
+        tmp_path,
+        _calls_wait("Let me check X."),
+        LLMResponse(content="Checked X, and did Y."),
+        LLMResponse(content="Did B."),
+    )
+    try:
+        first = application.turns.start(thread_id, prompt="Do A.")
+        _wait_until_said(application, first.turn.id, "Let me check X.")
+        _steer(application, thread_id, first.turn.id, "Also do Y.")
+        factory.wait.gate.set()
+        _wait_for(application, first.turn.id, TurnStatus.COMPLETED)
+        second = application.turns.start(thread_id, prompt="Do B.")
+        _wait_for(application, second.turn.id, TurnStatus.COMPLETED)
+        assert _projection(application, thread_id)[0] == ["Do A.", "Do B."]
+    finally:
+        application.close()
+
+    rebuilt = _rebuilt(tmp_path, application, thread_id, "rebuilt")
+    try:
+        prompts, items, conflicted = _projection(rebuilt, thread_id)
+        assert prompts == ["Do A.", "Do B."]
+        assert not conflicted
+        assert _projection(rebuilt, thread_id)[1] == items
+        steer = rebuilt.turns.read_input(thread_id, "steer-1")
+        assert steer.payload["text"] == "Also do Y."
+        assert steer.payload["deliveryState"] == "accepted"
+    finally:
+        rebuilt.close()
+
+
+def test_reading_a_thread_mid_turn_projects_nothing_twice(tmp_path: Path) -> None:
+    application, thread_id, factory = _application(
+        tmp_path,
+        _calls_wait("Let me check X."),
+        LLMResponse(content="Checked X."),
+    )
+    try:
+        first = application.turns.start(thread_id, prompt="Do A.")
+        _wait_until_said(application, first.turn.id, "Let me check X.")
+        _wait_until(lambda: len(_transcript(application, thread_id)) == 2)
+        # The file already holds the call; the live projection shows it too.
+        assert _projection(application, thread_id)[0] == ["Do A."]
+        factory.wait.gate.set()
+        _wait_for(application, first.turn.id, TurnStatus.COMPLETED)
+        prompts, items, conflicted = _projection(application, thread_id)
+        assert prompts == ["Do A."]
+        assert not conflicted
+        assert _projection(application, thread_id)[1] == items
+    finally:
+        application.close()
+
+
+def test_a_turn_compacted_midway_rebuilds_and_resumes_cleanly(tmp_path: Path) -> None:
+    application, thread_id, factory = _application(
+        tmp_path,
+        *(
+            _calls("read_page", f"Reading page {page}.", call_id=f"page-{page}")
+            for page in range(1, 6)
+        ),
+        LLMResponse(content="Read them all."),
+        LLMResponse(content="Did B."),
+    )
+    factory.model.summary = "Summary: pages 1 to 4 read."
+    factory.context_window_tokens = 9000
+    try:
+        for prompt in ("Do A.", "Do B."):
+            started = application.turns.start(thread_id, prompt=prompt)
+            _wait_for(application, started.turn.id, TurnStatus.COMPLETED)
+        session = application.session_store.get_session(thread_id)
+        assert any(
+            (message.metadata or {}).get("compaction") for message in session.messages
+        ), "the turn was expected to compact midway"
+        # Nothing is on record twice: one record per call and per result.
+        calls = [
+            call["id"]
+            for message in session.messages
+            for call in (message.metadata or {}).get("toolCalls") or ()
+        ]
+        results = [
+            message.metadata["toolCallId"]
+            for message in session.messages
+            if message.role == "tool"
+        ]
+        assert len(calls) == len(set(calls)) == 5
+        assert sorted(results) == sorted(calls)
+        prompts, _items, conflicted = _projection(application, thread_id)
+        assert prompts == ["Do A.", "Do B."]
+        assert not conflicted
+    finally:
+        application.close()
+
+    rebuilt = _rebuilt(tmp_path, application, thread_id, "rebuilt")
+    try:
+        prompts, items, conflicted = _projection(rebuilt, thread_id)
+        assert prompts == ["Do A.", "Do B."]
+        assert not conflicted
+        assert _projection(rebuilt, thread_id)[1] == items
+    finally:
+        rebuilt.close()
+
+    resumed, factory = _reopen(tmp_path, LLMResponse(content="Did C."))
+    try:
+        third = resumed.turns.start(thread_id, prompt="Do C.")
+        _wait_for(resumed, third.turn.id, TurnStatus.COMPLETED)
+        request = factory.model.requests[-1]
+        conversation = _conversation(request)
+        # The summary, what the compaction kept, and everything after it.
+        assert conversation[0][1].startswith("This is your own earlier conversation")
+        assert conversation[-4:] == [
+            ("assistant", "Read them all."),
+            ("user", "Do B."),
+            ("assistant", "Did B."),
+            ("user", "Do C."),
+        ]
+        _assert_valid_for_providers(request)
+    finally:
+        resumed.close()

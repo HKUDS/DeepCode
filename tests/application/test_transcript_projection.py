@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from core.agent_runtime.compaction import SUMMARIZATION_PROMPT
 from core.agent_runtime.tools.base import Tool, tool_parameters
 from core.agent_runtime.tools.registry import ToolRegistry
 from core.application import DeepCodeApplication
@@ -29,10 +30,20 @@ from core.sessions import SessionStore
 
 
 class _Model:
-    """Answers from a script: ``None`` never returns, an exception raises."""
+    """Answers from a script: ``None`` never returns, an exception raises.
 
-    def __init__(self, script: list[LLMResponse | Exception | None]) -> None:
+    With ``summary``, a compaction's request for a summary gets it, outside
+    the script.
+    """
+
+    def __init__(
+        self,
+        script: list[LLMResponse | Exception | None],
+        *,
+        summary: str | None = None,
+    ) -> None:
         self.script = list(script)
+        self.summary = summary
         self.called = threading.Event()
         self.requests: list[list[dict[str, Any]]] = []
 
@@ -40,6 +51,11 @@ class _Model:
         return "scripted"
 
     async def chat_with_retry(self, **kwargs: Any) -> LLMResponse:
+        if (
+            self.summary is not None
+            and kwargs["messages"][-1].get("content") == SUMMARIZATION_PROMPT
+        ):
+            return LLMResponse(content=self.summary)
         self.requests.append([dict(message) for message in kwargs["messages"]])
         self.called.set()
         response = self.script.pop(0)
@@ -72,6 +88,22 @@ class _Wait(Tool):
 
 
 @tool_parameters({"type": "object", "properties": {}})
+class _ReadPage(Tool):
+    """A result that fills the context without being large enough to prune."""
+
+    @property
+    def name(self) -> str:
+        return "read_page"
+
+    @property
+    def description(self) -> str:
+        return "Read a page."
+
+    async def execute(self, **_kwargs: Any) -> Any:
+        return " ".join(f"word{index}" for index in range(500))
+
+
+@tool_parameters({"type": "object", "properties": {}})
 class _ReadLog(Tool):
     """A tool with a result large enough for the pruner to shorten."""
 
@@ -87,10 +119,12 @@ class _ReadLog(Tool):
         return " ".join(f"line{index}" for index in range(2000))
 
 
-def _calls(tool: str, text: str = "") -> LLMResponse:
+def _calls(tool: str, text: str = "", *, call_id: str | None = None) -> LLMResponse:
     return LLMResponse(
         content=text,
-        tool_calls=[ToolCallRequest(id=f"call-{tool}", name=tool, arguments={})],
+        tool_calls=[
+            ToolCallRequest(id=call_id or f"call-{tool}", name=tool, arguments={})
+        ],
         finish_reason="tool_calls",
     )
 
@@ -105,6 +139,7 @@ class _Factory:
         self.wait = _Wait()
         # Asks the model to go on once it would stop, as Goal turns do.
         self.closure_callback = None
+        self.context_window_tokens: int | None = None
 
     def create(
         self,
@@ -119,6 +154,7 @@ class _Factory:
         tools = ToolRegistry()
         tools.register(self.wait)
         tools.register(_ReadLog())
+        tools.register(_ReadPage())
         return AgentSession(
             self.model,
             tools,
@@ -129,6 +165,7 @@ class _Factory:
             context_note_sink=context_note_sink,
             history_sink=history_sink,
             closure_callback=self.closure_callback,
+            context_window_tokens=self.context_window_tokens,
             streaming=True,
         )
 

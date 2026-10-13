@@ -930,8 +930,12 @@ class ThreadService:
             # ride a user-role record. Treating it as a prompt opened an empty
             # Turn in the Desktop projection whose title was the summary
             # preamble; it belongs to the Turn it closed, not to a new one.
-            starts_turn = message.role == "user" and not _is_compaction_checkpoint(
-                message
+            # A Steer is user input to the Turn it was read in, not a prompt.
+            starts_turn = (
+                message.role == "user"
+                and not _is_compaction_checkpoint(message)
+                and (message.metadata or {}).get("source")
+                != TurnInputSource.STEER.value
             )
             if starts_turn or not groups:
                 groups.append([message])
