@@ -283,3 +283,88 @@ def test_what_the_model_said_before_a_failure_keeps_the_projection_in_step(
         ]
     finally:
         application.close()
+
+
+def _transcript(application, thread_id: str) -> list[tuple[str, str, str | None]]:
+    session = application.session_store.get_session(thread_id)
+    assert session is not None
+    return [
+        (message.role, message.content, (message.metadata or {}).get("turnId"))
+        for message in session.messages
+    ]
+
+
+class _ReplyWrites:
+    """Makes saving the model's replies to the session file fail on demand."""
+
+    def __init__(self, application: DeepCodeApplication, monkeypatch) -> None:
+        self.failures_left = 0
+        store = application.session_store
+        append = store.append_message
+
+        def append_message(session_id, role, content, **kwargs):
+            if role in {"assistant", "tool"} and self.failures_left:
+                self.failures_left -= 1
+                raise OSError("No space left on device")
+            return append(session_id, role, content, **kwargs)
+
+        monkeypatch.setattr(store, "append_message", append_message)
+
+
+def test_a_turn_that_fails_while_saving_keeps_its_records(
+    tmp_path: Path, monkeypatch
+) -> None:
+    application, thread_id, factory = _application(
+        tmp_path,
+        _calls_wait("Let me check."),
+        LLMResponse(content="checked"),
+        LLMResponse(content="answered"),
+    )
+    factory.wait.gate.set()
+    writes = _ReplyWrites(application, monkeypatch)
+    writes.failures_left = 1
+    try:
+        first = application.turns.start(thread_id, prompt="first")
+        _wait_for(application, first.turn.id, TurnStatus.FAILED)
+        second = application.turns.start(thread_id, prompt="second")
+        _wait_for(application, second.turn.id, TurnStatus.COMPLETED)
+
+        one, two = first.turn.id, second.turn.id
+        assert _transcript(application, thread_id) == [
+            ("user", "first", one),
+            ("assistant", "Let me check.", one),
+            ("tool", "waited", one),
+            ("assistant", "checked", one),
+            ("user", "second", two),
+            ("assistant", "answered", two),
+        ]
+    finally:
+        application.close()
+
+
+def test_what_a_failed_turn_could_not_save_is_not_filed_under_the_next(
+    tmp_path: Path, monkeypatch
+) -> None:
+    application, thread_id, factory = _application(
+        tmp_path,
+        _calls_wait("Let me check."),
+        LLMResponse(content="checked"),
+        LLMResponse(content="answered"),
+    )
+    factory.wait.gate.set()
+    writes = _ReplyWrites(application, monkeypatch)
+    writes.failures_left = 100
+    try:
+        first = application.turns.start(thread_id, prompt="first")
+        _wait_for(application, first.turn.id, TurnStatus.FAILED)
+        writes.failures_left = 0
+        second = application.turns.start(thread_id, prompt="second")
+        _wait_for(application, second.turn.id, TurnStatus.COMPLETED)
+
+        assert _transcript(application, thread_id) == [
+            ("user", "first", first.turn.id),
+            ("user", "second", second.turn.id),
+            ("assistant", "answered", second.turn.id),
+        ]
+    finally:
+        application.close()

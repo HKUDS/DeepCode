@@ -1369,6 +1369,8 @@ class TurnService:
         error_code: str | None = "PROTOCOL_INCOMPLETE"
         error_message: str | None = "agent stream ended without task_complete"
         turn_usage: dict[str, int] = {}
+        save_history: Callable[[], None] | None = None
+        history_saved = False
         try:
             turn, workspace, execution_profile = self._mark_running(
                 turn_id,
@@ -1440,6 +1442,33 @@ class TurnService:
                 else {}
             )
             turn_client = _client_surface_value(initial_input_metadata.get("client"))
+
+            def save_history() -> None:
+                self.session_runtimes.persist_kernel_history(
+                    turn.thread_id,
+                    getattr(session, "history", ()),
+                    extra_metadata={
+                        "schemaVersion": 3,
+                        "client": turn_client,
+                        "turnId": turn.id,
+                        "executionProfile": execution_profile.to_dict(),
+                        "executionSecurityProfile": (
+                            turn.execution_security_profile.to_dict()
+                            if turn.execution_security_profile is not None
+                            else None
+                        ),
+                        **turn_identity_metadata,
+                        # Turn-level facts belong on every record this Turn
+                        # persists. Leaving them only on the fallback append
+                        # lost them entirely once the history path started
+                        # writing the assistant record itself.
+                        "skillInvocations": [
+                            invocation.to_metadata()
+                            for invocation in skill_invocations.values()
+                        ],
+                    },
+                )
+
             async for event in session.run_stream(
                 UserInput(
                     text=turn.prompt,
@@ -1503,30 +1532,7 @@ class TurnService:
             raw_usage = getattr(session, "last_usage", {})
             if not projection.usage:
                 turn_usage = normalize_usage(raw_usage)
-            self.session_runtimes.persist_kernel_history(
-                turn.thread_id,
-                getattr(session, "history", ()),
-                extra_metadata={
-                    "schemaVersion": 3,
-                    "client": turn_client,
-                    "turnId": turn.id,
-                    "executionProfile": execution_profile.to_dict(),
-                    "executionSecurityProfile": (
-                        turn.execution_security_profile.to_dict()
-                        if turn.execution_security_profile is not None
-                        else None
-                    ),
-                    **turn_identity_metadata,
-                    # Turn-level facts belong on every record this Turn
-                    # persists. Leaving them only on the fallback append lost
-                    # them entirely once the history path started writing the
-                    # assistant record itself.
-                    "skillInvocations": [
-                        invocation.to_metadata()
-                        for invocation in skill_invocations.values()
-                    ],
-                },
-            )
+            save_history()
             if projection.saw_terminal:
                 if projection.final_text:
                     canonical = self.session_store.get_session(turn.thread_id)
@@ -1587,6 +1593,7 @@ class TurnService:
                 else:
                     status = TurnStatus.COMPLETED
                     error_code = error_message = None
+            history_saved = True
         except asyncio.CancelledError:
             status = TurnStatus.INTERRUPTED
             stop_reason = "interrupted"
@@ -1599,6 +1606,16 @@ class TurnService:
             if projection is not None:
                 projection.add_error(code=error_code, message=error_message)
         finally:
+            if save_history is not None and not history_saved:
+                # The Turn stopped before it had saved what the model saw of
+                # it. Save that now, under this Turn, and have the next Turn
+                # start from the session file: anything the agent still holds
+                # from this one would otherwise be saved as the next one's.
+                try:
+                    save_history()
+                except Exception:  # noqa: BLE001 - the Turn must still finish
+                    logger.exception("could not save what turn %s did", turn_id)
+                self.session_runtimes.mark_stale(turn.thread_id)
             if session_thread_id is not None:
                 self.session_runtimes.release(
                     session_thread_id,

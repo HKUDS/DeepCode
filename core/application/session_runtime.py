@@ -305,6 +305,14 @@ class SessionRuntimeRegistry:
         if runtime is not None and canonical is not None:
             runtime.canonical_message_count = len(canonical.messages)
 
+    def mark_stale(self, session_id: str) -> None:
+        """Rebuild the resident history from the canonical Session next time."""
+
+        runtime = self._runtimes.get(session_id)
+        if runtime is not None:
+            # No Session has this many messages, so the next acquire reloads.
+            runtime.canonical_message_count = -1
+
     def clear_live_history(self, session_id: str) -> None:
         """Clear only the resident model context, preserving canonical history."""
 
