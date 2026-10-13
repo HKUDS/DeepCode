@@ -11,6 +11,7 @@ matching the kernel contract so a bad edit never aborts the loop.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 from typing import Any
@@ -119,6 +120,11 @@ class ReadTool(Tool):
         file_path = kwargs.get("file_path", "")
         offset = max(1, int(kwargs.get("offset") or 1))
         limit = max(1, int(kwargs.get("limit") or _DEFAULT_READ_LIMIT))
+        # Streaming to a far offset of a large file takes a while: not on the
+        # event loop, which the service shares with every other session.
+        return await asyncio.to_thread(self._read, file_path, offset, limit)
+
+    def _read(self, file_path: str, offset: int, limit: int) -> str:
         target = _resolve(self._workspace, file_path)
         if not target.exists():
             return f"Error: file not found: {file_path}"

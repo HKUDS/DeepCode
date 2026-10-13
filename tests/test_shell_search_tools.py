@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -456,3 +457,32 @@ async def test_search_results_stay_workspace_relative_under_a_symlinked_root(
 
 # (the default_coding_tools full-set assertion lives in
 # test_native_file_tools.py::test_default_coding_tools_registry)
+
+
+@pytest.mark.asyncio
+async def test_glob_does_not_hold_up_the_event_loop(tmp_path, monkeypatch):
+    # Walking a deep tree takes a while; other sessions must keep going.
+    real = Path.glob
+
+    def slow(self, pattern, *args, **kwargs):
+        time.sleep(1)
+        return real(self, pattern, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "glob", slow)
+    (tmp_path / "a.py").write_text("x\n")
+    ticks = 0
+
+    async def tick() -> None:
+        nonlocal ticks
+        while True:
+            await asyncio.sleep(0.05)
+            ticks += 1
+
+    ticker = asyncio.create_task(tick())
+    try:
+        out = await GlobTool(str(tmp_path)).execute(pattern="*.py")
+    finally:
+        ticker.cancel()
+
+    assert out == "a.py"
+    assert ticks >= 5

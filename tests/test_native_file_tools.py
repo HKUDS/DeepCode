@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -16,6 +18,7 @@ from core.domain.execution_security import (
     ExecutionSecurityProfile,
 )
 from core.harness.tools import default_coding_tools
+from core.harness.tools import files
 from core.harness.tools.files import EditTool, ReadTool, WriteTool
 
 
@@ -88,6 +91,39 @@ async def test_read_offset_past_the_end_is_not_an_empty_file(tmp_path):
 
     (tmp_path / "empty.txt").write_text("")
     assert await r.execute(file_path="empty.txt") == "(empty file)"
+
+
+async def _ticks_during(work) -> int:
+    ticks = 0
+
+    async def tick() -> None:
+        nonlocal ticks
+        while True:
+            await asyncio.sleep(0.05)
+            ticks += 1
+
+    ticker = asyncio.create_task(tick())
+    try:
+        await work
+    finally:
+        ticker.cancel()
+    return ticks
+
+
+@pytest.mark.asyncio
+async def test_read_does_not_hold_up_the_event_loop(tmp_path, monkeypatch):
+    # Streaming to a far offset in a huge file takes a while; other
+    # sessions on the service's loop must keep going meanwhile.
+    real = files._read_window
+
+    def slow(*args):
+        time.sleep(1)
+        return real(*args)
+
+    monkeypatch.setattr(files, "_read_window", slow)
+    (tmp_path / "a.txt").write_text("x\n")
+
+    assert await _ticks_during(ReadTool(str(tmp_path)).execute(file_path="a.txt")) >= 5
 
 
 @pytest.mark.asyncio

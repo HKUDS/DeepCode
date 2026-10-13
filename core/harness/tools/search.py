@@ -204,9 +204,13 @@ class GlobTool(Tool):
         pattern = kwargs.get("pattern", "")
         if not pattern:
             return "Error: pattern is required."
-        base = (Path(self._workspace) / (kwargs.get("path") or ".")).resolve()
+        # A deep tree takes a while to walk: not on the event loop either.
+        return await asyncio.to_thread(self._glob, pattern, kwargs.get("path"))
+
+    def _glob(self, pattern: str, path: str | None) -> str:
+        base = (Path(self._workspace) / (path or ".")).resolve()
         if not base.exists():
-            return f"Error: path not found: {kwargs.get('path')}"
+            return f"Error: path not found: {path}"
         matches = []
         for p in sorted(base.glob(pattern)):
             # Prune relative to the base only. ``p.parts`` also carries the
