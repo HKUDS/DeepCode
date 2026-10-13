@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
@@ -115,8 +116,16 @@ _SENSITIVE_HOME_PATHS: tuple[str, ...] = (
 # other file there, private keys whatever their name, stays out of reach.
 _SSH_PUBLIC_FILES = ("config", "config.d/*", "known_hosts*", "*.pub")
 
-# Argument keys inspected to find the "path" a tool touches.
+# Argument keys whose value a permission rule pattern is matched against.
 _PATH_ARG_KEYS = ("file_path", "path", "root", "workspace_path", "target", "filename")
+# For the protected-path check an argument names a path when its key says so,
+# at any depth: MCP tools spell paths many ways (paths, source, destination,
+# output_dir ...). Values under other keys (content, pattern, query ...) are
+# left alone; text that merely mentions .env is not a path.
+_PATH_KEY = re.compile(
+    r"path|file|dir|folder|root|source|src|dest|dst|target|location|cwd",
+    re.IGNORECASE,
+)
 _PATCH_PATH_PREFIXES = (
     "*** Add File: ",
     "*** Update File: ",
@@ -218,6 +227,18 @@ def public_files_in_sensitive_locations() -> tuple[str, ...]:
     return tuple(str(ssh / name) for name in _SSH_PUBLIC_FILES)
 
 
+def _path_values(arguments: Mapping[str, object]):
+    """Strings under path-like keys in ``arguments``, nested ones included."""
+    for name, value in arguments.items():
+        name = str(name)
+        items = value if isinstance(value, (list, tuple)) else [value]
+        for item in items:
+            if isinstance(item, Mapping):
+                yield from _path_values(item)
+            elif isinstance(item, str) and item.strip() and _PATH_KEY.search(name):
+                yield item
+
+
 _SHELL_TOOL_NAMES = ("bash", "exec", "execute_bash", "execute_commands")
 
 
@@ -278,13 +299,7 @@ class PermissionEngine:
         return False
 
     def _candidate_paths(self, arguments: Mapping[str, object]) -> list[str]:
-        paths: list[str] = []
-        for key in _PATH_ARG_KEYS:
-            value = arguments.get(key)
-            if isinstance(value, str) and value.strip():
-                paths.append(value)
-            elif isinstance(value, (list, tuple)):
-                paths.extend(v for v in value if isinstance(v, str) and v.strip())
+        paths = list(_path_values(arguments))
         # apply_patch carries paths in a structured patch envelope rather than
         # separate JSON fields. Extract only its declarative path directives so
         # the same central protection applies without a tool-name special case.

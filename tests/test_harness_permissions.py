@@ -98,6 +98,44 @@ def test_denylist_blocks_a_credential_directory_as_the_argument():
     assert _decide(engine, "read", file_path="/home/u/.aws/sso/cache/t.json") is DENY
 
 
+def test_denylist_checks_path_arguments_whatever_their_name():
+    # MCP tools name their paths in many ways (the filesystem server alone
+    # uses path, paths, source and destination), sometimes nested.
+    engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd="/home/u/proj")
+    assert (
+        _decide(
+            engine, "mcp_fs_read_multiple_files", paths=["a.py", "/home/u/.ssh/id_rsa"]
+        )
+        is DENY
+    )
+    assert (
+        _decide(
+            engine,
+            "mcp_fs_move_file",
+            source="/home/u/.aws/credentials",
+            destination="/tmp/x",
+        )
+        is DENY
+    )
+    assert _decide(engine, "mcp_fs_move_file", source="a", destination=".env") is DENY
+    assert (
+        _decide(engine, "mcp_x_export", options={"output_dir": "/home/u/.gnupg"})
+        is DENY
+    )
+    assert _decide(engine, "mcp_x_upload", files=[{"local_file": "server.pem"}]) is DENY
+
+
+def test_denylist_leaves_arguments_that_are_not_paths_alone():
+    # Text that merely mentions a protected name is not a path.
+    engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd="/home/u/proj")
+    assert (
+        _decide(engine, "write", file_path="notes.md", content="keys: ~/.ssh/id_rsa")
+        is ALLOW
+    )
+    assert _decide(engine, "grep", pattern=r"id_rsa|\.env") is ALLOW
+    assert _decide(engine, "mcp_x_search", query=".env", options={"limit": 5}) is ALLOW
+
+
 def test_denylist_follows_symlinks(tmp_path):
     secret = tmp_path / "home" / ".ssh" / "id_rsa"
     secret.parent.mkdir(parents=True)
