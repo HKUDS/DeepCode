@@ -825,6 +825,67 @@ def test_retire_preserves_history_and_rejects_new_manual_occurrences(
         application.close()
 
 
+def test_run_detail_comes_from_the_goal_state_it_was_judged_by(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    factory = _GoalAwareFactory(_TurnStep("blocked"))
+    application, automation = _application(tmp_path, factory)
+    reason = "Agent requested blocked in scripted Turn 0."
+    try:
+        execution = application.automations.run_now(
+            automation.id,
+            request_id="judged-by-one-state",
+        )
+        _wait_until(
+            lambda: any(
+                run.id == execution.run.id
+                and run.status is AutomationRunStatus.BLOCKED
+                and run.detail == reason
+                for run in _runs(application, automation.id)
+            ),
+            "the Run to carry the agent's blocking reason",
+        )
+        goal_id = execution.run.goal_id
+        assert goal_id is not None
+
+        # The user resumes the Goal while a reconciliation is part way through
+        # judging the Run: after it has read the blocked Goal, while it checks
+        # that the Goal's Turns are accounted.
+        turns_accounted = application.goals.are_turns_accounted
+        resumed = False
+
+        def resume_then_check(*args, **kwargs):
+            nonlocal resumed
+            if not resumed:
+                resumed = True
+                application.thread_goal_store.update(
+                    automation.thread_id,
+                    expected_goal_id=goal_id,
+                    transform=lambda current: current.user_transition(
+                        ThreadGoalStatus.ACTIVE
+                    ),
+                    reason="resumed by user",
+                    source="user",
+                )
+            return turns_accounted(*args, **kwargs)
+
+        monkeypatch.setattr(application.goals, "are_turns_accounted", resume_then_check)
+        application.automations.reconcile_runs()
+
+        assert resumed
+        run = next(
+            run
+            for run in _runs(application, automation.id)
+            if run.id == execution.run.id
+        )
+        # Judged blocked, it keeps the reason the Goal was blocked for, not
+        # "Goal is blocked" from an outcome read after the resume cleared it.
+        assert run.detail == reason
+    finally:
+        application.close()
+
+
 def test_agent_blocked_run_resumes_same_goal_and_same_run(tmp_path: Path) -> None:
     factory = _GoalAwareFactory(
         _TurnStep("blocked"),

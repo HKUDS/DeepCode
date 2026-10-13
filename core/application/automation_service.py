@@ -1176,7 +1176,9 @@ class AutomationService:
             # one-open-run guard while its attributed Turn is still executing.
             return _run_from_turn(run, active, terminal_from_turn=False)
 
-        goal = self.goals.read(run.thread_id)
+        # The outcome is read with the Goal, not later: the Goal may change
+        # while the Run is judged, and its reason must be the judged state's.
+        goal, outcome = self.goals.read_with_outcome(run.thread_id)
         if goal is None:
             if run.turn_id is None:
                 return run
@@ -1267,7 +1269,6 @@ class AutomationService:
         else:
             latest_goal_turn = goal_turns[-1] if goal_turns else initial
 
-        outcome = self.goals.read_outcome(run.thread_id)
         if goal.status is ThreadGoalStatus.COMPLETE:
             return replace(
                 run,
