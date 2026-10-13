@@ -465,12 +465,44 @@ def test_thread_goal_protocol_uses_the_canonical_session_ledger(
     assert (sessions.root / thread.id / "goal.jsonl").exists()
 
 
+class _HeldGoalSession:
+    """A Goal Turn that stays running until its test lets it go."""
+
+    def __init__(self, release: threading.Event) -> None:
+        self.release = release
+
+    def load_history(self, _messages) -> None:
+        return None
+
+    async def run_stream(self, _op):
+        yield Event("1", TurnStarted())
+        while not self.release.is_set():
+            await asyncio.sleep(0.005)
+        yield Event("2", TaskComplete(None, "interrupted"))
+
+    async def aclose(self) -> None:
+        return None
+
+
+class _HeldGoalFactory:
+    def __init__(self) -> None:
+        self.release = threading.Event()
+
+    def create(self, *, workspace, model, approval_callback, goal_runtime=None):
+        return _HeldGoalSession(self.release)
+
+
 def test_thread_goal_protocol_edits_and_resumes_the_same_identity(
     tmp_path: Path,
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    # Resuming starts the Goal's next Turn. Held, it can't settle (and, with
+    # no model configured here, block the Goal) before the replies are read.
+    factory = _HeldGoalFactory()
+    application = DeepCodeApplication.open(
+        tmp_path / "state.sqlite3", session_factory=factory
+    )
     try:
         project = application.projects.add(
             str(workspace),
@@ -538,6 +570,7 @@ def test_thread_goal_protocol_edits_and_resumes_the_same_identity(
         assert responses[4]["goal"] == responses[3]["goal"]
         assert responses[4]["outcome"] is None
     finally:
+        factory.release.set()
         application.close()
 
 
