@@ -7,7 +7,11 @@ from unittest.mock import patch
 import pytest
 
 from core.application import DeepCodeApplication
-from core.application.errors import ThreadNotFoundError, WorkspaceOutOfScopeError
+from core.application.errors import (
+    ThreadNotFoundError,
+    ThreadUnreadableError,
+    WorkspaceOutOfScopeError,
+)
 from core.application.event_service import EventBroker
 from core.domain import ThreadStatus, TrustState
 
@@ -157,9 +161,14 @@ def test_a_session_that_cannot_be_read_keeps_its_thread_history(
         path.chmod(0)
         os.utime(path, ns=(1, 1))
     try:
-        application.threads.list(project.id)
-        with pytest.raises(ThreadNotFoundError, match="could not be read"):
+        # Still listed; opening it says why it can't, not that it is gone.
+        assert [listed.id for listed in application.threads.list(project.id)] == [
+            thread.id
+        ]
+        with pytest.raises(ThreadUnreadableError, match="could not be read"):
             application.threads.read(thread.id)
+        with pytest.raises(ThreadUnreadableError):
+            application.threads.resume(thread.id)
     finally:
         path.chmod(0o600)
         path.write_bytes(original)

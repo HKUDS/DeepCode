@@ -16,6 +16,7 @@ from core.application.errors import (
     InvalidArgumentError,
     ProjectNotFoundError,
     ThreadNotFoundError,
+    ThreadUnreadableError,
     WorkspaceOutOfScopeError,
 )
 from core.application.event_service import EventBroker
@@ -145,6 +146,7 @@ class ThreadService:
         # App Server exits so list/read reconciliation cannot silently undo the
         # user's explicit choice.
         self._workspace_overrides: dict[str, Path] = {}
+        self._unreadable_reported: set[str] = set()
 
     def reconcile(self) -> int:
         """Repair both sides without treating established sessions as legacy."""
@@ -291,6 +293,8 @@ class ThreadService:
     ) -> Thread:
         session = self.session_store.get_session(session_id)
         if session is None:
+            if self._session_unreadable(session_id):
+                raise ThreadUnreadableError(session_id)
             raise ThreadNotFoundError(f"session not found: {session_id}")
         override = None
         if workspace_path is not None:
@@ -428,9 +432,7 @@ class ThreadService:
         if self.session_store.is_deletion_pending(thread_id):
             raise ThreadNotFoundError(f"thread not found: {thread_id}")
         if self._session_unreadable(thread_id):
-            raise ThreadNotFoundError(
-                f"thread {thread_id} could not be read from its session file"
-            )
+            raise ThreadUnreadableError(thread_id)
 
         # A projection-only thread may be encountered before startup
         # reconciliation. Adopt it in place (preserving its id) only when
@@ -475,11 +477,20 @@ class ThreadService:
         visible = [
             thread
             for thread in rows
-            if self.session_store.get_session(thread.id) is not None
+            if self._listable(thread.id)
             and (project_id is None or thread.project_id == project_id)
             and (exact_cwd is None or thread.workspace_path == exact_cwd)
         ]
         return visible[offset : offset + limit]
+
+    def _listable(self, thread_id: str) -> bool:
+        # A Session that can't be read right now is still listed: it has not
+        # gone anywhere, and opening it says why it can't be read.
+        if self.session_store.get_session(thread_id) is not None:
+            return True
+        return not self.session_store.is_deletion_pending(
+            thread_id
+        ) and not self.session_store.is_missing(thread_id)
 
     def rename(self, thread_id: str, title: str) -> Thread:
         clean_title = title.strip()
@@ -1198,10 +1209,12 @@ class ThreadService:
 
         if self.session_store.is_missing(thread_id):
             return False
-        logger.warning(
-            "Session %s is on disk but could not be read; its thread is kept",
-            thread_id,
-        )
+        if thread_id not in self._unreadable_reported:
+            self._unreadable_reported.add(thread_id)
+            logger.warning(
+                "Session %s is on disk but could not be read; its thread is kept",
+                thread_id,
+            )
         return True
 
     def _sqlite_is_system_of_record(self, thread_id: str) -> bool:

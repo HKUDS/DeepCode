@@ -681,6 +681,11 @@ class ServiceThreadClient:
                 "deleted elsewhere. Use /new or /resume."
             )
             return False
+        if code == "THREAD_UNREADABLE":
+            # Its file is locked, syncing or unreadable for now: keep trying.
+            if failures == 0:
+                self._notify_connection(f"{exc} Trying again until it can be read.")
+            return True
         # An internal error is an answer: the service is reachable, perhaps
         # briefly unable to read its database. Saying so mid-answer would split
         # the text, so it is only logged unless it persists.

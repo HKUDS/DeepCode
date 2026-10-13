@@ -55,6 +55,27 @@ class ThreadNotFoundError(ApplicationError):
     code = "THREAD_NOT_FOUND"
 
 
+class ThreadUnreadableError(ApplicationError):
+    """The Thread's Session file is on disk but can't be read right now.
+
+    Nothing was deleted: it may be locked, still syncing or unreadable for
+    this user, and opens again once it can be read.
+    """
+
+    code = "THREAD_UNREADABLE"
+    retryable = True
+
+    def __init__(self, thread_id: str) -> None:
+        super().__init__(
+            f"thread {thread_id} could not be read from its session file",
+            user_message=(
+                "This Session's file is on disk but can't be read right now "
+                "(it may be locked, still syncing, or damaged). Nothing was deleted."
+            ),
+            details={"threadId": thread_id},
+        )
+
+
 class TurnNotFoundError(ApplicationError):
     code = "TURN_NOT_FOUND"
 

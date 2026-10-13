@@ -329,6 +329,22 @@ def test_a_failed_replay_says_lost_connection_only_when_it_was() -> None:
     assert "keeps failing" in sink[-1].msg.message
 
 
+class _Unreadable(ApplicationError):
+    code = "THREAD_UNREADABLE"
+
+
+def test_a_session_file_that_cant_be_read_is_not_called_deleted() -> None:
+    client, sink = _client_for_pump(ServiceEventRenderer())
+    now = time.monotonic()
+    unreadable = _Unreadable("Nothing was deleted.")
+    assert client._replay_failed(unreadable, 0, now)
+    assert "Nothing was deleted" in sink[-1].msg.message
+    assert "no longer exists" not in sink[-1].msg.message
+    # It keeps trying, past the window that gives up on a lost service.
+    assert client._replay_failed(unreadable, 5, now - 600)
+    assert len(sink) == 1
+
+
 # -- failed turn reasons -------------------------------------------------------
 
 
