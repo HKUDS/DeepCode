@@ -374,12 +374,16 @@ class SessionStore:
                 # full bodies just to populate the listing card.
                 message_count = self._count_jsonl(jsonl) - 1  # minus metadata header
                 task_count = self._count_jsonl(self._tasks_jsonl(entry.name))
+                updated_at = max(
+                    str(metadata.get("updated_at", "")),
+                    self._last_message_time(jsonl),
+                )
                 summaries.append(
                     SessionSummary(
                         session_id=metadata["session_id"],
                         title=metadata.get("title", ""),
                         created_at=metadata.get("created_at", ""),
-                        updated_at=metadata.get("updated_at", ""),
+                        updated_at=updated_at,
                         message_count=max(0, message_count),
                         task_count=task_count,
                     )
@@ -413,6 +417,7 @@ class SessionStore:
             session = self.get_session(session_id)
             if session is None:
                 return None
+            title = session.title
             msg = session.add_message(
                 role,
                 content,
@@ -420,7 +425,10 @@ class SessionStore:
                 metadata=metadata,
             )
             self._append_jsonl(self._session_jsonl(session_id), msg.to_dict())
-            self._rewrite_metadata(session)
+            # Only a first prompt that names the session changes the header;
+            # its time is read back from the newest message.
+            if session.title != title:
+                self._rewrite_metadata(session)
             self._remember_signature(session_id)
             self._index_session(session)
             return msg
@@ -804,12 +812,20 @@ class SessionStore:
                 self._disk_signatures[session_id] = signature
 
     def _append_jsonl(self, path: Path, payload: dict) -> None:
+        line = json.dumps(payload, ensure_ascii=False, default=str) + "\n"
         descriptor = open_private_file(
             path,
-            os.O_APPEND | os.O_CREAT | os.O_WRONLY,
+            os.O_APPEND | os.O_CREAT | os.O_RDWR,
         )
-        with os.fdopen(descriptor, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
+        with os.fdopen(descriptor, "a+b") as fh:
+            # A crash mid-append can leave a last line without its newline.
+            # Start a new line, or this record is glued to it and lost too.
+            end = fh.seek(0, os.SEEK_END)
+            if end:
+                fh.seek(end - 1)
+                if fh.read(1) != b"\n":
+                    line = "\n" + line
+            fh.write(line.encode("utf-8"))
 
     @staticmethod
     def _fsync_directory(path: Path) -> None:
@@ -853,7 +869,9 @@ class SessionStore:
         ensure_private_directory(path.parent)
         message_lines: list[str] = []
         if path.exists():
-            with path.open("r", encoding="utf-8") as fh:
+            # Lines this store cannot read (one a crash cut short) are copied
+            # as they are, byte for byte: a rewrite must not be what loses them.
+            with path.open("r", encoding="utf-8", errors="surrogateescape") as fh:
                 for raw in fh:
                     line = raw.rstrip("\n")
                     if not line:
@@ -861,8 +879,8 @@ class SessionStore:
                     try:
                         parsed = json.loads(line)
                     except json.JSONDecodeError:
-                        continue
-                    if parsed.get("_type") == "metadata":
+                        parsed = None
+                    if isinstance(parsed, dict) and parsed.get("_type") == "metadata":
                         continue
                     message_lines.append(line)
         tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
@@ -870,12 +888,17 @@ class SessionStore:
             tmp,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL,
         )
-        with os.fdopen(descriptor, "w", encoding="utf-8") as fh:
+        with os.fdopen(
+            descriptor, "w", encoding="utf-8", errors="surrogateescape"
+        ) as fh:
             fh.write(session.metadata_line())
             fh.write("\n")
             for line in message_lines:
                 fh.write(line)
                 fh.write("\n")
+            # On disk before it replaces the original, as create_session does.
+            fh.flush()
+            os.fsync(fh.fileno())
         os.replace(tmp, path)
 
     def _rewrite_tasks(self, session_id: str, tasks: Iterable[SessionTask]) -> None:
@@ -892,12 +915,30 @@ class SessionStore:
                 fh.write("\n")
         os.replace(tmp, path)
 
+    def _last_message_time(self, path: Path) -> str:
+        """The timestamp of the file's last message line, or ``""``."""
+        last = ""
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    if line.strip():
+                        last = line
+        except OSError:
+            return ""
+        try:
+            parsed = json.loads(last)
+        except json.JSONDecodeError:
+            return ""
+        if not isinstance(parsed, dict) or parsed.get("_type") != "message":
+            return ""
+        return str(parsed.get("timestamp") or "")
+
     def _count_jsonl(self, path: Path) -> int:
         if not path.exists():
             return 0
         count = 0
         try:
-            with path.open("r", encoding="utf-8") as fh:
+            with path.open("r", encoding="utf-8", errors="replace") as fh:
                 for line in fh:
                     if line.strip():
                         count += 1
@@ -912,7 +953,9 @@ class SessionStore:
         metadata: dict | None = None
         messages: list[SessionMessage] = []
         try:
-            with sess_path.open("r", encoding="utf-8") as fh:
+            # A line a crash cut short may end inside a character; reading
+            # must not fail on it, it is skipped like any unreadable line.
+            with sess_path.open("r", encoding="utf-8", errors="replace") as fh:
                 for raw in fh:
                     line = raw.strip()
                     if not line:
@@ -920,6 +963,8 @@ class SessionStore:
                     try:
                         parsed = json.loads(line)
                     except json.JSONDecodeError:
+                        continue
+                    if not isinstance(parsed, dict):
                         continue
                     if parsed.get("_type") == "metadata":
                         metadata = parsed
@@ -929,6 +974,11 @@ class SessionStore:
             return None
         if metadata is None:
             return None
+        updated_at = str(metadata.get("updated_at") or _utcnow_iso())
+        if messages:
+            # Appending a message leaves the header alone, so the newest
+            # message can be later than the header's own time.
+            updated_at = max(updated_at, messages[-1].timestamp)
 
         tasks: list[SessionTask] = []
         tasks_path = self._tasks_jsonl(session_id)
@@ -952,7 +1002,7 @@ class SessionStore:
             session_id=str(metadata.get("session_id") or session_id),
             title=str(metadata.get("title", "")),
             created_at=str(metadata.get("created_at") or _utcnow_iso()),
-            updated_at=str(metadata.get("updated_at") or _utcnow_iso()),
+            updated_at=updated_at,
             messages=messages,
             tasks=tasks,
             metadata=dict(metadata.get("metadata") or {}),
