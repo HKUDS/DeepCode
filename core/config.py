@@ -37,7 +37,14 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from loguru import logger
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    model_validator,
+)
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
@@ -817,12 +824,27 @@ def _load_raw(path: Path) -> dict[str, Any]:
         with path.open("r", encoding="utf-8") as fh:
             data = json.load(fh) or {}
     except json.JSONDecodeError as exc:
-        raise ValueError(f"Invalid JSON in {path}: {exc}") from exc
+        raise ConfigError(f"Invalid JSON in {path}: {exc}") from exc
     if not isinstance(data, dict):
-        raise ValueError(
+        raise ConfigError(
             f"Top-level of {path} must be a JSON object (got {type(data).__name__})"
         )
     return data
+
+
+def _validated(raw: dict[str, Any], sources: list[Path]) -> DeepCodeConfig:
+    """The merged config; an invalid entry is a ConfigError that names it."""
+    try:
+        return DeepCodeConfig.model_validate(raw)
+    except ValidationError as exc:
+        problems = "; ".join(
+            f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
+            for error in exc.errors()[:3]
+        )
+        files = " or ".join(str(path) for path in sources if path.exists())
+        raise ConfigError(
+            f"Invalid setting in {files or 'the configuration'}: {problems}"
+        ) from exc
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -924,16 +946,15 @@ def load_config(config_path: str | Path | None = None) -> DeepCodeConfig:
     exists, defaults are returned so the process still boots for diagnostics.
     """
     if config_path is not None:
-        raw = _load_raw(Path(config_path).expanduser().resolve())
+        sources = [Path(config_path).expanduser().resolve()]
+        raw = _load_raw(sources[0])
     else:
-        base = _load_raw(home_config_path())  # user-level, cwd-independent
-        project = _project_runtime_layer(
-            _load_raw(default_config_path())
-        )  # cwd-scoped override
+        sources = [home_config_path(), default_config_path()]
+        base = _load_raw(sources[0])  # user-level, cwd-independent
+        project = _project_runtime_layer(_load_raw(sources[1]))  # cwd-scoped
         raw = _deep_merge(base, project)
 
-    raw = _resolve_env_refs(raw)
-    return DeepCodeConfig.model_validate(raw)
+    return _validated(_resolve_env_refs(raw), sources)
 
 
 # Any config path segment matching this marks its whole subtree as
@@ -1022,10 +1043,10 @@ def load_config_for_workspace(workspace: str | Path) -> DeepCodeConfig:
     Sessions from unrelated directories without global ``os.chdir()`` calls.
     """
 
-    base = _load_raw(home_config_path())
-    project = _project_runtime_layer(_load_raw(project_config_path(workspace)))
-    raw = _resolve_env_refs(_deep_merge(base, project))
-    return DeepCodeConfig.model_validate(raw)
+    sources = [home_config_path(), project_config_path(workspace)]
+    base = _load_raw(sources[0])
+    project = _project_runtime_layer(_load_raw(sources[1]))
+    return _validated(_resolve_env_refs(_deep_merge(base, project)), sources)
 
 
 # ---------------------------------------------------------------------------

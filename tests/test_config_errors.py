@@ -57,3 +57,29 @@ def test_message_is_terse_when_config_exists(isolated):
     )
     assert "requires providers.openai.apiKey" in msg
     assert "deepcode init" not in msg  # they have config; init is not the fix
+
+
+def test_an_invalid_entry_is_a_config_error_naming_file_and_field(isolated):
+    # It used to escape as pydantic's ValidationError, which the service
+    # reported as "internal error" and which blocked creating a Session.
+    from core.config import load_config, load_config_for_workspace
+
+    home, project = isolated
+    config = home / _DEFAULT_CONFIG_FILENAME
+    config.write_text(json.dumps({"mcpServers": {"slow": {"command": "python"}}}))
+
+    for load in (load_config, lambda: load_config_for_workspace(project)):
+        with pytest.raises(ConfigError) as raised:
+            load()
+        assert str(config) in str(raised.value)
+        assert "mcpServers.slow.type" in str(raised.value)
+
+
+def test_invalid_json_is_a_config_error(isolated):
+    from core.config import load_config
+
+    home, _project = isolated
+    (home / _DEFAULT_CONFIG_FILENAME).write_text("{not json")
+
+    with pytest.raises(ConfigError, match="Invalid JSON"):
+        load_config()

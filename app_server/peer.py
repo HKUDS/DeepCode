@@ -21,6 +21,7 @@ from app_server.protocol.codec import (
 from app_server.protocol.models import Request, Response, notification
 from app_server.protocol.timeouts import SLOW_METHOD_TIMEOUTS
 from core.application.application import DeepCodeApplication
+from core.config import ConfigError
 from core.application.errors import ApplicationError
 from core.application.event_service import DeliveryBatch
 from core.application.live_items import LiveDelta
@@ -166,6 +167,9 @@ class RpcPeer:
             return exc
         if isinstance(exc, ApplicationError):
             return from_application_error(exc)
+        if isinstance(exc, ConfigError):
+            # A setting the user must fix, not a fault in DeepCode.
+            return RpcError(-32000, str(exc), stable_code="CONFIG_INVALID")
         logger.exception("Unhandled App Server request failure")
         return RpcError(-32603, "internal error", stable_code="INTERNAL_ERROR")
 
