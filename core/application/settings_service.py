@@ -20,9 +20,9 @@ from core.application.execution_security_policy import ExecutionSecurityPolicy
 from core.application.project_service import ProjectService
 from core.config import (
     DeepCodeConfig,
-    home_config_path,
     load_config,
     load_config_for_workspace,
+    project_config_path,
 )
 from core.domain.execution_security import (
     ExecutionAccessPreset,
@@ -133,7 +133,10 @@ class SettingsService:
             ) from exc
         if not workspace.is_dir():
             raise InvalidArgumentError("project path must be a directory")
-        return ConfigStore(workspace / home_config_path().name)
+        # Write the file the project layer is read from, the nearest config at
+        # or above the project. A new one at the project root would hide that
+        # file's other settings from then on.
+        return ConfigStore(project_config_path(workspace))
 
     def _view(
         self,
@@ -179,7 +182,7 @@ class SettingsService:
         security_fields = getattr(config.security, "model_fields_set", set())
         user_raw = self.store.read()
         project_raw = (
-            ConfigStore(workspace / home_config_path().name).read()
+            ConfigStore(project_config_path(workspace)).read()
             if workspace is not None and workspace.is_dir()
             else {}
         )

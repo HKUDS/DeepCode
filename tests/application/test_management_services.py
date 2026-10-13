@@ -425,6 +425,82 @@ def test_settings_layering_and_scoped_updates_do_not_copy_project_overrides(
         application.close()
 
 
+def test_project_settings_are_written_to_the_file_they_are_read_from(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "home"
+    repository = tmp_path / "repository"
+    package = repository / "package"
+    home.mkdir()
+    package.mkdir(parents=True)
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+    # The project is a folder inside a repository whose config applies to it.
+    _write_json(
+        repository / "deepcode_config.json",
+        {
+            "agents": {"defaults": {"model": "openai/repository"}},
+            "security": {"accessPreset": "read_only"},
+        },
+    )
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    project = application.projects.add(str(package), trust_state=TrustState.TRUSTED)
+    try:
+        effective = application.settings.read(project.id)
+        assert effective["agents"]["defaults"]["model"] == "openai/repository"
+        assert effective["projectAccessPreset"] == "read_only"
+        assert effective["resolvedDefaultSecuritySource"] == "project"
+
+        updated = application.settings.update(
+            {"security": {"sandbox": False}},
+            scope="project",
+            project_id=project.id,
+        )
+
+        assert updated["agents"]["defaults"]["model"] == "openai/repository"
+        assert updated["security"]["sandbox"] is False
+        assert updated["projectAccessPreset"] == "read_only"
+        assert not (package / "deepcode_config.json").exists()
+        assert json.loads(
+            (repository / "deepcode_config.json").read_text(encoding="utf-8")
+        ) == {
+            "agents": {"defaults": {"model": "openai/repository"}},
+            "security": {"accessPreset": "read_only", "sandbox": False},
+        }
+    finally:
+        application.close()
+
+
+def test_project_mcp_servers_are_written_to_the_file_they_are_read_from(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "home"
+    repository = tmp_path / "repository"
+    package = repository / "package"
+    home.mkdir()
+    package.mkdir(parents=True)
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+    _write_json(
+        repository / "deepcode_config.json",
+        {"mcpServers": {"shared": {"type": "stdio", "command": "python3"}}},
+    )
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    project = application.projects.add(str(package), trust_state=TrustState.TRUSTED)
+    try:
+        updated = application.mcp.upsert(
+            project_id=project.id,
+            scope="project",
+            name="added",
+            patch={"type": "stdio", "command": "python3"},
+        )
+
+        assert {server.name for server in updated.servers} == {"shared", "added"}
+        assert not (package / "deepcode_config.json").exists()
+    finally:
+        application.close()
+
+
 def test_settings_projects_resolved_access_and_unsets_scope_override(
     tmp_path: Path,
     monkeypatch,

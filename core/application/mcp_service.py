@@ -637,7 +637,8 @@ class McpService:
                 "project must be trusted before its MCP config can be changed"
             )
         workspace = Path(project.canonical_path).resolve(strict=True)
-        return ConfigStore(workspace / "deepcode_config.json")
+        # Where `list` reads the project's servers from (see SettingsService).
+        return ConfigStore(project_config_path(workspace))
 
 
 def _raw_servers(config: dict[str, Any]) -> dict[str, Any]:
