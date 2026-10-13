@@ -86,6 +86,31 @@ class EventRepository:
         ).fetchall()
         return {str(row["thread_id"]): int(row["sequence"]) for row in rows}
 
+    def newest_row(self) -> tuple[int, str] | None:
+        """The rowid and event id of the last row written, if any."""
+
+        row = self.connection.execute(
+            "SELECT rowid, id FROM event_log ORDER BY rowid DESC LIMIT 1"
+        ).fetchone()
+        return (int(row[0]), str(row[1])) if row is not None else None
+
+    def event_id_at(self, rowid: int) -> str | None:
+        row = self.connection.execute(
+            "SELECT id FROM event_log WHERE rowid = ?", (rowid,)
+        ).fetchone()
+        return str(row[0]) if row is not None else None
+
+    def threads_written_after(self, rowid: int) -> set[str]:
+        """Threads with rows written after ``rowid``, reading only those rows."""
+
+        # ORDER BY rowid keeps SQLite on the rowid range instead of scanning
+        # the (thread_id, sequence) index from the start.
+        rows = self.connection.execute(
+            "SELECT thread_id FROM event_log WHERE rowid > ? ORDER BY rowid",
+            (rowid,),
+        )
+        return {str(row[0]) for row in rows}
+
     def sequence_head(self, thread_id: str) -> int:
         """Return one stream head without scanning unrelated Threads."""
 

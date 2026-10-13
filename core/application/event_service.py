@@ -240,6 +240,8 @@ class DurableEventRelay:
         self.poll_interval = float(poll_interval)
         self.batch_size = batch_size
         self._cursors: dict[str, int] = {}
+        # The newest row (rowid, event id) whose stream has been relayed.
+        self._mark: tuple[int, str] | None = None
         self._lifecycle_lock = threading.Lock()
         self._poll_lock = threading.Lock()
         self._stop = threading.Event()
@@ -284,14 +286,12 @@ class DurableEventRelay:
         with self._poll_lock:
             with self.database.read() as connection:
                 repository = EventRepository(connection)
-                heads = repository.sequence_heads()
-                for thread_id in sorted(heads):
-                    after = self._cursors.get(thread_id, 0)
-                    if heads[thread_id] <= after:
-                        continue
+                newest = repository.newest_row()
+                caught_up = True
+                for thread_id in sorted(self._changed_threads(repository, newest)):
                     events = repository.replay(
                         thread_id,
-                        after=after,
+                        after=self._cursors.get(thread_id, 0),
                         limit=self.batch_size,
                     )
                     for event in events:
@@ -299,7 +299,28 @@ class DurableEventRelay:
                             delivered += 1
                     if events:
                         self._cursors[thread_id] = events[-1].sequence
+                    if len(events) == self.batch_size:
+                        caught_up = False  # The rest comes with the next poll.
+                if caught_up:
+                    self._mark = newest
         return delivered
+
+    def _changed_threads(self, repository: EventRepository, newest) -> set[str]:
+        """Threads that may have rows this relay has not published."""
+
+        mark = self._mark
+        if mark is not None and repository.event_id_at(mark[0]) == mark[1]:
+            # While the marked row stands, new rows get larger rowids.
+            if newest == mark:
+                return set()
+            return repository.threads_written_after(mark[0])
+        # Rowids of deleted rows at the end of the table can be reused, which
+        # the mark cannot see past: check every stream once.
+        return {
+            thread_id
+            for thread_id, head in repository.sequence_heads().items()
+            if head > self._cursors.get(thread_id, 0)
+        }
 
     def close(self) -> None:
         with self._lifecycle_lock:
@@ -316,7 +337,11 @@ class DurableEventRelay:
         if self._initialized:
             return
         with self.database.read() as connection:
-            heads = EventRepository(connection).sequence_heads()
+            repository = EventRepository(connection)
+            # The mark first: rows written in between count as history.
+            mark = repository.newest_row()
+            heads = repository.sequence_heads()
+        self._mark = mark
         self._cursors = dict(heads)
         self.broker.seed_sequences(heads)
         self._initialized = True

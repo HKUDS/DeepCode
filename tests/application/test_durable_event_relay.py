@@ -260,3 +260,93 @@ def test_relay_backs_off_on_persistent_failure_and_recovers(
     assert waits[1] == pytest.approx(0.04)
     assert waits[2] == pytest.approx(0.08)
     assert waits[3] == pytest.approx(0.01)
+
+
+def _project_of(database: Database, thread_id: str) -> str:
+    with database.read() as connection:
+        return ThreadRepository(connection).get(thread_id).project_id
+
+
+def _counting_scans(monkeypatch) -> list[int]:
+    scans: list[int] = []
+    heads = EventRepository.sequence_heads
+
+    def counted(self):
+        scans.append(1)
+        return heads(self)
+
+    monkeypatch.setattr(EventRepository, "sequence_heads", counted)
+    return scans
+
+
+def test_an_idle_relay_reads_only_the_newest_row(tmp_path: Path, monkeypatch) -> None:
+    # Every 100ms it grouped the whole event log by Thread: 136ms per poll
+    # at a million events, longer than the interval itself.
+    reader_database, thread = _database_with_thread(tmp_path)
+    writer_database = Database(reader_database.path)
+    _append(reader_database, thread.id, "thread.started")
+    broker = EventBroker()
+    relay = DurableEventRelay(reader_database, broker)
+    relay.start(background=False)
+    token = broker.subscribe()
+    scans = _counting_scans(monkeypatch)
+
+    assert relay.poll_once() == 0
+    external = _append(writer_database, thread.id, "approval.requested")
+    assert relay.poll_once() == 1
+    assert broker.drain(token).events == (external,)
+    assert relay.poll_once() == 0
+    assert scans == []
+    relay.close()
+
+
+def test_rows_that_reuse_deleted_rowids_are_still_relayed(
+    tmp_path: Path, monkeypatch
+) -> None:
+    reader_database, kept = _database_with_thread(tmp_path)
+    writer_database = Database(reader_database.path)
+    deleted = Thread(
+        project_id=_project_of(reader_database, kept.id),
+        title="Deleted later",
+        mode=ThreadMode.CODE,
+        workspace_path=str(tmp_path),
+    )
+    with writer_database.transaction() as connection:
+        ThreadRepository(connection).add(deleted)
+    _append(reader_database, kept.id, "thread.started")
+    broker = EventBroker()
+    relay = DurableEventRelay(reader_database, broker)
+    relay.start(background=False)
+    token = broker.subscribe()
+    for _ in range(3):
+        _append(writer_database, deleted.id, "item.created")
+    assert relay.poll_once() == 3
+    broker.drain(token)
+
+    # Deleting the Thread deletes the newest rows; the next rows reuse their
+    # rowids, so the newest rowid looks the same as before.
+    with writer_database.transaction() as connection:
+        connection.execute("DELETE FROM threads WHERE id = ?", (deleted.id,))
+    reused = [_append(writer_database, kept.id, "item.created") for _ in range(3)]
+    scans = _counting_scans(monkeypatch)
+
+    assert relay.poll_once() == 3
+    assert broker.drain(token).events == tuple(reused)
+    assert scans == [1]  # Once, to get past the reused rowids.
+    assert relay.poll_once() == 0
+    assert scans == [1]
+    relay.close()
+
+
+def test_a_stream_longer_than_a_batch_is_relayed_over_polls(tmp_path: Path) -> None:
+    reader_database, thread = _database_with_thread(tmp_path)
+    writer_database = Database(reader_database.path)
+    broker = EventBroker()
+    relay = DurableEventRelay(reader_database, broker, batch_size=2)
+    relay.start(background=False)
+    token = broker.subscribe()
+    written = [_append(writer_database, thread.id, "item.created") for _ in range(5)]
+
+    assert [relay.poll_once() for _ in range(4)] == [2, 2, 1, 0]
+    assert broker.drain(token).events == tuple(written)
+    relay.close()
