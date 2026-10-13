@@ -130,18 +130,23 @@ def session_message_to_kernel(message: SessionMessage) -> dict[str, Any] | None:
     return entry
 
 
-def visible_kernel_history(messages: Iterable[SessionMessage]) -> list[dict[str, Any]]:
-    """Rebuild model history, honoring the latest compaction reset."""
-    records = list(messages)
-    retain = 0
-    reset_at: int | None = None
+def _latest_reset(records: list[SessionMessage]) -> tuple[int, int] | None:
+    """The latest compaction checkpoint's index and its retained window's start."""
+    latest: tuple[int, int] | None = None
     for index, message in enumerate(records):
         marker = (message.metadata or {}).get(COMPACTION_META)
         if isinstance(marker, dict) and marker.get("reset"):
-            reset_at = index
             retain = int(marker.get("retain") or 0)
-    if reset_at is not None:
-        tail_start = max(0, reset_at - max(retain, 0))
+            latest = (index, max(0, index - max(retain, 0)))
+    return latest
+
+
+def visible_kernel_history(messages: Iterable[SessionMessage]) -> list[dict[str, Any]]:
+    """Rebuild model history, honoring the latest compaction reset."""
+    records = list(messages)
+    latest = _latest_reset(records)
+    if latest is not None:
+        reset_at, tail_start = latest
         records = [
             records[reset_at],
             *records[tail_start:reset_at],
@@ -162,10 +167,20 @@ def new_records_from_history(
     """Store records for kernel messages that are not already in ``stored``.
 
     Each stored record accounts for one kernel message: content is not
-    identity, and a "yes" or "Done." said again is a new message.
+    identity, and a "yes" or "Done." said again is a new message. Only the
+    records a history rebuilt from ``stored`` holds can account for one —
+    those from the latest checkpoint's retained window on. That window holds
+    every saved message the history holds (a resumed history is built from
+    exactly it, and :func:`_retained_window` makes a new checkpoint's window
+    cover what its compacted history kept), so a saved message is always
+    found there and never written twice, while one a compaction folded away
+    cannot hide a new message that repeats it.
     """
     items = list(history)
-    unmatched = Counter(record_fingerprint(message) for message in stored)
+    records = list(stored)
+    latest = _latest_reset(records)
+    window = records[latest[1] :] if latest is not None else records
+    unmatched = Counter(record_fingerprint(message) for message in window)
     added: list[SessionMessage] = []
     for index, item in enumerate(items):
         record = kernel_message_to_record(item)
@@ -177,21 +192,45 @@ def new_records_from_history(
             continue
         marker = item.get("compaction")
         if isinstance(marker, dict) and marker.get("reset"):
-            retain = 0
-            remaining = unmatched.copy()
-            for later in items[index + 1 :]:
-                later_record = kernel_message_to_record(later)
-                if later_record is None:
-                    continue
-                later_key = record_fingerprint(later_record)
-                if remaining[later_key]:
-                    remaining[later_key] -= 1
-                    retain += 1
-                    continue
-                break
+            retain = _retained_window(items[index + 1 :], unmatched, [*records, *added])
             record.metadata = {
                 **(record.metadata or {}),
                 COMPACTION_META: {"reset": True, "retain": retain},
             }
         added.append(record)
     return added
+
+
+def _retained_window(
+    later: list[Mapping[str, Any]],
+    unmatched: Counter,
+    saved: list[SessionMessage],
+) -> int:
+    """How many saved records a new checkpoint's rebuilt history must keep.
+
+    Every message after the checkpoint that is already saved has to be in
+    that window: otherwise a resumed history loses it, and the next save no
+    longer finds it there and writes it again. Messages saved while the Turn
+    ran (its prompt, steering, notes) sit in the file in another order than
+    in the history, so the window is the shortest tail of the file holding
+    them all, not the number of them.
+    """
+    remaining = unmatched.copy()
+    needed: Counter = Counter()
+    for item in later:
+        record = kernel_message_to_record(item)
+        if record is None:
+            continue
+        key = record_fingerprint(record)
+        if remaining[key]:
+            remaining[key] -= 1
+            needed[key] += 1
+    retain = 0
+    for record in reversed(saved):
+        if not +needed:
+            break
+        key = record_fingerprint(record)
+        if needed[key]:
+            needed[key] -= 1
+        retain += 1
+    return retain

@@ -404,3 +404,38 @@ def test_a_reply_the_model_gave_before_is_saved_again(tmp_path: Path) -> None:
         ]
     finally:
         application.close()
+
+
+def test_a_reply_compaction_folded_away_is_saved_when_it_repeats(
+    tmp_path: Path,
+) -> None:
+    application, thread_id, factory = _application(
+        tmp_path,
+        LLMResponse(content="Working on it."),
+        LLMResponse(content="Step one is done."),
+        LLMResponse(content="two " * 400),
+        LLMResponse(content="Step two is done."),
+        LLMResponse(content="Summary of the work so far."),
+        LLMResponse(content="Working on it."),
+        LLMResponse(content="Step three is done."),
+    )
+    factory.closure_callback = lambda asked_already: (
+        None if asked_already else "Say whether the goal is complete."
+    )
+    try:
+        for prompt in ("first", "second"):
+            started = application.turns.start(thread_id, prompt=prompt)
+            _wait_for(application, started.turn.id, TurnStatus.COMPLETED)
+        # `/compact` folds the first turn, and its "Working on it.", away.
+        application.turns.run_compaction(thread_id)
+        third = application.turns.start(thread_id, prompt="third")
+        _wait_for(application, third.turn.id, TurnStatus.COMPLETED)
+
+        replies = [
+            content
+            for role, content, turn_id in _transcript(application, thread_id)
+            if role == "assistant" and turn_id == third.turn.id
+        ]
+        assert replies == ["Working on it.", "Step three is done."]
+    finally:
+        application.close()
