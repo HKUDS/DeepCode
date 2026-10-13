@@ -9,6 +9,8 @@ call used to be enough to close that loop.
 
 from __future__ import annotations
 
+import json
+import os
 import sys
 from pathlib import Path
 
@@ -20,7 +22,9 @@ if str(ROOT) not in sys.path:
 
 from core.harness.env_sanitize import (
     FULL_ENV_ENV_VAR,
+    SCRUB_ENV_VAR,
     SENSITIVE_ENV_PATTERN,
+    child_env,
     full_env_requested,
     scrubbed_parent_env,
 )
@@ -110,3 +114,114 @@ def test_external_backend_reexport_still_works():
 
     assert reexported is scrubbed_parent_env
     assert reexported_pattern is SENSITIVE_ENV_PATTERN
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "AWS_SHARED_CREDENTIALS_FILE",
+        "NPM_AUTH",
+        "OAUTH_CLIENT",
+        "PROXY_AUTHORIZATION",
+    ],
+)
+def test_credential_and_auth_names_are_matched(name):
+    assert SENSITIVE_ENV_PATTERN.search(name) is not None
+
+
+@pytest.mark.parametrize(
+    "name", ["GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "SSH_AUTH_SOCK", "PATH"]
+)
+def test_identity_and_agent_socket_names_survive_the_scrub(name):
+    """Commits keep their author and git-over-ssh keeps its agent."""
+
+    assert SENSITIVE_ENV_PATTERN.search(name) is None
+
+
+@pytest.fixture
+def clean_switches(monkeypatch):
+    monkeypatch.delenv(FULL_ENV_ENV_VAR, raising=False)
+    monkeypatch.delenv(SCRUB_ENV_VAR, raising=False)
+
+
+def test_child_env_drops_deepcode_provider_keys_by_default(monkeypatch, clean_switches):
+    """DeepCode's own model keys never reach an agent command; the user's
+    tool tokens still do."""
+
+    monkeypatch.setenv("OPENAI_API_KEY", "deepcode-model-key")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "deepcode-model-key")
+    monkeypatch.setenv("GH_TOKEN", "user-tool-token")
+    env = child_env()
+    assert "OPENAI_API_KEY" not in env
+    assert "DEEPSEEK_API_KEY" not in env
+    assert env["GH_TOKEN"] == "user-tool-token"
+
+
+def test_child_env_drops_a_configured_connection_key_variable(
+    monkeypatch, clean_switches
+):
+    home = Path(os.environ["DEEPCODE_HOME"])
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "deepcode_config.json").write_text(
+        json.dumps(
+            {
+                "providers": {
+                    "profiles": {
+                        "relay": {
+                            "template": "custom",
+                            "apiBase": "https://relay.example/v1",
+                            "apiKeyEnv": "MY_RELAY_SECRET_VALUE",
+                        }
+                    }
+                }
+            }
+        )
+    )
+    monkeypatch.setenv("MY_RELAY_SECRET_VALUE", "deepcode-model-key")
+    assert "MY_RELAY_SECRET_VALUE" not in child_env()
+
+
+def test_child_env_survives_an_unreadable_config(monkeypatch, clean_switches):
+    home = Path(os.environ["DEEPCODE_HOME"])
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "deepcode_config.json").write_text("{not json")
+    monkeypatch.setenv("OPENAI_API_KEY", "deepcode-model-key")
+    env = child_env()
+    assert "OPENAI_API_KEY" not in env
+    assert "PATH" in env
+
+
+def test_full_env_waiver_still_hands_over_provider_keys(monkeypatch):
+    monkeypatch.setenv(FULL_ENV_ENV_VAR, "1")
+    monkeypatch.setenv("OPENAI_API_KEY", "deepcode-model-key")
+    assert child_env()["OPENAI_API_KEY"] == "deepcode-model-key"
+
+
+def test_child_env_drops_deepcode_own_python_environment(
+    monkeypatch, clean_switches, tmp_path
+):
+    """A service started from DeepCode's checkout or virtualenv must not point
+    the project's Python at DeepCode's packages (it ships top-level ``tools``
+    and ``utils``)."""
+
+    project_lib = tmp_path / "lib"
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(ROOT), str(project_lib)]))
+    monkeypatch.setenv("VIRTUAL_ENV", sys.prefix)
+    env = child_env()
+    assert env["PYTHONPATH"] == str(project_lib)
+    assert "VIRTUAL_ENV" not in env
+
+    monkeypatch.setenv("PYTHONPATH", str(ROOT))
+    monkeypatch.setenv("VIRTUAL_ENV", str(tmp_path / ".venv"))
+    env = child_env()
+    assert "PYTHONPATH" not in env
+    assert env["VIRTUAL_ENV"] == str(tmp_path / ".venv")
+
+
+def test_external_agents_lose_deepcode_python_environment_too(
+    monkeypatch, clean_switches
+):
+    monkeypatch.setenv("PYTHONPATH", str(ROOT))
+    assert "PYTHONPATH" not in scrubbed_parent_env()
+    assert scrubbed_parent_env(force_full=True)["PYTHONPATH"] == str(ROOT)

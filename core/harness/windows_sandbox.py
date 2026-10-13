@@ -4,7 +4,7 @@ This module is executed *as a subprocess wrapper* on native Windows when
 :func:`core.harness.sandbox.sandbox_backend` reports ``"job"``.  It mirrors
 what ``/usr/bin/sandbox-exec`` does on macOS and ``bwrap`` does on Linux:
 
-    python -m core.harness.windows_sandbox -- <inner argv...>
+    python core/harness/windows_sandbox.py -- <inner argv...>
 
 The launcher:
 
@@ -205,7 +205,7 @@ def main() -> int:
     argv = sys.argv[1:]
     if not argv:
         print(
-            "deepcode-windows-sandbox: usage: -m core.harness.windows_sandbox -- <cmd> [args...]",
+            "deepcode-windows-sandbox: usage: windows_sandbox.py -- <cmd> [args...]",
             file=sys.stderr,
         )
         return 2

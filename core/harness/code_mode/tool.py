@@ -170,8 +170,9 @@ class CodeModeTool(Tool):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self._workspace,
-                # Full environment unless DEEPCODE_BASH_SCRUB_ENV=1 drops the
-                # credential-shaped variables (see env_sanitize.child_env).
+                # Never DeepCode's own model keys or PYTHONPATH; with
+                # DEEPCODE_BASH_SCRUB_ENV=1 no credential-shaped variable
+                # either (see env_sanitize.child_env).
                 env=child_env(),
                 limit=_STREAM_LIMIT,
                 **subprocess_group_kwargs(),

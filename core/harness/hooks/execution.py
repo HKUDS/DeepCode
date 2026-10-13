@@ -67,8 +67,9 @@ async def run_command(handler: Handler, payload_json: str, cwd: str) -> CommandR
     """Run one hook command, feeding ``payload_json`` on stdin, with a timeout."""
     started = time.monotonic()
     argv = [*_default_shell(), handler.command]
-    # Full environment unless DEEPCODE_BASH_SCRUB_ENV=1 drops credential-shaped
-    # variables; ``handler.env`` merges last either way.
+    # Never DeepCode's own model keys or PYTHONPATH; with
+    # DEEPCODE_BASH_SCRUB_ENV=1 no credential-shaped variable either.
+    # ``handler.env`` merges last either way.
     env = child_env(handler.env)
     try:
         proc = await asyncio.create_subprocess_exec(

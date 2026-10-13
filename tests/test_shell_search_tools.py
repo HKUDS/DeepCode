@@ -121,6 +121,23 @@ async def test_bash_keeps_credentials_in_env_by_default(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_bash_never_sees_deepcode_model_keys_or_python_path(
+    tmp_path, monkeypatch
+):
+    """`env` in the agent's shell must not print DeepCode's own provider key,
+    nor hand DeepCode's checkout to the project's Python."""
+
+    monkeypatch.delenv("DEEPCODE_BASH_SCRUB_ENV", raising=False)
+    monkeypatch.delenv("DEEPCODE_BASH_FULL_ENV", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-deepcode-own")
+    monkeypatch.setenv("PYTHONPATH", str(ROOT))
+    b = BashTool(str(tmp_path))
+    out = await b.execute(command="env")
+    assert "sk-deepcode-own" not in out
+    assert "PYTHONPATH" not in out
+
+
+@pytest.mark.asyncio
 async def test_bash_scrubs_credentials_when_opted_in(tmp_path, monkeypatch):
     monkeypatch.setenv("DEEPCODE_BASH_SCRUB_ENV", "1")
     monkeypatch.setenv("DEEPCODE_TEST_TOKEN", "present")

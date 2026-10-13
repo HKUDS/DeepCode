@@ -48,6 +48,10 @@ from dataclasses import dataclass, field
 # Absolute path — never resolved via PATH (PATH-injection defense).
 _MACOS_SANDBOX_EXEC = "/usr/bin/sandbox-exec"
 
+_WINDOWS_JOB_LAUNCHER = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "windows_sandbox.py"
+)
+
 
 @dataclass(frozen=True)
 class SandboxPolicy:
@@ -319,18 +323,14 @@ def wrap_argv_command(
 
     if backend == "job":
         # Windows Job Object launcher: same wrapper pattern as seatbelt/bwrap.
-        # ``python -m core.harness.windows_sandbox -- <inner argv...>`` creates
-        # a KILL_ON_JOB_CLOSE job, spawns the inner command into it suspended,
-        # and resumes it — the whole process tree dies with the wrapper.
+        # ``python windows_sandbox.py -- <inner argv...>`` creates a
+        # KILL_ON_JOB_CLOSE job, spawns the inner command into it suspended,
+        # and resumes it — the whole process tree dies with the wrapper. It
+        # runs by path, not ``-m``: it needs only the standard library, and a
+        # command's environment does not carry DeepCode's PYTHONPATH.
         import sys as _sys
 
-        argv = [
-            _sys.executable,
-            "-m",
-            "core.harness.windows_sandbox",
-            "--",
-            *inner_argv,
-        ]
+        argv = [_sys.executable, _WINDOWS_JOB_LAUNCHER, "--", *inner_argv]
         return WrappedCommand(argv=argv, backend=backend)
 
     return WrappedCommand(argv=list(inner_argv), backend="none")

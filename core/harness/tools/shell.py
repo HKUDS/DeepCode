@@ -12,11 +12,12 @@ reaches the shell. The destructive-command screen is always on. With
 interpreter, installs from unknown package indexes and one-edit package names,
 which matters when the command text may not be the model's own (an
 intermediary between us and the provider can rewrite a tool call on its way
-back). With ``DEEPCODE_BASH_SCRUB_ENV=1`` the child gets a credential-scrubbed
-environment (:mod:`core.harness.env_sanitize`) so a plain ``env`` cannot copy
-provider keys into the transcript. Both are opt-in because everyday work
-(``curl | sh`` installers, package mirrors, ``gh``/``aws`` reading tokens from
-the environment) would otherwise break for every user.
+back). The child never receives DeepCode's own model keys, so a plain ``env``
+cannot copy them into the transcript; with ``DEEPCODE_BASH_SCRUB_ENV=1`` it gets
+a credential-scrubbed environment (:mod:`core.harness.env_sanitize`). The
+strict screens and the scrub are opt-in because everyday work (``curl | sh``
+installers, package mirrors, ``gh``/``aws`` reading tokens from the
+environment) would otherwise break for every user.
 
 None of this is the security boundary. The sandbox is.
 """
@@ -203,8 +204,9 @@ class BashTool(Tool):
             proc = await asyncio.create_subprocess_exec(
                 *wrapped.argv,
                 cwd=self._workspace,
-                # Full environment unless DEEPCODE_BASH_SCRUB_ENV=1 drops the
-                # credential-shaped variables (see env_sanitize.child_env).
+                # Never DeepCode's own model keys or PYTHONPATH; with
+                # DEEPCODE_BASH_SCRUB_ENV=1 no credential-shaped variable
+                # either (see env_sanitize.child_env).
                 env=child_env(),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,

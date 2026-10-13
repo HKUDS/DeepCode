@@ -91,6 +91,28 @@ def test_fences_writes_tracks_backend_capability(monkeypatch, backend, fenced):
     assert fences_writes() is fenced
 
 
+def test_job_launcher_starts_without_deepcode_on_the_path(monkeypatch, tmp_path):
+    """Commands run in the project without DeepCode's PYTHONPATH, so the job
+    launcher must not need ``import core`` to start."""
+
+    import core.harness.windows_sandbox as launcher
+
+    monkeypatch.setattr("core.harness.sandbox.sandbox_backend", lambda: "job")
+    wrapped = wrap_shell_command("echo hi", SandboxPolicy.for_workspace(tmp_path))
+    assert wrapped.argv[1:3] == [launcher.__file__, "--"]
+    # -I keeps an installed copy of DeepCode out of reach as well.
+    proc = subprocess.run(
+        [sys.executable, "-I", *wrapped.argv[1:]],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert "No module named" not in proc.stderr
+    if os.name != "nt":
+        assert "only runs on Windows" in proc.stderr
+
+
 # ---- real enforcement smoke (macOS only) -----------------------------------
 
 _seatbelt = platform.system() == "Darwin" and os.path.exists("/usr/bin/sandbox-exec")
@@ -169,8 +191,8 @@ def test_windows_job_wrapper_is_used_by_build_exec_command(tmp_path):
         workspace=tmp_path,
         allow_network=False,
     )
-    # The wrapper module must prefix the inner argv.
-    assert "core.harness.windows_sandbox" in wrapped.argv
+    # The wrapper script must prefix the inner argv.
+    assert wrapped.argv[1].endswith("windows_sandbox.py")
     assert wrapped.backend == "job"
 
 
