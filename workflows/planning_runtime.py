@@ -158,9 +158,13 @@ def validate_plan_text(text: str) -> dict[str, Any]:
 
     result["yaml_valid"] = True
     section_source = parsed
-    nested = parsed.get("complete_reproduction_plan")
-    if isinstance(nested, dict):
-        section_source = nested
+    # Paper plans nest under complete_reproduction_plan, chat plans under
+    # project_plan.
+    for wrapper in ("complete_reproduction_plan", "project_plan"):
+        nested = parsed.get(wrapper)
+        if isinstance(nested, dict):
+            section_source = nested
+            break
 
     yaml_missing = [
         section for section in REQUIRED_PLAN_SECTIONS if section not in section_source

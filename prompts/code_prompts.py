@@ -1179,15 +1179,24 @@ project_plan:
     # Academic: algorithm.py, experiments/, data/, utils.py, config.json
     # Tool: cli.py, core/, utils.py, tests/, setup.py
 
-  # CORE IMPLEMENTATION PLAN
-  implementation_steps:
-    1. "[First step - usually setup/core structure]"
-    2. "[Second step - main functionality]"
-    3. "[Third step - integration/interface]"
-    4. "[Fourth step - testing/refinement]"
+  # WHAT TO BUILD
+  implementation_components:
+    main_features:
+      - "[core feature 1]"
+      - "[core feature 2]"
+      - "[core feature 3]"
+    components:
+      - "[component]: [purpose] in [file] - [key logic, data, interfaces]"
+
+  # HOW TO CHECK IT WORKS
+  validation_approach:
+    - "[test or check to add, the command that runs it, what passing looks like]"
 
   # DEPENDENCIES & SETUP
-  dependencies:
+  environment_setup:
+    language: "[primary language]"
+    frameworks: ["[framework1]", "[framework2]"]
+    key_libraries: ["[lib1]", "[lib2]"]
     required_packages:
       - "[package1==version]"
       - "[package2>=version]"
@@ -1197,17 +1206,17 @@ project_plan:
       - "[command to setup environment]"
       - "[command to install dependencies]"
 
-  # KEY TECHNICAL DETAILS
-  tech_stack:
-    language: "[primary language]"
-    frameworks: ["[framework1]", "[framework2]"]
-    key_libraries: ["[lib1]", "[lib2]"]
-
-  main_features:
-    - "[core feature 1]"
-    - "[core feature 2]"
-    - "[core feature 3]"
+  # CORE IMPLEMENTATION PLAN
+  implementation_strategy:
+    - "[First step - usually setup/core structure]"
+    - "[Second step - main functionality]"
+    - "[Third step - integration/interface]"
+    - "[Fourth step - testing/refinement]"
 ```
+
+Keep all five sections (file_structure, implementation_components,
+validation_approach, environment_setup, implementation_strategy): a plan
+without them fails validation at plan review.
 
 # 🎯 PLANNING PRINCIPLES
 - **Flexibility**: Adapt file structure to project type (no fixed templates)

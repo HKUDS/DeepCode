@@ -11,7 +11,7 @@ from core.application.workflow_adapter import (
     WorkflowExecutionRequest,
 )
 from workflows import agent_orchestration_engine as engine
-from workflows.planning_runtime import validate_plan_text
+from workflows.planning_runtime import extract_yaml_candidate, validate_plan_text
 
 
 @pytest.mark.asyncio
@@ -98,3 +98,15 @@ async def test_desktop_workflow_adapter_always_requests_strict_outcomes(
 
     assert outcome.status == "completed"
     assert captured["strict_outcomes"] is True
+
+
+def test_the_chat_plan_format_passes_plan_validation() -> None:
+    """Plan review validates chat plans too; the format the chat planner is
+    told to write has to be one it accepts."""
+    from prompts.code_prompts import CHAT_AGENT_PLANNING_PROMPT
+
+    template = extract_yaml_candidate(CHAT_AGENT_PLANNING_PROMPT)
+    validation = validate_plan_text(template)
+
+    assert validation["yaml_valid"], validation
+    assert validation["valid"], validation["missing_sections"]
