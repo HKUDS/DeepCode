@@ -140,7 +140,9 @@ def scrubbed_parent_env(
 def _drop_deepcode_own(env: dict[str, str]) -> None:
     """Remove what belongs to DeepCode itself rather than to the user's work."""
 
-    for name in _model_key_variables():
+    from core.config import credential_variables
+
+    for name in credential_variables():
         env.pop(name, None)
     pythonpath = env.pop("PYTHONPATH", None)
     if pythonpath:
@@ -187,13 +189,3 @@ def _inside(path: str, root: str) -> bool:
     return resolved is not None and (
         resolved == root or resolved.startswith(root + os.sep)
     )
-
-
-def _model_key_variables() -> set[str]:
-    """The variables DeepCode reads its own model-connection keys from."""
-
-    from core.config import credential_variables
-    from core.providers.registry import PROVIDERS
-
-    names = {spec.env_key for spec in PROVIDERS if spec.env_key}
-    return names | credential_variables()

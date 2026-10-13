@@ -38,6 +38,9 @@ class MCPServerConfig:
     command: str | None = None
     args: list[str] = field(default_factory=list)
     env: dict[str, str] | None = None
+    # Variables a stdio server does not inherit from DeepCode's environment
+    # (the keys DeepCode's own model connections use); ``env`` still sets them.
+    withheld_env: frozenset[str] = frozenset()
     url: str | None = None
     headers: dict[str, str] | None = None
     enabled_tools: list[str] = field(default_factory=lambda: ["*"])
@@ -424,6 +427,8 @@ async def connect_mcp_servers(
                     cfg.args,
                     cfg.env or None,
                 )
+                for withheld in cfg.withheld_env - set(cfg.env or {}):
+                    env.pop(withheld, None)
                 params = StdioServerParameters(
                     command=command,
                     args=args,

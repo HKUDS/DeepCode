@@ -613,6 +613,7 @@ class DeepCodeConfig(BaseSettings):
         slim dataclass), not the Pydantic schema, so we adapt here and keep
         ``self.tools.mcp_servers`` as the single edit surface.
         """
+        withheld = frozenset(credential_variables())
         return {
             name: MCPServerConfig(
                 name=name,
@@ -620,6 +621,7 @@ class DeepCodeConfig(BaseSettings):
                 command=server.command or None,
                 args=list(server.args),
                 env=dict(server.env) if server.env else None,
+                withheld_env=withheld,
                 url=server.url or None,
                 headers=dict(server.headers) if server.headers else None,
                 enabled_tools=list(server.enabled_tools) or ["*"],
@@ -954,15 +956,15 @@ def _resolve_env_refs(value: Any, *, path: str = "") -> Any:
 
 
 def credential_variables() -> set[str]:
-    """Environment variables DeepCode's own settings read credentials from.
+    """Environment variables DeepCode's own model credentials are read from.
 
-    Every ``apiKeyEnv`` and every ``${NAME}`` under ``providers`` and
-    ``dictation``, in the same layers :func:`load_config` merges. The raw files
-    are read, so a reference to an unset variable — which makes
-    :func:`load_config` fail — does not hide the others. An unreadable layer
-    contributes nothing.
+    Each provider template's variable (``OPENAI_API_KEY`` ...), plus every
+    ``apiKeyEnv`` and every ``${NAME}`` under ``providers`` and ``dictation``
+    in the layers :func:`load_config` merges. The raw files are read, so a
+    reference to an unset variable — which makes :func:`load_config` fail —
+    does not hide the others. An unreadable layer contributes nothing.
     """
-    names: set[str] = set()
+    names = {spec.env_key for spec in PROVIDERS if spec.env_key}
 
     def collect(value: Any, key: str = "") -> None:
         if isinstance(value, dict):
