@@ -93,11 +93,19 @@ class GrepTool(Tool):
         self, pattern: str, root: Path, include: str | None
     ) -> list[str] | None:
         argv = ["rg", "--line-number", "--no-heading", "--color", "never"]
+        # Both come from the model: attached with "=" they stay values, so a
+        # pattern like "--pre=<program>" can't make rg run a program.
         if include:
-            argv += ["--glob", include]
-        argv += [pattern, str(root)]
+            argv.append(f"--glob={include}")
+        argv += [f"--regexp={pattern}", "--", str(root)]
         try:
-            proc = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+            proc = subprocess.run(
+                argv,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
         except (OSError, subprocess.TimeoutExpired):
             return self._python_grep(pattern, root, include)
         if proc.returncode not in (0, 1):  # 1 = no matches; >1 = error

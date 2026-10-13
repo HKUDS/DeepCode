@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -229,6 +230,33 @@ async def test_grep_invalid_regex_is_error(tmp_path):
     g = GrepTool(str(tmp_path))
     out = await g.execute(pattern="(unclosed")
     assert out.startswith("Error: invalid regular expression")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="runs a shell script")
+@pytest.mark.skipif(shutil.which("rg") is None, reason="needs ripgrep")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["pattern", "include"])
+async def test_grep_arguments_cannot_become_rg_options(tmp_path, monkeypatch, field):
+    # rg --pre=<program> runs the program on every file it searches: outside
+    # the sandbox, with no approval, and from a read-only tool. Left with no
+    # path, rg searches its working directory, the service's.
+    monkeypatch.chdir(tmp_path)
+    marker = tmp_path / "ran"
+    program = tmp_path / "pre.sh"
+    program.write_text(f'#!/bin/sh\ntouch {marker}\ncat "$1"\n')
+    program.chmod(0o755)
+    option = f"--pre={program}"
+    (tmp_path / "notes.txt").write_text(f"see {option}\n")
+    if field == "pattern":
+        args = {"pattern": option}
+    else:
+        args = {"pattern": "see", "include": option}
+
+    out = await GrepTool(str(tmp_path)).execute(**args)
+
+    assert not marker.exists()
+    if field == "pattern":
+        assert "notes.txt" in out
 
 
 # --- glob -------------------------------------------------------------------
