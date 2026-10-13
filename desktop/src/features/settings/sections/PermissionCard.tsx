@@ -49,6 +49,7 @@ export function PermissionCard({
     accessPresetDraft === undefined ? configuredAccessPreset : accessPresetDraft;
   const defaultAccessLabel = settingsDefaultAccessLabel(settings, t);
   const source = settings?.resolvedDefaultSecuritySource;
+  const ignored = settings?.ignoredProjectSecurity ?? [];
 
   const saveSecurity = async () => {
     if (
@@ -113,11 +114,28 @@ export function PermissionCard({
                     { label: defaultAccessLabel },
                   )}
             </option>
-            {ACCESS_PRESET_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {t(`access.preset.${option.value}`, option.label)}
-              </option>
-            ))}
+            {ACCESS_PRESET_OPTIONS.map((option) => {
+              // A project's settings file comes with its repository, so it
+              // cannot make Full access the default (the server refuses it).
+              const userOnly =
+                scope === "project" && option.value === "full_access";
+              const label = t(`access.preset.${option.value}`, option.label);
+              return (
+                <option
+                  key={option.value}
+                  value={option.value}
+                  disabled={userOnly}
+                >
+                  {userOnly
+                    ? t(
+                        "settings.permissions.fullAccessUserOnly",
+                        "{{label}} · user settings or one Session only",
+                        { label },
+                      )
+                    : label}
+                </option>
+              );
+            })}
           </select>
         </label>
       </div>
@@ -136,6 +154,26 @@ export function PermissionCard({
           },
         )}
       </p>
+      {ignored.length > 0 ? (
+        <p className={styles.note} role="status">
+          {t(
+            "settings.permissions.ignored",
+            "This project's deepcode_config.json asks for {{what}}. DeepCode ignores that: a project's settings file comes with its repository. Choose Full access in user settings or for one Session.",
+            {
+              what: ignored
+                .map((name) =>
+                  name === "accessPreset"
+                    ? t("settings.permissions.ignored.accessPreset", "Full access")
+                    : t(
+                        "settings.permissions.ignored.sandbox",
+                        "the sandbox off",
+                      ),
+                )
+                .join(t("settings.permissions.ignored.and", " and ")),
+            },
+          )}
+        </p>
+      ) : null}
       <footer className={styles.formActions}>
         <span>
           {t(

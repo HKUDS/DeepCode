@@ -305,6 +305,12 @@ const ZH_CN: Record<string, string> = {
   "settings.permissions.fullAccessSave": "保存完全访问默认值",
   "settings.permissions.cancel": "取消",
   "settings.permissions.inherit": "继承用户默认值",
+  "settings.permissions.fullAccessUserOnly": "{{label}} · 仅限用户设置或单个会话",
+  "settings.permissions.ignored":
+    "此项目的 deepcode_config.json 要求{{what}}。DeepCode 会忽略它：项目设置文件随仓库而来。请在用户设置中或为单个会话选择完全访问。",
+  "settings.permissions.ignored.accessPreset": "完全访问",
+  "settings.permissions.ignored.sandbox": "关闭沙箱",
+  "settings.permissions.ignored.and": "并",
   "settings.permissions.fallback": "使用解析后的默认值 · {{label}}",
   "settings.permissions.effective":
     "当前生效的默认值：{{label}} · 来源：{{source}}。询问和只读会保留工作区沙箱与受保护路径防护。完全访问在确认后会移除这些执行边界。底层兼容性设置仅可通过高级配置修改。",

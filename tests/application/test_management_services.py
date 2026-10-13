@@ -634,6 +634,49 @@ def test_settings_refuse_a_project_default_without_the_sandbox(
         application.close()
 
 
+@pytest.mark.parametrize(
+    ("security", "ignored", "source"),
+    [
+        ({"accessPreset": "full_access"}, ["accessPreset"], "built_in"),
+        (
+            {"permissionMode": "full_auto", "sandbox": False},
+            ["sandbox"],
+            "project_legacy",
+        ),
+    ],
+)
+def test_settings_say_which_project_security_is_ignored(
+    tmp_path: Path,
+    monkeypatch,
+    security,
+    ignored,
+    source,
+) -> None:
+    # A project file that asks for what it may not set must not be shown as
+    # where the effective default comes from.
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    home.mkdir()
+    workspace.mkdir()
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+    _write_json(workspace / "deepcode_config.json", {"security": security})
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    project = application.projects.add(
+        str(workspace),
+        trust_state=TrustState.TRUSTED,
+    )
+    try:
+        settings = application.settings.read(project.id)
+
+        assert settings["ignoredProjectSecurity"] == ignored
+        assert settings["projectAccessPreset"] is None
+        assert settings["resolvedDefaultSecuritySource"] == source
+        assert settings["resolvedDefaultSecurityProfile"]["commandSandbox"] is True
+        assert application.settings.read()["ignoredProjectSecurity"] == []
+    finally:
+        application.close()
+
+
 def test_settings_projects_resolved_access_and_unsets_scope_override(
     tmp_path: Path,
     monkeypatch,

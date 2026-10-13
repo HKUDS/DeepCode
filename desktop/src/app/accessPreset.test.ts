@@ -46,6 +46,7 @@ function settings(
     projectAccessPreset: null,
     resolvedDefaultSecurityProfile,
     resolvedDefaultSecuritySource: "built_in",
+    ignoredProjectSecurity: [],
     providers: [],
     models: [],
   };

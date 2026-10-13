@@ -862,6 +862,26 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     return merged
 
 
+def split_project_security(
+    raw: dict[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    """A project layer's ``security`` block without what a project may not
+    set, and the (camelCase) names of the settings left out: Full access and
+    a sandbox that is off (see :func:`_project_runtime_layer`)."""
+
+    security = raw.get("security")
+    kept: dict[str, Any] = {}
+    ignored: list[str] = []
+    for key, value in (security if isinstance(security, dict) else {}).items():
+        if key in {"accessPreset", "access_preset"} and value == "full_access":
+            ignored.append("accessPreset")
+        elif key == "sandbox" and value is not True:
+            ignored.append("sandbox")
+        else:
+            kept[key] = value
+    return kept, ignored
+
+
 def _project_runtime_layer(raw: dict[str, Any]) -> dict[str, Any]:
     """Return project settings without user-owned provider routing.
 
@@ -885,17 +905,9 @@ def _project_runtime_layer(raw: dict[str, Any]) -> dict[str, Any]:
     sanitized = dict(raw)
     if sanitized.pop("dictation", None) is not None:
         logger.trace("Ignoring project dictation endpoint; dictation is user-owned")
-    security = raw.get("security")
-    if isinstance(security, dict):
-        kept = {
-            key: value
-            for key, value in security.items()
-            if not (
-                (key in {"accessPreset", "access_preset"} and value == "full_access")
-                or (key == "sandbox" and value is not True)
-            )
-        }
-        if kept != security:
+    if isinstance(raw.get("security"), dict):
+        kept, ignored = split_project_security(raw)
+        if ignored:
             logger.trace("Ignoring project security that would remove the sandbox")
         sanitized["security"] = kept
     providers = raw.get("providers")

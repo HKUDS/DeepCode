@@ -106,6 +106,7 @@ const desktopSettings: SettingsSnapshot = {
   projectAccessPreset: null,
   resolvedDefaultSecurityProfile: askSecurityProfile,
   resolvedDefaultSecuritySource: "built_in",
+  ignoredProjectSecurity: [],
   providers: [
     {
       id: "openai",
@@ -240,7 +241,7 @@ class TestRuntime implements ClientRuntime {
   readonly openedPaths: string[] = [];
   updateInstallCount = 0;
   private readonly threadState: Thread[];
-  private settingsState: SettingsSnapshot = {
+  settingsState: SettingsSnapshot = {
     ...desktopSettings,
     agents: { ...desktopSettings.agents },
     security: { ...desktopSettings.security },
@@ -2689,6 +2690,32 @@ describe("desktop command center", () => {
         scope: "project",
       });
     });
+  });
+
+  it("offers Full access only outside the project scope and says when a project asks for it", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    runtime.settingsState = {
+      ...runtime.settingsState,
+      ignoredProjectSecurity: ["accessPreset"],
+    };
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const scope = await screen.findByRole("combobox", { name: "Write to" });
+    expect(
+      screen.getByText(/project's deepcode_config\.json asks for Full access/),
+    ).toBeTruthy();
+    const fullAccess = () =>
+      within(
+        screen.getByRole("combobox", { name: "Default Session access" }),
+      ).getByRole("option", { name: /^Full access/ }) as HTMLOptionElement;
+    expect(fullAccess().disabled).toBe(false);
+
+    fireEvent.change(scope, { target: { value: "project" } });
+
+    expect(fullAccess().disabled).toBe(true);
+    expect(fullAccess().textContent).toContain("user settings or one Session");
   });
 
   it("keeps Settings edits when saving them fails", async () => {

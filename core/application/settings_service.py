@@ -23,6 +23,7 @@ from core.config import (
     load_config,
     load_config_for_workspace,
     project_config_path,
+    split_project_security,
 )
 from core.domain.execution_security import (
     ExecutionAccessPreset,
@@ -98,7 +99,7 @@ class SettingsService:
             security.get("accessPreset") == "full_access"
             or security.get("sandbox", True) is not True
         ):
-            # The project layer ignores both (see _project_runtime_layer).
+            # The project layer ignores both (see split_project_security).
             raise InvalidArgumentError(
                 "Full access and turning the sandbox off are user-scoped only: "
                 "a project's config file belongs to its repository"
@@ -196,6 +197,10 @@ class SettingsService:
             if workspace is not None and workspace.is_dir()
             else {}
         )
+        # What the project file asks for but cannot set is reported as such,
+        # never as the source of the effective default.
+        project_security, ignored_project_security = split_project_security(project_raw)
+        project_raw = {**project_raw, "security": project_security}
         user_access_preset = _raw_access_preset(user_raw)
         project_access_preset = _raw_access_preset(project_raw)
         resolved_security = self.execution_security_policy.resolve_default(
@@ -214,6 +219,7 @@ class SettingsService:
                 user_raw,
                 project_raw,
             ),
+            "ignoredProjectSecurity": ignored_project_security,
             "providers": providers,
             "models": models,
         }

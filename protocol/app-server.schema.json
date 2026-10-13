@@ -1393,6 +1393,16 @@
             "built_in"
           ]
         },
+        "ignoredProjectSecurity": {
+          "description": "Security settings the project's config file asks for but cannot set: Full access, or the sandbox off.",
+          "type": "array",
+          "items": {
+            "enum": [
+              "accessPreset",
+              "sandbox"
+            ]
+          }
+        },
         "providers": {
           "type": "array",
           "items": {
@@ -1416,6 +1426,7 @@
         "projectAccessPreset",
         "resolvedDefaultSecurityProfile",
         "resolvedDefaultSecuritySource",
+        "ignoredProjectSecurity",
         "providers",
         "models"
       ]

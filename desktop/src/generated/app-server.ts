@@ -1096,6 +1096,10 @@ export interface SettingsSnapshot {
   projectAccessPreset: ExecutionAccessPreset | null;
   resolvedDefaultSecurityProfile: ExecutionSecurityProfile;
   resolvedDefaultSecuritySource: "user" | "project" | "environment" | "user_legacy" | "project_legacy" | "built_in";
+  /**
+   * Security settings the project's config file asks for but cannot set: Full access, or the sandbox off.
+   */
+  ignoredProjectSecurity: ("accessPreset" | "sandbox")[];
   providers: SettingsProvider[];
   models: SettingsModel[];
 }
