@@ -32,6 +32,7 @@ from core.application.errors import (
     InvalidArgumentError,
     ProjectNotTrustedError,
     ThreadNotFoundError,
+    ThreadUnreadableError,
     TurnAlreadyRunningError,
     TurnInterruptTimeoutError,
     TurnNotFoundError,
@@ -557,6 +558,13 @@ class TurnService:
             # so admission revalidates the security override and repairs the
             # projection inside the same transaction that creates the Turn.
             canonical_session = self.session_store.get_session(thread_id)
+            if (
+                canonical_session is None
+                and not self.session_store.is_deletion_pending(thread_id)
+                and not self.session_store.is_missing(thread_id)
+            ):
+                # On disk but unreadable: a Turn could not see its history.
+                raise ThreadUnreadableError(thread_id)
             if canonical_session is not None:
                 try:
                     canonical_access = parse_access_preset_override(

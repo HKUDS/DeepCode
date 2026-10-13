@@ -180,6 +180,27 @@ def test_a_session_that_cannot_be_read_keeps_its_thread_history(
     ]
 
 
+def test_a_turn_is_refused_while_its_session_cannot_be_read(tmp_path: Path) -> None:
+    # It used to be admitted and then fail with "session not found", leaving
+    # a failed Turn in the thread's history and no word to the user.
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    project = application.projects.add(str(workspace), trust_state=TrustState.TRUSTED)
+    thread = application.threads.start(project.id, title="Original")
+    path = _session_file(application, thread.id)
+    original = path.read_bytes()
+
+    path.write_bytes(b"")
+    try:
+        with pytest.raises(ThreadUnreadableError):
+            application.turns.start(thread.id, prompt="hello")
+    finally:
+        path.write_bytes(original)
+
+    assert application.turns.list_for_thread(thread.id) == ()
+
+
 def test_a_session_removed_from_disk_drops_its_thread(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()

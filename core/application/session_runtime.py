@@ -33,7 +33,11 @@ from core.application.agent_adapter import (
     AgentSessionPort,
     ApprovalCallback,
 )
-from core.application.errors import ConflictError, ThreadNotFoundError
+from core.application.errors import (
+    ConflictError,
+    ThreadNotFoundError,
+    ThreadUnreadableError,
+)
 from core.domain.execution_permission import ExecutionPermissionMode
 from core.domain.execution_profile import ExecutionProfile
 from core.domain.execution_security import ExecutionSecurityProfile
@@ -146,6 +150,8 @@ class SessionRuntimeRegistry:
         await self._wait_for_compaction(session_id)
         canonical = self.store.get_session(session_id)
         if canonical is None:
+            if not self.store.is_missing(session_id):
+                raise ThreadUnreadableError(session_id)
             raise ThreadNotFoundError(f"session not found: {session_id}")
 
         # The canonical Session carries its own resolved composition (the
