@@ -1,7 +1,6 @@
 import { lazy, Suspense, useState } from "react";
 
 import { useSystemDarkMode } from "../../app/useSystemDarkMode";
-import { confirmAction } from "../../platform/confirmAction";
 import type { CodeWorkbenchController } from "../workbench/useCodeWorkbench";
 import { InspectorEmpty } from "./InspectorEmpty";
 import { languageFor } from "./inspectorFormat";
@@ -13,6 +12,7 @@ interface FilesPanelProps {
   trusted: boolean;
   hasActiveTurn: boolean;
   workbench: CodeWorkbenchController;
+  onOpenFile(path: string): Promise<void>;
   onDownload?: (path: string) => Promise<void>;
 }
 
@@ -20,6 +20,7 @@ export function FilesPanel({
   trusted,
   hasActiveTurn,
   workbench,
+  onOpenFile,
   onDownload,
 }: FilesPanelProps) {
   const [downloadError, setDownloadError] = useState<string | null>(null);
@@ -27,21 +28,6 @@ export function FilesPanel({
   const dirty = Boolean(
     workbench.file && workbench.draft !== workbench.file.content,
   );
-
-  const openFile = async (path: string) => {
-    if (
-      dirty &&
-      !(await confirmAction(
-        "Discard the unsaved editor draft and open another file? Your edits cannot be recovered.",
-        {
-          confirmLabel: "Discard draft",
-        },
-      ))
-    ) {
-      return;
-    }
-    await workbench.openFile(path);
-  };
 
   return (
     <div className={styles.filesView}>
@@ -51,7 +37,7 @@ export function FilesPanel({
             key={entry.path}
             type="button"
             disabled={entry.kind !== "file"}
-            onClick={() => void openFile(entry.path)}
+            onClick={() => void onOpenFile(entry.path)}
             style={{ paddingLeft: `${10 + (entry.path.split("/").length - 1) * 10}px` }}
           >
             <span aria-hidden="true">{entry.kind === "directory" ? "▾" : "·"}</span>

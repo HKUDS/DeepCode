@@ -11,6 +11,7 @@ import type {
 } from "../../generated/app-server";
 import type { ClientRuntime } from "../../rpc/contracts";
 import type { DesktopInspectorTab } from "../../app/useDesktopUi";
+import { confirmAction } from "../../platform/confirmAction";
 import { TerminalPanel } from "../workbench/TerminalPanel";
 import { useCodeWorkbench } from "../workbench/useCodeWorkbench";
 import { ArtifactsPanel } from "./ArtifactsPanel";
@@ -101,9 +102,28 @@ export function Inspector({
     return () => onDirtyChange(false);
   }, [dirty, onDirtyChange]);
 
-  const openFile = (path: string) => {
+  // Every way of opening a file goes through here: another file replaces
+  // the editor draft, so ask first.
+  const openFile = async (path: string) => {
+    if (
+      dirty &&
+      !(await confirmAction(
+        "Discard the unsaved editor draft and open another file? Your edits cannot be recovered.",
+        {
+          confirmLabel: "Discard draft",
+        },
+      ))
+    ) {
+      return;
+    }
+    await workbench.openFile(path);
+  };
+
+  const openChangedFile = (path: string) => {
     onTabChange("files");
-    void workbench.openFile(path);
+    // The file being edited is shown with its draft as it stands.
+    if (dirty && workbench.file?.path === path) return;
+    void openFile(path);
   };
 
   const badge = (candidate: DesktopInspectorTab): number | null => {
@@ -154,7 +174,7 @@ export function Inspector({
             trusted={trusted}
             hasActiveTurn={hasActiveTurn}
             workbench={workbench}
-            onOpenFile={openFile}
+            onOpenFile={openChangedFile}
           />
         ) : null}
         {tab === "files" ? (
@@ -163,6 +183,7 @@ export function Inspector({
             trusted={trusted}
             hasActiveTurn={hasActiveTurn}
             workbench={workbench}
+            onOpenFile={openFile}
           />
         ) : null}
         {tab === "artifacts" ? (
