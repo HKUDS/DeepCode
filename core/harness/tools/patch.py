@@ -46,7 +46,6 @@ Paths are fenced to the workspace exactly like ``write``/``edit``.
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -393,9 +392,7 @@ class ApplyPatchTool(Tool):
         for target, content in planned.items():
             if content is None:
                 continue
-            # Checkers run subprocesses (ruff up to 20s); keep them off the loop.
-            diagnostics = await asyncio.to_thread(self._diagnostics, str(target))
-            report = format_diagnostics(diagnostics)
+            report = format_diagnostics(await self._diagnostics(str(target)))
             if report:
                 reports.append(f"{displays[target]}:\n{report}")
         summary = f"Applied patch: {len(touched)} change(s) — " + ", ".join(touched)

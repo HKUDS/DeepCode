@@ -11,7 +11,6 @@ matching the kernel contract so a bad edit never aborts the loop.
 
 from __future__ import annotations
 
-import asyncio
 import os
 from pathlib import Path
 from typing import Any
@@ -176,8 +175,9 @@ class WriteTool(Tool):
         allow_outside_workspace: bool = False,
     ):
         self._workspace = str(workspace)
-        # Injected post-write checker (default: the declarative registry).
-        # Pass ``lambda _p: []`` to disable; a fake in tests to assert wiring.
+        # Injected async post-write checker (default: the declarative
+        # registry). Pass one that returns [] to disable; a fake in tests to
+        # assert wiring.
         self._diagnostics = diagnostics
         self._allow_outside_workspace = allow_outside_workspace
 
@@ -212,9 +212,7 @@ class WriteTool(Tool):
         except OSError as exc:
             return f"Error: could not write {file_path}: {exc}"
         result = f"Wrote {len(content)} bytes to {file_path}"
-        # Checkers run subprocesses (ruff up to 20s); keep them off the loop.
-        diagnostics = await asyncio.to_thread(self._diagnostics, str(target))
-        report = format_diagnostics(diagnostics)
+        report = format_diagnostics(await self._diagnostics(str(target)))
         return f"{result}\n\n{report}" if report else result
 
 
@@ -311,7 +309,5 @@ class EditTool(Tool):
             # Report how many were changed for transparency.
             occurrences = content.count(old_string) or "multiple"
         result = f"Edited {file_path} ({occurrences} replacement(s))."
-        # Checkers run subprocesses (ruff up to 20s); keep them off the loop.
-        diagnostics = await asyncio.to_thread(self._diagnostics, str(target))
-        report = format_diagnostics(diagnostics)
+        report = format_diagnostics(await self._diagnostics(str(target)))
         return f"{result}\n\n{report}" if report else result

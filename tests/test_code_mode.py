@@ -211,6 +211,10 @@ def test_code_mode_forwards_frozen_sandbox_choice(monkeypatch):
     assert "sandbox disabled" in tool.description
 
 
+async def _no_diagnostics(_path: str) -> list:
+    return []
+
+
 def _wired_write_code_tool(
     workspace: str,
     *,
@@ -222,7 +226,7 @@ def _wired_write_code_tool(
     registry.register(
         WriteTool(
             workspace,
-            diagnostics=lambda _path: [],
+            diagnostics=_no_diagnostics,
             allow_outside_workspace=(
                 profile.access_preset is ExecutionAccessPreset.FULL_ACCESS
             ),

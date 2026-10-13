@@ -337,6 +337,49 @@ async def test_grep_does_not_hold_up_the_event_loop(tmp_path, monkeypatch):
     assert ticks >= 5
 
 
+async def _wait_for_pid(pid_file: Path) -> int:
+    for _ in range(500):
+        if pid_file.exists() and pid_file.read_text().strip():
+            return int(pid_file.read_text())
+        await asyncio.sleep(0.01)
+    pytest.fail("the stand-in never started")
+
+
+async def _exited(pid: int) -> bool:
+    for _ in range(200):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        await asyncio.sleep(0.01)
+    os.kill(pid, 9)  # don't leave it running past the test
+    return False
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group assertion")
+@pytest.mark.asyncio
+async def test_cancelling_grep_ends_rg(tmp_path, monkeypatch):
+    # An interrupted turn must not leave rg searching for up to 30s.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    pid_file = tmp_path / "rg.pid"
+    stand_in = bin_dir / "rg"
+    stand_in.write_text(
+        f"#!{sys.executable}\nimport os, time\n"
+        f"open({str(pid_file)!r}, 'w').write(str(os.getpid()))\ntime.sleep(30)\n"
+    )
+    stand_in.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+
+    task = asyncio.create_task(GrepTool(str(tmp_path)).execute(pattern="hit"))
+    pid = await _wait_for_pid(pid_file)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert await _exited(pid)
+
+
 # --- glob -------------------------------------------------------------------
 
 

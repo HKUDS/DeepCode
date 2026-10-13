@@ -46,6 +46,35 @@ async def terminate_process_tree(
         await process.wait()
 
 
+async def run_captured(
+    argv: list[str], *, timeout: float
+) -> tuple[int, bytes, bytes] | None:
+    """Run ``argv`` to completion: ``(returncode, stdout, stderr)``.
+
+    ``None`` when it outlives ``timeout``. The timeout and cancellation (an
+    interrupted turn) both end the process and its descendants instead of
+    leaving them to run on unseen. A spawn failure raises ``OSError``.
+    """
+
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        **subprocess_group_kwargs(),
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except TimeoutError:
+        await terminate_process_tree(proc)
+        return None
+    except asyncio.CancelledError:
+        await terminate_process_tree(proc)
+        raise
+    assert proc.returncode is not None
+    return proc.returncode, stdout, stderr
+
+
 async def _terminate_windows_tree(process: asyncio.subprocess.Process) -> None:
     try:
         killer = await asyncio.create_subprocess_exec(

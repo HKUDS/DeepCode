@@ -12,10 +12,10 @@ import asyncio
 import os
 import re
 import shutil
-import subprocess
 from pathlib import Path
 from typing import Any
 
+from core.agent_runtime.processes import run_captured
 from core.agent_runtime.tools.base import Tool, tool_parameters
 
 _MAX_MATCHES = 200
@@ -76,10 +76,12 @@ class GrepTool(Tool):
         if not root.exists():
             return f"Error: path not found: {rel}"
 
-        # Either search can take seconds (rg is allowed 30); run it off the
-        # event loop, which the service shares with every other session.
-        search = self._ripgrep if shutil.which("rg") else self._python_grep
-        matches = await asyncio.to_thread(search, pattern, root, include)
+        # Either search can take seconds (rg is allowed 30). Neither runs on
+        # the event loop, which the service shares with every other session.
+        if shutil.which("rg"):
+            matches = await self._ripgrep(pattern, root, include)
+        else:
+            matches = await asyncio.to_thread(self._python_grep, pattern, root, include)
         if matches is None:
             return f"Error: invalid regular expression: {pattern}"
         if not matches:
@@ -92,7 +94,7 @@ class GrepTool(Tool):
         )
         return "\n".join(out) + suffix
 
-    def _ripgrep(
+    async def _ripgrep(
         self, pattern: str, root: Path, include: str | None
     ) -> list[str] | None:
         argv = ["rg", "--line-number", "--no-heading", "--color", "never"]
@@ -102,20 +104,19 @@ class GrepTool(Tool):
             argv.append(f"--glob={include}")
         argv += [f"--regexp={pattern}", "--", str(root)]
         try:
-            proc = subprocess.run(
-                argv,
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            return self._python_grep(pattern, root, include)
-        if proc.returncode not in (0, 1):  # 1 = no matches; >1 = error
-            if "regex parse error" in proc.stderr.lower():
+            # An interrupted turn ends rg instead of leaving it searching.
+            result = await run_captured(argv, timeout=30)
+        except OSError:
+            result = None
+        if result is None:
+            return await asyncio.to_thread(self._python_grep, pattern, root, include)
+        returncode, stdout, stderr = result
+        if returncode not in (0, 1):  # 1 = no matches; >1 = error
+            if b"regex parse error" in stderr.lower():
                 return None
-            return self._python_grep(pattern, root, include)
-        lines = [ln for ln in proc.stdout.splitlines() if ln.strip()]
+            return await asyncio.to_thread(self._python_grep, pattern, root, include)
+        text = stdout.decode("utf-8", errors="replace")
+        lines = [ln for ln in text.splitlines() if ln.strip()]
         # make paths workspace-relative for readability
         return [self._relativize(ln) for ln in lines]
 

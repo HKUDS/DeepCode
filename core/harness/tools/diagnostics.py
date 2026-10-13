@@ -11,14 +11,18 @@ silently skipped, so the loop degrades gracefully and never blocks an edit.
 
 Checks are non-executing (syntax/lint only): ``compile()`` compiles without
 running, ``node --check`` parses without running — safe to run on every edit.
+They are async and never block the event loop; a checker's process is ended
+when the turn that started it is interrupted.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
-import subprocess
 from dataclasses import dataclass
+
+from core.agent_runtime.processes import run_captured
 
 
 @dataclass(frozen=True)
@@ -42,7 +46,7 @@ class Checker:
     def is_available(self) -> bool:  # pragma: no cover - trivial
         return True
 
-    def check(self, path: str) -> list[Diagnostic]:  # pragma: no cover - abstract
+    async def check(self, path: str) -> list[Diagnostic]:  # pragma: no cover
         raise NotImplementedError
 
 
@@ -52,7 +56,10 @@ class PyCompileChecker(Checker):
     name = "py_compile"
     extensions = (".py",)
 
-    def check(self, path: str) -> list[Diagnostic]:
+    async def check(self, path: str) -> list[Diagnostic]:
+        return await asyncio.to_thread(self._compile, path)
+
+    def _compile(self, path: str) -> list[Diagnostic]:
         # compile() as py_compile does, minus writing the bytecode into a
         # __pycache__ beside the file, which is the user's project.
         with open(path, "rb") as f:
@@ -81,26 +88,18 @@ class NodeCheckChecker(Checker):
     def is_available(self) -> bool:
         return shutil.which("node") is not None
 
-    def check(self, path: str) -> list[Diagnostic]:
+    async def check(self, path: str) -> list[Diagnostic]:
         try:
-            proc = subprocess.run(
-                ["node", "--check", path],
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-        except (OSError, subprocess.TimeoutExpired):
+            result = await run_captured(["node", "--check", path], timeout=15)
+        except OSError:
             return []
-        if proc.returncode == 0:
+        if result is None or result[0] == 0:
             return []
         # stderr: "<file>:<line>\n<code>\n^\n\nSyntaxError: <message>"
+        stderr = result[2].decode("utf-8", errors="replace")
         line = None
-        message = (
-            proc.stderr.strip().splitlines()[-1]
-            if proc.stderr.strip()
-            else "syntax error"
-        )
-        for token in proc.stderr.splitlines():
+        message = stderr.strip().splitlines()[-1] if stderr.strip() else "syntax error"
+        for token in stderr.splitlines():
             if ":" in token and token.strip().startswith(path):
                 tail = token.rsplit(":", 1)[-1].strip()
                 if tail.isdigit():
@@ -126,18 +125,17 @@ class RuffChecker(Checker):
     def is_available(self) -> bool:
         return shutil.which("ruff") is not None
 
-    def check(self, path: str) -> list[Diagnostic]:
+    async def check(self, path: str) -> list[Diagnostic]:
         try:
-            proc = subprocess.run(
-                ["ruff", "check", "--output-format", "json", path],
-                capture_output=True,
-                text=True,
-                timeout=20,
+            result = await run_captured(
+                ["ruff", "check", "--output-format", "json", path], timeout=20
             )
-        except (OSError, subprocess.TimeoutExpired):
+        except OSError:
+            return []
+        if result is None:
             return []
         try:
-            items = json.loads(proc.stdout or "[]")
+            items = json.loads(result[1] or b"[]")
         except json.JSONDecodeError:
             return []
         out: list[Diagnostic] = []
@@ -163,7 +161,7 @@ DEFAULT_CHECKERS: tuple[Checker, ...] = (
 )
 
 
-def run_diagnostics(
+async def run_diagnostics(
     path: str, checkers: tuple[Checker, ...] = DEFAULT_CHECKERS
 ) -> list[Diagnostic]:
     """Run every applicable + available checker on ``path``; collect results."""
@@ -172,7 +170,7 @@ def run_diagnostics(
         if not checker.applies_to(path) or not checker.is_available():
             continue
         try:
-            out.extend(checker.check(path))
+            out.extend(await checker.check(path))
         except Exception:  # noqa: BLE001 - a checker crash must not break the edit
             continue
     return out

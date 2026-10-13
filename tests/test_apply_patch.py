@@ -26,9 +26,13 @@ def _apply(tool: ApplyPatchTool, patch: str) -> str:
     return asyncio.run(tool.execute(patch=patch))
 
 
+async def _no_diagnostics(_path: str) -> list:
+    return []
+
+
 def _tool(tmp_path) -> ApplyPatchTool:
     # Disable diagnostics so tests assert on the patch outcome, not linters.
-    return ApplyPatchTool(str(tmp_path), diagnostics=lambda _p: [])
+    return ApplyPatchTool(str(tmp_path), diagnostics=_no_diagnostics)
 
 
 # --- parsing (pure) --------------------------------------------------------
@@ -262,7 +266,7 @@ def test_full_access_profile_allows_patch_outside_workspace(tmp_path):
 
 def test_diagnostics_surface(tmp_path):
     # A real Python syntax error should be reported by the injected checker.
-    def fake_diag(_path):
+    async def fake_diag(_path):
         from core.harness.tools.diagnostics import Diagnostic
 
         return [

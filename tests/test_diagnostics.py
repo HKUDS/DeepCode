@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -31,7 +31,7 @@ from core.harness.tools.patch import ApplyPatchTool  # noqa: E402
 def test_pycompile_flags_syntax_error(tmp_path):
     bad = tmp_path / "bad.py"
     bad.write_text("def f(:\n    return 1\n")
-    diags = PyCompileChecker().check(str(bad))
+    diags = asyncio.run(PyCompileChecker().check(str(bad)))
     assert len(diags) == 1
     assert diags[0].severity == "error"
     assert diags[0].line is not None
@@ -40,27 +40,27 @@ def test_pycompile_flags_syntax_error(tmp_path):
 def test_pycompile_clean_file_no_diagnostics(tmp_path):
     good = tmp_path / "good.py"
     good.write_text("def f():\n    return 1\n")
-    assert PyCompileChecker().check(str(good)) == []
+    assert asyncio.run(PyCompileChecker().check(str(good))) == []
 
 
 @pytest.mark.parametrize("source", ["def f():\n    return 1\n", "def f(:\n"])
 def test_pycompile_writes_no_bytecode_into_the_project(tmp_path, source):
     path = tmp_path / "m.py"
     path.write_text(source)
-    PyCompileChecker().check(str(path))
+    asyncio.run(PyCompileChecker().check(str(path)))
     assert list(tmp_path.iterdir()) == [path]
 
 
 def test_registry_skips_unregistered_extension(tmp_path):
     txt = tmp_path / "notes.txt"
     txt.write_text("this is not code {{{")
-    assert run_diagnostics(str(txt)) == []
+    assert asyncio.run(run_diagnostics(str(txt))) == []
 
 
 def test_registry_runs_pycompile_on_py(tmp_path):
     bad = tmp_path / "b.py"
     bad.write_text("x = (1\n")  # unbalanced paren
-    diags = run_diagnostics(str(bad))
+    diags = asyncio.run(run_diagnostics(str(bad)))
     assert any(d.source == "py_compile" and d.severity == "error" for d in diags)
 
 
@@ -68,7 +68,7 @@ def test_registry_runs_pycompile_on_py(tmp_path):
 def test_node_check_flags_js_syntax_error(tmp_path):
     bad = tmp_path / "bad.js"
     bad.write_text("function f( { return 1 }\n")
-    diags = NodeCheckChecker().check(str(bad))
+    diags = asyncio.run(NodeCheckChecker().check(str(bad)))
     assert any(d.severity == "error" for d in diags)
 
 
@@ -91,7 +91,7 @@ def test_unavailable_checker_skipped(tmp_path, monkeypatch):
     monkeypatch.setattr(diag.shutil, "which", lambda name: None)
     bad = tmp_path / "b.py"
     bad.write_text("def f(:\n")
-    diags = run_diagnostics(str(bad))
+    diags = asyncio.run(run_diagnostics(str(bad)))
     # py_compile (always available) still fires; node/ruff skipped
     assert all(d.source != "ruff" for d in diags)
     assert any(d.source == "py_compile" for d in diags)
@@ -133,7 +133,7 @@ async def test_edit_that_breaks_syntax_is_flagged(tmp_path):
 async def test_diagnostics_injection_is_used(tmp_path):
     calls = []
 
-    def fake(path):
+    async def fake(path):
         calls.append(path)
         return [
             Diagnostic(
@@ -147,25 +147,31 @@ async def test_diagnostics_injection_is_used(tmp_path):
     assert "injected" in out
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="runs a shell script")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tool_name", ["write", "edit", "apply_patch"])
-async def test_diagnostics_do_not_hold_up_the_event_loop(tmp_path, tool_name):
+async def test_diagnostics_do_not_hold_up_the_event_loop(
+    tmp_path, monkeypatch, tool_name
+):
     # ruff and node --check may take seconds; other sessions must keep going.
-    def slow(_path):
-        time.sleep(1)
-        return []
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stand_in = bin_dir / "ruff"
+    stand_in.write_text(
+        f"#!{sys.executable}\nimport time\ntime.sleep(1)\nprint('[]')\n"
+    )
+    stand_in.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
 
     (tmp_path / "a.py").write_text("x = 1\n")
     if tool_name == "write":
-        run = WriteTool(str(tmp_path), diagnostics=slow).execute(
-            file_path="a.py", content="x = 2\n"
-        )
+        run = WriteTool(str(tmp_path)).execute(file_path="a.py", content="x = 2\n")
     elif tool_name == "edit":
-        run = EditTool(str(tmp_path), diagnostics=slow).execute(
+        run = EditTool(str(tmp_path)).execute(
             file_path="a.py", old_string="x = 1", new_string="x = 2"
         )
     else:
-        run = ApplyPatchTool(str(tmp_path), diagnostics=slow).execute(
+        run = ApplyPatchTool(str(tmp_path)).execute(
             patch="*** Begin Patch\n*** Update File: a.py\n@@\n-x = 1\n+x = 2\n"
             "*** End Patch\n"
         )
@@ -186,3 +192,41 @@ async def test_diagnostics_do_not_hold_up_the_event_loop(tmp_path, tool_name):
     assert not out.startswith("Error")
     assert (tmp_path / "a.py").read_text() == "x = 2\n"
     assert ticks >= 5
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group assertion")
+@pytest.mark.asyncio
+async def test_cancelling_a_write_ends_its_checker(tmp_path, monkeypatch):
+    # An interrupted turn must not leave ruff (allowed 20s) running on.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    pid_file = tmp_path / "ruff.pid"
+    stand_in = bin_dir / "ruff"
+    stand_in.write_text(
+        f"#!{sys.executable}\nimport os, time\n"
+        f"open({str(pid_file)!r}, 'w').write(str(os.getpid()))\ntime.sleep(30)\n"
+    )
+    stand_in.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+
+    task = asyncio.create_task(
+        WriteTool(str(tmp_path)).execute(file_path="a.py", content="x = 1\n")
+    )
+    for _ in range(500):
+        if pid_file.exists() and pid_file.read_text().strip():
+            break
+        await asyncio.sleep(0.01)
+    pid = int(pid_file.read_text())
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    for _ in range(200):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        await asyncio.sleep(0.01)
+    else:
+        os.kill(pid, 9)  # don't leave it running past the test
+        pytest.fail("ruff survived the cancelled write")
