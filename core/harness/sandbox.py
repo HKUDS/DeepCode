@@ -42,7 +42,6 @@ from __future__ import annotations
 import os
 import platform
 import shutil
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -345,18 +344,6 @@ def _seatbelt_profile(policy: SandboxPolicy) -> str:
     return "\n".join(parts) + "\n"
 
 
-def _write_seatbelt_profile(policy: SandboxPolicy) -> str:
-    """Write the profile to a temp file and return its path (caller cleans up)."""
-    fd, path = tempfile.mkstemp(prefix="deepcode-sb-", suffix=".sbpl")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(_seatbelt_profile(policy))
-    except Exception:
-        os.unlink(path)
-        raise
-    return path
-
-
 @dataclass
 class WrappedCommand:
     """A sandboxed command plus any temp artifact to clean up after run."""
@@ -388,9 +375,11 @@ def wrap_argv_command(
     backend = sandbox_backend()
 
     if backend == "seatbelt":
-        profile_path = _write_seatbelt_profile(policy)
-        argv = [_MACOS_SANDBOX_EXEC, "-f", profile_path, *inner_argv]
-        return WrappedCommand(argv=argv, cleanup_path=profile_path, backend=backend)
+        # Inline, not a file: a profile file would sit in the temp directory,
+        # which sandboxed commands may write, so one still running could
+        # swap the profile of the next command before it starts.
+        argv = [_MACOS_SANDBOX_EXEC, "-p", _seatbelt_profile(policy), *inner_argv]
+        return WrappedCommand(argv=argv, backend=backend)
 
     if backend == "bwrap":
         argv = ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"]

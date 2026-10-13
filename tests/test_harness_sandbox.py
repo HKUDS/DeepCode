@@ -165,6 +165,32 @@ def _run(command: str, policy: SandboxPolicy, cwd: Path):
         wrapped.cleanup()
 
 
+@pytest.mark.skipif(not _seatbelt, reason="seatbelt sandbox not available")
+def test_a_sandboxed_command_cannot_swap_a_later_commands_policy(tmp_path):
+    # A command still running in the sandbox (left in the background, say)
+    # must not be able to loosen the policy a later command starts under.
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    forbidden = Path.home() / ".deepcode_sandbox_swap_test.txt"
+    forbidden.unlink(missing_ok=True)
+    policy = SandboxPolicy.for_workspace(workspace)
+    later = wrap_shell_command(f"echo leak > {forbidden}", policy)
+    try:
+        # Whatever file the later command will read, try to replace it with
+        # an allow-everything policy from inside the sandbox.
+        for arg in later.argv:
+            if os.path.isfile(arg):
+                _run(
+                    f"printf '(version 1)(allow default)' > '{arg}'", policy, workspace
+                )
+        subprocess.run(later.argv, capture_output=True, timeout=30)
+        leaked = forbidden.exists()
+    finally:
+        later.cleanup()
+        forbidden.unlink(missing_ok=True)
+    assert not leaked
+
+
 def test_policy_for_workspace_keeps_credential_stores_unreadable(tmp_path):
     from core.config import deepcode_home
 
