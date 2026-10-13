@@ -602,11 +602,7 @@ class AutomationService:
                     raise AutomationNotFoundError(f"automation run not found: {run_id}")
                 if current.status.is_terminal:
                     return current
-                current = (
-                    self._provision_run(current).run
-                    if current.goal_id is not None and current.turn_id is None
-                    else self._reconcile_run(current)
-                )
+                current = self._converge_run(current)
                 if current.status.is_terminal:
                     return current
 
@@ -673,21 +669,28 @@ class AutomationService:
             with self.database.read() as connection:
                 run = AutomationRunRepository(connection).get_for_goal(turn.goal_id)
             if run is not None and not run.status.is_terminal:
-                self._reconcile_run(run)
+                self._converge_run(run)
 
     def _reconcile_runs_locked(self) -> int:
         with self.database.read() as connection:
             active = AutomationRunRepository(connection).list_active()
         changed = 0
         for run in active:
-            before = run
-            if run.goal_id is not None and run.turn_id is None:
-                after = self._provision_run(run).run
-            else:
-                after = self._reconcile_run(run)
-            if after != before:
+            if self._converge_run(run) != run:
                 changed += 1
         return changed
+
+    def _converge_run(self, run: AutomationRun) -> AutomationRun:
+        """Take one open Run a step towards settlement.
+
+        A Run whose initial Turn was never attached is provisioned, whichever
+        path reaches it first. Judging it by its Goal's other Turns instead,
+        as the settlement of a foreign Turn did, interrupted it for a Turn it
+        never owned while a reconciliation pass would have started its own.
+        """
+        if run.goal_id is not None and run.turn_id is None:
+            return self._provision_run(run).run
+        return self._reconcile_run(run)
 
     def _trigger(
         self,

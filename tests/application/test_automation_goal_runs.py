@@ -1201,9 +1201,11 @@ def test_pending_initial_turn_reservation_rejects_competing_submission(
         application.close()
 
 
+@pytest.mark.parametrize("settled_by", ["reconciliation", "turn_settlement"])
 def test_legacy_unreserved_turn_is_never_adopted_as_automation_initial_turn(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    settled_by: str,
 ) -> None:
     foreign_gate = threading.Event()
     factory = _GoalAwareFactory(
@@ -1256,13 +1258,22 @@ def test_legacy_unreserved_turn_is_never_adopted_as_automation_initial_turn(
         )
         assert accepted
         assert interrupted.status is TurnStatus.INTERRUPTED
-        application.automations.reconcile_runs()
-        completed = _wait_for_run(
-            application,
-            automation.id,
-            execution.run.id,
-            AutomationRunStatus.COMPLETED,
+        if settled_by == "reconciliation":
+            application.automations.reconcile_runs()
+        # Read the Run without reconciling it, so that only the path under test
+        # (an explicit pass, or the foreign Turn's settlement) decides it.
+        completed = _wait_until(
+            lambda: next(
+                (
+                    run
+                    for run in _runs(application, automation.id)
+                    if run.id == execution.run.id and run.status.is_terminal
+                ),
+                None,
+            ),
+            f"Run {execution.run.id} to settle",
         )
+        assert completed.status is AutomationRunStatus.COMPLETED, completed.detail
 
         turns = _turns(application, automation.thread_id)
         assert len(turns) == 2
