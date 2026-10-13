@@ -12,8 +12,9 @@ from app_server.errors import RpcError
 from app_server.native_client import NativeRpcClient
 from app_server.protocol.codec import encode_message
 from app_server.service_client import ServiceClient
-from app_server.service_state import ServiceFiles
+from app_server.service_state import ServiceFiles, ServiceRecord
 from core.domain import TrustState
+from core.version import __version__
 from tests.app_server.support import PausedFactory, control_server
 
 INITIALIZE = {
@@ -164,6 +165,101 @@ def test_native_version_mismatch_does_not_replace_service(tmp_path):
                 lease.close()
 
     asyncio.run(scenario())
+
+
+def _claim_version(files, version):
+    """Make the running service's discovery record claim another release."""
+    record, token = files.read()
+    files.publish(replace(record, version=version), token)
+    return record
+
+
+def _connect_starting(files):
+    async def connect():
+        client = NativeRpcClient(files)
+        try:
+            return await client.connect(INITIALIZE, start=True)
+        finally:
+            await client.close()
+
+    return asyncio.run(connect())
+
+
+@pytest.fixture
+def running_service(tmp_path):
+    from cli.service_cli import start_service, stop_service
+
+    files = ServiceFiles(tmp_path / "state.sqlite3")
+    try:
+        start_service(files, port=0, timeout=15)
+        yield files
+    finally:
+        if files.running():
+            stop_service(files, timeout=5, cancel_running=True)
+
+
+def test_a_newer_client_restarts_an_idle_older_service(running_service):
+    # After an update, Desktop and the TUI met the service the old version had
+    # started, and could only tell the user to run a terminal command.
+    older = _claim_version(running_service, "0.0.1")
+    info = _connect_starting(running_service)
+    assert info["serviceInfo"]["instanceId"] != older.instance_id
+    record, _ = running_service.read()
+    assert record.version == __version__
+    assert record.port == older.port
+
+
+def test_an_older_client_never_restarts_a_newer_service(running_service):
+    # The newer service may have migrated the database past what we can open.
+    newer = _claim_version(running_service, "999.0.0")
+    with pytest.raises(RpcError, match="This client is older") as error:
+        _connect_starting(running_service)
+    assert error.value.stable_code == "SERVICE_VERSION_MISMATCH"
+    status = ServiceClient(running_service).call("status")
+    assert status["instanceId"] == newer.instance_id
+
+
+def test_an_older_client_reconnecting_by_itself_is_told_to_update(running_service):
+    _claim_version(running_service, "999.0.0")
+
+    async def reconnect():
+        client = NativeRpcClient(running_service)
+        try:
+            await client.connect(INITIALIZE)
+        finally:
+            await client.close()
+
+    with pytest.raises(RpcError, match="This client is older"):
+        asyncio.run(reconnect())
+
+
+def test_a_restart_that_keeps_the_old_version_says_why(running_service, monkeypatch):
+    import cli.service_cli as service_cli
+
+    # A service manager entry keeps starting the executable it was installed with.
+    monkeypatch.setattr(service_cli, "restart_service", lambda *args, **kwargs: None)
+    _claim_version(running_service, "0.0.1")
+    with pytest.raises(RpcError, match="service manager still starts"):
+        _connect_starting(running_service)
+
+
+@pytest.mark.parametrize("work", ["activeTurns", "queuedTurns", "terminals"])
+def test_an_older_service_with_work_in_progress_is_not_restarted(
+    tmp_path, monkeypatch, work
+):
+    import cli.service_cli as service_cli
+
+    def restart(*args, **kwargs):
+        raise AssertionError("restarted a service with work in progress")
+
+    monkeypatch.setattr(service_cli, "restart_service", restart)
+    files = ServiceFiles(tmp_path / "state.sqlite3")
+    record = ServiceRecord("a" * 32, str(files.database), 1, 9, version="0.0.1")
+    status = {"activeTurns": 0, "queuedTurns": 0, "terminals": 0, work: 1}
+    with pytest.raises(RpcError, match="has active work"):
+        asyncio.run(
+            NativeRpcClient(files)._restart_older_service(record, status, allowed=True)
+        )
 
 
 def test_pinned_bundle_survives_source_replacement(tmp_path, monkeypatch):

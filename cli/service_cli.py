@@ -70,6 +70,24 @@ def _start_service(files: ServiceFiles, *, port: int | None, timeout: float) -> 
     return _start_detached(files, port=port, timeout=timeout)
 
 
+def restart_service(
+    files: ServiceFiles, *, port: int | None, timeout: float, cancel_running: bool
+) -> dict:
+    """Stop the service, then start it again from this installation."""
+    with exclusive_file_lock(files.directory / "management.lock"):
+        previous = files.read()
+        agent = _service_manager(files)
+        # A detached service keeps its address; a service manager keeps its own.
+        if (
+            port is None
+            and previous is not None
+            and not (agent and agent.path.exists())
+        ):
+            port = previous[0].port
+        _stop_service(files, timeout=timeout, cancel_running=cancel_running)
+        return _start_service(files, port=port, timeout=30)
+
+
 def stop_service(files: ServiceFiles, *, timeout: float, cancel_running: bool) -> dict:
     with exclusive_file_lock(files.directory / "management.lock"):
         return _stop_service(files, timeout=timeout, cancel_running=cancel_running)
@@ -450,22 +468,15 @@ def run(argv: list[str] | None = None) -> int:
             result = stop_service(
                 files, timeout=args.timeout, cancel_running=args.cancel_running
             )
+        elif args.command == "restart":
+            result = restart_service(
+                files,
+                port=args.port,
+                timeout=args.timeout,
+                cancel_running=args.cancel_running,
+            )
         else:
-            with exclusive_file_lock(files.directory / "management.lock"):
-                port = args.port
-                if args.command == "restart":
-                    previous = files.read()
-                    agent = _service_manager(files)
-                    if (
-                        port is None
-                        and previous is not None
-                        and not (agent and agent.path.exists())
-                    ):
-                        port = previous[0].port
-                    _stop_service(
-                        files, timeout=args.timeout, cancel_running=args.cancel_running
-                    )
-                result = _start_service(files, port=port, timeout=30)
+            result = start_service(files, port=args.port, timeout=30)
         if args.json:
             print(json.dumps(result, ensure_ascii=False))
         else:

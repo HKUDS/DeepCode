@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -11,9 +13,15 @@ import aiohttp
 
 from app_server.errors import RpcError
 from app_server.protocol.codec import DEFAULT_MAX_MESSAGE_BYTES, encode_message
-from app_server.service_client import ServiceClient, ServiceUnavailable
-from app_server.service_state import ServiceFiles
+from app_server.service_client import (
+    ServiceClient,
+    ServiceOperationError,
+    ServiceUnavailable,
+)
+from app_server.service_state import ServiceFiles, ServiceRecord
 from core.version import __version__
+
+logger = logging.getLogger(__name__)
 
 
 # Requests that wait on a model or an external process (a provider probe, a
@@ -30,6 +38,28 @@ _DEFAULT_TIMEOUT = 25.0
 
 def request_timeout(method: str) -> float:
     return _SLOW_METHOD_TIMEOUTS.get(method, _DEFAULT_TIMEOUT)
+
+
+_RESTART_YOURSELF = (
+    "Finish active work, then run `deepcode service restart` to start the "
+    "service from this installation."
+)
+
+
+def _release(version: str) -> tuple[int, ...] | None:
+    """A plain release's numbers; development and other builds never compare."""
+    if re.fullmatch(r"\d+(?:\.\d+)*", version) is None:
+        return None
+    return tuple(int(part) for part in version.split("."))
+
+
+def _version_mismatch(service_version: str, advice: str) -> RpcError:
+    return RpcError(
+        -32003,
+        "The running service and this client have different versions "
+        f"(service {service_version}, client {__version__}). {advice}",
+        stable_code="SERVICE_VERSION_MISMATCH",
+    )
 
 
 class NativeRpcClient:
@@ -57,21 +87,16 @@ class NativeRpcClient:
             from cli.service_cli import start_service
 
             await asyncio.to_thread(start_service, self.files, port=port)
-        # Authenticate the discovered listener before releasing any native secret.
-        status = await asyncio.to_thread(ServiceClient(self.files).call, "status")
-        found = self.files.read()
-        if found is None or found[0].instance_id != status["instanceId"]:
-            raise ServiceUnavailable("Service changed while connecting; reconnect")
-        record, token = found
+        record, token, status = await self._discover()
         if record.version != __version__:
-            raise RpcError(
-                -32003,
-                "The running service and this client have different versions "
-                f"(service {record.version}, client {__version__}). Finish active "
-                "work, then run `deepcode service restart` to start the service "
-                "from this installation.",
-                stable_code="SERVICE_VERSION_MISMATCH",
-            )
+            await self._restart_older_service(record, status, allowed=start)
+            record, token, _ = await self._discover()
+            if record.version != __version__:
+                raise _version_mismatch(
+                    record.version,
+                    "Its service manager still starts that version; run "
+                    "`deepcode service install --at-login` from this installation.",
+                )
         self._session = aiohttp.ClientSession(
             trust_env=False,
             timeout=aiohttp.ClientTimeout(total=None, sock_connect=5),
@@ -100,6 +125,53 @@ class NativeRpcClient:
         except BaseException:
             await self.close()
             raise
+
+    async def _discover(self) -> tuple[ServiceRecord, str, dict]:
+        # Authenticate the discovered listener before releasing any native secret.
+        status = await asyncio.to_thread(ServiceClient(self.files).call, "status")
+        found = self.files.read()
+        if found is None or found[0].instance_id != status["instanceId"]:
+            raise ServiceUnavailable("Service changed while connecting; reconnect")
+        return *found, status
+
+    async def _restart_older_service(
+        self, record: ServiceRecord, status: dict, *, allowed: bool
+    ) -> None:
+        """Restart an idle service of an older release from this installation.
+
+        Never a newer one, whose database this installation may not be able to
+        open, and never one with work in progress. Raises unless it restarted.
+        """
+        ours, theirs = _release(__version__), _release(record.version)
+        if ours is not None and theirs is not None and ours < theirs:
+            raise _version_mismatch(
+                record.version,
+                "This client is older; update or restart it to use the service.",
+            )
+        if not allowed or ours is None or theirs is None:
+            raise _version_mismatch(record.version, _RESTART_YOURSELF)
+        if status["activeTurns"] or status["queuedTurns"] or status["terminals"]:
+            raise _version_mismatch(
+                record.version,
+                "The service has active work, so it was not restarted; reconnect "
+                "when that work finishes, or run `deepcode service restart` to "
+                "wait for it.",
+            )
+        from cli.service_cli import restart_service
+
+        logger.info(
+            "Restarting the idle DeepCode %s service from this installation (%s)",
+            record.version,
+            __version__,
+        )
+        try:
+            await asyncio.to_thread(
+                restart_service, self.files, port=None, timeout=10, cancel_running=False
+            )
+        except (ServiceUnavailable, ServiceOperationError) as exc:
+            raise _version_mismatch(
+                record.version, f"Restarting it from this installation failed: {exc}"
+            ) from exc
 
     async def request(
         self, method: str, params: dict, *, timeout: float | None = None

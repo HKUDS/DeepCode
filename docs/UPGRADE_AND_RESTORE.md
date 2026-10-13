@@ -5,6 +5,17 @@ service by default. An incompatible native client does not kill an existing
 service or silently open another application/database. Complete the platform
 and stability checks before publishing an installation.
 
+A client and the service must run the same DeepCode release. When a TUI or
+Desktop that starts the service finds an older release running, for example
+after an update, it restarts that service from its own installation, but only
+while the service has no active or queued tasks and no open terminals; the
+restart drains as `service restart --drain` does. A service with work in
+progress, a newer service, or one started by a development build is left
+running, and the client names both versions and what to do: wait and
+reconnect, or update the older client. A login item keeps starting the
+executable it was installed with, so reinstall it after an update as shown
+below.
+
 ## Prepare an upgrade
 
 ```sh
