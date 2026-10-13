@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import shutil
 import sys
@@ -257,6 +258,36 @@ async def test_grep_arguments_cannot_become_rg_options(tmp_path, monkeypatch, fi
     assert not marker.exists()
     if field == "pattern":
         assert "notes.txt" in out
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="runs a shell script")
+@pytest.mark.asyncio
+async def test_grep_hands_rg_its_inputs_only_as_values(tmp_path, monkeypatch):
+    # Runs without ripgrep installed: a stand-in rg records what it was given.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    seen = tmp_path / "argv.json"
+    stand_in = bin_dir / "rg"
+    stand_in.write_text(
+        f"#!{sys.executable}\n"
+        "import json, sys\n"
+        f"open({str(seen)!r}, 'w').write(json.dumps(sys.argv[1:]))\n"
+        "sys.exit(1)\n"
+    )
+    stand_in.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+
+    out = await GrepTool(str(workspace)).execute(
+        pattern="--pre=/tmp/x", include="--pre=/tmp/y"
+    )
+
+    argv = json.loads(seen.read_text())
+    assert out == "No matches."
+    assert "--regexp=--pre=/tmp/x" in argv and "--glob=--pre=/tmp/y" in argv
+    assert argv[-2:] == ["--", str(workspace.resolve())]
+    assert not any(arg.startswith("--pre") for arg in argv)
 
 
 # --- glob -------------------------------------------------------------------
