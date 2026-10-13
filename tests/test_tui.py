@@ -161,6 +161,58 @@ def test_noninteractive_tui_requires_trust_without_creating_a_session(
     assert "--trust" in capsys.readouterr().err
 
 
+class _Terminal(io.StringIO):
+    def isatty(self) -> bool:
+        return True
+
+
+def _service_trust_state(workspace: Path) -> str:
+    from app_server.blocking_client import BlockingServiceClient
+    from app_server.service_state import ServiceFiles
+    from core.persistence.database import default_database_path
+
+    rpc = BlockingServiceClient(ServiceFiles(default_database_path()))
+    try:
+        return rpc.call("project/add", {"path": str(workspace)})["project"][
+            "trustState"
+        ]
+    finally:
+        rpc.close()
+
+
+@pytest.mark.parametrize(("answer", "trusted"), [("yes", True), ("no", False)])
+def test_service_tui_asks_before_trusting_a_folder_in_a_terminal(
+    monkeypatch, tmp_path, capsys, answer, trusted
+):
+    """The in-process TUI asked; the shared-service one only said "untrusted"."""
+    from core.sessions import SessionStore
+
+    workspace = tmp_path / "untrusted"
+    workspace.mkdir()
+    monkeypatch.setenv("DEEPCODE_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("DEEPCODE_SESSIONS_DIR", str(tmp_path / "sessions"))
+    monkeypatch.setattr("sys.stdin", _Terminal(f"{answer}\n"))
+    monkeypatch.setattr(tui_app, "_silence_console_logging", lambda: None)
+    opened: list[dict] = []
+
+    class _App:
+        def __init__(self, **kwargs):
+            opened.append(kwargs)
+
+        async def repl(self):
+            return 0
+
+    monkeypatch.setattr(tui_app, "TuiApp", _App)
+
+    assert tui_app.main(["--workspace", str(workspace)]) == (0 if trusted else 1)
+
+    err = capsys.readouterr().err
+    assert "Trust this folder?" in err and str(workspace.resolve()) in err
+    assert len(opened) == (1 if trusted else 0)
+    assert _service_trust_state(workspace) == ("trusted" if trusted else "untrusted")
+    assert SessionStore(tmp_path / "sessions").list_sessions() == []
+
+
 def test_slash_help_lists_registry(monkeypatch, tmp_path, capsys):
     rc, _ = _run_tui(monkeypatch, tmp_path, "/help\n/exit\n", ["unused"])
     assert rc == 0

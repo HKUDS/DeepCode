@@ -61,7 +61,7 @@ from core.config import ConfigError
 from core.domain.approval import ApprovalStatus
 from core.domain.event import DomainEvent
 from core.domain.execution_security import ExecutionAccessPreset
-from core.domain.project import TrustState
+from core.domain.project import Project, TrustState
 from core.file_lock import FileLease
 from core.providers.reasoning import normalize_reasoning_effort
 
@@ -1224,6 +1224,10 @@ def main(argv: list[str] | None = None, *, shared_service: bool = True) -> int:
         return 1
 
     try:
+        if shared_service and not _prepare_service_workspace_trust(
+            args.workspace, grant=args.trust
+        ):
+            return 1
         app = TuiApp(
             workspace=args.workspace,
             model=args.model,
@@ -1318,28 +1322,62 @@ def _prepare_workspace_trust(workspace: str, *, grant: bool) -> bool:
         )
         if project.trust_state is TrustState.TRUSTED:
             return True
-        if not sys.stdin.isatty():
-            try:
-                require_project_trusted(project)
-            except ApplicationError as exc:
-                print(exc.user_message, file=sys.stderr)
-            return False
-        print(
-            "DeepCode can read files and run tools in this workspace:\n"
-            f"  {project.canonical_path}\n"
-            "Trust this folder? Type yes to continue: ",
-            end="",
-            file=sys.stderr,
-            flush=True,
-        )
-        answer = sys.stdin.readline()
-        if answer.strip().casefold() != "yes":
-            print("Workspace was not trusted; no Session was created.", file=sys.stderr)
+        if not _confirm_trust(project):
             return False
         set_project_trusted(application, project)
         return True
     finally:
         application.close()
+
+
+def _prepare_service_workspace_trust(workspace: str, *, grant: bool) -> bool:
+    """Ask what ``_prepare_workspace_trust`` asks, through the shared service
+    that owns the Project."""
+
+    if grant:
+        return True  # ServiceThreadClient persists an explicit --trust itself
+    from app_server.blocking_client import BlockingServiceClient
+    from app_server.service_state import ServiceFiles
+    from cli.rpc_models import from_view
+    from core.persistence.database import default_database_path
+
+    # The service resolves a relative path against its own directory.
+    path = str(Path(workspace).expanduser().resolve())
+    rpc = BlockingServiceClient(ServiceFiles(default_database_path()))
+    try:
+        project = from_view(Project, rpc.call("project/add", {"path": path})["project"])
+        if project.trust_state is TrustState.TRUSTED:
+            return True
+        if not _confirm_trust(project):
+            return False
+        rpc.call("project/update", {"projectId": project.id, "trustState": "trusted"})
+        return True
+    finally:
+        rpc.close()
+
+
+def _confirm_trust(project: Project) -> bool:
+    """Ask in a terminal whether to trust ``project``; elsewhere say how."""
+
+    if not sys.stdin.isatty():
+        try:
+            require_project_trusted(project)
+        except ApplicationError as exc:
+            print(exc.user_message, file=sys.stderr)
+        return False
+    print(
+        "DeepCode can read files and run tools in this workspace:\n"
+        f"  {project.canonical_path}\n"
+        "Trust this folder? Type yes to continue: ",
+        end="",
+        file=sys.stderr,
+        flush=True,
+    )
+    answer = sys.stdin.readline()
+    if answer.strip().casefold() != "yes":
+        print("Workspace was not trusted; no Session was created.", file=sys.stderr)
+        return False
+    return True
 
 
 if __name__ == "__main__":
