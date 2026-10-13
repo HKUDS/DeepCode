@@ -290,6 +290,36 @@ async def test_grep_hands_rg_its_inputs_only_as_values(tmp_path, monkeypatch):
     assert not any(arg.startswith("--pre") for arg in argv)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="runs a shell script")
+@pytest.mark.asyncio
+async def test_grep_does_not_hold_up_the_event_loop(tmp_path, monkeypatch):
+    # A slow search must leave the service free for other sessions' work.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stand_in = bin_dir / "rg"
+    stand_in.write_text(
+        f"#!{sys.executable}\nimport time\ntime.sleep(1)\nprint('a.py:1:hit')\n"
+    )
+    stand_in.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    ticks = 0
+
+    async def tick() -> None:
+        nonlocal ticks
+        while True:
+            await asyncio.sleep(0.05)
+            ticks += 1
+
+    ticker = asyncio.create_task(tick())
+    try:
+        out = await GrepTool(str(tmp_path)).execute(pattern="hit")
+    finally:
+        ticker.cancel()
+
+    assert out == "a.py:1:hit"
+    assert ticks >= 5
+
+
 # --- glob -------------------------------------------------------------------
 
 

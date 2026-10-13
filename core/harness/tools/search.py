@@ -8,6 +8,7 @@ workspace.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import shutil
@@ -73,10 +74,10 @@ class GrepTool(Tool):
         if not root.exists():
             return f"Error: path not found: {rel}"
 
-        if shutil.which("rg"):
-            matches = self._ripgrep(pattern, root, include)
-        else:
-            matches = self._python_grep(pattern, root, include)
+        # Either search can take seconds (rg is allowed 30); run it off the
+        # event loop, which the service shares with every other session.
+        search = self._ripgrep if shutil.which("rg") else self._python_grep
+        matches = await asyncio.to_thread(search, pattern, root, include)
         if matches is None:
             return f"Error: invalid regular expression: {pattern}"
         if not matches:

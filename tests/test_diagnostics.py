@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -20,6 +22,7 @@ from core.harness.tools.diagnostics import (  # noqa: E402
     run_diagnostics,
 )
 from core.harness.tools.files import EditTool, WriteTool  # noqa: E402
+from core.harness.tools.patch import ApplyPatchTool  # noqa: E402
 
 
 # --- checkers ---------------------------------------------------------------
@@ -134,3 +137,44 @@ async def test_diagnostics_injection_is_used(tmp_path):
     out = await w.execute(file_path="x.py", content="x = 1\n")
     assert calls  # the injected checker was called
     assert "injected" in out
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", ["write", "edit", "apply_patch"])
+async def test_diagnostics_do_not_hold_up_the_event_loop(tmp_path, tool_name):
+    # ruff and node --check may take seconds; other sessions must keep going.
+    def slow(_path):
+        time.sleep(1)
+        return []
+
+    (tmp_path / "a.py").write_text("x = 1\n")
+    if tool_name == "write":
+        run = WriteTool(str(tmp_path), diagnostics=slow).execute(
+            file_path="a.py", content="x = 2\n"
+        )
+    elif tool_name == "edit":
+        run = EditTool(str(tmp_path), diagnostics=slow).execute(
+            file_path="a.py", old_string="x = 1", new_string="x = 2"
+        )
+    else:
+        run = ApplyPatchTool(str(tmp_path), diagnostics=slow).execute(
+            patch="*** Begin Patch\n*** Update File: a.py\n@@\n-x = 1\n+x = 2\n"
+            "*** End Patch\n"
+        )
+    ticks = 0
+
+    async def tick() -> None:
+        nonlocal ticks
+        while True:
+            await asyncio.sleep(0.05)
+            ticks += 1
+
+    ticker = asyncio.create_task(tick())
+    try:
+        out = await run
+    finally:
+        ticker.cancel()
+
+    assert not out.startswith("Error")
+    assert (tmp_path / "a.py").read_text() == "x = 2\n"
+    assert ticks >= 5

@@ -11,6 +11,7 @@ matching the kernel contract so a bad edit never aborts the loop.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 from typing import Any
@@ -211,7 +212,9 @@ class WriteTool(Tool):
         except OSError as exc:
             return f"Error: could not write {file_path}: {exc}"
         result = f"Wrote {len(content)} bytes to {file_path}"
-        report = format_diagnostics(self._diagnostics(str(target)))
+        # Checkers run subprocesses (ruff up to 20s); keep them off the loop.
+        diagnostics = await asyncio.to_thread(self._diagnostics, str(target))
+        report = format_diagnostics(diagnostics)
         return f"{result}\n\n{report}" if report else result
 
 
@@ -308,5 +311,7 @@ class EditTool(Tool):
             # Report how many were changed for transparency.
             occurrences = content.count(old_string) or "multiple"
         result = f"Edited {file_path} ({occurrences} replacement(s))."
-        report = format_diagnostics(self._diagnostics(str(target)))
+        # Checkers run subprocesses (ruff up to 20s); keep them off the loop.
+        diagnostics = await asyncio.to_thread(self._diagnostics, str(target))
+        report = format_diagnostics(diagnostics)
         return f"{result}\n\n{report}" if report else result
