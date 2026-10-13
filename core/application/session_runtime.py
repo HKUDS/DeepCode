@@ -776,9 +776,9 @@ class SessionRuntimeRegistry:
             if stored is None:
                 return
             # ``already_in_history`` decides whether the live runtime's model
-            # history already contains this text. Mid-turn notes do (the
-            # runner appended them before reporting), so the count is synced
-            # to keep the resident history authoritative. A note written
+            # history holds this text. Mid-turn notes do (the runner adds each
+            # one right after reporting it), so the count is synced to keep
+            # the resident history authoritative. A note written
             # AFTER its Turn closed — a sub-agent result that lost the
             # delivery race — is only in the canonical log, so the count is
             # deliberately left stale: the next acquire sees the mismatch and
