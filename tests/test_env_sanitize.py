@@ -282,6 +282,50 @@ def test_child_env_drops_deepcode_own_python_environment(
     assert env["VIRTUAL_ENV"] == str(tmp_path / ".venv")
 
 
+_OWN_BIN = os.path.join(sys.prefix, "Scripts" if os.name == "nt" else "bin")
+
+
+def test_activated_deepcode_venv_leaves_path_too(monkeypatch, clean_switches):
+    """With DeepCode's venv activated, ``python`` and ``pip`` in a project
+    command would be DeepCode's interpreter."""
+
+    monkeypatch.setenv("VIRTUAL_ENV", sys.prefix)
+    monkeypatch.setenv("PATH", os.pathsep.join([_OWN_BIN, "/opt/tools/bin", "/bin"]))
+    assert child_env()["PATH"] == os.pathsep.join(["/opt/tools/bin", "/bin"])
+
+
+def test_activated_deepcode_conda_env_leaves_path_too(monkeypatch, clean_switches):
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+    monkeypatch.setenv("CONDA_PREFIX", sys.prefix)
+    monkeypatch.setenv("CONDA_DEFAULT_ENV", "deepcode")
+    monkeypatch.setenv("PATH", os.pathsep.join([_OWN_BIN, "/bin"]))
+    env = child_env()
+    assert env["PATH"] == "/bin"
+    assert "CONDA_PREFIX" not in env
+    assert "CONDA_DEFAULT_ENV" not in env
+
+
+@pytest.mark.parametrize(
+    "activation",
+    [
+        {},  # DeepCode merely runs from that interpreter
+        {"VIRTUAL_ENV": "/somewhere/else/.venv"},
+        # The conda base is many users' everyday Python, not DeepCode's own.
+        {"CONDA_PREFIX": sys.prefix, "CONDA_DEFAULT_ENV": "base"},
+    ],
+)
+def test_path_is_untouched_without_deepcode_env_activated(
+    monkeypatch, clean_switches, activation
+):
+    for name in ("VIRTUAL_ENV", "CONDA_PREFIX", "CONDA_DEFAULT_ENV"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in activation.items():
+        monkeypatch.setenv(name, value)
+    path = os.pathsep.join([_OWN_BIN, "/bin"])
+    monkeypatch.setenv("PATH", path)
+    assert child_env()["PATH"] == path
+
+
 def test_external_agents_lose_deepcode_python_environment_too(
     monkeypatch, clean_switches
 ):

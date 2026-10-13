@@ -32,10 +32,10 @@ user to defend against a relay that rewrites tool calls.
 What never reaches those children is what belongs to DeepCode itself rather
 than to the user's work: the variables DeepCode reads its own model-connection
 keys from (``OPENAI_API_KEY``, a connection's ``apiKeyEnv``, a ``${NAME}`` in
-the provider settings, ...), and the ``PYTHONPATH`` / ``VIRTUAL_ENV`` of
-DeepCode's own checkout or interpreter, which a client started from there
-passes on to the service and which would otherwise point the project's Python
-at DeepCode's packages.
+the provider settings, ...), and DeepCode's own checkout and Python
+environment (its ``PYTHONPATH`` entry, an activated venv or conda env and that
+env's ``PATH`` entries), which a client started from there passes on to the
+service and which would otherwise point the project's Python at DeepCode's.
 
 ``DEEPCODE_BASH_FULL_ENV=1`` remains the explicit "give children everything"
 override and wins over all of the above.
@@ -76,7 +76,7 @@ _TRUTHY = frozenset({"1", "true", "yes", "on"})
 
 # The directory DeepCode's own top-level packages (``core``, ``tools``, ...)
 # are imported from.
-_DEEPCODE_ROOT = os.path.realpath(Path(__file__).resolve().parents[2])
+_DEEPCODE_ROOT = os.path.normcase(Path(__file__).resolve().parents[2])
 
 
 def full_env_requested() -> bool:
@@ -148,14 +148,45 @@ def _drop_deepcode_own(env: dict[str, str]) -> None:
         kept = [
             entry
             for entry in pythonpath.split(os.pathsep)
-            if not entry or os.path.realpath(entry) != _DEEPCODE_ROOT
+            if not entry or _resolved(entry) != _DEEPCODE_ROOT
         ]
         if any(kept):
             env["PYTHONPATH"] = os.pathsep.join(kept)
-    virtual_env = env.get("VIRTUAL_ENV")
-    if virtual_env and os.path.realpath(virtual_env) == os.path.realpath(sys.prefix):
-        # uv and poetry would otherwise install into DeepCode's interpreter.
+    # A client that had DeepCode's own environment activated passes it on:
+    # uv, poetry and conda would install into it, and ``python``/``pip`` on
+    # PATH would be DeepCode's interpreter rather than the project's. The
+    # conda base is many users' everyday Python, so it is left alone.
+    prefix = _resolved(sys.prefix)
+    activated = False
+    if _resolved(env.get("VIRTUAL_ENV")) == prefix:
         del env["VIRTUAL_ENV"]
+        activated = True
+    if (
+        _resolved(env.get("CONDA_PREFIX")) == prefix
+        and env.get("CONDA_DEFAULT_ENV") != "base"
+    ):
+        del env["CONDA_PREFIX"]
+        env.pop("CONDA_DEFAULT_ENV", None)
+        activated = True
+    if activated and "PATH" in env:
+        env["PATH"] = os.pathsep.join(
+            entry
+            for entry in env["PATH"].split(os.pathsep)
+            if not _inside(entry, prefix)
+        )
+
+
+def _resolved(path: str | None) -> str | None:
+    """``path`` with links resolved, comparable as text; ``None`` when empty."""
+
+    return os.path.normcase(os.path.realpath(path)) if path else None
+
+
+def _inside(path: str, root: str) -> bool:
+    resolved = _resolved(path)
+    return resolved is not None and (
+        resolved == root or resolved.startswith(root + os.sep)
+    )
 
 
 def _model_key_variables() -> set[str]:
