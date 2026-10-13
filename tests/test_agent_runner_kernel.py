@@ -414,6 +414,33 @@ async def test_streaming_request_respects_explicit_safety_cap(
 
 
 @pytest.mark.asyncio
+async def test_finalization_retry_sends_transient_context_once():
+    provider = ScriptedProvider(
+        [
+            LLMResponse(content="", finish_reason="stop"),
+            LLMResponse(content="", finish_reason="stop"),
+            LLMResponse(content="recovered answer", finish_reason="stop"),
+        ]
+    )
+    context = (
+        {"role": "developer", "content": "skill catalog"},
+        {"role": "user", "content": "environment facts"},
+    )
+
+    result = await AgentRunner(provider).run(
+        _spec(provider, transient_context_messages=context)
+    )
+
+    assert result.final_content == "recovered answer"
+    assert provider.calls == 3
+    # The retry is the request the model just answered plus one instruction.
+    retry = provider.requests[-1]["messages"]
+    assert retry[:-1] == provider.requests[-2]["messages"]
+    assert [m["content"] for m in retry].count("environment facts") == 1
+    assert str(retry[0]["content"]).count("skill catalog") == 1
+
+
+@pytest.mark.asyncio
 async def test_should_stop_callback_stops_before_model_call():
     provider = ScriptedProvider([LLMResponse(content="never", finish_reason="stop")])
 

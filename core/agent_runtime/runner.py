@@ -1134,14 +1134,13 @@ class AgentRunner:
     async def _request_finalization_retry(
         self,
         spec: AgentRunSpec,
-        messages: list[dict[str, Any]],
+        messages_for_model: list[dict[str, Any]],
     ):
-        retry_messages = list(messages)
+        # ``messages_for_model`` is the request view the model just answered,
+        # transient context already composed in; composing it again would
+        # send that context twice.
+        retry_messages = list(messages_for_model)
         retry_messages.append(build_finalization_retry_message())
-        retry_messages = self._with_transient_context(
-            retry_messages,
-            spec.transient_context_messages,
-        )
         retry_messages = self._snip_history(spec, retry_messages)
         kwargs = self._build_request_kwargs(spec, retry_messages, tools=None)
         return await self._await_provider_response(
