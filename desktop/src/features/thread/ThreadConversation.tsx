@@ -54,6 +54,7 @@ export function ThreadConversation({
     () => buildConversationTurns(turns, items),
     [items, turns],
   );
+  const hasConversation = groupedTurns.length > 0;
   const approvalsByItem = useMemo(
     () => new Map(approvals.map((approval) => [approval.itemId, approval])),
     [approvals],
@@ -88,6 +89,10 @@ export function ThreadConversation({
     }
   }, []);
 
+  // The scroller only exists once there is a conversation; a Session opens
+  // empty and its history arrives after, so attach when it appears and start
+  // at the bottom at once: a smooth scroll from the top would read as the
+  // user scrolling away.
   useEffect(() => {
     const viewport = scrollViewportRef.current;
     if (!viewport) return;
@@ -101,8 +106,9 @@ export function ThreadConversation({
     };
 
     viewport.addEventListener("scroll", handleScroll, { passive: true });
+    scrollToLatest("auto");
     return () => viewport.removeEventListener("scroll", handleScroll);
-  }, []);
+  }, [hasConversation, scrollToLatest]);
 
   useEffect(() => {
     if (!followingRef.current) return;
@@ -115,7 +121,7 @@ export function ThreadConversation({
     scrollToLatest("smooth");
   };
 
-  if (groupedTurns.length === 0) {
+  if (!hasConversation) {
     return (
       <div className={styles.conversationFrame}>
         <div className={styles.conversationScroller}>
