@@ -38,6 +38,7 @@ from core.agent_runtime.helpers import (
     estimate_message_tokens,
     find_legal_message_start,
     maybe_persist_tool_result,
+    renew_tool_result_references,
     truncate_text,
 )
 from core.agent_runtime.token_meter import (
@@ -473,6 +474,7 @@ class AgentRunner:
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
         hook = spec.hook or AgentHook()
         messages = list(spec.initial_messages)
+        renew_tool_result_references(spec.workspace, messages)
         final_content: str | None = None
         tools_used: list[str] = []
         usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0}

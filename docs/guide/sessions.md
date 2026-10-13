@@ -84,7 +84,8 @@ files. Finish or stop its active work before deleting it.
 DeepCode normally stores your conversation files in `~/.deepcode/sessions/` and
 its task, approval, and Automation data in `~/.deepcode/state/deepcode.sqlite3`.
 Large tool outputs may also be stored in your project's `.deepcode/tool-results/`
-directory. Keep these files when backing up work you want to resume.
+directory. Keep these files when backing up work you want to resume. An output
+that no Session has used for 90 days is removed.
 
 For a consistent backup or to recover an earlier installation, follow the
 [backup and restore guide](../UPGRADE_AND_RESTORE.md). Back up your project files

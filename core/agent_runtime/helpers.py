@@ -7,9 +7,10 @@ since the runner threads ``workspace`` / ``session_key`` through ``AgentRunSpec`
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import re
-import shutil
 import time
 import uuid
 from pathlib import Path
@@ -45,15 +46,19 @@ def truncate_text(text: str, max_chars: int) -> str:
 _UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*]')
 _TOOL_RESULT_PREVIEW_CHARS = 1200
 _TOOL_RESULTS_DIR = ".deepcode/tool-results"
+_TOOL_RESULT_REFERENCE_HEAD = "[tool output persisted]\nFull output saved to: "
 # A spilled result is referenced by the session history that produced it, so
-# its bucket has to outlive anything a user might resume. Deleting by RANK
-# (a "keep the newest N sessions" cap) broke exactly that: in a workspace with
-# more sessions than the cap, an older session's locators went dangling while
-# its history still pointed at them. Age is the only honest signal available
-# at this layer — the kernel cannot see which sessions still exist — so the
-# horizon is long enough that a bucket only disappears once nobody has
-# resumed that session for a full quarter.
+# it has to outlive anything a user might resume. Deleting by RANK (a "keep
+# the newest N sessions" cap) broke exactly that: in a workspace with more
+# sessions than the cap, an older session's locators went dangling while its
+# history still pointed at them. Age is the only honest signal available at
+# this layer — the kernel cannot see which sessions still exist — so the
+# horizon is long enough that a file only disappears once no run has
+# referenced it for a full quarter (each run renews what its history cites).
 _TOOL_RESULT_RETENTION_SECS = 90 * 24 * 60 * 60
+# The service is a long-lived process; sweeping only once per process would
+# leave its spills unbounded for as long as it runs.
+_TOOL_RESULT_SWEEP_INTERVAL_SECS = 24 * 60 * 60
 
 
 def safe_filename(name: str) -> str:
@@ -110,8 +115,7 @@ def _render_tool_result_reference(
     truncated_preview: bool,
 ) -> str:
     result = (
-        f"[tool output persisted]\n"
-        f"Full output saved to: {filepath}\n"
+        f"{_TOOL_RESULT_REFERENCE_HEAD}{filepath}\n"
         f"Original size: {original_size} chars\n"
         f"Preview:\n{preview}"
     )
@@ -120,30 +124,66 @@ def _render_tool_result_reference(
     return result
 
 
-def _bucket_mtime(path: Path) -> float:
+def _mtime(path: Path) -> float:
     try:
         return path.stat().st_mtime
     except OSError:
         return 0.0
 
 
-_SWEPT_TOOL_RESULT_ROOTS: set[str] = set()
+_SWEPT_TOOL_RESULT_ROOTS: dict[str, float] = {}
 
 
 def _cleanup_tool_result_buckets(root: Path, current_bucket: Path) -> None:
-    """Drop buckets no session has touched inside the retention horizon.
+    """Drop spilled results no run has touched inside the retention horizon.
 
-    Swept once per root per process: this used to run on every oversized tool
-    result, scanning and stat-ing the whole directory on a hot path.
+    Swept at most once a day per root per process: this used to run on every
+    oversized tool result, scanning and stat-ing the whole directory on a hot
+    path.
     """
     key = str(root)
-    if key in _SWEPT_TOOL_RESULT_ROOTS:
+    now = time.time()
+    if now - _SWEPT_TOOL_RESULT_ROOTS.get(key, 0.0) < _TOOL_RESULT_SWEEP_INTERVAL_SECS:
         return
-    _SWEPT_TOOL_RESULT_ROOTS.add(key)
-    cutoff = time.time() - _TOOL_RESULT_RETENTION_SECS
-    for path in root.iterdir():
-        if path.is_dir() and path != current_bucket and _bucket_mtime(path) < cutoff:
-            shutil.rmtree(path, ignore_errors=True)
+    _SWEPT_TOOL_RESULT_ROOTS[key] = now
+    cutoff = now - _TOOL_RESULT_RETENTION_SECS
+    for bucket in root.iterdir():
+        if not bucket.is_dir():
+            continue
+        # File by file: every interactive session spills into the one
+        # "default" bucket, which is always current and so never ages out.
+        for path in bucket.iterdir():
+            if path.is_file() and _mtime(path) < cutoff:
+                path.unlink(missing_ok=True)
+        if bucket != current_bucket:
+            with contextlib.suppress(OSError):  # not empty: still in use
+                bucket.rmdir()
+
+
+def renew_tool_result_references(
+    workspace: Path | None,
+    messages: list[dict[str, Any]],
+) -> None:
+    """Mark the spilled results ``messages`` still point at as in use.
+
+    Retention is by age, so without this a session resumed after a long
+    pause would lose files its history still cites at the next sweep.
+    """
+    if workspace is None:
+        return
+    root = workspace / _TOOL_RESULTS_DIR
+    for message in messages:
+        content = message.get("content")
+        if message.get("role") != "tool" or not isinstance(content, str):
+            continue
+        if not content.startswith(_TOOL_RESULT_REFERENCE_HEAD):
+            continue
+        path = Path(content[len(_TOOL_RESULT_REFERENCE_HEAD) :].split("\n", 1)[0])
+        # Only our own spill files: tool output can imitate the reference.
+        if path.parent.parent != root or ".." in path.parts:
+            continue
+        with contextlib.suppress(OSError):
+            os.utime(path)
 
 
 def _write_text_atomic(path: Path, content: str) -> None:
