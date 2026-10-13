@@ -44,6 +44,7 @@ import platform
 import shutil
 import tempfile
 from dataclasses import dataclass, field
+from pathlib import Path
 
 # Absolute path — never resolved via PATH (PATH-injection defense).
 _MACOS_SANDBOX_EXEC = "/usr/bin/sandbox-exec"
@@ -336,11 +337,28 @@ def wrap_argv_command(
     return WrappedCommand(argv=list(inner_argv), backend="none")
 
 
+def default_shell() -> str:
+    """The bash a shell command runs in.
+
+    Windows has no ``/bin/bash``. Git for Windows keeps ``bash.exe`` in
+    ``bin`` beside the ``cmd`` directory its installer puts on PATH; failing
+    that, any ``bash`` on PATH (MSYS2, Cygwin, ...).
+    """
+    if platform.system() != "Windows":
+        return "/bin/bash"
+    git = shutil.which("git")
+    if git:
+        bash = Path(git).resolve().parent.parent / "bin" / "bash.exe"
+        if bash.is_file():
+            return str(bash)
+    return shutil.which("bash") or "bash.exe"
+
+
 def wrap_shell_command(
     command: str,
     policy: SandboxPolicy,
     *,
-    shell: str = "/bin/bash",
+    shell: str | None = None,
 ) -> WrappedCommand:
     """Wrap a shell ``command`` string so it runs inside the sandbox.
 
@@ -349,7 +367,7 @@ def wrap_shell_command(
     the caller is responsible for degrading safely (e.g. requiring approval
     or refusing network-touching commands).
     """
-    return wrap_argv_command([shell, "-c", command], policy)
+    return wrap_argv_command([shell or default_shell(), "-c", command], policy)
 
 
 def sandbox_available() -> bool:
@@ -381,7 +399,7 @@ def build_exec_command(
     argv: list[str] | None = None,
     workspace: str | os.PathLike[str],
     allow_network: bool = True,
-    shell: str = "/bin/bash",
+    shell: str | None = None,
     enabled: bool | None = None,
 ) -> WrappedCommand:
     """Build the (possibly sandboxed) command a tool executor should run.
@@ -404,7 +422,11 @@ def build_exec_command(
     # for direct embedders that have not adopted ExecutionSecurityProfile yet.
     effective_enabled = sandbox_enabled() if enabled is None else enabled
     if not effective_enabled:
-        bare = [shell, "-c", command] if command is not None else list(argv or [])
+        bare = (
+            [shell or default_shell(), "-c", command]
+            if command is not None
+            else list(argv or [])
+        )
         return WrappedCommand(argv=bare, backend="disabled")
 
     policy = SandboxPolicy.for_workspace(workspace, allow_network=allow_network)

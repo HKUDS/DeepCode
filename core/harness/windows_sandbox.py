@@ -44,7 +44,11 @@ _JobObjectExtendedLimitInformation = 9
 # Process creation flags.
 _CREATE_SUSPENDED = 0x00000004
 _CREATE_UNICODE_ENVIRONMENT = 0x00000400
-_INHERIT_HANDLES = 0x00000001
+
+# Standard handles (winbase.h).
+_STD_HANDLES = (-10, -11, -12)  # input, output, error
+_STARTF_USESTDHANDLES = 0x00000100
+_HANDLE_FLAG_INHERIT = 0x00000001
 
 
 class _JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
@@ -141,11 +145,23 @@ def _run_in_job(argv: list[str]) -> int:
     except Exception:
         return _passthrough(argv)
 
-    # Build the command line: quote each argument for the C runtime.
-    command_line = " ".join(f'"{a}"' if (" " in a or "\t" in a) else a for a in argv)
+    # Quote for the C runtime the way subprocess does, so an argument holding
+    # quotes or trailing backslashes (a bash -c script) arrives unchanged.
+    command_line = subprocess.list2cmdline(argv)
 
+    # Hand the inner command this wrapper's stdin/stdout/stderr. They are
+    # pipes when the agent runs a command, and a pipe reaches the child only
+    # as an inheritable handle named in STARTUPINFO; otherwise its output is
+    # lost.
     startup = _STARTUPINFOW()
     startup.cb = ctypes.sizeof(_STARTUPINFOW)
+    startup.dwFlags = _STARTF_USESTDHANDLES
+    handles = [kernel32.GetStdHandle(which) for which in _STD_HANDLES]
+    for handle in handles:
+        kernel32.SetHandleInformation(
+            handle, _HANDLE_FLAG_INHERIT, _HANDLE_FLAG_INHERIT
+        )
+    startup.hStdInput, startup.hStdOutput, startup.hStdError = handles
     process_info = _PROCESS_INFORMATION()
 
     ok = kernel32.CreateProcessW(
@@ -153,7 +169,7 @@ def _run_in_job(argv: list[str]) -> int:
         command_line,
         None,  # process attributes
         None,  # thread attributes
-        False,  # bInheritHandles
+        True,  # bInheritHandles: the standard handles above
         _CREATE_SUSPENDED | _CREATE_UNICODE_ENVIRONMENT,
         None,  # environment (inherit)
         None,  # current directory (inherit)

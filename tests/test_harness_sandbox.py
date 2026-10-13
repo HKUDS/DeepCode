@@ -208,3 +208,112 @@ def test_windows_job_kills_descendant_processes():
     )
     exit_code = _run_in_job([probe, "-c", code])
     assert exit_code == 0
+
+
+# ---- Windows command construction (runs everywhere) ------------------------
+
+
+class _FakeKernel32:
+    """Just enough kernel32 for ``_run_in_job`` to build its CreateProcessW call."""
+
+    std_handles = {-10: 100, -11: 101, -12: 102}
+
+    def __init__(self):
+        self.inheritable: set[int] = set()
+        self.create_process = None
+
+    def CreateJobObjectW(self, *_args):
+        return 1
+
+    def SetInformationJobObject(self, *_args):
+        return 1
+
+    def GetStdHandle(self, which):
+        return self.std_handles[which]
+
+    def SetHandleInformation(self, handle, mask, flags):
+        if mask & flags & 0x1:
+            self.inheritable.add(handle)
+        return 1
+
+    def CreateProcessW(self, _app, command_line, _pa, _ta, inherit, *rest):
+        startup = rest[-2]._obj
+        self.create_process = {
+            "command_line": command_line,
+            "inherit_handles": inherit,
+            "flags": startup.dwFlags,
+            "std": (startup.hStdInput, startup.hStdOutput, startup.hStdError),
+        }
+        return 1
+
+    def GetExitCodeProcess(self, _handle, code):
+        code._obj.value = 3
+        return 1
+
+    def __getattr__(self, _name):
+        return lambda *_args: 1
+
+
+@pytest.fixture
+def fake_kernel32(monkeypatch):
+    import ctypes
+
+    kernel32 = _FakeKernel32()
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *_a, **_k: kernel32, raising=False)
+    return kernel32
+
+
+def test_windows_job_quotes_arguments_like_subprocess(fake_kernel32):
+    """The inner bash must receive the command exactly, quotes and all."""
+
+    argv = [
+        "C:\\Program Files\\Git\\bin\\bash.exe",
+        "-c",
+        'echo "hi there" && grep -r "a\\"b" src\\',
+    ]
+    assert _run_in_job(argv) == 3
+    assert fake_kernel32.create_process["command_line"] == subprocess.list2cmdline(argv)
+
+
+def test_windows_job_hands_its_pipes_to_the_inner_command(fake_kernel32):
+    """Under the agent's shell the wrapper's stdout is a pipe; without passing
+    it on (inheritably) the command's output never arrives."""
+
+    _run_in_job(["bash.exe", "-c", "echo hi"])
+    call = fake_kernel32.create_process
+    assert call["inherit_handles"]
+    assert call["flags"] & 0x100  # STARTF_USESTDHANDLES
+    assert call["std"] == (100, 101, 102)
+    assert fake_kernel32.inheritable == {100, 101, 102}
+
+
+def test_windows_shell_is_git_bash_not_bin_bash(monkeypatch, tmp_path):
+    """Windows has no /bin/bash; Git for Windows keeps bash.exe beside git."""
+
+    from core.harness.sandbox import build_exec_command
+
+    git = tmp_path / "Git" / "cmd" / "git.exe"
+    bash = tmp_path / "Git" / "bin" / "bash.exe"
+    for path in (git, bash):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    monkeypatch.setattr("core.harness.sandbox.platform.system", lambda: "Windows")
+    monkeypatch.setattr(
+        "core.harness.sandbox.shutil.which",
+        lambda name, *_a, **_k: str(git) if name == "git" else None,
+    )
+    wrapped = build_exec_command(command="echo hi", workspace=tmp_path, enabled=False)
+    assert wrapped.argv == [str(bash.resolve()), "-c", "echo hi"]
+
+
+def test_windows_shell_falls_back_to_bash_on_path(monkeypatch, tmp_path):
+    from core.harness.sandbox import build_exec_command
+
+    on_path = str(tmp_path / "msys64" / "usr" / "bin" / "bash.exe")
+    monkeypatch.setattr("core.harness.sandbox.platform.system", lambda: "Windows")
+    monkeypatch.setattr(
+        "core.harness.sandbox.shutil.which",
+        lambda name, *_a, **_k: on_path if name == "bash" else None,
+    )
+    wrapped = build_exec_command(command="echo hi", workspace=tmp_path, enabled=False)
+    assert wrapped.argv == [on_path, "-c", "echo hi"]
