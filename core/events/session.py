@@ -390,6 +390,7 @@ class AgentSession:
         approval_callback: Any | None = None,
         injection_callback: Any | None = None,
         context_note_sink: Any | None = None,
+        history_sink: Any | None = None,
         hooks_engine: Any | None = None,
         agent_context: tuple[str, str] | None = None,
         context_window_tokens: int | None = None,
@@ -417,6 +418,9 @@ class AgentSession:
         # Records mid-turn model-visible messages into canonical history
         # (model-visible means logged); None keeps the kernel host-agnostic.
         self._context_note_sink = context_note_sink
+        # Receives the model history each time the runner reports it, so a
+        # host can record a Turn as it happens rather than when it ends.
+        self._history_sink = history_sink
         # External-command hooks (C3). Fires SessionStart (once) + UserPromptSubmit
         # (each prompt) here, and PreToolUse/PostToolUse in the runner. None when
         # no hooks are configured, so the whole feature is dormant at zero cost.
@@ -593,6 +597,16 @@ class AgentSession:
     def _record_usage(self, usage: dict[str, int]) -> None:
         for key, value in usage.items():
             self._last_usage[key] = self._last_usage.get(key, 0) + value
+
+    def _keep_history(self, messages: list[dict[str, Any]]) -> None:
+        """Follow the runner's history as it grows.
+
+        A Turn that is stopped or fails keeps what the model already saw and
+        did, the same as one that finishes.
+        """
+        self._history = [m for m in messages if m.get("role") != "system"]
+        if self._history_sink is not None:
+            self._history_sink(self.history)
 
     def load_history(self, messages: list[dict[str, Any]]) -> None:
         """Replace the conversation history (session resume).
@@ -1033,6 +1047,7 @@ class AgentSession:
             approval_callback=self._approval_callback,
             injection_callback=self._injection_callback,
             context_note_sink=self._context_note_sink,
+            history_sink=self._keep_history,
             pre_tool_hook=pre_tool_hook,
             post_tool_hook=post_tool_hook,
             permission_request_hook=permission_request_hook,

@@ -185,6 +185,13 @@ class AgentRunSpec:
     # host record each one as it happens. A sink failure is logged and
     # swallowed: persistence trouble must not abort the run it documents.
     context_note_sink: Any | None = None
+    # The model history itself, as it grows: ``(messages) -> None`` is called
+    # with the run's current history before every model request, before a
+    # tool runs and after its result, before each noted message joins, and
+    # when the run ends however it ends. A host can keep the history (or its
+    # record) in step with what the model saw, partial work included. Failures
+    # are logged and swallowed, like the note sink's.
+    history_sink: Any | None = None
     workspace: Path | None = None
     session_key: str | None = None
     context_window_tokens: int | None = None
@@ -351,27 +358,6 @@ class AgentRunner:
 
         return _to_blocks(left) + _to_blocks(right)
 
-    @classmethod
-    def _append_injected_messages(
-        cls,
-        messages: list[dict[str, Any]],
-        injections: list[dict[str, Any]],
-    ) -> None:
-        for injection in injections:
-            if (
-                messages
-                and injection.get("role") == "user"
-                and messages[-1].get("role") == "user"
-            ):
-                merged = dict(messages[-1])
-                merged["content"] = cls._merge_message_content(
-                    merged.get("content"),
-                    injection.get("content"),
-                )
-                messages[-1] = merged
-                continue
-            messages.append(injection)
-
     async def _try_drain_injections(
         self,
         spec: AgentRunSpec,
@@ -402,7 +388,18 @@ class AgentRunner:
                         "pending_tool_calls": [],
                     },
                 )
-        self._append_injected_messages(messages, injections)
+        for item, message in injections:
+            if isinstance(item, UserSteer):
+                # Steering is appended to the canonical Session by the
+                # service that accepted it.
+                messages.append(message)
+            else:
+                self._enter_noted(
+                    spec,
+                    messages,
+                    message,
+                    self._injection_note_source(item),
+                )
         logger.info(
             "Injected {} follow-up message(s) {}",
             len(injections),
@@ -411,22 +408,45 @@ class AgentRunner:
         return True
 
     @staticmethod
-    def _note_context(spec: AgentRunSpec, content: str, source: str) -> None:
-        """Report one mid-turn model-visible message to the host's sink."""
-        if spec.context_note_sink is None:
+    def _report_history(spec: AgentRunSpec, messages: list[dict[str, Any]]) -> None:
+        """Hand the model history as it now stands to the host's sink."""
+        if spec.history_sink is None:
             return
         try:
-            spec.context_note_sink(content, source)
+            spec.history_sink(messages)
         except Exception:
             # Persistence trouble must not abort the run it documents.
-            logger.exception("context_note_sink failed (source={})", source)
+            logger.exception("history_sink failed")
+
+    @classmethod
+    def _enter_noted(
+        cls,
+        spec: AgentRunSpec,
+        messages: list[dict[str, Any]],
+        message: dict[str, Any],
+        source: str,
+    ) -> None:
+        """Add a runner-written user message to the history, noted.
+
+        Model-visible means logged, in the order the model sees it: the
+        history so far is reported first, so a note is never recorded ahead
+        of the messages it follows.
+        """
+        cls._report_history(spec, messages)
+        if spec.context_note_sink is not None:
+            try:
+                spec.context_note_sink(str(message.get("content", "")), source)
+            except Exception:
+                # Persistence trouble must not abort the run it documents.
+                logger.exception("context_note_sink failed (source={})", source)
+        messages.append(message)
 
     async def _drain_injections(
         self,
         spec: AgentRunSpec,
         *,
         close_if_empty: bool = False,
-    ) -> list[dict[str, Any]]:
+    ) -> list[tuple[Any, dict[str, Any]]]:
         if spec.injection_callback is None:
             return []
         signature = inspect.signature(spec.injection_callback)
@@ -442,26 +462,16 @@ class AgentRunner:
         items = await spec.injection_callback(**kwargs)
         if not items:
             return []
-        injected_messages: list[dict[str, Any]] = []
+        injected: list[tuple[Any, dict[str, Any]]] = []
         for item in items:
             message = runtime_input_to_provider_message(item)
-            # Model-visible means logged — for every drained input nothing
-            # else persists. Steering is appended to the canonical Session by
-            # the service that accepted it; Goal updates, sub-agent results,
-            # and raw injections exist only in this run's memory until noted.
-            if not isinstance(item, UserSteer):
-                self._note_context(
-                    spec,
-                    str(message.get("content", "")),
-                    self._injection_note_source(item),
-                )
             if message.get("role") == "user" and "content" in message:
-                injected_messages.append(message)
+                injected.append((item, message))
                 continue
             text = str(message.get("content", ""))
             if text.strip():
-                injected_messages.append({"role": "user", "content": text})
-        return injected_messages
+                injected.append((item, {"role": "user", "content": text}))
+        return injected
 
     @staticmethod
     def _injection_note_source(item: Any) -> str:
@@ -472,8 +482,21 @@ class AgentRunner:
         return "injection"
 
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
-        hook = spec.hook or AgentHook()
         messages = list(spec.initial_messages)
+        try:
+            return await self._run(spec, messages)
+        finally:
+            # However the run ends — finished, failed or cancelled — the
+            # history it built is reported, so a host keeps the partial work.
+            # ``messages`` is only ever changed in place for this to hold.
+            self._report_history(spec, messages)
+
+    async def _run(
+        self,
+        spec: AgentRunSpec,
+        messages: list[dict[str, Any]],
+    ) -> AgentRunResult:
+        hook = spec.hook or AgentHook()
         renew_tool_result_references(spec.workspace, messages)
         final_content: str | None = None
         tools_used: list[str] = []
@@ -600,11 +623,13 @@ class AgentRunner:
                     ),
                 )
 
-            messages = await self._maybe_compact(
+            messages[:] = await self._maybe_compact(
                 spec,
                 messages,
                 response_observer=record_compaction_response,
             )
+            # What the model is about to read is on record before it reads it.
+            self._report_history(spec, messages)
 
             messages_for_model = self._request_view(
                 spec, messages, iteration=current_iteration
@@ -633,6 +658,9 @@ class AgentRunner:
                     thinking_blocks=response.thinking_blocks,
                 )
                 messages.append(assistant_message)
+                # A call is on record before it runs: its effects may outlast
+                # this process.
+                self._report_history(spec, messages)
                 tools_used.extend(tc.name for tc in response.tool_calls)
                 await self._emit_checkpoint(
                     spec,
@@ -673,6 +701,7 @@ class AgentRunner:
                     }
                     messages.append(tool_message)
                     completed_tool_results.append(tool_message)
+                self._report_history(spec, messages)
                 if repeat_tracker is not None or evidence_ledger is not None:
                     # Observed at the result boundary so denied and failed
                     # calls count too — a model hammering a rejected call is
@@ -709,14 +738,12 @@ class AgentRunner:
                             if reminder is not None:
                                 reminders.append(reminder)
                     if reminders:
-                        reminder_text = "\n\n".join(reminders)
-                        messages.append(
-                            {
-                                "role": "user",
-                                "content": reminder_text,
-                            }
+                        self._enter_noted(
+                            spec,
+                            messages,
+                            {"role": "user", "content": "\n\n".join(reminders)},
+                            "repeat_guard",
                         )
-                        self._note_context(spec, reminder_text, "repeat_guard")
                 if fatal_error is not None:
                     error = f"Error: {type(fatal_error).__name__}: {fatal_error}"
                     final_content = error
@@ -825,13 +852,12 @@ class AgentRunner:
                             thinking_blocks=response.thinking_blocks,
                         )
                     )
-                    recovery_message = build_length_recovery_message()
-                    messages.append(recovery_message)
                     # Model-visible means logged: this recovery prompt joins
                     # the persisted history, so canonical storage must see it.
-                    self._note_context(
+                    self._enter_noted(
                         spec,
-                        str(recovery_message.get("content", "")),
+                        messages,
+                        build_length_recovery_message(),
                         "length_recovery",
                     )
                     await hook.after_iteration(context)
@@ -961,12 +987,14 @@ class AgentRunner:
             if continuation is not None:
                 stop_hook_active = True
                 had_injections = True
-                self._append_injected_messages(
-                    messages, [{"role": "user", "content": continuation}]
-                )
                 # Model-visible means logged: the continuation joins the
                 # persisted history, so canonical storage must see it.
-                self._note_context(spec, continuation, "stop_hook")
+                self._enter_noted(
+                    spec,
+                    messages,
+                    {"role": "user", "content": continuation},
+                    "stop_hook",
+                )
                 await hook.after_iteration(context)
                 continue
 
@@ -1604,11 +1632,11 @@ class AgentRunner:
             messages
             and messages[-1].get("role") == "assistant"
             and not messages[-1].get("tool_calls")
+            and messages[-1].get("content") == content
         ):
-            if messages[-1].get("content") == content:
-                return
-            messages[-1] = build_assistant_message(content)
             return
+        # Appended, never written over: what the model said stays in its
+        # history (and on record) as it said it.
         messages.append(build_assistant_message(content))
 
     @staticmethod
@@ -1866,9 +1894,11 @@ class AgentRunner:
             total_limit=checkpoint_room,
         )
         if checkpoint:
-            self._append_injected_messages(
+            self._enter_noted(
+                spec,
                 compacted,
-                [{"role": "user", "content": checkpoint}],
+                {"role": "user", "content": checkpoint},
+                "precompact_checkpoint",
             )
         self._refused_compaction = None
         if spec.post_compact_hook is not None:
