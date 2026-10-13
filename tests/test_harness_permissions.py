@@ -89,6 +89,37 @@ def test_ordinary_workspace_path_is_not_denylisted():
     assert _decide(engine, "write_file", file_path="src/model.py") is ALLOW
 
 
+def test_denylist_blocks_a_credential_directory_as_the_argument():
+    # grep/glob/read take a directory: searching ~/.aws reads what is inside.
+    engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd="/home/u/proj")
+    for directory in ("/home/u/.aws", "/home/u/.gnupg", "/home/u/.config/gcloud"):
+        assert _decide(engine, "grep", pattern="key", path=directory) is DENY
+    assert _decide(engine, "glob", pattern="**/*", path="/home/u/.azure") is DENY
+    assert _decide(engine, "read", file_path="/home/u/.aws/sso/cache/t.json") is DENY
+
+
+def test_denylist_follows_symlinks(tmp_path):
+    secret = tmp_path / "home" / ".ssh" / "id_rsa"
+    secret.parent.mkdir(parents=True)
+    secret.write_text("not a real key")
+    workspace = tmp_path / "proj"
+    workspace.mkdir()
+    (workspace / "notes.txt").symlink_to(secret)
+    (workspace / "keys").symlink_to(secret.parent)
+    engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd=str(workspace))
+
+    assert _decide(engine, "read", file_path="notes.txt") is DENY
+    assert _decide(engine, "grep", pattern="x", path="keys") is DENY
+
+
+def test_denylist_ignores_case():
+    # The default macOS and Windows filesystems ignore case: ~/.SSH is ~/.ssh.
+    engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd="/home/u/proj")
+    assert _decide(engine, "read", file_path="/home/u/.SSH/id_rsa") is DENY
+    assert _decide(engine, "read", file_path="/home/u/proj/.ENV") is DENY
+    assert _decide(engine, "read", file_path="/home/u/proj/Server.PEM") is DENY
+
+
 # ---- modes -----------------------------------------------------------------
 
 

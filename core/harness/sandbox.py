@@ -46,6 +46,8 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from core.harness.permissions import sensitive_locations
+
 # Absolute path — never resolved via PATH (PATH-injection defense).
 _MACOS_SANDBOX_EXEC = "/usr/bin/sandbox-exec"
 
@@ -60,18 +62,24 @@ class SandboxPolicy:
 
     ``writable_roots`` are absolute directories the command may modify;
     everything else on disk is read-only. Reads are unrestricted (agents
-    routinely need to read system headers, site-packages, etc.).
+    routinely need to read system headers, site-packages, etc.) except for
+    ``unreadable``: credential stores the command may neither read nor write.
     """
 
     writable_roots: tuple[str, ...] = ()
     allow_network: bool = False
+    unreadable: tuple[str, ...] = ()
 
     @classmethod
     def for_workspace(
         cls, workspace: str | os.PathLike[str], *, allow_network: bool = False
     ) -> SandboxPolicy:
         root = os.path.abspath(str(workspace))
-        return cls(writable_roots=(root,), allow_network=allow_network)
+        return cls(
+            writable_roots=(root,),
+            allow_network=allow_network,
+            unreadable=sensitive_locations(),
+        )
 
     def normalized_roots(self) -> list[str]:
         return [os.path.abspath(r) for r in self.writable_roots if r]
@@ -236,9 +244,14 @@ _SEATBELT_NETWORK_POLICY = r"""
 """
 
 
+def _sbpl_string(path: str) -> str:
+    return '"' + path.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def _seatbelt_profile(policy: SandboxPolicy) -> str:
     """Deny-by-default seatbelt (.sbpl): the curated base + broad reads + writes
-    to ephemeral/device areas and the policy's roots + optional network."""
+    to ephemeral/device areas and the policy's roots + optional network, minus
+    the policy's credential stores."""
     parts = [
         _SEATBELT_BASE_POLICY.rstrip(),
         "",
@@ -257,8 +270,21 @@ def _seatbelt_profile(policy: SandboxPolicy) -> str:
         "; writable: the policy's workspace roots",
     ]
     for root in policy.normalized_roots():
-        escaped = root.replace("\\", "\\\\").replace('"', '\\"')
-        parts.append(f'(allow file-write* (subpath "{escaped}"))')
+        parts.append(f"(allow file-write* (subpath {_sbpl_string(root)}))")
+    if policy.unreadable:
+        # Seatbelt matches the resolved path (and the filesystem's case), so a
+        # store reached through a symlink, or a link to one, is covered by
+        # naming where it really is.
+        stores = dict.fromkeys(
+            variant
+            for path in policy.unreadable
+            for variant in (os.path.abspath(path), os.path.realpath(path))
+        )
+        parts.append("")
+        parts.append("; credential stores: neither readable nor writable")
+        parts.append("(deny file-read* file-write*")
+        parts.extend(f"  (subpath {_sbpl_string(path)})" for path in stores)
+        parts[-1] += ")"
     if policy.allow_network:
         parts.append(_SEATBELT_NETWORK_POLICY.rstrip())
     return "\n".join(parts) + "\n"
@@ -317,6 +343,15 @@ def wrap_argv_command(
         for root in policy.normalized_roots():
             if os.path.exists(root):
                 argv += ["--bind", root, root]
+        # Mounted over after the binds so they win even inside a writable
+        # root. bwrap can only mount over what exists; a store that does not
+        # exist has nothing to hide. A symlinked store (dotfile managers) is
+        # masked where it really is: bwrap would not follow the link there.
+        for path in map(os.path.realpath, policy.unreadable):
+            if os.path.isdir(path):
+                argv += ["--tmpfs", path]
+            elif os.path.exists(path):
+                argv += ["--ro-bind", "/dev/null", path]
         if not policy.allow_network:
             argv += ["--unshare-net"]
         argv += ["--die-with-parent", *inner_argv]

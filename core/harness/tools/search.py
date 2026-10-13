@@ -3,7 +3,9 @@
 grep uses ripgrep when available (fast, respects .gitignore) and falls back to
 a pure-Python regex walk otherwise — same output either way. glob uses
 pathlib, so no external dependency. Both are read-only and scoped to the
-workspace.
+workspace. Unless protection is off (Full access), neither returns anything
+from a protected credential file found inside the searched directory: the
+permission engine only sees the directory the model named.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from typing import Any
 
 from core.agent_runtime.processes import run_captured
 from core.agent_runtime.tools.base import Tool, tool_parameters
+from core.harness.permissions import is_sensitive_path
 
 _MAX_MATCHES = 200
 _SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build"}
@@ -45,10 +48,11 @@ _SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "b
 class GrepTool(Tool):
     """Search file contents by regex, returning ``path:line: text`` matches."""
 
-    def __init__(self, workspace: str):
+    def __init__(self, workspace: str, *, protect_sensitive_paths: bool = True):
         # Resolved like the search roots below, so results are relative to it
         # even when the workspace is reached through a link (/tmp on macOS).
         self._workspace = str(Path(workspace).resolve())
+        self._protect = protect_sensitive_paths
 
     @property
     def name(self) -> str:
@@ -98,6 +102,9 @@ class GrepTool(Tool):
         self, pattern: str, root: Path, include: str | None
     ) -> list[str] | None:
         argv = ["rg", "--line-number", "--no-heading", "--color", "never"]
+        # Every match starts with its file's path, ended by NUL, so the path
+        # can be checked against the protected-path guard below.
+        argv += ["--with-filename", "--null"]
         # Both come from the model: attached with "=" they stay values, so a
         # pattern like "--pre=<program>" can't make rg run a program.
         if include:
@@ -115,10 +122,14 @@ class GrepTool(Tool):
             if b"regex parse error" in stderr.lower():
                 return None
             return await asyncio.to_thread(self._python_grep, pattern, root, include)
-        text = stdout.decode("utf-8", errors="replace")
-        lines = [ln for ln in text.splitlines() if ln.strip()]
-        # make paths workspace-relative for readability
-        return [self._relativize(ln) for ln in lines]
+        matches: list[str] = []
+        for line in stdout.decode("utf-8", errors="replace").splitlines():
+            path, sep, rest = line.partition("\0")
+            if not sep or (self._protect and is_sensitive_path(path)):
+                continue
+            # make paths workspace-relative for readability
+            matches.append(f"{self._relativize(path)}:{rest}")
+        return matches
 
     def _python_grep(
         self, pattern: str, root: Path, include: str | None
@@ -130,6 +141,8 @@ class GrepTool(Tool):
         results: list[str] = []
         targets = [root] if root.is_file() else self._walk(root, include)
         for file in targets:
+            if self._protect and is_sensitive_path(str(file)):
+                continue
             try:
                 text = file.read_text(encoding="utf-8", errors="ignore")
             except OSError:
@@ -150,16 +163,13 @@ class GrepTool(Tool):
                     continue
                 yield Path(dirpath) / name
 
-    def _relativize(self, line: str) -> str:
-        # rg output is "abspath:line:text" — shorten the path to the workspace.
-        parts = line.split(":", 1)
-        if parts and os.path.isabs(parts[0]):
+    def _relativize(self, path: str) -> str:
+        if os.path.isabs(path):
             try:
-                rel = os.path.relpath(parts[0], self._workspace)
-                return rel + ":" + parts[1] if len(parts) > 1 else rel
+                return os.path.relpath(path, self._workspace)
             except ValueError:
-                return line
-        return line
+                return path
+        return path
 
 
 @tool_parameters(
@@ -181,10 +191,11 @@ class GrepTool(Tool):
 class GlobTool(Tool):
     """List files matching a glob pattern, workspace-relative."""
 
-    def __init__(self, workspace: str):
+    def __init__(self, workspace: str, *, protect_sensitive_paths: bool = True):
         # Resolved like the search roots below, so results are relative to it
         # even when the workspace is reached through a link (/tmp on macOS).
         self._workspace = str(Path(workspace).resolve())
+        self._protect = protect_sensitive_paths
 
     @property
     def name(self) -> str:
@@ -218,6 +229,8 @@ class GlobTool(Tool):
             # directory named e.g. "build" or "venv" skipped every file.
             rel = os.path.relpath(p, base)
             if any(part in _SKIP_DIRS for part in Path(rel).parts):
+                continue
+            if self._protect and is_sensitive_path(str(p)):
                 continue
             if p.is_file():
                 matches.append(os.path.relpath(p, self._workspace))

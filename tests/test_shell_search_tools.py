@@ -17,6 +17,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from core.agent_runtime.tools.base import ToolResult
+from core.domain.execution_security import (
+    ExecutionAccessPreset,
+    ExecutionSecurityProfile,
+)
+from core.harness.tools import default_coding_tools
 from core.harness.tools.search import GlobTool, GrepTool
 from core.harness.tools.shell import BashTool, _declared_packages, _preflight
 
@@ -316,7 +321,7 @@ async def test_grep_does_not_hold_up_the_event_loop(tmp_path, monkeypatch):
     bin_dir.mkdir()
     stand_in = bin_dir / "rg"
     stand_in.write_text(
-        f"#!{sys.executable}\nimport time\ntime.sleep(1)\nprint('a.py:1:hit')\n"
+        f"#!{sys.executable}\nimport time\ntime.sleep(1)\nprint('a.py\\x001:hit')\n"
     )
     stand_in.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
@@ -379,6 +384,85 @@ async def test_cancelling_grep_ends_rg(tmp_path, monkeypatch):
         await task
 
     assert await _exited(pid)
+
+
+def _workspace_with_secrets(tmp_path: Path) -> Path:
+    workspace = tmp_path / "ws"
+    (workspace / "certs").mkdir(parents=True)
+    (workspace / "app.py").write_text("TOKEN = os.environ['TOKEN']\n")
+    (workspace / ".env").write_text("TOKEN=fake-secret\n")
+    (workspace / "certs" / "server.key").write_text("TOKEN fake-key\n")
+    return workspace
+
+
+@pytest.mark.asyncio
+async def test_grep_skips_protected_files_inside_the_searched_directory(tmp_path):
+    workspace = _workspace_with_secrets(tmp_path)
+
+    out = await GrepTool(str(workspace)).execute(pattern="TOKEN")
+
+    assert "app.py" in out
+    assert "fake-secret" not in out and "fake-key" not in out
+
+
+@pytest.mark.asyncio
+async def test_grep_searches_protected_files_when_protection_is_off(tmp_path):
+    # Full access turns the protected-path guard off as a whole.
+    workspace = _workspace_with_secrets(tmp_path)
+
+    out = await GrepTool(str(workspace), protect_sensitive_paths=False).execute(
+        pattern="TOKEN"
+    )
+
+    # (rg skips hidden files such as .env on its own, so check the key file)
+    assert "fake-key" in out
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("preset", "protected"),
+    [(ExecutionAccessPreset.ASK, True), (ExecutionAccessPreset.FULL_ACCESS, False)],
+)
+async def test_coding_tools_follow_the_profiles_protected_path_guard(
+    tmp_path, preset, protected
+):
+    workspace = _workspace_with_secrets(tmp_path)
+    registry = default_coding_tools(
+        str(workspace),
+        execution_security_profile=ExecutionSecurityProfile.for_preset(preset),
+    )
+
+    out = await registry.execute("grep", {"pattern": "TOKEN"})
+
+    assert ("fake-key" not in out) is protected
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="runs a shell script")
+@pytest.mark.asyncio
+async def test_grep_drops_protected_files_from_rg_output(tmp_path, monkeypatch):
+    # rg reads every file under the directory; what it found in a protected
+    # one must not reach the model. A stand-in rg prints what a real one would.
+    workspace = _workspace_with_secrets(tmp_path)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stand_in = bin_dir / "rg"
+    lines = [
+        f"{workspace / 'app.py'}\0" + "1:TOKEN = os.environ['TOKEN']",
+        f"{workspace / '.env'}\0" + "1:TOKEN=fake-secret",
+        f"{workspace / 'certs' / 'server.key'}\0" + "1:TOKEN fake-key",
+    ]
+    stand_in.write_text(
+        f"#!{sys.executable}\n"
+        "import sys\n"
+        "assert '--null' in sys.argv\n"
+        f"sys.stdout.write({chr(10).join(lines) + chr(10)!r})\n"
+    )
+    stand_in.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+
+    out = await GrepTool(str(workspace)).execute(pattern="TOKEN")
+
+    assert out == "app.py:1:TOKEN = os.environ['TOKEN']"
 
 
 # --- glob -------------------------------------------------------------------
@@ -453,6 +537,21 @@ async def test_search_results_stay_workspace_relative_under_a_symlinked_root(
     assert await GlobTool(str(link)).execute(pattern="**/*.py") == "src/m.py"
     found = await GrepTool(str(link)).execute(pattern="needle")
     assert found.startswith("src/m.py:1:"), found
+
+
+@pytest.mark.asyncio
+async def test_glob_does_not_list_protected_files(tmp_path):
+    workspace = _workspace_with_secrets(tmp_path)
+    keys = tmp_path / "home" / ".ssh"
+    keys.mkdir(parents=True)
+    (keys / "id_ed25519").write_text("not a real key")
+
+    listed = await GlobTool(str(workspace)).execute(pattern="**/*")
+    escaped = await GlobTool(str(workspace)).execute(pattern="../home/.ssh/*")
+
+    assert "app.py" in listed
+    assert ".env" not in listed and "server.key" not in listed
+    assert escaped == "No files matched."
 
 
 # (the default_coding_tools full-set assertion lives in

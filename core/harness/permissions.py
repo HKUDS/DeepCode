@@ -63,13 +63,18 @@ class PermissionMode(str, Enum):
 # Patterns are matched against normalized absolute
 # paths with fnmatch (``*`` spans path separators here, which is what we want:
 # ``*/.ssh/*`` should catch any depth). Kept deliberately small and auditable.
+# A credential directory is listed by itself too, since a search given the
+# directory reads everything in it.
 SENSITIVE_PATH_PATTERNS: tuple[str, ...] = (
     "*/.ssh",
     "*/.ssh/*",
-    "*/.aws/credentials",
-    "*/.aws/config",
+    "*/.aws",
+    "*/.aws/*",
+    "*/.config/gcloud",
     "*/.config/gcloud/*",
+    "*/.azure",
     "*/.azure/*",
+    "*/.gnupg",
     "*/.gnupg/*",
     "*/.docker/config.json",
     "*/.kube/config",
@@ -86,6 +91,24 @@ SENSITIVE_PATH_PATTERNS: tuple[str, ...] = (
     "*.key",
     "*id_rsa*",
     "*id_ed25519*",
+)
+
+# The stores above that sit at fixed places in the home directory. The OS
+# sandbox cannot match patterns, so bash and code mode are kept out of these
+# paths instead. Name patterns (.env, *.pem, *.key …) stay with the tools:
+# builds read files like those (certifi's cacert.pem, a project's .env). So
+# does ~/.npmrc, which also says which registry npm installs from.
+_SENSITIVE_HOME_PATHS: tuple[str, ...] = (
+    ".ssh",
+    ".aws",
+    ".config/gcloud",
+    ".azure",
+    ".gnupg",
+    ".docker/config.json",
+    ".kube/config",
+    ".netrc",
+    ".pypirc",
+    ".git-credentials",
 )
 
 # Argument keys inspected to find the "path" a tool touches.
@@ -146,6 +169,42 @@ def _normalize_path(raw: str, cwd: str | None) -> str:
         return os.path.normpath(str(resolved))
     except (OSError, ValueError):
         return raw
+
+
+def is_sensitive_path(raw: str, cwd: str | None = None) -> bool:
+    """Whether ``raw`` names a protected credential location.
+
+    The path is checked as written and with symlinks resolved, so a link in
+    the workspace cannot reach ``~/.ssh/id_rsa``, and without regard to case,
+    since the default macOS and Windows filesystems ignore it.
+    """
+    normalized = _normalize_path(raw, cwd)
+    try:
+        candidates = {normalized, os.path.realpath(normalized)}
+    except (OSError, ValueError):
+        candidates = {normalized}
+    for candidate in candidates:
+        probe = candidate.replace(os.sep, "/").casefold()
+        name = probe.rsplit("/", 1)[-1]
+        for pattern in SENSITIVE_PATH_PATTERNS:
+            if fnmatch.fnmatchcase(probe, pattern) or fnmatch.fnmatchcase(
+                name, pattern
+            ):
+                return True
+    return False
+
+
+def sensitive_locations() -> tuple[str, ...]:
+    """The credential stores on this machine a sandboxed command may not read."""
+    from core.config import deepcode_home  # lazy: core.config is heavy
+
+    home = Path.home()
+    deepcode = deepcode_home()
+    return (
+        *(str(home / name) for name in _SENSITIVE_HOME_PATHS),
+        str(deepcode / "credentials.json"),
+        str(deepcode / "deepcode_config.json"),
+    )
 
 
 _SHELL_TOOL_NAMES = ("bash", "exec", "execute_bash", "execute_commands")
@@ -232,13 +291,8 @@ class PermissionEngine:
     def hits_sensitive_path(self, arguments: Mapping[str, object]) -> str | None:
         """Return the offending raw path if any argument targets a secret."""
         for raw in self._candidate_paths(arguments):
-            normalized = _normalize_path(raw, self.cwd)
-            probe = normalized.replace(os.sep, "/")
-            for pattern in SENSITIVE_PATH_PATTERNS:
-                if fnmatch.fnmatch(probe, pattern) or fnmatch.fnmatch(
-                    os.path.basename(probe), pattern
-                ):
-                    return raw
+            if is_sensitive_path(raw, self.cwd):
+                return raw
         return None
 
     @staticmethod

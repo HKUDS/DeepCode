@@ -154,6 +154,94 @@ def test_seatbelt_blocks_write_outside_workspace(tmp_path):
     assert not leaked
 
 
+def _run(command: str, policy: SandboxPolicy, cwd: Path):
+    wrapped = wrap_shell_command(command, policy)
+    try:
+        return subprocess.run(
+            wrapped.argv, capture_output=True, text=True, timeout=30, cwd=cwd
+        )
+    finally:
+        wrapped.cleanup()
+
+
+def test_policy_for_workspace_keeps_credential_stores_unreadable(tmp_path):
+    from core.config import deepcode_home
+
+    unreadable = SandboxPolicy.for_workspace(tmp_path).unreadable
+
+    assert str(Path.home() / ".ssh") in unreadable
+    assert str(Path.home() / ".aws") in unreadable
+    assert str(deepcode_home() / "credentials.json") in unreadable
+
+
+@pytest.mark.skipif(not _seatbelt, reason="seatbelt sandbox not available")
+def test_seatbelt_denies_credential_locations(tmp_path):
+    # A stand-in home: the policy names its own locations, so no real
+    # credential is ever read by this test.
+    home = tmp_path / "home"
+    (home / ".ssh").mkdir(parents=True)
+    (home / ".ssh" / "id_rsa").write_text("FAKE-KEY")
+    (home / ".netrc").write_text("FAKE-NETRC")
+    (home / "notes.txt").write_text("fine")
+    (home / "link").symlink_to(home / ".ssh" / "id_rsa")
+    policy = SandboxPolicy(
+        writable_roots=(str(home),),
+        unreadable=(str(home / ".ssh"), str(home / ".netrc")),
+    )
+
+    for command in (
+        "cat .ssh/id_rsa",
+        "cat .SSH/id_rsa",
+        "cat link",
+        "cat .netrc",
+        "ls .ssh",
+        "echo planted > .ssh/authorized_keys",
+    ):
+        proc = _run(command, policy, cwd=home)
+        assert proc.returncode != 0, command
+        assert "FAKE" not in proc.stdout, command
+    assert not (home / ".ssh" / "authorized_keys").exists()
+    assert _run("cat notes.txt", policy, cwd=home).stdout == "fine"
+
+
+def test_bwrap_masks_credential_locations_that_exist(monkeypatch, tmp_path):
+    monkeypatch.setattr("core.harness.sandbox.sandbox_backend", lambda: "bwrap")
+    store = tmp_path / ".aws"
+    store.mkdir()
+    netrc = tmp_path / ".netrc"
+    netrc.write_text("x")
+    absent = tmp_path / ".kube" / "config"
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    policy = SandboxPolicy(
+        writable_roots=(str(workspace),),
+        unreadable=(str(store), str(netrc), str(absent)),
+    )
+
+    argv = wrap_shell_command("true", policy).argv
+    joined = "\0".join(argv)
+
+    # After the binds, so a mask also covers a store inside a writable root.
+    bind = joined.index("\0".join(["--bind", str(workspace), str(workspace)]))
+    assert joined.index("\0".join(["--tmpfs", str(store)])) > bind
+    assert joined.index("\0".join(["--ro-bind", "/dev/null", str(netrc)])) > bind
+    assert str(absent) not in argv
+
+
+def test_bwrap_masks_a_symlinked_store_where_it_really_is(monkeypatch, tmp_path):
+    monkeypatch.setattr("core.harness.sandbox.sandbox_backend", lambda: "bwrap")
+    real = tmp_path / "dotfiles" / "aws"
+    real.mkdir(parents=True)
+    linked = tmp_path / ".aws"
+    linked.symlink_to(real)
+    policy = SandboxPolicy(unreadable=(str(linked),))
+
+    argv = wrap_shell_command("true", policy).argv
+
+    assert "\0".join(["--tmpfs", str(real)]) in "\0".join(argv)
+    assert str(linked) not in argv
+
+
 @pytest.mark.skipif(not _seatbelt, reason="seatbelt sandbox not available")
 def test_seatbelt_allows_reads_everywhere(tmp_path):
     # Reads outside the workspace must still succeed (agents read sys headers).

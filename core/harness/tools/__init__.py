@@ -13,7 +13,11 @@ These are pure mechanism: file I/O + the permission/sandbox seams from P1.
 :class:`~core.events.session.AgentSession` can consume.
 """
 
-from core.domain.execution_security import ExecutionSecurityProfile, FilesystemScope
+from core.domain.execution_security import (
+    ExecutionAccessPreset,
+    ExecutionSecurityProfile,
+    FilesystemScope,
+)
 from core.harness.tools.files import EditTool, ReadTool, WriteTool
 from core.harness.tools.patch import ApplyPatchTool, PatchError, parse_patch
 from core.harness.tools.replace import (
@@ -100,6 +104,12 @@ def default_coding_tools(
         if execution_security_profile is not None
         else None
     )
+    # The same switch as the permission engine's protected-path guard.
+    protect_sensitive_paths = (
+        execution_security_profile is None
+        or execution_security_profile.access_preset
+        is not ExecutionAccessPreset.FULL_ACCESS
+    )
     tools = [
         ReadTool(workspace),
         WriteTool(
@@ -115,8 +125,8 @@ def default_coding_tools(
             allow_outside_workspace=allow_outside_workspace,
         ),
         BashTool(workspace, sandbox_enabled=command_sandbox),
-        GrepTool(workspace),
-        GlobTool(workspace),
+        GrepTool(workspace, protect_sensitive_paths=protect_sensitive_paths),
+        GlobTool(workspace, protect_sensitive_paths=protect_sensitive_paths),
         MemoryTool(workspace),
         UpdatePlanTool(),  # the agent's self-driven TODO plan
         WebFetchTool(),
