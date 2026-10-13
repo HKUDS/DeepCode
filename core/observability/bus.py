@@ -4,8 +4,8 @@ The bus is intentionally module-level and idempotent. The first call to
 :func:`setup_logging` wires up:
 
 * a console sink (human-readable, level >= INFO by default);
-* a global JSONL sink at ``logs/server-{date}.jsonl`` (rotation by day,
-  retention configurable, all log records);
+* a global JSONL sink at ``logs/server-{date}.jsonl`` in the DeepCode home
+  (rotation by day, retention configurable, all log records);
 * a per-task JSONL sink at ``deepcode_lab/tasks/<task_id>/logs/system.jsonl``
   routed dynamically based on ``record["extra"]["task_id"]``;
 * a global ``logger.patch`` that injects the active ``task_id`` and
@@ -99,8 +99,6 @@ _LOCK = threading.Lock()
 _INITIALISED = False
 _SINK_IDS: list[int] = []
 _TASK_DIRS: dict[str, Path] = {}
-_DEFAULT_TASK_LOG_DIR_FALLBACK = Path("logs") / "tasks"
-_GLOBAL_LOG_DIR_FALLBACK = Path("logs")
 _LLM_PREVIEW_CHARS = 2000
 _MCP_PREVIEW_CHARS = 2000
 
@@ -136,8 +134,7 @@ def setup_logging(
     JSONL + per-task JSONL).
 
     ``workspace_root`` controls where the global log file lives (``logs/``
-    is created relative to it). When omitted the current working
-    directory is used.
+    is created relative to it). When omitted it is the DeepCode home.
 
     ``console_sink`` lets a headless host redirect the console channel without
     replacing the shared stdlib/loguru bridge or duplicating its routing. A
@@ -301,7 +298,7 @@ def log_llm_call(
 ) -> None:
     """Append an :class:`LLMLogRecord` to the active task's ``llm.jsonl``.
 
-    Falls back to the global ``logs/llm.jsonl`` when no task is bound
+    Falls back to ``logs/llm.jsonl`` in the DeepCode home when no task is bound
     (e.g. process-startup probes).
 
     The extra keyword arguments are the transparency-log fields. They are
@@ -514,8 +511,7 @@ def _resolve_channel_path(task_id: str | None, filename: str) -> Path:
     task_dir = _resolve_task_dir(task_id)
     if task_dir is not None:
         return task_dir / "logs" / filename
-    fallback = _GLOBAL_LOG_DIR_FALLBACK
-    return fallback / filename
+    return _home_log_dir() / filename
 
 
 # ---------------------------------------------------------------------------
@@ -679,8 +675,19 @@ def _write_jsonl(path: Path, line: str) -> bool:
 
 def _resolve_global_log_dir(workspace_root: Path | None) -> Path:
     if workspace_root is None:
-        return _GLOBAL_LOG_DIR_FALLBACK
-    return Path(workspace_root) / _GLOBAL_LOG_DIR_FALLBACK
+        return _home_log_dir()
+    return Path(workspace_root) / "logs"
+
+
+def _home_log_dir() -> Path:
+    """Logs with no task or workspace of their own.
+
+    Never the current directory: a client runs in the user's project and the
+    service in its install directory, and neither should collect log files.
+    """
+    from core.config import deepcode_home  # core.config imports this module
+
+    return deepcode_home() / "logs"
 
 
 __all__ = [

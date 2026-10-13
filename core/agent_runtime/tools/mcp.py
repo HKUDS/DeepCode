@@ -341,23 +341,26 @@ class MCPPromptWrapper(Tool):
 def _open_mcp_stderr_log(server_name: str, server_stack: AsyncExitStack):
     """Open ``mcp_server_<name>.log`` in the active task's logs dir.
 
-    Falls back to ``logs/mcp_servers/<name>.log`` when there is no active
-    task (e.g. process-startup smoke test). The file handle is registered
-    with ``server_stack`` so it is closed when the MCP connection tears
-    down. Returns ``None`` on any error so the caller can use the SDK's
+    Falls back to ``logs/mcp_servers/`` in the DeepCode home when there is
+    no active task (e.g. process-startup smoke test). The file handle is
+    registered with ``server_stack`` so it is closed when the MCP connection
+    tears down. Returns ``None`` on any error so the caller can use the SDK's
     default stderr instead.
     """
     try:
         # Resolve task dir lazily to avoid a hard dependency cycle: bus.py
         # imports records.py only, not this module.
-        from core.observability.bus import _resolve_task_dir  # type: ignore
+        from core.observability.bus import (  # type: ignore
+            _home_log_dir,
+            _resolve_task_dir,
+        )
 
         task_id = current_task_id()
         target_dir: Path
         if task_id and (task_dir := _resolve_task_dir(task_id)) is not None:
             target_dir = task_dir / "logs"
         else:
-            target_dir = Path("logs") / "mcp_servers"
+            target_dir = _home_log_dir() / "mcp_servers"
         target_dir.mkdir(parents=True, exist_ok=True)
 
         path = target_dir / f"mcp_server_{server_name}.log"
