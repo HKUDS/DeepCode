@@ -57,10 +57,11 @@ New imports and creator output use `.agents/skills` only. Compatibility roots
 are never migrated, overwritten, or deleted automatically, so existing IDs and
 Sessions remain valid.
 
-Only the first enabled candidate is active for implicit name lookup. Other
-candidates remain visible as `shadowed`. Structured selection by `skillId` is
-unambiguous. A plain `$name` that is ambiguous among selectable entries fails
-before model execution instead of guessing.
+Only the first enabled candidate is active for its name. Other candidates
+remain visible as `shadowed`. A name, whether `$name`, `/skill name`, or the
+model's `skill` tool, selects the active candidate, so a project or user Skill
+overrides a bundled one with the same name. Structured selection by `skillId`
+is unambiguous and still reaches a shadowed candidate.
 
 ## Provider boundary
 
@@ -227,8 +228,8 @@ Anthropic, and compatible providers one consistent role model without
 elevating user-authored Skill bodies.
 
 Plain `$name` mentions are a compatibility path. They are parsed in the core
-runtime, never in a frontend, and become explicit selections only when the name
-is unambiguous. The visible user message is not rewritten.
+runtime, never in a frontend, and become explicit selections of the Skill that
+is active for that name. The visible user message is not rewritten.
 
 The model may still use the progressive-disclosure `skill` tool for implicit
 selection. A per-Turn invocation ledger ensures the same Skill revision is
@@ -369,7 +370,7 @@ The feature is complete only when:
 - Desktop Composer and management views share one deduplicated catalog state;
 - a fake contributed Provider works through the public source seam without
   local-path access or frontend special cases;
-- structured and unambiguous `$name` invocation resolve to the same snapshot;
+- structured and `$name` invocation resolve to the same snapshot;
 - explicit instructions are present before the first model-provider call;
 - catalog listing retains no instruction bodies and every content read stays on
   the listing Provider;

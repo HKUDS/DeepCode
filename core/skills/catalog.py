@@ -74,7 +74,6 @@ class SkillCatalog:
         self._by_id: dict[str, list[SkillRecord]] = {}
         self._by_package: dict[tuple[SkillAuthority, SkillPackageId], SkillRecord] = {}
         active: dict[str, SkillRecord] = {}
-        names: dict[str, list[SkillRecord]] = {}
         all_names: set[str] = set()
         for record in records:
             self._by_id.setdefault(record.id, []).append(record)
@@ -85,13 +84,8 @@ class SkillCatalog:
             all_names.add(record.name.casefold())
             if record.status is SkillStatus.ACTIVE:
                 active[record.name.casefold()] = record
-            if record.selectable:
-                names.setdefault(record.name.casefold(), []).append(record)
         self._active_by_name = active
         self._all_names = frozenset(all_names)
-        self._selectable_by_name = {
-            name: tuple(candidates) for name, candidates in names.items()
-        }
         digest = hashlib.sha256()
         for record in records:
             digest.update(record.id.encode())
@@ -188,23 +182,20 @@ class SkillCatalog:
         return record
 
     def select_name(self, name: str) -> SkillRecord:
-        candidates = self._selectable_by_name.get(name.casefold(), ())
-        if not candidates:
-            disabled = [
-                record
-                for record in self._records
-                if record.name.casefold() == name.casefold()
-                and record.status is SkillStatus.DISABLED
-            ]
-            if disabled:
-                raise SkillResolutionError(f"Skill is disabled: {name}")
-            raise SkillResolutionError(f"Skill is not available: {name}")
-        if len(candidates) > 1:
-            sources = ", ".join(record.source for record in candidates)
-            raise SkillResolutionError(
-                f"Skill name is ambiguous: {name} ({sources}); select it by ID"
-            )
-        return candidates[0]
+        # A name selects what the listing shows as active for it, the first
+        # candidate by precedence; a shadowed copy stays selectable by ID.
+        record = self.get_active(name)
+        if record is not None:
+            return record
+        disabled = [
+            record
+            for record in self._records
+            if record.name.casefold() == name.casefold()
+            and record.status is SkillStatus.DISABLED
+        ]
+        if disabled:
+            raise SkillResolutionError(f"Skill is disabled: {name}")
+        raise SkillResolutionError(f"Skill is not available: {name}")
 
     def text_mentions(self, text: str) -> tuple[SkillRecord, ...]:
         selected: list[SkillRecord] = []

@@ -461,8 +461,39 @@ def test_catalog_retains_duplicate_and_invalid_entries(tmp_path: Path) -> None:
         record for record in catalog.records if record.key.relative_path == "duplicate"
     )
     assert alias_record.id != real_record.id
-    with pytest.raises(SkillResolutionError, match="ambiguous"):
-        catalog.select_name("duplicate")
+    assert catalog.select_name("duplicate") == catalog.get_active("duplicate")
+
+
+def test_a_name_selects_the_skill_listed_as_active(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    home = tmp_path / "home"
+    workspace.mkdir()
+    _write_skill(
+        home / ".agents" / "skills",
+        "skill-creator",
+        body="Use my own creator.",
+    )
+    runtime = SkillRuntime(workspace, home=home)
+    catalog = runtime.catalog()
+    mine = catalog.get_active("skill-creator")
+    bundled = next(
+        record
+        for record in catalog.records
+        if record.name == "skill-creator" and record.scope is SkillScope.SYSTEM
+    )
+    assert mine is not None and mine.scope is SkillScope.USER
+    assert bundled.status is SkillStatus.SHADOWED
+
+    context, token = runtime.begin_turn("$skill-creator draft a release checklist")
+    try:
+        assert [record.id for record in context.snapshot.records] == [mine.id]
+        assert context.snapshot.records[0].require_instructions() == (
+            "Use my own creator."
+        )
+    finally:
+        runtime.end_turn(token)
+    assert catalog.select_name("skill-creator").id == mine.id
+    assert catalog.select_id(bundled.id).id == bundled.id
 
 
 def test_agents_roots_are_layered_inside_the_workspace(tmp_path: Path) -> None:
