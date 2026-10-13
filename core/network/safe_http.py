@@ -54,6 +54,7 @@ DEFAULT_MAX_URL_CHARACTERS = 8_192
 _NAT64_WELL_KNOWN = ipaddress.IPv6Network("64:ff9b::/96")  # RFC 6052
 _NAT64_LOCAL_USE = ipaddress.IPv6Network("64:ff9b:1::/48")  # RFC 8215
 _IPV4_COMPATIBLE = ipaddress.IPv6Network("::/96")  # RFC 4291, deprecated form
+_IPV4_TRANSLATED = ipaddress.IPv6Network("::ffff:0:0:0/96")  # RFC 2765 SIIT
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,14 +140,19 @@ def is_public_ip(value: str | ipaddress.IPv4Address | ipaddress.IPv6Address) -> 
         elif address in _NAT64_LOCAL_USE:
             # RFC 8215 local-use prefix: never a public destination.
             return False
-        elif address in _NAT64_WELL_KNOWN or address in _IPV4_COMPATIBLE:
-            # NAT64 (RFC 6052 /96 layout) and the deprecated IPv4-compatible
-            # form both tunnel an IPv4 target, so ``64:ff9b::127.0.0.1`` and
-            # ``::127.0.0.1`` would otherwise pass as global. Classify the
-            # embedded address instead. The address used for connecting is
-            # unchanged.
+        elif (
+            address in _NAT64_WELL_KNOWN
+            or address in _IPV4_COMPATIBLE
+            or address in _IPV4_TRANSLATED
+        ):
+            # NAT64 (RFC 6052 /96 layout), the deprecated IPv4-compatible
+            # form and SIIT all tunnel an IPv4 target, so ``64:ff9b::127.0.0.1``,
+            # ``::127.0.0.1`` and ``::ffff:0:127.0.0.1`` would otherwise pass as
+            # global. Classify the embedded address instead. The address used
+            # for connecting is unchanged.
             address = ipaddress.IPv4Address(int(address) & 0xFFFFFFFF)
-    return address.is_global
+    # ``is_global`` alone admits reserved IPv6 space outside 2000::/3.
+    return address.is_global and not address.is_reserved
 
 
 def validate_public_url(

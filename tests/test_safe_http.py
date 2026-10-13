@@ -83,6 +83,12 @@ def test_domain_policy_is_boundary_aware_and_deny_wins() -> None:
         ("64:ff9b:1::8.8.8.8", False),  # RFC 8215 local-use prefix
         ("::127.0.0.1", False),  # IPv4-compatible form
         ("::169.254.169.254", False),
+        ("::ffff:0:127.0.0.1", False),  # SIIT IPv4-translated (RFC 2765)
+        ("::ffff:0:169.254.169.254", False),
+        ("::ffff:0:8.8.8.8", True),  # classified by its embedded address
+        ("4000::1", False),  # reserved: outside the 2000::/3 global unicast
+        ("fe00::1", False),
+        ("::1:0:0:1", False),
     ],
 )
 def test_public_ip_classification(address: str, expected: bool) -> None:
@@ -107,10 +113,14 @@ async def test_public_resolver_rejects_if_any_resolution_is_private(
 
 
 @pytest.mark.asyncio
-async def test_public_resolver_rejects_nat64_tunnelled_private_address(
-    monkeypatch,
+@pytest.mark.parametrize(
+    "answer",
+    ["64:ff9b::169.254.169.254", "::ffff:0:169.254.169.254"],  # NAT64, SIIT
+)
+async def test_public_resolver_rejects_tunnelled_private_address(
+    monkeypatch, answer: str
 ) -> None:
-    """DNS64/NAT64 answers must be classified by their embedded IPv4 target."""
+    """IPv6 answers that embed an IPv4 target must be classified by it."""
     loop = asyncio.get_running_loop()
 
     async def fake_getaddrinfo(*args, **kwargs):  # type: ignore[no-untyped-def]
@@ -120,7 +130,7 @@ async def test_public_resolver_rejects_nat64_tunnelled_private_address(
                 socket.SOCK_STREAM,
                 6,
                 "",
-                ("64:ff9b::169.254.169.254", 443, 0, 0),
+                (answer, 443, 0, 0),
             ),
         ]
 
