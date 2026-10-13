@@ -193,6 +193,26 @@ export function useWorkspaceController(runtime: ClientRuntime): WorkspaceControl
     [runtime],
   );
 
+  /** thread/resume; a Session whose file can't be read is shown as such. */
+  const resumeThread = useCallback(
+    async (threadId: string): Promise<Thread | null> => {
+      try {
+        const { thread } = await runtime.request("thread/resume", {
+          sessionId: threadId,
+        });
+        dispatch({ type: "thread-unreadable", threadId: null });
+        return thread;
+      } catch (error) {
+        if (normalizeError(error).code !== "THREAD_UNREADABLE") throw error;
+        eventStreamRef.current?.stop();
+        dispatch({ type: "trace-reset" });
+        dispatch({ type: "thread-unreadable", threadId });
+        return null;
+      }
+    },
+    [runtime],
+  );
+
   const loadThreads = useCallback(
     async (
       projectId: string,
@@ -221,17 +241,16 @@ export function useWorkspaceController(runtime: ClientRuntime): WorkspaceControl
       if (!selected) eventStreamRef.current?.stop();
       if (selected) {
         localStorage.setItem(THREAD_KEY, selected);
-        const resumed = await runtime.request("thread/resume", {
-          sessionId: selected,
-        });
-        dispatch({ type: "thread-upsert", thread: resumed.thread });
+        const resumed = await resumeThread(selected);
+        if (!resumed) return selectedThread;
+        dispatch({ type: "thread-upsert", thread: resumed });
         await replayThread(selected);
         await loadGoal(selected);
-        return resumed.thread;
+        return resumed;
       }
       return null;
     },
-    [loadGoal, replayThread, runtime],
+    [loadGoal, replayThread, resumeThread, runtime],
   );
 
   const loadProjects = useCallback(async () => {
@@ -470,18 +489,18 @@ export function useWorkspaceController(runtime: ClientRuntime): WorkspaceControl
         dispatch({ type: "select-project", projectId: target.projectId });
         localStorage.setItem(PROJECT_KEY, target.projectId);
       }
-      const resumed = await runtime.request("thread/resume", {
-        sessionId: target.id,
-      });
-      dispatch({ type: "thread-upsert", thread: resumed.thread });
+      const resumed = await resumeThread(target.id);
+      if (resumed) dispatch({ type: "thread-upsert", thread: resumed });
       dispatch({ type: "select-thread", threadId: target.id });
       selectedThreadRef.current = target.id;
       localStorage.setItem(THREAD_KEY, target.id);
-      await replayThread(target.id);
-      await loadGoal(target.id);
+      if (resumed) {
+        await replayThread(target.id);
+        await loadGoal(target.id);
+      }
       await loadSettings(target.projectId);
     },
-    [loadGoal, loadSettings, replayThread, runtime, state.selectedProjectId],
+    [loadGoal, loadSettings, replayThread, resumeThread, state.selectedProjectId],
   );
 
   const selectThread = useCallback(

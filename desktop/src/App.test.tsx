@@ -268,6 +268,8 @@ class TestRuntime implements ClientRuntime {
   }
 
   readonly presetState = new Map<string, string>();
+  /** Threads whose Session file the service reports it can't read. */
+  readonly unreadable = new Set<string>();
   /** What turn/read returns per Turn: the items as the service holds them. */
   readonly turnItems: Record<string, Item[]> = {};
 
@@ -706,6 +708,12 @@ class TestRuntime implements ClientRuntime {
       }
       case "thread/resume": {
         const sessionId = (params as MethodParams["thread/resume"]).sessionId;
+        if (this.unreadable.has(sessionId))
+          throw {
+            code: "THREAD_UNREADABLE",
+            message: "This Session's file is on disk but can't be read right now.",
+            retryable: true,
+          };
         const resumed = this.threadState.find(
           (candidate) => candidate.id === sessionId,
         );
@@ -3587,5 +3595,50 @@ describe("desktop command center", () => {
       ).toBeTruthy();
     });
     expect(view.container.querySelector("#turn-prompt")).toBeNull();
+  });
+});
+
+describe("a Session whose file can't be read", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    __resetComposerBehaviorForTests();
+    __resetEscapeLayersForTests();
+    __setLocaleForTests("en");
+  });
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("stays open, says why, and loads once the file can be read", async () => {
+    // Reopening it on launch used to abort before settings loaded, so the
+    // composer fell back to another connection, and the empty thread read
+    // "Start with a task."
+    const runtime = new TestRuntime([project], [thread], recoveryEvents);
+    runtime.unreadable.add(thread.id);
+    localStorage.setItem("deepcode.desktop.selectedThread", thread.id);
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", {
+      name: "This Session can't be read right now.",
+    });
+    expect(screen.queryByText("Start with a task.")).toBeNull();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Session model" }).textContent,
+      ).toContain("gpt-5"),
+    );
+    expect(
+      screen.getByText("This Session's file can't be read right now."),
+    ).toBeTruthy();
+
+    runtime.unreadable.delete(thread.id);
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await screen.findByLabelText("Thread conversation");
+    expect(
+      screen.queryByRole("heading", {
+        name: "This Session can't be read right now.",
+      }),
+    ).toBeNull();
   });
 });

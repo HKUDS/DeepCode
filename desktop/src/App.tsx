@@ -1,4 +1,4 @@
-import { FolderOpen, MessageSquarePlus } from "lucide-react";
+import { FolderOpen, MessageSquarePlus, RotateCw } from "lucide-react";
 import { lazy, Suspense, useState } from "react";
 
 import { projectCanExecute } from "./app/projectPresentation";
@@ -97,10 +97,13 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
     ? ["queued", "running", "waiting"].includes(latestWorkflow.status)
     : false;
   const workspaceAvailable = projectCanExecute(selectedProject);
+  const threadUnreadable =
+    selectedThread !== null && state.unreadableThreadId === selectedThread.id;
   const composerEditable =
     state.runtime.phase === "ready" &&
     workspaceAvailable &&
-    selectedThread !== null;
+    selectedThread !== null &&
+    !threadUnreadable;
   const agentExecutionEnabled =
     composerEditable && selectedProject?.trustState === "trusted";
   const disabledReason =
@@ -114,7 +117,9 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
           ? "Trust this folder before agent execution."
           : !selectedThread
             ? "Create a thread to begin."
-            : null;
+            : threadUnreadable
+              ? "This Session's file can't be read right now."
+              : null;
   const showingThreads = ui.destination === "threads";
   const inspectorVisible = Boolean(
     showingThreads && selectedThread && ui.inspectorOpen,
@@ -275,6 +280,26 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
                       New thread
                     </button>
                     <span>⌘N from anywhere</span>
+                  </div>
+                </div>
+              ) : threadUnreadable ? (
+                <div className={styles.startState} role="alert">
+                  <p className={styles.startEyebrow}>{selectedThread.title}</p>
+                  <h2>This Session can't be read right now.</h2>
+                  <p>
+                    Its file is on disk but may be locked, still syncing, or
+                    damaged. Nothing was deleted: once the file can be read,
+                    the conversation opens as before.
+                  </p>
+                  <div className={styles.startActions}>
+                    <button
+                      type="button"
+                      disabled={state.busy}
+                      onClick={() => void controller.selectThread(selectedThread.id)}
+                    >
+                      <RotateCw size={16} />
+                      Try again
+                    </button>
                   </div>
                 </div>
               ) : (

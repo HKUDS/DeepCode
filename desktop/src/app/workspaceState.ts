@@ -41,6 +41,8 @@ export interface WorkspaceState {
   threads: Thread[];
   selectedProjectId: string | null;
   selectedThreadId: string | null;
+  /** A thread whose Session file is on disk but could not be read. */
+  unreadableThreadId: string | null;
   turns: Turn[];
   items: Item[];
   approvals: Approval[];
@@ -70,6 +72,7 @@ export type WorkspaceAction =
   | { type: "thread-upsert"; thread: Thread }
   | { type: "thread-remove"; threadId: string }
   | { type: "select-thread"; threadId: string | null }
+  | { type: "thread-unreadable"; threadId: string | null }
   | { type: "trace-reset" }
   | { type: "snapshot"; snapshot: TurnSnapshotResult }
   | { type: "approval-upsert"; approval: Approval }
@@ -98,6 +101,7 @@ export const initialWorkspaceState: WorkspaceState = {
   threads: [],
   selectedProjectId: null,
   selectedThreadId: null,
+  unreadableThreadId: null,
   turns: [],
   items: [],
   approvals: [],
@@ -483,6 +487,8 @@ export function workspaceReducer(
         entitySequences: {},
         selectedItemId: null,
       };
+    case "thread-unreadable":
+      return { ...state, unreadableThreadId: action.threadId };
     case "trace-reset":
       return {
         ...state,
