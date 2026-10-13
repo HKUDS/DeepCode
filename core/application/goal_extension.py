@@ -134,11 +134,14 @@ class GoalExtension(GoalRuntimeHandler):
             turn_id=turn_id,
         )
 
-    def execution_settled(self, goal: ThreadGoal) -> bool:
-        """A terminal Goal is ready only after its deciding Turn is accounted."""
+    def execution_settled(self, goal: ThreadGoal, outcome: GoalOutcome | None) -> bool:
+        """A terminal Goal is ready only after its deciding Turn is accounted.
+
+        ``outcome`` is the one read with ``goal`` (see read_with_outcome): read
+        again, a reopened Goal has none and its running Turn looked settled.
+        """
         if goal.status is ThreadGoalStatus.ACTIVE:
             return False
-        outcome = self.read_outcome(goal.thread_id)
         deciding_turn_id = outcome.decided_by_turn_id if outcome else None
         if deciding_turn_id is None:
             return True

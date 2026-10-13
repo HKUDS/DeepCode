@@ -1233,7 +1233,7 @@ class Dispatcher:
         return {
             **self._goal_view(goal, outcome),
             "executionSettled": (
-                goal is None or self.application.goals.execution_settled(goal)
+                goal is None or self.application.goals.execution_settled(goal, outcome)
             ),
         }
 

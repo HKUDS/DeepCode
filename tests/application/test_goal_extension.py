@@ -585,7 +585,7 @@ def test_goal_without_budget_stops_after_20_unattended_continuations(
     assert outcome is not None
     assert outcome.source is GoalDecisionSource.RUNTIME
     assert "20 automatic continuations" in outcome.reason
-    assert goals.execution_settled(current)
+    assert goals.execution_settled(current, outcome)
 
     # Resuming is the user's decision to go on, so the count starts over.
     goals.resume(

@@ -616,6 +616,67 @@ def test_thread_goal_get_reads_the_goal_and_its_outcome_together(
         application.close()
 
 
+def test_thread_goal_get_judges_settlement_by_the_outcome_it_reports(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # A Goal completed by a Turn still running is not settled, even if the
+    # Goal is reopened while the reply is built.
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    factory = _HeldGoalFactory()
+    application = DeepCodeApplication.open(
+        tmp_path / "state.sqlite3", session_factory=factory
+    )
+    try:
+        project = application.projects.add(
+            str(workspace), trust_state=TrustState.TRUSTED
+        )
+        thread = application.threads.start(project.id, title="Settled read")
+        goal = application.goals.create(thread.id, objective="Ship", start=True)
+        deadline = time.monotonic() + 5
+        while (deciding := application.turns.active_for_thread(thread.id)) is None:
+            assert time.monotonic() < deadline, "the Goal's Turn never started"
+            time.sleep(0.01)
+        store = application.thread_goal_store
+        store.update(
+            thread.id,
+            expected_goal_id=goal.id,
+            transform=lambda current: current.agent_transition(
+                ThreadGoalStatus.COMPLETE
+            ),
+            reason="Shipped.",
+            source="agent",
+            turn_id=deciding.id,
+        )
+        read_record = store.read_record
+
+        def read_then_reopen(thread_id: str):
+            record = read_record(thread_id)
+            monkeypatch.setattr(store, "read_record", read_record)
+            store.update(
+                thread_id,
+                expected_goal_id=goal.id,
+                transform=lambda current: current.user_transition(
+                    ThreadGoalStatus.ACTIVE
+                ),
+                reason="resumed by user",
+                source="user",
+            )
+            return record
+
+        monkeypatch.setattr(store, "read_record", read_then_reopen)
+        result = Dispatcher(application, SimpleNamespace())._thread_goal_get(
+            Params({"threadId": thread.id})
+        )
+
+        assert result["goal"]["status"] == ThreadGoalStatus.COMPLETE.value
+        assert result["outcome"]["decidedByTurnId"] == deciding.id
+        assert result["executionSettled"] is False
+    finally:
+        factory.release.set()
+        application.close()
+
+
 def test_settings_and_thread_model_are_real_shared_configuration(
     tmp_path: Path, monkeypatch
 ) -> None:
