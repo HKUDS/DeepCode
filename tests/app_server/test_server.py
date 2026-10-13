@@ -944,7 +944,7 @@ def test_management_methods_round_trip_real_project_state(
             {
                 "projectId": project.id,
                 "scope": "project",
-                "patch": {"security": {"sandbox": False}},
+                "patch": {"security": {"accessPreset": "read_only"}},
             },
         )
         + _request(
@@ -1025,7 +1025,7 @@ def test_management_methods_round_trip_real_project_state(
         )
         assert demo["args"][-1] == "••••••"
         assert responses[6]["diagnostics"]["projectPath"] == str(workspace)
-        assert responses[7]["settings"]["security"]["sandbox"] is False
+        assert responses[7]["settings"]["security"]["accessPreset"] == "read_only"
         assert {server["name"] for server in responses[8]["servers"]} == {
             "demo",
             "project-tools",

@@ -35,6 +35,10 @@ from core.compat.runtime import (  # noqa: E402
     use_runtime,
 )
 import core.compat.runtime as runtime_module  # noqa: E402
+from core.application.execution_security_policy import (  # noqa: E402
+    ExecutionSecurityPolicy,
+)
+from core.domain.execution_security import ExecutionAccessPreset  # noqa: E402
 
 
 def _write_config(directory: Path, data: dict) -> Path:
@@ -272,6 +276,55 @@ def test_project_cannot_redirect_a_legacy_user_provider_credential(layered):
     assert cfg.providers.openrouter.api_key == "sk-user"
     assert cfg.providers.openrouter.api_base == "https://openrouter.ai/api/v1"
     assert cfg.providers.openrouter.extra_headers == {"X-User": "trusted"}
+
+
+@pytest.mark.parametrize(
+    "security",
+    [
+        {"accessPreset": "full_access"},
+        {"access_preset": "full_access"},
+        {"permissionMode": "full_auto", "sandbox": False},
+    ],
+)
+def test_project_cannot_turn_the_sandbox_off(layered, security):
+    # Trusting a folder lets the agent work in it (`--trust` "does not grant
+    # Full access"). A repository's own file must not take that decision for
+    # the user, whichever setting it uses.
+    _home, project = layered
+    _write_config(project, {"security": security})
+
+    profile = ExecutionSecurityPolicy().resolve_default(str(project))
+
+    assert profile.access_preset is not ExecutionAccessPreset.FULL_ACCESS
+    assert profile.command_sandbox is True
+
+
+def test_project_can_still_tighten_security(layered):
+    home, project = layered
+    _write_config(home, {"security": {"accessPreset": "full_access"}})
+    _write_config(
+        project,
+        {
+            "security": {
+                "accessPreset": "read_only",
+                "sandbox": True,
+                "permissions": {"bash": {"git push *": "deny"}},
+            }
+        },
+    )
+
+    security = load_config_for_workspace(project).security
+
+    assert security.access_preset == "read_only"
+    assert security.permissions == {"bash": {"git push *": "deny"}}
+
+
+def test_user_full_access_survives_a_project_that_names_it_too(layered):
+    home, project = layered
+    _write_config(home, {"security": {"accessPreset": "full_access"}})
+    _write_config(project, {"security": {"accessPreset": "full_access"}})
+
+    assert load_config_for_workspace(project).security.access_preset == "full_access"
 
 
 def test_explicit_workspace_layer_does_not_depend_on_process_cwd(

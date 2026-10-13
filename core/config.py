@@ -873,11 +873,29 @@ def _project_runtime_layer(raw: dict[str, Any]) -> dict[str, Any]:
     ``dictation`` is discarded for the same reason: its endpoint receives raw
     microphone audio, so a cloned repository must not be able to point it at a
     host of its own choosing.
+
+    ``security`` may tighten but not remove the command sandbox: trusting a
+    folder lets the agent work there and never grants Full access, which the
+    user confirms for themselves. So ``accessPreset: full_access`` and a
+    legacy ``sandbox: false`` are discarded.
     """
 
     sanitized = dict(raw)
     if sanitized.pop("dictation", None) is not None:
         logger.trace("Ignoring project dictation endpoint; dictation is user-owned")
+    security = raw.get("security")
+    if isinstance(security, dict):
+        kept = {
+            key: value
+            for key, value in security.items()
+            if not (
+                (key in {"accessPreset", "access_preset"} and value == "full_access")
+                or (key == "sandbox" and value is not True)
+            )
+        }
+        if kept != security:
+            logger.trace("Ignoring project security that would remove the sandbox")
+        sanitized["security"] = kept
     providers = raw.get("providers")
     if not isinstance(providers, dict):
         return sanitized

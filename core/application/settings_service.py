@@ -93,6 +93,16 @@ class SettingsService:
             raise InvalidArgumentError(
                 "provider connections and credentials are user-scoped only"
             )
+        security = patch.get("security") or {}
+        if scope == "project" and (
+            security.get("accessPreset") == "full_access"
+            or security.get("sandbox", True) is not True
+        ):
+            # The project layer ignores both (see _project_runtime_layer).
+            raise InvalidArgumentError(
+                "Full access and turning the sandbox off are user-scoped only: "
+                "a project's config file belongs to its repository"
+            )
         store = self._store(scope, project_id)
         try:
             store.mutate(

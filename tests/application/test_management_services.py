@@ -380,9 +380,10 @@ def test_settings_layering_and_scoped_updates_do_not_copy_project_overrides(
             is True
         )
 
+        rules = {"bash": {"git push *": "deny"}}
         with pytest.raises(ProjectNotTrustedError):
             application.settings.update(
-                {"security": {"sandbox": False}},
+                {"security": {"permissions": rules}},
                 scope="project",
                 project_id=project.id,
             )
@@ -390,17 +391,17 @@ def test_settings_layering_and_scoped_updates_do_not_copy_project_overrides(
         application.projects.update(project.id, trust_state=TrustState.TRUSTED)
         monkeypatch.chdir(workspace)
         project_result = application.settings.update(
-            {"security": {"sandbox": False}},
+            {"security": {"permissions": rules}},
             scope="project",
             project_id=project.id,
         )
-        assert project_result["security"]["sandbox"] is False
+        assert project_result["security"]["permissions"] == rules
         project_raw = json.loads(
             (workspace / "deepcode_config.json").read_text(encoding="utf-8")
         )
         assert project_raw == {
             "agents": {"defaults": {"model": "openai/project"}},
-            "security": {"sandbox": False},
+            "security": {"permissions": rules},
         }
 
         user_result = application.settings.update(
@@ -412,8 +413,8 @@ def test_settings_layering_and_scoped_updates_do_not_copy_project_overrides(
         assert user_result["security"] == {
             "accessPreset": None,
             "permissionMode": "plan",
-            "permissions": {},
-            "sandbox": False,
+            "permissions": rules,
+            "sandbox": True,
         }
         user_raw = json.loads(
             (home / "deepcode_config.json").read_text(encoding="utf-8")
@@ -451,21 +452,22 @@ def test_project_settings_are_written_to_the_file_they_are_read_from(
         assert effective["projectAccessPreset"] == "read_only"
         assert effective["resolvedDefaultSecuritySource"] == "project"
 
+        rules = {"bash": {"git push *": "deny"}}
         updated = application.settings.update(
-            {"security": {"sandbox": False}},
+            {"security": {"permissions": rules}},
             scope="project",
             project_id=project.id,
         )
 
         assert updated["agents"]["defaults"]["model"] == "openai/repository"
-        assert updated["security"]["sandbox"] is False
+        assert updated["security"]["permissions"] == rules
         assert updated["projectAccessPreset"] == "read_only"
         assert not (package / "deepcode_config.json").exists()
         assert json.loads(
             (repository / "deepcode_config.json").read_text(encoding="utf-8")
         ) == {
             "agents": {"defaults": {"model": "openai/repository"}},
-            "security": {"accessPreset": "read_only", "sandbox": False},
+            "security": {"accessPreset": "read_only", "permissions": rules},
         }
     finally:
         application.close()
@@ -497,6 +499,41 @@ def test_project_mcp_servers_are_written_to_the_file_they_are_read_from(
 
         assert {server.name for server in updated.servers} == {"shared", "added"}
         assert not (package / "deepcode_config.json").exists()
+    finally:
+        application.close()
+
+
+@pytest.mark.parametrize(
+    "security", [{"accessPreset": "full_access"}, {"sandbox": False}]
+)
+def test_settings_refuse_a_project_default_without_the_sandbox(
+    tmp_path: Path,
+    monkeypatch,
+    security,
+) -> None:
+    # The project file is part of the repository, so it is never where Full
+    # access or a sandbox-off default can live; saving one there would also
+    # be silently ignored.
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    home.mkdir()
+    workspace.mkdir()
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    project = application.projects.add(
+        str(workspace),
+        trust_state=TrustState.TRUSTED,
+    )
+    try:
+        with pytest.raises(InvalidArgumentError, match="user-scoped only"):
+            application.settings.update(
+                {"security": security},
+                scope="project",
+                project_id=project.id,
+            )
+        assert not (workspace / "deepcode_config.json").exists()
+
+        application.settings.update({"security": security}, scope="user")
     finally:
         application.close()
 
@@ -613,7 +650,7 @@ def test_settings_read_keeps_history_available_when_project_directory_is_missing
             match="project path does not exist",
         ):
             application.settings.update(
-                {"security": {"sandbox": False}},
+                {"security": {"accessPreset": "read_only"}},
                 scope="project",
                 project_id=project.id,
             )
