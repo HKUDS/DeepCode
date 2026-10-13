@@ -148,3 +148,91 @@ def test_an_updated_task_list_is_on_disk_when_saving_returns(
 
     tasks = store.root / session.session_id / "tasks.jsonl"
     assert tasks.stat().st_ino in synced
+
+
+def _count_loads(monkeypatch) -> list[str]:
+    loads: list[str] = []
+    load = SessionStore._load
+
+    def counting_load(self, session_id):
+        loads.append(session_id)
+        return load(self, session_id)
+
+    monkeypatch.setattr(SessionStore, "_load", counting_load)
+    return loads
+
+
+def test_appending_does_not_read_the_session_file_again(
+    tmp_path: Path, monkeypatch
+) -> None:
+    store = SessionStore(tmp_path / "sessions")
+    session = store.create_session(title="kept")
+    loads = _count_loads(monkeypatch)
+
+    for index in range(50):
+        store.append_message(session.session_id, "user", f"message {index}")
+
+    assert loads == []
+    reopened = SessionStore(tmp_path / "sessions").get_session(session.session_id)
+    assert reopened is not None
+    assert [message.content for message in reopened.messages] == [
+        f"message {index}" for index in range(50)
+    ]
+
+
+def test_a_message_another_writer_appended_is_kept_in_order(tmp_path: Path) -> None:
+    root = tmp_path / "sessions"
+    first, second = SessionStore(root), SessionStore(root)
+    session_id = first.create_session(title="shared").session_id
+
+    first.append_message(session_id, "user", "one")
+    second.append_message(session_id, "assistant", "two")
+    first.append_message(session_id, "user", "three")
+
+    for store in (first, second, SessionStore(root)):
+        current = store.get_session(session_id)
+        assert current is not None
+        assert [message.content for message in current.messages] == [
+            "one",
+            "two",
+            "three",
+        ]
+
+
+def test_a_header_another_writer_replaced_is_seen_even_with_coarse_times(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "sessions"
+    first, second = SessionStore(root), SessionStore(root)
+    session_id = first.create_session(title="aaaa").session_id
+    first.append_message(session_id, "user", "one")
+    path = root / session_id / "session.jsonl"
+    before = path.stat()
+
+    second.rename_session(session_id, "bbbb")
+    # A filesystem with coarse timestamps: same size, same time.
+    os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+    first.append_message(session_id, "user", "two")
+
+    current = first.get_session(session_id)
+    assert current is not None
+    assert current.title == "bbbb"
+    assert [message.content for message in current.messages] == ["one", "two"]
+
+
+def test_a_failed_append_leaves_no_message_behind(tmp_path: Path, monkeypatch) -> None:
+    store = SessionStore(tmp_path / "sessions")
+    session_id = store.create_session(title="kept").session_id
+    store.append_message(session_id, "user", "kept")
+
+    def no_space(*_args, **_kwargs):
+        raise OSError("No space left on device")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(store, "_append_jsonl", no_space)
+        with pytest.raises(OSError):
+            store.append_message(session_id, "assistant", "lost")
+
+    current = store.get_session(session_id)
+    assert current is not None
+    assert [message.content for message in current.messages] == ["kept"]

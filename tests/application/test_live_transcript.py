@@ -522,3 +522,33 @@ def test_a_result_the_full_mailbox_refused_waits_for_the_turn_to_end(
         ]
     finally:
         application.close()
+
+
+def test_writing_a_turn_as_it_happens_does_not_reread_the_session(
+    tmp_path: Path, monkeypatch
+) -> None:
+    application, thread_id, _factory = _application(
+        tmp_path,
+        *(
+            _calls("read_page", f"Reading page {page}.", call_id=f"page-{page}")
+            for page in range(1, 9)
+        ),
+        LLMResponse(content="Read them all."),
+    )
+    loads: list[str] = []
+    load = SessionStore._load
+
+    def counting_load(self, session_id):
+        loads.append(session_id)
+        return load(self, session_id)
+
+    monkeypatch.setattr(SessionStore, "_load", counting_load)
+    try:
+        started = application.turns.start(thread_id, prompt="Do A.")
+        _wait_for(application, started.turn.id, TurnStatus.COMPLETED)
+
+        # Every message was written, one by one, without reading the file back.
+        assert len(_transcript(application, thread_id)) > 17
+        assert loads == []
+    finally:
+        application.close()

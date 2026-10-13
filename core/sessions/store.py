@@ -16,10 +16,11 @@ optional — see :mod:`core.sessions.index`. Any index failure silently falls
 back to the JSONL scan.
 
 Concurrency model: :class:`threading.RLock` covers in-process
-serialisation and a per-session file lock covers other processes; we
-additionally re-read the session before every write so two processes
-editing the same session don't trample each other (the hot mutation
-surface — ``append_message`` / ``attach_task`` — appends to JSONL files).
+serialisation and a per-session file lock covers other processes; before
+every write we re-read the session if its files changed since it was read
+(their signature: inode, mtime, size), so two processes editing the same
+session don't trample each other (the hot mutation surface —
+``append_message`` / ``attach_task`` — appends to JSONL files).
 
 Durability: a write to session.jsonl or tasks.jsonl is on disk when it
 returns. An append is fsynced (the JSONL is the record, so it must not be
@@ -38,6 +39,7 @@ import threading
 import uuid
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 
 from core.config import deepcode_home
@@ -102,14 +104,14 @@ class SessionStore:
         harden_private_tree(self.root)
         self._lock = threading.RLock()
         self._cache: dict[str, Session] = {}
-        self._cache_signatures: dict[str, tuple[int, int, int, int]] = {}
+        self._cache_signatures: dict[str, tuple[int, ...]] = {}
         # Derived SQLite index; disposable and self-healing. Disable with
         # use_index=False to force the pure-JSONL scan (used in tests to
         # exercise the fallback path).
         self._index: SessionIndex | None = (
             SessionIndex(self.root / "index.db") if use_index else None
         )
-        self._disk_signatures: dict[str, tuple[int, int, int, int]] | None = None
+        self._disk_signatures: dict[str, tuple[int, ...]] | None = None
         self._deletions = SessionDeletionJournal(self.root)
 
     def close(self) -> None:
@@ -482,11 +484,15 @@ class SessionStore:
         Returns ``None`` when the session does not exist.
         """
         with self._lock, exclusive_file_lock(self._session_lock(session_id)):
-            self._cache.pop(session_id, None)
-            self._cache_signatures.pop(session_id, None)
-            session = self.get_session(session_id)
-            if session is None:
+            # No writer can change the file while the lock is held, and a
+            # change made before it no longer matches the cached signature, so
+            # the cached Session is reread only when someone else wrote.
+            current = self.get_session(session_id)
+            if current is None:
                 return None
+            # Copied, not changed in place: a caller holding ``current`` keeps
+            # it as it was, and a failed write leaves the cache as it was.
+            session = replace(current, messages=list(current.messages))
             title = session.title
             msg = session.add_message(
                 role,
@@ -499,6 +505,7 @@ class SessionStore:
             # its time is read back from the newest message.
             if session.title != title:
                 self._rewrite_metadata(session)
+            self._cache[session_id] = session
             self._remember_signature(session_id)
             self._index_session(session)
             return msg
@@ -850,26 +857,34 @@ class SessionStore:
             and not self._deletions.pending(entry.name)
         ]
 
-    def _all_disk_signatures(self) -> dict[str, tuple[int, int, int, int]]:
+    def _all_disk_signatures(self) -> dict[str, tuple[int, ...]]:
         return {
             sid: signature
             for sid in self._disk_session_ids()
             if (signature := self._disk_signature(sid)) is not None
         }
 
-    def _disk_signature(self, session_id: str) -> tuple[int, int, int, int] | None:
+    def _disk_signature(self, session_id: str) -> tuple[int, ...] | None:
+        # The inode tells a replaced file (a rewritten header or task list)
+        # from the old one even where timestamps are too coarse to.
         try:
             session_stat = self._session_jsonl(session_id).stat()
         except OSError:
             return None
         try:
             task_stat = self._tasks_jsonl(session_id).stat()
-            task_mtime, task_size = task_stat.st_mtime_ns, task_stat.st_size
+            task_ino, task_mtime, task_size = (
+                task_stat.st_ino,
+                task_stat.st_mtime_ns,
+                task_stat.st_size,
+            )
         except OSError:
-            task_mtime = task_size = 0
+            task_ino = task_mtime = task_size = 0
         return (
+            session_stat.st_ino,
             session_stat.st_mtime_ns,
             session_stat.st_size,
+            task_ino,
             task_mtime,
             task_size,
         )
