@@ -489,9 +489,13 @@ class ConnectionResolver:
                 f"Connection '{connection_id}' uses unknown template "
                 f"'{profile.template}'"
             )
-        env_name = (profile.api_key_env or spec.env_key or "").strip()
+        env_name = (profile.api_key_env or "").strip()
         legacy_key = None
         if connection_id == spec.name:
+            # The template's variable (OPENAI_API_KEY...) belongs to the
+            # template's own connection. Another connection made from it may
+            # point anywhere, and would win over that connection's own key.
+            env_name = env_name or (spec.env_key or "").strip()
             legacy_key = getattr(self.config.providers, spec.name).api_key
         api_key, source = self._credential(
             connection_id,

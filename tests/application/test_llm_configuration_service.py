@@ -109,6 +109,48 @@ def test_environment_precedence_and_named_local_connection(
     assert local.credential_source == "not_required"
 
 
+def test_only_a_template_s_own_connection_reads_its_environment_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A gateway set up from the openai template used to be sent the user's
+    # OPENAI_API_KEY, in place of the key saved for it.
+    home = tmp_path / "home"
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+    service, config, credentials = _service(home)
+    service.upsert(
+        {
+            "id": "gateway",
+            "template": "openai",
+            "apiBase": "https://gateway.example/v1",
+            "apiKey": "gateway-key",
+        }
+    )
+    service.upsert(
+        {
+            "id": "gateway-unsaved",
+            "template": "openai",
+            "apiBase": "https://other.example/v1",
+        }
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
+
+    resolver = ConnectionResolver(
+        load_config(config_path=config.path),
+        credentials,
+    )
+    gateway = resolver.resolve_connection("gateway")
+    unsaved = resolver.resolve_connection("gateway-unsaved")
+    openai = resolver.resolve_connection("openai")
+
+    assert (gateway.api_key, gateway.credential_source) == (
+        "gateway-key",
+        "credential_store",
+    )
+    assert (unsaved.api_key, unsaved.credential_source) == (None, "missing")
+    assert (openai.api_key, openai.credential_source) == ("openai-key", "environment")
+
+
 def test_endpoint_required_templates_are_not_usable_until_configured(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
