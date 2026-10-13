@@ -9,9 +9,12 @@ import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from core.domain.common import JsonObject
+
+if TYPE_CHECKING:
+    from core.config import DeepCodeConfig
 
 
 WorkflowOutcomeStatus = Literal["completed", "incomplete", "cancelled"]
@@ -54,6 +57,10 @@ class WorkflowCallbacks:
 
 
 class WorkflowRunner(Protocol):
+    """Runs a workflow. A runner may also define ``preflight(config, *,
+    source_type, options, workspace)``, which ``workflow/start`` calls to
+    refuse a request before a run is created."""
+
     async def run(
         self,
         request: WorkflowExecutionRequest,
@@ -64,6 +71,17 @@ class WorkflowRunner(Protocol):
 class DefaultWorkflowRunner:
     """Lazy adapter; importing workflow/Docling code never slows App Server startup."""
 
+    def preflight(
+        self,
+        config: DeepCodeConfig,
+        *,
+        source_type: str,
+        options: JsonObject,
+        workspace: Path,
+    ) -> None:
+        """Refuse a request at ``workflow/start``, before a run exists."""
+        _require_mcp_servers(config, source_type, options, workspace)
+
     async def run(
         self,
         request: WorkflowExecutionRequest,
@@ -73,9 +91,16 @@ class DefaultWorkflowRunner:
             execute_chat_based_planning_pipeline,
             execute_multi_agent_research_pipeline,
         )
+        from core.compat.runtime import get_runtime
         from workflows.plan_review_runtime import PlanReviewCancelled
 
-        _require_mcp_servers(request)
+        # Checked again: the configuration may have changed since the start.
+        _require_mcp_servers(
+            get_runtime().config,
+            request.source_type,
+            request.options,
+            request.workspace,
+        )
         workflow_root = request.workspace / ".deepcode" / "workflows"
         task_id = str(request.checkpoint.get("taskId") or request.run_id)
         await callbacks.progress(
@@ -170,27 +195,28 @@ class DefaultWorkflowRunner:
         )
 
 
-def _require_mcp_servers(request: WorkflowExecutionRequest) -> None:
+def _require_mcp_servers(
+    config: DeepCodeConfig, source_type: str, options: JsonObject, workspace: Path
+) -> None:
     """Refuse a run whose MCP servers (``tools.mcpServers``) are missing.
 
     The kernel only logs a missing server, deep in the run, and its agent then
     works with no tools: no file tree is created and no code is written. No
     default configuration ships, so say what to add.
     """
-    from core.compat.runtime import get_runtime
     from core.config import ConfigError, home_config_path
 
     required = ["code-implementation", "command-executor"]
-    if request.options.get("enableIndexing"):
+    if options.get("enableIndexing"):
         required.append("code-reference-indexer")
-        if request.source_type in {"local", "url"}:
+        if source_type in {"local", "url"}:
             # Reference analysis and repository download.
             required += ["fetch", "filesystem", "github-downloader"]
-    configured = get_runtime().config.mcp_servers
+    configured = config.mcp_servers
     missing = [name for name in required if name not in configured]
     if not missing:
         return
-    examples = _mcp_server_examples(request.workspace)
+    examples = _mcp_server_examples(workspace)
     raise ConfigError(
         "Paper2Code needs MCP servers that are not configured: "
         f'{", ".join(missing)}. Add them under "tools" > "mcpServers" in '

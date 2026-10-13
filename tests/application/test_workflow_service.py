@@ -14,11 +14,13 @@ from core.application import DeepCodeApplication
 from core.application.errors import WorkflowInteractionError
 from core.application.workflow_adapter import (
     ArtifactSpec,
+    DefaultWorkflowRunner,
     WorkflowExecutionRequest,
     WorkflowOutcome,
     _normalize_result,
 )
 from core.compat.runtime import get_runtime
+from core.config import ConfigError, home_config_path
 from core.domain import RuntimeWorker, TrustState
 from core.domain.item import Item, ItemKind, ItemStatus
 from core.domain.thread import ThreadStatus
@@ -186,6 +188,41 @@ def _wait_for_claims_released(application: DeepCodeApplication) -> None:
         if time.monotonic() >= deadline:
             raise AssertionError(f"claims still active: {coordinator.active_claims}")
         time.sleep(0.01)
+
+
+class _PreflightedRunner(DefaultWorkflowRunner):
+    """The Paper2Code runner's start checks, with a scripted run."""
+
+    async def run(self, request, callbacks) -> WorkflowOutcome:
+        return WorkflowOutcome(status="completed", summary="done")
+
+
+def test_start_refuses_paper2code_without_its_mcp_servers(tmp_path: Path) -> None:
+    """The refusal used to come only once the run executed, leaving a failed
+    run (and its turn) behind for a configuration problem."""
+    application, thread_id, _workspace = _application(tmp_path, _PreflightedRunner())
+    try:
+        with pytest.raises(ConfigError, match="code-implementation, command-executor"):
+            application.workflows.start(
+                thread_id,
+                kind="paper2code",
+                source_type="requirement",
+                source="Build it",
+            )
+        assert application.workflows.list_for_thread(thread_id) == ()
+        assert application.turns.list_for_thread(thread_id) == ()
+
+        servers = {"code-implementation": {}, "command-executor": {}}
+        home_config_path().parent.mkdir(parents=True, exist_ok=True)
+        home_config_path().write_text(
+            json.dumps({"tools": {"mcpServers": servers}}), encoding="utf-8"
+        )
+        started = application.workflows.start(
+            thread_id, kind="paper2code", source_type="requirement", source="Build it"
+        )
+        _wait_for(application, started.run.id, WorkflowStatus.COMPLETED)
+    finally:
+        application.close()
 
 
 def test_completed_workflow_projects_progress_and_bounded_artifact(

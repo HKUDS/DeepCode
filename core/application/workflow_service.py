@@ -666,6 +666,16 @@ class WorkflowService:
         )
         submitting_worker_id = self._submitting_worker_id()
         context = self.workspaces.resolve(thread_id, require_trusted=True)
+        # A runner may refuse up front (Paper2Code does without its MCP
+        # servers), before there is a run and turn to leave behind failed.
+        preflight = getattr(self.runner, "preflight", None)
+        if preflight is not None:
+            preflight(
+                load_config_for_workspace(context.root),
+                source_type=clean_source_type,
+                options=clean_options,
+                workspace=context.root,
+            )
         if clean_source_type == "local":
             try:
                 local_path = Path(clean_source).expanduser().resolve(strict=True)
