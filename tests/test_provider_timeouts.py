@@ -43,19 +43,22 @@ def test_timeout_policy_separates_regular_requests_from_active_streams(
 
 @pytest.mark.asyncio
 async def test_stream_idle_deadline_renews_after_every_event() -> None:
+    # The stream as a whole outlasts the deadline (8 x 40ms > 200ms); no gap
+    # does. The margin per gap is what a busy machine may stall the loop for:
+    # when a stall carries the loop past both the next event and the
+    # deadline, the deadline fires first, so 6ms gaps against 15ms failed
+    # whenever the loop lost 9ms.
     async def active_stream():
-        for value in range(4):
-            await asyncio.sleep(0.006)
+        for value in range(8):
+            await asyncio.sleep(0.04)
             yield value
 
     values = [
         value
-        async for value in iter_with_stream_idle_timeout(
-            active_stream(), timeout_s=0.015
-        )
+        async for value in iter_with_stream_idle_timeout(active_stream(), timeout_s=0.2)
     ]
 
-    assert values == [0, 1, 2, 3]
+    assert values == list(range(8))
 
 
 @pytest.mark.asyncio
