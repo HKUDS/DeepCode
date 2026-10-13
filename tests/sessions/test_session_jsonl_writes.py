@@ -104,3 +104,47 @@ def test_a_saved_message_or_task_is_on_disk_when_saving_returns(
     if os.name != "nt":
         # The first task created tasks.jsonl; its directory entry is durable too.
         assert directory.stat().st_ino in synced
+
+
+def test_a_task_line_cut_short_by_a_crash_survives_later_writes(
+    tmp_path: Path,
+) -> None:
+    torn = '{"_type": "task", "task_id": "任务'.encode()[:-1]
+    store = SessionStore(tmp_path / "sessions")
+    session = store.create_session(title="kept")
+    store.attach_task(session.session_id, "t1", task_kind="paper", task_dir="a")
+    path = store.root / session.session_id / "tasks.jsonl"
+    with path.open("ab") as handle:
+        handle.write(torn)
+
+    store.attach_task(session.session_id, "t2", task_kind="paper", task_dir="b")
+    store.update_task_status(session.session_id, "t1", "completed")
+    store.attach_task(session.session_id, "t2", task_kind="paper", task_dir="c")
+
+    assert torn in path.read_bytes().splitlines()
+    reopened = SessionStore(tmp_path / "sessions").get_session(session.session_id)
+    assert reopened is not None
+    assert [(task.task_id, task.status, task.task_dir) for task in reopened.tasks] == [
+        ("t1", "completed", "a"),
+        ("t2", "pending", "c"),
+    ]
+
+
+def test_an_updated_task_list_is_on_disk_when_saving_returns(
+    tmp_path: Path, monkeypatch
+) -> None:
+    store = SessionStore(tmp_path / "sessions")
+    session = store.create_session(title="kept")
+    store.attach_task(session.session_id, "t1", task_kind="paper", task_dir="a")
+    synced: list[int] = []
+    fsync = os.fsync
+
+    def recording_fsync(descriptor: int) -> None:
+        synced.append(os.fstat(descriptor).st_ino)
+        fsync(descriptor)
+
+    monkeypatch.setattr(os, "fsync", recording_fsync)
+    store.update_task_status(session.session_id, "t1", "completed")
+
+    tasks = store.root / session.session_id / "tasks.jsonl"
+    assert tasks.stat().st_ino in synced

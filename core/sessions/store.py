@@ -21,12 +21,12 @@ additionally re-read the session before every write so two processes
 editing the same session don't trample each other (the hot mutation
 surface — ``append_message`` / ``attach_task`` — appends to JSONL files).
 
-Durability: a write to session.jsonl is on disk when it returns. An append
-is fsynced (the JSONL is the record, so it must not be less durable than
-the SQLite index derived from it); the header is rewritten through a
-fsynced temporary file and an atomic replace. A crash can at worst cut the
-last line short: readers skip such a line, the next append starts a fresh
-one, and rewrites keep it.
+Durability: a write to session.jsonl or tasks.jsonl is on disk when it
+returns. An append is fsynced (the JSONL is the record, so it must not be
+less durable than the SQLite index derived from it); a rewrite (the header,
+the task list) goes through a fsynced temporary file and an atomic replace.
+A crash can at worst cut the last line short: readers skip such a line, the
+next append starts a fresh one, and rewrites keep it.
 """
 
 from __future__ import annotations
@@ -938,15 +938,44 @@ class SessionStore:
     def _rewrite_tasks(self, session_id: str, tasks: Iterable[SessionTask]) -> None:
         path = self._tasks_jsonl(session_id)
         ensure_private_directory(path.parent)
+        rows = iter(tasks)
+        lines: list[str] = []
+        if path.exists():
+            # ``tasks`` were read from this file, in this order: each task line
+            # takes its task's new row, and a line this store cannot read (one
+            # a crash cut short) is copied as it is, byte for byte.
+            with path.open("r", encoding="utf-8", errors="surrogateescape") as fh:
+                for raw in fh:
+                    line = raw.rstrip("\n")
+                    if not line.strip():
+                        continue
+                    try:
+                        parsed = json.loads(line)
+                    except json.JSONDecodeError:
+                        parsed = None
+                    if isinstance(parsed, dict) and parsed.get("_type") == "task":
+                        task = next(rows, None)
+                        if task is not None:
+                            line = json.dumps(
+                                task.to_dict(), ensure_ascii=False, default=str
+                            )
+                    lines.append(line)
+        lines.extend(
+            json.dumps(task.to_dict(), ensure_ascii=False, default=str) for task in rows
+        )
         tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
         descriptor = open_private_file(
             tmp,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL,
         )
-        with os.fdopen(descriptor, "w", encoding="utf-8") as fh:
-            for task in tasks:
-                fh.write(json.dumps(task.to_dict(), ensure_ascii=False, default=str))
+        with os.fdopen(
+            descriptor, "w", encoding="utf-8", errors="surrogateescape"
+        ) as fh:
+            for line in lines:
+                fh.write(line)
                 fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
         os.replace(tmp, path)
 
     def _last_message_time(self, path: Path) -> str:
@@ -1018,7 +1047,7 @@ class SessionStore:
         tasks_path = self._tasks_jsonl(session_id)
         if tasks_path.exists():
             try:
-                with tasks_path.open("r", encoding="utf-8") as fh:
+                with tasks_path.open("r", encoding="utf-8", errors="replace") as fh:
                     for raw in fh:
                         line = raw.strip()
                         if not line:
@@ -1027,7 +1056,7 @@ class SessionStore:
                             parsed = json.loads(line)
                         except json.JSONDecodeError:
                             continue
-                        if parsed.get("_type") == "task":
+                        if isinstance(parsed, dict) and parsed.get("_type") == "task":
                             tasks.append(SessionTask.from_dict(parsed))
             except OSError:
                 pass
