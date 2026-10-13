@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import os
+import platform
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -11,12 +11,9 @@ from xml.sax.saxutils import escape
 
 
 def _default_shell_name() -> str:
-    variable = "COMSPEC" if os.name == "nt" else "SHELL"
-    fallback = "cmd.exe" if os.name == "nt" else "sh"
-    configured = os.environ.get(variable, "").strip()
-    if not configured:
-        return fallback
-    return configured.replace("\\", "/").rsplit("/", maxsplit=1)[-1] or fallback
+    # What the bash tool runs (core.harness.sandbox.default_shell), not the
+    # user's login shell or cmd.exe: the model writes commands for this shell.
+    return "bash (Git for Windows)" if platform.system() == "Windows" else "bash"
 
 
 def _timezone_name(now: datetime) -> str:

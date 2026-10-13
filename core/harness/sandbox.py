@@ -445,7 +445,9 @@ def default_shell() -> str:
 
     Windows has no ``/bin/bash``. Git for Windows keeps ``bash.exe`` in
     ``bin`` beside the ``cmd`` directory its installer puts on PATH; failing
-    that, any ``bash`` on PATH (MSYS2, Cygwin, ...).
+    that, any ``bash`` on PATH (MSYS2, Cygwin, ...) except the WSL launcher,
+    which runs a Linux distro instead of the user's Windows tools. Raises
+    :class:`FileNotFoundError` when there is none.
     """
     if platform.system() != "Windows":
         return "/bin/bash"
@@ -454,7 +456,23 @@ def default_shell() -> str:
         bash = Path(git).resolve().parent.parent / "bin" / "bash.exe"
         if bash.is_file():
             return str(bash)
-    return shutil.which("bash") or "bash.exe"
+    bash = shutil.which("bash")
+    if bash and not _is_wsl_launcher(bash):
+        return bash
+    raise FileNotFoundError(
+        "Git for Windows bash not found; install Git for Windows "
+        "(https://git-scm.com/download/win) to run shell commands"
+    )
+
+
+def _is_wsl_launcher(path: str) -> bool:
+    """``bash.exe`` in the Windows directory or a Store app alias starts WSL."""
+
+    lowered = path.replace("/", "\\").lower()
+    windows = os.environ.get("SystemRoot", "C:\\Windows").replace("/", "\\").lower()
+    return (
+        lowered.startswith(windows.rstrip("\\") + "\\") or "\\windowsapps\\" in lowered
+    )
 
 
 def wrap_shell_command(

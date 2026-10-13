@@ -495,3 +495,26 @@ def test_windows_shell_falls_back_to_bash_on_path(monkeypatch, tmp_path):
     )
     wrapped = build_exec_command(command="echo hi", workspace=tmp_path, enabled=False)
     assert wrapped.argv == [on_path, "-c", "echo hi"]
+
+
+@pytest.mark.parametrize(
+    "launcher",
+    [
+        "C:\\Windows\\System32\\bash.exe",
+        "C:\\Users\\me\\AppData\\Local\\Microsoft\\WindowsApps\\bash.exe",
+    ],
+)
+def test_windows_never_runs_commands_in_wsl(monkeypatch, tmp_path, launcher):
+    """System32's bash.exe starts a Linux distro, not the user's Windows tools;
+    with no Git for Windows the bash tool must say so instead."""
+
+    from core.harness.sandbox import build_exec_command
+
+    monkeypatch.setenv("SystemRoot", "C:\\Windows")
+    monkeypatch.setattr("core.harness.sandbox.platform.system", lambda: "Windows")
+    monkeypatch.setattr(
+        "core.harness.sandbox.shutil.which",
+        lambda name, *_a, **_k: launcher if name == "bash" else None,
+    )
+    with pytest.raises(FileNotFoundError, match="Git for Windows"):
+        build_exec_command(command="echo hi", workspace=tmp_path, enabled=False)

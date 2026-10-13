@@ -186,6 +186,30 @@ def test_transient_context_preserves_priority_and_latest_user_order() -> None:
     assert all(message["role"] != "developer" for message in composed)
 
 
+@pytest.mark.parametrize(
+    ("system", "login_shell", "described"),
+    [
+        ("Darwin", {"SHELL": "/bin/zsh"}, "bash"),
+        ("Linux", {"SHELL": "/usr/bin/fish"}, "bash"),
+        (
+            "Windows",
+            {"COMSPEC": "C:\\Windows\\system32\\cmd.exe"},
+            "bash (Git for Windows)",
+        ),
+    ],
+)
+def test_environment_context_names_the_shell_the_bash_tool_runs(
+    tmp_path: Path, monkeypatch, system, login_shell, described
+) -> None:
+    """The model writes for the shell it is told about; the bash tool runs
+    bash, not the user's login shell or cmd.exe."""
+
+    monkeypatch.setattr("platform.system", lambda: system)
+    for name, value in login_shell.items():
+        monkeypatch.setenv(name, value)
+    assert EnvironmentContext.for_workspace(tmp_path).shell == described
+
+
 def test_environment_context_is_resolved_and_xml_safe(tmp_path: Path) -> None:
     workspace = tmp_path / "project & sources"
     context = EnvironmentContext.for_workspace(workspace)

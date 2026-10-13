@@ -153,6 +153,14 @@ async def test_bash_scrubs_credentials_when_opted_in(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_bash_without_git_bash_on_windows_says_so(tmp_path, monkeypatch):
+    monkeypatch.setattr("core.harness.sandbox.platform.system", lambda: "Windows")
+    monkeypatch.setattr("core.harness.sandbox.shutil.which", lambda *_a, **_k: None)
+    out = await BashTool(str(tmp_path)).execute(command="echo hi")
+    assert out.startswith("Error:") and "Git for Windows" in out
+
+
+@pytest.mark.asyncio
 async def test_bash_still_refuses_destructive_before_the_shell(tmp_path):
     b = BashTool(str(tmp_path))
     out = await b.execute(command="rm -rf /")

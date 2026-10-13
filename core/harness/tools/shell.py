@@ -195,11 +195,14 @@ class BashTool(Tool):
                 "If this is intended, re-run with the matching DEEPCODE_* waiver."
             )
 
-        wrapped = build_exec_command(
-            command=command,
-            workspace=self._workspace,
-            enabled=self._sandbox_enabled,
-        )
+        try:
+            wrapped = build_exec_command(
+                command=command,
+                workspace=self._workspace,
+                enabled=self._sandbox_enabled,
+            )
+        except OSError as exc:  # no bash to run it in (Windows without Git)
+            return f"Error: could not run command: {exc}"
         try:
             proc = await asyncio.create_subprocess_exec(
                 *wrapped.argv,
