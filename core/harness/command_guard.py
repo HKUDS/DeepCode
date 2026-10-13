@@ -115,6 +115,50 @@ def _is_disk_write(cmd: str, args: list[str]) -> bool:
     return False
 
 
+# Programs that run the rest of their argv as another command, each with the
+# options that take a separate value, so the value is not mistaken for the
+# command. ``timeout`` also takes a duration before it. ``sudo`` is refused on
+# its own, so it needs no unwrapping.
+_COMMAND_WRAPPERS: dict[str, frozenset[str]] = {
+    "env": frozenset({"-u", "--unset", "-C", "--chdir"}),
+    "nohup": frozenset(),
+    "nice": frozenset({"-n", "--adjustment"}),
+    "timeout": frozenset({"-s", "--signal", "-k", "--kill-after"}),
+    "command": frozenset(),
+    "exec": frozenset({"-a"}),
+}
+
+# ``NAME=value`` before a command only sets its environment.
+_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+# A Windows script named like a system program (Tomcat's ``bin/shutdown.bat``)
+# is the project's own; the system programs are ``.exe``.
+_SCRIPT_SUFFIXES = (".bat", ".cmd", ".ps1")
+
+
+def _unwrap(tokens: list[str]) -> list[str]:
+    """The command that environment assignments and wrappers end up running."""
+
+    while tokens:
+        if _ASSIGNMENT.match(tokens[0]):
+            tokens = tokens[1:]
+            continue
+        program = _program(tokens[0])
+        value_flags = _COMMAND_WRAPPERS.get(program)
+        if value_flags is None:
+            return tokens
+        tokens = tokens[1:]
+        while tokens and tokens[0].startswith("-"):
+            flag = tokens.pop(0)
+            if flag == "--":
+                break
+            if flag in value_flags and tokens:
+                tokens.pop(0)
+        if program == "timeout" and tokens:
+            tokens = tokens[1:]  # the duration
+    return tokens
+
+
 def _classify(cmd: str, args: list[str]) -> str | None:
     if _is_recursive_force_rm(cmd, args):
         return "recursive force remove (rm -rf)"
@@ -136,7 +180,9 @@ def screen_command(command: str) -> str | None:
     (``;`` ``&&`` ``||`` ``|`` ``&`` and newlines) so that a destructive stage
     hidden in a pipeline or sequence is still caught, e.g. ``echo hi && rm -rf /``
     or ``cd /tmp; rm -rf x``. Each segment is then tokenised with
-    :func:`shlex.split` and classified on its argv. A segment that cannot be
+    :func:`shlex.split` and classified on the argv it ends up running, past
+    ``NAME=value`` assignments and wrappers such as ``env``, ``nohup`` or
+    ``timeout 5``. A segment that cannot be
     tokenised (unbalanced quotes, etc.) is skipped rather than guessed at — this
     layer never blocks what it cannot understand, and the sandbox remains the
     boundary.
@@ -153,7 +199,8 @@ def screen_command(command: str) -> str | None:
         except ValueError:
             # Unbalanced quotes etc. — don't guess; defer to the sandbox.
             continue
-        if not tokens:
+        tokens = _unwrap(tokens)
+        if not tokens or tokens[0].lower().endswith(_SCRIPT_SUFFIXES):
             continue
         reason = _classify(_program(tokens[0]), tokens[1:])
         if reason is not None:

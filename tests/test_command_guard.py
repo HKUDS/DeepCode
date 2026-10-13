@@ -130,3 +130,64 @@ def test_allows_path_qualified_benign_commands(command):
     """Normalising the program must not turn every absolute path into a hit."""
 
     assert screen_command(command) is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "bin/shutdown.bat",  # Tomcat's own stop script
+        "./reboot.cmd",
+        "scripts/shutdown.ps1 -Force",
+        "cd server && bin/shutdown.bat",
+    ],
+)
+def test_allows_project_scripts_named_like_system_programs(command):
+    """A Windows script is the project's own, never the system program: the
+    system ``shutdown`` is ``shutdown.exe``."""
+
+    assert screen_command(command) is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "env FOO=1 rm -rf /",
+        "env -i PATH=/bin rm -rf /",
+        "env -u HOME -- rm -rf /",
+        "/usr/bin/env rm -rf /",
+        "FOO=1 rm -rf /",
+        "nohup rm -rf / &",
+        "timeout 5 rm -rf /",
+        "timeout -s KILL 5 rm -rf /",
+        "timeout --signal=KILL -k 1 5 rm -rf /",
+        "nice rm -rf /",
+        "nice -n 10 rm -rf /",
+        "nice -10 rm -rf /",
+        "command rm -rf /",
+        "exec rm -rf /",
+        "exec -a name rm -rf /",
+        "nohup nice -n 5 timeout 60 rm -rf /",  # stacked wrappers
+        "env FOO=1 shutdown -h now",
+        "nohup sudo reboot",
+        "ls && env CI=1 chmod 777 /etc",
+    ],
+)
+def test_blocks_destructive_commands_behind_wrappers(command):
+    assert screen_command(command) is not None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "env",
+        "env FOO=1 python train.py",
+        "timeout 5 pytest -q",
+        "nohup python server.py &",
+        "nice -n 10 make -j8",
+        "command -v rm",
+        "FOO=1 BAR=2 make",
+        "timeout 5",
+    ],
+)
+def test_allows_benign_commands_behind_wrappers(command):
+    assert screen_command(command) is None
