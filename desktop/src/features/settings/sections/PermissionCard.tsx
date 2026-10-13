@@ -28,7 +28,7 @@ interface PermissionCardProps {
     patch: JsonObject,
     scope: ConfigScope,
     riskAcknowledged?: boolean,
-  ): Promise<void>;
+  ): Promise<boolean>;
 }
 
 export function PermissionCard({
@@ -64,12 +64,12 @@ export function PermissionCard({
     ) {
       return;
     }
-    await onUpdate(
+    const saved = await onUpdate(
       { security: { accessPreset } },
       scope,
       accessPreset === "full_access",
     );
-    setAccessPresetDraft(undefined);
+    if (saved) setAccessPresetDraft(undefined);
   };
 
   return (

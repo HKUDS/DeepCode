@@ -36,7 +36,7 @@ export interface SettingsSectionProps {
     patch: JsonObject,
     scope: ConfigScope,
     riskAcknowledged?: boolean,
-  ): Promise<void>;
+  ): Promise<boolean>;
 }
 
 export interface SettingsSection {

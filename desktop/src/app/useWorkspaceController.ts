@@ -96,11 +96,12 @@ export interface WorkspaceController {
   ): Promise<void>;
   setAccessPreset(preset: ExecutionAccessPreset | null): Promise<boolean>;
   refreshSettings(): Promise<void>;
+  /** False when the write failed (the error is already shown). */
   updateSettings(
     patch: JsonObject,
     scope?: ConfigScope,
     riskAcknowledged?: boolean,
-  ): Promise<void>;
+  ): Promise<boolean>;
   setGoal(input: GoalDefinitionInput): Promise<void>;
   pauseGoal(): Promise<void>;
   resumeGoal(): Promise<void>;
@@ -670,11 +671,17 @@ export function useWorkspaceController(runtime: ClientRuntime): WorkspaceControl
   );
 
   const updateSettings = useCallback(
-    (
+    async (
       patch: JsonObject,
       scope: ConfigScope = "user",
       riskAcknowledged = false,
-    ) => withBusy(() => applySettings(patch, scope, riskAcknowledged)),
+    ) => {
+      const applied = await withBusy(async () => {
+        await applySettings(patch, scope, riskAcknowledged);
+        return true;
+      });
+      return applied === true;
+    },
     [applySettings, withBusy],
   );
 

@@ -2583,6 +2583,53 @@ describe("desktop command center", () => {
     });
   });
 
+  it("keeps Settings edits when saving them fails", async () => {
+    const runtime = new TestRuntime([project], [thread], []);
+    const original = runtime.request.bind(runtime);
+    let failedUpdates = 0;
+    vi.spyOn(runtime, "request").mockImplementation(async (method, params) => {
+      if (method === "settings/update") {
+        failedUpdates += 1;
+        throw new Error("config is locked");
+      }
+      return original(method, params);
+    });
+    render(<App runtime={runtime} />);
+
+    await screen.findByRole("heading", { name: "Recovered task" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const dialog = await screen.findByRole("dialog", { name: "Settings" });
+    const access = (await within(dialog).findByRole("combobox", {
+      name: "Default Session access",
+    })) as HTMLSelectElement;
+    fireEvent.change(access, { target: { value: "read_only" } });
+    const saveAccess = within(dialog).getByRole("button", {
+      name: "Save safety settings",
+    }) as HTMLButtonElement;
+    fireEvent.click(saveAccess);
+    await waitFor(() => expect(failedUpdates).toBe(1));
+    await waitFor(() => expect(saveAccess.disabled).toBe(false));
+    expect(access.value).toBe("read_only");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Models" }));
+    const effort = (await within(dialog).findByRole("combobox", {
+      name: "Reasoning effort",
+    })) as HTMLSelectElement;
+    await waitFor(() =>
+      expect(Array.from(effort.options, (option) => option.value)).toContain(
+        "high",
+      ),
+    );
+    fireEvent.change(effort, { target: { value: "high" } });
+    const saveDefaults = within(dialog).getByRole("button", {
+      name: "Save defaults",
+    }) as HTMLButtonElement;
+    fireEvent.click(saveDefaults);
+    await waitFor(() => expect(failedUpdates).toBe(2));
+    await waitFor(() => expect(saveDefaults.disabled).toBe(false));
+    expect(effort.value).toBe("high");
+  });
+
   it("configures one shared credential-safe LLM connection from Settings", async () => {
     const runtime = new TestRuntime([project], [thread], []);
     render(<App runtime={runtime} />);

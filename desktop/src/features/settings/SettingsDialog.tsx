@@ -34,7 +34,7 @@ interface SettingsDialogProps {
     patch: JsonObject,
     scope: ConfigScope,
     riskAcknowledged?: boolean,
-  ): Promise<void>;
+  ): Promise<boolean>;
   onClose(): void;
 }
 

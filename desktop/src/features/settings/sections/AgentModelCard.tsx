@@ -35,7 +35,7 @@ interface AgentModelCardProps {
   busy: boolean;
   scope: ConfigScope;
   connections: ConnectionCatalogController;
-  onUpdate(patch: JsonObject, scope: ConfigScope): Promise<void>;
+  onUpdate(patch: JsonObject, scope: ConfigScope): Promise<boolean>;
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -114,7 +114,7 @@ export function AgentModelCard({
 
   const saveAgents = async (): Promise<boolean> => {
     if (!maxTokensValid) return false;
-    await onUpdate(
+    const saved = await onUpdate(
       {
         agents: {
           defaults: {
@@ -136,8 +136,8 @@ export function AgentModelCard({
       },
       scope,
     );
-    setAgentOverrides({});
-    return true;
+    if (saved) setAgentOverrides({});
+    return saved;
   };
 
   const verifyDefaultModel = async () => {

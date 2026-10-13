@@ -61,11 +61,11 @@ export function DefaultPresetCard({
   const knownIds = new Set(entries.map((entry) => entry.id));
 
   const save = async () => {
-    await onUpdate(
+    const saved = await onUpdate(
       { agents: { defaults: { defaultPreset: selection || null } } },
       scope,
     );
-    setDraft(undefined);
+    if (saved) setDraft(undefined);
   };
 
   return (
