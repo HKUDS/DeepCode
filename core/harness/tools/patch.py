@@ -34,7 +34,10 @@ judgement):
   the locating.
 * **All-or-nothing.** Parse and compute every file's new content in memory
   first; only if *every* operation validates do we touch disk. A patch that
-  fails on its third file leaves the first two untouched.
+  fails on its third file leaves the first two untouched. Sections apply in
+  order, each to what the earlier ones left, so two sections for one file
+  compose. A write that still fails on disk (permissions, a file where a
+  directory must go) puts back every file already changed.
 * **Errors as data.** Every failure is returned as an ``"Error: ..."``
   string (never raised past the tool), matching the kernel contract.
 
@@ -211,17 +214,19 @@ def parse_patch(text: str) -> list[FileOp]:
     return ops
 
 
-@dataclass
-class _PlannedWrite:
-    target: Path
-    content: str
-    display: str
-
-
-@dataclass
-class _PlannedDelete:
-    target: Path
-    display: str
+def _restore(done: list[tuple[Path, bytes | None]]) -> list[Path]:
+    """Put each file back as it was, newest change first; return failures."""
+    failed: list[Path] = []
+    for target, original in reversed(done):
+        try:
+            if original is None:
+                if target.exists():
+                    target.unlink()
+            elif not target.exists() or target.read_bytes() != original:
+                target.write_bytes(original)
+        except OSError:
+            failed.append(target)
+    return failed
 
 
 @tool_parameters(
@@ -282,10 +287,16 @@ class ApplyPatchTool(Tool):
         except PatchError as exc:
             return f"Error: {exc}"
 
-        # -- Phase 1: plan every op in memory; abort on the first problem. --
-        writes: list[_PlannedWrite] = []
-        deletes: list[_PlannedDelete] = []
-        planned_paths: set[Path] = set()
+        # -- Phase 1: apply every op, in order, to an in-memory view of the --
+        # -- files it touches (None = deleted); abort on the first problem. --
+        planned: dict[Path, str | None] = {}
+        displays: dict[Path, str] = {}
+
+        def exists(target: Path) -> bool:
+            if target in planned:
+                return planned[target] is not None
+            return target.exists()
+
         for op in ops:
             target = _resolve(self._workspace, op.path)
             if not self._allow_outside_workspace and not _within(
@@ -296,31 +307,34 @@ class ApplyPatchTool(Tool):
                 )
 
             if op.kind == "add":
-                if target.exists():
+                if exists(target):
                     return (
                         f"Error: cannot add {op.path}: it already exists. Use an "
                         "Update File hunk to change it."
                     )
-                writes.append(_PlannedWrite(target, op.add_content or "", op.path))
-                planned_paths.add(target)
+                planned[target] = op.add_content or ""
+                displays[target] = op.path
                 continue
 
             if op.kind == "delete":
-                if not target.exists():
+                if not exists(target):
                     return f"Error: cannot delete {op.path}: file not found."
-                deletes.append(_PlannedDelete(target, op.path))
+                planned[target] = None
+                displays[target] = op.path
                 continue
 
             # update (optionally a move)
-            if not target.exists():
+            if not exists(target):
                 return (
                     f"Error: cannot update {op.path}: file not found. Use "
                     "Add File to create it."
                 )
-            try:
-                content = target.read_text(encoding="utf-8")
-            except OSError as exc:
-                return f"Error: could not read {op.path}: {exc}"
+            content = planned.get(target)
+            if content is None:
+                try:
+                    content = target.read_text(encoding="utf-8")
+                except OSError as exc:
+                    return f"Error: could not read {op.path}: {exc}"
             for hunk in op.hunks:
                 try:
                     content = replace(content, hunk.before, hunk.after)
@@ -337,34 +351,50 @@ class ApplyPatchTool(Tool):
                         f"Error: refusing to move {op.path} outside the "
                         f"workspace: {op.move_to}."
                     )
-                writes.append(_PlannedWrite(dest, content, op.move_to))
-                deletes.append(_PlannedDelete(target, op.path))
-                planned_paths.add(dest)
+                # Set before the destination, so a move onto itself keeps it.
+                planned[target] = None
+                displays[target] = op.path
+                planned[dest] = content
+                displays[dest] = op.move_to
             else:
-                writes.append(_PlannedWrite(target, content, op.path))
-                planned_paths.add(target)
+                planned[target] = content
+                displays[target] = op.path
 
-        # -- Phase 2: commit. Writes first, then deletes (so a move that --
-        # -- keeps the same path can't be clobbered by its own delete).   --
+        # -- Phase 2: commit, remembering what each file held so a failure --
+        # -- part way can put everything back.                              --
+        done: list[tuple[Path, bytes | None]] = []
         touched: list[str] = []
         try:
-            for w in writes:
-                w.target.parent.mkdir(parents=True, exist_ok=True)
-                w.target.write_text(w.content, encoding="utf-8")
-                touched.append(w.display)
-            for d in deletes:
-                if d.target not in planned_paths:
-                    d.target.unlink()
-                    touched.append(f"{d.display} (deleted)")
+            for target, content in planned.items():
+                original = target.read_bytes() if target.exists() else None
+                if content is None and original is None:
+                    continue  # added and deleted within this patch
+                done.append((target, original))
+                if content is None:
+                    target.unlink()
+                    touched.append(f"{displays[target]} (deleted)")
+                else:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(content, encoding="utf-8")
+                    touched.append(displays[target])
         except OSError as exc:
-            return f"Error: patch partially failed while writing: {exc}"
+            failed = _restore(done)
+            if failed:
+                names = ", ".join(displays[path] for path in failed)
+                return (
+                    f"Error: patch failed while writing: {exc}. These files "
+                    f"could not be restored: {names}"
+                )
+            return f"Error: patch not applied, nothing was changed: {exc}"
 
         # -- Phase 3: diagnostics on every file we wrote. --
         reports: list[str] = []
-        for w in writes:
-            report = format_diagnostics(self._diagnostics(str(w.target)))
+        for target, content in planned.items():
+            if content is None:
+                continue
+            report = format_diagnostics(self._diagnostics(str(target)))
             if report:
-                reports.append(f"{w.display}:\n{report}")
+                reports.append(f"{displays[target]}:\n{report}")
         summary = f"Applied patch: {len(touched)} change(s) — " + ", ".join(touched)
         if reports:
             return summary + "\n\n" + "\n\n".join(reports)

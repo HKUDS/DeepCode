@@ -151,6 +151,73 @@ def test_atomic_rollback_on_failure(tmp_path):
     assert not (tmp_path / "a.py").exists()  # rolled back (never written)
 
 
+def test_sections_for_one_file_apply_in_order(tmp_path):
+    (tmp_path / "m.py").write_text("a = 1\nb = 2\nc = 3\n")
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: m.py\n"
+        "@@\n"
+        "-a = 1\n"
+        "+a = 10\n"
+        "*** Update File: m.py\n"
+        "@@\n"
+        "-c = 3\n"
+        "+c = 30\n"
+        "*** Add File: n.py\n"
+        "+x = 1\n"
+        "*** Update File: n.py\n"
+        "@@\n"
+        "-x = 1\n"
+        "+x = 2\n"
+        "*** End Patch\n"
+    )
+    out = _apply(_tool(tmp_path), patch)
+    assert out.startswith("Applied patch")
+    assert (tmp_path / "m.py").read_text() == "a = 10\nb = 2\nc = 30\n"
+    assert (tmp_path / "n.py").read_text() == "x = 2"
+
+
+def test_a_later_section_sees_an_earlier_delete(tmp_path):
+    (tmp_path / "gone.py").write_text("x = 1\n")
+    patch = (
+        "*** Begin Patch\n"
+        "*** Delete File: gone.py\n"
+        "*** Update File: gone.py\n"
+        "@@\n"
+        "-x = 1\n"
+        "+x = 2\n"
+        "*** End Patch\n"
+    )
+    out = _apply(_tool(tmp_path), patch)
+    assert out.startswith("Error") and "gone.py" in out
+    assert (tmp_path / "gone.py").read_text() == "x = 1\n"
+
+
+def test_a_failed_write_leaves_every_file_as_it_was(tmp_path):
+    (tmp_path / "a.py").write_text("x = 1\n")
+    (tmp_path / "doomed.py").write_text("keep\n")
+    # A file where the patch needs a directory: planning can't see it coming,
+    # writing fails after a.py is done.
+    (tmp_path / "blocker").write_text("not a directory\n")
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: a.py\n"
+        "@@\n"
+        "-x = 1\n"
+        "+x = 2\n"
+        "*** Delete File: doomed.py\n"
+        "*** Add File: blocker/new.py\n"
+        "+y = 1\n"
+        "*** End Patch\n"
+    )
+    out = _apply(_tool(tmp_path), patch)
+    assert out.startswith("Error")
+    assert "nothing was changed" in out
+    assert (tmp_path / "a.py").read_text() == "x = 1\n"
+    assert (tmp_path / "doomed.py").read_text() == "keep\n"
+    assert (tmp_path / "blocker").read_text() == "not a directory\n"
+
+
 def test_add_existing_file_is_error(tmp_path):
     (tmp_path / "a.py").write_text("keep\n")
     patch = "*** Begin Patch\n*** Add File: a.py\n+overwrite\n*** End Patch\n"
