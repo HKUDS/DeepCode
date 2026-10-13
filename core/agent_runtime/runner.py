@@ -65,6 +65,7 @@ from core.agent_runtime.runtime import (
 )
 from core.agent_runtime.tools.base import ToolResult
 from core.agent_runtime.tools.registry import ToolRegistry
+from core.agent_runtime.tools.semantic_hint import build_miss_message
 from core.providers.base import (
     LLMProvider,
     LLMResponse,
@@ -1216,6 +1217,30 @@ class AgentRunner:
         _HINT = "\n\n[Analyze the error above and try a different approach.]"
         allowed = spec.allowed_tool_names()
         if allowed is not None and tool_call.name not in allowed:
+            registered = {
+                ToolRegistry._schema_name(schema)
+                for schema in spec.tools.get_definitions()
+            }
+            if tool_call.name not in registered:
+                # A misspelled name is not a policy decision. Answer it as the
+                # registry does, but offer only the tools this turn may call.
+                visible = [
+                    ToolRegistry._schema_name(schema)
+                    for schema in spec.tool_definitions()
+                ]
+                message = (
+                    f"Error: {build_miss_message(tool_call.name, visible)} "
+                    f"Available: {', '.join(visible)}"
+                )
+                return (
+                    message + _HINT,
+                    {
+                        "name": tool_call.name,
+                        "status": "error",
+                        "detail": message.split(": ", 1)[-1][:120],
+                    },
+                    RuntimeError(message) if spec.fail_on_tool_error else None,
+                )
             message = (
                 f"Error: tool {tool_call.name!r} is not allowed by the active "
                 "Skill policy"

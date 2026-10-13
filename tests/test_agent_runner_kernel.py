@@ -513,6 +513,37 @@ async def test_denied_tool_becomes_error_result_not_crash():
 
 
 @pytest.mark.asyncio
+async def test_misspelled_tool_under_a_filter_is_reported_as_unknown():
+    """A name no tool has is a typo, not a policy decision: the model is told
+    it does not exist and offered only the tools it may call."""
+    provider = ScriptedProvider(
+        [
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(id="c1", name="ecoh", arguments={"text": "hi"})
+                ],
+                finish_reason="tool_calls",
+            ),
+            LLMResponse(content="done", finish_reason="stop"),
+        ]
+    )
+    registry = _tool_registry()
+    registry.register(StructuredFailureTool())
+
+    result = await AgentRunner(provider).run(
+        _spec(provider, tools=registry, tool_filter=lambda: ("echo",))
+    )
+
+    content = next(m["content"] for m in result.messages if m.get("role") == "tool")
+    assert "Skill policy" not in content
+    assert "Tool 'ecoh' not found. Did you mean one of: echo?" in content
+    # Hidden tools stay hidden: the hint never offers what this turn can't call.
+    assert "Available: echo\n" in content
+    assert "structured_failure" not in content
+
+
+@pytest.mark.asyncio
 async def test_ask_without_approver_is_denied():
     provider = ScriptedProvider(
         [
