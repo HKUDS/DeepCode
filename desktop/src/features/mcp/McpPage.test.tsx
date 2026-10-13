@@ -134,6 +134,7 @@ class McpRuntime {
             requiredEnvKeys: [],
             missingEnvKeys: [],
             credentialEnvKeys: ["OPENROUTER_API_KEY"],
+            credentialEnv: { OPENROUTER_API_KEY: "provider:openrouter" },
             headerKeys: [],
             envHttpHeaders: {},
             envUrlParams: {},
@@ -182,6 +183,7 @@ function mcpServer(
     requiredEnvKeys: [],
     missingEnvKeys: [],
     credentialEnvKeys: [],
+    credentialEnv: {},
     headerKeys: [],
     envHttpHeaders: {},
     envUrlParams: {},
@@ -276,6 +278,7 @@ test("shows Plugin MCP servers without exposing native edit actions", async () =
         requiredEnvKeys: [],
         missingEnvKeys: [],
         credentialEnvKeys: [],
+        credentialEnv: {},
         headerKeys: [],
         envHttpHeaders: {},
         envUrlParams: {},
@@ -427,5 +430,45 @@ test("removes a header or URL parameter mapping from a saved server", async () =
     )?.params as MethodParams["mcp/upsert"] | undefined;
     expect(upsert?.server.envHttpHeaders).toEqual({ "X-Team": "TEAM_HEADER" });
     expect(upsert?.server.envUrlParams).toEqual({});
+  });
+});
+
+test("removes a credential binding from a saved server", async () => {
+  const runtime = new McpRuntime();
+  runtime.inventory = {
+    ...runtime.inventory,
+    servers: [
+      mcpServer("local", {
+        credentialEnvKeys: ["API_KEY", "OLD_KEY"],
+        credentialEnv: {
+          API_KEY: "provider:openrouter",
+          OLD_KEY: "provider:anthropic",
+        },
+      }),
+    ],
+  };
+  render(
+    <McpPage
+      runtime={runtime as unknown as ClientRuntime}
+      project={project}
+    />,
+  );
+
+  await screen.findByRole("heading", { name: "local" });
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  const bindings = screen.getByLabelText(
+    "Credential bindings",
+  ) as HTMLTextAreaElement;
+  expect(bindings.value).toBe("API_KEY=openrouter\nOLD_KEY=anthropic");
+  fireEvent.change(bindings, { target: { value: "API_KEY=openrouter" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+  await waitFor(() => {
+    const upsert = runtime.requests.find(
+      (request) => request.method === "mcp/upsert",
+    )?.params as MethodParams["mcp/upsert"] | undefined;
+    expect(upsert?.server.credentialEnv).toEqual({
+      API_KEY: { credentialRef: "provider:openrouter" },
+    });
   });
 });

@@ -1297,6 +1297,9 @@ export interface McpServerInfo {
   requiredEnvKeys: string[];
   missingEnvKeys: string[];
   credentialEnvKeys: string[];
+  credentialEnv: {
+    [k: string]: string;
+  };
   headerKeys: string[];
   envHttpHeaders: {
     [k: string]: string;

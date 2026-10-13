@@ -67,10 +67,10 @@ _SERVER_FIELDS = frozenset(
         "description",
     }
 )
-# Maps of header / URL parameter name to environment variable name. A patch
-# carries each one whole, so it replaces the stored map: merging it key by
-# key would keep every entry the client removed.
-_REPLACED_MAPS = ("envHttpHeaders", "envUrlParams")
+# Maps of header / URL parameter / environment variable name to where its
+# value comes from. A patch carries each one whole, so it replaces the stored
+# map: merging it key by key would keep every entry the client removed.
+_REPLACED_MAPS = ("credentialEnv", "envHttpHeaders", "envUrlParams")
 _SECRET_FLAG = re.compile(
     r"(?:token|api[-_]?key|password|passwd|secret|authorization|auth|header)",
     re.IGNORECASE,
@@ -102,6 +102,7 @@ class McpServerInfo:
     required_env_keys: tuple[str, ...]
     missing_env_keys: tuple[str, ...]
     credential_env_keys: tuple[str, ...]
+    credential_env: tuple[tuple[str, str], ...]
     header_keys: tuple[str, ...]
     env_http_headers: tuple[tuple[str, str], ...]
     env_url_params: tuple[tuple[str, str], ...]
@@ -782,6 +783,12 @@ def _validated_server_info(
             )
         ),
         credential_env_keys=tuple(sorted(server.credential_env)),
+        credential_env=tuple(
+            sorted(
+                (name, reference.credential_ref)
+                for name, reference in server.credential_env.items()
+            )
+        ),
         header_keys=tuple(
             sorted(
                 {
@@ -842,6 +849,7 @@ def _invalid_server_info(
         required_env_keys=(),
         missing_env_keys=(),
         credential_env_keys=(),
+        credential_env=(),
         header_keys=tuple(sorted(raw.get("headers", {})))
         if isinstance(raw.get("headers"), dict)
         else (),

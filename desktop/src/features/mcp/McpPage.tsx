@@ -119,6 +119,8 @@ export function McpPage({
   const save = async () => {
     const name = draft.name.trim();
     if (!name) return;
+    // Maps are sent whole, and the service replaces them: a line removed
+    // here is removed from the saved server.
     const server: JsonObject = {
       type: draft.transport,
       enabled: editing?.enabled ?? false,
@@ -137,15 +139,11 @@ export function McpPage({
             cwd: draft.cwd.trim() || null,
             envVars: csv(draft.envVars),
             requiredEnvVars: csv(draft.requiredEnvVars),
-            ...(draft.credentialEnv.trim()
-              ? { credentialEnv: credentialMap(draft.credentialEnv) }
-              : {}),
+            credentialEnv: credentialMap(draft.credentialEnv),
           }
         : {
             url: draft.url.trim(),
             auth: draft.auth === "oauth" ? "oauth" : null,
-            // Sent whole, and the service replaces them: a removed line is
-            // removed from the saved server.
             envHttpHeaders: stringMap(draft.headerEnv),
             envUrlParams: stringMap(draft.urlParamEnv),
           }),
@@ -177,7 +175,9 @@ export function McpPage({
       url: server.url ?? "",
       envVars: server.forwardedEnvKeys.join(", "),
       requiredEnvVars: server.requiredEnvKeys.join(", "),
-      credentialEnv: server.credentialEnvKeys.map((name) => `${name}=`).join("\n"),
+      credentialEnv: Object.entries(server.credentialEnv)
+        .map(([name, reference]) => `${name}=${reference.replace(/^provider:/, "")}`)
+        .join("\n"),
       headerEnv: mapLines(server.envHttpHeaders),
       urlParamEnv: mapLines(server.envUrlParams),
       enabledTools: server.enabledTools?.join(", ") ?? "",

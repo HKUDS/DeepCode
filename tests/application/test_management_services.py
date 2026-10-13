@@ -286,6 +286,53 @@ def test_mcp_upsert_replaces_header_and_url_parameter_maps(
         application.close()
 
 
+def test_mcp_upsert_replaces_credential_bindings(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    home.mkdir()
+    workspace.mkdir()
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+    monkeypatch.chdir(workspace)
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    project = application.projects.add(str(workspace))
+    local = {"type": "stdio", "command": "python3"}
+    try:
+        application.mcp.upsert(
+            project_id=project.id,
+            scope="user",
+            name="local",
+            patch={
+                **local,
+                "credentialEnv": {
+                    "API_KEY": {"credentialRef": "provider:openrouter"},
+                    "OLD_KEY": {"credentialRef": "provider:anthropic"},
+                },
+            },
+        )
+        inventory = application.mcp.upsert(
+            project_id=project.id,
+            scope="user",
+            name="local",
+            patch={
+                **local,
+                "credentialEnv": {"API_KEY": {"credentialRef": "provider:openrouter"}},
+            },
+        )
+        stored = json.loads((home / "deepcode_config.json").read_text())
+        assert stored["mcpServers"]["local"]["credentialEnv"] == {
+            "API_KEY": {"credentialRef": "provider:openrouter"}
+        }
+        server = next(item for item in inventory.servers if item.name == "local")
+        assert mcp_server_view(server)["credentialEnv"] == {
+            "API_KEY": "provider:openrouter"
+        }
+    finally:
+        application.close()
+
+
 def test_mcp_inventory_includes_plugin_servers_with_effective_user_policy(
     tmp_path: Path,
     monkeypatch,

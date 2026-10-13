@@ -3252,6 +3252,12 @@
             "type": "string"
           }
         },
+        "credentialEnv": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
         "headerKeys": {
           "type": "array",
           "items": {
@@ -3350,6 +3356,7 @@
         "requiredEnvKeys",
         "missingEnvKeys",
         "credentialEnvKeys",
+        "credentialEnv",
         "headerKeys",
         "envHttpHeaders",
         "envUrlParams",
