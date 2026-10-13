@@ -372,6 +372,7 @@ def test_worktree_recreates_a_missing_registered_path_only_with_its_manifest(
 
 
 @pytest.mark.skipif(not Path("/bin/sh").exists(), reason="requires a Unix PTY")
+@pytest.mark.usefixtures("plain_shell")
 def test_terminal_is_thread_owned_and_emits_output_and_exit(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()

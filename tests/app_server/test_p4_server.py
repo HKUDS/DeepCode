@@ -10,6 +10,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from app_server.server import AppServer
 from app_server.protocol.codec import encode_message
 from core.application import DeepCodeApplication
@@ -43,6 +45,7 @@ def _until(reader, predicate) -> dict[str, Any]:
     raise AssertionError("matching protocol message was not received")
 
 
+@pytest.mark.usefixtures("plain_shell")
 def test_p4_file_git_and_terminal_protocol_round_trip(tmp_path: Path) -> None:
     workspace = tmp_path / "repository"
     workspace.mkdir()

@@ -12,7 +12,10 @@ from core.application import DeepCodeApplication
 from core.application.errors import InvalidArgumentError, TerminalNotFoundError
 from core.domain import TrustState
 
-pytestmark = pytest.mark.skipif(os.name == "nt", reason="POSIX PTY adapter only")
+pytestmark = [
+    pytest.mark.skipif(os.name == "nt", reason="POSIX PTY adapter only"),
+    pytest.mark.usefixtures("plain_shell"),
+]
 
 
 @pytest.fixture

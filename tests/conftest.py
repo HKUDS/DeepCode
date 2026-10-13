@@ -34,6 +34,17 @@ def _isolate_session_store(tmp_path, monkeypatch):
 
 
 @pytest.fixture
+def plain_shell(monkeypatch):
+    """Open terminals in /bin/sh rather than the developer's login shell.
+
+    An interactive login shell runs its rc files first (a conda hook alone
+    takes seconds, far longer on a loaded machine), which used up the few
+    seconds PTY tests allow for output from the command they type into it.
+    """
+    monkeypatch.setenv("SHELL", "/bin/sh")
+
+
+@pytest.fixture
 def shared_cli_service(monkeypatch):
     """Real HTTP/WS host in a test thread, so patched model providers stay local."""
     import asyncio

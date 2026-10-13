@@ -13,6 +13,7 @@ from tests.app_server.test_websocket import initialize, rpc
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX PTY adapter only")
+@pytest.mark.usefixtures("plain_shell")
 @pytest.mark.parametrize("overflow", [False, True])
 def test_real_pty_disconnected_exit_and_readonly_recovery(tmp_path, overflow):
     async def scenario():
