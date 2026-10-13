@@ -136,3 +136,38 @@ def test_team_exclude_keeps_non_ascii_user_rules(tmp_path):
     assert "数据/" in exclude.read_text(encoding="utf-8")
     m.cleanup_all()
     assert exclude.read_bytes().splitlines() == original.splitlines()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="hooks are shell scripts")
+@pytest.mark.parametrize("hooks_dir", [".git/hooks", ".githooks"])
+def test_isolated_agent_commits_and_merges_run_no_hooks(tmp_path, hooks_dir):
+    # The agent can write the repository's hooks, or the tracked directory
+    # core.hooksPath names. DeepCode commits and merges for isolated agents
+    # outside the sandbox, so a planted hook would escape it.
+    m = _mgr(tmp_path)
+    m.ensure_base()
+    if hooks_dir != ".git/hooks":
+        m._git("config", "core.hooksPath", hooks_dir)  # noqa: SLF001
+    hooks = m.base / hooks_dir
+    hooks.mkdir(exist_ok=True)
+    ran = tmp_path / "ran"
+    for name in (
+        "pre-commit",
+        "prepare-commit-msg",
+        "commit-msg",
+        "post-commit",
+        "post-checkout",
+        "pre-merge-commit",
+        "post-merge",
+        "reference-transaction",
+    ):
+        hook = hooks / name
+        hook.write_text(f'#!/bin/sh\necho {name} >> "{ran}"\n')
+        hook.chmod(0o755)
+
+    wt = Path(m.create("w1"))
+    (wt / "a.py").write_text("A = 1\n")
+    assert m.merge("w1").clean
+    m.cleanup_all()
+
+    assert not ran.exists(), ran.read_text()

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import platform
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -256,6 +257,95 @@ def test_seatbelt_allows_reads_everywhere(tmp_path):
         wrapped.cleanup()
     assert proc.returncode == 0
     assert proc.stdout.decode().strip() == "hello"
+
+
+def _git_repository(path: Path) -> None:
+    path.mkdir()
+    for args in (["init", "-q"], ["commit", "-q", "--allow-empty", "-m", "base"]):
+        subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+            cwd=path,
+            check=True,
+            capture_output=True,
+        )
+
+
+_git = shutil.which("git") is not None
+
+
+@pytest.mark.skipif(not (_seatbelt and _git), reason="seatbelt and git required")
+def test_seatbelt_keeps_workspace_control_paths_read_only(tmp_path):
+    # DeepCode later acts on these outside the sandbox: git runs hooks and
+    # config-defined programs, and the next session loads project hooks and
+    # config. A sandboxed command must not plant anything there.
+    workspace = tmp_path / "ws"
+    _git_repository(workspace)
+    policy = SandboxPolicy(writable_roots=(str(workspace),))
+
+    for command in (
+        "echo 'touch /tmp/x' > .git/hooks/pre-commit",
+        "git config core.fsmonitor 'touch /tmp/x'",
+        "echo /tmp/elsewhere > .git/commondir",
+        "mkdir -p .git/modules/sub",
+        "mv .git .git-old",
+        "mkdir .deepcode",
+        "mkdir .claude",
+        "echo '{}' > deepcode_config.json",
+    ):
+        assert _run(command, policy, cwd=workspace).returncode != 0, command
+    assert not (workspace / ".git" / "hooks" / "pre-commit").exists()
+    assert not (workspace / ".git" / "commondir").exists()
+    assert not (workspace / ".deepcode").exists()
+    assert not (workspace / "deepcode_config.json").exists()
+
+    # Everyday git still works: only what makes git run a program is fenced.
+    commit = _run(
+        "echo x > f && git add f && "
+        "git -c user.name=t -c user.email=t@t commit -q -m change && "
+        "git switch -q -c topic",
+        policy,
+        cwd=workspace,
+    )
+    assert commit.returncode == 0, commit.stderr
+
+
+@pytest.mark.skipif(not (_seatbelt and _git), reason="seatbelt and git required")
+def test_seatbelt_still_lets_a_command_start_a_repository(tmp_path):
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    policy = SandboxPolicy(writable_roots=(str(workspace),))
+
+    proc = _run("git init -q", policy, cwd=workspace)
+
+    assert proc.returncode == 0, proc.stderr
+    assert (workspace / ".git" / "HEAD").exists()
+
+
+def test_bwrap_mounts_existing_control_paths_read_only(monkeypatch, tmp_path):
+    monkeypatch.setattr("core.harness.sandbox.sandbox_backend", lambda: "bwrap")
+    workspace = tmp_path / "ws"
+    (workspace / ".git" / "hooks").mkdir(parents=True)
+    (workspace / ".git" / "config").write_text("")
+    (workspace / ".deepcode").mkdir()
+    policy = SandboxPolicy(writable_roots=(str(workspace),))
+
+    argv = wrap_shell_command("true", policy).argv
+    joined = "\0".join(argv)
+
+    def at(*parts: Path | str) -> int:
+        return joined.index("\0".join(str(part) for part in parts))
+
+    git = workspace / ".git"
+    bind = at("--bind", workspace, workspace)
+    # .git is pinned by mounting it on itself (a mount point cannot be moved
+    # away), then the parts that make git run a program become read-only.
+    assert bind < at("--bind", git, git)
+    assert at("--bind", git, git) < at("--ro-bind", git / "hooks", git / "hooks")
+    assert bind < at("--ro-bind", git / "config", git / "config")
+    assert bind < at("--ro-bind", workspace / ".deepcode", workspace / ".deepcode")
+    # bwrap can only mount over what exists.
+    assert str(workspace / ".claude") not in argv
+    assert str(git / "commondir") not in argv
 
 
 # ---- Windows Job Object backend ------------------------------------------

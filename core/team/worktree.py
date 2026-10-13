@@ -24,6 +24,10 @@ _GIT_IDENTITY = (
     "user.email=team@deepcode.local",
 )
 _BRANCH_PREFIX = "team/"
+# These calls run outside the sandbox on a repository the agents write to:
+# a hook they planted, in .git/hooks or wherever core.hooksPath points, must
+# not run here.
+_NO_HOOKS = ("-c", "core.hooksPath=/dev/null")
 
 # Paths a worker must never commit: the team's own scratch state (.deepcode/ —
 # task board + per-worker loop state) and build-artifact noise a worker's test
@@ -84,7 +88,7 @@ class WorktreeManager:
 
     def _git(self, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
         return subprocess.run(
-            ["git", *args],
+            ["git", *_NO_HOOKS, *args],
             cwd=str(cwd or self.base),
             capture_output=True,
             text=True,

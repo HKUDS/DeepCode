@@ -244,14 +244,58 @@ _SEATBELT_NETWORK_POLICY = r"""
 """
 
 
+# Paths in a writable root that DeepCode itself acts on later, outside the
+# sandbox: the next session loads the project's hooks (.deepcode/hooks.json,
+# .claude/settings.json) and config from them. A sandboxed command may not
+# create or change them.
+_CONTROL_PATHS = (".deepcode", ".claude", "deepcode_config.json")
+# In a repository that already exists, the parts of .git that make git run a
+# program (hooks, config) or take those from another git dir (commondir,
+# submodule and linked-worktree git dirs), plus .git itself so it cannot be
+# swapped for one the command wrote. The rest stays writable, so commits and
+# branches still work. A repository the command starts is not covered, which
+# keeps git init working.
+_GIT_CONTROL_PATHS = (
+    "config",
+    "config.worktree",
+    "commondir",
+    "hooks",
+    "modules",
+    "worktrees",
+)
+
+
+def _control_paths(root: str) -> list[str]:
+    """What a sandboxed command may not change inside writable ``root``
+    (besides ``.git`` itself)."""
+    paths = [os.path.join(root, name) for name in _CONTROL_PATHS]
+    git = os.path.join(root, ".git")
+    if os.path.isdir(git):
+        paths += [os.path.join(git, name) for name in _GIT_CONTROL_PATHS]
+    return paths
+
+
 def _sbpl_string(path: str) -> str:
     return '"' + path.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _as_resolved(paths) -> list[str]:
+    """Each path as given and resolved. Seatbelt matches the resolved path (in
+    the filesystem's case), so naming where a path really is also covers it
+    when reached through a symlink."""
+    return list(
+        dict.fromkeys(
+            variant
+            for path in paths
+            for variant in (os.path.abspath(path), os.path.realpath(path))
+        )
+    )
 
 
 def _seatbelt_profile(policy: SandboxPolicy) -> str:
     """Deny-by-default seatbelt (.sbpl): the curated base + broad reads + writes
     to ephemeral/device areas and the policy's roots + optional network, minus
-    the policy's credential stores."""
+    the roots' control paths and the policy's credential stores."""
     parts = [
         _SEATBELT_BASE_POLICY.rstrip(),
         "",
@@ -269,21 +313,31 @@ def _seatbelt_profile(policy: SandboxPolicy) -> str:
         "",
         "; writable: the policy's workspace roots",
     ]
-    for root in policy.normalized_roots():
+    roots = policy.normalized_roots()
+    for root in roots:
         parts.append(f"(allow file-write* (subpath {_sbpl_string(root)}))")
-    if policy.unreadable:
-        # Seatbelt matches the resolved path (and the filesystem's case), so a
-        # store reached through a symlink, or a link to one, is covered by
-        # naming where it really is.
-        stores = dict.fromkeys(
-            variant
-            for path in policy.unreadable
-            for variant in (os.path.abspath(path), os.path.realpath(path))
+    if roots:
+        gits = [os.path.join(root, ".git") for root in roots]
+        controls = [path for root in roots for path in _control_paths(root)]
+        parts.append("")
+        parts.append("; control paths in the roots: DeepCode acts on them unsandboxed")
+        parts.append("(deny file-write*")
+        parts.extend(
+            f"  (literal {_sbpl_string(git)})"
+            for git in _as_resolved(git for git in gits if os.path.lexists(git))
         )
+        parts.extend(
+            f"  (subpath {_sbpl_string(path)})" for path in _as_resolved(controls)
+        )
+        parts[-1] += ")"
+    if policy.unreadable:
         parts.append("")
         parts.append("; credential stores: neither readable nor writable")
         parts.append("(deny file-read* file-write*")
-        parts.extend(f"  (subpath {_sbpl_string(path)})" for path in stores)
+        parts.extend(
+            f"  (subpath {_sbpl_string(path)})"
+            for path in _as_resolved(policy.unreadable)
+        )
         parts[-1] += ")"
     if policy.allow_network:
         parts.append(_SEATBELT_NETWORK_POLICY.rstrip())
@@ -343,6 +397,20 @@ def wrap_argv_command(
         for root in policy.normalized_roots():
             if os.path.exists(root):
                 argv += ["--bind", root, root]
+        for root in policy.normalized_roots():
+            # Real paths, as for the stores below: bwrap does not follow a
+            # symlinked destination.
+            git = os.path.realpath(os.path.join(root, ".git"))
+            if os.path.isdir(git):
+                # Mounted on itself: a mount point cannot be moved away.
+                argv += ["--bind", git, git]
+            elif os.path.isfile(git):
+                argv += ["--ro-bind", git, git]
+            # bwrap can only mount over what exists, so a control path the
+            # command creates is not covered here (seatbelt covers it).
+            for path in map(os.path.realpath, _control_paths(root)):
+                if os.path.exists(path):
+                    argv += ["--ro-bind", path, path]
         # Mounted over after the binds so they win even inside a writable
         # root. bwrap can only mount over what exists; a store that does not
         # exist has nothing to hide. A symlinked store (dotfile managers) is

@@ -318,6 +318,30 @@ def test_worktree_lifecycle_requires_explicit_dirty_cleanup(tmp_path: Path) -> N
         application.close()
 
 
+@pytest.mark.skipif(not Path("/bin/sh").exists(), reason="hooks are shell scripts")
+def test_worktree_and_discard_run_no_repository_hooks(tmp_path: Path) -> None:
+    # The agent can write .git/hooks (outside a sandbox, or with no sandbox
+    # backend); DeepCode's own git calls must not run what it planted there.
+    workspace = tmp_path / "repository"
+    _repository(workspace)
+    ran = tmp_path / "ran"
+    for name in ("post-checkout", "post-index-change", "reference-transaction"):
+        hook = workspace / ".git" / "hooks" / name
+        hook.write_text(f'#!/bin/sh\necho {name} >> "{ran}"\n', encoding="utf-8")
+        hook.chmod(0o755)
+    application, thread_id = _application(tmp_path, workspace)
+    try:
+        (workspace / "tracked.txt").write_text("changed\n", encoding="utf-8")
+        diff = application.git.diff(thread_id, path="tracked.txt")[0]
+        application.git.discard(thread_id, "tracked.txt", diff.revision)
+        application.worktrees.create(thread_id)
+        application.worktrees.remove(thread_id, disposition="clean", force=True)
+    finally:
+        application.close()
+
+    assert not ran.exists(), ran.read_text(encoding="utf-8")
+
+
 def test_worktree_recreates_a_missing_registered_path_only_with_its_manifest(
     tmp_path: Path,
 ) -> None:
