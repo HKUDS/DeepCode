@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable, Iterable, Mapping
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
@@ -40,8 +39,6 @@ from core.skills.provider import (
     SkillSearchResult,
 )
 
-logger = logging.getLogger(__name__)
-
 MAX_SKILLS_PER_TURN = 8
 MAX_INJECTED_SKILL_CHARS = 48_000
 
@@ -61,8 +58,10 @@ class SkillTurnContext:
     capability_mcp_servers: Mapping[str, frozenset[str]] | None = None
     allowed_tools: set[str] = field(default_factory=set)
     has_tool_restriction: bool = False
+    warnings: list[str] = field(default_factory=list)
     on_invocation: Callable[[SkillInvocation], None] | None = None
     on_failure: Callable[[str, str | None], None] | None = None
+    on_warning: Callable[[str], None] | None = None
 
     def register(
         self,
@@ -83,18 +82,27 @@ class SkillTurnContext:
         self.loaded[identity] = invocation
         self.loaded_records[identity] = record
         declared = {tool.casefold() for tool in record.allowed_tools}
-        if self.capability_tools is not None and declared - self.capability_tools:
+        unknown = [
+            tool
+            for tool in record.allowed_tools
+            if self.capability_tools is not None
+            and tool.casefold() not in self.capability_tools
+        ]
+        if unknown:
             # A name this Session has no tool for, such as another agent's
             # WebSearch, matches nothing. Beside a known name it is harmless
             # (and a deferred MCP tool may still appear), but on its own it
             # would leave the Turn without tools, so it restricts nothing.
-            logger.warning(
-                "Skill %s: allowed-tools names unknown tools: %s",
-                record.name,
-                ", ".join(sorted(declared - self.capability_tools)),
+            message = (
+                f"Skill {record.name}: allowed-tools names tools this Session "
+                f"does not have: {', '.join(unknown)}"
             )
-            if not declared & self.capability_tools:
+            if not declared - {tool.casefold() for tool in unknown}:
                 declared = set()
+                message += "; the Skill does not restrict this Turn's tools"
+            self.warnings.append(message)
+            if self.on_warning is not None:
+                self.on_warning(message)
         if declared:
             self.has_tool_restriction = True
             self.allowed_tools.update(declared)

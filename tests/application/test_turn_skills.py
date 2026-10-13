@@ -4,10 +4,12 @@ import time
 from pathlib import Path
 
 from core.application import DeepCodeApplication
+from core.domain.item import ItemKind, ItemStatus
 from core.domain.project import TrustState
 from core.domain.turn import TurnStatus
 from core.events import (
     AgentMessage,
+    ErrorEvent,
     Event,
     SkillLoaded,
     TaskComplete,
@@ -49,9 +51,21 @@ class SkillSession:
         return None
 
 
+WARNING = "Skill research: allowed-tools names tools this Session does not have"
+
+
+class WarningSkillSession(SkillSession):
+    async def run_stream(self, op):
+        self.submitted = op
+        yield Event("1", TurnStarted())
+        yield Event("2", ErrorEvent(WARNING, warning=True))
+        yield Event("3", AgentMessage("done"))
+        yield Event("4", TaskComplete("done", "completed"))
+
+
 class SkillFactory:
-    def __init__(self) -> None:
-        self.session = SkillSession()
+    def __init__(self, session: SkillSession | None = None) -> None:
+        self.session = session or SkillSession()
 
     def create(self, **_kwargs):
         return self.session
@@ -154,3 +168,31 @@ def test_turn_skill_selection_survives_application_reopen(
         assert restored.items[0].payload["skillIds"] == [SKILL_ID]
     finally:
         reopened.close()
+
+
+def test_a_turn_warning_is_saved_as_a_warning_not_a_failure(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    application = DeepCodeApplication.open(
+        tmp_path / "state.sqlite3",
+        session_factory=SkillFactory(WarningSkillSession()),
+        session_store=SessionStore(tmp_path / "sessions"),
+    )
+    project = application.projects.add(
+        str(workspace),
+        trust_state=TrustState.TRUSTED,
+    )
+    thread = application.threads.start(project.id, title="Warnings")
+    try:
+        started = application.turns.start(thread.id, prompt="$research go")
+        snapshot = _wait(application, started.turn.id)
+
+        assert snapshot.turn.status is TurnStatus.COMPLETED
+        notice = next(item for item in snapshot.items if item.kind is ItemKind.ERROR)
+        # Clients show an error item with this severity as a warning.
+        assert notice.status is ItemStatus.COMPLETED
+        assert notice.payload == {"message": WARNING, "severity": "warning"}
+    finally:
+        application.close()

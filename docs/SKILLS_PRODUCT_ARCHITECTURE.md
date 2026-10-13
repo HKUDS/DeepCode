@@ -16,8 +16,9 @@ code are explicitly out of scope.
    `allowed-tools` declaration can only narrow the tools already allowed by the
    Session policy. It narrows by tool name: a Claude-style `Bash(git status:*)`
    admits the whole bash tool, and an entry that is not a tool name is ignored;
-   both are reported as catalog warnings. A declaration naming no tool the
-   Session has restricts nothing rather than leaving the Turn without tools.
+   both are reported as catalog warnings. A name the Session has no tool for
+   is a warning in the Turn, and a declaration naming no tool the Session has
+   restricts nothing rather than leaving the Turn without tools.
 4. Project Skills are code from the working tree. Desktop may expose their
    metadata while a Project is untrusted, but it must not expose instructions
    or execute a Turn until the Project is trusted. Starting the CLI with an

@@ -860,6 +860,8 @@ class AgentSession:
             for invocation in invocations:
                 self._emit(SkillLoaded(invocation=invocation))
             if skill_context is not None:
+                for warning in skill_context.warnings:
+                    self._emit(ErrorEvent(message=warning, warning=True))
                 # Progressive-disclosure loads happen during tool execution and
                 # join the same per-turn invocation ledger.
                 skill_context.on_invocation = lambda invocation: self._emit(
@@ -867,6 +869,9 @@ class AgentSession:
                 )
                 skill_context.on_failure = lambda message, skill_id: self._emit(
                     SkillLoadFailed(message=message, skill_id=skill_id)
+                )
+                skill_context.on_warning = lambda message: self._emit(
+                    ErrorEvent(message=message, warning=True)
                 )
             terminal = await self._execute_turn(text, skill_context)
         except asyncio.CancelledError:

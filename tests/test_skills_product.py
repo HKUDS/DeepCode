@@ -290,6 +290,37 @@ def test_claude_style_allowed_tools_keep_the_skill_usable(tmp_path: Path) -> Non
         runtime.end_turn(token)
 
 
+@pytest.mark.asyncio
+async def test_unknown_allowed_tools_are_a_warning_in_the_turn(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_skill(
+        workspace / ".agents" / "skills",
+        "research",
+        allowed_tools="Read, WebSearch",
+    )
+    runtime = SkillRuntime(workspace, include_user=False, include_system=False)
+    session = AgentSession(
+        CapturingProvider(),
+        default_coding_tools(workspace, skill_runtime=runtime),
+        model="fake-model",
+        skill_runtime=runtime,
+    )
+
+    events = [
+        event.msg async for event in session.run_stream(UserInput(text="$research go"))
+    ]
+
+    warnings = [event for event in events if event.type == "error"]
+    assert len(warnings) == 1
+    assert warnings[0].warning is True
+    assert "research" in warnings[0].message
+    assert "WebSearch" in warnings[0].message
+    assert events[-1].stop_reason == "completed"
+
+
 def test_agent_skill_allowed_tools_accept_argument_patterns(tmp_path: Path) -> None:
     root = tmp_path / "skills"
     directory = root / "commit"

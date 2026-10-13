@@ -251,12 +251,22 @@ class TurnEventProjector:
                     },
                 )
         elif isinstance(message, ErrorEvent):
-            self._add_item(
-                kind=ItemKind.ERROR,
-                status=ItemStatus.FAILED,
-                summary=message.message,
-                payload={"message": message.message},
-            )
+            if message.warning:
+                # A problem the Turn survived: clients show an error item with
+                # this severity as a warning, not as a failed step.
+                self._add_item(
+                    kind=ItemKind.ERROR,
+                    status=ItemStatus.COMPLETED,
+                    summary=message.message,
+                    payload={"message": message.message, "severity": "warning"},
+                )
+            else:
+                self._add_item(
+                    kind=ItemKind.ERROR,
+                    status=ItemStatus.FAILED,
+                    summary=message.message,
+                    payload={"message": message.message},
+                )
         elif isinstance(message, TaskComplete):
             if message.final_text and not self._saw_final_assistant:
                 # Completes the answer's own item when its write failed, and
