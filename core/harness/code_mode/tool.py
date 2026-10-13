@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from core.agent_runtime.processes import (
-    subprocess_group_kwargs,
+    start_process_group,
     terminate_process_tree,
 )
 from core.agent_runtime.tools.base import Tool, tool_parameters
@@ -164,7 +164,7 @@ class CodeModeTool(Tool):
 
     async def _run(self, argv: list[str], init: dict) -> str:
         try:
-            proc = await asyncio.create_subprocess_exec(
+            proc = await start_process_group(
                 *argv,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
@@ -175,15 +175,15 @@ class CodeModeTool(Tool):
                 # either (see env_sanitize.child_env).
                 env=child_env(),
                 limit=_STREAM_LIMIT,
-                **subprocess_group_kwargs(),
             )
         except OSError as exc:
             return f"Error: could not start code-mode runtime: {exc}"
 
-        proc.stdin.write((json.dumps(init) + "\n").encode())
-        await proc.stdin.drain()
-
         try:
+            # Inside the try: a cancel while handing over the init must also
+            # end the runtime.
+            proc.stdin.write((json.dumps(init) + "\n").encode())
+            await proc.stdin.drain()
             done = await asyncio.wait_for(self._rpc_loop(proc), timeout=self._timeout_s)
         except TimeoutError:
             await terminate_process_tree(proc)

@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from core.agent_runtime.processes import (
-    subprocess_group_kwargs,
+    start_process_group,
     terminate_process_tree,
 )
 from core.config import home_config_path
@@ -248,7 +248,7 @@ async def run_external_subagent(
 
     with tempfile.TemporaryDirectory(prefix="deepcode-subagent-") as scratch:
         answer_path = Path(scratch) / "last-message.txt"
-        process = await asyncio.create_subprocess_exec(
+        process = await start_process_group(
             executable,
             *cli.argv(answer_path),
             cwd=str(workspace),
@@ -256,7 +256,6 @@ async def run_external_subagent(
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            **subprocess_group_kwargs(),
         )
         try:
             async with asyncio.timeout(budget):

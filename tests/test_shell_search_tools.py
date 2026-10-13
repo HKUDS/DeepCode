@@ -197,6 +197,32 @@ async def test_bash_large_output_spilled(tmp_path):
     assert "output truncated" in out and "saved to:" in out
 
 
+async def _within(seconds: float, condition) -> bool:
+    """Poll ``condition`` until it holds; a loaded machine can take a while
+    to start a shell or to reap a killed child, so the bound is generous."""
+    deadline = time.monotonic() + seconds
+    while not condition():
+        if time.monotonic() > deadline:
+            return False
+        await asyncio.sleep(0.01)
+    return True
+
+
+def _started(pid_file: Path):
+    return lambda: pid_file.exists() and pid_file.read_text().strip() != ""
+
+
+def _gone(pid: int):
+    def check() -> bool:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        return False
+
+    return check
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process-group assertion")
 @pytest.mark.asyncio
 async def test_bash_cancellation_terminates_child_process_tree(tmp_path, monkeypatch):
@@ -206,25 +232,48 @@ async def test_bash_cancellation_terminates_child_process_tree(tmp_path, monkeyp
     task = asyncio.create_task(
         tool.execute(command="sleep 30 & echo $! > child.pid; wait")
     )
-    for _ in range(100):
-        if pid_file.exists():
-            break
-        await asyncio.sleep(0.01)
-    assert pid_file.exists()
+    assert await _within(10, _started(pid_file))
     child_pid = int(pid_file.read_text().strip())
 
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
 
-    for _ in range(100):
-        try:
-            os.kill(child_pid, 0)
-        except ProcessLookupError:
-            break
-        await asyncio.sleep(0.01)
-    else:
-        pytest.fail("child process survived cancellation")
+    # Well under the child's 30 s, so a survivor is still caught.
+    assert await _within(10, _gone(child_pid)), "child survived cancellation"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group assertion")
+@pytest.mark.asyncio
+async def test_bash_cancelled_while_starting_terminates_child_process_tree(
+    tmp_path, monkeypatch
+):
+    """asyncio forks before it has wired the pipes. A cancel in between, which
+    a loaded machine makes likely, used to SIGKILL bash alone: its background
+    child lived on under init."""
+    monkeypatch.setenv("DEEPCODE_SANDBOX", "0")
+    pid_file = tmp_path / "child.pid"
+    cancelled = asyncio.Event()
+    spawn = asyncio.create_subprocess_exec
+
+    async def slow_to_wire(*args, **kwargs):
+        process = await spawn(*args, **kwargs)
+        await cancelled.wait()  # the cancel arrives before the start returns
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", slow_to_wire)
+    task = asyncio.create_task(
+        BashTool(str(tmp_path)).execute(command="sleep 30 & echo $! > child.pid; wait")
+    )
+    assert await _within(10, _started(pid_file))
+    child_pid = int(pid_file.read_text().strip())
+
+    task.cancel()
+    cancelled.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert await _within(10, _gone(child_pid)), "child survived cancellation"
 
 
 # --- grep -------------------------------------------------------------------

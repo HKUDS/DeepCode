@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from core.agent_runtime.processes import (
-    subprocess_group_kwargs,
+    start_process_group,
     terminate_process_tree,
 )
 from core.harness.env_sanitize import child_env
@@ -72,14 +72,13 @@ async def run_command(handler: Handler, payload_json: str, cwd: str) -> CommandR
     # ``handler.env`` merges last either way.
     env = child_env(handler.env)
     try:
-        proc = await asyncio.create_subprocess_exec(
+        proc = await start_process_group(
             *argv,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
             env=env,
-            **subprocess_group_kwargs(),
         )
     except OSError as exc:
         return CommandResult(None, "", "", f"failed to spawn hook: {exc}", 0)

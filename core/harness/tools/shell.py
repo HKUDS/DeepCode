@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from core.agent_runtime.processes import (
-    subprocess_group_kwargs,
+    start_process_group,
     terminate_process_tree,
 )
 from core.agent_runtime.tools.base import Tool, ToolResult, tool_parameters
@@ -204,7 +204,7 @@ class BashTool(Tool):
         except OSError as exc:  # no bash to run it in (Windows without Git)
             return f"Error: could not run command: {exc}"
         try:
-            proc = await asyncio.create_subprocess_exec(
+            proc = await start_process_group(
                 *wrapped.argv,
                 cwd=self._workspace,
                 # Never DeepCode's own model keys or PYTHONPATH; with
@@ -213,7 +213,6 @@ class BashTool(Tool):
                 env=child_env(),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
-                **subprocess_group_kwargs(),
             )
             try:
                 out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
