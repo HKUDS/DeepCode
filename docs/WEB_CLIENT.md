@@ -17,9 +17,12 @@ deepcode service status --json
 
 The launcher prints the actual URL, including a single-use ticket valid for
 60 seconds. The browser immediately removes the ticket from the address bar and
-exchanges it for an HttpOnly session cookie. No DeepCode account is required.
-A session lasts 12 hours; after expiration or service restart, run `deepcode web`
-again. Sign out revokes that browser session without stopping admitted tasks.
+exchanges it for a browser session. No DeepCode account is required. The page
+keeps the session in its own site storage rather than in a cookie, because a
+browser sends cookies to every port on `127.0.0.1` and so to any other local
+server you visit. A session lasts 12 hours and is shared by tabs of the same
+address; after expiration or service restart, run `deepcode web` again. Sign
+out revokes that browser session without stopping admitted tasks.
 The service binds to `127.0.0.1` only; use the printed host and port. Public
 hosting and arbitrary reverse-proxy origins are not supported.
 

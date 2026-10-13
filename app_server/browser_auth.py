@@ -1,4 +1,9 @@
-"""Instance-local browser sessions; all access belongs to the HTTP event loop."""
+"""Instance-local browser sessions; all access belongs to the HTTP event loop.
+
+A session is never a cookie: browsers send a host's cookies to all of its
+ports, so every other local server the user visits would receive it. The page
+keeps the session in its own origin's storage and presents it explicitly.
+"""
 
 from __future__ import annotations
 
@@ -9,19 +14,37 @@ from collections.abc import Callable
 
 from aiohttp import web
 
+# Browsers cannot set headers on a WebSocket handshake, so the page offers its
+# session as a second subprotocol beside the one the service selects.
+RPC_PROTOCOL = "deepcode.rpc"
+SESSION_PROTOCOL = "deepcode.session."
+
+
+def _presented(request: web.Request) -> str:
+    scheme, _, credential = request.headers.get("Authorization", "").partition(" ")
+    if scheme == "Bearer":
+        return credential
+    offered = [
+        protocol.strip()
+        for protocol in request.headers.get("Sec-WebSocket-Protocol", "").split(",")
+    ]
+    # A handshake that cannot select the RPC protocol logs every offered one.
+    if RPC_PROTOCOL in offered:
+        for protocol in offered:
+            if protocol.startswith(SESSION_PROTOCOL):
+                return protocol.removeprefix(SESSION_PROTOCOL)
+    return ""
+
 
 class BrowserAuth:
+    """Sessions live in memory, so a service restart invalidates all of them."""
+
     TICKET_TTL = 60
     SESSION_TTL = 12 * 60 * 60
     CAPACITY = 64
     EXCHANGES_PER_MINUTE = 60
 
-    def __init__(
-        self, instance_id: str, *, clock: Callable[[], float] = time.monotonic
-    ):
-        # Cookies are not scoped by port. Instance-specific names avoid collisions
-        # between separate local databases, and restart invalidates all sessions.
-        self.cookie_name = f"deepcode_session_{instance_id}"
+    def __init__(self, *, clock: Callable[[], float] = time.monotonic):
         self._clock = clock
         self._tickets: dict[str, float] = {}
         self._sessions: dict[str, float] = {}
@@ -57,7 +80,7 @@ class BrowserAuth:
         return max(0.0, self._sessions.get(session, 0.0) - self._clock())
 
     def require(self, request: web.Request) -> str:
-        session = request.cookies.get(self.cookie_name, "")
+        session = _presented(request)
         if not self.remaining(session):
             raise web.HTTPUnauthorized(text="Browser session expired; open a new link")
         return session

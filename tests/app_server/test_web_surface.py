@@ -25,8 +25,8 @@ async def browser_headers(control, client):
         headers={"Origin": control.record.url},
         json={"ticket": ticket},
     )
-    cookie = next(iter(response.cookies.values()))
-    return {"Origin": control.record.url, "Cookie": f"{cookie.key}={cookie.value}"}
+    session = (await response.json())["session"]
+    return {"Origin": control.record.url, "Authorization": f"Bearer {session}"}
 
 
 def test_static_assets_missing_build_and_path_boundaries(tmp_path):

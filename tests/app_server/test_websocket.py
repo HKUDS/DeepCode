@@ -10,7 +10,7 @@ import threading
 from aiohttp import ClientSession, WSServerHandshakeError, WSMsgType, web
 import pytest
 
-from app_server.browser_auth import BrowserAuth
+from app_server.browser_auth import RPC_PROTOCOL, SESSION_PROTOCOL, BrowserAuth
 from app_server.service_client import ServiceClient, ServiceUnavailable
 from app_server.service_state import ServiceFiles
 from app_server.websocket import FrameQueue
@@ -157,15 +157,12 @@ async def browser_headers(control, client):
         json={"ticket": ticket},
     )
     assert response.status == 200
-    cookie = response.cookies[control.browser_auth.cookie_name]
-    assert cookie["httponly"] and cookie["samesite"] == "Strict"
+    assert "Set-Cookie" not in response.headers
     assert response.headers["Cache-Control"] == "no-store"
-    assert cookie.value not in await response.text()
-    # Tests explicitly select sessions, instead of the last Set-Cookie winning.
-    client.session.cookie_jar.clear()
+    session = (await response.json())["session"]
     return {
         "Origin": control.record.url,
-        "Cookie": f"{cookie.key}={cookie.value}",
+        "Authorization": f"Bearer {session}",
     }, ticket
 
 
@@ -196,17 +193,14 @@ def test_browser_auth_origin_replay_logout_and_management_separation(tmp_path):
             assert (
                 await client.post("/control/rpc", headers=headers, json=body("stop"))
             ).status == 403
+            session_only = {"Authorization": headers["Authorization"]}
             assert (
                 await client.post(
-                    "/control/rpc",
-                    headers={"Cookie": headers["Cookie"]},
-                    json=body("stop"),
+                    "/control/rpc", headers=session_only, json=body("stop")
                 )
             ).status == 401
             with pytest.raises(WSServerHandshakeError) as failure:
-                await client.ws_connect(
-                    "/api/rpc", headers={"Cookie": headers["Cookie"]}
-                )
+                await client.ws_connect("/api/rpc", headers=session_only)
             assert failure.value.status == 401
             first = await client.ws_connect("/api/rpc", headers=headers)
             sibling = await client.ws_connect("/api/rpc", headers=headers)
@@ -227,16 +221,63 @@ def test_browser_auth_origin_replay_logout_and_management_separation(tmp_path):
     asyncio.run(asyncio.wait_for(scenario(), timeout=20))
 
 
+def test_browser_session_is_never_a_cookie_and_rides_a_websocket_subprotocol(
+    tmp_path, caplog
+):
+    # A cookie for 127.0.0.1 also goes to every other port on it, so another
+    # local server the user visits would receive it and could drive the agent.
+    async def scenario():
+        async with control_server(tmp_path) as (control, client):
+            headers, _ = await browser_headers(control, client)
+            session = headers["Authorization"].removeprefix("Bearer ")
+            origin = {"Origin": control.record.url}
+            assert (await client.get("/api/session", headers=headers)).status == 200
+            for presented in [
+                {"Cookie": f"deepcode_session={session}"},
+                {"Authorization": f"Basic {session}"},
+            ]:
+                assert (
+                    await client.get("/api/session", headers={**origin, **presented})
+                ).status == 401
+                with pytest.raises(WSServerHandshakeError) as failure:
+                    await client.ws_connect("/api/rpc", headers={**origin, **presented})
+                assert failure.value.status == 401
+
+            # What a browser sends: it cannot set headers on a WebSocket.
+            ws = await client.ws_connect(
+                "/api/rpc",
+                headers=origin,
+                protocols=(RPC_PROTOCOL, SESSION_PROTOCOL + session),
+            )
+            assert ws.protocol == RPC_PROTOCOL
+            await initialize(ws)
+            await ws.close()
+            for protocols in [
+                (RPC_PROTOCOL, SESSION_PROTOCOL + "wrong"),
+                # Unselectable offers are logged, so they never authenticate.
+                (SESSION_PROTOCOL + session,),
+            ]:
+                with pytest.raises(WSServerHandshakeError) as failure:
+                    await client.ws_connect(
+                        "/api/rpc", headers=origin, protocols=protocols
+                    )
+                assert failure.value.status == 401
+            assert session not in caplog.text
+
+    with caplog.at_level("DEBUG"):
+        asyncio.run(asyncio.wait_for(scenario(), timeout=20))
+
+
 def test_ticket_expiry_session_expiry_limits_and_restart():
     now = [100.0]
-    sessions = BrowserAuth("first", clock=lambda: now[0])
+    sessions = BrowserAuth(clock=lambda: now[0])
     ticket = sessions.issue()["ticket"]
     now[0] += 60
     with pytest.raises(web.HTTPUnauthorized):
         sessions.exchange(ticket)
     session = sessions.exchange(sessions.issue()["ticket"])
     assert sessions.remaining(session) == sessions.SESSION_TTL
-    assert BrowserAuth("second").remaining(session) == 0
+    assert BrowserAuth().remaining(session) == 0
     now[0] += sessions.SESSION_TTL
     assert sessions.remaining(session) == 0
     sessions.EXCHANGES_PER_MINUTE = 2

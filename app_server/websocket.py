@@ -11,7 +11,7 @@ import threading
 
 from aiohttp import WSMsgType, web
 
-from app_server.browser_auth import BrowserAuth
+from app_server.browser_auth import RPC_PROTOCOL, BrowserAuth
 from app_server.errors import RpcError
 from app_server.host import ServiceHost
 from app_server.peer import RpcPeer
@@ -189,6 +189,7 @@ class WebSocketTransport:
             timeout=2,
             max_msg_size=self.host.max_message_bytes,
             compress=False,
+            protocols=(RPC_PROTOCOL,),
         )
         # Reserve before the first await, including handshakes in progress.
         self._connections[ws] = session

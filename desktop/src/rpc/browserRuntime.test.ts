@@ -19,6 +19,8 @@ const handshake = {
 type Frame = { id: number; method: string; params: Record<string, unknown> };
 let handle: (socket: Socket, frame: Frame) => void;
 let requests: Frame[];
+let sockets: Socket[];
+const SESSION_KEY = "deepcode.web.session.v1";
 class Socket {
   static OPEN = 1;
   readyState = 0;
@@ -26,7 +28,11 @@ class Socket {
   onclose?: () => void;
   onmessage?: (event: { data: string }) => void;
   onerror?: () => void;
-  constructor() {
+  constructor(
+    readonly url: string,
+    readonly protocols: string[],
+  ) {
+    sockets.push(this);
     queueMicrotask(() => {
       if (this.readyState === 0) {
         this.readyState = 1;
@@ -53,13 +59,22 @@ let runtime: BrowserRuntime;
 beforeEach(() => {
   vi.useFakeTimers();
   requests = [];
+  sockets = [];
+  localStorage.clear();
   history.replaceState(null, "", "/");
   vi.stubGlobal("WebSocket", Socket);
   vi.stubGlobal(
     "fetch",
     vi.fn(
-      async () =>
-        new Response(JSON.stringify({ authenticated: true }), { status: 200 }),
+      async (path: string) =>
+        new Response(
+          JSON.stringify(
+            path === "/auth/exchange"
+              ? { authenticated: true, session: "session-1" }
+              : { authenticated: true },
+          ),
+          { status: 200 },
+        ),
     ),
   );
   handle = (socket, frame) =>
@@ -99,6 +114,27 @@ describe("BrowserRuntime connection and retry contract", () => {
     expect(
       vi.mocked(fetch).mock.calls.filter(([path]) => path === "/auth/exchange"),
     ).toHaveLength(1);
+  });
+
+  it("presents the session explicitly, never as a cookie other ports receive", async () => {
+    runtime.dispose();
+    history.replaceState(null, "", "/#ticket=one-time");
+    runtime = new BrowserRuntime({ chooseDirectory: async () => null });
+    expect((await runtime.status()).phase).toBe("ready");
+    expect(localStorage.getItem(SESSION_KEY)).toBe("session-1");
+    const [, init] = vi
+      .mocked(fetch)
+      .mock.calls.find(([path]) => path === "/api/session")!;
+    expect(init?.credentials).toBe("omit");
+    expect(new Headers(init?.headers).get("Authorization")).toBe(
+      "Bearer session-1",
+    );
+    expect(sockets.at(-1)?.protocols).toEqual([
+      "deepcode.rpc",
+      "deepcode.session.session-1",
+    ]);
+    await runtime.logout();
+    expect(localStorage.getItem(SESSION_KEY)).toBeNull();
   });
 
   it("reconnects and retries a lost read with bounded attempts", async () => {
@@ -221,10 +257,14 @@ describe("BrowserRuntime connection and retry contract", () => {
     expect(requests).toEqual([]);
   });
 
-  it("clears the authorization error when a valid browser session is available", async () => {
+  it("clears the authorization error when another tab stores a valid session", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(new Response("expired", { status: 401 }));
     expect((await runtime.status()).errorCode).toBe("AUTH_REQUIRED");
+    localStorage.setItem(SESSION_KEY, "from-another-tab");
     expect(await runtime.restart()).toMatchObject({ phase: "ready", errorCode: null, message: null });
+    expect(sockets.at(-1)?.protocols).toContain(
+      "deepcode.session.from-another-tab",
+    );
   });
 
   it("reports network failures separately and recovers with bounded retries", async () => {

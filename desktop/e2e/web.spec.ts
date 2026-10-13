@@ -383,8 +383,10 @@ test("browser access: missing and used links, sign-out, and fresh-link recovery"
   await page.goto(accessLink);
   await expect(page.getByRole("button", { name: "Open project folder", exact: true }).first()).toBeEnabled();
   await expect(notice).toHaveCount(0);
+  // Every port on this host would receive a cookie.
+  expect(await context.cookies()).toEqual([]);
 
-  await context.clearCookies();
+  await page.evaluate(() => localStorage.clear());
   await page.goto(accessLink);
   await expect(notice).toContainText("Browser access required");
   await page.goto(link());

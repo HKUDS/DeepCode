@@ -62,7 +62,7 @@ class ControlServer:
         self.interrupt = threading.Event()
         self.phase = "ready"
         self._operation = asyncio.Lock()
-        self.browser_auth = BrowserAuth(record.instance_id)
+        self.browser_auth = BrowserAuth()
         self.web_surface = WebSurface(
             host.application, self.browser_auth, lambda: self.phase
         )
@@ -141,25 +141,19 @@ class ControlServer:
         if not isinstance(body, dict) or set(body) != {"ticket"}:
             raise web.HTTPBadRequest(text="Expected a browser ticket")
         session = self.browser_auth.exchange(body["ticket"])
-        response = web.json_response(
-            {"authenticated": True, "instanceId": self.record.instance_id}
+        return web.json_response(
+            {
+                "authenticated": True,
+                "instanceId": self.record.instance_id,
+                "session": session,
+                "expiresIn": self.browser_auth.SESSION_TTL,
+            }
         )
-        response.set_cookie(
-            self.browser_auth.cookie_name,
-            session,
-            httponly=True,
-            samesite="Strict",
-            max_age=self.browser_auth.SESSION_TTL,
-            path="/",
-        )
-        return response
 
     async def _logout(self, request: web.Request) -> web.Response:
         session = self.browser_auth.require(request)
         await self.business.revoke(session)
-        response = web.json_response({"authenticated": False})
-        response.del_cookie(self.browser_auth.cookie_name, path="/")
-        return response
+        return web.json_response({"authenticated": False})
 
     async def _health(self, request: web.Request) -> web.Response:
         ready = self.phase == "ready"

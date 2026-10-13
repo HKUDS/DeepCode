@@ -169,11 +169,19 @@ Browser authentication is a separate flow:
 1. The local management client calls `auth/issue`. The result includes
    `instanceId`, a single-use `ticket`, and `expiresIn` (60 seconds).
 2. The same-origin browser posts `{"ticket":"…"}` as JSON to `/auth/exchange`.
-   Successful exchange consumes the ticket and sets a host-only, HttpOnly,
-   SameSite=Strict cookie. Session credentials are absent from the response body.
-3. The browser opens `/api/rpc` with that cookie and the exact service Origin.
-   A browser-supplied management Authorization header does not bypass session
-   authentication. No CORS origins or forwarded hosts are implicitly trusted.
+   Successful exchange consumes the ticket and returns the session and its
+   lifetime (`session`, `expiresIn`) in the body. It sets no cookie: browsers
+   send cookies to every port of a host, so any other local server the user
+   visits would receive it. The page keeps the session in its origin's
+   `localStorage`, which other ports cannot read.
+3. HTTP routes take the session as `Authorization: Bearer <session>`. Browsers
+   cannot set headers on a WebSocket, so the page opens `/api/rpc` offering the
+   subprotocols `deepcode.rpc` and `deepcode.session.<session>`, with the exact
+   service Origin; the service selects `deepcode.rpc`. A session offered without
+   `deepcode.rpc` is refused before the handshake, which would otherwise log
+   it. A browser-supplied management Authorization header does not bypass
+   session authentication. No CORS origins or forwarded hosts are implicitly
+   trusted.
 4. `POST /auth/logout` revokes that browser session and closes all its sockets.
    Other sessions and admitted Agent tasks continue.
 
@@ -181,8 +189,9 @@ Sessions expire after 12 hours, including already connected sockets. A service
 restart invalidates all sessions and unused tickets. Limits are 64 pending
 tickets, 64 sessions, and 60 exchange attempts per minute per service. Sensitive
 responses use `Cache-Control: no-store`; the service disables access logging.
-Cookies currently travel over loopback HTTP, so they do not use the HTTPS-only
-Secure attribute. This is not a remote HTTPS or multi-user deployment mode.
+Page scripts can read the stored session; the strict Content Security Policy
+(`script-src 'self'`) keeps other scripts out of the page. This is not a remote
+HTTPS or multi-user deployment mode.
 
 `deepcode web` issues the ticket and opens the packaged same-origin client.
 The browser removes the fragment before exchanging it. This is local service

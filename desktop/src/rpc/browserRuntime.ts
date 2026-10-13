@@ -11,6 +11,21 @@ import type {
   SidecarStatus,
 } from "./contracts";
 
+// The service selects RPC_PROTOCOL; the session rides along as a second
+// subprotocol because browsers cannot set headers on a WebSocket handshake.
+const RPC_PROTOCOL = "deepcode.rpc";
+const SESSION_PROTOCOL = "deepcode.session.";
+// Origin-scoped storage: unlike a cookie, it never reaches other local ports.
+const SESSION_KEY = "deepcode.web.session.v1";
+
+function storedSession(): string | null {
+  try {
+    return localStorage.getItem(SESSION_KEY);
+  } catch {
+    return null;
+  }
+}
+
 export class BrowserRuntimeError extends Error implements BridgeError {
   constructor(
     readonly code: string,
@@ -59,6 +74,7 @@ export class BrowserRuntime implements ClientRuntime {
   private projects = new Set<string>();
   private stopped = false;
   private ticket: string | null;
+  private session: string | null = storedSession();
 
   constructor(private readonly options: BrowserOptions) {
     this.ticket = new URLSearchParams(location.hash.slice(1)).get("ticket");
@@ -88,10 +104,23 @@ export class BrowserRuntime implements ClientRuntime {
     for (const receive of this.statuses) receive(this.state);
   }
 
+  private remember(session: string | null): void {
+    this.session = session;
+    try {
+      if (session) localStorage.setItem(SESSION_KEY, session);
+      else localStorage.removeItem(SESSION_KEY);
+    } catch {
+      // Unavailable storage: this page still holds the session in memory.
+    }
+  }
+
   private async http(path: string, init: RequestInit = {}): Promise<Response> {
+    const headers = new Headers(init.headers);
+    if (this.session) headers.set("Authorization", `Bearer ${this.session}`);
     const response = await fetch(path, {
       ...init,
-      credentials: "same-origin",
+      headers,
+      credentials: "omit",
       cache: "no-store",
       signal: AbortSignal.timeout(15000),
     });
@@ -150,16 +179,23 @@ export class BrowserRuntime implements ClientRuntime {
     if (this.ticket) {
       const ticket = this.ticket;
       this.ticket = null;
-      await this.http("/auth/exchange", {
+      const response = await this.http("/auth/exchange", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ticket }),
       });
+      this.remember((await response.json()).session ?? null);
+    } else {
+      // Another tab may have opened a fresh access link meanwhile.
+      this.session = storedSession() ?? this.session;
     }
     await this.http("/api/session");
     if (this.stopped) return;
     const socket = new WebSocket(
       `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/api/rpc`,
+      this.session
+        ? [RPC_PROTOCOL, SESSION_PROTOCOL + this.session]
+        : [RPC_PROTOCOL],
     );
     this.socket = socket;
     await new Promise<void>((resolve, reject) => {
@@ -560,7 +596,12 @@ export class BrowserRuntime implements ClientRuntime {
     );
   }
   async logout(): Promise<void> {
-    await this.http("/auth/logout", { method: "POST" });
+    try {
+      await this.http("/auth/logout", { method: "POST" });
+    } finally {
+      // Signing out forgets the session even if the service was unreachable.
+      this.remember(null);
+    }
     this.dispose();
     this.emitStatus(
       "stopped",
