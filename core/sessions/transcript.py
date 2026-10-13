@@ -82,15 +82,19 @@ def is_compaction_checkpoint(message: SessionMessage) -> bool:
 
 def record_fingerprint(message: SessionMessage) -> tuple[Any, ...]:
     metadata = message.metadata or {}
+    call_id = str(metadata.get(TOOL_CALL_ID_META) or "")
     return (
         message.role,
-        message.content,
+        # A tool result is the result of its call. Under context pressure the
+        # runner shortens old results in the history itself; the shorter
+        # text is not a second result to save.
+        "" if message.role == "tool" and call_id else message.content,
         tuple(
             str(call.get("id", ""))
             for call in metadata.get(TOOL_CALLS_META) or ()
             if isinstance(call, dict)
         ),
-        str(metadata.get(TOOL_CALL_ID_META) or ""),
+        call_id,
     )
 
 

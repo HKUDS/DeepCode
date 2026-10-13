@@ -158,3 +158,26 @@ def test_what_a_compaction_kept_is_resumed_and_never_saved_twice() -> None:
     ]
     added = new_records_from_history(history, stored)
     assert [(item.role, item.content) for item in added] == [("assistant", "a_next")]
+
+
+def test_a_tool_result_pruned_under_pressure_is_not_saved_again() -> None:
+    call = {"id": "c1", "type": "function", "function": {"name": "read"}}
+    stored = [
+        SessionMessage(role="user", content="read it"),
+        SessionMessage(role="assistant", content="", metadata={"toolCalls": [call]}),
+        SessionMessage(
+            role="tool",
+            content="x" * 10_000,
+            metadata={"toolCallId": "c1", "name": "read"},
+        ),
+        SessionMessage(role="assistant", content="read"),
+        SessionMessage(role="user", content="again"),
+    ]
+    history = visible_kernel_history(stored)
+    # The pruner cut the middle out of the old result, in the history itself.
+    history[2] = {**history[2], "content": "x" * 10 + "[... pruned ...]" + "x" * 10}
+    history.append({"role": "assistant", "content": "done"})
+
+    added = new_records_from_history(history, stored)
+
+    assert [(item.role, item.content) for item in added] == [("assistant", "done")]

@@ -69,12 +69,32 @@ class _Wait(Tool):
         return "waited"
 
 
-def _calls_wait(text: str) -> LLMResponse:
+@tool_parameters({"type": "object", "properties": {}})
+class _ReadLog(Tool):
+    """A tool with a result large enough for the pruner to shorten."""
+
+    @property
+    def name(self) -> str:
+        return "read_log"
+
+    @property
+    def description(self) -> str:
+        return "Read a long log."
+
+    async def execute(self, **_kwargs: Any) -> Any:
+        return " ".join(f"line{index}" for index in range(2000))
+
+
+def _calls(tool: str, text: str = "") -> LLMResponse:
     return LLMResponse(
         content=text,
-        tool_calls=[ToolCallRequest(id="call-wait", name="wait", arguments={})],
+        tool_calls=[ToolCallRequest(id=f"call-{tool}", name=tool, arguments={})],
         finish_reason="tool_calls",
     )
+
+
+def _calls_wait(text: str) -> LLMResponse:
+    return _calls("wait", text)
 
 
 class _Factory:
@@ -95,6 +115,7 @@ class _Factory:
     ) -> AgentSession:
         tools = ToolRegistry()
         tools.register(self.wait)
+        tools.register(_ReadLog())
         return AgentSession(
             self.model,
             tools,
@@ -437,5 +458,35 @@ def test_a_reply_compaction_folded_away_is_saved_when_it_repeats(
             if role == "assistant" and turn_id == third.turn.id
         ]
         assert replies == ["Working on it.", "Step three is done."]
+    finally:
+        application.close()
+
+
+def test_a_tool_result_shortened_under_context_pressure_is_not_saved_again(
+    tmp_path: Path,
+) -> None:
+    application, thread_id, _factory = _application(
+        tmp_path,
+        _calls("read_log"),
+        LLMResponse(content="Read it."),
+        # The provider refuses the next request as too long; the runner
+        # shortens the old log result in the history and tries again.
+        LLMResponse(
+            content="", finish_reason="error", error_code="context_length_exceeded"
+        ),
+        LLMResponse(content="Done."),
+    )
+    try:
+        for prompt in ("first", "second"):
+            started = application.turns.start(thread_id, prompt=prompt)
+            _wait_for(application, started.turn.id, TurnStatus.COMPLETED)
+
+        results = [
+            content
+            for role, content, _turn_id in _transcript(application, thread_id)
+            if role == "tool"
+        ]
+        assert len(results) == 1
+        assert results[0].endswith("line1999")
     finally:
         application.close()
