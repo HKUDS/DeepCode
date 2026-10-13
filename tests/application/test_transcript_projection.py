@@ -81,6 +81,8 @@ class _Factory:
     def __init__(self, model: _Model) -> None:
         self.model = model
         self.wait = _Wait()
+        # Asks the model to go on once it would stop, as Goal turns do.
+        self.closure_callback = None
 
     def create(
         self,
@@ -101,6 +103,7 @@ class _Factory:
             approval_callback=approval_callback,
             injection_callback=injection_callback,
             context_note_sink=context_note_sink,
+            closure_callback=self.closure_callback,
             streaming=True,
         )
 
@@ -365,6 +368,39 @@ def test_what_a_failed_turn_could_not_save_is_not_filed_under_the_next(
             ("user", "first", first.turn.id),
             ("user", "second", second.turn.id),
             ("assistant", "answered", second.turn.id),
+        ]
+    finally:
+        application.close()
+
+
+def test_a_reply_the_model_gave_before_is_saved_again(tmp_path: Path) -> None:
+    application, thread_id, factory = _application(
+        tmp_path,
+        LLMResponse(content="Working on it."),
+        LLMResponse(content="Step one is done."),
+        LLMResponse(content="Working on it."),
+        LLMResponse(content="Step two is done."),
+    )
+    factory.closure_callback = lambda asked_already: (
+        None if asked_already else "Say whether the goal is complete."
+    )
+    try:
+        turns = []
+        for prompt in ("first", "second"):
+            started = application.turns.start(thread_id, prompt=prompt)
+            _wait_for(application, started.turn.id, TurnStatus.COMPLETED)
+            turns.append(started.turn.id)
+
+        replies = [
+            (content, turn_id)
+            for role, content, turn_id in _transcript(application, thread_id)
+            if role == "assistant"
+        ]
+        assert replies == [
+            ("Working on it.", turns[0]),
+            ("Step one is done.", turns[0]),
+            ("Working on it.", turns[1]),
+            ("Step two is done.", turns[1]),
         ]
     finally:
         application.close()

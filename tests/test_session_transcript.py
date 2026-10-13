@@ -70,3 +70,23 @@ def test_new_records_skip_already_stored() -> None:
     second = new_records_from_history(history, stored=first)
     assert [item.content for item in first] == ["hi", "yo"]
     assert second == []
+
+
+def test_a_repeated_message_is_a_new_message() -> None:
+    stored = [
+        SessionMessage(role="user", content="yes"),
+        SessionMessage(role="assistant", content="ok"),
+        SessionMessage(role="user", content="yes"),
+    ]
+    history = [
+        {"role": "user", "content": "yes"},
+        {"role": "assistant", "content": "ok"},
+        {"role": "user", "content": "yes"},
+        {"role": "assistant", "content": "ok"},
+        {"role": "assistant", "content": "ok"},
+    ]
+    added = new_records_from_history(history, stored)
+    assert [(item.role, item.content) for item in added] == [
+        ("assistant", "ok"),
+        ("assistant", "ok"),
+    ]

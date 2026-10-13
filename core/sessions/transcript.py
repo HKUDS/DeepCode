@@ -7,6 +7,7 @@ on resume.
 
 from __future__ import annotations
 
+from collections import Counter
 from copy import deepcopy
 from typing import Any, Iterable, Mapping
 
@@ -158,25 +159,33 @@ def new_records_from_history(
     history: Iterable[Mapping[str, Any]],
     stored: Iterable[SessionMessage],
 ) -> list[SessionMessage]:
-    """Store records for kernel messages that are not already in ``stored``."""
+    """Store records for kernel messages that are not already in ``stored``.
+
+    Each stored record accounts for one kernel message: content is not
+    identity, and a "yes" or "Done." said again is a new message.
+    """
     items = list(history)
-    seen = {record_fingerprint(message) for message in stored}
+    unmatched = Counter(record_fingerprint(message) for message in stored)
     added: list[SessionMessage] = []
     for index, item in enumerate(items):
         record = kernel_message_to_record(item)
         if record is None:
             continue
         key = record_fingerprint(record)
-        if key in seen:
+        if unmatched[key]:
+            unmatched[key] -= 1
             continue
         marker = item.get("compaction")
         if isinstance(marker, dict) and marker.get("reset"):
             retain = 0
+            remaining = unmatched.copy()
             for later in items[index + 1 :]:
                 later_record = kernel_message_to_record(later)
                 if later_record is None:
                     continue
-                if record_fingerprint(later_record) in seen:
+                later_key = record_fingerprint(later_record)
+                if remaining[later_key]:
+                    remaining[later_key] -= 1
                     retain += 1
                     continue
                 break
@@ -185,5 +194,4 @@ def new_records_from_history(
                 COMPACTION_META: {"reset": True, "retain": retain},
             }
         added.append(record)
-        seen.add(record_fingerprint(record))
     return added
