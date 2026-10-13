@@ -388,26 +388,112 @@ def test_run_blocks_when_its_goal_continues_unattended_too_long(
             automation.id,
             request_id="never-decides",
         )
-        # Between two Turns a read may briefly report the Run idle and blocked;
-        # wait for the stop itself.
-        blocked = _wait_until(
-            lambda: next(
-                (
-                    run
-                    for run in application.automations.list_runs(automation.id).runs
-                    if run.id == execution.run.id
-                    and "Stopped after 2 automatic continuations" in run.detail
-                ),
-                None,
-            ),
-            "the Run to report the unattended continuation stop",
+        blocked = _wait_for_run(
+            application,
+            automation.id,
+            execution.run.id,
+            AutomationRunStatus.BLOCKED,
         )
 
-        assert blocked.status is AutomationRunStatus.BLOCKED
+        assert "Stopped after 2 automatic continuations" in blocked.detail
         assert len(_turns(application, automation.thread_id)) == 3
         goal = application.goals.read(automation.thread_id)
         assert goal is not None
         assert goal.status is ThreadGoalStatus.BLOCKED
+    finally:
+        application.close()
+
+
+def test_reading_runs_between_goal_turns_does_not_report_an_idle_goal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_turn_gate = threading.Event()
+    factory = _GoalAwareFactory(
+        _TurnStep(None, gate=first_turn_gate),
+        _TurnStep("complete"),
+    )
+    application, automation = _application(tmp_path, factory)
+    goals = application.goals
+    reconcile_turn_settlements = goals.reconcile_turn_settlements
+    start_continuation = goals._start_continuation_locked
+    reader_checked = threading.Event()
+    continuation_pending = threading.Event()
+    release_continuation = threading.Event()
+
+    def reconcile_while_the_turn_runs(*args, **kwargs):
+        applied = reconcile_turn_settlements(*args, **kwargs)
+        if threading.current_thread().name == "run-reader":
+            # The first Turn settles between this check and the rest of the read.
+            reader_checked.set()
+            continuation_pending.wait(timeout=1)
+        return applied
+
+    def hold_the_next_turn(goal, **kwargs):
+        if threading.current_thread().name != "run-reader":
+            continuation_pending.set()
+            release_continuation.wait(timeout=1)
+        return start_continuation(goal, **kwargs)
+
+    monkeypatch.setattr(
+        goals, "reconcile_turn_settlements", reconcile_while_the_turn_runs
+    )
+    monkeypatch.setattr(goals, "_start_continuation_locked", hold_the_next_turn)
+    read: list[AutomationRun] = []
+    try:
+        execution = application.automations.run_now(
+            automation.id,
+            request_id="read-between-turns",
+        )
+        _wait_until(lambda: factory.started_prompts, "the first Turn to start")
+        reader = threading.Thread(
+            name="run-reader",
+            target=lambda: read.extend(
+                application.automations.list_runs(automation.id).runs
+            ),
+        )
+        reader.start()
+        assert reader_checked.wait(timeout=5)
+        first_turn_gate.set()
+        reader.join(timeout=5)
+        release_continuation.set()
+
+        observed = next(run for run in read if run.id == execution.run.id)
+        assert observed.status is not AutomationRunStatus.BLOCKED, observed.detail
+        _wait_for_run(
+            application,
+            automation.id,
+            execution.run.id,
+            AutomationRunStatus.COMPLETED,
+        )
+    finally:
+        first_turn_gate.set()
+        release_continuation.set()
+        application.close()
+
+
+def test_a_goal_left_idle_still_blocks_its_run(tmp_path: Path) -> None:
+    factory = _GoalAwareFactory(_TurnStep(None))
+    application, automation = _application(tmp_path, factory)
+
+    def hold_for_review(_goal) -> None:
+        raise goal_extension.GoalContinuationRejected("held for review")
+
+    application.goals.add_continuation_guard(hold_for_review)
+    try:
+        execution = application.automations.run_now(
+            automation.id,
+            request_id="left-idle",
+        )
+        blocked = _wait_for_run(
+            application,
+            automation.id,
+            execution.run.id,
+            AutomationRunStatus.BLOCKED,
+        )
+
+        assert blocked.detail.startswith("Goal is active but idle")
+        assert len(_turns(application, automation.thread_id)) == 1
     finally:
         application.close()
 

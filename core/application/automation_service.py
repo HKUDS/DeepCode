@@ -1114,7 +1114,9 @@ class AutomationService:
             raise AutomationNotFoundError(f"automation run not found: {run.id}")
         if latest.status.is_terminal:
             return latest
-        desired = self._desired_run_state(latest)
+        # Between two Goal Turns, a Run must not read as blocked by an idle Goal.
+        with self.goals.settlement_scope(latest.thread_id):
+            desired = self._desired_run_state(latest)
         # Reconciliation may inspect a stable non-terminal state repeatedly.
         # ``updated_at`` is an observation timestamp, not a state transition;
         # do not turn it into a write/event heartbeat when every durable

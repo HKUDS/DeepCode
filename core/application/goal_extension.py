@@ -229,6 +229,18 @@ class GoalExtension(GoalRuntimeHandler):
                 else None
             )
 
+    @contextmanager
+    def settlement_scope(self, thread_id: str) -> Iterator[None]:
+        """Keep Goal settlement still while a caller reads Goal and Turn state.
+
+        Settling a Turn accounts it and then starts the next continuation, both
+        under this lock. A reader outside it can see the Goal between the two
+        steps, accounted with nothing running, and take that for an idle Goal.
+        """
+
+        with self._lock(thread_id):
+            yield
+
     def create(
         self,
         thread_id: str,
