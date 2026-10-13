@@ -232,3 +232,56 @@ def test_a_turn_finishes_once_the_database_takes_the_write_again(tmp_path, monke
         _assert_next_turn_runs(application, thread_id)
     finally:
         application.close()
+
+
+def test_a_turn_whose_outcome_cannot_be_saved_ends_as_failed(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        turn_service_module, "_FINISH_RETRY_DELAYS_S", (0.01,), raising=False
+    )
+    application, thread_id = _application(tmp_path, _answer, _answer)
+    finish = application.turns._finish
+
+    def finish_only_as_failed(turn_id, **kwargs):
+        # A fault that comes back on every attempt to record this outcome.
+        if kwargs["status"] is not TurnStatus.FAILED:
+            raise ValueError("cannot record this outcome")
+        return finish(turn_id, **kwargs)
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(application.turns, "_finish", finish_only_as_failed)
+            started = application.turns.start(thread_id, prompt="Say hello")
+            failed = _wait_for(application, started.turn.id, TurnStatus.FAILED)
+
+        assert failed.turn.error_code == "TURN_FINISH_FAILED"
+        assert "cannot record this outcome" in failed.turn.error_message
+        _assert_next_turn_runs(application, thread_id)
+    finally:
+        application.close()
+
+
+def test_a_turn_that_could_not_start_is_finished_once_the_database_allows(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        turn_service_module, "_FINISH_RETRY_DELAYS_S", (0.01,), raising=False
+    )
+    application, thread_id = _application(tmp_path, _answer, _answer)
+    start = application.executions.start
+
+    def refuse_turns(job_id, job_factory, **kwargs):
+        if job_id.startswith("turn_"):
+            raise RuntimeError("the runtime refused the Turn")
+        return start(job_id, job_factory, **kwargs)
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(application.executions, "start", refuse_turns)
+            _fail_once(patch, application.turns, "_finish")
+            started = application.turns.start(thread_id, prompt="Say hello")
+            failed = _wait_for(application, started.turn.id, TurnStatus.FAILED)
+
+        assert failed.turn.stop_reason == "scheduler_error"
+        _assert_next_turn_runs(application, thread_id)
+    finally:
+        application.close()

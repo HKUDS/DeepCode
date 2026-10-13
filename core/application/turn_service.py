@@ -990,13 +990,14 @@ class TurnService:
         thread_id: str | None = None
         try:
             thread_id = self.read(dispatch.turn_id).turn.thread_id
-            self._finish_unstarted(
+            self._finish_now_or_later(
                 dispatch.turn_id,
                 status=TurnStatus.FAILED,
                 stop_reason="scheduler_error",
                 error_code="SCHEDULER_ERROR",
                 error_message=str(error),
                 claim=dispatch.claim,
+                ensure_completion=True,
             )
         finally:
             if thread_id is not None:
@@ -1019,11 +1020,12 @@ class TurnService:
             return
         if turn.status is TurnStatus.QUEUED:
             try:
-                self._finish_unstarted(
+                self._finish_now_or_later(
                     claim.turn_id,
                     status=TurnStatus.INTERRUPTED,
                     stop_reason="interrupted",
                     claim=claim,
+                    ensure_completion=True,
                 )
             finally:
                 self._remove_observer(claim.turn_id)
@@ -1044,7 +1046,9 @@ class TurnService:
             TurnStatus.WAITING_APPROVAL.value,
         }:
             raise ValueError(f"cannot recover orphan status: {orphan.status}")
-        self._finish(
+        # A later attempt no longer holds the proof, and needs none: a worker
+        # proven dead stays dead.
+        self._finish_now_or_later(
             orphan.turn_id,
             status=TurnStatus.INTERRUPTED,
             stop_reason="worker_crashed",
@@ -1658,19 +1662,25 @@ class TurnService:
             self.live_items.finish_turn(turn_id)
 
     async def _finish_ran(self, turn_id: str, **finish: Any) -> None:
-        """Finish a Turn that ran, retrying while the database refuses.
+        """Finish a Turn, trying again until it is finished.
 
         The finish is one transaction, so a refused attempt leaves nothing
         behind, and a Turn that is already finished returns at once. It does
         not give up: nothing else finishes a Turn whose process is alive, so
-        one left running would hold its Session, and the execution claim the
-        heartbeat keeps renewing, until the service restarted.
+        one left unfinished would hold its Session, and the execution claim
+        the heartbeat keeps renewing, until the service restarted. A refused
+        write is tried again as it was; any other error would come back on
+        every attempt, so after one the Turn is finished as failed instead.
         """
         delays = iter(_FINISH_RETRY_DELAYS_S)
         delay = 0.0
         while True:
             try:
                 self._finish(turn_id, **finish)
+                return
+            except (TurnNotFoundError, TurnWriteConflictError):
+                # Gone, or no longer this process's Turn to finish.
+                logger.warning("gave up finishing turn %s", turn_id, exc_info=True)
                 return
             except sqlite3.OperationalError:
                 delay = next(delays, delay)
@@ -1680,7 +1690,48 @@ class TurnService:
                     delay,
                     exc_info=True,
                 )
-                await asyncio.sleep(delay)
+            except Exception as exc:  # noqa: BLE001 - the Turn must still finish
+                delay = next(delays, delay)
+                logger.exception(
+                    "could not finish turn %s; finishing it as failed in %ss",
+                    turn_id,
+                    delay,
+                )
+                finish = {
+                    **finish,
+                    "status": TurnStatus.FAILED,
+                    "stop_reason": "error",
+                    "error_code": "TURN_FINISH_FAILED",
+                    "error_message": f"{type(exc).__name__}: {exc}",
+                    "ensure_completion": True,
+                }
+            await asyncio.sleep(delay)
+
+    def _finish_now_or_later(self, turn_id: str, **finish: Any) -> None:
+        """Finish a Turn now, or keep trying in the background until it is.
+
+        For the paths that end a Turn outside its own execution: cancelled
+        before it started, refused at start, recovered from a dead worker.
+        """
+        try:
+            self._finish(turn_id, **finish)
+        except Exception:  # noqa: BLE001 - retried below
+            logger.warning(
+                "could not finish turn %s; trying again in the background",
+                turn_id,
+                exc_info=True,
+            )
+            try:
+                self.registry.start(
+                    f"finish:{turn_id}",
+                    lambda: self._finish_ran(turn_id, **finish),
+                    bounded=False,
+                )
+            except ValueError:
+                pass  # already being finished in the background
+            except ExecutionRegistryClosed:
+                # Shutting down; recovery finishes it on the next start.
+                logger.warning("turn %s is left for recovery", turn_id)
 
     def _cancel_before_start(
         self,
@@ -1691,11 +1742,12 @@ class TurnService:
         thread_id: str | None = None
         try:
             thread_id = self.read(turn_id).turn.thread_id
-            self._finish_unstarted(
+            self._finish_now_or_later(
                 turn_id,
                 status=TurnStatus.INTERRUPTED,
                 stop_reason="interrupted",
                 claim=claim,
+                ensure_completion=True,
             )
         finally:
             if thread_id is not None:

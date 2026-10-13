@@ -43,7 +43,14 @@ class ExecutionRegistry:
         job_factory: JobFactory,
         *,
         on_cancelled_before_start: Callable[[], None] | None = None,
+        bounded: bool = True,
     ) -> None:
+        """Run one job in the background.
+
+        ``bounded=False`` jobs do not take one of the ``max_concurrent``
+        slots: settling a Turn must not wait behind, or hold back, the Turns
+        that run.
+        """
         with self._lock:
             if self._closing or self._closed:
                 raise ExecutionRegistryClosed("execution registry is closed")
@@ -51,7 +58,10 @@ class ExecutionRegistry:
                 raise ValueError(f"job is already registered: {job_id}")
             loop = self._ensure_loop_locked()
             future = asyncio.run_coroutine_threadsafe(
-                self._run_bounded(job_factory, on_cancelled_before_start), loop
+                self._run_bounded(job_factory, on_cancelled_before_start)
+                if bounded
+                else job_factory(),
+                loop,
             )
             self._jobs[job_id] = future
             future.add_done_callback(lambda done: self._forget(job_id, done))

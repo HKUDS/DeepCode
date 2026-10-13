@@ -21,6 +21,7 @@ from core.domain import (
     Turn,
 )
 from core.domain.common import utc_now
+from core.domain.runtime_coordination import ResourceClaim
 from core.domain.turn import TurnStatus
 from core.events import AgentMessage, Event, TaskComplete, TurnStarted
 from core.file_lock import FileLease
@@ -238,14 +239,9 @@ def test_registry_start_failure_atomically_fails_turn_and_releases_claim(
         application.close()
 
 
-def test_dead_running_turn_is_interrupted_and_never_replayed(
-    tmp_path: Path,
-) -> None:
-    application = DeepCodeApplication.open(
-        tmp_path / "state.sqlite3",
-        session_factory=_ImmediateFactory(),
-    )
-    application.execution_coordinator.quiesce()
+def _dead_workers_running_turn(
+    application: DeepCodeApplication, tmp_path: Path
+) -> tuple[RuntimeWorker, Turn, ResourceClaim]:
     workspace = tmp_path / "workspace-orphan"
     workspace.mkdir()
     project = Project(
@@ -297,7 +293,18 @@ def test_dead_running_turn_is_interrupted_and_never_replayed(
                 started_at=turn.enqueued_at,
             )
         )
+    return dead, turn, claim
 
+
+def test_dead_running_turn_is_interrupted_and_never_replayed(
+    tmp_path: Path,
+) -> None:
+    application = DeepCodeApplication.open(
+        tmp_path / "state.sqlite3",
+        session_factory=_ImmediateFactory(),
+    )
+    application.execution_coordinator.quiesce()
+    dead, turn, claim = _dead_workers_running_turn(application, tmp_path)
     try:
         recovered = application.execution_coordinator.recover_dead_worker(dead.id)
         assert recovered is not None
@@ -309,6 +316,36 @@ def test_dead_running_turn_is_interrupted_and_never_replayed(
             application.turns.read(turn.id).items[-1].payload["stopReason"]
             == "worker_crashed"
         )
+        with application.database.read() as connection:
+            assert not RuntimeCoordinationRepository(connection).claim_is_current(claim)
+    finally:
+        application.close()
+
+
+def test_dead_running_turn_is_failed_when_it_cannot_be_interrupted(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    application = DeepCodeApplication.open(
+        tmp_path / "state.sqlite3",
+        session_factory=_ImmediateFactory(),
+    )
+    application.execution_coordinator.quiesce()
+    dead, turn, claim = _dead_workers_running_turn(application, tmp_path)
+    finish = application.turns._finish
+
+    def finish_only_as_failed(turn_id, **kwargs):
+        # A fault that comes back on every attempt to record the interrupt.
+        if kwargs["status"] is not TurnStatus.FAILED:
+            raise ValueError("cannot record the interrupt")
+        return finish(turn_id, **kwargs)
+
+    monkeypatch.setattr(application.turns, "_finish", finish_only_as_failed)
+    try:
+        application.execution_coordinator.recover_dead_worker(dead.id)
+        failed = _wait_for(application, turn.id, TurnStatus.FAILED)
+        assert failed.error_code == "TURN_FINISH_FAILED"
+        assert failed.execution_owner_id is None
         with application.database.read() as connection:
             assert not RuntimeCoordinationRepository(connection).claim_is_current(claim)
     finally:
