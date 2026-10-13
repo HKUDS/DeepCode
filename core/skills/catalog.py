@@ -500,8 +500,10 @@ def validate_skill_directory(
     scope: SkillScope = SkillScope.USER,
     source_root: SkillSourceRoot = SkillSourceRoot.DEEPCODE,
 ) -> SkillRecord:
-    unresolved = Path(directory).expanduser()
-    path = unresolved.resolve(strict=True)
+    # Keep the path as given, as discovery does: the Skill ID hashes the
+    # catalog path, so resolving a linked root or Skill directory here would
+    # make a listed Skill unreadable. The parser still reads the target.
+    path = Path(directory).expanduser().absolute()
     if not path.is_dir():
         raise SkillValidationError("Skill source must be a directory")
     record = _read_candidate(

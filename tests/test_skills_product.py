@@ -809,6 +809,43 @@ def test_project_skill_root_cannot_move_the_workspace_trust_boundary(
     assert "not in the subpath" in (escaped.error or "")
 
 
+def test_skills_reached_through_symlinks_load_as_listed(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    home = tmp_path / "home"
+    workspace.mkdir()
+    # A dotfiles-managed root, a linked Skill directory, and a project root
+    # linked to a folder inside the workspace.
+    _write_skill(tmp_path / "dotfiles" / "skills", "linked-root")
+    (home / ".claude").mkdir(parents=True)
+    (home / ".claude" / "skills").symlink_to(tmp_path / "dotfiles" / "skills")
+    linked_dir = _write_skill(tmp_path / "elsewhere", "linked-dir")
+    (home / ".agents" / "skills").mkdir(parents=True)
+    (home / ".agents" / "skills" / "linked-dir").symlink_to(linked_dir)
+    _write_skill(workspace / "shared-skills", "linked-project")
+    (workspace / ".agents").mkdir()
+    (workspace / ".agents" / "skills").symlink_to(workspace / "shared-skills")
+    (tmp_path / "outside.md").write_text("not part of the Skill", encoding="utf-8")
+    (linked_dir / "escape.md").symlink_to(tmp_path / "outside.md")
+    runtime = SkillRuntime(workspace, home=home, include_system=False)
+
+    context, token = runtime.begin_turn("$linked-root $linked-dir $linked-project")
+    try:
+        assert [record.name for record in context.snapshot.records] == [
+            "linked-root",
+            "linked-dir",
+            "linked-project",
+        ]
+        assert {
+            record.require_instructions() for record in context.snapshot.records
+        } == {"Follow the product workflow."}
+    finally:
+        runtime.end_turn(token)
+    linked = runtime.catalog().get_active("linked-dir")
+    assert linked is not None
+    with pytest.raises(SkillResolutionError, match="outside its package"):
+        runtime.read_resource(linked.id, "escape.md")
+
+
 def test_catalog_limit_is_explicit_and_deterministic(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
