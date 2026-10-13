@@ -583,6 +583,65 @@ def test_goal_ownership_change_during_attributed_turn_keeps_run_open_until_settl
         application.close()
 
 
+def test_run_closed_while_its_turn_settles_never_ends_before_the_turn(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    turn_gate = threading.Event()
+    factory = _GoalAwareFactory(_TurnStep(None, gate=turn_gate))
+    application, automation = _application(tmp_path, factory)
+    try:
+        execution = application.automations.run_now(
+            automation.id,
+            request_id="settle-during-reconciliation",
+        )
+        running = _wait_for_run(
+            application,
+            automation.id,
+            execution.run.id,
+            AutomationRunStatus.RUNNING,
+        )
+        assert running.goal_id is not None
+        assert running.turn_id is not None
+        application.goals.clear(
+            automation.thread_id,
+            expected_goal_id=running.goal_id,
+        )
+
+        # Settle the attributed Turn after reconciliation has begun but before
+        # it looks for an active Turn: the window a poll (list_runs) can hit.
+        reconcile_settlements = application.goals.reconcile_turn_settlements
+
+        def settle_turn_first(*args, **kwargs):
+            turn_gate.set()
+            _wait_until(
+                lambda: application.turns.read(running.turn_id).turn.completed_at,
+                "the attributed Turn to settle",
+            )
+            return reconcile_settlements(*args, **kwargs)
+
+        monkeypatch.setattr(
+            application.goals,
+            "reconcile_turn_settlements",
+            settle_turn_first,
+        )
+        application.automations.reconcile_runs()
+
+        interrupted = _wait_for_run(
+            application,
+            automation.id,
+            running.id,
+            AutomationRunStatus.INTERRUPTED,
+        )
+        settled_turn = application.turns.read(running.turn_id).turn
+        assert settled_turn.completed_at is not None
+        assert interrupted.completed_at is not None
+        assert interrupted.completed_at >= settled_turn.completed_at
+    finally:
+        turn_gate.set()
+        application.close()
+
+
 def test_retire_preserves_history_and_rejects_new_manual_occurrences(
     tmp_path: Path,
 ) -> None:

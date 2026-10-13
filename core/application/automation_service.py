@@ -1124,8 +1124,8 @@ class AutomationService:
         return self._persist_run_state(latest, desired)
 
     def _desired_run_state(self, run: AutomationRun) -> AutomationRun:
-        now = _not_before(run.updated_at)
         if run.goal_id is None:
+            now = _not_before(run.updated_at)
             if run.turn_id is None:
                 return replace(
                     run,
@@ -1152,6 +1152,9 @@ class AutomationService:
             continue_from_latest_completion=True,
         )
         active = self.turns.active_for_thread(run.thread_id)
+        # Read the clock only after looking for the active Turn: it may settle
+        # while this runs, and a Run closed without it must not end before it.
+        now = _not_before(run.updated_at)
         if active is not None and active.goal_id == run.goal_id:
             if run.turn_id is None:
                 return replace(
