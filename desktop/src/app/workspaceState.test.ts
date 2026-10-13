@@ -498,3 +498,61 @@ describe("workspace event projection", () => {
     expect(removed.entitySequences).toEqual({});
   });
 });
+
+describe("live streamed text in the workspace", () => {
+  const live = (offset: number, text: string) => ({
+    threadId: "thread-1",
+    turnId: turn.id,
+    itemId: "item-1",
+    channel: "text" as const,
+    offset,
+    nextOffset: offset + new TextEncoder().encode(text).length,
+    delta: text,
+  });
+
+  it("keeps streamed text when an older copy of the item arrives", () => {
+    let state = workspaceReducer(initialWorkspaceState, {
+      type: "event",
+      event: { ...event(1, item("in_progress", "Hello")), type: "item.created" },
+    });
+    state = workspaceReducer(state, { type: "live-delta", delta: live(5, " world") });
+    expect(state.items[0].payload.text).toBe("Hello world");
+
+    // An in-progress item's events carry only the text it started with.
+    state = workspaceReducer(state, {
+      type: "event",
+      event: event(2, item("in_progress", "Hello")),
+    });
+    expect(state.items[0].payload.text).toBe("Hello world");
+    state = workspaceReducer(state, { type: "live-delta", delta: live(11, "!") });
+    expect(state.items[0].payload.text).toBe("Hello world!");
+
+    state = workspaceReducer(state, {
+      type: "event",
+      event: event(3, item("completed", "Hello world!")),
+    });
+    expect(state.liveBytes).toEqual({});
+    // A late delta of a completed item is ignored.
+    state = workspaceReducer(state, { type: "live-delta", delta: live(12, "?") });
+    expect(state.items[0].payload.text).toBe("Hello world!");
+  });
+
+  it("asks for a read when a delta was missed, once per Turn", () => {
+    let state = workspaceReducer(initialWorkspaceState, {
+      type: "event",
+      event: { ...event(1, item("in_progress", "Hello")), type: "item.created" },
+    });
+    state = workspaceReducer(state, { type: "live-delta", delta: live(9, "x") });
+    state = workspaceReducer(state, { type: "live-delta", delta: live(10, "y") });
+    expect(state.liveGaps).toEqual([turn.id]);
+    expect(state.items[0].payload.text).toBe("Hello");
+
+    state = workspaceReducer(state, {
+      type: "live-text",
+      turnId: turn.id,
+      items: [item("in_progress", "Hello worxy")],
+    });
+    expect(state.items[0].payload.text).toBe("Hello worxy");
+    expect(state.liveGaps).toEqual([]);
+  });
+});

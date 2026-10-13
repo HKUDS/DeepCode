@@ -900,7 +900,7 @@ def test_one_session_preserves_each_turns_client_surface(tmp_path: Path) -> None
         application.close()
 
 
-def test_streaming_projection_logs_only_new_assistant_text(tmp_path: Path) -> None:
+def test_streamed_assistant_text_is_logged_once_it_completes(tmp_path: Path) -> None:
     factory = LongStreamingFactory()
     application, thread_id = _application(tmp_path, factory)
     database_path = application.database.path
@@ -920,13 +920,8 @@ def test_streaming_projection_logs_only_new_assistant_text(tmp_path: Path) -> No
             if event.item_id == assistant.id
         ]
 
-        assert [event.type for event in events] == [
-            "item.created",
-            "item.delta",
-            "item.updated",
-        ]
-        assert events[1].payload["delta"] == "b" * 300
-        assert "item" not in events[1].payload
+        # The streamed text went to clients live; the log keeps the item.
+        assert [event.type for event in events] == ["item.created", "item.updated"]
         assert assistant.payload["text"] == ("a" * 300) + ("b" * 300)
         assert assistant.status is ItemStatus.COMPLETED
     finally:
@@ -942,7 +937,7 @@ def test_streaming_projection_logs_only_new_assistant_text(tmp_path: Path) -> No
             for event in reopened.events.replay(thread_id, limit=1000)
             if event.item_id == assistant_id
         ]
-        assert replayed == ["item.created", "item.delta", "item.updated"]
+        assert replayed == ["item.created", "item.updated"]
     finally:
         reopened.close()
 
@@ -975,16 +970,7 @@ def test_reasoning_projects_once_and_replays_from_durable_events(
             for event in application.events.replay(thread_id, limit=1000)
             if event.item_id == reasoning.id
         ]
-        assert [event.type for event in events] == [
-            "item.created",
-            "item.delta",
-            "item.delta",
-            "item.updated",
-        ]
-        assert [event.payload.get("reasoningChannel") for event in events[1:3]] == [
-            "summary",
-            "provider_trace",
-        ]
+        assert [event.type for event in events] == ["item.created", "item.updated"]
     finally:
         application.close()
 

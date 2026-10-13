@@ -10,6 +10,7 @@ from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from core.application.live_items import LiveDelta
 from core.domain.event import DomainEvent
 from core.persistence.database import Database
 from core.persistence.event_repository import EventRepository
@@ -26,7 +27,9 @@ DEFAULT_RELAY_BATCH_SIZE = 500
 
 @dataclass(frozen=True, slots=True)
 class DeliveryBatch:
-    events: tuple[DomainEvent, ...]
+    """Durable events and live deltas in the order they were published."""
+
+    events: tuple[DomainEvent | LiveDelta, ...]
     dropped: int
 
 
@@ -40,7 +43,7 @@ class ReplayPage:
 
 @dataclass(slots=True)
 class _Subscriber:
-    queue: deque[DomainEvent]
+    queue: deque[DomainEvent | LiveDelta]
     dropped: int = 0
 
 
@@ -120,12 +123,21 @@ class EventBroker:
             )
             if not watermark.accept(event.sequence):
                 return False
-            for subscriber in self._subscribers.values():
-                if len(subscriber.queue) == subscriber.queue.maxlen:
-                    subscriber.dropped += 1
-                subscriber.queue.append(event)
-            self._condition.notify_all()
+            self._deliver_locked(event)
             return True
+
+    def publish_live(self, delta: LiveDelta) -> None:
+        """Deliver a streamed piece of text; it has no durable sequence."""
+
+        with self._condition:
+            self._deliver_locked(delta)
+
+    def _deliver_locked(self, message: DomainEvent | LiveDelta) -> None:
+        for subscriber in self._subscribers.values():
+            if len(subscriber.queue) == subscriber.queue.maxlen:
+                subscriber.dropped += 1
+            subscriber.queue.append(message)
+        self._condition.notify_all()
 
     def drain(self, token: str) -> DeliveryBatch:
         with self._condition:

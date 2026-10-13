@@ -60,6 +60,7 @@ from core.application.turn_input_service import (
     TurnInputReceipt,
     TurnInputService,
 )
+from core.application.live_items import LiveItems
 from core.application.turn_projection import TurnEventProjector
 from core.application.turn_usage import (
     TURN_USAGE_EVENT_TYPE,
@@ -213,6 +214,8 @@ class TurnService:
     ) -> None:
         self.database = database
         self.broker = broker
+        # Text of items still streaming in this process's Turns.
+        self.live_items = LiveItems()
         self.approvals = approvals
         self.registry = registry
         self.session_factory = session_factory or DefaultAgentSessionFactory()
@@ -1089,7 +1092,11 @@ class TurnService:
                 raise TurnNotFoundError(f"turn not found: {turn_id}")
             items = ItemRepository(connection).list_for_turn(turn_id)
             approvals = ApprovalRepository(connection).list_for_turn(turn_id)
-        return TurnSnapshot(turn, tuple(items), tuple(approvals))
+        return TurnSnapshot(
+            turn,
+            tuple(self.live_items.overlay(item) for item in items),
+            tuple(approvals),
+        )
 
     def active_for_thread(self, thread_id: str) -> Turn | None:
         with self.database.read() as connection:
@@ -1363,6 +1370,7 @@ class TurnService:
             projection = TurnEventProjector(
                 self.database,
                 self.broker,
+                live_items=self.live_items,
                 thread_id=turn.thread_id,
                 turn_id=turn.id,
             )
@@ -1627,6 +1635,7 @@ class TurnService:
             )
         finally:
             self._remove_observer(turn_id)
+            self.live_items.finish_turn(turn_id)
 
     async def _finish_ran(self, turn_id: str, **finish: Any) -> None:
         """Finish a Turn that ran, retrying while the database refuses.

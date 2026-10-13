@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import deque
 from pathlib import Path
 
 from app_server.blocking_client import BlockingServiceClient
-from app_server.protocol.notifications import SERVER_WARNING
+from app_server.protocol.notifications import ITEM_DELTA, SERVER_WARNING
 from app_server.service_state import ServiceFiles
 from cli.rpc_models import from_view
 from cli.service_catalogs import (
@@ -40,13 +41,13 @@ logger = logging.getLogger(__name__)
 # How long the event pump keeps retrying an unreachable service before it
 # stops and points the user at /reconnect (which can start it again).
 _RECONNECT_WINDOW_S = 120.0
-# The pump renders the events the service pushes. It replays the Session's
-# event log when it may have missed some, and also this often in case a push
-# went missing without a warning.
+# The pump renders the events and streamed text the service pushes. It
+# replays the Session's event log when it may have missed some, and also this
+# often in case a push went missing without a warning.
 _SAFETY_REPLAY_S = 10.0
-# Pushes waiting for the pump; when it falls further behind, it replays.
+# Pushes waiting to be rendered; past this, the oldest are dropped for a replay.
 _PUSH_BACKLOG = 4096
-# Handed to the pump instead of an event: replay before rendering more.
+# Pushed instead of an event: replay before rendering more.
 _REPLAY = object()
 
 
@@ -78,8 +79,10 @@ class ServiceThreadClient:
         self._domain_sink = None
         self._selection_generation = 0
         self._sequence = 0
-        self._pushes = None
+        # Pushes from the RPC thread, taken by the pump or by drain_events.
+        self._inbox = deque()
         self._push_loop = None
+        self._pushed = None  # set on the pump's loop when the inbox fills
         self.rpc = BlockingServiceClient(
             ServiceFiles(database or default_database_path()),
             surface=surface,
@@ -482,9 +485,7 @@ class ServiceThreadClient:
             try:
                 if self._domain_sink:
                     self._domain_sink(event)
-                for rendered in self._renderer.convert(event):
-                    if self._event_sink:
-                        self._event_sink(rendered)
+                self._emit(self._renderer.convert(event))
             except Exception as exc:  # noqa: BLE001 - one bad event must not stop the TUI
                 logger.exception("could not render service event %s", event.type)
                 self._resync(
@@ -518,6 +519,8 @@ class ServiceThreadClient:
             self._event_sink(Event("connection", ErrorEvent(message)))
 
     def drain_events(self):
+        """Render what happened since the last call (for callers without the pump)."""
+
         through = None
         while True:
             params = {"threadId": self.thread.id, "after": self._sequence, "limit": 100}
@@ -527,7 +530,12 @@ class ServiceThreadClient:
             through = page["headSequence"]
             self._consume_page(page)
             if not page["hasMore"]:
-                return
+                break
+        pushed, _ = self._take_pushes()
+        for turn_id in self._render_pushed(pushed):
+            items = self._streamed_items(turn_id)
+            if items is not None:
+                self._emit(self._renderer.convert_streamed(items))
 
     async def drain_events_async(self):
         through = None
@@ -549,62 +557,90 @@ class ServiceThreadClient:
     def _on_push(self, message):
         """Runs on the RPC thread for each notification the service pushes."""
         params = message.get("params") or {}
-        if message.get("method") == SERVER_WARNING:
+        method = message.get("method")
+        if method == SERVER_WARNING:
             if params.get("replayRequired"):
                 self._hand_to_pump(_REPLAY)
-        elif "eventId" in params:
+        elif method == ITEM_DELTA or "eventId" in params:
             self._hand_to_pump(params)
 
     def _hand_to_pump(self, value):
-        loop = self._push_loop
-        if loop is None:
-            return
-        try:
-            loop.call_soon_threadsafe(self._enqueue_push, value)
-        except RuntimeError:
-            pass  # The TUI loop has already closed.
+        if len(self._inbox) >= _PUSH_BACKLOG:
+            self._inbox.clear()
+            value = _REPLAY  # The log recovers the events; streamed text is read.
+        self._inbox.append(value)
+        loop, pushed = self._push_loop, self._pushed
+        if loop is not None:
+            try:
+                loop.call_soon_threadsafe(pushed.set)
+            except RuntimeError:
+                pass  # The TUI loop has already closed.
 
-    def _enqueue_push(self, value):
-        pushes = self._pushes
-        if pushes is None:
-            return
-        try:
-            pushes.put_nowait(value)
-        except asyncio.QueueFull:
-            while not pushes.empty():
-                pushes.get_nowait()
-            pushes.put_nowait(_REPLAY)
+    def _take_pushes(self):
+        """This Session's pushes in arrival order, and whether to replay first."""
+
+        values = []
+        while self._inbox:
+            values.append(self._inbox.popleft())
+        replay = any(value is _REPLAY for value in values)
+        pushed = [
+            value
+            for value in values
+            if value is not _REPLAY and value["threadId"] == self.thread.id
+        ]
+        expected = self._sequence + 1
+        for value in pushed:
+            if "sequence" in value:
+                if value["sequence"] > expected:
+                    replay = True  # A push is missing between these.
+                expected = max(expected, value["sequence"] + 1)
+        return pushed, replay
 
     async def _next_pushes(self):
-        """The pushed events in order, and whether the pump must replay first."""
+        self._pushed.clear()
+        if not self._inbox:
+            try:
+                await asyncio.wait_for(self._pushed.wait(), _SAFETY_REPLAY_S)
+            except TimeoutError:
+                return [], True
+        return self._take_pushes()
+
+    def _render_pushed(self, pushed):
+        """Render pushes in order; returns the Turns whose stream missed a delta."""
+
+        gaps = set()
+        for value in pushed:
+            if "eventId" in value:
+                # Events a replay already rendered are skipped by sequence.
+                self._consume_page({"events": [value]})
+                continue
+            rendered = self._renderer.convert_live(value)
+            if rendered is None:
+                gaps.add(value["turnId"])
+            else:
+                self._emit(rendered)
+        return gaps
+
+    def _streamed_items(self, turn_id):
+        """The Turn's items with the text streamed so far, or None."""
+
         try:
-            first = await asyncio.wait_for(self._pushes.get(), _SAFETY_REPLAY_S)
-        except TimeoutError:
-            return [], True
-        values = [first]
-        while not self._pushes.empty():
-            values.append(self._pushes.get_nowait())
-        replay = any(value is _REPLAY for value in values)
-        events = sorted(
-            (
-                value
-                for value in values
-                if value is not _REPLAY and value["threadId"] == self.thread.id
-            ),
-            key=lambda value: value["sequence"],
-        )
-        expected = self._sequence + 1
-        for value in events:
-            if value["sequence"] > expected:
-                replay = True  # A push is missing between these.
-            expected = max(expected, value["sequence"] + 1)
-        return events, replay
+            return self.turns.read(turn_id).items
+        except (RuntimeError, OSError) as exc:
+            # Its completion still brings the whole text.
+            logger.warning("could not read streamed text of turn %s: %s", turn_id, exc)
+            return None
+
+    def _emit(self, rendered):
+        for event in rendered:
+            if self._event_sink:
+                self._event_sink(event)
 
     async def start_domain_events(self, sink):
         if self._domain_task is not None and not self._domain_task.done():
             return
         self._domain_sink = sink
-        self._pushes = asyncio.Queue(maxsize=_PUSH_BACKLOG)
+        self._pushed = asyncio.Event()
         self._push_loop = asyncio.get_running_loop()
 
         async def pump():
@@ -613,9 +649,9 @@ class ServiceThreadClient:
             failures = 0
             while True:
                 generation = self._selection_generation
-                events = []
+                pushed = []
                 if not replay:
-                    events, replay = await self._next_pushes()
+                    pushed, replay = await self._next_pushes()
                 if replay:
                     try:
                         await self.drain_events_async()
@@ -627,9 +663,12 @@ class ServiceThreadClient:
                         await asyncio.sleep(min(5, 0.25 * 2**failures))
                         continue
                     replay, failing_since, failures = False, None, 0
-                if generation == self._selection_generation:
-                    # Events the replay already rendered are skipped by sequence.
-                    self._consume_page({"events": events})
+                if generation != self._selection_generation:
+                    continue
+                for turn_id in self._render_pushed(pushed):
+                    items = await asyncio.to_thread(self._streamed_items, turn_id)
+                    if items is not None and generation == self._selection_generation:
+                        self._emit(self._renderer.convert_streamed(items))
 
         self._domain_task = asyncio.create_task(pump())
 
@@ -671,7 +710,8 @@ class ServiceThreadClient:
 
         await self.stop_domain_events()
         await asyncio.to_thread(self.rpc.reconnect, start=True)
-        self._renderer = await asyncio.to_thread(self._fresh_renderer, self.thread.id)
+        # The renderer stays: it knows how much streamed text is on screen,
+        # and the replay brings whatever happened while disconnected.
         await self.start_domain_events(self._domain_sink)
 
     async def stop_domain_events(self):

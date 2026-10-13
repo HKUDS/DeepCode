@@ -335,7 +335,7 @@ and errors. Async notification subscriptions resolving after unmount are cleaned
 up, and live listeners are installed before status can start the initial replay.
 The unused reducer-wide `lastSequence` maximum has been removed; it was not a
 contiguous cursor. Entity-specific versions remain to protect event state from
-older snapshots and duplicate deltas.
+older snapshots; live streamed text is guarded by its byte offsets instead.
 
 Replay rejects a missing sequence, wrong Thread, changed captured head or a
 non-advancing cursor instead of skipping evidence or retrying indefinitely.

@@ -2,19 +2,22 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import sqlite3
 from collections.abc import Callable
 from dataclasses import replace
 from time import monotonic
 from typing import TypeVar
 
 from core.application.event_service import EventBroker
+from core.application.live_items import TEXT_CHANNEL, LiveItems
 from core.application.turn_usage import (
     TURN_USAGE_EVENT_TYPE,
     add_usage,
     normalize_usage,
 )
-from core.application.views import item_view, timestamp
+from core.application.views import item_view
 from core.domain.common import utc_now
 from core.domain.event import DomainEvent
 from core.domain.item import Item, ItemKind, ItemStatus
@@ -43,8 +46,12 @@ from core.persistence.event_repository import EventRepository
 from core.persistence.execution_repository import ItemRepository
 from core.reasoning import ReasoningChannel, ReasoningPayload
 
+# Streamed text reaches clients in batches of at most this age or size.
 _STREAM_FLUSH_INTERVAL_S = 0.05
 _STREAM_FLUSH_MIN_CHARS = 256
+# Clients get streamed text live, not from the item's row. The row is brought
+# up to date this often, which bounds what a crash of the service loses.
+_CHECKPOINT_INTERVAL_S = 5.0
 _INCOMPLETE_NOTICE = (
     "Some updates in this turn could not be saved, so its transcript may be "
     "incomplete. The service log has the details."
@@ -57,9 +64,12 @@ _T = TypeVar("_T")
 class TurnEventProjector:
     """Map live events into the rebuildable Desktop execution projection.
 
-    A write the database refuses is logged and costs only what clients see:
-    text the throttle holds goes out with the next write, and the Turn goes
-    on. None of the public methods raise for a failed write.
+    Items, their completion and the Turn's other changes are written to the
+    database and its event log. Streamed text is not: it goes to clients as
+    live deltas and waits in ``live_items`` until its item completes.
+
+    A write the database refuses is logged and costs only what clients see,
+    and the Turn goes on. None of the public methods raise for a failed write.
     """
 
     def __init__(
@@ -67,11 +77,13 @@ class TurnEventProjector:
         database: Database,
         broker: EventBroker,
         *,
+        live_items: LiveItems,
         thread_id: str,
         turn_id: str,
     ) -> None:
         self.database = database
         self.broker = broker
+        self.live = live_items
         self.thread_id = thread_id
         self.turn_id = turn_id
         self.final_text: str | None = None
@@ -93,6 +105,8 @@ class TurnEventProjector:
         self._skill_invocations: dict[str, dict[str, str]] = {}
         self._usage: dict[str, int] = {}
         self._usage_ordinals: set[int] = set()
+        self._checkpointed: dict[str, float] = {}
+        self._trailing_flush: asyncio.TimerHandle | None = None
 
     @property
     def usage(self) -> dict[str, int]:
@@ -353,7 +367,11 @@ class TurnEventProjector:
     def _close_open_items(self, interrupted: bool) -> None:
         with self.database.transaction() as connection:
             items = ItemRepository(connection)
-            active = items.list_active_for_turn(self.turn_id)
+            # Streamed text is newer than the rows; keep all of it.
+            active = [
+                self.live.overlay(item)
+                for item in items.list_active_for_turn(self.turn_id)
+            ]
             event_repo = EventRepository(connection)
             events: list[DomainEvent] = []
             for item in active:
@@ -379,6 +397,8 @@ class TurnEventProjector:
                     )
                 )
         self._publish(events)
+        for item in active:
+            self.live.finish(item.id)
 
     def add_completion(
         self,
@@ -454,26 +474,16 @@ class TurnEventProjector:
                 },
             )
             self._assistant_item_ids[key] = item.id
+            self._follow(item, {TEXT_CHANNEL: text})
             self._last_delta_flush[key] = monotonic()
             self._last_flushed_length[key] = len(text)
             return
-        now = monotonic()
-        if (
-            now - self._last_delta_flush.get(key, 0.0) < _STREAM_FLUSH_INTERVAL_S
-            and len(text) - self._last_flushed_length.get(key, 0)
-            < _STREAM_FLUSH_MIN_CHARS
+        if self._held(
+            self._last_delta_flush.get(key, 0.0),
+            len(text) - self._last_flushed_length.get(key, 0),
         ):
             return
-        pending_delta = text[self._last_flushed_length.get(key, 0) :]
-        updated = self._append_item_delta(
-            item_id,
-            delta=pending_delta,
-            summary=text[:160],
-        )
-        if updated is None:
-            return
-        self._last_delta_flush[key] = now
-        self._last_flushed_length[key] = len(text)
+        self._flush_assistant_stream(key)
 
     def _complete_assistant(
         self,
@@ -502,19 +512,22 @@ class TurnEventProjector:
                 payload=payload,
             )
             self._assistant_item_ids[key] = item.id
-        else:
+        elif (
             self._update_item(
                 item_id,
                 status=ItemStatus.COMPLETED,
                 summary=text[:160],
                 payload_update=payload,
             )
+            is not None
+        ):
+            self.live.finish(item_id)
         self._last_flushed_length[key] = len(text)
         if phase is AgentMessagePhase.FINAL_ANSWER:
             self._saw_final_assistant = True
 
     def _flush_assistant_stream(self, key: str) -> None:
-        """Publish assistant text the throttle is still holding, if any."""
+        """Send assistant text the throttle is still holding, if any."""
 
         item_id = self._assistant_item_ids.get(key)
         if item_id is None:
@@ -523,22 +536,22 @@ class TurnEventProjector:
         flushed = self._last_flushed_length.get(key, 0)
         if len(text) <= flushed:
             return
-        updated = self._append_item_delta(
-            item_id,
-            delta=text[flushed:],
-            summary=text[:160],
-        )
-        if updated is None:
-            return
         self._last_delta_flush[key] = monotonic()
         self._last_flushed_length[key] = len(text)
+        self._publish_live(
+            item_id,
+            channel=TEXT_CHANNEL,
+            delta=text[flushed:],
+            payload_update={"text": text},
+            summary=text[:160],
+        )
 
     def _flush_assistant_streams(self) -> None:
         for key in tuple(self._assistant_item_ids):
             self._flush_assistant_stream(key)
 
     def _flush_reasoning_stream(self, reasoning_id: str) -> None:
-        """Publish reasoning text the throttle is still holding, per channel."""
+        """Send reasoning text the throttle is still holding, per channel."""
 
         item_id = self._reasoning_item_ids.get(reasoning_id)
         payload = self._reasoning_payloads.get(reasoning_id)
@@ -550,15 +563,28 @@ class TurnEventProjector:
             flushed = self._reasoning_last_length.get(key, 0)
             if len(text) <= flushed:
                 continue
-            updated = self._append_reasoning_item_delta(
-                item_id,
-                channel=channel,
-                delta=text[flushed:],
-            )
-            if updated is None:
-                continue
             self._reasoning_last_flush[key] = monotonic()
             self._reasoning_last_length[key] = len(text)
+            self._publish_live(
+                item_id,
+                channel=channel.value,
+                delta=text[flushed:],
+                payload_update=self._sent_reasoning(reasoning_id).to_dict(),
+            )
+
+    def _sent_reasoning(self, reasoning_id: str) -> ReasoningPayload:
+        """The reasoning payload as far as clients have received it."""
+
+        payload = self._reasoning_payloads[reasoning_id]
+        summary, trace = (
+            self._reasoning_last_length.get((reasoning_id, channel), 0)
+            for channel in (ReasoningChannel.SUMMARY, ReasoningChannel.PROVIDER_TRACE)
+        )
+        return replace(
+            payload,
+            summary_text=payload.summary_text[:summary],
+            trace_text=payload.trace_text[:trace],
+        )
 
     def _flush_reasoning_streams(self) -> None:
         for reasoning_id in tuple(self._reasoning_item_ids):
@@ -589,6 +615,7 @@ class TurnEventProjector:
         )
         self._reasoning_item_ids[reasoning_id] = item.id
         self._reasoning_payloads[reasoning_id] = payload
+        self._follow(item, {channel.value: "" for channel in ReasoningChannel})
         return item
 
     def _append_reasoning_delta(
@@ -606,25 +633,12 @@ class TurnEventProjector:
         payload = payload.with_delta(channel, delta)
         self._reasoning_payloads[reasoning_id] = payload
         key = (reasoning_id, channel)
-        text = payload.text_for(channel)
-        now = monotonic()
-        if (
-            now - self._reasoning_last_flush.get(key, 0.0) < _STREAM_FLUSH_INTERVAL_S
-            and len(text) - self._reasoning_last_length.get(key, 0)
-            < _STREAM_FLUSH_MIN_CHARS
+        if self._held(
+            self._reasoning_last_flush.get(key, 0.0),
+            len(payload.text_for(channel)) - self._reasoning_last_length.get(key, 0),
         ):
             return
-        pending = text[self._reasoning_last_length.get(key, 0) :]
-        item_id = self._reasoning_item_ids[reasoning_id]
-        updated = self._append_reasoning_item_delta(
-            item_id,
-            channel=channel,
-            delta=pending,
-        )
-        if updated is None:
-            return
-        self._reasoning_last_flush[key] = now
-        self._reasoning_last_length[key] = len(text)
+        self._flush_reasoning_stream(reasoning_id)
 
     def _complete_reasoning(self, message: AgentReasoningCompleted) -> None:
         if message.reasoning_id not in self._reasoning_item_ids:
@@ -643,12 +657,16 @@ class TurnEventProjector:
         )
         self._reasoning_payloads[message.reasoning_id] = payload
         item_id = self._reasoning_item_ids[message.reasoning_id]
-        self._update_item(
-            item_id,
-            status=ItemStatus.COMPLETED,
-            summary="Thinking",
-            payload_update=payload.to_dict(),
-        )
+        if (
+            self._update_item(
+                item_id,
+                status=ItemStatus.COMPLETED,
+                summary="Thinking",
+                payload_update=payload.to_dict(),
+            )
+            is not None
+        ):
+            self.live.finish(item_id)
         for channel in ReasoningChannel:
             key = (message.reasoning_id, channel)
             self._reasoning_last_length[key] = len(payload.text_for(channel))
@@ -717,92 +735,81 @@ class TurnEventProjector:
         self.broker.publish(event)
         return updated
 
-    def _append_item_delta(
+    def _follow(self, item: Item, texts: dict[str, str]) -> None:
+        """Stream ``item``'s text live from now on; its row has ``texts``."""
+
+        self.live.begin(item, texts)
+        self._checkpointed[item.id] = monotonic()
+
+    def _held(self, last_flush: float, pending: int) -> bool:
+        """Whether the throttle holds pending text back for now.
+
+        Held text goes out with the next delta or, if the model pauses, once
+        the interval has passed.
+        """
+
+        if (
+            monotonic() - last_flush >= _STREAM_FLUSH_INTERVAL_S
+            or pending >= _STREAM_FLUSH_MIN_CHARS
+        ):
+            return False
+        if self._trailing_flush is None:
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                return False  # Nothing could send it later; send it now.
+            self._trailing_flush = loop.call_later(
+                _STREAM_FLUSH_INTERVAL_S, self._flush_held
+            )
+        return True
+
+    def _flush_held(self) -> None:
+        self._trailing_flush = None
+        self._guarded(self._flush_pending_streams)
+
+    def _publish_live(
         self,
         item_id: str,
         *,
+        channel: str,
         delta: str,
-        summary: str,
-    ) -> Item | None:
-        """Persist current item state while logging only newly appended text."""
+        payload_update: dict,
+        summary: str | None = None,
+    ) -> None:
+        live = self.live.append(
+            item_id,
+            channel=channel,
+            delta=delta,
+            payload_update=payload_update,
+            summary=summary,
+        )
+        if live is None:
+            return
+        self.broker.publish_live(live)
+        self._checkpoint(item_id)
 
-        if not delta:
-            return None
-        with self.database.transaction() as connection:
-            repository = ItemRepository(connection)
-            item = repository.get(item_id)
-            if item is None:
-                return None
-            text = item.payload.get("text")
-            current_text = text if isinstance(text, str) else ""
-            updated = replace(
-                item,
-                status=ItemStatus.IN_PROGRESS,
-                summary=summary,
-                payload={
-                    **item.payload,
-                    "text": current_text + delta,
-                    "streaming": True,
-                },
-                updated_at=utc_now(),
-            )
-            repository.update(updated)
-            event = EventRepository(connection).append(
-                thread_id=self.thread_id,
-                turn_id=self.turn_id,
-                item_id=updated.id,
-                type="item.delta",
-                payload={
-                    "delta": delta,
-                    "summary": updated.summary,
-                    "streaming": True,
-                    "updatedAt": timestamp(updated.updated_at),
-                },
-            )
-        self.broker.publish(event)
-        return updated
+    def _checkpoint(self, item_id: str) -> None:
+        """Bring a streaming item's row up to date every few seconds.
 
-    def _append_reasoning_item_delta(
-        self,
-        item_id: str,
-        *,
-        channel: ReasoningChannel,
-        delta: str,
-    ) -> Item | None:
-        """Persist and publish one typed reasoning delta."""
+        It never waits for a locked database, so a lock cannot stall the
+        stream: a skipped checkpoint is caught up by the next one, and the
+        item's completion writes all of its text regardless.
+        """
 
-        if not delta:
-            return None
-        with self.database.transaction() as connection:
-            repository = ItemRepository(connection)
-            item = repository.get(item_id)
-            if item is None:
-                return None
-            payload = ReasoningPayload.from_dict(item.payload).with_delta(
-                channel,
-                delta,
-            )
-            updated = replace(
-                item,
-                status=ItemStatus.IN_PROGRESS,
-                payload=payload.to_dict(),
-                updated_at=utc_now(),
-            )
-            repository.update(updated)
-            event = EventRepository(connection).append(
-                thread_id=self.thread_id,
-                turn_id=self.turn_id,
-                item_id=updated.id,
-                type="item.delta",
-                payload={
-                    "delta": delta,
-                    "reasoningChannel": channel.value,
-                    "streaming": True,
-                    "updatedAt": timestamp(updated.updated_at),
-                },
-            )
-        self.broker.publish(event)
-        return updated
+        now = monotonic()
+        if now - self._checkpointed.get(item_id, now) < _CHECKPOINT_INTERVAL_S:
+            return
+        self._checkpointed[item_id] = now
+        try:
+            with self.database.transaction(wait=False) as connection:
+                repository = ItemRepository(connection)
+                item = repository.get(item_id)
+                if item is not None and item.status is ItemStatus.IN_PROGRESS:
+                    repository.update(
+                        replace(self.live.overlay(item), updated_at=utc_now())
+                    )
+        except sqlite3.Error as exc:
+            logger.debug("skipped a checkpoint of item %s: %s", item_id, exc)
 
     def _publish(self, events: list[DomainEvent]) -> None:
         for event in events:

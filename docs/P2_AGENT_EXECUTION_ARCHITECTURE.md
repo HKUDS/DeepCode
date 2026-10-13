@@ -71,7 +71,7 @@ that history before the next Turn. The projector maps SQ/EQ events as follows:
 
 | SQ/EQ event | Durable projection |
 |---|---|
-| `agent_message_delta` | Coalesced in-progress AssistantMessage Item |
+| `agent_message_delta` | In-progress AssistantMessage Item; text sent live |
 | `agent_message` | Completed AssistantMessage projection |
 | file write/edit tool | FileChange Item |
 | shell command | CommandExecution Item |
@@ -79,9 +79,11 @@ that history before the next Turn. The projector maps SQ/EQ events as follows:
 | `error` | failed Error Item |
 | `task_complete` | Completion Item and terminal Turn decision |
 
-Delta writes are coalesced by time/size and the final message always overwrites
-the draft, avoiding one SQLite transaction per token. A terminal assistant
-message is also appended once to canonical JSONL.
+Streamed text is coalesced by time/size (50 ms or 256 characters; a timer sends
+what is held when the model pauses) and sent to clients as live deltas without
+a SQLite write. The Item row receives the text when it completes, plus a
+checkpoint every five seconds that never waits for a locked database. A
+terminal assistant message is also appended once to canonical JSONL.
 
 Every path ends in exactly one of `completed`, `failed`, or `interrupted`.
 Missing `task_complete`, factory/provider exceptions, projection failures,

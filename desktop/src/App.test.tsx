@@ -20,6 +20,7 @@ import type {
   Goal,
   GoalOutcome,
   Item,
+  ItemDelta,
   JsonValue,
   MethodParams,
   MethodResults,
@@ -267,6 +268,8 @@ class TestRuntime implements ClientRuntime {
   }
 
   readonly presetState = new Map<string, string>();
+  /** What turn/read returns per Turn: the items as the service holds them. */
+  readonly turnItems: Record<string, Item[]> = {};
 
   async request<M extends RpcMethod>(
     method: M,
@@ -1009,6 +1012,14 @@ class TestRuntime implements ClientRuntime {
           },
         } as unknown as MethodResults[M];
       }
+      case "turn/read": {
+        const { turnId } = params as MethodParams["turn/read"];
+        return {
+          turn,
+          items: this.turnItems[turnId] ?? [],
+          approvals: [],
+        } as unknown as MethodResults[M];
+      }
       case "event/replay": {
         const { threadId, after = 0, through, limit = 500 } = params as MethodParams["event/replay"];
         const history = this.events.filter((event) => event.threadId === threadId);
@@ -1287,7 +1298,8 @@ const recoveryEvents: Event[] = [
   },
 ];
 
-function liveDelta(sequence: number, delta: string): Event {
+function durableDelta(sequence: number, delta: string): Event {
+  // Older services stored streamed text in the log; their history replays.
   return {
     ...recoveryEvents[1],
     eventId: `event-${sequence}`,
@@ -1297,17 +1309,67 @@ function liveDelta(sequence: number, delta: string): Event {
   };
 }
 
+function itemUpdate(sequence: number, text: string): Event {
+  const item = recoveryEvents[1].payload.item as unknown as Item;
+  return {
+    ...recoveryEvents[1],
+    eventId: `event-${sequence}`,
+    sequence,
+    type: "item.updated",
+    payload: {
+      item: { ...item, summary: text, payload: { ...item.payload, text } },
+    } as unknown as Event["payload"],
+  };
+}
+
+const streamingItem: Item = {
+  ...(recoveryEvents[1].payload.item as unknown as Item),
+  id: "item-live",
+  status: "in_progress",
+  summary: "你好",
+  payload: { text: "你好", streaming: true },
+};
+
+function streamingCreated(sequence: number): Event {
+  return {
+    ...recoveryEvents[1],
+    eventId: `event-${sequence}`,
+    sequence,
+    itemId: streamingItem.id,
+    type: "item.created",
+    payload: { item: streamingItem as unknown as JsonValue },
+  };
+}
+
+/** A live delta of item-live; offsets count UTF-8 bytes after "你好". */
+function live(text: string, before: string): ItemDelta {
+  const bytes = (value: string) => new TextEncoder().encode(value).length;
+  const offset = bytes("你好" + before);
+  return {
+    threadId: thread.id,
+    turnId: turn.id,
+    itemId: streamingItem.id,
+    channel: "text",
+    offset,
+    nextOffset: offset + bytes(text),
+    delta: text,
+  };
+}
+
 describe("workspace event recovery", () => {
-  it("repairs skipped deltas and a dropped approval without resetting the selected item", async () => {
+  it("repairs skipped events and a dropped approval without resetting the selected item", async () => {
     const events = [...recoveryEvents];
     const runtime = new TestRuntime([project], [thread], events);
     const { result } = renderHook(() => useWorkspaceController(runtime));
     await waitFor(() => expect(result.current.state.items).toHaveLength(1));
     act(() => result.current.selectItem("item-1"));
-    events.push(liveDelta(3, " A"), liveDelta(4, "B"));
+    events.push(
+      itemUpdate(3, "Recovered final answer A"),
+      itemUpdate(4, "Recovered final answer AB"),
+    );
     act(() =>
       runtime.notifications.forEach((receive) =>
-        receive({ jsonrpc: "2.0", method: "item.delta", params: events[3] }),
+        receive({ jsonrpc: "2.0", method: "item.updated", params: events[3] }),
       ),
     );
     await waitFor(() =>
@@ -1349,8 +1411,38 @@ describe("workspace event recovery", () => {
     ).toEqual([0, 2, 4]);
   });
 
-  it("holds a newer live delta until its replayed base exists", async () => {
-    const events = [...recoveryEvents];
+  it("applies live text by byte offset, once, and reads past a missed piece", async () => {
+    const runtime = new TestRuntime([project], [thread], [
+      ...recoveryEvents,
+      streamingCreated(3),
+    ]);
+    const { result } = renderHook(() => useWorkspaceController(runtime));
+    const text = () =>
+      result.current.state.items.find((item) => item.id === streamingItem.id)
+        ?.payload.text;
+    await waitFor(() => expect(text()).toBe("你好"));
+    const push = (delta: ItemDelta) =>
+      act(() =>
+        runtime.notifications.forEach((receive) =>
+          receive({ jsonrpc: "2.0", method: "item.delta", params: delta }),
+        ),
+      );
+    push(live("，世界", ""));
+    push(live("，世界", "")); // A repeat changes nothing.
+    expect(text()).toBe("你好，世界");
+
+    // " 😀" never arrived. The service's copy has it and what followed.
+    runtime.turnItems[turn.id] = [
+      { ...streamingItem, payload: { text: "你好，世界 😀!", streaming: true } },
+    ];
+    push(live("!", "，世界 😀"));
+    await waitFor(() => expect(text()).toBe("你好，世界 😀!"));
+    push(live("?", "，世界 😀!"));
+    expect(text()).toBe("你好，世界 😀!?");
+  });
+
+  it("reads text that streamed while the thread was replaying", async () => {
+    const events = [...recoveryEvents, streamingCreated(3)];
     const runtime = new TestRuntime([project], [thread], events);
     const original = runtime.request.bind(runtime);
     let resolve!: (value: MethodResults["event/replay"]) => void;
@@ -1367,34 +1459,28 @@ describe("workspace event recovery", () => {
     });
     const { result } = renderHook(() => useWorkspaceController(runtime));
     await waitFor(() => expect(paused).toBe(true));
-    const delta = liveDelta(3, " appended once");
-    events.push(delta);
+    // Sent before the item exists here: dropped, and then the model pauses.
     act(() =>
       runtime.notifications.forEach((receive) =>
-        receive({ jsonrpc: "2.0", method: "item.delta", params: delta }),
+        receive({ jsonrpc: "2.0", method: "item.delta", params: live("，世界", "") }),
       ),
     );
-    expect(result.current.state.items).toHaveLength(0);
+    runtime.turnItems[turn.id] = [
+      { ...streamingItem, payload: { text: "你好，世界", streaming: true } },
+    ];
     await act(async () =>
       resolve({
-        events: recoveryEvents,
+        events,
         nextAfter: null,
         hasMore: false,
-        headSequence: 2,
+        headSequence: 3,
       }),
     );
     await waitFor(() =>
-      expect(result.current.state.items[0]?.payload.text).toBe(
-        "Recovered final answer appended once",
-      ),
-    );
-    act(() =>
-      runtime.notifications.forEach((receive) =>
-        receive({ jsonrpc: "2.0", method: "item.delta", params: delta }),
-      ),
-    );
-    expect(result.current.state.items[0].payload.text).toBe(
-      "Recovered final answer appended once",
+      expect(
+        result.current.state.items.find((item) => item.id === streamingItem.id)
+          ?.payload.text,
+      ).toBe("你好，世界"),
     );
   });
 
@@ -1410,7 +1496,7 @@ describe("workspace event recovery", () => {
           receive({ ...readyStatus, phase }),
         ),
       );
-      events.push(liveDelta(3, " after reconnect"));
+      events.push(durableDelta(3, " after reconnect"));
       act(() => runtime.statuses.forEach((receive) => receive(readyStatus)));
       await waitFor(() =>
         expect(result.current.state.items[0]?.payload.text).toBe(

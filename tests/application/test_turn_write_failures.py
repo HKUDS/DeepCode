@@ -124,8 +124,8 @@ def _last_assistant_message(application, thread_id: str) -> str:
     return [m.content for m in session.messages if m.role == "assistant"][-1]
 
 
-def test_a_failed_text_write_keeps_the_turn_and_its_answer(tmp_path, monkeypatch):
-    _fail_once(monkeypatch, TurnEventProjector, "_append_item_delta")
+def test_a_failed_answer_write_keeps_the_turn_and_its_answer(tmp_path, monkeypatch):
+    _fail_once(monkeypatch, TurnEventProjector, "_update_item")
     application, thread_id = _application(tmp_path, _answer, _answer)
     try:
         started = application.turns.start(thread_id, prompt="Say hello")
@@ -147,9 +147,7 @@ def test_a_failed_text_write_keeps_the_turn_and_its_answer(tmp_path, monkeypatch
 
 
 def test_the_outcome_survives_when_streamed_text_cannot_be_saved(tmp_path, monkeypatch):
-    # The answer's item is created, then nothing about it can be written:
-    # not the rest of its text and not its completion.
-    monkeypatch.setattr(TurnEventProjector, "_append_item_delta", _locked)
+    # The answer's item is created, then its completion cannot be written.
     monkeypatch.setattr(TurnEventProjector, "_update_item", _locked)
     application, thread_id = _application(tmp_path, _answer, _answer)
     try:

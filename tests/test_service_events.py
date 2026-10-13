@@ -189,3 +189,108 @@ def test_service_stream_completion_renders_each_line_once() -> None:
 
     assert text.count("Hello world") == 1
     assert ", done." in text
+
+
+def _live(offset, text, *, channel="text", item_id=ITEM):
+    return {
+        "threadId": THREAD,
+        "turnId": TURN_A,
+        "itemId": item_id,
+        "channel": channel,
+        "offset": offset,
+        "nextOffset": offset + len(text.encode()),
+        "delta": text,
+    }
+
+
+def _followed(renderer, text="你好"):
+    """A renderer that has shown the assistant item's first text."""
+
+    _messages(
+        renderer,
+        [
+            _event(1, "turn.started", {"turn": {"status": "running"}}),
+            _event(
+                2,
+                "item.created",
+                _assistant("in_progress", text, streaming=True),
+                item_id=ITEM,
+            ),
+        ],
+    )
+
+
+def _deltas(rendered):
+    return [event.msg.delta for event in rendered]
+
+
+def test_live_text_is_rendered_once_from_its_byte_offset() -> None:
+    renderer = ServiceEventRenderer()
+    _followed(renderer)
+    shown = len("你好".encode())
+
+    assert _deltas(renderer.convert_live(_live(shown, "😀 world"))) == ["😀 world"]
+    # Re-sent from an earlier offset: only the unseen part, at a whole character.
+    assert _deltas(renderer.convert_live(_live(shown + 4, " world!"))) == ["!"]
+    assert renderer.convert_live(_live(shown, "😀")) == []
+    # A missed delta: the caller reads the text so far.
+    assert renderer.convert_live(_live(100, "later")) is None
+    # Not followed (it began before this client attached): its completion
+    # carries the text.
+    assert renderer.convert_live(_live(0, "x", item_id="item_other")) == []
+
+
+def test_a_read_after_a_missed_delta_shows_only_what_is_missing() -> None:
+    renderer = ServiceEventRenderer()
+    _followed(renderer)
+    renderer.convert_live(_live(len("你好".encode()), "，世界"))
+    read = Item(
+        id=ITEM,
+        thread_id=THREAD,
+        turn_id=TURN_A,
+        ordinal=1,
+        kind=ItemKind.ASSISTANT_MESSAGE,
+        status=ItemStatus.IN_PROGRESS,
+        summary="",
+        payload={"text": "你好，世界 and more", "messageId": "msg-1"},
+    )
+
+    assert _deltas(renderer.convert_streamed([read])) == [" and more"]
+    assert renderer.convert_streamed([read]) == []
+    following = len("你好，世界 and more".encode())
+    assert _deltas(renderer.convert_live(_live(following, "."))) == ["."]
+
+
+def test_live_reasoning_streams_each_channel() -> None:
+    renderer = ServiceEventRenderer()
+    _messages(
+        renderer,
+        [
+            _event(1, "turn.started", {"turn": {"status": "running"}}),
+            _event(
+                2,
+                "item.created",
+                {
+                    "item": {
+                        "id": ITEM,
+                        "kind": "reasoning_summary",
+                        "status": "in_progress",
+                        "summary": "Thinking",
+                        "payload": {
+                            "summaryText": "",
+                            "traceText": "",
+                            "streaming": True,
+                        },
+                    }
+                },
+                item_id=ITEM,
+            ),
+        ],
+    )
+    summary = renderer.convert_live(_live(0, "plan", channel="summary"))
+    trace = renderer.convert_live(_live(0, "trace", channel="provider_trace"))
+
+    assert [(m.msg.channel.value, m.msg.delta) for m in summary + trace] == [
+        ("summary", "plan"),
+        ("provider_trace", "trace"),
+    ]

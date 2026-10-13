@@ -48,6 +48,10 @@ class DurableThreadEventCursor:
             self._initial_replay_required = False
 
         for event in batch.events:
+            # Live deltas carry no sequence; this TUI renders the agent's own
+            # events, so it does not need them.
+            if not isinstance(event, DomainEvent):
+                continue
             if event.thread_id != self.thread_id or event.sequence <= self.sequence:
                 continue
             if event.sequence > self.sequence + 1:

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import io
 import time
+from collections import deque
 from types import SimpleNamespace
 
 from rich.console import Console
@@ -268,26 +269,39 @@ def test_replay_gap_is_announced_and_later_events_still_render() -> None:
 
 
 def _pushed(client, *values):
-    async def collect():
-        client._pushes = asyncio.Queue()
-        for value in values:
-            client._pushes.put_nowait(value)
-        return await client._next_pushes()
-
-    return asyncio.run(collect())
+    client._inbox = deque(values)
+    return client._take_pushes()
 
 
 def _event_view(sequence, thread=THREAD):
-    return {**_view(sequence, "turn.started", {}), "threadId": thread}
+    return {
+        **_view(sequence, "turn.started", {}),
+        "eventId": f"evt_{sequence}",
+        "threadId": thread,
+    }
 
 
-def test_pushed_events_render_in_order_and_skip_other_sessions() -> None:
+def _live_view(offset, text):
+    return {
+        "threadId": THREAD,
+        "turnId": TURN,
+        "itemId": ITEM,
+        "channel": "text",
+        "offset": offset,
+        "nextOffset": offset + len(text.encode()),
+        "delta": text,
+    }
+
+
+def test_pushes_keep_their_order_and_skip_other_sessions() -> None:
+    # Streamed text must come out between the events it was sent between.
     client, _sink = _client_for_pump(ServiceEventRenderer())
     client._sequence = 4
-    events, replay = _pushed(
-        client, _event_view(6), _event_view(9, thread="other"), _event_view(5)
+    delta = _live_view(0, "Hi")
+    pushed, replay = _pushed(
+        client, _event_view(5), _event_view(9, thread="other"), delta, _event_view(6)
     )
-    assert [value["sequence"] for value in events] == [5, 6]
+    assert pushed == [_event_view(5), delta, _event_view(6)]
     assert not replay
 
 

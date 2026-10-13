@@ -158,6 +158,11 @@ export function useWorkspaceController(runtime: ClientRuntime): WorkspaceControl
           }
         },
         reportError,
+        () => {
+          if (selectedThreadRef.current === threadId) {
+            dispatch({ type: "live-stale" });
+          }
+        },
       );
       eventStreamRef.current = stream;
       await stream.recover();
@@ -259,6 +264,25 @@ export function useWorkspaceController(runtime: ClientRuntime): WorkspaceControl
     }
   }, [loadSettings, loadThreads, reportError, runtime]);
 
+  // A missed live delta leaves a gap in streamed text; the Turn's current
+  // items have the text so far. One read per Turn at a time.
+  const fillingRef = useRef(new Set<string>());
+  useEffect(() => {
+    for (const turnId of state.liveGaps) {
+      if (fillingRef.current.has(turnId)) continue;
+      fillingRef.current.add(turnId);
+      void runtime
+        .request("turn/read", { turnId })
+        .then(
+          (result) => dispatch({ type: "live-text", turnId, items: result.items }),
+          // Best effort: the item's completion carries its whole text, and
+          // the next missed delta tries again.
+          () => dispatch({ type: "live-text", turnId, items: [] }),
+        )
+        .finally(() => fillingRef.current.delete(turnId));
+    }
+  }, [runtime, state.liveGaps]);
+
   useEffect(() => {
     let disposed = false;
     const cleanups: Array<() => void> = [];
@@ -276,6 +300,12 @@ export function useWorkspaceController(runtime: ClientRuntime): WorkspaceControl
 
     const acceptNotification = (notification: AnyRpcNotification) => {
       if (disposed) return;
+      if (notification.method === "item.delta") {
+        if (notification.params.threadId === selectedThreadRef.current) {
+          dispatch({ type: "live-delta", delta: notification.params });
+        }
+        return;
+      }
       if (notification.method === "server.warning") {
         if (notification.params.replayRequired === true) {
           void eventStreamRef.current?.recover().catch(reportError);

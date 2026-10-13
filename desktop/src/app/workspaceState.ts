@@ -5,6 +5,7 @@ import type {
   GoalOutcome,
   Artifact,
   Item,
+  ItemDelta,
   Project,
   SettingsSnapshot,
   Thread,
@@ -16,6 +17,16 @@ import type {
   WorkflowSnapshotResult,
 } from "../generated/app-server";
 import type { BridgeError, SidecarStatus } from "../rpc/contracts";
+import {
+  adoptLiveText,
+  applyLiveDelta,
+  byteLength,
+  channelText,
+  liveKey,
+  streamedBytes,
+  streamsText,
+  withoutItem,
+} from "./liveText";
 import { appendReasoningDelta } from "./reasoningPayload";
 
 export interface TurnPlanState extends TurnPlan {
@@ -39,6 +50,10 @@ export interface WorkspaceState {
   goal: Goal | null;
   goalOutcome: GoalOutcome | null;
   entitySequences: Record<string, number>;
+  /** UTF-8 bytes of streamed text per in-progress item channel. */
+  liveBytes: Record<string, number>;
+  /** Turns whose streamed text missed a delta; `turn/read` fills them. */
+  liveGaps: string[];
   selectedItemId: string | null;
   busy: boolean;
   error: BridgeError | null;
@@ -61,6 +76,9 @@ export type WorkspaceAction =
   | { type: "workflow-snapshot"; snapshot: WorkflowSnapshotResult }
   | { type: "goal"; goal: Goal | null; outcome: GoalOutcome | null }
   | { type: "event"; event: Event }
+  | { type: "live-delta"; delta: ItemDelta }
+  | { type: "live-text"; turnId: string; items: Item[] }
+  | { type: "live-stale" }
   | { type: "select-item"; itemId: string | null }
   | { type: "busy"; busy: boolean }
   | { type: "error"; error: BridgeError | null }
@@ -89,6 +107,8 @@ export const initialWorkspaceState: WorkspaceState = {
   goal: null,
   goalOutcome: null,
   entitySequences: {},
+  liveBytes: {},
+  liveGaps: [],
   selectedItemId: null,
   busy: false,
   error: null,
@@ -213,6 +233,76 @@ function applyItemDelta(state: WorkspaceState, event: Event): WorkspaceState {
   };
 }
 
+/** An item from an event, keeping streamed text the event does not have
+ * yet: an in-progress item's events carry only the text it started with. */
+function withStreamedText(
+  state: WorkspaceState,
+  item: Item,
+): { item: Item; bytes: Record<string, number> } {
+  if (item.status !== "in_progress") {
+    return { item, bytes: withoutItem(state.liveBytes, item.id) };
+  }
+  const bytes = { ...withoutItem(state.liveBytes, item.id), ...streamedBytes(item) };
+  const held = state.items.find((candidate) => candidate.id === item.id);
+  return held ? adoptLiveText(item, held, bytes) : { item, bytes };
+}
+
+function applyLiveText(state: WorkspaceState, delta: ItemDelta): WorkspaceState {
+  const index = state.items.findIndex((item) => item.id === delta.itemId);
+  const current = state.items[index];
+  // Before its item.created arrives, the text is in that event and later reads.
+  if (!current || current.status !== "in_progress") return state;
+  const key = liveKey(delta.itemId, delta.channel);
+  const known =
+    state.liveBytes[key] ?? byteLength(channelText(current, delta.channel));
+  const applied = applyLiveDelta(current, known, delta);
+  if (!applied) {
+    return state.liveGaps.includes(delta.turnId)
+      ? state
+      : { ...state, liveGaps: [...state.liveGaps, delta.turnId] };
+  }
+  if (applied.item === current) return state;
+  const items = state.items.slice();
+  items[index] = applied.item;
+  return { ...state, items, liveBytes: { ...state.liveBytes, [key]: applied.known } };
+}
+
+/** After a replay: replayed items hold only the text they started with. */
+function markStreamingStale(state: WorkspaceState): WorkspaceState {
+  const turnIds = new Set(state.liveGaps);
+  for (const item of state.items) {
+    if (item.status === "in_progress" && streamsText(item)) turnIds.add(item.turnId);
+  }
+  return turnIds.size === state.liveGaps.length
+    ? state
+    : { ...state, liveGaps: [...turnIds] };
+}
+
+function fillLiveText(
+  state: WorkspaceState,
+  turnId: string,
+  read: Item[],
+): WorkspaceState {
+  let items = state.items;
+  let liveBytes = state.liveBytes;
+  for (const value of read) {
+    const index = items.findIndex((item) => item.id === value.id);
+    if (index === -1 || items[index].status !== "in_progress") continue;
+    const adopted = adoptLiveText(items[index], value, liveBytes);
+    if (adopted.item !== items[index]) {
+      if (items === state.items) items = items.slice();
+      items[index] = adopted.item;
+    }
+    liveBytes = adopted.bytes;
+  }
+  return {
+    ...state,
+    items,
+    liveBytes,
+    liveGaps: state.liveGaps.filter((candidate) => candidate !== turnId),
+  };
+}
+
 function applyDomainEvent(state: WorkspaceState, event: Event): WorkspaceState {
   if (event.type === "item.delta") {
     return applyItemDelta(state, event);
@@ -279,11 +369,13 @@ function applyDomainEvent(state: WorkspaceState, event: Event): WorkspaceState {
   const accepted = new Map(
     entities.map(([kind, entity]) => [kind, accepts(kind, entity)]),
   );
+  const streamed = item && accepted.get("item") ? withStreamedText(state, item) : null;
   return {
     ...state,
     threads: thread && accepted.get("thread") ? upsert(state.threads, thread) : state.threads,
     turns: turn && accepted.get("turn") ? upsert(state.turns, turn) : state.turns,
-    items: item && accepted.get("item") ? upsert(state.items, item) : state.items,
+    items: streamed ? upsert(state.items, streamed.item) : state.items,
+    liveBytes: streamed ? streamed.bytes : state.liveBytes,
     approvals:
       approval && accepted.get("approval")
         ? upsert(state.approvals, approval)
@@ -403,6 +495,8 @@ export function workspaceReducer(
         goal: null,
         goalOutcome: null,
         entitySequences: {},
+        liveBytes: {},
+        liveGaps: [],
         selectedItemId: null,
       };
     case "snapshot":
@@ -462,6 +556,12 @@ export function workspaceReducer(
       };
     case "event":
       return applyDomainEvent(state, action.event);
+    case "live-delta":
+      return applyLiveText(state, action.delta);
+    case "live-text":
+      return fillLiveText(state, action.turnId, action.items);
+    case "live-stale":
+      return markStreamingStale(state);
     case "select-item":
       return { ...state, selectedItemId: action.itemId };
     case "busy":

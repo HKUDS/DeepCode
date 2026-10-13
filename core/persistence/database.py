@@ -299,10 +299,16 @@ class Database:
             self._harden_files()
 
     @contextmanager
-    def transaction(self) -> Iterator[sqlite3.Connection]:
-        """Open a short write transaction and commit or fully roll it back."""
+    def transaction(self, *, wait: bool = True) -> Iterator[sqlite3.Connection]:
+        """Open a short write transaction and commit or fully roll it back.
+
+        ``wait=False`` raises at once while another connection holds the
+        write lock, instead of waiting out the busy timeout.
+        """
         connection = self._connect()
         try:
+            if not wait:
+                connection.execute("PRAGMA busy_timeout = 0")
             connection.execute("BEGIN IMMEDIATE")
             yield connection
         except BaseException:

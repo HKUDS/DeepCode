@@ -365,6 +365,93 @@ def test_the_tui_renders_pushed_events_and_stays_quiet_while_idle(tmp_path):
     asyncio.run(scenario())
 
 
+def test_a_dropped_connection_mid_answer_neither_repeats_nor_loses_text(tmp_path):
+    import threading
+
+    from core.events import AgentMessage, AgentMessageDelta, TaskComplete, TurnStarted
+    from core.events import Event as AgentEvent
+
+    pieces = [f"part {index}, " for index in range(10)]
+    halfway, disconnected, sent_while_down = (threading.Event() for _ in range(3))
+
+    class Factory:
+        def create(self, **_kwargs):
+            class Session:
+                def load_history(self, _history):
+                    pass
+
+                async def run_stream(self, _op):
+                    yield AgentEvent("start", TurnStarted())
+                    for index, piece in enumerate(pieces):
+                        if index == 3:
+                            halfway.set()
+                            while not disconnected.is_set():
+                                await asyncio.sleep(0.01)
+                        if index == 6:
+                            sent_while_down.set()
+                        await asyncio.sleep(0.08)
+                        yield AgentEvent("d", AgentMessageDelta(piece, "message"))
+                    text = "".join(pieces)
+                    yield AgentEvent("m", AgentMessage(text, message_id="message"))
+                    yield AgentEvent("done", TaskComplete(text, "completed"))
+
+                async def aclose(self):
+                    pass
+
+            return Session()
+
+    async def scenario():
+        async with control_server(tmp_path, session_factory=Factory()) as (control, _):
+            files, lease = publish(control)
+            client = None
+            try:
+                events = []
+                client = await asyncio.to_thread(
+                    ServiceThreadClient,
+                    workspace=str(tmp_path),
+                    model=None,
+                    connection_id=None,
+                    reasoning_effort=None,
+                    max_iterations=None,
+                    streaming=True,
+                    trust_workspace=True,
+                    database=files.database,
+                    event_sink=events.append,
+                )
+                reconnect = client.rpc.reconnect
+
+                def reconnect_late(*args, **kwargs):
+                    # Parts 3-5 are sent while this client is disconnected.
+                    sent_while_down.wait(5)
+                    return reconnect(*args, **kwargs)
+
+                client.rpc.reconnect = reconnect_late
+                await client.start_domain_events(lambda _: None)
+                await asyncio.to_thread(client.send, "stream")
+                assert await asyncio.to_thread(halfway.wait, 5)
+                await asyncio.to_thread(
+                    client.rpc.run, client.rpc.client._socket.close()
+                )
+                disconnected.set()
+                async with asyncio.timeout(10):
+                    while not any(e.msg.type == "task_complete" for e in events):
+                        await asyncio.sleep(0.01)
+                streamed = "".join(
+                    e.msg.delta for e in events if e.msg.type == "agent_message_delta"
+                )
+                assert streamed == "".join(pieces)
+                assert client.rpc.generation == 1
+            finally:
+                for flag in (halfway, disconnected, sent_while_down):
+                    flag.set()
+                if client:
+                    await client.close()
+                files.clear()
+                lease.close()
+
+    asyncio.run(scenario())
+
+
 def test_service_tui_and_second_client_share_approval_cas(tmp_path):
     from app_server.errors import RpcError
     from app_server.native_client import NativeRpcClient

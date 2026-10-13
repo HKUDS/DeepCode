@@ -1837,7 +1837,7 @@ export interface Notifications {
   "turn.completed": Event;
   "turn.recovered": Event;
   "item.created": Event;
-  "item.delta": Event;
+  "item.delta": ItemDelta;
   "item.updated": Event;
   "approval.requested": Event;
   "approval.resolved": Event;
@@ -1875,6 +1875,18 @@ export interface Notifications {
     dropped: number;
     replayRequired: true;
   };
+}
+/**
+ * Streamed text of an in-progress item, sent live and never stored. Offsets count UTF-8 bytes of the channel's text; a gap is filled by turn/read.
+ */
+export interface ItemDelta {
+  threadId: string;
+  turnId: string;
+  itemId: string;
+  channel: "text" | "summary" | "provider_trace";
+  offset: number;
+  nextOffset: number;
+  delta: string;
 }
 export interface TurnPlan {
   explanation: string | null;

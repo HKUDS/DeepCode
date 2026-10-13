@@ -109,9 +109,11 @@ with an older App Server, a `RESPONSE_TOO_LARGE` result causes the page limit to
 be halved and retried. JSONL owns Session identity and visible conversation;
 SQLite and its event log are the rebuildable Desktop projection.
 
-Live assistant output uses compact `item.delta` notifications between the
-initial and final Item snapshots. Reducer sequence guards make deltas
-idempotent, so replay and live delivery cannot append the same text twice.
+Live assistant and reasoning output uses `item.delta` notifications between
+the initial and final Item events. They are not in the replayed log; the
+reducer applies them by UTF-8 byte offset, so a repeated delta never appends
+text twice. A delta past the held text, or a finished replay while an Item is
+still streaming, makes the controller read the Turn and adopt its newer text.
 
 Project discovery reconciles Sessions from the central store, including records
 created by CLI processes in other directories. Listing can be scoped to an

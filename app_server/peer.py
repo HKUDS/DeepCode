@@ -22,6 +22,7 @@ from app_server.protocol.models import Request, Response, notification
 from core.application.application import DeepCodeApplication
 from core.application.errors import ApplicationError
 from core.application.event_service import DeliveryBatch
+from core.application.live_items import LiveDelta
 from core.application.views import event_view
 
 logger = logging.getLogger(__name__)
@@ -210,6 +211,11 @@ class RpcPeer:
                 ),
             )
         for event in batch.events:
+            if isinstance(event, LiveDelta):
+                self._write_notification(
+                    notification(rpc_notifications.ITEM_DELTA, event.view())
+                )
+                continue
             method = (
                 rpc_notifications.THREAD_UPDATED
                 if event.type.startswith("thread.")

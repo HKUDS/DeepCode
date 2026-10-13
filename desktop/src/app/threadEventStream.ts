@@ -5,6 +5,8 @@ import { replayThreadHistory } from "./replayThreadHistory";
 /** One selected Thread's contiguous cursor, shared by replay and live delivery.
  * Gapped live payloads are recovered from the durable log instead of retained
  * in an unbounded client queue. Stopping the stream fences late RPC results.
+ * Streamed text is not in that log; `caughtUp` runs after each replay so the
+ * caller can read what is still streaming.
  */
 export class ThreadEventStream {
   private cursor = 0;
@@ -18,6 +20,7 @@ export class ThreadEventStream {
     readonly threadId: string,
     private readonly accept: (event: Event) => void,
     private readonly onError: (error: unknown) => void,
+    private readonly caughtUp: () => void = () => {},
   ) {}
 
   stop(): void {
@@ -68,8 +71,10 @@ export class ThreadEventStream {
             "event/replay cannot recover an observed event; reload the Thread",
           );
         }
-        if (revision === this.revision && this.observedHead <= this.cursor)
+        if (revision === this.revision && this.observedHead <= this.cursor) {
+          this.caughtUp();
           return;
+        }
       }
     } finally {
       this.pending = null;

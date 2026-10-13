@@ -66,10 +66,25 @@ fits the advertised message limit. The event log is the durable replay source
 for the current Desktop projection, while JSONL remains canonical for Session
 history.
 
-Streaming assistant text is stored as one initial Item, compact `item.delta`
-events, and one final Item checkpoint. The current Item row always contains the
-complete text, while the append-only log grows linearly instead of saving the
-entire accumulated response for every streamed update.
+Streamed assistant and reasoning text is not written per update. The log keeps
+the Item as created (with its first text) and as completed, interrupted or
+failed (with all of it). In between, the text goes to clients as live
+`item.delta` notifications, which have no sequence and are never stored:
+
+```json
+{"threadId", "turnId", "itemId", "channel": "text" | "summary" | "provider_trace",
+ "offset", "nextOffset", "delta"}
+```
+
+`offset` and `nextOffset` count the UTF-8 bytes of the channel's text, as
+`terminal.output` does. A client keeps that count per in-progress Item and
+channel: it appends a delta at its offset, keeps only the unseen part of one
+that overlaps, and calls `turn/read` after a delta that starts past its count,
+since a missed delta is not replayed. `turn/read` shows in-progress Items with
+the text streamed so far. The Item row itself is brought up to date every five
+seconds, without waiting for a locked database, which bounds what a crash of
+the service loses. Logs written by older versions still contain durable
+`item.delta` events; clients replay those as before.
 
 ## P1 protocol surface
 

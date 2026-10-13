@@ -1,4 +1,10 @@
-"""Render durable service events through the existing TUI/exec event vocabulary."""
+"""Render service events through the existing TUI/exec event vocabulary.
+
+Durable events arrive in sequence order. Streamed text arrives as live
+``item.delta`` notifications, whose offsets count the UTF-8 bytes of the
+item's text on one channel; the renderer remembers how much of each streaming
+item it has shown.
+"""
 
 from __future__ import annotations
 
@@ -33,6 +39,7 @@ class ServiceEventRenderer:
 
     def __init__(self):
         self._items = {}
+        self._shown = {}  # (item id, channel) -> UTF-8 bytes rendered
         self._started = set()
         self._skills = set()
         self._turns_with_error_items = set()
@@ -56,18 +63,72 @@ class ServiceEventRenderer:
                 item.payload.get("messageId") or item.id,
                 item.turn_id,
             )
+            # Followed from here on: what streamed before is not shown again.
+            for channel, text in _channel_texts(item.kind.value, item.payload):
+                self._shown[item.id, channel] = len(text.encode())
 
     def _remember(self, item_id, kind, message_id, turn_id):
         if len(self._items) >= 2048 and item_id not in self._items:
             raise RuntimeError("Too many active timeline items to render")
         self._items[item_id] = (kind, message_id, turn_id)
 
+    def _forget(self, item_ids):
+        for item_id in item_ids:
+            self._items.pop(item_id, None)
+        self._shown = {
+            key: shown for key, shown in self._shown.items() if key[0] in self._items
+        }
+
+    def convert_live(self, delta):
+        """Render a live delta; None when an earlier one was missed."""
+
+        state = self._items.get(delta["itemId"])
+        if state is None:
+            # The item began before this client followed it; its completion
+            # carries the whole text.
+            return []
+        key = (delta["itemId"], delta["channel"])
+        shown = self._shown.get(key, 0)
+        if delta["offset"] > shown:
+            return None
+        if delta["nextOffset"] <= shown:
+            return []
+        unseen = delta["delta"].encode()[shown - delta["offset"] :].decode()
+        self._shown[key] = delta["nextOffset"]
+        return _events(
+            f"live:{delta['itemId']}:{shown}",
+            self._streamed(state, delta["itemId"], delta["channel"], unseen),
+        )
+
+    def convert_streamed(self, items):
+        """Render streamed text of ``items`` (read now) not yet shown."""
+
+        messages = []
+        for item in items:
+            state = self._items.get(item.id)
+            if state is None or item.status.value != "in_progress":
+                continue
+            for channel, text in _channel_texts(item.kind.value, item.payload):
+                data = text.encode()
+                shown = self._shown.get((item.id, channel), 0)
+                if len(data) > shown:
+                    self._shown[item.id, channel] = len(data)
+                    messages += self._streamed(
+                        state, item.id, channel, data[shown:].decode()
+                    )
+        return _events("caught-up", messages)
+
+    @staticmethod
+    def _streamed(state, item_id, channel, text):
+        kind, message_id, _ = state
+        if kind == "assistant_message":
+            return [AgentMessageDelta(text, message_id)]
+        if kind == "reasoning_summary":
+            return [AgentReasoningDelta(item_id, ReasoningChannel(channel), text)]
+        return []
+
     def convert(self, event: DomainEvent):
-        messages = self._messages(event)
-        return [
-            Event(f"{event.id}:{index}", message)
-            for index, message in enumerate(messages)
-        ]
+        return _events(event.id, self._messages(event))
 
     def _messages(self, event):
         payload = event.payload
@@ -90,11 +151,13 @@ class ServiceEventRenderer:
             self._started.discard(event.turn_id)
             self._turns_with_error_items.discard(event.turn_id)
             self._skills = {key for key in self._skills if key[0] != event.turn_id}
-            self._items = {
-                key: value
-                for key, value in self._items.items()
-                if value[2] != event.turn_id
-            }
+            self._forget(
+                [
+                    item_id
+                    for item_id, value in self._items.items()
+                    if value[2] == event.turn_id
+                ]
+            )
             if not followed:
                 # A Turn this client never saw start (a queued Turn cancelled
                 # elsewhere, or one that ended before the replay cursor) must
@@ -127,6 +190,7 @@ class ServiceEventRenderer:
                 )
             ]
         if event.type == "item.delta":
+            # Only in the history of older services, which logged streamed text.
             state = self._items.get(event.item_id)
             if state is None:
                 # The item began before this client's cursor (it attached
@@ -154,8 +218,12 @@ class ServiceEventRenderer:
         created = event.type == "item.created"
         if running:
             self._remember(item["id"], kind, identity, event.turn_id)
+            if created:
+                # Its text so far is rendered below; live deltas continue it.
+                for channel, text in _channel_texts(kind, data):
+                    self._shown[item["id"], channel] = len(text.encode())
         else:
-            self._items.pop(item["id"], None)
+            self._forget([item["id"]])
         if kind == "user_message":
             loaded = []
             for value in data.get("skills", []):
@@ -258,3 +326,24 @@ class ServiceEventRenderer:
                 self._turns_with_error_items.add(event.turn_id)
             return [ErrorEvent(message)]
         return []
+
+
+def _events(identity, messages):
+    return [
+        Event(f"{identity}:{index}", message) for index, message in enumerate(messages)
+    ]
+
+
+def _channel_texts(kind, payload):
+    """An item's streamed text per live channel."""
+
+    if kind == "assistant_message":
+        text = payload.get("text")
+        return [("text", text if isinstance(text, str) else "")]
+    if kind == "reasoning_summary":
+        reasoning = ReasoningPayload.from_dict(payload)
+        return [
+            (ReasoningChannel.SUMMARY.value, reasoning.summary_text),
+            (ReasoningChannel.PROVIDER_TRACE.value, reasoning.trace_text),
+        ]
+    return []

@@ -7516,7 +7516,7 @@
           "$ref": "#/$defs/Event"
         },
         "item.delta": {
-          "$ref": "#/$defs/Event"
+          "$ref": "#/$defs/ItemDelta"
         },
         "item.updated": {
           "$ref": "#/$defs/Event"
@@ -8259,6 +8259,53 @@
       "required": [
         "text",
         "model"
+      ]
+    },
+    "ItemDelta": {
+      "description": "Streamed text of an in-progress item, sent live and never stored. Offsets count UTF-8 bytes of the channel's text; a gap is filled by turn/read.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "turnId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "itemId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "channel": {
+          "enum": [
+            "text",
+            "summary",
+            "provider_trace"
+          ]
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "nextOffset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "delta": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "threadId",
+        "turnId",
+        "itemId",
+        "channel",
+        "offset",
+        "nextOffset",
+        "delta"
       ]
     }
   }
