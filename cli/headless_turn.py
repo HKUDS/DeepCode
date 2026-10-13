@@ -26,6 +26,16 @@ EventHook = Callable[[Event], None]
 ApprovalDecider = Callable[[Approval], ApprovalStatus]
 
 
+def ends_agent_turn(msg) -> bool:
+    """Whether an agent event is the Turn's last: done, or failed.
+
+    A warning is an error event the Turn survives, not its end.
+    """
+    if msg.type == "task_complete":
+        return True
+    return msg.type == "error" and not getattr(msg, "warning", False)
+
+
 def run_headless_turn(
     options: HeadlessTurnOptions,
     *,
@@ -66,7 +76,7 @@ def run_headless_turn(
             if on_event is not None:
                 on_event(event)
         finally:
-            if event.msg.type in {"task_complete", "error"}:
+            if ends_agent_turn(event.msg):
                 terminal_agent_event.set()
             wake.set()
 
