@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import sqlite3
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -675,6 +676,49 @@ class ThreadService:
             or self._workspace_overrides.get(session.session_id)
             or self._workspace_for(session)
         )
+        # Nearly every read, list and resume finds the projection current.
+        # Reconcile in a read-only snapshot first, so comparing a long Session
+        # neither takes nor waits for the write lock. Only when that pass has
+        # something to write does it run again, in a write transaction.
+        try:
+            with self.database.snapshot() as connection:
+                projected, _events = self._reconcile_projection(
+                    connection,
+                    session,
+                    workspace=workspace,
+                    project_hint=project_hint,
+                    event_type=event_type,
+                )
+            return projected, False
+        except sqlite3.OperationalError as exc:
+            if exc.sqlite_errorcode != sqlite3.SQLITE_READONLY:
+                raise
+        with self.database.transaction() as connection:
+            projected, events = self._reconcile_projection(
+                connection,
+                session,
+                workspace=workspace,
+                project_hint=project_hint,
+                event_type=event_type,
+            )
+        for event in events:
+            self.broker.publish(event)
+        return projected, bool(events)
+
+    def _reconcile_projection(
+        self,
+        connection,
+        session: Session,
+        *,
+        workspace: Path,
+        project_hint: str | None,
+        event_type: str | None,
+    ) -> tuple[Thread, list[DomainEvent]]:
+        """Repair one Thread's projection from its Session; return its events.
+
+        It must write only what differs: a current projection is recognized
+        by this running in a snapshot that refuses writes.
+        """
         canonical_created = self._parse_time(session.created_at)
         canonical_updated = self._parse_time(session.updated_at)
         metadata = session.metadata or {}
@@ -689,106 +733,96 @@ class ThreadService:
             self._parse_time(str(metadata.get("archived_at"))) if archived else None
         )
         events: list[DomainEvent] = []
-        changed = False
 
-        with self.database.transaction() as connection:
-            projects = ProjectRepository(connection)
-            project = self._project_for_workspace(
-                projects,
-                workspace,
-                project_hint=project_hint,
+        projects = ProjectRepository(connection)
+        project = self._project_for_workspace(
+            projects,
+            workspace,
+            project_hint=project_hint,
+        )
+        threads = ThreadRepository(connection)
+        existing = threads.get(session.session_id)
+        parent_id = self._parent_for(metadata, threads)
+        title = session.title.strip() or f"Session {session.session_id}"
+
+        if existing is None:
+            projected = Thread(
+                id=session.session_id,
+                project_id=project.id,
+                parent_thread_id=parent_id,
+                title=title,
+                mode=mode,
+                status=ThreadStatus.ARCHIVED if archived else ThreadStatus.IDLE,
+                model=model,
+                connection_id=connection_id,
+                reasoning_effort=reasoning_effort,
+                context_window=context_window,
+                access_preset_override=access_preset_override,
+                workspace_path=str(workspace),
+                created_at=canonical_created,
+                updated_at=canonical_updated,
+                archived_at=archived_at,
             )
-            threads = ThreadRepository(connection)
-            existing = threads.get(session.session_id)
-            parent_id = self._parent_for(metadata, threads)
-            title = session.title.strip() or f"Session {session.session_id}"
-
-            if existing is None:
-                projected = Thread(
-                    id=session.session_id,
-                    project_id=project.id,
-                    parent_thread_id=parent_id,
-                    title=title,
-                    mode=mode,
-                    status=ThreadStatus.ARCHIVED if archived else ThreadStatus.IDLE,
-                    model=model,
-                    connection_id=connection_id,
-                    reasoning_effort=reasoning_effort,
-                    context_window=context_window,
-                    access_preset_override=access_preset_override,
-                    workspace_path=str(workspace),
-                    created_at=canonical_created,
-                    updated_at=canonical_updated,
-                    archived_at=archived_at,
+            threads.add(projected)
+            event = EventRepository(connection).append(
+                thread_id=projected.id,
+                type=event_type or "thread.projected",
+                payload={"thread": thread_view(projected)},
+            )
+            events.append(event)
+        else:
+            status = (
+                ThreadStatus.ARCHIVED
+                if archived
+                else (
+                    ThreadStatus.IDLE
+                    if existing.status is ThreadStatus.ARCHIVED
+                    else existing.status
                 )
-                threads.add(projected)
-                changed = True
+            )
+            # Canonical transcript time drives recency, but projection-only
+            # runtime transitions (recovery, approval, worktree state) may
+            # legitimately be newer and must never move backwards.
+            updated_at = max(existing.updated_at, canonical_updated)
+            projected = replace(
+                existing,
+                project_id=project.id,
+                parent_thread_id=parent_id,
+                title=title,
+                mode=mode,
+                status=status,
+                model=model,
+                connection_id=connection_id,
+                reasoning_effort=reasoning_effort,
+                context_window=context_window,
+                access_preset_override=access_preset_override,
+                workspace_path=str(workspace),
+                updated_at=updated_at,
+                archived_at=archived_at,
+            )
+            if projected != existing:
+                threads.update(projected)
                 event = EventRepository(connection).append(
                     thread_id=projected.id,
-                    type=event_type or "thread.projected",
+                    type=event_type or "thread.reconciled",
                     payload={"thread": thread_view(projected)},
                 )
                 events.append(event)
-            else:
-                status = (
-                    ThreadStatus.ARCHIVED
-                    if archived
-                    else (
-                        ThreadStatus.IDLE
-                        if existing.status is ThreadStatus.ARCHIVED
-                        else existing.status
-                    )
-                )
-                # Canonical transcript time drives recency, but projection-only
-                # runtime transitions (recovery, approval, worktree state) may
-                # legitimately be newer and must never move backwards.
-                updated_at = max(existing.updated_at, canonical_updated)
-                projected = replace(
-                    existing,
-                    project_id=project.id,
-                    parent_thread_id=parent_id,
-                    title=title,
-                    mode=mode,
-                    status=status,
-                    model=model,
-                    connection_id=connection_id,
-                    reasoning_effort=reasoning_effort,
-                    context_window=context_window,
-                    access_preset_override=access_preset_override,
-                    workspace_path=str(workspace),
-                    updated_at=updated_at,
-                    archived_at=archived_at,
-                )
-                if projected != existing:
-                    threads.update(projected)
-                    changed = True
-                    event = EventRepository(connection).append(
-                        thread_id=projected.id,
-                        type=event_type or "thread.reconciled",
-                        payload={"thread": thread_view(projected)},
-                    )
-                    events.append(event)
 
-            transcript_events = self._reconcile_transcript(
-                connection,
-                projected,
-                session,
-            )
-            if transcript_events:
-                changed = True
-                events.extend(transcript_events)
-            workflow_events = self._reconcile_session_tasks(
-                connection,
-                projected,
-                session,
-            )
-            if workflow_events:
-                changed = True
-                events.extend(workflow_events)
+        transcript_events = self._reconcile_transcript(
+            connection,
+            projected,
+            session,
+        )
+        events.extend(transcript_events)
+        workflow_events = self._reconcile_session_tasks(
+            connection,
+            projected,
+            session,
+        )
+        events.extend(workflow_events)
 
-        for event in events:
-            self.broker.publish(event)
-        return projected, changed
+        return projected, events
 
     def _reconcile_transcript(
         self,

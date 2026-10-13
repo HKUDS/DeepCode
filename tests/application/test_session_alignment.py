@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 import pytest
@@ -65,6 +66,59 @@ def test_desktop_projects_existing_cli_session_without_copying_it(
             "remembered",
         ]
     finally:
+        application.close()
+
+
+def test_reading_an_up_to_date_thread_takes_no_write_lock(tmp_path: Path) -> None:
+    """Reads used to compare JSONL with SQLite inside a write transaction.
+
+    Every read, list and resume then waited for any writer, and held up the
+    next one, for as long as comparing a long Session took.
+    """
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = SessionStore(tmp_path / "sessions")
+    session = _seed_cli_session(store, workspace)
+    application = DeepCodeApplication.open(
+        tmp_path / "state.sqlite3",
+        session_store=store,
+    )
+    holding = threading.Event()
+    release = threading.Event()
+
+    def hold_write_lock() -> None:
+        with application.database.transaction():
+            holding.set()
+            release.wait(30)
+
+    writer = threading.Thread(target=hold_write_lock)
+    try:
+        application.threads.read(session.session_id)
+        writer.start()
+        assert holding.wait(5)
+        read = application.threads.read(session.session_id)
+        listed = application.threads.list()
+        release.set()
+        writer.join()
+        assert read.id == session.session_id
+        assert [thread.id for thread in listed] == [session.session_id]
+
+        # A Session that changed is still brought up to date.
+        store.append_message(session.session_id, "user", "and this")
+        application.threads.read(session.session_id)
+        with application.database.read() as connection:
+            items = ItemRepository(connection).conversation_for_thread(
+                session.session_id
+            )
+        assert [item.payload["text"] for item in items] == [
+            "remember this",
+            "remembered",
+            "and this",
+        ]
+    finally:
+        release.set()
+        if writer.is_alive():
+            writer.join()
         application.close()
 
 

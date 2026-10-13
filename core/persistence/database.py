@@ -299,6 +299,24 @@ class Database:
             self._harden_files()
 
     @contextmanager
+    def snapshot(self) -> Iterator[sqlite3.Connection]:
+        """Open a read transaction that refuses every write.
+
+        Its reads see one consistent state and neither take nor wait for the
+        write lock. A write raises ``sqlite3.OperationalError`` with
+        ``SQLITE_READONLY``.
+        """
+        connection = self._connect()
+        try:
+            connection.execute("PRAGMA query_only = ON")
+            connection.execute("BEGIN")
+            yield connection
+        finally:
+            # Closing ends the read transaction; there is nothing to commit.
+            connection.close()
+            self._harden_files()
+
+    @contextmanager
     def transaction(self, *, wait: bool = True) -> Iterator[sqlite3.Connection]:
         """Open a short write transaction and commit or fully roll it back.
 
