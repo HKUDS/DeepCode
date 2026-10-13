@@ -124,14 +124,14 @@ export function McpPage({
       toolTimeoutSeconds: numberValue(draft.toolTimeout, 60),
       approvalMode: draft.approvalMode,
       disabledTools: csv(draft.disabledTools),
-      ...(draft.enabledTools.trim()
-        ? { enabledTools: csv(draft.enabledTools) }
-        : {}),
+      // The form shows these when editing, so a blank one clears the saved
+      // value: the service merges the patch, and a missing key keeps it.
+      enabledTools: draft.enabledTools.trim() ? csv(draft.enabledTools) : null,
       ...(draft.transport === "stdio"
         ? {
             command: draft.command.trim(),
             args: lines(draft.args),
-            ...(draft.cwd.trim() ? { cwd: draft.cwd.trim() } : {}),
+            cwd: draft.cwd.trim() || null,
             envVars: csv(draft.envVars),
             requiredEnvVars: csv(draft.requiredEnvVars),
             ...(draft.credentialEnv.trim()

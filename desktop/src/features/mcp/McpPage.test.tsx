@@ -336,3 +336,41 @@ test("adds a bundled preset disabled, tests it, then enables agent use", async (
     params: { projectId: project.id, name: "context7", enabled: true },
   });
 });
+
+test("clears a saved working directory and tool allow-list", async () => {
+  const runtime = new McpRuntime();
+  runtime.inventory = {
+    ...runtime.inventory,
+    servers: [
+      mcpServer("files", { cwd: "/workspace/tools", enabledTools: ["read"] }),
+    ],
+  };
+  render(
+    <McpPage
+      runtime={runtime as unknown as ClientRuntime}
+      project={project}
+    />,
+  );
+
+  await screen.findByRole("heading", { name: "files" });
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  const cwd = screen.getByLabelText("Working directory") as HTMLInputElement;
+  const enabledTools = screen.getByLabelText(
+    "Enabled tools",
+  ) as HTMLInputElement;
+  expect(cwd.value).toBe("/workspace/tools");
+  expect(enabledTools.value).toBe("read");
+  fireEvent.change(cwd, { target: { value: "" } });
+  fireEvent.change(enabledTools, { target: { value: " " } });
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+  await waitFor(() =>
+    expect(
+      runtime.requests.find((request) => request.method === "mcp/upsert")
+        ?.params,
+    ).toMatchObject({
+      name: "files",
+      server: { type: "stdio", cwd: null, enabledTools: null },
+    }),
+  );
+});
