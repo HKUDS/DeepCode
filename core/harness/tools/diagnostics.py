@@ -9,7 +9,7 @@ registry keyed by file extension. Adding a language = adding a ``Checker`` to
 the registry. A checker that isn't installed (``is_available()`` false) is
 silently skipped, so the loop degrades gracefully and never blocks an edit.
 
-Checks are non-executing (syntax/lint only): ``py_compile`` compiles without
+Checks are non-executing (syntax/lint only): ``compile()`` compiles without
 running, ``node --check`` parses without running — safe to run on every edit.
 """
 
@@ -53,26 +53,14 @@ class PyCompileChecker(Checker):
     extensions = (".py",)
 
     def check(self, path: str) -> list[Diagnostic]:
-        import py_compile
-
+        # compile() as py_compile does, minus writing the bytecode into a
+        # __pycache__ beside the file, which is the user's project.
+        with open(path, "rb") as f:
+            source = f.read()
         try:
-            py_compile.compile(path, doraise=True)
+            compile(source, path, "exec", dont_inherit=True)
             return []
-        except py_compile.PyCompileError as exc:
-            inner = getattr(exc, "exc_value", None)
-            line = getattr(inner, "lineno", None)
-            col = getattr(inner, "offset", None)
-            msg = getattr(inner, "msg", None) or str(exc)
-            return [
-                Diagnostic(
-                    line=line,
-                    column=col,
-                    severity="error",
-                    message=msg,
-                    source=self.name,
-                )
-            ]
-        except (SyntaxError, ValueError) as exc:  # defensive
+        except (SyntaxError, ValueError) as exc:
             return [
                 Diagnostic(
                     line=getattr(exc, "lineno", None),

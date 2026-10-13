@@ -43,6 +43,14 @@ def test_pycompile_clean_file_no_diagnostics(tmp_path):
     assert PyCompileChecker().check(str(good)) == []
 
 
+@pytest.mark.parametrize("source", ["def f():\n    return 1\n", "def f(:\n"])
+def test_pycompile_writes_no_bytecode_into_the_project(tmp_path, source):
+    path = tmp_path / "m.py"
+    path.write_text(source)
+    PyCompileChecker().check(str(path))
+    assert list(tmp_path.iterdir()) == [path]
+
+
 def test_registry_skips_unregistered_extension(tmp_path):
     txt = tmp_path / "notes.txt"
     txt.write_text("this is not code {{{")
