@@ -1082,7 +1082,7 @@ def _resolve_spec_for_phase(
     return matched_cfg, spec, chosen_model, settings
 
 
-def _enforce_provider_egress(
+def enforce_provider_egress(
     config: DeepCodeConfig,
     spec: ProviderSpec,
     api_base: str | None,
@@ -1181,7 +1181,7 @@ def make_llm_provider(
     effective_base = api_base or spec.default_api_base or None
     # P0-1: one egress decision per provider construction. Placed after
     # `effective_base` so the spec's own default endpoint is judged too.
-    _enforce_provider_egress(config, spec, effective_base, phase=phase)
+    enforce_provider_egress(config, spec, effective_base, phase=phase)
 
     if backend == "anthropic":
         from core.providers.anthropic import AnthropicProvider

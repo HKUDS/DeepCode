@@ -10,7 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
-from core.config import ConfigError, ManualModelConfig, _enforce_provider_egress
+from core.config import ConfigError, ManualModelConfig, enforce_provider_egress
 from core.domain.execution_profile import ExecutionProfile, ExecutionSelection
 from core.providers.base import GenerationSettings, LLMProvider
 from core.providers.catalog import resolve_model_info
@@ -313,7 +313,7 @@ class ConnectionResolver:
         connection = self.connection_for_profile(profile)
         # Sessions build providers here rather than in make_llm_provider, so
         # the model-egress policy is applied here too.
-        _enforce_provider_egress(
+        enforce_provider_egress(
             self.config, connection.spec, connection.api_base, phase="default"
         )
         if connection.adapter == "anthropic":
