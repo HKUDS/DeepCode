@@ -11,6 +11,7 @@ things that logs, so a quiet default has to be installed first.
 
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 
@@ -93,6 +94,44 @@ def test_an_unreadable_config_does_not_break_startup(monkeypatch, tmp_path):
     deepcode._bootstrap_logging()
 
     assert sink_levels()
+
+
+def _log_http_request_and_more() -> None:
+    import httpx
+
+    transport = httpx.MockTransport(lambda _request: httpx.Response(200))
+    with httpx.Client(transport=transport) as client:
+        client.post("http://127.0.0.1:1/control/rpc")
+    logging.getLogger("cli.service_cli").info("service started")
+
+
+def test_http_requests_stay_off_the_terminal(monkeypatch, tmp_path, capsys):
+    """httpx logs every request at INFO, so `deepcode web` and `deepcode
+    service stop` printed a line per call to the service above their output."""
+
+    shutdown_logging()
+    monkeypatch.delenv("DEEPCODE_LOG_LEVEL", raising=False)
+    monkeypatch.setenv("DEEPCODE_HOME", str(tmp_path / "home"))
+    monkeypatch.chdir(tmp_path)
+
+    deepcode._bootstrap_logging()
+    _log_http_request_and_more()
+
+    err = capsys.readouterr().err
+    assert "HTTP Request" not in err
+    assert "service started" in err
+
+
+def test_debug_logging_still_shows_http_requests(monkeypatch, tmp_path, capsys):
+    shutdown_logging()
+    monkeypatch.setenv("DEEPCODE_LOG_LEVEL", "DEBUG")
+    monkeypatch.setenv("DEEPCODE_HOME", str(tmp_path / "home"))
+    monkeypatch.chdir(tmp_path)
+
+    deepcode._bootstrap_logging()
+    _log_http_request_and_more()
+
+    assert "HTTP Request" in capsys.readouterr().err
 
 
 def test_main_bootstraps_before_dispatching(monkeypatch, capsys):

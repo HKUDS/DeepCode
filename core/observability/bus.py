@@ -180,10 +180,12 @@ def setup_logging(
             to_handler = isinstance(console_sink, logging.Handler)
             if to_handler:
                 console_sink.setFormatter(_FinishedLine())
+            quiet_http = console_sink is None and level not in ("TRACE", "DEBUG")
             sid = _loguru_logger.add(
                 console_sink if console_sink is not None else sys.stderr,
                 level=level,
                 format=_handler_format if to_handler else _console_format,
+                filter=_not_http_chatter if quiet_http else None,
                 backtrace=False,
                 diagnose=False,
                 enqueue=False,
@@ -387,6 +389,18 @@ def _console_line(record: dict[str, Any]) -> str:
         f"<level>{{level: <8}}</level> | "
         f"{tag}<cyan>{{name}}</cyan>:<cyan>{{line}}</cyan> - "
         "<level>{message}</level>"
+    )
+
+
+def _not_http_chatter(record: dict[str, Any]) -> bool:
+    """httpx logs every request at INFO: a line per call to the service or a
+    model, which on the terminal buried what the command itself printed
+    (``deepcode web``, ``deepcode service stop``). Other sinks, such as the
+    log files and the service log, keep them; the terminal shows them at DEBUG.
+    """
+    return (
+        record["level"].no >= logging.WARNING
+        or (record["name"] or "").partition(".")[0] != "httpx"
     )
 
 
