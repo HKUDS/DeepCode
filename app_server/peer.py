@@ -19,6 +19,7 @@ from app_server.protocol.codec import (
     encode_message,
 )
 from app_server.protocol.models import Request, Response, notification
+from app_server.protocol.timeouts import SLOW_METHOD_TIMEOUTS
 from core.application.application import DeepCodeApplication
 from core.application.errors import ApplicationError
 from core.application.event_service import DeliveryBatch
@@ -98,6 +99,20 @@ class RpcPeer:
                 self._dropped += 1
             self._pending.append(notification(method, payload))
 
+    def runs_alongside(self, raw: bytes) -> bool:
+        """Whether this frame waits on a model or an external process.
+
+        Such a request (a /compact, a provider or MCP test) can take minutes.
+        It runs without holding this connection, so the client's other
+        requests and its live events go on meanwhile; its reply follows
+        whatever they wrote.
+        """
+        try:
+            request = decode_request(raw, max_bytes=self.max_message_bytes)
+        except RpcError:
+            return False
+        return request.method in SLOW_METHOD_TIMEOUTS
+
     def receive(
         self, raw: bytes, *, before_dispatch: Callable[[Request], None] | None = None
     ) -> None:
@@ -106,41 +121,65 @@ class RpcPeer:
             with self._delivery_lock:
                 if self.closed or self.connection.shutting_down:
                     return
-                request = None
-                try:
-                    request = decode_request(raw, max_bytes=self.max_message_bytes)
-                    if before_dispatch is not None:
-                        before_dispatch(request)
-                    result = self.dispatcher.dispatch(request)
-                except ApplicationError as exc:
-                    if request is not None and request.has_id:
-                        self._write_error(request.id, from_application_error(exc))
-                except RpcError as exc:
-                    if request is None or request.has_id:
-                        self._write_error(
-                            request.id if request is not None else None, exc
-                        )
-                except Exception:
-                    logger.exception("Unhandled App Server request failure")
-                    if request is not None and request.has_id:
-                        self._write_error(
-                            request.id,
-                            RpcError(
-                                -32603, "internal error", stable_code="INTERNAL_ERROR"
-                            ),
-                        )
-                else:
-                    if request.has_id:
-                        self._write_response(
-                            Response(id=request.id, result=result).to_dict(),
-                            method=request.method,
-                        )
-                self._drain_events()
+                request, error = self._admit(raw, before_dispatch)
+                alongside = error is None and request.method in SLOW_METHOD_TIMEOUTS
+                if not alongside:
+                    result = None
+                    if error is None:
+                        result, error = self._dispatch(request)
+                    self._reply(request, result, error)
+                    self._drain_events()
+            if alongside:
+                result, error = self._dispatch(request)
+                with self._delivery_lock:
+                    if self.closed:
+                        return
+                    self._reply(request, result, error)
+                    self._drain_events()
         except (BrokenPipeError, OSError, ValueError):
             self.close()
             raise
         if self.connection.shutting_down:
             self.close()
+
+    def _admit(
+        self, raw: bytes, before_dispatch: Callable[[Request], None] | None
+    ) -> tuple[Request | None, RpcError | None]:
+        request = None
+        try:
+            request = decode_request(raw, max_bytes=self.max_message_bytes)
+            if before_dispatch is not None:
+                before_dispatch(request)
+        except Exception as exc:
+            return request, self._failure(exc)
+        return request, None
+
+    def _dispatch(self, request: Request) -> tuple[Any, RpcError | None]:
+        try:
+            return self.dispatcher.dispatch(request), None
+        except Exception as exc:
+            return None, self._failure(exc)
+
+    @staticmethod
+    def _failure(exc: Exception) -> RpcError:
+        if isinstance(exc, RpcError):
+            return exc
+        if isinstance(exc, ApplicationError):
+            return from_application_error(exc)
+        logger.exception("Unhandled App Server request failure")
+        return RpcError(-32603, "internal error", stable_code="INTERNAL_ERROR")
+
+    def _reply(
+        self, request: Request | None, result: Any, error: RpcError | None
+    ) -> None:
+        if error is not None:
+            if request is None or request.has_id:
+                self._write_error(request.id if request is not None else None, error)
+        elif request.has_id:
+            self._write_response(
+                Response(id=request.id, result=result).to_dict(),
+                method=request.method,
+            )
 
     def reject_oversized_frame(self) -> None:
         try:

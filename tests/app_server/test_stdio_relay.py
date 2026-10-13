@@ -35,7 +35,9 @@ class Desktop:
 
     def _read(self, stdout) -> None:
         for line in stdout:
-            self._responses.put(json.loads(line))
+            message = json.loads(line)
+            if "id" in message:  # notifications are not what these tests wait for
+                self._responses.put(message)
 
     def send(self, request_id: int, method: str, params: dict | None = None) -> None:
         frame = {"jsonrpc": "2.0", "id": request_id, "method": method}
@@ -47,8 +49,21 @@ class Desktop:
         return self._responses.get(timeout=timeout)
 
     def close(self) -> None:
-        self._requests.close()
+        if not self._requests.closed:
+            self._requests.close()
         self.relay.join(timeout=5)
+
+
+def _held_provider_test(monkeypatch, application) -> threading.Event:
+    """provider/test stands in for any request that waits on a model."""
+    released = threading.Event()
+
+    def held(*args, **kwargs):
+        released.wait(10)
+        return {"ok": True}
+
+    monkeypatch.setattr(application.llm, "test", held)
+    return released
 
 
 def _slow_list(monkeypatch, service, seconds: float) -> None:
@@ -106,5 +121,91 @@ def test_the_service_tells_clients_how_long_each_method_may_take(tmp_path):
         budgets = info["capabilities"]["requestTimeouts"]
         assert budgets["defaultSeconds"] == timeouts.DEFAULT_TIMEOUT
         assert budgets["methodSeconds"]["thread/context/compact"] == 600.0
+
+    asyncio.run(scenario())
+
+
+def test_a_slow_request_does_not_hold_up_the_next(tmp_path, monkeypatch):
+    # The relay used to wait for each answer before reading the next frame.
+    async def scenario():
+        async with control_server(tmp_path) as (control, _):
+            files, lease = publish(control)
+            released = _held_provider_test(monkeypatch, control.host.application)
+            desktop = await asyncio.to_thread(Desktop, files)
+            try:
+                desktop.send(1, "initialize", INITIALIZE)
+                await asyncio.to_thread(desktop.response)
+                desktop.send(2, "provider/test", {"connectionId": "deepseek"})
+                desktop.send(3, "thread/list", {})
+                first = await asyncio.to_thread(desktop.response, 5)
+                released.set()
+                second = await asyncio.to_thread(desktop.response)
+
+                assert first == {"jsonrpc": "2.0", "id": 3, "result": {"threads": []}}
+                assert second == {"jsonrpc": "2.0", "id": 2, "result": {"ok": True}}
+            finally:
+                released.set()
+                await asyncio.to_thread(desktop.close)
+                files.clear()
+                lease.close()
+
+    asyncio.run(scenario())
+
+
+def test_closing_its_input_still_answers_what_was_asked(tmp_path, monkeypatch):
+    async def scenario():
+        async with control_server(tmp_path) as (control, _):
+            files, lease = publish(control)
+            _slow_list(monkeypatch, control.host.application.threads, 1.0)
+            desktop = await asyncio.to_thread(Desktop, files)
+            try:
+                desktop.send(1, "initialize", INITIALIZE)
+                await asyncio.to_thread(desktop.response)
+                desktop.send(2, "thread/list", {})
+                desktop._requests.close()
+
+                answer = await asyncio.to_thread(desktop.response)
+                await asyncio.to_thread(desktop.relay.join, 5)
+
+                assert answer["id"] == 2 and "result" in answer
+                assert not desktop.relay.is_alive()
+            finally:
+                await asyncio.to_thread(desktop.close)
+                files.clear()
+                lease.close()
+
+    asyncio.run(scenario())
+
+
+def test_shutdown_does_not_wait_for_a_slow_request(tmp_path, monkeypatch):
+    # The Desktop host gives the shutdown reply 3s; the service finishes a
+    # /compact on its own, whether or not this window is still there.
+    async def scenario():
+        async with control_server(tmp_path) as (control, _):
+            files, lease = publish(control)
+            released = _held_provider_test(monkeypatch, control.host.application)
+            desktop = await asyncio.to_thread(Desktop, files)
+            try:
+                desktop.send(1, "initialize", INITIALIZE)
+                await asyncio.to_thread(desktop.response)
+                desktop.send(2, "provider/test", {"connectionId": "deepseek"})
+                started = time.monotonic()
+                desktop.send(3, "shutdown")
+
+                answer = await asyncio.to_thread(desktop.response)
+                await asyncio.to_thread(desktop.relay.join, 5)
+
+                assert answer == {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "result": {"accepted": True},
+                }
+                assert time.monotonic() - started < 3.0
+                assert not desktop.relay.is_alive()
+            finally:
+                released.set()
+                await asyncio.to_thread(desktop.close)
+                files.clear()
+                lease.close()
 
     asyncio.run(scenario())

@@ -18,7 +18,6 @@ from app_server.protocol.codec import (
     encode_message,
 )
 from app_server.protocol.models import Response
-from app_server.protocol.timeouts import request_timeout
 from app_server.service_state import ServiceFiles
 
 
@@ -30,6 +29,7 @@ def serve_relay(files: ServiceFiles, source: BinaryIO, sink: BinaryIO) -> int:
     output_bytes = 0
     stopped = threading.Event()
     failed = threading.Event()
+    broken = threading.Event()  # the service connection failed mid-request
     loop = asyncio.new_event_loop()
     thread = threading.Thread(
         target=loop.run_forever, name="deepcode-native-rpc", daemon=True
@@ -87,19 +87,39 @@ def serve_relay(files: ServiceFiles, source: BinaryIO, sink: BinaryIO) -> int:
     reader.start()
     writer.start()
 
-    def run(coroutine, timeout: float):
-        future = asyncio.run_coroutine_threadsafe(coroutine, loop)
+    def connect(params: dict):
+        future = asyncio.run_coroutine_threadsafe(
+            client.connect(params, start=True), loop
+        )
         try:
-            return future.result(timeout=timeout)
+            return future.result(timeout=40)
         except concurrent.futures.TimeoutError:
             future.cancel()
             raise RpcError(
                 -32000, "Service connection timed out", stable_code="RESULT_UNKNOWN"
             ) from None
 
+    async def answer(request) -> None:
+        # Each request waits as long as its method allows, off this loop: a
+        # /compact may take minutes, and the host's other requests go on.
+        try:
+            result = await client.request(request.method, request.params)
+        except RpcError as exc:
+            error = exc
+        except (OSError, RuntimeError, ValueError) as exc:
+            error = RpcError(-32000, str(exc), stable_code="SERVICE_UNAVAILABLE")
+            broken.set()
+        else:
+            if request.has_id:
+                emit(Response(request.id, result=result).to_dict())
+            return
+        if request.has_id:
+            emit(Response(request.id, error=error.payload()).to_dict())
+
+    answering: list[concurrent.futures.Future] = []
     try:
         initialized = False
-        while not failed.is_set():
+        while not failed.is_set() and not broken.is_set():
             if initialized and client.closed.is_set():
                 # EOF tells the native bridge to offer Reconnect. Never start a
                 # replacement application after a network failure.
@@ -109,6 +129,8 @@ def serve_relay(files: ServiceFiles, source: BinaryIO, sink: BinaryIO) -> int:
             except queue.Empty:
                 continue
             if raw is None:
+                # No more input: everything asked is still answered.
+                concurrent.futures.wait(answering)
                 break
             request = None
             try:
@@ -116,9 +138,12 @@ def serve_relay(files: ServiceFiles, source: BinaryIO, sink: BinaryIO) -> int:
                 if not initialized:
                     if request.method != "initialize":
                         raise NotInitialized()
-                    result = run(client.connect(request.params, start=True), 40)
+                    result = connect(request.params)
                     initialized = True
                 elif request.method == "shutdown":
+                    # The host is leaving: answer what finishes promptly, but
+                    # not a /compact; the service completes that regardless.
+                    concurrent.futures.wait(answering, timeout=2)
                     result = {"accepted": True}
                 elif request.method == "service/status":
                     from app_server.service_client import ServiceClient
@@ -142,12 +167,11 @@ def serve_relay(files: ServiceFiles, source: BinaryIO, sink: BinaryIO) -> int:
                     # Native management only, bounded drain; no implicit cancel.
                     result = stop_service(files, timeout=10, cancel_running=False)
                 else:
-                    result = run(
-                        client.request(request.method, request.params),
-                        # Outlive the request's own budget (a /compact may take
-                        # minutes) so its error, not this wrapper's, is sent.
-                        request_timeout(request.method) + 15,
+                    answering = [f for f in answering if not f.done()]
+                    answering.append(
+                        asyncio.run_coroutine_threadsafe(answer(request), loop)
                     )
+                    continue
                 if request.has_id:
                     emit(Response(request.id, result=result).to_dict())
                 if request.method == "shutdown":

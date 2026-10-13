@@ -103,6 +103,10 @@ class WebSocketTransport:
     MAX_CONNECTIONS = 32
     # Business calls have their own bounded pool; management stays responsive.
     MAX_REQUESTS = 8
+    # Requests that wait on a model or an external process (see
+    # RpcPeer.runs_alongside) get their own few workers, so a /compact taking
+    # minutes never holds one an ordinary request needs.
+    MAX_SLOW_REQUESTS = 4
     DRAIN_METHODS = frozenset(
         {
             "initialize",
@@ -143,6 +147,11 @@ class WebSocketTransport:
         self._executor = ThreadPoolExecutor(
             max_workers=self.MAX_REQUESTS, thread_name_prefix="deepcode-rpc"
         )
+        self._slow_slots = asyncio.Semaphore(self.MAX_SLOW_REQUESTS)
+        self._slow_executor = ThreadPoolExecutor(
+            max_workers=self.MAX_SLOW_REQUESTS, thread_name_prefix="deepcode-rpc-slow"
+        )
+        self._alongside: set[asyncio.Task] = set()
         self._inflight: set[asyncio.Future] = set()
         self._idle = asyncio.Event()
         self._idle.set()
@@ -257,25 +266,29 @@ class WebSocketTransport:
         outgoing: FrameQueue,
         session: str | None,
     ) -> None:
-        """Keep request order without blocking the socket's ping/pong reader."""
+        """Keep request order without blocking the socket's ping/pong reader.
+
+        A slow request is not waited for before the next frame is read; a
+        client with several of them queued waits for one to finish first.
+        """
         work = None
+        slow: set[asyncio.Task] = set()
         try:
             while (raw := await incoming.receive()) is not None:
+                if peer.runs_alongside(raw):
+                    if len(slow) >= self.MAX_SLOW_REQUESTS:
+                        await asyncio.wait(slow, return_when=asyncio.FIRST_COMPLETED)
+                    if not await self._admissible(ws, session):
+                        break
+                    task = asyncio.create_task(self._run_alongside(peer, raw))
+                    for tasks in (slow, self._alongside):
+                        tasks.add(task)
+                        task.add_done_callback(tasks.discard)
+                    continue
                 async with self._slots:
-                    if ws.closed or self._closing:
+                    if not await self._admissible(ws, session):
                         break
-                    if session is not None and not self.auth.remaining(session):
-                        await _close_socket(
-                            ws, code=1008, message=b"Browser session expired"
-                        )
-                        break
-                    work = asyncio.get_running_loop().run_in_executor(
-                        self._executor,
-                        partial(peer.receive, raw, before_dispatch=self._guard),
-                    )
-                    self._inflight.add(work)
-                    self._idle.clear()
-                    work.add_done_callback(self._finished)
+                    work = self._start(self._executor, peer, raw)
                     # Disconnect/cancellation must not cancel an admitted mutation.
                     await asyncio.shield(work)
                 if peer.closed:
@@ -287,6 +300,35 @@ class WebSocketTransport:
                 await asyncio.gather(work, return_exceptions=True)
             # A shutdown reply precedes the WebSocket close frame.
             outgoing.finish()
+
+    async def _admissible(self, ws: web.WebSocketResponse, session: str | None) -> bool:
+        if ws.closed or self._closing:
+            return False
+        if session is not None and not self.auth.remaining(session):
+            await _close_socket(ws, code=1008, message=b"Browser session expired")
+            return False
+        return True
+
+    def _start(
+        self, executor: ThreadPoolExecutor, peer: RpcPeer, raw: bytes
+    ) -> asyncio.Future:
+        work = asyncio.get_running_loop().run_in_executor(
+            executor, partial(peer.receive, raw, before_dispatch=self._guard)
+        )
+        self._inflight.add(work)
+        self._idle.clear()
+        work.add_done_callback(self._finished)
+        return work
+
+    async def _run_alongside(self, peer: RpcPeer, raw: bytes) -> None:
+        async with self._slow_slots:
+            if peer.closed or self._closing:
+                return
+            work = self._start(self._slow_executor, peer, raw)
+            try:
+                await asyncio.shield(work)
+            except (ConnectionError, OSError, ValueError):
+                pass  # the client left; the peer has closed itself
 
     def _finished(self, task: asyncio.Future) -> None:
         self._inflight.discard(task)
@@ -329,5 +371,8 @@ class WebSocketTransport:
         )
 
     async def cleanup(self, _app: web.Application) -> None:
-        await asyncio.gather(*tuple(self._inflight), return_exceptions=True)
+        await asyncio.gather(
+            *tuple(self._alongside), *tuple(self._inflight), return_exceptions=True
+        )
         await asyncio.to_thread(self._executor.shutdown, wait=True)
+        await asyncio.to_thread(self._slow_executor.shutdown, wait=True)
