@@ -1,10 +1,13 @@
+import os
+import shutil
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from core.application import DeepCodeApplication
-from core.application.errors import WorkspaceOutOfScopeError
+from core.application.errors import ThreadNotFoundError, WorkspaceOutOfScopeError
 from core.application.event_service import EventBroker
 from core.domain import ThreadStatus, TrustState
 
@@ -124,3 +127,59 @@ def test_live_event_broker_is_bounded_and_reports_loss() -> None:
     assert [event.sequence for event in batch.events] == [3, 4]
     assert batch.dropped == 2
     assert broker.drain(token).events == ()
+
+
+def _session_file(application: DeepCodeApplication, thread_id: str) -> Path:
+    return application.session_store.root / thread_id / "session.jsonl"
+
+
+@pytest.mark.parametrize("damage", ["truncated", "unreadable"])
+def test_a_session_that_cannot_be_read_keeps_its_thread_history(
+    tmp_path: Path,
+    damage: str,
+) -> None:
+    # Reconciling used to treat such a Session as removed and delete its
+    # thread row, which takes its turns, approvals and events with it.
+    if damage == "unreadable" and (sys.platform == "win32" or os.geteuid() == 0):
+        pytest.skip("file permissions don't stop this user reading")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    project = application.projects.add(str(workspace))
+    thread = application.threads.start(project.id, title="Original")
+    application.threads.rename(thread.id, "Renamed")
+    path = _session_file(application, thread.id)
+    original = path.read_bytes()
+
+    if damage == "truncated":
+        path.write_bytes(b"")
+    else:
+        path.chmod(0)
+        os.utime(path, ns=(1, 1))
+    try:
+        application.threads.list(project.id)
+        with pytest.raises(ThreadNotFoundError, match="could not be read"):
+            application.threads.read(thread.id)
+    finally:
+        path.chmod(0o600)
+        path.write_bytes(original)
+
+    assert application.threads.read(thread.id).title == "Renamed"
+    assert [event.type for event in application.events.replay(thread.id)] == [
+        "thread.created",
+        "thread.renamed",
+    ]
+
+
+def test_a_session_removed_from_disk_drops_its_thread(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    project = application.projects.add(str(workspace))
+    thread = application.threads.start(project.id, title="Removed")
+
+    shutil.rmtree(_session_file(application, thread.id).parent)
+
+    assert application.threads.list(project.id) == []
+    with pytest.raises(ThreadNotFoundError):
+        application.threads.read(thread.id)

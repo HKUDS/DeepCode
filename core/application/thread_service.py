@@ -427,6 +427,10 @@ class ThreadService:
 
         if self.session_store.is_deletion_pending(thread_id):
             raise ThreadNotFoundError(f"thread not found: {thread_id}")
+        if self._session_unreadable(thread_id):
+            raise ThreadNotFoundError(
+                f"thread {thread_id} could not be read from its session file"
+            )
 
         # A projection-only thread may be encountered before startup
         # reconciliation. Adopt it in place (preserving its id) only when
@@ -1176,10 +1180,29 @@ class ThreadService:
                 thread.id
             ) is not None or self.session_store.is_deletion_pending(thread.id):
                 continue
+            if self._session_unreadable(thread.id):
+                continue
             if self._sqlite_is_system_of_record(thread.id):
                 self._adopt_thread(thread)
             else:
                 self._drop_stale_projection(thread)
+
+    def _session_unreadable(self, thread_id: str) -> bool:
+        """True when the Session is on disk but could not be loaded.
+
+        Its Thread is then neither adopted, which would rewrite the transcript,
+        nor dropped, which would delete its turns, approvals and events for
+        good. A later read can still succeed: the file may be locked, mid-sync
+        or briefly unreadable.
+        """
+
+        if self.session_store.is_missing(thread_id):
+            return False
+        logger.warning(
+            "Session %s is on disk but could not be read; its thread is kept",
+            thread_id,
+        )
+        return True
 
     def _sqlite_is_system_of_record(self, thread_id: str) -> bool:
         """True when this Thread legitimately predates its canonical Session."""

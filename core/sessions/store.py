@@ -220,6 +220,21 @@ class SessionStore:
     def is_deletion_pending(self, session_id: str) -> bool:
         return self._deletions.pending(self._validated_session_id(session_id))
 
+    def is_missing(self, session_id: str) -> bool:
+        """True only when the Session's transcript is known to be gone.
+
+        ``get_session`` also returns None for a transcript that is on disk but
+        could not be read or has no metadata line; that Session still exists.
+        """
+        path = self._session_jsonl(self._validated_session_id(session_id))
+        try:
+            path.stat()
+        except (FileNotFoundError, NotADirectoryError):
+            return True
+        except OSError:
+            return False
+        return False
+
     def pending_deletions(self) -> tuple[SessionDeletionTicket, ...]:
         return self._deletions.list_pending()
 
