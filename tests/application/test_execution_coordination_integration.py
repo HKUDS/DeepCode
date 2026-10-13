@@ -83,6 +83,18 @@ def _wait_for(
     )
 
 
+def _wait_for_claims_released(application: DeepCodeApplication) -> None:
+    # Settlement commits the terminal status and the claim's release together,
+    # and only then does the worker forget the claim in memory, so a reader
+    # can see the status a moment before active_claims empties.
+    coordinator = application.execution_coordinator
+    deadline = time.monotonic() + 4.0
+    while coordinator.active_claims:
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"claims still active: {coordinator.active_claims}")
+        time.sleep(0.01)
+
+
 def _trusted_thread(
     application: DeepCodeApplication,
     tmp_path: Path,
@@ -123,7 +135,7 @@ def test_product_turn_is_bound_claimed_and_released_by_submitting_worker(
         assert completed.execution_owner_id is None
         assert completed.home_worker_id is None
         assert completed.execution_epoch == 1
-        assert application.execution_coordinator.active_claims == ()
+        _wait_for_claims_released(application)
         with application.database.read() as connection:
             held = RuntimeCoordinationRepository(
                 connection
@@ -212,7 +224,7 @@ def test_registry_start_failure_atomically_fails_turn_and_releases_claim(
         assert failed.stop_reason == "scheduler_error"
         assert failed.error_code == "SCHEDULER_ERROR"
         assert failed.execution_owner_id is None
-        assert application.execution_coordinator.active_claims == ()
+        _wait_for_claims_released(application)
         snapshot = application.turns.read(failed.id)
         assert snapshot.items[-1].payload["stopReason"] == "scheduler_error"
         with application.database.read() as connection:
@@ -380,7 +392,7 @@ def test_second_application_requests_cancel_from_claim_owner(
         assert interrupted.status is TurnStatus.INTERRUPTED
         assert interrupted.cancel_requested_at is not None
         assert interrupted.execution_owner_id is None
-        assert first.execution_coordinator.active_claims == ()
+        _wait_for_claims_released(first)
     finally:
         second.close()
         first.close()

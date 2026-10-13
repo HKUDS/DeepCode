@@ -176,6 +176,18 @@ def _wait_for(application: DeepCodeApplication, run_id: str, status: WorkflowSta
     )
 
 
+def _wait_for_claims_released(application: DeepCodeApplication) -> None:
+    # Settlement commits the terminal status and the claim's release together,
+    # and only then does the worker forget the claim in memory, so a reader
+    # can see the status a moment before active_claims empties.
+    coordinator = application.execution_coordinator
+    deadline = time.monotonic() + 5
+    while coordinator.active_claims:
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"claims still active: {coordinator.active_claims}")
+        time.sleep(0.01)
+
+
 def test_completed_workflow_projects_progress_and_bounded_artifact(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -206,7 +218,7 @@ def test_completed_workflow_projects_progress_and_bounded_artifact(
         assert completed.turn.execution_owner_id is None
         assert registry_job_ids == [completed.turn.id]
         assert completed.run.id not in registry_job_ids
-        assert application.execution_coordinator.active_claims == ()
+        _wait_for_claims_released(application)
         assert completed.run.result == {"status": "completed", "testsPassed": True}
         assert completed.run.progress_current == completed.run.progress_total == 100
         assert [artifact.storage_path for artifact in completed.artifacts] == [
@@ -256,7 +268,7 @@ def test_workflow_registry_start_failure_is_terminal_and_releases_claim(
         assert failed.run.error_code == "SCHEDULER_ERROR"
         assert failed.turn.status is TurnStatus.FAILED
         assert failed.turn.execution_owner_id is None
-        assert application.execution_coordinator.active_claims == ()
+        _wait_for_claims_released(application)
         assert runner.requests == []
         with application.database.read() as connection:
             held = RuntimeCoordinationRepository(
@@ -892,7 +904,7 @@ def test_remote_process_requests_workflow_cancel_from_claim_owner(
         assert cancelled.turn.status is TurnStatus.INTERRUPTED
         assert cancelled.turn.cancel_requested_at is not None
         assert cancelled.turn.execution_owner_id is None
-        assert owner.execution_coordinator.active_claims == ()
+        _wait_for_claims_released(owner)
         assert len(owner_runner.requests) == 1
         assert observer_runner.requests == []
     finally:
