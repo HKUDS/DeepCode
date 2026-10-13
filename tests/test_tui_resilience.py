@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import asyncio
 import io
+import time
 from types import SimpleNamespace
 
 from rich.console import Console
 
 import cli.tui.app as tui_app
 from cli.service_events import ServiceEventRenderer
-from cli.service_thread_client import ServiceThreadClient
+from cli.service_thread_client import _REPLAY, ServiceThreadClient
 from core.application.errors import ApplicationError
 from core.domain.approval import ApprovalStatus
 from core.domain.event import DomainEvent
@@ -264,6 +265,54 @@ def test_replay_gap_is_announced_and_later_events_still_render() -> None:
         isinstance(e.msg, ErrorEvent) and "5-8 were missing" in e.msg.message
         for e in sink
     )
+
+
+def _pushed(client, *values):
+    async def collect():
+        client._pushes = asyncio.Queue()
+        for value in values:
+            client._pushes.put_nowait(value)
+        return await client._next_pushes()
+
+    return asyncio.run(collect())
+
+
+def _event_view(sequence, thread=THREAD):
+    return {**_view(sequence, "turn.started", {}), "threadId": thread}
+
+
+def test_pushed_events_render_in_order_and_skip_other_sessions() -> None:
+    client, _sink = _client_for_pump(ServiceEventRenderer())
+    client._sequence = 4
+    events, replay = _pushed(
+        client, _event_view(6), _event_view(9, thread="other"), _event_view(5)
+    )
+    assert [value["sequence"] for value in events] == [5, 6]
+    assert not replay
+
+
+def test_a_missing_push_or_a_lost_connection_makes_the_pump_replay() -> None:
+    client, _sink = _client_for_pump(ServiceEventRenderer())
+    client._sequence = 4
+    assert _pushed(client, _event_view(5), _event_view(7))[1]
+    assert _pushed(client, _event_view(6))[1]
+    assert _pushed(client, _REPLAY)[1]
+
+
+class _Answered(ApplicationError):
+    code = "INTERNAL_ERROR"
+
+
+def test_a_failed_replay_says_lost_connection_only_when_it_was() -> None:
+    client, sink = _client_for_pump(ServiceEventRenderer())
+    now = time.monotonic()
+    # E.g. the database briefly locked: a notice would split the answer.
+    assert client._replay_failed(_Answered("database is locked"), 0, now)
+    assert not sink
+    assert client._replay_failed(_ServiceDown("connection refused"), 0, now)
+    assert "Lost connection" in sink[-1].msg.message
+    assert not client._replay_failed(_Answered("database is locked"), 3, now - 121)
+    assert "keeps failing" in sink[-1].msg.message
 
 
 # -- failed turn reasons -------------------------------------------------------

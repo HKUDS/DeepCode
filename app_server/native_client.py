@@ -66,10 +66,16 @@ class NativeRpcClient:
     """One connection on one event loop; no implicit mutation replay or fallback."""
 
     def __init__(
-        self, files: ServiceFiles, *, notify: Callable[[dict], None] | None = None
+        self,
+        files: ServiceFiles,
+        *,
+        notify: Callable[[dict], None] | None = None,
+        on_close: Callable[[], None] | None = None,
     ):
+        """``notify`` and ``on_close`` run on the reading loop and must not raise."""
         self.files = files
         self.notify = notify or (lambda _: None)
+        self._on_close = on_close or (lambda: None)
         self.info: dict[str, Any] | None = None
         self._session: aiohttp.ClientSession | None = None
         self._socket: aiohttp.ClientWebSocketResponse | None = None
@@ -280,6 +286,7 @@ class NativeRpcClient:
             for future in self._pending.values():
                 if not future.done():
                     future.set_exception(ConnectionError("Service connection closed"))
+            self._on_close()
 
     async def close(self) -> None:
         self.closed.set()

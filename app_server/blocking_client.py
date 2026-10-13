@@ -7,6 +7,7 @@ import concurrent.futures
 import json
 import threading
 import time
+from collections.abc import Callable
 
 from app_server.errors import RpcError
 from app_server.native_client import NativeRpcClient, request_timeout
@@ -33,10 +34,20 @@ class BlockingServiceClient:
     """One owned I/O thread; close releases transport, never service work."""
 
     def __init__(
-        self, files: ServiceFiles, *, surface: str = "cli", start: bool = True
+        self,
+        files: ServiceFiles,
+        *,
+        surface: str = "cli",
+        start: bool = True,
+        notify: Callable[[dict], None] | None = None,
+        on_close: Callable[[], None] | None = None,
     ):
+        """``notify`` gets every pushed notification of every connection, and
+        ``on_close`` each connection's end, both on this client's I/O thread."""
         self.files = files
         self.surface = surface
+        self._notify = notify
+        self._on_close = on_close
         self._connection_lock = threading.RLock()
         self.generation = 0
         self.loop = asyncio.new_event_loop()
@@ -44,7 +55,7 @@ class BlockingServiceClient:
             target=self.loop.run_forever, name="deepcode-cli-rpc", daemon=True
         )
         self.thread.start()
-        self.client = NativeRpcClient(files)
+        self.client = self._new_client()
         self._closed = False
         try:
             self.info = self.run(
@@ -63,6 +74,9 @@ class BlockingServiceClient:
         except BaseException:
             self.close()
             raise
+
+    def _new_client(self) -> NativeRpcClient:
+        return NativeRpcClient(self.files, notify=self._notify, on_close=self._on_close)
 
     def run(self, coroutine, *, timeout: float = 40):
         if self._closed:
@@ -106,7 +120,7 @@ class BlockingServiceClient:
                 return
             old = self.client
             self.run(old.close())
-            candidate = NativeRpcClient(self.files)
+            candidate = self._new_client()
             info = self.run(
                 candidate.connect(
                     {

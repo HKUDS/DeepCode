@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 from app_server.blocking_client import BlockingServiceClient
+from app_server.protocol.notifications import SERVER_WARNING
 from app_server.service_state import ServiceFiles
 from cli.rpc_models import from_view
 from cli.service_catalogs import (
@@ -39,6 +40,14 @@ logger = logging.getLogger(__name__)
 # How long the event pump keeps retrying an unreachable service before it
 # stops and points the user at /reconnect (which can start it again).
 _RECONNECT_WINDOW_S = 120.0
+# The pump renders the events the service pushes. It replays the Session's
+# event log when it may have missed some, and also this often in case a push
+# went missing without a warning.
+_SAFETY_REPLAY_S = 10.0
+# Pushes waiting for the pump; when it falls further behind, it replays.
+_PUSH_BACKLOG = 4096
+# Handed to the pump instead of an event: replay before rendering more.
+_REPLAY = object()
 
 
 class ServiceThreadClient:
@@ -69,8 +78,13 @@ class ServiceThreadClient:
         self._domain_sink = None
         self._selection_generation = 0
         self._sequence = 0
+        self._pushes = None
+        self._push_loop = None
         self.rpc = BlockingServiceClient(
-            ServiceFiles(database or default_database_path()), surface=surface
+            ServiceFiles(database or default_database_path()),
+            surface=surface,
+            notify=self._on_push,
+            on_close=lambda: self._hand_to_pump(_REPLAY),
         )
         try:
             self.llm = ServiceLLM(self.rpc)
@@ -532,58 +546,125 @@ class ServiceThreadClient:
             if not page["hasMore"]:
                 return
 
+    def _on_push(self, message):
+        """Runs on the RPC thread for each notification the service pushes."""
+        params = message.get("params") or {}
+        if message.get("method") == SERVER_WARNING:
+            if params.get("replayRequired"):
+                self._hand_to_pump(_REPLAY)
+        elif "eventId" in params:
+            self._hand_to_pump(params)
+
+    def _hand_to_pump(self, value):
+        loop = self._push_loop
+        if loop is None:
+            return
+        try:
+            loop.call_soon_threadsafe(self._enqueue_push, value)
+        except RuntimeError:
+            pass  # The TUI loop has already closed.
+
+    def _enqueue_push(self, value):
+        pushes = self._pushes
+        if pushes is None:
+            return
+        try:
+            pushes.put_nowait(value)
+        except asyncio.QueueFull:
+            while not pushes.empty():
+                pushes.get_nowait()
+            pushes.put_nowait(_REPLAY)
+
+    async def _next_pushes(self):
+        """The pushed events in order, and whether the pump must replay first."""
+        try:
+            first = await asyncio.wait_for(self._pushes.get(), _SAFETY_REPLAY_S)
+        except TimeoutError:
+            return [], True
+        values = [first]
+        while not self._pushes.empty():
+            values.append(self._pushes.get_nowait())
+        replay = any(value is _REPLAY for value in values)
+        events = sorted(
+            (
+                value
+                for value in values
+                if value is not _REPLAY and value["threadId"] == self.thread.id
+            ),
+            key=lambda value: value["sequence"],
+        )
+        expected = self._sequence + 1
+        for value in events:
+            if value["sequence"] > expected:
+                replay = True  # A push is missing between these.
+            expected = max(expected, value["sequence"] + 1)
+        return events, replay
+
     async def start_domain_events(self, sink):
         if self._domain_task is not None and not self._domain_task.done():
             return
         self._domain_sink = sink
+        self._pushes = asyncio.Queue(maxsize=_PUSH_BACKLOG)
+        self._push_loop = asyncio.get_running_loop()
 
         async def pump():
-            through = None
+            replay = True  # Catch up on what happened before the pump ran.
+            failing_since = None
             failures = 0
-            first_failure = None
             while True:
-                thread_id, generation = self.thread.id, self._selection_generation
-                params = {"threadId": thread_id, "after": self._sequence, "limit": 100}
-                if through is not None and through > self._sequence:
-                    params["through"] = through
-                try:
-                    page = await asyncio.to_thread(
-                        self.rpc.call, "event/replay", params
-                    )
-                    failures = 0
-                    first_failure = None
-                except (RuntimeError, OSError) as exc:
-                    if getattr(exc, "code", None) == "THREAD_NOT_FOUND":
-                        self._notify_connection(
-                            "This Session no longer exists in the service; it may "
-                            "have been deleted elsewhere. Use /new or /resume."
-                        )
-                        return
-                    now = time.monotonic()
-                    if first_failure is None:
-                        first_failure = now
-                        self._notify_connection(
-                            f"Lost connection to the DeepCode service ({exc}). "
-                            "Retrying for up to 2 minutes; tasks it already accepted "
-                            "keep running."
-                        )
-                    if now - first_failure >= _RECONNECT_WINDOW_S:
-                        self._notify_connection(
-                            "Still cannot reach the DeepCode service. Use /reconnect "
-                            "to start it again, or check `deepcode service status`."
-                        )
-                        return
-                    failures += 1
-                    await asyncio.sleep(min(5, 0.25 * 2**failures))
-                    continue
-                if generation != self._selection_generation:
-                    through = None
-                    continue
-                self._consume_page(page)
-                through = page["headSequence"] if page["hasMore"] else None
-                await asyncio.sleep(0.05)
+                generation = self._selection_generation
+                events = []
+                if not replay:
+                    events, replay = await self._next_pushes()
+                if replay:
+                    try:
+                        await self.drain_events_async()
+                    except (RuntimeError, OSError) as exc:
+                        failing_since = failing_since or time.monotonic()
+                        if not self._replay_failed(exc, failures, failing_since):
+                            return
+                        failures += 1
+                        await asyncio.sleep(min(5, 0.25 * 2**failures))
+                        continue
+                    replay, failing_since, failures = False, None, 0
+                if generation == self._selection_generation:
+                    # Events the replay already rendered are skipped by sequence.
+                    self._consume_page({"events": events})
 
         self._domain_task = asyncio.create_task(pump())
+
+    def _replay_failed(self, exc, failures, failing_since):
+        """Tell the user what a failed replay means; False stops the pump."""
+        code = getattr(exc, "code", None)
+        if code == "THREAD_NOT_FOUND":
+            self._notify_connection(
+                "This Session no longer exists in the service; it may have been "
+                "deleted elsewhere. Use /new or /resume."
+            )
+            return False
+        # An internal error is an answer: the service is reachable, perhaps
+        # briefly unable to read its database. Saying so mid-answer would split
+        # the text, so it is only logged unless it persists.
+        answered = code == "INTERNAL_ERROR"
+        if time.monotonic() - failing_since >= _RECONNECT_WINDOW_S:
+            self._notify_connection(
+                f"The DeepCode service keeps failing to send this Session's "
+                f"updates ({exc}). Use /reconnect to try again, or see "
+                "`deepcode service logs`."
+                if answered
+                else "Still cannot reach the DeepCode service. Use /reconnect to "
+                "start it again, or check `deepcode service status`."
+            )
+            return False
+        if failures == 0:
+            if answered:
+                logger.warning("Could not replay Session events: %s", exc)
+            else:
+                self._notify_connection(
+                    f"Lost connection to the DeepCode service ({exc}). Retrying "
+                    "for up to 2 minutes; tasks it already accepted keep running."
+                )
+        return True
 
     async def reconnect(self):
         """Reconnect, starting the service again if it is no longer running."""
@@ -594,6 +675,7 @@ class ServiceThreadClient:
         await self.start_domain_events(self._domain_sink)
 
     async def stop_domain_events(self):
+        self._push_loop = None
         if self._domain_task is not None:
             self._domain_task.cancel()
             await asyncio.gather(self._domain_task, return_exceptions=True)

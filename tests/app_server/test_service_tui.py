@@ -271,6 +271,100 @@ def test_service_reconnect_replays_rendered_tools_and_reasoning_once(tmp_path):
     asyncio.run(scenario())
 
 
+def test_the_tui_renders_pushed_events_and_stays_quiet_while_idle(tmp_path):
+    from core.events import AgentMessage, AgentMessageDelta, TaskComplete, TurnStarted
+    from core.events import Event as AgentEvent
+
+    class Factory:
+        def create(self, **_kwargs):
+            class Session:
+                def load_history(self, _history):
+                    pass
+
+                async def run_stream(self, _op):
+                    yield AgentEvent("start", TurnStarted())
+                    yield AgentEvent("d", AgentMessageDelta("pushed ", "message"))
+                    yield AgentEvent(
+                        "m", AgentMessage("pushed text", message_id="message")
+                    )
+                    yield AgentEvent("done", TaskComplete("pushed text", "completed"))
+
+                async def aclose(self):
+                    pass
+
+            return Session()
+
+    async def scenario():
+        async with control_server(tmp_path, session_factory=Factory()) as (control, _):
+            files, lease = publish(control)
+            client = None
+            try:
+                events = []
+                client = await asyncio.to_thread(
+                    ServiceThreadClient,
+                    workspace=str(tmp_path),
+                    model=None,
+                    connection_id=None,
+                    reasoning_effort=None,
+                    max_iterations=None,
+                    streaming=True,
+                    trust_workspace=True,
+                    database=files.database,
+                    event_sink=events.append,
+                )
+                replays = []
+                call = client.rpc.call
+
+                def counting(method, params):
+                    if method == "event/replay":
+                        replays.append(params)
+                    return call(method, params)
+
+                client.rpc.call = counting
+                await client.start_domain_events(lambda _: None)
+
+                async def finish_turn(prompt):
+                    rendered = len(events)
+                    await asyncio.to_thread(client.send, prompt)
+                    async with asyncio.timeout(5):
+                        while not any(
+                            event.msg.type == "task_complete"
+                            for event in events[rendered:]
+                        ):
+                            await asyncio.sleep(0.01)
+
+                # Each poll read the Session's file and took a write lock, 20
+                # times a second, idle or not. Only the catch-up replays now.
+                await asyncio.sleep(1)
+                assert len(replays) == 1
+                await finish_turn("first")
+                assert len(replays) == 1
+
+                # A dropped connection makes the pump replay, which reconnects;
+                # pushes then arrive on the new connection.
+                await asyncio.to_thread(
+                    client.rpc.run, client.rpc.client._socket.close()
+                )
+                async with asyncio.timeout(5):
+                    while client.rpc.generation == 0:
+                        await asyncio.sleep(0.01)
+                await finish_turn("second")
+                kinds = [event.msg.type for event in events]
+                assert kinds.count("agent_message") == 2
+                assert kinds.count("task_complete") == 2
+                assert client._sequence == control.host.application.events.head(
+                    client.thread.id
+                )
+                assert len(replays) == 2
+            finally:
+                if client:
+                    await client.close()
+                files.clear()
+                lease.close()
+
+    asyncio.run(scenario())
+
+
 def test_service_tui_and_second_client_share_approval_cas(tmp_path):
     from app_server.errors import RpcError
     from app_server.native_client import NativeRpcClient
