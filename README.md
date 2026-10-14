@@ -158,6 +158,33 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
 
 ## News
 
+**2026-10-14 · Sessions that keep their history, a tighter sandbox, and the Desktop and Web apps in Chinese**
+
+- **Your history stays.** A session that cannot be read is listed with the
+  reason instead of losing its history, and a turn that is stopped or fails
+  keeps what it already wrote. Each message reaches the session file as the
+  model reads it, so a crash mid-turn no longer loses the turn, a resumed
+  session gives the model the history it had, and a line a crash cut short no
+  longer breaks the session.
+- **A tighter sandbox.** Agent commands no longer see the model keys DeepCode
+  uses (`DEEPCODE_BASH_FULL_ENV=1` still hands over everything). Credential
+  files and private keys in `~/.ssh` stay out of reach, while `git` over SSH
+  works through your SSH agent. A command can no longer plant hooks or loosen
+  the next command's sandbox, and DeepCode's own `git` calls run no program a
+  repository names. A repository's config can no longer turn the sandbox off
+  or choose Full access; that is a user setting.
+- **Tools that don't stall.** `apply_patch` applies all of its hunks or none;
+  `read`, `glob` and `grep` no longer freeze other sessions; stopping a turn
+  ends the processes it started; an MCP server that is slow to start no longer
+  holds up new sessions; and long requests no longer time out or hold up the
+  Desktop and Web apps. A Goal the model never settles stops after 20 continuations.
+- **Desktop and Web in Chinese.** Settings, MCP, automations, Paper2Code, the
+  terminal pane and the sidebar's service state follow the interface language.
+  A Settings save that fails keeps your edits, and the Latest button no longer
+  hides under the composer.
+- **Windows.** The bash tool starts on Windows and never picks WSL's `bash`,
+  and code mode and the job sandbox work in the packaged Desktop app.
+
 **2026-10-13 · Smoother streaming, a self-managing background service, and safer Web sign-in**
 
 - **Answers stream smoothly.** Live text goes straight to every client instead
