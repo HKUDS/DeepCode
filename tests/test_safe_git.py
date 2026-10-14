@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.safe_git import safe_git_options  # noqa: E402
+from core.safe_git import MovedWorkTreeError, safe_git_options  # noqa: E402
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git required")
 
@@ -63,3 +63,26 @@ def test_outside_a_repository_only_the_fixed_options_apply(tmp_path):
 
     assert options[options.index("core.hooksPath=/dev/null") - 1] == "-c"
     assert "core.fsmonitor=false" in options
+
+
+@pytest.mark.parametrize("where", ["elsewhere", "."])
+def test_a_repository_that_moves_its_work_tree_is_refused(tmp_path, where):
+    # Out of the workspace, or onto a directory above it.
+    target = (tmp_path / where).resolve()
+    target.mkdir(exist_ok=True)
+    repo = _repository(tmp_path / "repo", **{"core.worktree": str(target)})
+
+    with pytest.raises(MovedWorkTreeError, match="core.worktree"):
+        safe_git_options(repo)
+
+
+def test_a_separate_git_dir_naming_its_own_work_tree_is_kept(tmp_path):
+    # How a submodule's work tree is recorded: its git dir lives apart.
+    work = tmp_path / "work"
+    store = tmp_path / "store"
+    subprocess.run(
+        ["git", "init", "-q", f"--separate-git-dir={store}", str(work)], check=True
+    )
+    subprocess.run(["git", "config", "core.worktree", str(work)], cwd=work, check=True)
+
+    assert "core.hooksPath=/dev/null" in safe_git_options(work)

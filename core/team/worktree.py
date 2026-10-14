@@ -17,7 +17,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from core.safe_git import safe_git_options
+from core.safe_git import MovedWorkTreeError, safe_git_options
 
 _GIT_IDENTITY = (
     "-c",
@@ -86,8 +86,12 @@ class WorktreeManager:
 
     def _git(self, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
         # Outside the sandbox, on repositories the agents write to.
+        try:
+            options = safe_git_options(cwd or self.base)
+        except MovedWorkTreeError as exc:
+            raise WorktreeError(str(exc)) from exc
         return subprocess.run(
-            ["git", *safe_git_options(cwd or self.base), *args],
+            ["git", *options, *args],
             cwd=str(cwd or self.base),
             capture_output=True,
             text=True,

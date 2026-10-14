@@ -12,6 +12,7 @@ from core.application import DeepCodeApplication
 from core.application.errors import (
     ConflictError,
     FileChangedError,
+    GitUnavailableError,
     TerminalNotFoundError,
     WorkspaceOutOfScopeError,
 )
@@ -384,6 +385,31 @@ def test_changes_view_runs_no_program_the_repository_names(tmp_path: Path) -> No
         application.close()
 
     assert not ran.exists(), ran.read_text(encoding="utf-8")
+
+
+def test_changes_view_refuses_a_work_tree_moved_out_of_the_workspace(
+    tmp_path: Path,
+) -> None:
+    # A repository the agent started in the sandbox can set core.worktree:
+    # git would then show, restore and discard files wherever it points.
+    workspace = tmp_path / "repository"
+    _repository(workspace)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "tracked.txt").write_text("someone else's\n", encoding="utf-8")
+    _git(workspace, "config", "core.worktree", str(elsewhere))
+    application, thread_id = _application(tmp_path, workspace)
+    try:
+        with pytest.raises(GitUnavailableError, match="core.worktree"):
+            application.git.status(thread_id)
+        with pytest.raises(GitUnavailableError, match="core.worktree"):
+            application.git.discard(thread_id, "tracked.txt", "any")
+    finally:
+        application.close()
+
+    assert (elsewhere / "tracked.txt").read_text(encoding="utf-8") == (
+        "someone else's\n"
+    )
 
 
 def test_worktree_recreates_a_missing_registered_path_only_with_its_manifest(
