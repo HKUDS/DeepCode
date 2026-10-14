@@ -1793,6 +1793,48 @@ describe("desktop command center", () => {
     );
   });
 
+  it("keeps what sits above the composer clear of it as the composer grows", async () => {
+    // The composer floats over the conversation and grows (Goal rail, the
+    // active Turn's controls). The Latest button, plan progress and the last
+    // lines are placed by its measured height, not a fixed offset.
+    const callbacks: ResizeObserverCallback[] = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          callbacks.push(callback);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    let firstRowTop = 800;
+    const rect = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.tagName === "FOOTER"
+          ? DOMRect.fromRect({ x: 0, y: 760, width: 800, height: 240 })
+          : DOMRect.fromRect({ x: 0, y: firstRowTop, width: 800, height: 30 });
+      });
+    try {
+      render(<App runtime={new TestRuntime([project], [thread], [])} />);
+      await screen.findByRole("heading", { name: "Recovered task" });
+      const host = document
+        .getElementById("turn-prompt")!
+        .closest("footer")!.parentElement!;
+      await waitFor(() =>
+        expect(host.style.getPropertyValue("--composer-clearance")).toBe("200px"),
+      );
+
+      firstRowTop = 740;
+      act(() => callbacks.at(-1)!([], {} as ResizeObserver));
+      expect(host.style.getPropertyValue("--composer-clearance")).toBe("260px");
+    } finally {
+      rect.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("navigates to the shared Skill inventory for the selected project", async () => {
     const runtime = new TestRuntime([project], [thread], []);
     render(<App runtime={runtime} />);

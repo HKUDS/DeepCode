@@ -16,7 +16,7 @@
 .conversation {
   width: var(--conversation-width);
   margin: 0 auto;
-  padding: 42px 30px 202px;
+  padding: 42px 30px calc(var(--composer-clearance, 160px) + 42px);
 }
 
 .turnBlock {
@@ -571,8 +571,9 @@ div.runStep {
 
 .jumpToLatest {
   position: absolute;
-  z-index: 8;
-  bottom: 160px;
+  /* Above the composer's fade, just over its top edge. */
+  z-index: 13;
+  bottom: calc(var(--composer-clearance, 148px) + 12px);
   left: 50%;
   display: inline-flex;
   min-height: 36px;
@@ -596,15 +597,15 @@ div.runStep {
 
 .planProgressDock {
   position: absolute;
-  z-index: 9;
-  bottom: 154px;
+  z-index: 13;
+  bottom: calc(var(--composer-clearance, 148px) + 6px);
   left: 50%;
   pointer-events: none;
   transform: translateX(-50%);
 }
 
 .conversationFrame[data-plan-active="true"] .jumpToLatest {
-  bottom: 198px;
+  bottom: calc(var(--composer-clearance, 148px) + 50px);
 }
 
 .conversationEnd {
@@ -629,7 +630,7 @@ div.runStep {
   align-content: center;
   justify-items: start;
   margin: 0 auto;
-  padding: 72px 38px 202px;
+  padding: 72px 38px calc(var(--composer-clearance, 160px) + 42px);
   text-align: left;
 }
 

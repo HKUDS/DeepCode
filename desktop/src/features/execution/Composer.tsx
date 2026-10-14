@@ -8,7 +8,14 @@ import {
   Square,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 
 import type {
   ExecutionAccessPreset,
@@ -148,6 +155,7 @@ export function Composer({
     thread?.id ?? "unselected",
     initialLaunch?.prompt,
   );
+  const regionRef = useRef<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const caretRef = useRef<number | null>(null);
   const [contextError, setContextError] = useState<string | null>(null);
@@ -220,6 +228,28 @@ export function Composer({
       textarea.setSelectionRange(caret, caret);
     }
   }, [prompt]);
+
+  // The composer floats over the bottom of the conversation, and grows with
+  // the Goal rail, the active Turn's controls and the draft. What sits just
+  // above it (the Latest button, plan progress, the conversation's last
+  // lines) reads its height from --composer-clearance.
+  useLayoutEffect(() => {
+    const region = regionRef.current;
+    const host = region?.parentElement;
+    if (!region || !host || typeof ResizeObserver === "undefined") return;
+    const update = () => {
+      const top = (region.firstElementChild ?? region).getBoundingClientRect().top;
+      const clearance = region.getBoundingClientRect().bottom - top;
+      host.style.setProperty("--composer-clearance", `${Math.round(clearance)}px`);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(region);
+    return () => {
+      observer.disconnect();
+      host.style.removeProperty("--composer-clearance");
+    };
+  }, []);
 
   useEffect(() => {
     if (!initialLaunch) return;
@@ -387,7 +417,7 @@ export function Composer({
   };
 
   return (
-    <footer className={styles.region}>
+    <footer className={styles.region} ref={regionRef}>
       <GoalRail
         goal={goal}
         outcome={goalOutcome}
