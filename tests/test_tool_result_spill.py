@@ -38,9 +38,7 @@ def test_old_spills_in_the_shared_bucket_are_removed(tmp_path: Path) -> None:
     stale = _spill(bucket, "old.txt", mtime=_OLD)
     recent = _spill(bucket, "recent.txt")
 
-    reference = maybe_persist_tool_result(
-        tmp_path, None, "new", "y" * 50, max_chars=10
-    )
+    reference = maybe_persist_tool_result(tmp_path, None, "new", "y" * 50, max_chars=10)
 
     assert "Full output saved to:" in reference
     assert (bucket / "new.txt").exists()
