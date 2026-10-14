@@ -43,8 +43,12 @@ import glob
 import os
 import platform
 import shutil
+import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from loguru import logger
 
 from core.harness.permissions import (
     public_files_in_sensitive_locations,
@@ -255,7 +259,9 @@ _SEATBELT_NETWORK_POLICY = r"""
 # sandbox: the next session loads the project's hooks (.deepcode/hooks.json,
 # .claude/settings.json) and config from them. A sandboxed command may not
 # create or change them.
-_CONTROL_PATHS = (".deepcode", ".claude", "deepcode_config.json")
+_CONTROL_DIRS = (".deepcode", ".claude")
+_CONTROL_FILE = "deepcode_config.json"
+_CONTROL_PATHS = (*_CONTROL_DIRS, _CONTROL_FILE)
 # In a repository that already exists, the parts of .git that make git run a
 # program (hooks, config) or take those from another git dir (commondir,
 # submodule and linked-worktree git dirs), plus .git itself so it cannot be
@@ -395,21 +401,69 @@ def _seatbelt_profile(policy: SandboxPolicy) -> str:
     return "\n".join(parts) + "\n"
 
 
+# bwrap can only mount over a path that exists. A control directory the
+# workspace lacks is held, for as long as a command runs, by an empty
+# placeholder mounted read-only; commands running at once share it.
+_placeholders: dict[str, int] = {}
+_placeholders_lock = threading.Lock()
+
+
+def _hold_placeholder(path: str) -> bool:
+    with _placeholders_lock:
+        if path not in _placeholders:
+            try:
+                os.mkdir(path)
+            except OSError:
+                return False  # it exists (or cannot be made): nothing to hold
+            _placeholders[path] = 0
+        _placeholders[path] += 1
+        return True
+
+
+def _release_placeholder(path: str) -> None:
+    with _placeholders_lock:
+        _placeholders[path] -= 1
+        if _placeholders[path]:
+            return
+        del _placeholders[path]
+        try:
+            os.rmdir(path)
+        except OSError:
+            pass  # DeepCode itself wrote into it meanwhile: it is real now
+
+
 @dataclass
 class WrappedCommand:
-    """A sandboxed command plus any temp artifact to clean up after run."""
+    """A sandboxed command, and what to undo once it has run.
+
+    ``placeholders`` are the empty directories holding bwrap's mounts.
+    ``watched`` is a project config file that did not exist: one that does
+    after the command was made by it (bwrap could not stop that), and is set
+    aside before DeepCode would load it. Callers run :meth:`cleanup` after
+    the command.
+    """
 
     argv: list[str]
-    cleanup_path: str | None = None
     backend: str = "none"
     extra_env: dict[str, str] = field(default_factory=dict)
+    placeholders: list[str] = field(default_factory=list)
+    watched: list[str] = field(default_factory=list)
 
     def cleanup(self) -> None:
-        if self.cleanup_path and os.path.exists(self.cleanup_path):
-            try:
-                os.unlink(self.cleanup_path)
-            except OSError:
-                pass
+        for path in self.placeholders:
+            _release_placeholder(path)
+        self.placeholders = []
+        for path in self.watched:
+            if os.path.lexists(path):
+                aside = f"{path}.from-sandbox-{time.time_ns()}"
+                try:
+                    os.rename(path, aside)
+                except OSError:
+                    continue
+                logger.warning(
+                    "A sandboxed command created {}; set aside as {}", path, aside
+                )
+        self.watched = []
 
 
 def wrap_argv_command(
@@ -434,7 +488,11 @@ def wrap_argv_command(
 
     if backend == "bwrap":
         argv = ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"]
-        argv += ["--tmpfs", "/tmp"]
+        # Its own process namespace: nothing the command starts outlives it
+        # (to write where the placeholders below no longer stand guard).
+        argv += ["--unshare-pid", "--tmpfs", "/tmp"]
+        placeholders: list[str] = []
+        watched: list[str] = []
         for root in policy.normalized_roots():
             if os.path.exists(root):
                 argv += ["--bind", root, root]
@@ -447,11 +505,14 @@ def wrap_argv_command(
                 argv += ["--bind", git, git]
             elif os.path.isfile(git):
                 argv += ["--ro-bind", git, git]
-            # bwrap can only mount over what exists, so a control path the
-            # command creates is not covered here (seatbelt covers it).
             for path in map(os.path.realpath, _control_paths(root)):
+                name = os.path.basename(path)
+                if name in _CONTROL_DIRS and _hold_placeholder(path):
+                    placeholders.append(path)
                 if os.path.exists(path):
                     argv += ["--ro-bind", path, path]
+                elif name == _CONTROL_FILE:
+                    watched.append(path)
         # Mounted over after the binds so they win even inside a writable
         # root. bwrap can only mount over what exists; a store that does not
         # exist has nothing to hide. A symlinked store (dotfile managers) is
@@ -470,7 +531,9 @@ def wrap_argv_command(
         if not policy.allow_network:
             argv += ["--unshare-net"]
         argv += ["--die-with-parent", *inner_argv]
-        return WrappedCommand(argv=argv, backend=backend)
+        return WrappedCommand(
+            argv=argv, backend=backend, placeholders=placeholders, watched=watched
+        )
 
     if backend == "job":
         # Windows Job Object launcher: same wrapper pattern as seatbelt/bwrap.

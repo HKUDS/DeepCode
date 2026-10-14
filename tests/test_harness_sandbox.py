@@ -419,7 +419,9 @@ def test_bwrap_mounts_existing_control_paths_read_only(monkeypatch, tmp_path):
     (workspace / ".deepcode").mkdir()
     policy = SandboxPolicy(writable_roots=(str(workspace),))
 
-    argv = wrap_shell_command("true", policy).argv
+    wrapped = wrap_shell_command("true", policy)
+    wrapped.cleanup()
+    argv = wrapped.argv
     joined = "\0".join(argv)
 
     def at(*parts: Path | str) -> int:
@@ -434,8 +436,64 @@ def test_bwrap_mounts_existing_control_paths_read_only(monkeypatch, tmp_path):
     assert bind < at("--ro-bind", git / "config", git / "config")
     assert bind < at("--ro-bind", workspace / ".deepcode", workspace / ".deepcode")
     # bwrap can only mount over what exists.
-    assert str(workspace / ".claude") not in argv
     assert str(git / "commondir") not in argv
+
+
+def test_bwrap_holds_missing_control_dirs_with_placeholders(monkeypatch, tmp_path):
+    # A command could otherwise create .deepcode/hooks.json or the agent
+    # settings directory, which the next session loads outside the sandbox.
+    monkeypatch.setattr("core.harness.sandbox.sandbox_backend", lambda: "bwrap")
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    policy = SandboxPolicy(writable_roots=(str(workspace),))
+
+    first = wrap_shell_command("true", policy)
+    second = wrap_shell_command("true", policy)  # running at the same time
+
+    joined = "\0".join(first.argv)
+    for name in (".deepcode", ".claude"):
+        path = str(workspace / name)
+        assert "\0".join(["--ro-bind", path, path]) in joined
+        assert not any((workspace / name).iterdir())
+    # Nothing the command starts outlives it to create them afterwards.
+    assert "--unshare-pid" in first.argv
+    first.cleanup()
+    assert (workspace / ".claude").is_dir()  # still held for the other command
+    (workspace / ".deepcode" / "memory").mkdir()  # DeepCode itself, meanwhile
+    second.cleanup()
+    assert not (workspace / ".claude").exists()
+    assert (workspace / ".deepcode" / "memory").is_dir()
+
+
+def test_bwrap_sets_aside_a_project_config_the_command_created(monkeypatch, tmp_path):
+    monkeypatch.setattr("core.harness.sandbox.sandbox_backend", lambda: "bwrap")
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    policy = SandboxPolicy(writable_roots=(str(workspace),))
+    planted = '{"mcpServers": {"x": {"type": "stdio", "command": "sh"}}}'
+
+    wrapped = wrap_shell_command("true", policy)
+    (workspace / "deepcode_config.json").write_text(planted)  # the command
+    wrapped.cleanup()
+
+    assert not (workspace / "deepcode_config.json").exists()
+    (aside,) = workspace.glob("deepcode_config.json.from-sandbox-*")
+    assert aside.read_text() == planted
+
+
+def test_bwrap_keeps_a_project_config_that_was_there(monkeypatch, tmp_path):
+    monkeypatch.setattr("core.harness.sandbox.sandbox_backend", lambda: "bwrap")
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    config = workspace / "deepcode_config.json"
+    config.write_text("{}")
+    policy = SandboxPolicy(writable_roots=(str(workspace),))
+
+    wrapped = wrap_shell_command("true", policy)
+    wrapped.cleanup()
+
+    assert "\0".join(["--ro-bind", str(config), str(config)]) in "\0".join(wrapped.argv)
+    assert config.read_text() == "{}"
 
 
 # ---- Windows Job Object backend ------------------------------------------
