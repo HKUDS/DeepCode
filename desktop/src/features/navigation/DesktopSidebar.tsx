@@ -22,6 +22,7 @@ import {
 import type { Project, Thread } from "../../generated/app-server";
 import type { DesktopDestination } from "../../app/useDesktopUi";
 import type { SidecarStatus } from "../../rpc/contracts";
+import { runtimePhaseLabel } from "./runtimePhaseLabel";
 import { SessionRow } from "./SessionRow";
 import { useProjectDisclosure } from "./useProjectDisclosure";
 import { useTranslation } from "react-i18next";
@@ -381,7 +382,7 @@ export function DesktopSidebar({
       <footer className={styles.footer}>
         <Sparkles size={14} aria-hidden="true" />
         <span>
-          <strong>{runtime.phase === "ready" ? t("sidebar.agentReady", "Local agent ready") : runtime.phase}</strong>
+          <strong>{runtimePhaseLabel(runtime.phase, t)}</strong>
           <small>{t("sidebar.sharedHistory", "Shared Session history")}</small>
         </span>
         <span className={styles.runtimeDot} data-phase={runtime.phase} aria-hidden="true" />

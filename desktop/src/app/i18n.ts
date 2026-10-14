@@ -175,6 +175,10 @@ const ZH_CN: Record<string, string> = {
   "sidebar.folderUnavailable": "原始文件夹不可用",
   "sidebar.localAgent": "本地智能体",
   "sidebar.agentReady": "本地智能体就绪",
+  "sidebar.agentStarting": "本地智能体启动中",
+  "sidebar.agentStopping": "本地智能体正在停止",
+  "sidebar.agentStopped": "本地智能体已停止",
+  "sidebar.agentCrashed": "本地智能体意外停止",
   "sidebar.sharedHistory": "共享会话历史",
   // Composer high-traffic strings
   "composer.hint.send": "↵ 发送",
