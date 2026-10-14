@@ -22,6 +22,7 @@ if str(ROOT) not in sys.path:
 from core.harness.sandbox import (  # noqa: E402
     SandboxPolicy,
     _seatbelt_profile,
+    default_shell,
     fences_writes,
     wrap_shell_command,
 )
@@ -73,7 +74,7 @@ def test_none_backend_is_flagged(monkeypatch, tmp_path):
     monkeypatch.setattr("core.harness.sandbox.sandbox_backend", lambda: "none")
     wrapped = wrap_shell_command("echo hi", SandboxPolicy.for_workspace(tmp_path))
     assert wrapped.backend == "none"
-    assert wrapped.argv == ["/bin/bash", "-c", "echo hi"]
+    assert wrapped.argv == [default_shell(), "-c", "echo hi"]
 
 
 @pytest.mark.parametrize(

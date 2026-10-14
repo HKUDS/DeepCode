@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.harness.sandbox import build_exec_command
+from core.harness.sandbox import build_exec_command, default_shell
 
 _seatbelt = platform.system() == "Darwin" and os.path.exists("/usr/bin/sandbox-exec")
 
@@ -37,7 +37,7 @@ def test_disabled_via_env_returns_bare(monkeypatch, tmp_path):
     monkeypatch.setenv("DEEPCODE_SANDBOX", "0")
     w = build_exec_command(command="echo hi", workspace=tmp_path)
     assert w.backend == "disabled"
-    assert w.argv == ["/bin/bash", "-c", "echo hi"]
+    assert w.argv == [default_shell(), "-c", "echo hi"]
     wa = build_exec_command(argv=["python", "x.py"], workspace=tmp_path)
     assert wa.backend == "disabled"
     assert wa.argv == ["python", "x.py"]
