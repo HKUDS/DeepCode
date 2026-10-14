@@ -237,6 +237,19 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         # route, so the prefix must survive rather than be stripped.
     ),
     ProviderSpec(
+        name="futureinfra",
+        keywords=("futureinfra",),
+        env_key="FUTUREINFRA_API_KEY",
+        display_name="FutureInfra",
+        backend="openai_compat",
+        is_gateway=True,
+        endpoint_class="gateway",
+        detect_by_base_keyword="futureinfra.ai",
+        default_api_base="https://futureinfra.ai/v1/ai",
+        # Ids are ``provider/model`` slugs such as ``openai/gpt-4o-mini``, so
+        # the prefix is part of the id and must not be stripped.
+    ),
+    ProviderSpec(
         name="forge",
         keywords=("forge",),
         env_key="FORGE_API_KEY",
