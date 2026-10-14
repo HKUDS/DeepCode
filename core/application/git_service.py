@@ -19,17 +19,13 @@ from core.application.errors import (
 from core.application.workspace_service import WorkspaceService
 from core.persistence.database import Database
 from core.persistence.execution_repository import TurnRepository
+from core.safe_git import safe_git_options
 
 
 MAX_GIT_OUTPUT = 8 * 1024 * 1024
 MAX_DIFF_FILES = 500
 MAX_DIFF_LINES = 4_000
 MAX_DIFF_TEXT_BYTES = 256 * 1024
-# DeepCode's own git calls run outside the sandbox on a repository the agent
-# writes to: a hook it planted, in .git/hooks or wherever core.hooksPath
-# points, must not run here. (Discard's restore runs post-checkout, and so
-# does worktree add.)
-NO_HOOKS = ("-c", "core.hooksPath=/dev/null")
 _HUNK_HEADER = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?: ?(.*))?$")
 
 
@@ -187,6 +183,7 @@ class GitService:
                 arguments = [
                     "diff",
                     "--no-ext-diff",
+                    "--no-textconv",
                     "--no-color",
                     "--find-renames",
                     "--unified=3",
@@ -350,7 +347,7 @@ class GitService:
         environment = {**os.environ, "GIT_OPTIONAL_LOCKS": "0", "LC_ALL": "C"}
         try:
             process = subprocess.Popen(
-                ["git", *NO_HOOKS, *arguments],
+                ["git", *safe_git_options(workspace), *arguments],
                 cwd=workspace,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

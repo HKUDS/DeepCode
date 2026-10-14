@@ -17,6 +17,8 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from core.safe_git import safe_git_options
+
 _GIT_IDENTITY = (
     "-c",
     "user.name=DeepCode Team",
@@ -24,10 +26,6 @@ _GIT_IDENTITY = (
     "user.email=team@deepcode.local",
 )
 _BRANCH_PREFIX = "team/"
-# These calls run outside the sandbox on a repository the agents write to:
-# a hook they planted, in .git/hooks or wherever core.hooksPath points, must
-# not run here.
-_NO_HOOKS = ("-c", "core.hooksPath=/dev/null")
 
 # Paths a worker must never commit: the team's own scratch state (.deepcode/ —
 # task board + per-worker loop state) and build-artifact noise a worker's test
@@ -87,8 +85,9 @@ class WorktreeManager:
     # -- git helpers -----------------------------------------------------------
 
     def _git(self, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
+        # Outside the sandbox, on repositories the agents write to.
         return subprocess.run(
-            ["git", *_NO_HOOKS, *args],
+            ["git", *safe_git_options(cwd or self.base), *args],
             cwd=str(cwd or self.base),
             capture_output=True,
             text=True,
@@ -105,6 +104,19 @@ class WorktreeManager:
             )
         return proc
 
+    def _add_all(self, cwd: Path) -> None:
+        """Stage everything (honoring info/exclude) except gitlinks: git checks
+        a gitlink's work tree by running git inside it, under that nested
+        repository's own config, which the agent wrote."""
+        listed = self._git_ok("ls-files", "--stage", "-z", cwd=cwd).stdout
+        gitlinks = [
+            entry.split("\t", 1)[1]
+            for entry in listed.split("\0")
+            if entry.startswith("160000 ")
+        ]
+        excluded = [f":(exclude,literal){path}" for path in gitlinks]
+        self._git_ok(*_GIT_IDENTITY, "add", "-A", "--", ".", *excluded, cwd=cwd)
+
     # -- lifecycle -------------------------------------------------------------
 
     def ensure_base(self) -> None:
@@ -116,7 +128,7 @@ class WorktreeManager:
         self._install_team_exclude()
         # A worktree needs a commit to branch from; create one if HEAD is unborn.
         if self._git("rev-parse", "--verify", "HEAD").returncode != 0:
-            self._git_ok(*_GIT_IDENTITY, "add", "-A")  # honors info/exclude
+            self._add_all(self.base)
             self._git_ok(
                 *_GIT_IDENTITY, "commit", "--allow-empty", "-q", "-m", "team base"
             )
@@ -159,7 +171,7 @@ class WorktreeManager:
         """Commit the worker's changes in its worktree. Returns True if there
         was anything to commit."""
         path = self.worktrees_root / worker_id
-        self._git_ok(*_GIT_IDENTITY, "add", "-A", cwd=path)  # honors info/exclude
+        self._add_all(path)
         # Look at what is actually STAGED (post-exclusion), not the raw working
         # tree — a worker that only wrote ignored state has nothing to merge.
         staged = self._git("diff", "--cached", "--name-only", cwd=path)

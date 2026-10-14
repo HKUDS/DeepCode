@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -170,4 +171,86 @@ def test_isolated_agent_commits_and_merges_run_no_hooks(tmp_path, hooks_dir):
     assert m.merge("w1").clean
     m.cleanup_all()
 
+    assert not ran.exists(), ran.read_text()
+
+
+def _plain_git(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+
+
+# For the test's own setup commits once the programs are planted.
+_WITHOUT_PROGRAMS = (
+    *("-c", "core.fsmonitor=false", "-c", "commit.gpgSign=false"),
+    *("-c", "filter.x.clean=", "-c", "filter.x.smudge=", "-c", "filter.x.process="),
+)
+
+
+def _plant_programs(repo: Path, ran: Path) -> None:
+    """Configure ``repo`` the way a command that created it in the sandbox
+    could: every program its git calls might run records itself in ``ran``."""
+    (repo / ".gitattributes").write_text("* filter=x diff=x merge=x\n")
+    _plain_git(repo, "add", ".gitattributes")
+    _plain_git(repo, "commit", "-q", "-m", "attributes")
+    for key, name in (
+        ("core.fsmonitor", "fsmonitor"),
+        ("filter.x.clean", "clean"),
+        ("filter.x.smudge", "smudge"),
+        ("filter.x.process", "process"),
+        ("diff.x.textconv", "textconv"),
+        ("merge.x.driver", "merge"),
+        ("gpg.program", "gpg"),
+    ):
+        _plain_git(repo, "config", key, f"sh -c 'echo {name} >> \"{ran}\"; cat'")
+    _plain_git(repo, "config", "commit.gpgSign", "true")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the programs are shell commands")
+def test_isolated_agent_commits_and_merges_run_no_program_the_repository_names(
+    tmp_path,
+):
+    # A repository the agent started in the sandbox (git init) carries a
+    # config it wrote. DeepCode commits and merges outside the sandbox, so
+    # nothing that config names may run: not even on a 3-way merge.
+    m = _mgr(tmp_path)
+    m.ensure_base()
+    ran = tmp_path / "ran"
+    _plant_programs(m.base, ran)
+
+    wt = Path(m.create("w1"))
+    (wt / "README.md").write_text("# worker\n")
+    (m.base / "README.md").write_text("# base\n# project\n")
+    _plain_git(m.base, *_WITHOUT_PROGRAMS, "commit", "-qam", "base")
+    m.merge("w1")
+    m.cleanup_all()
+
+    assert not ran.exists(), ran.read_text()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the programs are shell commands")
+def test_isolated_agent_commits_do_not_enter_a_nested_repository(tmp_path):
+    # git checks a gitlink's work tree by running git inside it, under that
+    # repository's own config, which the agent wrote.
+    m = _mgr(tmp_path)
+    wt = Path(m.create("w1"))
+    nested = wt / "vendor"
+    nested.mkdir()
+    _plain_git(nested, "init", "-q")
+    (nested / "lib.txt").write_text("one\n")
+    _plain_git(nested, "add", "lib.txt")
+    _plain_git(nested, "commit", "-q", "-m", "lib")
+    ran = tmp_path / "ran"
+    _plant_programs(nested, ran)
+    m.merge("w1")  # the nested repository becomes a gitlink
+
+    (nested / "lib.txt").write_text("two\n")
+    (wt / "a.py").write_text("A = 1\n")
+    result = m.merge("w1")
+    m.cleanup_all()
+
+    assert result.clean, result.detail
     assert not ran.exists(), ran.read_text()

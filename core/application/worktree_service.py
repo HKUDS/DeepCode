@@ -17,7 +17,7 @@ from core.application.errors import (
     ThreadNotFoundError,
 )
 from core.application.event_service import EventBroker
-from core.application.git_service import NO_HOOKS, GitService
+from core.application.git_service import GitService
 from core.application.views import thread_view
 from core.domain.common import utc_now
 from core.domain.project import Project, TrustState
@@ -27,6 +27,7 @@ from core.persistence.event_repository import EventRepository
 from core.persistence.execution_repository import TurnRepository
 from core.persistence.project_repository import ProjectRepository
 from core.persistence.thread_repository import ThreadRepository
+from core.safe_git import safe_git_options
 from core.sessions import SessionStore
 
 
@@ -411,7 +412,7 @@ class WorktreeService:
     ) -> subprocess.CompletedProcess[str]:
         try:
             completed = subprocess.run(
-                ["git", *NO_HOOKS, *arguments],
+                ["git", *safe_git_options(cwd), *arguments],
                 cwd=cwd,
                 capture_output=True,
                 text=True,

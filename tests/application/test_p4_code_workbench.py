@@ -342,6 +342,50 @@ def test_worktree_and_discard_run_no_repository_hooks(tmp_path: Path) -> None:
     assert not ran.exists(), ran.read_text(encoding="utf-8")
 
 
+@pytest.mark.skipif(
+    not Path("/bin/sh").exists(), reason="the programs are shell commands"
+)
+def test_changes_view_runs_no_program_the_repository_names(tmp_path: Path) -> None:
+    # A repository the agent started in the sandbox carries a config it wrote,
+    # and so may a repository nested in the workspace. Showing, diffing and
+    # discarding changes runs git outside the sandbox.
+    workspace = tmp_path / "repository"
+    _repository(workspace)
+    ran = tmp_path / "ran"
+    (workspace / ".gitattributes").write_text("* filter=x diff=x\n", encoding="utf-8")
+    nested = workspace / "vendor"
+    nested.mkdir()
+    _git(nested, "init", "-q")
+    (nested / "lib.txt").write_text("one\n", encoding="utf-8")
+    (nested / ".gitattributes").write_text("* filter=x\n", encoding="utf-8")
+    _git(nested, "add", ".")
+    _git(
+        nested, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "lib"
+    )
+    _git(workspace, "add", ".gitattributes", "vendor")
+    _git(workspace, "commit", "-q", "-m", "attributes and a nested repository")
+    for repo in (workspace, nested):
+        for key, name in (
+            ("core.fsmonitor", "fsmonitor"),
+            ("filter.x.clean", "clean"),
+            ("filter.x.smudge", "smudge"),
+            ("filter.x.process", "process"),
+            ("diff.x.textconv", "textconv"),
+        ):
+            _git(repo, "config", key, f"sh -c 'echo {name} >> \"{ran}\"; cat'")
+    (workspace / "tracked.txt").write_text("changed\n", encoding="utf-8")
+    (nested / "lib.txt").write_text("two\n", encoding="utf-8")
+    application, thread_id = _application(tmp_path, workspace)
+    try:
+        application.git.status(thread_id)
+        diff = application.git.diff(thread_id, path="tracked.txt")[0]
+        application.git.discard(thread_id, "tracked.txt", diff.revision)
+    finally:
+        application.close()
+
+    assert not ran.exists(), ran.read_text(encoding="utf-8")
+
+
 def test_worktree_recreates_a_missing_registered_path_only_with_its_manifest(
     tmp_path: Path,
 ) -> None:
