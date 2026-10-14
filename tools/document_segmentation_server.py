@@ -1627,9 +1627,9 @@ async def analyze_and_segment_document(
 async def read_document_segments(
     paper_dir: str,
     query_type: str,
-    keywords: List[str] = None,
+    keywords: List[str] | None = None,
     max_segments: int = 3,
-    max_total_chars: int = None,
+    max_total_chars: int | None = None,
 ) -> str:
     """
     Intelligently retrieve relevant document segments based on query type
