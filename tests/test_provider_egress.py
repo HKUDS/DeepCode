@@ -201,6 +201,7 @@ def test_invalid_policy_entry_fails_closed():
         ("openrouter", "gateway"),
         ("requesty", "gateway"),
         ("opper", "gateway"),
+        ("atlascloud", "gateway"),
         ("forge", "gateway"),
         ("zhipu", "aggregator"),
         ("dashscope", "aggregator"),
