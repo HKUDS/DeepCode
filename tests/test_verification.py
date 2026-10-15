@@ -1,8 +1,17 @@
 from __future__ import annotations
 
+import json
+import shutil
+import sys
 from pathlib import Path
 
-from core.verification import discover_verification_commands, run_verification
+import pytest
+
+from core.verification import (
+    VerificationCommand,
+    discover_verification_commands,
+    run_verification,
+)
 
 
 def test_discovers_real_test_scripts_and_rejects_npm_placeholder(
@@ -70,3 +79,32 @@ def test_verification_reports_pass_and_keeps_output_bounded(tmp_path: Path) -> N
     assert result.timed_out is False
     assert len(result.stdout.encode()) <= 64 * 1024
     assert len(result.stderr.encode()) <= 64 * 1024
+
+
+def test_verification_uses_the_active_python_interpreter(tmp_path: Path) -> None:
+    command = VerificationCommand(
+        "python-probe",
+        "Python interpreter",
+        ("python3", "-c", "import sys; print(sys.executable)"),
+    )
+
+    result = run_verification(tmp_path, command, timeout_seconds=15)
+
+    assert result.passed
+    assert Path(result.stdout.strip()) == Path(sys.executable)
+
+
+@pytest.mark.skipif(shutil.which("npm") is None, reason="npm is not installed")
+def test_verification_runs_an_actual_npm_test_script(tmp_path: Path) -> None:
+    root = tmp_path / "project with spaces"
+    root.mkdir()
+    (root / "package.json").write_text(
+        json.dumps({"scripts": {"test": "node -e \"console.log('verification-ok')\""}}),
+        encoding="utf-8",
+    )
+    command = discover_verification_commands(root)[0]
+
+    result = run_verification(root, command, timeout_seconds=15)
+
+    assert result.passed
+    assert "verification-ok" in result.stdout

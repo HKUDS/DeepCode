@@ -11,6 +11,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from core.platform_compat import normalize_stdio_command
+
 
 MAX_VERIFICATION_OUTPUT = 64 * 1024
 MAX_DISCOVERY_FILES = 256
@@ -105,12 +107,17 @@ def run_verification(
     timeout_seconds: int = 300,
 ) -> VerificationResult:
     started = time.monotonic()
+    executable, arguments, environment = normalize_stdio_command(
+        command.argv[0],
+        list(command.argv[1:]),
+        {"CI": "1", "PYTHONUNBUFFERED": "1"},
+    )
     process = subprocess.Popen(
-        command.argv,
+        [executable, *arguments],
         cwd=root,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        env={**os.environ, "CI": "1", "PYTHONUNBUFFERED": "1"},
+        env=environment,
         start_new_session=os.name != "nt",
     )
     stdout_raw, stderr_raw, timed_out, truncated = _capture(process, timeout_seconds)
