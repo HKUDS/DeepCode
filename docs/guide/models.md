@@ -32,6 +32,20 @@ deepcode provider test my-openrouter --model MODEL_ID
 This sends a short request to check that the model responds. Desktop/Web offer
 the same check through **Save and verify model**.
 
+For API Route, choose **API Route** in Desktop/Web or add a connection from the
+terminal. It uses the OpenAI-compatible endpoint at
+`https://global.api-route.com/v1`:
+
+```console
+deepcode provider set my-api-route --template api_route --api-key-env API_ROUTE_API_KEY
+deepcode provider models my-api-route --refresh
+deepcode provider test my-api-route --model MODEL_ID
+```
+
+Set `API_ROUTE_API_KEY` in your environment and replace `MODEL_ID` with an exact
+ID returned by the catalog refresh. See the [API Route quickstart](https://www.api-route.com/docs/quickstart)
+for key setup.
+
 When trying a new model server, you can also check streaming and tool calls:
 
 ```console
