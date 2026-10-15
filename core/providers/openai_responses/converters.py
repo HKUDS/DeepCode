@@ -56,13 +56,13 @@ def convert_messages(
                         "id": f"msg_{idx}",
                     }
                 )
-            for tool_call in msg.get("tool_calls", []) or []:
+            for tool_idx, tool_call in enumerate(msg.get("tool_calls", []) or []):
                 fn = tool_call.get("function") or {}
                 call_id, item_id = split_tool_call_id(tool_call.get("id"))
                 input_items.append(
                     {
                         "type": "function_call",
-                        "id": item_id or f"fc_{idx}",
+                        "id": item_id or f"fc_{idx}_{tool_idx}",
                         "call_id": call_id or f"call_{idx}",
                         "name": fn.get("name"),
                         "arguments": fn.get("arguments") or "{}",
