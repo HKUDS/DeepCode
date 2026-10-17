@@ -9,6 +9,7 @@ DEEPCODE_SESSIONS_DIR.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import io
 import json
 import sys
@@ -32,6 +33,7 @@ from cli.tui import animation, theme
 from cli.tui import text as text_fitting
 from cli.tui.input import InputInterrupted, InputReader, expand_file_refs
 from cli.tui.renderer import EventRenderer
+from cli.tui.text import short_path
 from core import agent_setup
 from core.events import (
     AgentMessage,
@@ -1528,7 +1530,10 @@ def test_resume_scoped_to_directory(monkeypatch, tmp_path, capsys):
     out = capsys.readouterr().out
     assert "no sessions for this directory" in out
     assert "task in A" in out  # shown in the `all` view
-    assert str(tmp_path / "A") in out  # origin directory annotated
+    # Origin directory annotated, exactly as the picker names it: a path under
+    # the home directory is `~`-folded (pytest's tmp dir lives under $HOME on
+    # Windows, and does not on POSIX, so compare against the folded form).
+    assert short_path(str(tmp_path / "A")) in out
 
 
 def test_cross_directory_resume_hints_origin(monkeypatch, tmp_path, capsys):
@@ -1582,7 +1587,19 @@ def test_file_refs_fenced_to_workspace(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_interactive_ctrl_c_becomes_a_turn_interrupt_request() -> None:
+async def test_interactive_ctrl_c_becomes_a_turn_interrupt_request(monkeypatch) -> None:
+    """Ctrl-C at the prompt interrupts the turn; it must not end the session.
+
+    ``patch_stdout`` is stubbed out: it builds a prompt_toolkit output, which
+    wants a real console (on Windows pytest gets
+    ``NoConsoleScreenBufferError: Found xterm-256color``), and the stdout
+    patching has nothing to do with the interrupt mapping under test.
+    """
+
+    monkeypatch.setattr(
+        "cli.tui.input.patch_stdout", lambda **_kwargs: contextlib.nullcontext()
+    )
+
     class InterruptingPrompt:
         async def prompt_async(self, _prompt: str) -> str:
             raise KeyboardInterrupt
