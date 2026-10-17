@@ -272,3 +272,49 @@ def test_mcp_list_names_concerns_and_states_default_posture_once(
         "Default posture among 3 enabled servers: "
         "2 expose all tools, 2 add no MCP approval gate."
     )
+
+
+def test_mcp_cli_audit_renders_supply_chain_report(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+    (home / "deepcode_config.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "plain": {
+                        "type": "stdio",
+                        "command": "python3",
+                        "args": ["plain.py"],
+                    },
+                    "retired": {
+                        "type": "stdio",
+                        "command": "python3",
+                        "args": ["old.py"],
+                        "enabled": False,
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert run(["audit", "--json"]) == 0
+    report = _json_output(capsys)
+    assert report["server_count"] == 2
+    by_name = {server["name"]: server for server in report["servers"]}
+    assert by_name["plain"]["command"] == "python3"
+    assert by_name["retired"]["enabled"] is False
+    # Only the enabled server introduces supply-chain exposure.
+    assert len(report["risks"]) == 2
+    assert any("executes local command 'python3'" in risk for risk in report["risks"])
+    assert any("exposes ALL its tools" in risk for risk in report["risks"])
+
+    assert run(["audit"]) == 0
+    human = capsys.readouterr().out
+    assert "MCP supply-chain audit: 2 server(s)." in human
+    assert "risk:" in human
