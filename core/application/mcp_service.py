@@ -18,7 +18,11 @@ from loguru import logger
 from pydantic import ValidationError
 
 from core.application.config_store import ConfigStore, deep_merge
-from core.application.errors import InvalidArgumentError, ProjectNotTrustedError
+from core.application.errors import (
+    ApplicationError,
+    InvalidArgumentError,
+    ProjectNotTrustedError,
+)
 from core.application.project_service import ProjectService
 from core.config import home_config_path, project_config_path
 from core.domain.project import TrustState
@@ -509,7 +513,11 @@ class McpService:
             return _replace_servers(current, selected)
 
         store.mutate(mutate)
-        _remove_replaced_oauth_credentials(clean_name, previous, patch)
+        try:
+            _remove_replaced_oauth_credentials(clean_name, previous, patch)
+        except Exception as credential_error:
+            _restore_server_entry(store, clean_name, previous, cause=credential_error)
+            raise
         self._publish_change()
         return self.list(project_id)
 
@@ -537,7 +545,11 @@ class McpService:
             return _replace_servers(current, selected)
 
         store.mutate(mutate)
-        _remove_oauth_credentials(clean_name, previous)
+        try:
+            _remove_oauth_credentials(clean_name, previous)
+        except Exception as credential_error:
+            _restore_server_entry(store, clean_name, previous, cause=credential_error)
+            raise
         self._publish_change()
         return self.list(project_id)
 
@@ -698,6 +710,48 @@ def _remove_oauth_credentials(name: str, previous: Any) -> None:
     previous_url = previous.get("url")
     if isinstance(previous_url, str) and previous_url:
         McpOAuthCredentialStore.delete_endpoint(name, previous_url)
+
+
+def _restore_server_entry(
+    store: ConfigStore,
+    name: str,
+    previous: Any,
+    *,
+    cause: BaseException,
+) -> None:
+    """Roll back the settings half of a paired write whose credential half failed.
+
+    A paired write (config entry + OAuth credentials) must land together or
+    not at all: if the credential cleanup fails after the settings mutation,
+    restore the exact ``previous`` entry (or drop it when the server was just
+    created) so the pair keeps its old version. If the restore itself fails,
+    raise loudly naming both residual states (C1 ``unverified`` semantics) —
+    never leave a silent half-pair behind.
+    """
+
+    def restore(current: dict[str, Any]) -> dict[str, Any]:
+        selected = _raw_servers(current)
+        if previous is None:
+            selected.pop(name, None)
+        else:
+            selected[name] = previous
+        return _replace_servers(current, selected)
+
+    try:
+        store.mutate(restore)
+    except Exception as rollback_error:
+        raise ApplicationError(
+            "Paired MCP write ended half-applied: the settings entry and its "
+            f"OAuth credentials may disagree for {name!r}. Credential cleanup "
+            f"failed with {cause!r} and the settings rollback also failed with "
+            f"{rollback_error!r}. Inspect the MCP config and stored credentials "
+            "before retrying.",
+            details={
+                "server": name,
+                "credential_error": repr(cause),
+                "rollback_error": repr(rollback_error),
+            },
+        ) from rollback_error
 
 
 def _server_info(

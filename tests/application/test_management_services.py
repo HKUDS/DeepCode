@@ -7,9 +7,15 @@ from pathlib import Path
 import pytest
 
 from core.application import DeepCodeApplication
-from core.application.errors import InvalidArgumentError, ProjectNotTrustedError
+from core.application.config_store import ConfigStore
+from core.application.errors import (
+    ApplicationError,
+    InvalidArgumentError,
+    ProjectNotTrustedError,
+)
 from core.application.views import mcp_server_view
 from core.domain import TrustState
+from core.mcp.oauth import McpOAuthCredentialStore
 from core.persistence.migrations import LATEST_SCHEMA_VERSION
 from core.plugins.registry import LocalPluginRegistry
 from core.plugins.resolver import resolve_plugin
@@ -857,3 +863,134 @@ def test_settings_update_refuses_a_stale_config_revision(tmp_path, monkeypatch):
 
     # Omitting the revision keeps the historical last-write-wins behavior.
     service.update({"agents": {"defaults": {"model": "gpt-5-mini"}}})
+
+
+def _seed_oauth_mcp_server(home: Path) -> dict:
+    entry = {
+        "type": "streamableHttp",
+        "url": "https://old.example.test/rpc",
+        "auth": "oauth",
+        "enabled": True,
+    }
+    _write_json(home / "deepcode_config.json", {"mcpServers": {"demo": dict(entry)}})
+    return entry
+
+
+def test_mcp_pair_writes_roll_back_settings_on_credential_cleanup_failure(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    home.mkdir()
+    workspace.mkdir()
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+    monkeypatch.chdir(workspace)
+    original_entry = _seed_oauth_mcp_server(home)
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    try:
+
+        def boom(*args: object, **kwargs: object) -> None:
+            raise OSError("credential store unavailable")
+
+        monkeypatch.setattr(McpOAuthCredentialStore, "delete_endpoint", boom)
+
+        with pytest.raises(OSError, match="credential store unavailable"):
+            application.mcp.upsert(
+                name="demo",
+                patch={"url": "https://new.example.test/rpc"},
+                scope="user",
+            )
+        config = json.loads((home / "deepcode_config.json").read_text(encoding="utf-8"))
+        assert config["mcpServers"]["demo"] == original_entry
+
+        with pytest.raises(OSError, match="credential store unavailable"):
+            application.mcp.remove(name="demo", scope="user")
+        config = json.loads((home / "deepcode_config.json").read_text(encoding="utf-8"))
+        assert config["mcpServers"]["demo"] == original_entry
+    finally:
+        application.close()
+
+
+def test_mcp_pair_writes_land_together_and_clean_credential_on_success(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    home.mkdir()
+    workspace.mkdir()
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+    monkeypatch.chdir(workspace)
+    _seed_oauth_mcp_server(home)
+    deleted: list[tuple[str, str]] = []
+
+    def record(name: str, url: str) -> bool:
+        deleted.append((name, url))
+        return True
+
+    monkeypatch.setattr(McpOAuthCredentialStore, "delete_endpoint", record)
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    try:
+        application.mcp.upsert(
+            name="demo",
+            patch={"url": "https://new.example.test/rpc"},
+            scope="user",
+        )
+        config = json.loads((home / "deepcode_config.json").read_text(encoding="utf-8"))
+        assert config["mcpServers"]["demo"]["url"] == "https://new.example.test/rpc"
+        assert deleted == [("demo", "https://old.example.test/rpc")]
+
+        application.mcp.remove(name="demo", scope="user")
+        config = json.loads((home / "deepcode_config.json").read_text(encoding="utf-8"))
+        assert "demo" not in config.get("mcpServers", {})
+        assert deleted == [
+            ("demo", "https://old.example.test/rpc"),
+            ("demo", "https://new.example.test/rpc"),
+        ]
+    finally:
+        application.close()
+
+
+def test_mcp_pair_rollback_failure_raises_loud_unverified_error(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    home.mkdir()
+    workspace.mkdir()
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+    monkeypatch.chdir(workspace)
+    _seed_oauth_mcp_server(home)
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    try:
+
+        def boom(*args: object, **kwargs: object) -> None:
+            raise OSError("credential store unavailable")
+
+        monkeypatch.setattr(McpOAuthCredentialStore, "delete_endpoint", boom)
+
+        real_mutate = ConfigStore.mutate
+        calls = {"count": 0}
+
+        def flaky(self, transform, *, expected_revision=None):
+            calls["count"] += 1
+            if calls["count"] > 1:
+                raise OSError("settings rollback failed")
+            return real_mutate(self, transform, expected_revision=expected_revision)
+
+        monkeypatch.setattr(ConfigStore, "mutate", flaky)
+
+        with pytest.raises(ApplicationError, match="half-applied") as excinfo:
+            application.mcp.upsert(
+                name="demo",
+                patch={"url": "https://new.example.test/rpc"},
+                scope="user",
+            )
+        message = str(excinfo.value)
+        assert "credential store unavailable" in message
+        assert "settings rollback failed" in message
+        assert excinfo.value.details["server"] == "demo"
+    finally:
+        application.close()
