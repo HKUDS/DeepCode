@@ -36,9 +36,7 @@ class BoomProvider(FakeProvider):
 
 def test_resolver_inert_unless_env_enabled(monkeypatch):
     monkeypatch.delenv("DEEPCODE_RISK_CLASSIFIER", raising=False)
-    resolver = build_risk_classifier(
-        FakeProvider('{"risk": "low", "reason": "ok"}')
-    )
+    resolver = build_risk_classifier(FakeProvider('{"risk": "low", "reason": "ok"}'))
     assert asyncio.run(resolver("write", {"file_path": "x"}, "ask")) is None
 
 

@@ -245,9 +245,7 @@ def asyncio_wait_for(awaitable: Any, *, timeout: float) -> Any:
     return asyncio.wait_for(awaitable, timeout=timeout)
 
 
-def build_risk_classifier(
-    provider: Any, *, model: str | None = None
-) -> Any:
+def build_risk_classifier(provider: Any, *, model: str | None = None) -> Any:
     """Build the async resolver that wires this module into the permission gate.
 
     Returns an ``async (tool_name, arguments, reason) -> RiskVerdict | None``
