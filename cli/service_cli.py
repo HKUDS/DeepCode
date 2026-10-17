@@ -170,8 +170,13 @@ def _start_detached(
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=os.name != "nt",
+        # CREATE_NO_WINDOW, not DETACHED_PROCESS: DETACHED_PROCESS makes Windows
+        # allocate a brand-new console for the service, which the default
+        # terminal surfaces as a visible window on every `service start`.
+        # CREATE_NO_WINDOW still runs without any window and still outlives the
+        # launcher (the console is private to the child, never inherited).
         creationflags=(
-            subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+            subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
         )
         if os.name == "nt"
         else 0,

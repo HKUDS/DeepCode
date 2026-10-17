@@ -213,7 +213,9 @@ def test_service_exits_cleanly_after_control_stop(tmp_path, log_to_file, detache
         cwd=Path(__file__).resolve().parents[2],
         start_new_session=detached and os.name != "nt",
         creationflags=(
-            subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+            # Mirror the launcher: CREATE_NO_WINDOW, so the detached leg does
+            # not pop a console window on Windows (DETACHED_PROCESS would).
+            subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
             if detached and os.name == "nt"
             else 0
         ),
