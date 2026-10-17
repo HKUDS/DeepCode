@@ -100,6 +100,7 @@ const ZH_CN: Record<string, string> = {
   "settings.appearance.conversationWidth": "对话宽度",
   "settings.appearance.fontSize": "字号",
   "settings.appearance.fontFamily": "首选字体",
+  "settings.appearance.fontFamilyMono": "首选等宽字体",
   "settings.appearance.paper": "纸张 · 暖色低蓝光",
   "settings.appearance.midnight": "午夜 · 深邃冷色",
   "settings.appearance.claude": "Claude · 象牙白与陶土色",
@@ -111,12 +112,15 @@ const ZH_CN: Record<string, string> = {
   "settings.appearance.importHint":
     "读取一个本地 JSON/JSONC 颜色主题文件；暂不导入主题 include 链和语法配色。",
   "settings.appearance.fontPlaceholder": "例如：更纱黑体 SC、Inter",
+  "settings.appearance.fontMonoPlaceholder": "例如：JetBrains Mono、Cascadia Code",
   "settings.appearance.addInstalledFont": "添加已安装字体…",
   "settings.appearance.fontGroup.interface": "界面字体",
   "settings.appearance.fontGroup.monospace": "等宽字体",
   "settings.appearance.fontGroup.cjk": "中日韩字体",
   "settings.appearance.fontDescription":
     "以逗号分隔的字体会优先于内置字体尝试，便于为中英文混排选择一致的字体。系统会跳过未安装的字体，因此可以安全地列出多个字体。",
+  "settings.appearance.fontMonoDescription":
+    "以逗号分隔的字体会优先于内置等宽字体尝试，代码块、差异视图与细小的等宽标签都会跟随。适合正文的字体往往不适合代码，因此这份列表与上面的相互独立。终端面板仍使用自己的字体。",
   "settings.appearance.localOnly":
     "这些显示设置仅保存在本机，会立即生效，不属于项目配置。",
   "settings.appearance.reset": "恢复默认设置",
