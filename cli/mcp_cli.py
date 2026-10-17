@@ -32,6 +32,13 @@ def _parser() -> argparse.ArgumentParser:
     _workspace_arguments(listing, allow_trust=False)
     listing.add_argument("--json", action="store_true")
 
+    audit = commands.add_parser(
+        "audit",
+        help="Render a supply-chain audit of the effective MCP servers.",
+    )
+    _workspace_arguments(audit, allow_trust=False)
+    audit.add_argument("--json", action="store_true")
+
     presets = commands.add_parser("presets", help="List bundled MCP templates.")
     _workspace_arguments(presets, allow_trust=False)
     presets.add_argument("--json", action="store_true")
@@ -167,6 +174,11 @@ def run(argv: list[str] | None = None) -> int:
         if args.command == "list":
             inventory = application.mcp.list(project_id)
             result = mcp_inventory_view(inventory)
+        elif args.command == "audit":
+            from core.mcp.audit import audit_inventory
+
+            report = audit_inventory(application.mcp.list(project_id))
+            result = {**report.to_dict(), "risks": report.risks()}
         elif args.command == "presets":
             result = mcp_preset_inventory_view(application.mcp.list_presets(project_id))
         elif args.command in {"enable", "disable"}:
@@ -249,6 +261,8 @@ def run(argv: list[str] | None = None) -> int:
                 if result["removed"]
                 else "No OAuth credentials were stored."
             )
+        elif args.command == "audit":
+            _print_audit(result)
         else:
             _print_inventory(result)
         return exit_code
@@ -257,6 +271,15 @@ def run(argv: list[str] | None = None) -> int:
         return 2
     finally:
         application.close()
+
+
+def _print_audit(result: dict[str, Any]) -> None:
+    print(f"MCP supply-chain audit: {result['server_count']} server(s).")
+    for server in result["servers"]:
+        endpoint = server.get("command") or server.get("url") or "-"
+        print(f"  {server['name']:<20} {server['transport']:<14} {endpoint}")
+    for risk in result["risks"]:
+        print(f"risk: {risk}")
 
 
 def _project_id(
