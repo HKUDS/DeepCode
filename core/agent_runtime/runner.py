@@ -216,6 +216,13 @@ class AgentRunSpec:
     # ``ask`` is resolved by ``approval_callback`` if provided, else denied.
     permission_checker: Any | None = None
     approval_callback: Any | None = None
+    # Optional LLM risk classifier (P0-1, core.harness.classifier). Only
+    # consulted when an ``ask`` has no approval callback (headless): a decisive
+    # ``low`` verdict auto-allows; anything else (medium/high/error/disabled)
+    # keeps the existing deny — the classifier can upgrade an ask, never
+    # widen a deny or escalate risk. Attach via
+    # ``core.harness.classifier.build_risk_classifier(provider)``.
+    risk_classifier: Any | None = None
     # External-command hook seams (C3). Optional async callables invoked around
     # each tool call, mirroring ``permission_checker``:
     #   ``pre_tool_hook(tool_name, arguments)`` -> outcome with ``.block`` /
@@ -1599,6 +1606,27 @@ class AgentRunner:
 
         approver = spec.approval_callback
         if approver is None:
+            # Headless: an optional risk classifier may auto-allow a clearly
+            # low-risk ask before we fail-closed (P0-1). It only ever upgrades
+            # an ask; any other outcome keeps the deny below.
+            if spec.risk_classifier is not None:
+                try:
+                    verdict = spec.risk_classifier(
+                        tool_call.name, tool_call.arguments, reason
+                    )
+                    if inspect.isawaitable(verdict):
+                        verdict = await verdict
+                    if (
+                        verdict is not None
+                        and getattr(verdict, "decisive", False)
+                        and getattr(verdict.level, "value", verdict.level) == "low"
+                    ):
+                        return None
+                except Exception:
+                    logger.exception(
+                        "risk_classifier failed for {}; denying by default",
+                        tool_call.name,
+                    )
             return (
                 (reason or "requires confirmation")
                 + " — no approver attached (non-interactive run), so this "
