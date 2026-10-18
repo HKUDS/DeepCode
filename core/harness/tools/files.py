@@ -12,11 +12,14 @@ matching the kernel contract so a bad edit never aborts the loop.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from core.agent_runtime.tools.base import Tool, tool_parameters
+from core.harness.permissions import is_sensitive_path
 from core.harness.tools.diagnostics import format_diagnostics, run_diagnostics
 from core.harness.tools.replace import ReplaceError, replace
 
@@ -30,6 +33,50 @@ def _resolve(workspace: str, file_path: str) -> Path:
     base = Path(workspace)
     p = Path(os.path.expanduser(file_path))
     return (p if p.is_absolute() else base / p).resolve()
+
+
+def _provenance_footer(target: Path, workspace: str) -> str:
+    """Cross-session artifact provenance (2610.13227 §5.2 proxy).
+
+    When a read touches a sensitive artifact (MCP/hook/config chain), append
+    a read-time snapshot footer (mtime/size/sha256 head) so the agent sees
+    mutation facts before reusing the artifact. This is a proxy for
+    SkillRelayGuard's write-time provenance ledger: writer identity and
+    session origin are NOT recorded here — only detectable mutation facts.
+    Default on; ``DEEPCODE_PROVENANCE_CONTEXT=0`` disables. Never raises:
+    a failed stat degrades to fewer fields, a total failure omits the footer.
+    """
+    flag = os.environ.get("DEEPCODE_PROVENANCE_CONTEXT", "1").strip().lower()
+    if flag in ("0", "false", "off", "no"):
+        return ""
+    try:
+        if not is_sensitive_path(str(target), workspace):
+            return ""
+    except Exception:
+        return ""
+    parts: list[str] = []
+    try:
+        st = target.stat()
+        mtime = datetime.fromtimestamp(st.st_mtime, tz=timezone.utc)
+        parts.append(f"mtime={mtime.strftime('%Y-%m-%dT%H:%M:%SZ')}")
+        parts.append(f"size={st.st_size}B")
+    except OSError:
+        pass
+    try:
+        h = hashlib.sha256()
+        with target.open("rb") as f:
+            h.update(f.read(65536))
+        parts.append(f"sha256_64k={h.hexdigest()[:16]}")
+    except OSError:
+        pass
+    if not parts:
+        return ""
+    return (
+        "\n[provenance] sensitive artifact: "
+        + " ".join(parts)
+        + " (read-time snapshot; cross-session writes to MCP/hook configs"
+        " are code-execution vectors — 2610.13227 IP)"
+    )
 
 
 def _read_window(
@@ -154,6 +201,7 @@ class ReadTool(Tool):
             )
         elif more:
             result += f"\n… [more lines; use offset={next_line} to continue]"
+        result += _provenance_footer(target, self._workspace)
         return result
 
 
