@@ -89,6 +89,110 @@ def test_ordinary_workspace_path_is_not_denylisted():
     assert _decide(engine, "write_file", file_path="src/model.py") is ALLOW
 
 
+def test_writing_a_hook_discovery_file_asks_even_in_full_auto():
+    # The three files hooks are discovered from are not secrets, but a
+    # written-in handler runs commands in a later session: a file-tool
+    # write to one of them surfaces a confirmation instead of passing
+    # through full_auto. Reads are checked by the test below.
+    engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd="/home/u/proj")
+    for raw in (
+        "/home/u/.deepcode/hooks.json",  # user level
+        "/home/u/proj/.deepcode/hooks.json",  # workspace
+        "/home/u/proj/.claude/settings.json",  # workspace
+    ):
+        decision, reason = engine.evaluate("write", {"file_path": raw})
+        assert decision is ASK, raw
+        assert "hook" in reason
+    # Other mutating file tools count as writes too.
+    assert (
+        _decide(engine, "edit", file_path="/home/u/proj/.claude/settings.json") is ASK
+    )
+    # Windows drops trailing dots/spaces at open time: the decoration still
+    # names the real file, so it still asks.
+    assert (
+        _decide(engine, "write", file_path="/home/u/proj/.claude/settings.json.") is ASK
+    )
+    assert _decide(engine, "write", file_path="/home/u/.deepcode/hooks.json .") is ASK
+    # A blanket allow rule cannot silence the confirmation…
+    allowed = PermissionEngine(
+        mode=PermissionMode.FULL_AUTO,
+        rules=[PermissionRule("*", "*", ALLOW)],
+        cwd="/home/u/proj",
+    )
+    assert (
+        _decide(allowed, "write", file_path="/home/u/proj/.deepcode/hooks.json") is ASK
+    )
+    # …and a stricter decision never relaxes into an ask: deny stays deny.
+    denied = PermissionEngine(
+        mode=PermissionMode.FULL_AUTO,
+        rules=[PermissionRule("*", "*", DENY)],
+        cwd="/home/u/proj",
+    )
+    assert (
+        _decide(denied, "write", file_path="/home/u/proj/.deepcode/hooks.json") is DENY
+    )
+
+
+def test_reading_a_hook_discovery_file_is_never_denied_or_asked():
+    engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd="/home/u/proj")
+    for raw in (
+        "/home/u/.deepcode/hooks.json",
+        "/home/u/proj/.deepcode/hooks.json",
+        "/home/u/proj/.claude/settings.json",
+    ):
+        assert _decide(engine, "read_file", file_path=raw) is ALLOW, raw
+    # Search tools read them with the same freedom.
+    assert _decide(engine, "grep", path="/home/u/proj/.claude/settings.json") is ALLOW
+    # Default mode keeps its standing rule: read-only tools are allowed.
+    default = PermissionEngine(mode=PermissionMode.DEFAULT, cwd="/home/u/proj")
+    assert (
+        _decide(default, "read_file", file_path="/home/u/proj/.claude/settings.json")
+        is ALLOW
+    )
+
+
+def test_hook_write_ask_never_relaxes_plan_or_read_only_modes():
+    # Plan mode denies mutating tools outright — the ask check must not
+    # surface a confirmation where no mutation is permitted at all.
+    plan = PermissionEngine(mode=PermissionMode.PLAN, cwd="/home/u/proj")
+    assert _decide(plan, "write", file_path="/home/u/proj/.deepcode/hooks.json") is DENY
+    # The read-only preset's mutating-tool denial is likewise an upper bound.
+    read_only = PermissionEngine(
+        mode=PermissionMode.FULL_AUTO,
+        enforce_read_only=True,
+        cwd="/home/u/proj",
+    )
+    assert (
+        _decide(read_only, "write", file_path="/home/u/proj/.claude/settings.json")
+        is DENY
+    )
+
+
+def test_denylist_survives_windows_trailing_dot_and_space():
+    # Windows drops trailing dots/spaces from path components at open time,
+    # while os.path.normpath keeps them, so ".env." opens ".env" yet a
+    # literal match misses. The matcher must see through the decoration on
+    # every platform.
+    engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd="/w")
+    assert _decide(engine, "read_file", file_path="/w/.env.") is DENY
+    assert _decide(engine, "write", file_path="/w/.env .") is DENY
+    assert _decide(engine, "read_file", file_path="C:/w/.env.") is DENY
+    # Existing credential patterns get the same hardening.
+    assert _decide(engine, "read_file", file_path="/w/.ssh/id_rsa ") is DENY
+
+
+def test_trailing_dot_normalization_does_not_overmatch():
+    engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd="/w")
+    # Editor and ordinary JSON configs are not credentials: no pattern
+    # matches them, decorated or not.
+    assert _decide(engine, "write", file_path="/w/.vscode/settings.json") is ALLOW
+    assert _decide(engine, "write", file_path="/w/settings.json") is ALLOW
+    assert _decide(engine, "write", file_path="/w/package.json.") is ALLOW
+    assert _decide(engine, "write", file_path="/w/.envx.") is ALLOW
+    # Parent-directory references survive normalization untouched.
+    assert _decide(engine, "write", file_path="/w/../.env") is DENY
+
+
 def test_denylist_blocks_a_credential_directory_as_the_argument():
     # grep/glob/read take a directory: searching ~/.aws reads what is inside.
     engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd="/home/u/proj")
