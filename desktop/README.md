@@ -310,6 +310,7 @@ npm run build:sidecar
 npm run audit:licenses
 npm run lint
 npm run test
+npm run test:web
 npm run check:protocol
 npm run build
 cd src-tauri
@@ -317,6 +318,11 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test --all-targets
 ```
+
+`npm run test:web` builds the web client and runs the Playwright browser
+acceptance; install Chromium with `npx playwright install chromium` first.
+The suite starts the local service with the Python test environment described
+in [Working with CI](../docs/CI.md).
 
 `setup:sidecar` is idempotent. It creates `build/sidecar/.venv` and installs the
 locked runtime plus PyInstaller. Regenerate `sidecar-requirements.lock` from
