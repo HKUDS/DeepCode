@@ -27,6 +27,7 @@ workflow that never started. Desktop bundle jobs retain their existing scope.
 
 | Check | What it verifies |
 |---|---|
+| Formatting and lint (lint-and-format) | pre-commit, run on every push and PR by linting.yaml |
 | Python 3.13 (push) / 3.12–3.14 (PR) | The full backend suite on Ubuntu 24.04 |
 | Windows lifecycle | Real file locks, ACLs, recovery, background service operations, and discovery races |
 | Browser | Chromium interactions with the real local service and a deterministic test Agent |
