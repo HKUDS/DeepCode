@@ -171,17 +171,31 @@ describe("theme override selectors", () => {
 describe("appearance variables", () => {
   const rootDeclarations = declarationsAfter(":root {");
 
-  it.each(["--conversation-width", "--font-size-base", "--font-ui-preferred"])(
-    "declares a default for %s",
-    (variable) => {
-      expect(rootDeclarations.has(variable)).toBe(true);
-    },
-  );
+  // Declared even when they are empty: a preference var that no stack consumes
+  // is a setting that silently does nothing, and one that is consumed without
+  // being declared makes its whole declaration invalid at computed-value time.
+  it.each([
+    "--conversation-width",
+    "--font-size-base",
+    "--font-ui-preferred",
+    "--font-mono-preferred",
+  ])("declares a default for %s", (variable) => {
+    expect(rootDeclarations.has(variable)).toBe(true);
+  });
 
   it("routes the root font through both variables", () => {
     expect(rootDeclarations.get("font-family")).toContain(
       "var(--font-ui-preferred)",
     );
     expect(rootDeclarations.get("font-size")).toBe("var(--font-size-base)");
+  });
+
+  it("routes the monospace stack through its own variable", () => {
+    // Code, terminal output and the small metadata text use --font-mono, so a
+    // monospace preference that is not part of this stack would look applied
+    // and change nothing.
+    expect(rootDeclarations.get("--font-mono")).toContain(
+      "var(--font-mono-preferred)",
+    );
   });
 });

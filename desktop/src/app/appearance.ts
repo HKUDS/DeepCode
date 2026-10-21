@@ -63,6 +63,14 @@ export interface AppearanceState {
    * fixed list would be both wrong and stale. Empty means "use the default".
    */
   fontFamily: string;
+  /**
+   * The same thing for monospace text: code, diffs and the small labels that
+   * use the built-in monospace stack, which the interface list cannot reach.
+   * Kept separate because a face that reads well in prose is rarely the one
+   * that reads well in a code block. The terminal pane is out of reach: it
+   * paints its own canvas and is configured in `TerminalPanel`.
+   */
+  fontFamilyMono: string;
   /** Complete, normalized palette imported from one local VS Code theme. */
   importedTheme: ImportedTheme | null;
 }
@@ -72,6 +80,7 @@ export const APPEARANCE_DEFAULTS: AppearanceState = {
   theme: "system",
   fontSize: 14,
   fontFamily: "",
+  fontFamilyMono: "",
   importedTheme: null,
 };
 
@@ -92,6 +101,14 @@ interface AppearanceSetting<K extends keyof AppearanceState> {
   toCss?(value: AppearanceState[K]): string;
   /** Present for numeric settings so the UI can build a slider. */
   range?: { min: number; max: number; step: number; unit: string };
+  /** Present for free-text settings: the field's placeholder, key and fallback. */
+  placeholder?: { key: string; fallback: string };
+  /**
+   * i18n key for the note under the form. Lives here so the table stays the one
+   * place that knows everything about a preference; `description` is its
+   * fallback, which keeps the English copy in this file.
+   */
+  noteKey?: string;
 }
 
 function clampNumber(value: unknown, min: number, max: number, fallback: number) {
@@ -111,6 +128,26 @@ export const CONVERSATION_WIDTH_RANGE = {
   step: 5,
   unit: "%",
 } as const;
+/** A free-text family list: trimmed, bounded, and never anything but a string. */
+function familyList(value: unknown): string {
+  return typeof value === "string" ? value.trim().slice(0, 200) : "";
+}
+
+/**
+ * Rendered as a prefix of the built-in stack, never the whole of it, so an
+ * unavailable font degrades instead of leaving the text unstyled.
+ *
+ * The trailing comma carries the mechanism. The stack it is prepended to has no
+ * comma of its own (`var(--font-mono-preferred) "SFMono-Regular", …`), so
+ * without one the two become a single bogus family name and the browser drops
+ * the whole declaration. Measured in Edge 153, the engine Tauri uses on
+ * Windows: with the comma the built-in stack follows the preference as
+ * intended; without it the element falls back to the inherited interface font —
+ * no error, just the wrong font.
+ */
+function familyListCss(value: string): string {
+  return value ? `${value},` : "";
+}
 
 const CONVERSATION_WIDTH: AppearanceSetting<"conversationWidth"> = {
   key: "conversationWidth",
@@ -164,10 +201,31 @@ const FONT_FAMILY: AppearanceSetting<"fontFamily"> = {
     "picking a CJK face so mixed text renders consistently. Anything the " +
     "system lacks is skipped, so listing several is safe.",
   cssVariable: "--font-ui-preferred",
-  sanitize: (value) => (typeof value === "string" ? value.trim().slice(0, 200) : ""),
-  // Trailing comma: this list is a prefix of the built-in stack, never the
-  // whole of it, so an unavailable font can always fall through.
-  toCss: (value) => (value ? `${value},` : ""),
+  noteKey: "settings.appearance.fontDescription",
+  placeholder: {
+    key: "settings.appearance.fontPlaceholder",
+    fallback: "e.g. Sarasa Mono SC, Inter",
+  },
+  sanitize: familyList,
+  toCss: familyListCss,
+};
+
+const FONT_FAMILY_MONO: AppearanceSetting<"fontFamilyMono"> = {
+  key: "fontFamilyMono",
+  label: "Preferred monospace fonts",
+  description:
+    "Comma-separated families tried before the built-in monospace stack: " +
+    "code blocks, diffs and the small monospace labels follow it. A face " +
+    "chosen for prose is rarely the one that reads well in code, so this list " +
+    "is independent of the one above. The terminal pane keeps its own font.",
+  cssVariable: "--font-mono-preferred",
+  noteKey: "settings.appearance.fontMonoDescription",
+  placeholder: {
+    key: "settings.appearance.fontMonoPlaceholder",
+    fallback: "e.g. JetBrains Mono, Cascadia Code",
+  },
+  sanitize: familyList,
+  toCss: familyListCss,
 };
 
 export const APPEARANCE_SETTINGS = [
@@ -175,6 +233,7 @@ export const APPEARANCE_SETTINGS = [
   THEME,
   FONT_SIZE,
   FONT_FAMILY,
+  FONT_FAMILY_MONO,
 ] as const;
 
 /** Coerce a parsed blob of unknown provenance into a complete state. */

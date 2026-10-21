@@ -73,9 +73,9 @@ const FONT_GROUPS = [
 /**
  * Appearance controls, rendered from `APPEARANCE_SETTINGS`.
  *
- * The table owns each preference's label, range and validation, so adding one
- * is a row there rather than another block of near-identical JSX here.
- * Changes apply immediately and persist locally — these are per-machine
+ * The table owns each preference's label, range, validation and field copy, so
+ * adding one is a row there rather than another block of near-identical JSX
+ * here. Changes apply immediately and persist locally — these are per-machine
  * display choices, not project configuration, so there is nothing to save.
  */
 export function AppearanceSettings() {
@@ -220,6 +220,9 @@ export function AppearanceSettings() {
             );
           }
 
+          // The remaining settings are free-text family lists. Each edits the key
+          // it was reached through, so the two lists cannot write each other.
+          const fontKey = setting.key as "fontFamily" | "fontFamilyMono";
           return (
             <label key={setting.key} htmlFor={id}>
               {label}
@@ -227,13 +230,12 @@ export function AppearanceSettings() {
                 id={id}
                 type="text"
                 value={value as string}
-                placeholder={t(
-                  "settings.appearance.fontPlaceholder",
-                  "e.g. Sarasa Mono SC, Inter",
-                )}
-                onChange={(event) =>
-                  set(setting.key as "fontFamily", event.target.value)
+                placeholder={
+                  setting.placeholder
+                    ? t(setting.placeholder.key, setting.placeholder.fallback)
+                    : undefined
                 }
+                onChange={(event) => set(fontKey, event.target.value)}
               />
               {installed.length > 0 ? (
                 <select
@@ -245,8 +247,8 @@ export function AppearanceSettings() {
                   onChange={(event) => {
                     if (!event.target.value) return;
                     set(
-                      "fontFamily",
-                      appendFamily(appearance.fontFamily, event.target.value),
+                      fontKey,
+                      appendFamily(appearance[fontKey], event.target.value),
                     );
                   }}
                 >
@@ -317,13 +319,14 @@ export function AppearanceSettings() {
         {importError ? <p role="alert">{importError}</p> : null}
       </div>
 
-      <p className={styles.note}>
-        {t(
-          "settings.appearance.fontDescription",
-          APPEARANCE_SETTINGS.find((setting) => setting.key === "fontFamily")
-            ?.description ?? "Choose fonts for the interface.",
-        )}
-      </p>
+      {/* One note per preference that asks for one, in table order. */}
+      {APPEARANCE_SETTINGS.map((setting) =>
+        setting.noteKey ? (
+          <p className={styles.note} key={setting.key}>
+            {t(setting.noteKey, setting.description)}
+          </p>
+        ) : null,
+      )}
 
       <footer className={styles.formActions}>
         <span>
