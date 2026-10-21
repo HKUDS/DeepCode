@@ -103,26 +103,13 @@ and defaults to the repository's `.venv`.
 
 The Windows lifecycle job is the only check that executes the NTFS ACL and
 Job Object suites; the Ubuntu jobs can only skip them. On Windows, with the
-Python test environment active, run its two groups (CI additionally writes
-`--junitxml` reports):
+Python test environment active, run its two groups from PowerShell (CI
+additionally writes `--junitxml` reports):
 
-```sh
-python -m pytest -v --durations=10 \
-  tests/application/test_application_lease.py \
-  tests/application/test_automation_scheduler_leadership.py \
-  tests/application/test_session_deletion_service.py \
-  tests/application/test_execution_coordinator.py
+```powershell
+python -m pytest -v --durations=10 tests/application/test_application_lease.py tests/application/test_automation_scheduler_leadership.py tests/application/test_session_deletion_service.py tests/application/test_execution_coordinator.py
 
-python -m pytest -v --durations=10 \
-  tests/test_private_storage_windows.py \
-  tests/test_harness_sandbox.py \
-  tests/test_exec_sandbox_wiring.py \
-  tests/app_server/test_windows_task.py \
-  tests/app_server/test_state_backup.py \
-  tests/test_provider_oauth.py \
-  tests/test_provider_protocols.py \
-  tests/app_server/test_service.py \
-  tests/app_server/test_service_discovery.py
+python -m pytest -v --durations=10 tests/test_private_storage_windows.py tests/test_harness_sandbox.py tests/test_exec_sandbox_wiring.py tests/app_server/test_windows_task.py tests/app_server/test_state_backup.py tests/test_provider_oauth.py tests/test_provider_protocols.py tests/app_server/test_service.py tests/app_server/test_service_discovery.py
 ```
 
 The first group covers shared leases, startup recovery, and scheduler
