@@ -344,7 +344,14 @@ def test_mcp_list_flags_unpinned_launcher_packages(
     for row in rows:
         fields = row.split(maxsplit=5)
         concerns[fields[4]] = fields[5]
-    assert summary.startswith("Default posture among 9 enabled servers")
+    # The posture line counts only enabled servers whose configuration
+    # resolves, and command availability differs by host (a Windows path or
+    # ``uvx`` may be absent here), so derive the denominator from the rows.
+    readable = sum(
+        1 for row in rows if row.split(maxsplit=1)[0] not in {"invalid", "disabled"}
+    )
+    assert readable >= 1
+    assert summary.startswith(f"Default posture among {readable} enabled servers")
     # ``npx``/``uvx`` resolve their package argument from the registry on
     # every start, so a missing version or a floating tag is the concern;
     # a pinned version, a local file, a non-launcher command and a command
