@@ -725,8 +725,7 @@ def _restore_server_entry(
     not at all: if the credential cleanup fails after the settings mutation,
     restore the exact ``previous`` entry (or drop it when the server was just
     created) so the pair keeps its old version. If the restore itself fails,
-    raise loudly naming both residual states (C1 ``unverified`` semantics) —
-    never leave a silent half-pair behind.
+    raise an error that names both halves' state, never a silent half-pair.
     """
 
     def restore(current: dict[str, Any]) -> dict[str, Any]:

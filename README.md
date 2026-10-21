@@ -158,6 +158,19 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
 
 ## News
 
+**2026-10-21 · A quiet Windows service, a separate code font, and community fixes**
+
+- **No console windows on Windows.** The background service no longer opens a
+  console window for each program it starts, such as shells and MCP servers,
+  and closing such a window can no longer stop the service. (#267)
+- **A font for code.** The Appearance settings in Desktop and Web take a list
+  of preferred monospace fonts for code blocks, diffs and other monospace text,
+  separate from the interface font. (#265)
+- **Community fixes.** Adding or removing an MCP server keeps its settings and
+  its saved sign-in in step when one of the two writes fails (#259); the
+  bundled code and document MCP tools accept `null` for their optional
+  arguments (#261); and two TUI tests pass on Windows (#264).
+
 **2026-10-14 · Sessions that keep their history, a tighter sandbox, and the Desktop and Web apps in Chinese**
 
 - **Your history stays.** A session that cannot be read is listed with the

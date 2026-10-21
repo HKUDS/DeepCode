@@ -170,11 +170,12 @@ def _start_detached(
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=os.name != "nt",
-        # CREATE_NO_WINDOW, not DETACHED_PROCESS: DETACHED_PROCESS makes Windows
-        # allocate a brand-new console for the service, which the default
-        # terminal surfaces as a visible window on every `service start`.
-        # CREATE_NO_WINDOW still runs without any window and still outlives the
-        # launcher (the console is private to the child, never inherited).
+        # CREATE_NO_WINDOW, not DETACHED_PROCESS. A detached service has no
+        # console, so every console program it starts (the interpreter behind a
+        # venv's python.exe, shells, MCP stdio servers) opens a visible console
+        # window of its own, and closing that window can stop the service.
+        # CREATE_NO_WINDOW gives the service a hidden console that those
+        # programs share; the service still outlives the launcher.
         creationflags=(
             subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
         )
