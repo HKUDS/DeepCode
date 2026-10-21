@@ -72,6 +72,63 @@ the packaged runtime, not the CI-only tools. Package installation and the live
 package dependency audit still resolve supported dependency ranges, so the fixed
 test baseline does not replace installation compatibility checks.
 
+## Reproduce the secret, browser, and Windows lifecycle checks
+
+The secret history scan needs only the pinned Gitleaks binary; the release
+URL and checksum live in `.github/workflows/security-ci.yml`:
+
+```sh
+gitleaks git --redact --no-banner --exit-code 1
+```
+
+Run it from the repository root, where gitleaks applies its built-in rules
+and the repository's `.gitleaksignore` exactly as CI does — the workflow
+passes no custom config. CI scans the full history; `--log-opts=-n 200`
+restricts a local pass to the latest 200 commits, and a clean subset does not
+replace the full scan before pushing.
+
+The browser check runs on Ubuntu 24.04 with Node 22. Create the Python test
+environment above, then run from `desktop/`:
+
+```sh
+npm ci
+npx playwright install --with-deps chromium
+DEEPCODE_TEST_PYTHON=python npm run test:web
+```
+
+`test:web` first rebuilds the web client (`check:protocol`, `tsc --noEmit`,
+and the web Vite build) and then runs the Playwright suite, which starts the
+local service itself. `DEEPCODE_TEST_PYTHON` names the Python that starts it
+and defaults to the repository's `.venv`.
+
+The Windows lifecycle job is the only check that executes the NTFS ACL and
+Job Object suites; the Ubuntu jobs can only skip them. On Windows, with the
+Python test environment active, run its two groups (CI additionally writes
+`--junitxml` reports):
+
+```sh
+python -m pytest -v --durations=10 \
+  tests/application/test_application_lease.py \
+  tests/application/test_automation_scheduler_leadership.py \
+  tests/application/test_session_deletion_service.py \
+  tests/application/test_execution_coordinator.py
+
+python -m pytest -v --durations=10 \
+  tests/test_private_storage_windows.py \
+  tests/test_harness_sandbox.py \
+  tests/test_exec_sandbox_wiring.py \
+  tests/app_server/test_windows_task.py \
+  tests/app_server/test_state_backup.py \
+  tests/test_provider_oauth.py \
+  tests/test_provider_protocols.py \
+  tests/app_server/test_service.py \
+  tests/app_server/test_service_discovery.py
+```
+
+The first group covers shared leases, startup recovery, and scheduler
+leadership; the second holds the Windows-gated cases and is the only place
+they execute.
+
 ## Diagnose a failure
 
 Inspect the earliest failing step. Python and Windows jobs upload JUnit reports
