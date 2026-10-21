@@ -109,7 +109,7 @@ def log_operation(action: str, details: Dict[str, Any]):
 
 @mcp.tool()
 async def read_file(
-    file_path: str, start_line: int = None, end_line: int = None
+    file_path: str, start_line: int | None = None, end_line: int | None = None
 ) -> str:
     """
     Read file content, supports specifying line number range
@@ -1184,7 +1184,7 @@ async def search_code(
     pattern: str,
     file_pattern: str = "*.json",
     use_regex: bool = False,
-    search_directory: str = None,
+    search_directory: str | None = None,
 ) -> str:
     """
     Search patterns in code files
