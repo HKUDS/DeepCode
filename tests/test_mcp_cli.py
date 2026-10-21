@@ -272,3 +272,91 @@ def test_mcp_list_names_concerns_and_states_default_posture_once(
         "Default posture among 3 enabled servers: "
         "2 expose all tools, 2 add no MCP approval gate."
     )
+
+
+def test_mcp_list_flags_unpinned_launcher_packages(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+    (home / "deepcode_config.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "npx_tag": {
+                        "type": "stdio",
+                        "command": "npx",
+                        "args": ["-y", "left-pad@latest"],
+                    },
+                    "npx_noversion": {
+                        "type": "stdio",
+                        "command": "npx",
+                        "args": ["-y", "@modelcontextprotocol/server-filesystem"],
+                    },
+                    "npx_pinned": {
+                        "type": "stdio",
+                        "command": "npx",
+                        "args": ["-y", "left-pad@1.2.3"],
+                    },
+                    "npx_flags_only": {
+                        "type": "stdio",
+                        "command": "npx",
+                        "args": ["--version"],
+                    },
+                    "npx_local_file": {
+                        "type": "stdio",
+                        "command": "npx",
+                        "args": ["./server.js"],
+                    },
+                    "npx_windows": {
+                        "type": "stdio",
+                        "command": "C:\\Program Files\\nodejs\\npx.cmd",
+                        "args": ["-y", "left-pad"],
+                    },
+                    "uvx_noversion": {
+                        "type": "stdio",
+                        "command": "uvx",
+                        "args": ["mcp-server-time"],
+                    },
+                    "uvx_pinned": {
+                        "type": "stdio",
+                        "command": "uvx",
+                        "args": ["mcp-server-time==0.3.0"],
+                    },
+                    "python": {
+                        "type": "stdio",
+                        "command": "python3",
+                        "args": ["server.py"],
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert run(["list"]) == 0
+    header, *rows, summary = capsys.readouterr().out.splitlines()
+    assert header.split() == ["CONFIG", "AUTH", "RUNTIME", "SCOPE", "NAME", "CONCERNS"]
+    concerns: dict[str, str] = {}
+    for row in rows:
+        fields = row.split(maxsplit=5)
+        concerns[fields[4]] = fields[5]
+    assert summary.startswith("Default posture among 9 enabled servers")
+    # ``npx``/``uvx`` resolve their package argument from the registry on
+    # every start, so a missing version or a floating tag is the concern;
+    # a pinned version, a local file, a non-launcher command and a command
+    # line without a package are not.
+    assert concerns == {
+        "npx_tag": "unpinned-package",
+        "npx_noversion": "unpinned-package",
+        "npx_pinned": "-",
+        "npx_flags_only": "-",
+        "npx_local_file": "-",
+        "npx_windows": "unpinned-package",
+        "uvx_noversion": "unpinned-package",
+        "uvx_pinned": "-",
+        "python": "-",
+    }

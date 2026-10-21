@@ -340,7 +340,56 @@ _MCP_CONCERN_LABELS = {
     "off": "disabled",
     "env": "missing-env",
     "cred": "sends-credential",
+    "pin": "unpinned-package",
 }
+
+#: Launchers whose argument names a registry package resolved at start time.
+_UNPINNED_LAUNCHERS = frozenset({"npx", "uvx"})
+
+#: Windows filename suffixes ``npx``/``uvx`` may be invoked with.
+_LAUNCHER_SUFFIXES = (".cmd", ".exe", ".bat", ".ps1")
+
+
+def _launcher_package_spec(args: list[str]) -> str | None:
+    """First registry-package token on a launcher command line, if any.
+
+    Flags and URL values (``--index-url https://...``) are skipped, and a
+    path-like token (``./server.js``, ``/opt/x.js``, ``C:\\x.js``) names a
+    local file rather than a package, so there is no version to pin and
+    the scan stops. Only the first package token decides: later positional
+    arguments are the server's own operands (``npx -y pkg /data``).
+    """
+    for arg in args:
+        if arg.startswith("-") or "://" in arg:
+            continue
+        if arg.startswith((".", "/", "\\")) or (
+            len(arg) >= 2 and arg[1] == ":" and arg[0].isalpha()
+        ):
+            return None
+        return arg
+    return None
+
+
+def _package_spec_is_unpinned(spec: str) -> bool:
+    """Whether a package spec floats: no version, or a non-numeric tag.
+
+    ``pkg`` and ``pkg@latest`` (or ``pkg@next``) resolve to whatever the
+    registry serves now, so the effective code was never chosen; ``pkg@1.2.3``
+    and pip's ``pkg==1.2.3`` name exact releases (an optional leading ``v``
+    is accepted). A leading ``@scope/`` belongs to the name, so the ``@``
+    delimiter is only searched past position 0.
+    """
+    double_equals = spec.find("==")
+    if double_equals >= 0:
+        version = spec[double_equals + 2 :]
+    else:
+        at = spec.find("@", 1) if spec.startswith("@") else spec.find("@")
+        if at < 0:
+            return True
+        version = spec[at + 1 :]
+    if version.startswith("v"):
+        version = version[1:]
+    return not version or not version[0].isdigit()
 
 
 def _mcp_concerns(server: dict[str, Any]) -> tuple[str, ...]:
@@ -353,6 +402,12 @@ def _mcp_concerns(server: dict[str, Any]) -> tuple[str, ...]:
     :func:`_posture_summary` states them once instead of repeating them on
     every row. Only key *names* are ever read, never credential values (see
     ``core.config._resolve_env_refs``).
+
+    The package spec a stdio launcher runs is explicit configuration too:
+    ``npx``/``uvx`` given no version (or a floating tag such as
+    ``@latest``) fetch whatever the registry serves at each start, so that
+    choice is recorded on its row. Other commands run what they name and
+    are not scanned.
     """
     concerns: list[str] = []
     if not server["enabled"]:
@@ -361,6 +416,16 @@ def _mcp_concerns(server: dict[str, Any]) -> tuple[str, ...]:
         concerns.append("env")
     if server["credentialEnvKeys"]:
         concerns.append("cred")
+    command = server["command"]
+    if command:
+        program = command.replace("\\", "/").rsplit("/", 1)[-1].lower()
+        for suffix in _LAUNCHER_SUFFIXES:
+            if program.endswith(suffix):
+                program = program[: -len(suffix)]
+        if program in _UNPINNED_LAUNCHERS:
+            spec = _launcher_package_spec(server["args"])
+            if spec is not None and _package_spec_is_unpinned(spec):
+                concerns.append("pin")
     return tuple(concerns)
 
 
