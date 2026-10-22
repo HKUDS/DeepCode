@@ -118,12 +118,14 @@ def normalize_stdio_command(
     env: Mapping[str, Any] | None = None,
     *,
     inherit_env: bool = True,
+    map_python_to_current_interpreter: bool = True,
 ) -> tuple[str, list[str], dict[str, str]]:
     """Normalize MCP stdio command/env for Windows and virtualenv safety.
 
-    - ``python`` / ``python3`` map to the current interpreter on every OS, so
-      MCP tool servers run in the same environment as the backend — except in
-      the frozen build, whose executable is not a Python.
+    - By default, bare ``python`` / ``python3`` map to the current interpreter,
+      so MCP tool servers run in the backend environment. Callers running
+      project-owned commands can disable this mapping; frozen builds also leave
+      Python on PATH because their executable is not a Python.
     - Windows ``.cmd``/``.bat`` launchers such as ``npx`` are wrapped in
       ``cmd.exe /d /c`` because CreateProcess does not reliably execute them
       as stdio children across environments.
@@ -136,7 +138,8 @@ def normalize_stdio_command(
     base = _basename(command)
     bare_command = "/" not in command and "\\" not in command
     if (
-        bare_command
+        map_python_to_current_interpreter
+        and bare_command
         and base in {"python", "python.exe", "python3", "python3.exe"}
         and not getattr(sys, "frozen", False)
     ):

@@ -373,6 +373,7 @@ class OpenAICompatProvider(LLMProvider):
         messages: list[dict[str, Any]],
         *,
         preserve_provider_state: bool = False,
+        normalize_tool_ids: bool = True,
     ) -> list[dict[str, Any]]:
         """Strip non-standard keys, normalize tool_call IDs."""
         allowed_keys = (
@@ -384,7 +385,7 @@ class OpenAICompatProvider(LLMProvider):
         id_map: dict[str, str] = {}
 
         def map_id(value: Any) -> Any:
-            if not isinstance(value, str):
+            if not normalize_tool_ids or not isinstance(value, str):
                 return value
             return id_map.setdefault(value, self._normalize_tool_call_id(value))
 
@@ -624,7 +625,9 @@ class OpenAICompatProvider(LLMProvider):
         self.validate_request_capabilities(messages, tools)
         model_name = model or self.default_model
         sanitized_messages = self._sanitize_messages(
-            self._sanitize_empty_content(messages), preserve_provider_state=True
+            self._sanitize_empty_content(messages),
+            preserve_provider_state=True,
+            normalize_tool_ids=False,
         )
         instructions, input_items = convert_messages(sanitized_messages)
 

@@ -27,6 +27,11 @@ def map_finish_reason(status: str | None) -> str:
     return FINISH_REASON_MAP.get(status or "completed", "stop")
 
 
+def _tool_call_id(call_id: str, item_id: Any) -> str:
+    """Keep Responses item IDs when present; converters assign missing IDs uniquely."""
+    return f"{call_id}|{item_id}" if item_id else call_id
+
+
 async def iter_sse(response: httpx.Response) -> AsyncGenerator[dict[str, Any], None]:
     """Yield parsed JSON events from a Responses API SSE stream."""
     buffer: list[str] = []
@@ -83,7 +88,7 @@ async def consume_sse(
                 if not call_id:
                     continue
                 tool_call_buffers[call_id] = {
-                    "id": item.get("id") or "fc_0",
+                    "id": item.get("id"),
                     "name": item.get("name"),
                     "arguments": item.get("arguments") or "",
                 }
@@ -125,7 +130,7 @@ async def consume_sse(
                         args = {"raw": args_raw}
                 tool_calls.append(
                     ToolCallRequest(
-                        id=f"{call_id}|{buf.get('id') or item.get('id') or 'fc_0'}",
+                        id=_tool_call_id(call_id, buf.get("id") or item.get("id")),
                         name=buf.get("name") or item.get("name") or "",
                         arguments=args,
                     )
@@ -175,7 +180,7 @@ def parse_response_output(response: Any) -> LLMResponse:
                     reasoning_content = (reasoning_content or "") + s["text"]
         elif item_type == "function_call":
             call_id = item.get("call_id") or ""
-            item_id = item.get("id") or "fc_0"
+            item_id = item.get("id")
             args_raw = item.get("arguments") or "{}"
             try:
                 args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
@@ -194,7 +199,7 @@ def parse_response_output(response: Any) -> LLMResponse:
                     args = {"raw": args_raw}
             tool_calls.append(
                 ToolCallRequest(
-                    id=f"{call_id}|{item_id}",
+                    id=_tool_call_id(call_id, item_id),
                     name=item.get("name") or "",
                     arguments=args if isinstance(args, dict) else {},
                 )
@@ -264,7 +269,7 @@ async def consume_sdk_stream(
                 if not call_id:
                     continue
                 tool_call_buffers[call_id] = {
-                    "id": getattr(item, "id", None) or "fc_0",
+                    "id": getattr(item, "id", None),
                     "name": getattr(item, "name", None),
                     "arguments": getattr(item, "arguments", None) or "",
                 }
@@ -312,7 +317,9 @@ async def consume_sdk_stream(
                         args = {"raw": args_raw}
                 tool_calls.append(
                     ToolCallRequest(
-                        id=f"{call_id}|{buf.get('id') or getattr(item, 'id', None) or 'fc_0'}",
+                        id=_tool_call_id(
+                            call_id, buf.get("id") or getattr(item, "id", None)
+                        ),
                         name=buf.get("name") or getattr(item, "name", None) or "",
                         arguments=args,
                     )

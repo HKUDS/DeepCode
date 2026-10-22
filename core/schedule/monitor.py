@@ -493,7 +493,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[monitor] changed: {args.job_id}")
             if outcome.context_block:
                 print(outcome.context_block)
-    return 0
+    return 1 if outcome.error else 0
 
 
 if __name__ == "__main__":

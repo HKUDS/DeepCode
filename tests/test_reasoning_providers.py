@@ -375,3 +375,36 @@ async def test_anthropic_reasoning_events_keep_stream_alive_without_becoming_tex
         ("private-1", expected_channel),
         ("private-2", expected_channel),
     ]
+
+
+@pytest.mark.parametrize("compound_ids", [False, True])
+def test_responses_parallel_tool_calls_preserve_distinct_identities(compound_ids):
+    provider = _openai_provider()
+    ids = [f"call_{i}|fc_{i}" if compound_ids else f"call_{i}" for i in range(2)]
+    messages = [
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": identifier,
+                    "type": "function",
+                    "function": {"name": "probe", "arguments": "{}"},
+                }
+                for identifier in ids
+            ],
+        }
+    ] + [
+        {"role": "tool", "tool_call_id": identifier, "content": "ok"}
+        for identifier in ids
+    ]
+    body = provider._build_responses_body(
+        messages, None, "gpt-5.4", 1024, 0.1, None, None
+    )
+    calls = [item for item in body["input"] if item["type"] == "function_call"]
+    outputs = [item for item in body["input"] if item["type"] == "function_call_output"]
+    assert [item["call_id"] for item in calls] == ["call_0", "call_1"]
+    assert [item["call_id"] for item in outputs] == ["call_0", "call_1"]
+    assert len({item["id"] for item in calls}) == 2
+    if compound_ids:
+        assert [item["id"] for item in calls] == ["fc_0", "fc_1"]

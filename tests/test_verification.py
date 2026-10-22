@@ -1,8 +1,18 @@
 from __future__ import annotations
 
+import json
+import os
+import shutil
+import sys
 from pathlib import Path
 
-from core.verification import discover_verification_commands, run_verification
+import pytest
+
+from core.verification import (
+    VerificationCommand,
+    discover_verification_commands,
+    run_verification,
+)
 
 
 def test_discovers_real_test_scripts_and_rejects_npm_placeholder(
@@ -56,7 +66,25 @@ def test_root_level_pytest_style_files_keep_pytest_runner(tmp_path: Path) -> Non
     assert [command.id for command in commands] == ["pytest"]
 
 
-def test_verification_reports_pass_and_keeps_output_bounded(tmp_path: Path) -> None:
+def test_verification_reports_pass_and_keeps_output_bounded(
+    monkeypatch, tmp_path: Path
+) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    if os.name == "nt":
+        launcher = bin_dir / "python3.cmd"
+        launcher.write_text(f'@echo off\r\n"{sys.executable}" %*\r\n', encoding="utf-8")
+    else:
+        launcher = bin_dir / "python3"
+        launcher.write_text(
+            f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8"
+        )
+        launcher.chmod(0o755)
+    monkeypatch.setenv(
+        "PATH",
+        os.pathsep.join(filter(None, (str(bin_dir), os.environ.get("PATH", "")))),
+    )
+
     tests_dir = tmp_path / "tests"
     tests_dir.mkdir()
     (tests_dir / "test_ok.py").write_text(
@@ -70,3 +98,45 @@ def test_verification_reports_pass_and_keeps_output_bounded(tmp_path: Path) -> N
     assert result.timed_out is False
     assert len(result.stdout.encode()) <= 64 * 1024
     assert len(result.stderr.encode()) <= 64 * 1024
+
+
+def test_verification_uses_the_project_python_from_path(
+    monkeypatch, tmp_path: Path
+) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    if os.name == "nt":
+        launcher = bin_dir / "python3.cmd"
+        launcher.write_text("@echo off\r\necho project-python\r\n", encoding="utf-8")
+    else:
+        launcher = bin_dir / "python3"
+        launcher.write_text("#!/bin/sh\nprintf 'project-python\\n'\n", encoding="utf-8")
+        launcher.chmod(0o755)
+    monkeypatch.setenv(
+        "PATH",
+        os.pathsep.join(filter(None, (str(bin_dir), os.environ.get("PATH", "")))),
+    )
+
+    command = VerificationCommand(
+        "python-probe", "Project Python", ("python3", "-c", "pass")
+    )
+    result = run_verification(tmp_path, command, timeout_seconds=15)
+
+    assert result.passed
+    assert result.stdout.strip() == "project-python"
+
+
+@pytest.mark.skipif(shutil.which("npm") is None, reason="npm is not installed")
+def test_verification_runs_an_actual_npm_test_script(tmp_path: Path) -> None:
+    root = tmp_path / "project with spaces"
+    root.mkdir()
+    (root / "package.json").write_text(
+        json.dumps({"scripts": {"test": "node -e \"console.log('verification-ok')\""}}),
+        encoding="utf-8",
+    )
+    command = discover_verification_commands(root)[0]
+
+    result = run_verification(root, command, timeout_seconds=15)
+
+    assert result.passed
+    assert "verification-ok" in result.stdout
