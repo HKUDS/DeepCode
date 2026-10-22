@@ -11,7 +11,8 @@ from core.providers.registry import find_by_name
 
 
 @pytest.mark.asyncio
-async def test_responses_tool_result_roundtrip():
+@pytest.mark.parametrize("include_item_ids", [True, False])
+async def test_responses_tool_result_roundtrip(include_item_ids):
     bodies = []
 
     def endpoint(request):
@@ -20,8 +21,8 @@ async def test_responses_tool_result_roundtrip():
         if len(bodies) == 1:
             output = [
                 {
+                    **({"id": f"fc_{i}"} if include_item_ids else {}),
                     "type": "function_call",
-                    "id": f"fc_{i}",
                     "call_id": f"call_{i}",
                     "name": "probe",
                     "arguments": "{}",
@@ -34,9 +35,12 @@ async def test_responses_tool_result_roundtrip():
             results = [
                 x for x in body["input"] if x.get("type") == "function_call_output"
             ]
+            expected_item_ids = (
+                ["fc_0", "fc_1"] if include_item_ids else ["fc_1_0", "fc_1_1"]
+            )
             if (
                 [x["call_id"] for x in calls] != ["call_0", "call_1"]
-                or [x["id"] for x in calls] != ["fc_0", "fc_1"]
+                or [x["id"] for x in calls] != expected_item_ids
                 or [x["call_id"] for x in results] != ["call_0", "call_1"]
             ):
                 return httpx.Response(

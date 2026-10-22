@@ -111,6 +111,7 @@ def run_verification(
         command.argv[0],
         list(command.argv[1:]),
         {"CI": "1", "PYTHONUNBUFFERED": "1"},
+        map_python_to_current_interpreter=False,
     )
     process = subprocess.Popen(
         [executable, *arguments],

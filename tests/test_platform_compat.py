@@ -24,6 +24,17 @@ def test_normalize_stdio_command_maps_only_bare_python_names() -> None:
     assert command == explicit
 
 
+def test_normalize_stdio_command_can_preserve_project_python_name() -> None:
+    command, _args, _environment = normalize_stdio_command(
+        "python3",
+        [],
+        {},
+        inherit_env=False,
+        map_python_to_current_interpreter=False,
+    )
+    assert command == "python3"
+
+
 def test_frozen_build_leaves_python_to_the_path(monkeypatch) -> None:
     """The Desktop build's executable is the App Server, not a Python: an MCP
     server configured as ``python server.py`` needs the user's Python."""
