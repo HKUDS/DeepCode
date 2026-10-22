@@ -205,6 +205,7 @@ def test_invalid_policy_entry_fails_closed():
         ("openrouter", "gateway"),
         ("requesty", "gateway"),
         ("opper", "gateway"),
+        ("api_route", "gateway"),
         ("forge", "gateway"),
         ("zhipu", "aggregator"),
         ("dashscope", "aggregator"),

@@ -237,6 +237,17 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         # route, so the prefix must survive rather than be stripped.
     ),
     ProviderSpec(
+        name="api_route",
+        keywords=("api_route", "api-route"),
+        env_key="API_ROUTE_API_KEY",
+        display_name="API Route",
+        backend="openai_compat",
+        is_gateway=True,
+        endpoint_class="gateway",
+        detect_by_base_keyword="api-route.com",
+        default_api_base="https://global.api-route.com/v1",
+    ),
+    ProviderSpec(
         name="forge",
         keywords=("forge",),
         env_key="FORGE_API_KEY",
