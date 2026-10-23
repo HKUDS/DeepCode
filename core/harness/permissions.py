@@ -190,6 +190,50 @@ def is_sensitive_path(raw: str, cwd: str | None = None) -> bool:
     The path is checked as written and with symlinks resolved, so a link in
     the workspace cannot reach ``~/.ssh/id_rsa``, and without regard to case,
     since the default macOS and Windows filesystems ignore it.
+
+    Windows also drops trailing dots and spaces from path components at open
+    time while ``os.path.normpath`` keeps them (the literal name ``.env.``
+    opens ``.env`` yet a literal compare misses), so a stripped variant is
+    checked too. The strip is only a match probe — the reported path stays
+    as written.
+    """
+    normalized = _normalize_path(raw, cwd)
+    try:
+        candidates = {normalized, os.path.realpath(normalized)}
+    except (OSError, ValueError):
+        candidates = {normalized}
+    probes: set[str] = set()
+    for candidate in candidates:
+        probe = candidate.replace(os.sep, "/").casefold()
+        probes.add(probe)
+        # Keep "." and ".." components intact (rstrip would blank them).
+        probes.add("/".join(p.rstrip(" .") or p for p in probe.split("/")))
+    for probe in probes:
+        name = probe.rsplit("/", 1)[-1]
+        for pattern in SENSITIVE_PATH_PATTERNS:
+            if fnmatch.fnmatchcase(probe, pattern) or fnmatch.fnmatchcase(
+                name, pattern
+            ):
+                return True
+    return False
+
+
+# The files ``core.harness.hooks.discovery`` reads handlers from: the
+# user-level and workspace-level ``hooks.json``, plus the workspace
+# ``.claude/settings.json``. They are not secrets — reads stay free — but a
+# written-in handler runs commands in a later session, so a file-tool write
+# to one of them is surfaced for confirmation (see
+# ``PermissionEngine._evaluate``).
+_HOOK_CONFIG_SUFFIXES = ("/.deepcode/hooks.json", "/.claude/settings.json")
+
+
+def is_hook_config_path(raw: str, cwd: str | None = None) -> bool:
+    """Whether ``raw`` names one of the hook-discovery files.
+
+    Matched by suffix on the normalized, casefolded path, with symlinks
+    resolved and the same trailing-dot/space probe as
+    :func:`is_sensitive_path` (Windows drops those at open time, so
+    ``.claude/settings.json.`` still names the real file).
     """
     normalized = _normalize_path(raw, cwd)
     try:
@@ -198,12 +242,9 @@ def is_sensitive_path(raw: str, cwd: str | None = None) -> bool:
         candidates = {normalized}
     for candidate in candidates:
         probe = candidate.replace(os.sep, "/").casefold()
-        name = probe.rsplit("/", 1)[-1]
-        for pattern in SENSITIVE_PATH_PATTERNS:
-            if fnmatch.fnmatchcase(probe, pattern) or fnmatch.fnmatchcase(
-                name, pattern
-            ):
-                return True
+        probes = {probe, "/".join(p.rstrip(" .") or p for p in probe.split("/"))}
+        if any(p.endswith(_HOOK_CONFIG_SUFFIXES) for p in probes):
+            return True
     return False
 
 
@@ -274,6 +315,12 @@ class PermissionEngine:
         Skips an origin-specific confirmation gate after the shared policy has
         allowed a call. This is enabled only by the canonical Full Access
         preset; explicit permission rules still run first and can deny or ask.
+    protect_hook_configs:
+        Makes a write to a hook-discovery file ask. Off only for the canonical
+        Full Access preset: there ``approval_policy`` is ``never``, which would
+        turn the ask into a deny nobody can answer, and Full Access runs
+        commands outside the sandbox anyway — a shell command can write the
+        same file. Everywhere else a hook write keeps asking.
     """
 
     mode: PermissionMode = PermissionMode.DEFAULT
@@ -284,6 +331,7 @@ class PermissionEngine:
     protect_sensitive_paths: bool = True
     enforce_read_only: bool = False
     bypass_origin_approval: bool = False
+    protect_hook_configs: bool = True
 
     def is_read_only(self, tool_name: str) -> bool:
         known = _READ_ONLY_TOOLS | self.read_only_tools
@@ -318,6 +366,13 @@ class PermissionEngine:
         """Return the offending raw path if any argument targets a secret."""
         for raw in self._candidate_paths(arguments):
             if is_sensitive_path(raw, self.cwd):
+                return raw
+        return None
+
+    def hits_hook_config_path(self, arguments: Mapping[str, object]) -> str | None:
+        """Return the raw path if any argument targets a hook-discovery file."""
+        for raw in self._candidate_paths(arguments):
+            if is_hook_config_path(raw, self.cwd):
                 return raw
         return None
 
@@ -429,12 +484,33 @@ class PermissionEngine:
                 "read-only access preset: mutating tools cannot be enabled by rules",
             )
 
+        # A write to a file hooks are discovered from installs handlers that
+        # run commands in a later session. Downgrade every write that would
+        # otherwise be allowed to a confirmation: reads are never gated here,
+        # and a decision that is already stricter (deny rule, plan mode, the
+        # read-only preset above) keeps its strength — an ask only meets allow.
+        # ``protect_hook_configs`` is off only under Full Access (see the
+        # dataclass field), where the ask would become an unanswerable deny.
+        hook_config = (
+            None
+            if read_only or not self.protect_hook_configs
+            else self.hits_hook_config_path(arguments)
+        )
+
         argument = self._argument_string(tool_name, arguments)
         matched: PermissionRule | None = None
         for rule in self.rules:  # last match wins
             if rule.matches(tool_name, argument):
                 matched = rule
         if matched is not None:
+            if matched.action is PermissionDecision.ALLOW and hook_config is not None:
+                return self._apply_approval_policy(
+                    PermissionDecision.ASK,
+                    (
+                        f"Writing '{hook_config}' requires confirmation: hook "
+                        "handlers run commands in a later session"
+                    ),
+                )
             return self._apply_approval_policy(
                 matched.action,
                 (
@@ -452,6 +528,14 @@ class PermissionEngine:
                 "exploration is permitted until the plan is approved.",
             )
         if self.mode is PermissionMode.FULL_AUTO:
+            if hook_config is not None:
+                return self._apply_approval_policy(
+                    PermissionDecision.ASK,
+                    (
+                        f"Writing '{hook_config}' requires confirmation: hook "
+                        "handlers run commands in a later session"
+                    ),
+                )
             return PermissionDecision.ALLOW, "full_auto mode: no implicit gate"
         # DEFAULT
         if read_only:

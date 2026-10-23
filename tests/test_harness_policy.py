@@ -146,6 +146,41 @@ def test_full_access_profile_is_atomic_and_ignores_legacy_env(monkeypatch):
     )
 
 
+def test_full_access_skips_the_hook_write_ask():
+    # Full Access resolves to full_auto with approval_policy=never, where an
+    # ask becomes a deny nobody can answer. The same way Full Access skips
+    # the sensitive-path guard and origin approval, it skips the hook-write
+    # ask: Full Access runs commands outside the sandbox anyway, so a shell
+    # command can write the same file. The write must come out as allow,
+    # matching main.
+    full_access = ExecutionSecurityProfile.for_preset(ExecutionAccessPreset.FULL_ACCESS)
+    engine = build_permission_engine(
+        None,
+        cwd="/w",
+        execution_security_profile=full_access,
+    )
+    assert engine.protect_hook_configs is False
+    for raw in (
+        "/home/u/.deepcode/hooks.json",  # user level
+        "/w/.deepcode/hooks.json",  # workspace
+        "/w/.claude/settings.json",  # workspace
+    ):
+        assert (
+            engine.evaluate("write", {"file_path": raw})[0] is PermissionDecision.ALLOW
+        ), raw
+
+
+def test_legacy_full_auto_still_asks_on_hook_writes():
+    # The legacy full_auto path carries an on_request approver: the ask
+    # stays, exactly as before.
+    engine = build_permission_engine(None, cwd="/w")
+    assert engine.protect_hook_configs is True
+    assert (
+        engine.evaluate("write", {"file_path": "/w/.claude/settings.json"})[0]
+        is PermissionDecision.ASK
+    )
+
+
 def test_read_only_profile_is_a_non_expandable_upper_bound():
     read_only = ExecutionSecurityProfile.for_preset(ExecutionAccessPreset.READ_ONLY)
     engine = build_permission_engine(
