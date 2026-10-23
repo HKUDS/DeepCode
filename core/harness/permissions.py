@@ -315,6 +315,12 @@ class PermissionEngine:
         Skips an origin-specific confirmation gate after the shared policy has
         allowed a call. This is enabled only by the canonical Full Access
         preset; explicit permission rules still run first and can deny or ask.
+    protect_hook_configs:
+        Makes a write to a hook-discovery file ask. Off only for the canonical
+        Full Access preset: there ``approval_policy`` is ``never``, which would
+        turn the ask into a deny nobody can answer, and Full Access runs
+        commands outside the sandbox anyway — a shell command can write the
+        same file. Everywhere else a hook write keeps asking.
     """
 
     mode: PermissionMode = PermissionMode.DEFAULT
@@ -325,6 +331,7 @@ class PermissionEngine:
     protect_sensitive_paths: bool = True
     enforce_read_only: bool = False
     bypass_origin_approval: bool = False
+    protect_hook_configs: bool = True
 
     def is_read_only(self, tool_name: str) -> bool:
         known = _READ_ONLY_TOOLS | self.read_only_tools
@@ -482,7 +489,13 @@ class PermissionEngine:
         # otherwise be allowed to a confirmation: reads are never gated here,
         # and a decision that is already stricter (deny rule, plan mode, the
         # read-only preset above) keeps its strength — an ask only meets allow.
-        hook_config = None if read_only else self.hits_hook_config_path(arguments)
+        # ``protect_hook_configs`` is off only under Full Access (see the
+        # dataclass field), where the ask would become an unanswerable deny.
+        hook_config = (
+            None
+            if read_only or not self.protect_hook_configs
+            else self.hits_hook_config_path(arguments)
+        )
 
         argument = self._argument_string(tool_name, arguments)
         matched: PermissionRule | None = None

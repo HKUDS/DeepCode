@@ -84,6 +84,19 @@ def test_sensitive_path_protection_can_only_be_disabled_centrally():
     assert _decide(engine, "write", file_path="/home/u/.ssh/config") is ALLOW
 
 
+def test_hook_write_ask_can_only_be_disabled_centrally():
+    engine = PermissionEngine(
+        mode=PermissionMode.FULL_AUTO,
+        cwd="/home/u/proj",
+        protect_hook_configs=False,
+    )
+
+    assert (
+        _decide(engine, "write", file_path="/home/u/proj/.claude/settings.json")
+        is ALLOW
+    )
+
+
 def test_ordinary_workspace_path_is_not_denylisted():
     engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd="/home/u/proj")
     assert _decide(engine, "write_file", file_path="src/model.py") is ALLOW
