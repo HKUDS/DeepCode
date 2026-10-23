@@ -71,6 +71,11 @@ setuptools.setup(
     extras_require={
         "server": [],
         "advanced-documents": ["docling>=2.113.0"],
+        # The Feishu approval bridge (integrations/feishu_approver,
+        # `deepcode feishu start`). Optional so the core install stays lean;
+        # `lark_oapi` is imported lazily only when the bridge actually runs.
+        # Install with `pip install .[feishu]`.
+        "feishu": ["lark-oapi>=1.4.0"],
         "test": [
             "pytest>=8,<10",
             "pytest-asyncio>=1,<2",
