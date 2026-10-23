@@ -167,6 +167,10 @@ def main():
             from cli.automation_cli import run as automation_run
 
             raise SystemExit(automation_run(sys.argv[2:]))
+        elif sys.argv[1] == "feishu":
+            from cli.feishu_cli import run as feishu_run
+
+            raise SystemExit(feishu_run(sys.argv[2:]))
         elif sys.argv[1] in ["--help", "-h", "help"]:
             print_banner()
 
@@ -240,6 +244,10 @@ def main():
                         ),
                         row("deepcode provider list", "Show model connections"),
                         row("deepcode service status", "Check the background service"),
+                        row(
+                            "deepcode feishu start",
+                            "Run the Feishu approval bridge",
+                        ),
                         "",
                         "Run 'deepcode <command> --help' for command options.",
                         "Run 'deepcode chat --help' for TUI options.",
