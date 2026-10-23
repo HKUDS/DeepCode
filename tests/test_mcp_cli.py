@@ -331,6 +331,56 @@ def test_mcp_list_flags_unpinned_launcher_packages(
                         "command": "python3",
                         "args": ["server.py"],
                     },
+                    "npx_cache_value": {
+                        "type": "stdio",
+                        "command": "npx",
+                        "args": ["--cache", "/tmp/c", "-y", "left-pad"],
+                    },
+                    "npx_package_option_pinned": {
+                        "type": "stdio",
+                        "command": "npx",
+                        "args": ["--package", "left-pad@1.2.3", "-y"],
+                    },
+                    "npx_package_short_unpinned": {
+                        "type": "stdio",
+                        "command": "npx",
+                        "args": ["-y", "-p", "left-pad", "cowsay@2.0.0"],
+                    },
+                    "npx_major_only": {
+                        "type": "stdio",
+                        "command": "npx",
+                        "args": ["-y", "left-pad@1"],
+                    },
+                    "npx_minor_wild": {
+                        "type": "stdio",
+                        "command": "npx",
+                        "args": ["-y", "left-pad@1.x"],
+                    },
+                    "npx_prerelease": {
+                        "type": "stdio",
+                        "command": "npx",
+                        "args": ["-y", "left-pad@1.2.3-beta.1"],
+                    },
+                    "uvx_python_option": {
+                        "type": "stdio",
+                        "command": "uvx",
+                        "args": ["--python", "3.12", "mcp-server-time==0.3.0"],
+                    },
+                    "uvx_python_short": {
+                        "type": "stdio",
+                        "command": "uvx",
+                        "args": ["-p", "3.12", "mcp-server-time==0.3.0"],
+                    },
+                    "uvx_with_option": {
+                        "type": "stdio",
+                        "command": "uvx",
+                        "args": ["--with", "httpx", "mcp-server-time==0.3.0"],
+                    },
+                    "uvx_from_option": {
+                        "type": "stdio",
+                        "command": "uvx",
+                        "args": ["--from", "mcp-server-time==0.3.0"],
+                    },
                 }
             }
         ),
@@ -355,7 +405,11 @@ def test_mcp_list_flags_unpinned_launcher_packages(
     # ``npx``/``uvx`` resolve their package argument from the registry on
     # every start, so a missing version or a floating tag is the concern;
     # a pinned version, a local file, a non-launcher command and a command
-    # line without a package are not.
+    # line without a package are not. The package is read from the
+    # launcher's own option when one names it, other options' values are
+    # skipped rather than scanned, and npm's partial versions (``@1``,
+    # ``@1.x``) are ranges -- only a full ``x.y.z``, with an optional
+    # pre-release suffix, counts as pinned there.
     assert concerns == {
         "npx_tag": "unpinned-package",
         "npx_noversion": "unpinned-package",
@@ -363,7 +417,17 @@ def test_mcp_list_flags_unpinned_launcher_packages(
         "npx_flags_only": "-",
         "npx_local_file": "-",
         "npx_windows": "unpinned-package",
+        "npx_cache_value": "unpinned-package",
+        "npx_package_option_pinned": "-",
+        "npx_package_short_unpinned": "unpinned-package",
+        "npx_major_only": "unpinned-package",
+        "npx_minor_wild": "unpinned-package",
+        "npx_prerelease": "-",
         "uvx_noversion": "unpinned-package",
         "uvx_pinned": "-",
+        "uvx_python_option": "-",
+        "uvx_python_short": "-",
+        "uvx_with_option": "-",
+        "uvx_from_option": "-",
         "python": "-",
     }
