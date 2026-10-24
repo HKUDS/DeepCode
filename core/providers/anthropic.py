@@ -14,9 +14,9 @@ import json_repair
 from core.observability import log_llm_call
 from core.providers.base import (
     LLMProvider,
+    LLMResponse,
     ProviderCapabilityError,
     ProviderConfigurationError,
-    LLMResponse,
     ReasoningDeltaCallback,
     ToolCallRequest,
 )
@@ -428,6 +428,114 @@ class AnthropicProvider(LLMProvider):
                 return {"type": "tool", "name": name}
         return {"type": "auto"}
 
+    @staticmethod
+    def _strip_cache_control(message: dict[str, Any]) -> dict[str, Any]:
+        """Return a copy of ``message`` with any cache_control marker removed.
+
+        Strips markers both from the message dict itself and from any content
+        block (string or block-list form) so a replayed request never carries
+        a stale breakpoint into the next finalize step.
+        """
+        if "cache_control" in message:
+            message = {k: v for k, v in message.items() if k != "cache_control"}
+        content = message.get("content")
+        if isinstance(content, list):
+            cleaned: list[Any] = []
+            changed = False
+            for block in content:
+                if isinstance(block, dict) and "cache_control" in block:
+                    cleaned.append(
+                        {k: v for k, v in block.items() if k != "cache_control"}
+                    )
+                    changed = True
+                else:
+                    cleaned.append(block)
+            if changed:
+                message = {**message, "content": cleaned}
+        return message
+
+    @staticmethod
+    def _place_cache_control(
+        message: dict[str, Any], marker: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Return a copy of ``message`` with a fresh cache_control marker.
+
+        Handles both the plain-string content shape and the block-list shape
+        (used for tool_result / multimodal content). A message with no
+        cacheable content is returned unchanged — an image-only or empty
+        result must not host a breakpoint.
+        """
+        content = message.get("content")
+        if isinstance(content, str) and content:
+            return {
+                **message,
+                "content": [{"type": "text", "text": content, "cache_control": marker}],
+            }
+        if isinstance(content, list) and content:
+            nc = list(content)
+            nc[-1] = (
+                {**nc[-1], "cache_control": marker}
+                if isinstance(nc[-1], dict)
+                else {"type": "text", "text": str(nc[-1]), "cache_control": marker}
+            )
+            return {**message, "content": nc}
+        return message
+
+    @staticmethod
+    def _strip_system_cache_hints(
+        system: str | list[dict[str, Any]],
+    ) -> str | list[dict[str, Any]]:
+        """Remove the private ``cacheHint`` section marker from system blocks.
+
+        ``cacheHint`` is an agent-side hint (see ``core.agent_setup``) telling
+        the cache layer where the stable/dynamic boundary of a block-list
+        system prompt sits. It must never reach the Anthropic API.
+        """
+        if not isinstance(system, list):
+            return system
+        if not any(isinstance(b, dict) and "cacheHint" in b for b in system):
+            return system
+        return [
+            {k: v for k, v in b.items() if k != "cacheHint"}
+            if isinstance(b, dict)
+            else b
+            for b in system
+        ]
+
+    @staticmethod
+    def _apply_system_cache_control(
+        system: str | list[dict[str, Any]], marker: dict[str, Any]
+    ) -> str | list[dict[str, Any]]:
+        """Place the single system breakpoint, honoring ``cacheHint`` sections.
+
+        The system prompt may arrive as a block list whose blocks carry a
+        private ``cacheHint`` of ``"stable"`` (base instructions + collaboration
+        preamble) or ``"dynamic"`` (project instructions, memory index). The
+        breakpoint lands on the last *stable* block so edits to the dynamic
+        tail never bust the stable-prefix cache (ZCode cacheHint pattern).
+        Without hints the marker stays on the last block (previous behavior).
+        Exactly one system breakpoint is emitted: the per-request budget is 4
+        (system 1 + tools ≤ 2 + message frontier 1). Stale markers and the
+        private hints are always stripped before send.
+        """
+        if isinstance(system, str) and system:
+            return [{"type": "text", "text": system, "cache_control": marker}]
+        if not isinstance(system, list) or not system:
+            return system
+        blocks: list[dict[str, Any]] = [
+            {k: v for k, v in block.items() if k not in ("cache_control", "cacheHint")}
+            if isinstance(block, dict)
+            else {"type": "text", "text": str(block)}
+            for block in system
+        ]
+        last_stable: int | None = None
+        for idx, block in enumerate(system):
+            if isinstance(block, dict) and block.get("cacheHint") == "stable":
+                last_stable = idx
+        place = last_stable if last_stable is not None else len(blocks) - 1
+        blocks[place] = {**blocks[place], "cache_control": marker}
+        return blocks
+
     # ------------------------------------------------------------------
     # Prompt caching
     # ------------------------------------------------------------------
@@ -443,25 +551,25 @@ class AnthropicProvider(LLMProvider):
     ]:
         marker = {"type": "ephemeral"}
 
-        if isinstance(system, str) and system:
-            system = [{"type": "text", "text": system, "cache_control": marker}]
-        elif isinstance(system, list) and system:
-            system = list(system)
-            system[-1] = {**system[-1], "cache_control": marker}
+        system = cls._apply_system_cache_control(system, marker)
 
-        new_msgs = list(messages)
-        if len(new_msgs) >= 3:
-            m = new_msgs[-2]
-            c = m.get("content")
-            if isinstance(c, str):
-                new_msgs[-2] = {
-                    **m,
-                    "content": [{"type": "text", "text": c, "cache_control": marker}],
-                }
-            elif isinstance(c, list) and c:
-                nc = list(c)
-                nc[-1] = {**nc[-1], "cache_control": marker}
-                new_msgs[-2] = {**m, "content": nc}
+        # --- Message cache breakpoint: clear-then-finalize (ZCode-verified) ---
+        # The old write point hardcoded messages[-2], which silently broke when
+        # the final message was not a cacheable content block (a tool_result
+        # carrying an image, a trailing system note, a truncated turn). We now
+        # (1) strip every stale marker from the whole message list, so a reused
+        # or replayed list can never carry a leftover breakpoint that would
+        # pin the cache at the wrong offset, then (2) place a single fresh
+        # marker on the *latest non-system message*. Anchoring at the newest
+        # cacheable message (instead of a fixed -2) keeps the write point
+        # exactly at the conversation frontier, maximizing the prefix that
+        # subsequent turns hit.
+        new_msgs = [cls._strip_cache_control(m) for m in messages]
+        for idx in range(len(new_msgs) - 1, -1, -1):
+            if new_msgs[idx].get("role") == "system":
+                continue
+            new_msgs[idx] = cls._place_cache_control(new_msgs[idx], marker)
+            break
 
         new_tools = tools
         if tools:
@@ -499,6 +607,10 @@ class AnthropicProvider(LLMProvider):
                 anthropic_msgs,
                 anthropic_tools,
             )
+        else:
+            # Non-caching path: _apply_cache_control never runs, so the private
+            # cacheHint marker must be stripped here or it would leak to the API.
+            system = self._strip_system_cache_hints(system)
 
         max_tokens = max(1, max_tokens)
         effort = normalize_reasoning_effort(reasoning_effort)
