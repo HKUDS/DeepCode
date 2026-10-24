@@ -54,3 +54,7 @@ fail-closed:checker 或 approver 抛异常 → 一律拒绝。
   冻结进 `ExecutionSecurityProfile`，worker 不再动态重读可变配置。
 - 通用 Agent 循环、CLI 与 Desktop 已共享 Ask / Read only / Full access 预设
   及同一 Approval 状态机；legacy mode 只保留给兼容调用。
+- 可选风险评估（#245，默认关闭）：`DEEPCODE_RISK_EVALUATOR=1` 时，对模式默认
+  会放行（步骤 4 的 `allow`）的调用复用 `command_guard.screen_all` 再看一眼，
+  命中只会 `allow` → `ask`（`never` 策略下即 deny）；评估器异常按 fail-closed
+  处理。它不能放宽 deny、不能覆盖显式规则，属于建议性防御而非安全边界。
