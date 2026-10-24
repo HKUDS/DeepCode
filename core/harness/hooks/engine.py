@@ -109,9 +109,16 @@ class HooksEngine:
         *,
         model: str = "",
         permission_mode: str = "default",
+        trust_store=None,
     ):
-        """Build an engine for ``workspace``, or ``None`` if no hooks configured."""
-        result = discover_hooks(workspace, home=home)
+        """Build an engine for ``workspace``, or ``None`` if no hooks configured.
+
+        ``trust_store`` is an optional
+        :class:`~core.harness.hooks.trust.HookTrustStore`; when given, project
+        hook files are discovered only if their declaration digest is
+        approved, so a changed ``hooks.json`` stops running until re-approved.
+        """
+        result = discover_hooks(workspace, home=home, trust_store=trust_store)
         if not result.handlers:
             return None, result.warnings
         engine = cls(
