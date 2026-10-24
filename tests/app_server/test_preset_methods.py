@@ -29,6 +29,17 @@ def _messages(sink: io.BytesIO) -> list[dict[str, Any]]:
 def test_preset_roster_selection_and_lock_over_the_wire(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    # A deny-only project preset: the wire must carry the restriction, not
+    # claim "all tools" (the reviewer's display point, verified end to end).
+    project_preset = workspace / ".agents" / "presets"
+    project_preset.mkdir(parents=True)
+    (project_preset / "no-writes.md").write_text(
+        "---\n"
+        "description: no writes\n"
+        "disallowed-tools: write, edit\n"
+        "---\nYou may not write files.",
+        encoding="utf-8",
+    )
     application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
     project = application.projects.add(str(workspace))
     thread = application.threads.start(project.id, title="Preset wire test")
@@ -69,6 +80,12 @@ def test_preset_roster_selection_and_lock_over_the_wire(tmp_path: Path) -> None:
     roster = {entry["id"]: entry for entry in responses[2]["result"]["presets"]}
     assert "code-reader" in roster and roster["code-reader"]["trust"] == "system"
     assert roster["code-reader"]["tools"] == ["read", "grep", "glob", "skill"]
+    # Presets without a deny list report null (absent), never an empty claim.
+    assert roster["code-reader"]["disallowedTools"] is None
+    # Deny-only preset: no allowlist, but the restriction is on the wire.
+    assert roster["no-writes"]["tools"] is None
+    assert roster["no-writes"]["disallowedTools"] == ["write", "edit"]
+    assert roster["no-writes"]["broken"] is None
 
     assert responses[3]["result"]["agentPreset"] == "code-reader"
     assert responses[4]["result"]["agentPreset"] == "code-reader"

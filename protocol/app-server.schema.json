@@ -5900,6 +5900,15 @@
             "type": "string"
           }
         },
+        "disallowedTools": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
         "broken": {
           "type": [
             "string",
@@ -5913,6 +5922,7 @@
         "name",
         "description",
         "tools",
+        "disallowedTools",
         "broken"
       ]
     },

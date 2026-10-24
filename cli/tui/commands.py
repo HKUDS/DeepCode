@@ -591,6 +591,8 @@ async def _preset_via_picker(app) -> str | None:
             )
             continue
         face = ", ".join(preset.tools) if preset.tools is not None else "all tools"
+        if preset.disallowed_tools:
+            face = f"{face} except {', '.join(preset.disallowed_tools)}"
         detail = (
             f"[{preset.trust}] {preset.description or preset.display_name} ({face})"
         )

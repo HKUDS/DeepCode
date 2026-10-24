@@ -1149,6 +1149,7 @@ export interface AgentPresetEntry {
   name: string;
   description: string;
   tools: string[] | null;
+  disallowedTools: string[] | null;
   broken: string | null;
 }
 export interface PresetCurrentResult {

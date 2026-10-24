@@ -506,6 +506,8 @@ class TuiApp:
                 continue
             marker = "●" if preset.id == current else "○"
             face = ", ".join(preset.tools) if preset.tools is not None else "all tools"
+            if preset.disallowed_tools:
+                face = f"{face} except {', '.join(preset.disallowed_tools)}"
             lines.append(
                 f"  {marker} {preset.id} [{preset.trust}] — "
                 f"{preset.description or preset.display_name} ({face})"

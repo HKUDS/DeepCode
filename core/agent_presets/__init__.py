@@ -102,6 +102,7 @@ class AgentPreset:
     prompt: str = ""
     prompt_mode: str = PROMPT_MODE_APPEND
     tools: tuple[str, ...] | None = None
+    disallowed_tools: tuple[str, ...] | None = None
     allow_spawn: bool | None = None
     suggested_model: str | None = None
     order: int | None = None
@@ -116,6 +117,7 @@ class AgentPreset:
             prompt_mode=self.prompt_mode,
             tools=self.tools,
             allow_spawn=self.allow_spawn,
+            disallowed_tools=self.disallowed_tools,
         )
 
 
@@ -127,6 +129,7 @@ class AgentPresetSnapshot:
     prompt: str = ""
     prompt_mode: str = PROMPT_MODE_APPEND
     tools: tuple[str, ...] | None = None
+    disallowed_tools: tuple[str, ...] | None = None
     allow_spawn: bool | None = None
 
     def to_metadata(self) -> dict[str, Any]:
@@ -135,6 +138,11 @@ class AgentPresetSnapshot:
             "prompt": self.prompt,
             "promptMode": self.prompt_mode,
             "tools": list(self.tools) if self.tools is not None else None,
+            "disallowedTools": (
+                list(self.disallowed_tools)
+                if self.disallowed_tools is not None
+                else None
+            ),
             "allowSpawn": self.allow_spawn,
         }
 
@@ -152,6 +160,10 @@ class AgentPresetSnapshot:
         tools: tuple[str, ...] | None = None
         if isinstance(raw_tools, list):
             tools = tuple(str(name) for name in raw_tools)
+        raw_disallowed = value.get("disallowedTools")
+        disallowed_tools: tuple[str, ...] | None = None
+        if isinstance(raw_disallowed, list):
+            disallowed_tools = tuple(str(name) for name in raw_disallowed)
         mode = value.get("promptMode")
         allow_spawn = value.get("allowSpawn")
         return cls(
@@ -159,12 +171,20 @@ class AgentPresetSnapshot:
             prompt=str(value.get("prompt") or ""),
             prompt_mode=(mode if mode in _PROMPT_MODES else PROMPT_MODE_APPEND),
             tools=tools,
+            disallowed_tools=disallowed_tools,
             allow_spawn=allow_spawn if isinstance(allow_spawn, bool) else None,
         )
 
     def fingerprint(self) -> tuple[Any, ...]:
         """Hashable identity for runtime-key comparison."""
-        return (self.id, self.prompt, self.prompt_mode, self.tools, self.allow_spawn)
+        return (
+            self.id,
+            self.prompt,
+            self.prompt_mode,
+            self.tools,
+            self.disallowed_tools,
+            self.allow_spawn,
+        )
 
     def compose_system_prompt(self, base: str) -> str:
         if not self.prompt:
@@ -175,13 +195,23 @@ class AgentPresetSnapshot:
         return f"{base}\n\n## Persona\n{self.prompt}"
 
     def tool_filter(self) -> Any | None:
-        """AgentRunSpec-contract narrowing filter, or None when unrestricted."""
-        if self.tools is None:
+        """AgentRunSpec-contract narrowing filter, or None when unrestricted.
+
+        ``tools`` is an allowlist; ``disallowed_tools`` subtracts from it —
+        or applies alone when no allowlist is present — matching the
+        cross-product ``disallowedTools`` frontmatter dialect.
+        """
+        if self.tools is None and self.disallowed_tools is None:
             return None
-        allowed = frozenset(self.tools)
+        allowed = frozenset(self.tools) if self.tools is not None else None
+        denied = frozenset(self.disallowed_tools or ())
 
         def preset_filter(names: tuple[str, ...]) -> tuple[str, ...]:
-            return tuple(name for name in names if name in allowed)
+            return tuple(
+                name
+                for name in names
+                if name not in denied and (allowed is None or name in allowed)
+            )
 
         return preset_filter
 
@@ -323,6 +353,40 @@ def _parse_preset_file(path: Path, *, trust: str) -> AgentPreset:
             broken="allow-spawn must be a boolean",
         )
 
+    # ``disallowed-tools`` is a RESTRICTION, so it parses strictly like
+    # ``tools:`` — a malformed value marks the preset broken instead of
+    # silently dropping the deny list (fail closed: the agent would otherwise
+    # keep tools the author tried to remove). ``*`` is rejected for the same
+    # reason: it would mean "deny everything", which the subtraction filter
+    # cannot express, and the unrestricted fallback would invert the intent.
+    # ``max-turns``/``memory`` are deliberately NOT parsed — nothing reads
+    # them, and Claude Code's ``memory`` is a scope string, not a bool.
+    # ``permission-mode`` likewise stays out: permission remains an
+    # independent session-level knob (dsh's split).
+    raw_disallowed = data.get(
+        "disallowed-tools",
+        data.get("disallowedTools", data.get("disallowed_tools")),
+    )
+    disallowed_tools, disallowed_error = _parse_tools(
+        raw_disallowed, field="disallowed-tools"
+    )
+    # ``*`` must die in BOTH spellings: the bare string folds to ``None``
+    # (unrestricted), while ``["*"]`` would normalize to ``("*",)`` — a deny
+    # entry no roster ever matches, i.e. it denies nothing. Both invert the
+    # author's intent, so both mark the preset broken.
+    if (
+        disallowed_error is None
+        and raw_disallowed is not None
+        and (disallowed_tools is None or "*" in disallowed_tools)
+    ):
+        disallowed_error = (
+            "disallowed-tools: '*' would deny every tool; list tools explicitly"
+        )
+    if disallowed_error is not None:
+        return AgentPreset(
+            id=preset_id, trust=trust, path=str(path), broken=disallowed_error
+        )
+
     order = data.get("order")
     model = data.get("model")
     return AgentPreset(
@@ -334,14 +398,17 @@ def _parse_preset_file(path: Path, *, trust: str) -> AgentPreset:
         prompt=text[match.end() :].strip(),
         prompt_mode=mode or PROMPT_MODE_APPEND,
         tools=tools,
+        disallowed_tools=disallowed_tools,
         allow_spawn=allow_spawn,
         suggested_model=str(model) if isinstance(model, str) and model else None,
         order=order if isinstance(order, int) else None,
     )
 
 
-def _parse_tools(value: Any) -> tuple[tuple[str, ...] | None, str | None]:
-    """``tools:`` field → normalized allowlist. Absent or ``*`` = unrestricted."""
+def _parse_tools(
+    value: Any, *, field: str = "tools"
+) -> tuple[tuple[str, ...] | None, str | None]:
+    """Tool-name list field → normalized names. Absent or ``*`` = unrestricted."""
     if value is None:
         return None, None
     if isinstance(value, str):
@@ -350,10 +417,10 @@ def _parse_tools(value: Any) -> tuple[tuple[str, ...] | None, str | None]:
         names = [part for part in re.split(r"[,\s]+", value) if part]
     elif isinstance(value, list):
         if any(not isinstance(item, str) for item in value):
-            return None, "tools list entries must be strings"
+            return None, f"{field} list entries must be strings"
         names = [item for item in value if item.strip()]
     else:
-        return None, "tools must be a string or a list of strings"
+        return None, f"{field} must be a string or a list of strings"
     normalized: list[str] = []
     for name in names:
         folded = normalize_tool_name(name)
