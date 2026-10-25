@@ -90,18 +90,18 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
 ### 🎬 **Introduction Video**
 
 <div style="margin: 20px 0;">
-  <a href="https://youtu.be/PRgmP8pOI08" target="_blank">
-    <img src="https://img.youtube.com/vi/PRgmP8pOI08/maxresdefault.jpg"
+  <a href="https://youtu.be/TxwBHRQoaBw" target="_blank">
+    <img src="https://img.youtube.com/vi/TxwBHRQoaBw/maxresdefault.jpg"
          alt="DeepCode Introduction Video"
          width="75%"
          style="border-radius: 12px; box-shadow: 0 8px 25px rgba(0,0,0,0.15); transition: transform 0.3s ease;"/>
   </a>
 </div>
 
-*🎯 **Watch our complete introduction** - See how DeepCode transforms research papers and natural language into production-ready code*
+*🎯 **Watch the DeepCode V2 introduction** - Long-horizon tasks, loop engineering, the agent harness, and self-evolution in 100 seconds*
 
 <p>
-  <a href="https://youtu.be/PRgmP8pOI08" target="_blank">
+  <a href="https://youtu.be/TxwBHRQoaBw" target="_blank">
     <img src="https://img.shields.io/badge/▶️_Watch_Video-FF0000?style=for-the-badge&logo=youtube&logoColor=white" alt="Watch Video"/>
   </a>
 </p>
@@ -1420,8 +1420,8 @@ are output demonstrations rather than screenshots of the current Desktop UI.
 </tr>
 </table>
 
-The [project introduction](https://youtu.be/PRgmP8pOI08) remains available for
-a broader walkthrough.
+The [DeepCode V2 introduction video](https://youtu.be/TxwBHRQoaBw) gives a
+broader walkthrough.
 
 ## Development
 

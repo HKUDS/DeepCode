@@ -89,18 +89,18 @@ DeepCode 提供 TUI、Desktop 和 Web 三种客户端，连接同一个本地共
 ### 🎬 **介绍视频**
 
 <div style="margin: 20px 0;">
-  <a href="https://youtu.be/PRgmP8pOI08" target="_blank">
-    <img src="https://img.youtube.com/vi/PRgmP8pOI08/maxresdefault.jpg"
+  <a href="https://youtu.be/TxwBHRQoaBw" target="_blank">
+    <img src="https://img.youtube.com/vi/TxwBHRQoaBw/maxresdefault.jpg"
          alt="DeepCode Introduction Video"
          width="75%"
          style="border-radius: 12px; box-shadow: 0 8px 25px rgba(0,0,0,0.15); transition: transform 0.3s ease;"/>
   </a>
 </div>
 
-*🎯 **观看我们的完整介绍** - 了解DeepCode如何将研究论文和自然语言转换为生产就绪的代码*
+*🎯 **观看 DeepCode V2 介绍** - 100 秒看完长程任务、循环工程、Agent Harness 与自我进化*
 
 <p>
-  <a href="https://youtu.be/PRgmP8pOI08" target="_blank">
+  <a href="https://youtu.be/TxwBHRQoaBw" target="_blank">
     <img src="https://img.shields.io/badge/▶️_观看视频-FF0000?style=for-the-badge&logo=youtube&logoColor=white" alt="Watch Video"/>
   </a>
 </p>
@@ -1134,7 +1134,7 @@ DeepCode 原始研究使用
 </tr>
 </table>
 
-[项目介绍视频](https://youtu.be/PRgmP8pOI08)继续提供更完整的产品说明。
+[DeepCode V2 介绍视频](https://youtu.be/TxwBHRQoaBw)提供更完整的产品说明。
 
 ## 开发
 
