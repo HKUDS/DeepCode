@@ -381,6 +381,16 @@ def test_mcp_list_flags_unpinned_launcher_packages(
                         "command": "uvx",
                         "args": ["--from", "mcp-server-time==0.3.0"],
                     },
+                    "uvx_from_local": {
+                        "type": "stdio",
+                        "command": "uvx",
+                        "args": ["--from", ".", "my-mcp"],
+                    },
+                    "npx_package_local": {
+                        "type": "stdio",
+                        "command": "npx",
+                        "args": ["-p", "./local-pkg", "cmd"],
+                    },
                 }
             }
         ),
@@ -406,7 +416,8 @@ def test_mcp_list_flags_unpinned_launcher_packages(
     # every start, so a missing version or a floating tag is the concern;
     # a pinned version, a local file, a non-launcher command and a command
     # line without a package are not. The package is read from the
-    # launcher's own option when one names it, other options' values are
+    # launcher's own option when one names it (a local path there is not a
+    # package either), other options' values are
     # skipped rather than scanned, and npm's partial versions (``@1``,
     # ``@1.x``) are ranges -- only a full ``x.y.z``, with an optional
     # pre-release suffix, counts as pinned there.
@@ -429,5 +440,7 @@ def test_mcp_list_flags_unpinned_launcher_packages(
         "uvx_python_short": "-",
         "uvx_with_option": "-",
         "uvx_from_option": "-",
+        "uvx_from_local": "-",
+        "npx_package_local": "-",
         "python": "-",
     }

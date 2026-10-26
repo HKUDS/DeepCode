@@ -368,6 +368,13 @@ _VALUE_OPTIONS = {
 _NPM_EXACT_VERSION = re.compile(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?")
 
 
+def _names_local_path(arg: str) -> bool:
+    """Whether a launcher argument is a filesystem path, not a package."""
+    return arg.startswith((".", "/", "\\")) or (
+        len(arg) >= 2 and arg[1] == ":" and arg[0].isalpha()
+    )
+
+
 def _launcher_package_spec(args: list[str], launcher: str) -> str | None:
     """First registry-package token on a launcher command line, if any.
 
@@ -381,8 +388,10 @@ def _launcher_package_spec(args: list[str], launcher: str) -> str | None:
     nothing. URL tokens are skipped, and a path-like token
     (``./server.js``, ``/opt/x.js``, ``C:\\x.js``) names a local file
     rather than a package, so there is no version to pin and the scan
-    stops. Only the first package token decides: later positional
-    arguments are the server's own operands (``npx -y pkg /data``).
+    stops. A package option whose value is such a path (``uvx --from .
+    my-mcp``, ``npx -p ./local cmd``) likewise names no registry package.
+    Only the first package token decides: later positional arguments are
+    the server's own operands (``npx -y pkg /data``).
     """
     package_options = _PACKAGE_OPTIONS.get(launcher, ())
     value_options = _VALUE_OPTIONS.get(launcher, frozenset())
@@ -390,23 +399,21 @@ def _launcher_package_spec(args: list[str], launcher: str) -> str | None:
     for arg in args:
         if expect is not None:
             if expect == "package":
-                return arg
+                return None if _names_local_path(arg) else arg
             expect = None
             continue
         if arg.startswith("-"):
             name, eq, inline = arg.partition("=")
             if name in package_options:
                 if eq:
-                    return inline
+                    return None if _names_local_path(inline) else inline
                 expect = "package"
             elif name in value_options and not eq:
                 expect = "skip"
             continue
         if "://" in arg:
             continue
-        if arg.startswith((".", "/", "\\")) or (
-            len(arg) >= 2 and arg[1] == ":" and arg[0].isalpha()
-        ):
+        if _names_local_path(arg):
             return None
         return arg
     return None
