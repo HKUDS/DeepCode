@@ -8,7 +8,7 @@ aiohappyeyeballs==2.7.1
     # via
     #   -c scripts/ci/../../desktop/sidecar-requirements.lock
     #   aiohttp
-aiohttp==3.14.3
+aiohttp==3.14.4
     # via
     #   -c scripts/ci/../../desktop/sidecar-requirements.lock
     #   deepcode-hku
@@ -44,7 +44,7 @@ attrs==26.1.0
     #   referencing
 build==1.6.0
     # via -r scripts/ci/requirements.in
-certifi==2026.6.17
+certifi==2026.10.23
     # via
     #   -c scripts/ci/../../desktop/sidecar-requirements.lock
     #   httpcore
@@ -188,7 +188,7 @@ loguru==0.7.3
     #   deepcode-hku
 markdown-it-py==4.2.0
     # via rich
-mcp==1.29.0
+mcp==1.30.0
     # via
     #   -c scripts/ci/../../desktop/sidecar-requirements.lock
     #   deepcode-hku
@@ -282,7 +282,7 @@ pyjwt==2.15.1
     # via
     #   -c scripts/ci/../../desktop/sidecar-requirements.lock
     #   mcp
-pypdf==6.19.0
+pypdf==6.21.2
     # via
     #   -c scripts/ci/../../desktop/sidecar-requirements.lock
     #   deepcode-hku
@@ -350,7 +350,7 @@ rpds-py==2026.6.3
     #   referencing
 secretstorage==3.5.0 ; platform_machine != 'ppc64le' and platform_machine != 's390x' and sys_platform == 'linux'
     # via keyring
-setuptools==83.0.0
+setuptools==84.2.1
     # via
     #   -c scripts/ci/../../desktop/sidecar-requirements.lock
     #   -r scripts/ci/requirements.in
@@ -428,7 +428,7 @@ win32-setctime==1.2.0 ; sys_platform == 'win32'
     # via
     #   -c scripts/ci/../../desktop/sidecar-requirements.lock
     #   loguru
-yarl==1.24.2
+yarl==1.25.1
     # via
     #   -c scripts/ci/../../desktop/sidecar-requirements.lock
     #   aiohttp
