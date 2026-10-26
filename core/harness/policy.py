@@ -208,4 +208,7 @@ def build_permission_engine(
         bypass_origin_approval=(
             profile.access_preset is ExecutionAccessPreset.FULL_ACCESS
         ),
+        protect_hook_configs=(
+            profile.access_preset is not ExecutionAccessPreset.FULL_ACCESS
+        ),
     )
