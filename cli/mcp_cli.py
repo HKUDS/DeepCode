@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -340,7 +341,103 @@ _MCP_CONCERN_LABELS = {
     "off": "disabled",
     "env": "missing-env",
     "cred": "sends-credential",
+    "pin": "unpinned-package",
 }
+
+#: Launchers whose argument names a registry package resolved at start time.
+_UNPINNED_LAUNCHERS = frozenset({"npx", "uvx"})
+
+#: Windows filename suffixes ``npx``/``uvx`` may be invoked with.
+_LAUNCHER_SUFFIXES = (".cmd", ".exe", ".bat", ".ps1")
+
+#: Options whose own value names the package, per launcher.
+_PACKAGE_OPTIONS = {
+    "npx": ("--package", "-p"),
+    "uvx": ("--from",),
+}
+
+#: Options that take a value which is not the package, per launcher; the
+#: next bare token is consumed as that value and never scanned as a package.
+_VALUE_OPTIONS = {
+    "npx": frozenset({"--cache", "--registry", "--call", "-c"}),
+    "uvx": frozenset({"--python", "-p", "--with", "--index-url"}),
+}
+
+#: npm reads a partial version (``pkg@1``, ``pkg@1.x``) as a range, so only
+#: a full ``x.y.z`` with an optional pre-release suffix pins it down.
+_NPM_EXACT_VERSION = re.compile(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?")
+
+
+def _launcher_package_spec(args: list[str], launcher: str) -> str | None:
+    """First registry-package token on a launcher command line, if any.
+
+    The package may arrive as a positional argument or through the
+    launcher's own option (``--package``/``-p`` for ``npx``, ``--from``
+    for ``uvx``); the option's value decides, inline ``--from=x`` alike.
+    Any other option that takes a value (``--cache``, ``--with``,
+    ``--python``) consumes its value without scanning it, so a value can
+    never be mistaken for the package (``uvx --with httpx pkg`` scans
+    ``pkg``, not ``httpx``), while a valueless flag (``-y``) consumes
+    nothing. URL tokens are skipped, and a path-like token
+    (``./server.js``, ``/opt/x.js``, ``C:\\x.js``) names a local file
+    rather than a package, so there is no version to pin and the scan
+    stops. Only the first package token decides: later positional
+    arguments are the server's own operands (``npx -y pkg /data``).
+    """
+    package_options = _PACKAGE_OPTIONS.get(launcher, ())
+    value_options = _VALUE_OPTIONS.get(launcher, frozenset())
+    expect: str | None = None  # next token is a package value or a skipped value
+    for arg in args:
+        if expect is not None:
+            if expect == "package":
+                return arg
+            expect = None
+            continue
+        if arg.startswith("-"):
+            name, eq, inline = arg.partition("=")
+            if name in package_options:
+                if eq:
+                    return inline
+                expect = "package"
+            elif name in value_options and not eq:
+                expect = "skip"
+            continue
+        if "://" in arg:
+            continue
+        if arg.startswith((".", "/", "\\")) or (
+            len(arg) >= 2 and arg[1] == ":" and arg[0].isalpha()
+        ):
+            return None
+        return arg
+    return None
+
+
+def _package_spec_is_unpinned(spec: str, launcher: str) -> bool:
+    """Whether a package spec floats: no version, or not one exact release.
+
+    ``pkg`` and ``pkg@latest`` (or ``pkg@next``) resolve to whatever the
+    registry serves now, so the effective code was never chosen; ``pkg@1.2.3``
+    and pip's ``pkg==1.2.3`` name exact releases (an optional leading ``v``
+    is accepted). npm reads a partial version as a range (``pkg@1`` means
+    every ``1.x``), so ``npx`` counts only a full ``x.y.z`` -- optionally
+    with a pre-release suffix such as ``-beta.1`` -- as pinned; uvx's
+    ``==`` matches exactly at any precision, so a leading digit still
+    counts there. A leading ``@scope/`` belongs to the name, so the ``@``
+    delimiter is only searched past position 0.
+    """
+    double_equals = spec.find("==")
+    if double_equals >= 0:
+        version = spec[double_equals + 2 :]
+    else:
+        at = spec.find("@", 1) if spec.startswith("@") else spec.find("@")
+        if at < 0:
+            return True
+        version = spec[at + 1 :]
+    if version.startswith("v"):
+        version = version[1:]
+    if launcher == "npx":
+        return _NPM_EXACT_VERSION.fullmatch(version) is None
+    return not version or not version[0].isdigit()
 
 
 def _mcp_concerns(server: dict[str, Any]) -> tuple[str, ...]:
@@ -353,6 +450,12 @@ def _mcp_concerns(server: dict[str, Any]) -> tuple[str, ...]:
     :func:`_posture_summary` states them once instead of repeating them on
     every row. Only key *names* are ever read, never credential values (see
     ``core.config._resolve_env_refs``).
+
+    The package spec a stdio launcher runs is explicit configuration too:
+    ``npx``/``uvx`` given no version (or a floating tag such as
+    ``@latest``) fetch whatever the registry serves at each start, so that
+    choice is recorded on its row. Other commands run what they name and
+    are not scanned.
     """
     concerns: list[str] = []
     if not server["enabled"]:
@@ -361,6 +464,16 @@ def _mcp_concerns(server: dict[str, Any]) -> tuple[str, ...]:
         concerns.append("env")
     if server["credentialEnvKeys"]:
         concerns.append("cred")
+    command = server["command"]
+    if command:
+        program = command.replace("\\", "/").rsplit("/", 1)[-1].lower()
+        for suffix in _LAUNCHER_SUFFIXES:
+            if program.endswith(suffix):
+                program = program[: -len(suffix)]
+        if program in _UNPINNED_LAUNCHERS:
+            spec = _launcher_package_spec(server["args"], program)
+            if spec is not None and _package_spec_is_unpinned(spec, program):
+                concerns.append("pin")
     return tuple(concerns)
 
 
