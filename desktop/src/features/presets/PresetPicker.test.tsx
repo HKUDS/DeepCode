@@ -12,6 +12,7 @@ const reader: AgentPresetEntry = {
   name: "Code reader",
   description: "Read-only investigator",
   tools: ["read", "grep", "glob"],
+  disallowedTools: null,
   broken: null,
 };
 
@@ -21,6 +22,7 @@ const damaged: AgentPresetEntry = {
   name: "damaged",
   description: "",
   tools: null,
+  disallowedTools: null,
   broken: "missing YAML frontmatter block",
 };
 
