@@ -26,22 +26,7 @@ def convert_messages(
         content = msg.get("content")
 
         if role == "system":
-            if isinstance(content, str):
-                system_prompt = content
-            elif isinstance(content, list):
-                # Block-list system prompts (stable/dynamic cacheHint split):
-                # join the text blocks; private hint/marker keys are ignored
-                # here — the Responses API only needs the text.
-                system_prompt = "\n\n".join(
-                    block.get("text", "")
-                    for block in content
-                    if isinstance(block, dict)
-                    and block.get("type") == "text"
-                    and isinstance(block.get("text"), str)
-                    and block.get("text")
-                )
-            else:
-                system_prompt = ""
+            system_prompt = content if isinstance(content, str) else ""
             continue
 
         if role == "user":

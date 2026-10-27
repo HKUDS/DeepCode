@@ -17,8 +17,8 @@ about.
 from __future__ import annotations
 
 import inspect
-import os
 from collections.abc import Awaitable, Callable
+import os
 from typing import Any
 
 from loguru import logger
@@ -370,25 +370,12 @@ def build_agent_session(
 
     if skill_runtime is None:
         skill_runtime = SkillRuntime(workspace)
-    # Stable/dynamic split (ZCode cacheHint pattern): the base prompt plus the
-    # mode-keyed collaboration preamble rarely change, so they form the
-    # cache-stable prefix; workspace/memory sections can change between
-    # sessions and stay in a dynamic tail. When both halves exist the system
-    # prompt is emitted as two text blocks whose concatenation (the separator
-    # rides at the end of the stable block) reproduces the exact flat-join
-    # text below. cacheHint is a private key: every provider strips it before
-    # the request leaves the process (anthropic._apply_system_cache_control,
-    # openai_compat._sanitize_messages, openai_responses.converters).
-    collab_text = collaboration_preamble(engine.mode)
-    dynamic_text = system_preamble(workspace)
-    stable_text = "\n\n".join(p for p in (system_prompt, collab_text) if p)
-    if stable_text and dynamic_text:
-        full_system_prompt: str | list[dict[str, Any]] = [
-            {"type": "text", "text": f"{stable_text}\n\n", "cacheHint": "stable"},
-            {"type": "text", "text": dynamic_text, "cacheHint": "dynamic"},
-        ]
-    else:
-        full_system_prompt = stable_text or dynamic_text
+    addenda = [
+        collaboration_preamble(engine.mode),
+        system_preamble(workspace),
+    ]
+    addendum = "\n\n".join(a for a in addenda if a)
+    full_system_prompt = f"{system_prompt}\n\n{addendum}" if addendum else system_prompt
 
     # Delegation: one AgentControl per top-level session drives spawn_agent /
     # wait_agent and feeds sub-agent results back through the injection seam.

@@ -33,9 +33,9 @@ else:
 
 from core.providers.base import (
     LLMProvider,
-    LLMResponse,
     ProviderCapabilityError,
     ProviderConfigurationError,
+    LLMResponse,
     ReasoningDeltaCallback,
     ToolCallRequest,
 )
@@ -161,7 +161,7 @@ def _extract_tc_extras(
 
 
 def _uses_openrouter_attribution(
-    spec: ProviderSpec | None, api_base: str | None
+    spec: "ProviderSpec | None", api_base: str | None
 ) -> bool:
     """Apply Nanobot attribution headers to OpenRouter requests by default."""
     if spec and spec.name == "openrouter":
@@ -169,7 +169,9 @@ def _uses_openrouter_attribution(
     return bool(api_base and "openrouter" in api_base.lower())
 
 
-def _uses_requesty_attribution(spec: ProviderSpec | None, api_base: str | None) -> bool:
+def _uses_requesty_attribution(
+    spec: "ProviderSpec | None", api_base: str | None
+) -> bool:
     """Apply DeepCode attribution headers to Requesty requests by default."""
     if spec and spec.name == "requesty":
         return True
@@ -388,20 +390,6 @@ class OpenAICompatProvider(LLMProvider):
             return id_map.setdefault(value, self._normalize_tool_call_id(value))
 
         for clean in sanitized:
-            # cacheHint is a private agent-side key (stable/dynamic cache
-            # boundary, see core.agent_setup). It must never reach the API;
-            # message-level sanitization above only filters top-level keys, so
-            # walk content blocks here.
-            content = clean.get("content")
-            if isinstance(content, list) and any(
-                isinstance(b, dict) and "cacheHint" in b for b in content
-            ):
-                clean["content"] = [
-                    {k: v for k, v in b.items() if k != "cacheHint"}
-                    if isinstance(b, dict)
-                    else b
-                    for b in content
-                ]
             if isinstance(clean.get("tool_calls"), list):
                 normalized = []
                 for tc in clean["tool_calls"]:
@@ -428,7 +416,7 @@ class OpenAICompatProvider(LLMProvider):
                     # Some OpenAI-compatible gateways reject assistant messages
                     # that mix non-empty content with tool_calls.
                     clean["content"] = None
-            if clean.get("tool_call_id"):
+            if "tool_call_id" in clean and clean["tool_call_id"]:
                 clean["tool_call_id"] = map_id(clean["tool_call_id"])
         return self._enforce_role_alternation(sanitized)
 
@@ -557,11 +545,9 @@ class OpenAICompatProvider(LLMProvider):
 
         model_name = (model or self.default_model).lower()
         wants = False
-        if (
-            reasoning_effort
-            and reasoning_effort.lower() != "none"
-            or any(token in model_name for token in ("gpt-5", "o1", "o3", "o4"))
-        ):
+        if reasoning_effort and reasoning_effort.lower() != "none":
+            wants = True
+        elif any(token in model_name for token in ("gpt-5", "o1", "o3", "o4")):
             wants = True
         if not wants:
             return False
