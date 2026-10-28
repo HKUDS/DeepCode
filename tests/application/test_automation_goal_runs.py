@@ -75,7 +75,7 @@ class _GoalAwareSession:
         while step.gate is not None and not step.gate.is_set():
             await asyncio.sleep(0.005)
         if step.decision is not None:
-            self.goal_runtime.request(
+            await self.goal_runtime.request(
                 status=step.decision,
                 reason=f"Agent requested {step.decision} in scripted Turn {index}.",
             )

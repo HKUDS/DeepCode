@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from core.agent_runtime.goal_verifier import (
+        GoalCompletionRequest,
+        GoalCompletionVerifier,
+        GoalVerdict,
+    )
 
 
 GOAL_TOOL_NAMES = frozenset({"get_goal", "update_goal"})
@@ -45,19 +52,66 @@ class GoalRuntimeHandler(Protocol):
         reason: str | None,
     ) -> dict[str, Any]: ...
 
+    def completion_request(
+        self,
+        context: GoalRuntimeContext,
+        *,
+        reason: str | None,
+    ) -> GoalCompletionRequest:
+        """Build the claim a configured verifier judges.
+
+        Only consulted while a completion verifier is configured; carries the
+        real objective and this Turn's existing evidence references.
+        """
+        ...
+
 
 class GoalRuntimeRouter:
-    """Route Goal tools only while one attributed Turn owns the runtime."""
+    """Route Goal tools only while one attributed Turn owns the runtime.
+
+    When a completion verifier is configured (see
+    :meth:`configure_completion_verifier`), a ``complete`` request is judged
+    exactly once, asynchronously, before any durable update. A rejection is
+    returned to the model as data — with the verifier's justification — and
+    the goal is not updated. After ``max_rejections`` rejected claims the
+    router moves the goal to ``blocked`` itself, so a model that keeps
+    re-claiming completion cannot burn Turns forever.
+    """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._handler: GoalRuntimeHandler | None = None
         self._context: GoalRuntimeContext | None = None
         self._terminal_requested = False
+        self._verifier: GoalCompletionVerifier | None = None
+        self._max_rejections = 3
+        # Rejected completion claims per goal, so a model cannot burn Turns
+        # retrying the same claim; cleared on success or auto-block.
+        self._rejections: dict[str, int] = {}
 
     def configure(self, handler: GoalRuntimeHandler) -> None:
         with self._lock:
             self._handler = handler
+
+    def configure_completion_verifier(
+        self,
+        verifier: GoalCompletionVerifier,
+        *,
+        max_rejections: int = 3,
+    ) -> None:
+        """Arm the single asynchronous completion gate.
+
+        There is deliberately no way to pass a pre-computed verdict into
+        :meth:`request`; every ``complete`` claim goes through ``verifier``
+        exactly once.
+        """
+
+        if max_rejections < 1:
+            raise ValueError("max_rejections must be positive")
+        with self._lock:
+            self._verifier = verifier
+            self._max_rejections = max_rejections
+            self._rejections.clear()
 
     def activate(self, context: GoalRuntimeContext) -> None:
         with self._lock:
@@ -79,13 +133,33 @@ class GoalRuntimeRouter:
         handler, context = self._snapshot()
         return handler.read_goal(context)
 
-    def request(
+    async def request(
         self,
         *,
         status: str,
         reason: str | None,
     ) -> dict[str, Any]:
+        """Record one terminal decision, verifying a ``complete`` claim once."""
+
         handler, context = self._snapshot()
+        with self._lock:
+            verifier = self._verifier
+
+        if status == "complete" and verifier is not None:
+            from core.agent_runtime.goal_verifier import GoalVerdict
+
+            try:
+                verdict = await verifier(
+                    handler.completion_request(context, reason=reason)
+                )
+            except Exception as exc:  # noqa: BLE001 - fail closed, report to the model
+                verdict = GoalVerdict(
+                    confirmed=False,
+                    justification=f"Completion verification failed: {exc}",
+                )
+            if not verdict.confirmed:
+                return self._reject_completion(handler, context, verdict)
+
         result = handler.update_goal(
             context,
             status=status,
@@ -95,7 +169,59 @@ class GoalRuntimeRouter:
             if self._context != context:
                 raise GoalRuntimeError("Goal Turn changed while recording the decision")
             self._terminal_requested = True
+            self._rejections.pop(context.goal_id, None)
         return result
+
+    def _reject_completion(
+        self,
+        handler: GoalRuntimeHandler,
+        context: GoalRuntimeContext,
+        verdict: GoalVerdict,
+    ) -> dict[str, Any]:
+        """Return a rejection to the model; auto-block after N rejections."""
+
+        with self._lock:
+            if self._context != context:
+                raise GoalRuntimeError("Goal Turn changed while recording the decision")
+            count = self._rejections.get(context.goal_id, 0) + 1
+            self._rejections[context.goal_id] = count
+            max_rejections = self._max_rejections
+            exhausted = count >= max_rejections
+
+        rejection: dict[str, Any] = {
+            "goalId": context.goal_id,
+            "updated": False,
+            "verdict": {
+                "confirmed": False,
+                "justification": verdict.justification,
+            },
+            "rejections": count,
+            "maxRejections": max_rejections,
+        }
+        if not exhausted:
+            return rejection
+
+        # The claim is exhausted: move the Goal to blocked (a terminal
+        # decision the model asked for by never producing evidence) instead
+        # of letting it burn Turns on the same rejected completion claim.
+        result = handler.update_goal(
+            context,
+            status="blocked",
+            reason=verdict.justification,
+        )
+        with self._lock:
+            if self._context != context:
+                raise GoalRuntimeError("Goal Turn changed while recording the decision")
+            self._terminal_requested = True
+            self._rejections.pop(context.goal_id, None)
+        return {
+            **result,
+            "updated": True,
+            "verdict": rejection["verdict"],
+            "rejections": count,
+            "maxRejections": max_rejections,
+            "autoBlocked": True,
+        }
 
     def visible_tool_names(self, names: tuple[str, ...]) -> tuple[str, ...]:
         """Narrow tools dynamically without ever adding a capability."""

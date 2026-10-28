@@ -1423,7 +1423,7 @@ class _AutomationSession:
 
     async def run_stream(self, _op):
         yield Event("1", TurnStarted())
-        self.goal_runtime.request(
+        await self.goal_runtime.request(
             status="complete",
             reason="Scheduled repository work and verification completed.",
         )

@@ -10,7 +10,7 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from importlib.resources import files
 from pathlib import Path
-from typing import Any, Iterator
+from typing import TYPE_CHECKING, Any, Iterator
 
 from core.agent_runtime.goal_runtime import GoalRuntimeContext, GoalRuntimeHandler
 from core.application.errors import (
@@ -42,6 +42,9 @@ from core.sessions.thread_goal_store import (
     ThreadGoalStore,
 )
 from core.skills.models import MAX_SELECTED_SKILLS, SkillSelection
+
+if TYPE_CHECKING:
+    from core.agent_runtime.goal_verifier import GoalCompletionRequest
 
 
 logger = logging.getLogger(__name__)
@@ -641,6 +644,56 @@ class GoalExtension(GoalRuntimeHandler):
                 "goal": thread_goal_view(updated),
                 "updated": True,
             }
+
+    def completion_request(
+        self,
+        context: GoalRuntimeContext,
+        *,
+        reason: str | None,
+    ) -> GoalCompletionRequest:
+        """Build the verifier's view: the real objective and this Turn's evidence.
+
+        The old branch hardcoded ``objective=""``; here the verifier judges the
+        actual objective the model is claiming to satisfy, plus the evidence
+        references this Turn already recorded (same filter as the outcome).
+        """
+
+        from core.agent_runtime.goal_verifier import (
+            GoalCompletionRequest,
+            GoalEvidenceItem,
+        )
+
+        goal = self.read(context.thread_id)
+        objective = goal.objective if goal is not None else ""
+        try:
+            snapshot = self.turns.read(context.turn_id)
+        except TurnNotFoundError as exc:
+            logger.info(
+                "Goal completion Turn %s is unavailable: %s",
+                context.turn_id,
+                exc,
+            )
+            return GoalCompletionRequest(
+                objective=objective,
+                reason=reason or "",
+                evidence=(),
+            )
+        evidence = tuple(
+            GoalEvidenceItem(
+                kind=item.kind.value,
+                status=item.status.value,
+                summary=(item.summary.strip() or item.kind.value.replace("_", " "))[
+                    :GOAL_OUTCOME_EVIDENCE_SUMMARY_MAX_CHARS
+                ],
+            )
+            for item in sorted(snapshot.items, key=lambda candidate: candidate.ordinal)
+            if item.kind in _EVIDENCE_KINDS
+        )[:GOAL_OUTCOME_EVIDENCE_MAX_ITEMS]
+        return GoalCompletionRequest(
+            objective=objective,
+            reason=reason or "",
+            evidence=evidence,
+        )
 
     def recover_incomplete(self) -> int:
         """Replay committed Goal Turns whose ledger settlement may be missing."""

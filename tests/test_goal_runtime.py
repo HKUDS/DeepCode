@@ -45,7 +45,10 @@ def _context() -> GoalRuntimeContext:
     )
 
 
-def test_goal_tools_are_hidden_outside_an_attempt_and_freeze_after_request() -> None:
+@pytest.mark.asyncio
+async def test_goal_tools_are_hidden_outside_an_attempt_and_freeze_after_request() -> (
+    None
+):
     runtime = GoalRuntimeRouter()
     handler = FakeGoalHandler()
     runtime.configure(handler)
@@ -57,7 +60,7 @@ def test_goal_tools_are_hidden_outside_an_attempt_and_freeze_after_request() -> 
     assert runtime.visible_tool_names(registered) == registered
     assert runtime.closure_prompt() is not None
     assert runtime.closure_prompt(stop_hook_active=True) is None
-    result = runtime.request(
+    result = await runtime.request(
         status="complete",
         reason="The latest Goal is complete.",
     )

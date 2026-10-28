@@ -162,7 +162,7 @@ class _ImmediateSession:
     async def run_stream(self, op):
         self.history.append({"role": "user", "content": op.text})
         yield Event("start", TurnStarted())
-        self.goal_runtime.request(
+        await self.goal_runtime.request(
             status="complete",
             reason="Automation CLI verification completed.",
         )

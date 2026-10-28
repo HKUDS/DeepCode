@@ -85,7 +85,7 @@ class UpdateGoalTool(Tool):
         status: str,
         reason: str | None = None,
     ) -> dict[str, Any]:
-        return self.runtime.request(
+        return await self.runtime.request(
             status=status,
             reason=reason,
         )
