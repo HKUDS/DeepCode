@@ -363,25 +363,7 @@ def _parse_preset_file(path: Path, *, trust: str) -> AgentPreset:
     # them, and Claude Code's ``memory`` is a scope string, not a bool.
     # ``permission-mode`` likewise stays out: permission remains an
     # independent session-level knob (dsh's split).
-    raw_disallowed = data.get(
-        "disallowed-tools",
-        data.get("disallowedTools", data.get("disallowed_tools")),
-    )
-    disallowed_tools, disallowed_error = _parse_tools(
-        raw_disallowed, field="disallowed-tools"
-    )
-    # ``*`` must die in BOTH spellings: the bare string folds to ``None``
-    # (unrestricted), while ``["*"]`` would normalize to ``("*",)`` — a deny
-    # entry no roster ever matches, i.e. it denies nothing. Both invert the
-    # author's intent, so both mark the preset broken.
-    if (
-        disallowed_error is None
-        and raw_disallowed is not None
-        and (disallowed_tools is None or "*" in disallowed_tools)
-    ):
-        disallowed_error = (
-            "disallowed-tools: '*' would deny every tool; list tools explicitly"
-        )
+    disallowed_tools, disallowed_error = _parse_disallowed_tools(data)
     if disallowed_error is not None:
         return AgentPreset(
             id=preset_id, trust=trust, path=str(path), broken=disallowed_error
@@ -403,6 +385,46 @@ def _parse_preset_file(path: Path, *, trust: str) -> AgentPreset:
         suggested_model=str(model) if isinstance(model, str) and model else None,
         order=order if isinstance(order, int) else None,
     )
+
+
+_DISALLOWED_KEYS = ("disallowed-tools", "disallowedTools", "disallowed_tools")
+# apply_patch can create and edit files, so denying any of these denies it too.
+_FILE_WRITING_TOOLS = frozenset({"write", "edit", "multi_edit"})
+
+
+def _parse_disallowed_tools(
+    data: dict[str, Any],
+) -> tuple[tuple[str, ...] | None, str | None]:
+    """Deny list from every spelling of the key, or the reason it is broken.
+
+    A deny entry that cannot be honoured breaks the preset rather than being
+    dropped: ``*`` (the filter cannot deny everything) and rules such as
+    ``Bash(rm:*)`` (only whole tools can be removed).
+    """
+    denied: list[str] | None = None
+    for key in _DISALLOWED_KEYS:
+        raw = data.get(key)
+        if raw is None:
+            continue
+        names, error = _parse_tools(raw, field="disallowed-tools")
+        if error is not None:
+            return None, error
+        if names is None or "*" in names:
+            return None, (
+                "disallowed-tools: '*' would deny every tool; list tools explicitly"
+            )
+        if any("(" in name or ")" in name for name in names):
+            return None, (
+                "disallowed-tools: rules like Bash(rm:*) are not supported; "
+                "list whole tools"
+            )
+        denied = denied or []
+        denied.extend(name for name in names if name not in denied)
+    if denied is None:
+        return None, None
+    if _FILE_WRITING_TOOLS.intersection(denied) and "apply_patch" not in denied:
+        denied.append("apply_patch")
+    return tuple(denied), None
 
 
 def _parse_tools(

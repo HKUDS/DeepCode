@@ -362,7 +362,7 @@ def test_disallowed_tools_load_and_unparsed_dialect_keys_stay_out(
     )
     snapshot = resolve_agent_preset("reviewer", workspace)
     assert snapshot.tools == ("read", "bash")
-    assert snapshot.disallowed_tools == ("write", "edit")
+    assert snapshot.disallowed_tools == ("write", "edit", "apply_patch")
     # The dropped fields leave no trace — nothing may look enforced.
     assert not hasattr(snapshot, "max_turns")
     assert not hasattr(snapshot, "memory")
@@ -440,9 +440,8 @@ def test_unparsed_dialect_keys_never_break_a_preset(tmp_path: Path) -> None:
     assert roster["sloppy"].disallowed_tools is None
 
 
-def test_key_variant_precedence_is_kebab_then_camel_then_snake(
-    tmp_path: Path,
-) -> None:
+def test_every_key_spelling_adds_to_the_deny_list(tmp_path: Path) -> None:
+    # A deny list never drops entries: all spellings are combined.
     workspace = tmp_path / "ws"
     _write_preset(
         workspace / ".agents" / "presets",
@@ -454,16 +453,52 @@ def test_key_variant_precedence_is_kebab_then_camel_then_snake(
         "---\n",
     )
     snapshot = resolve_agent_preset("variants", workspace)
-    assert snapshot.disallowed_tools == ("write",)
+    assert snapshot.disallowed_tools == ("write", "edit", "bash", "apply_patch")
 
-    # Without kebab, camel wins over snake.
+
+def test_rule_patterns_in_disallowed_tools_mark_preset_broken(
+    tmp_path: Path,
+) -> None:
+    # ``Bash(rm:*)`` names no tool, so it would deny nothing; fail closed.
+    workspace = tmp_path / "ws"
     _write_preset(
         workspace / ".agents" / "presets",
-        "variants2",
-        "---\ndisallowedTools: Edit\ndisallowed_tools: Bash\n---\n",
+        "rule-string",
+        "---\ndisallowedTools: Read, Bash(git push:*)\n---\nbody",
     )
-    snapshot = resolve_agent_preset("variants2", workspace)
-    assert snapshot.disallowed_tools == ("edit",)
+    _write_preset(
+        workspace / ".agents" / "presets",
+        "rule-list",
+        "---\ndisallowed-tools: ['Bash(rm:*)']\n---\nbody",
+    )
+    roster = {p.id: p for p in list_agent_presets(workspace)}
+    message = (
+        "disallowed-tools: rules like Bash(rm:*) are not supported; list whole tools"
+    )
+    assert roster["rule-string"].broken == message
+    assert roster["rule-list"].broken == message
+
+
+def test_denying_a_file_writing_tool_also_denies_apply_patch(
+    tmp_path: Path,
+) -> None:
+    # A Claude Code reviewer that drops Write/Edit must not keep apply_patch.
+    workspace = tmp_path / "ws"
+    _write_preset(
+        workspace / ".agents" / "presets",
+        "reviewer",
+        "---\ndisallowedTools: Edit\n---\nbody",
+    )
+    _write_preset(
+        workspace / ".agents" / "presets",
+        "no-shell",
+        "---\ndisallowedTools: Bash\n---\nbody",
+    )
+    reviewer = resolve_agent_preset("reviewer", workspace)
+    assert reviewer.disallowed_tools == ("edit", "apply_patch")
+    roster = ("read", "write", "edit", "apply_patch", "bash")
+    assert reviewer.tool_filter()(roster) == ("read", "write", "bash")
+    assert resolve_agent_preset("no-shell", workspace).disallowed_tools == ("bash",)
 
 
 def test_tool_filter_subtracts_disallowed_from_any_roster() -> None:

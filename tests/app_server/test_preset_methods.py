@@ -84,7 +84,11 @@ def test_preset_roster_selection_and_lock_over_the_wire(tmp_path: Path) -> None:
     assert roster["code-reader"]["disallowedTools"] is None
     # Deny-only preset: no allowlist, but the restriction is on the wire.
     assert roster["no-writes"]["tools"] is None
-    assert roster["no-writes"]["disallowedTools"] == ["write", "edit"]
+    assert roster["no-writes"]["disallowedTools"] == [
+        "write",
+        "edit",
+        "apply_patch",
+    ]
     assert roster["no-writes"]["broken"] is None
 
     assert responses[3]["result"]["agentPreset"] == "code-reader"
