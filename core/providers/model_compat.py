@@ -181,9 +181,19 @@ def resolve_model_compat(
             thinking_extra_body = fragment
 
     # Empty reasoning_content echo is needed when thinking is actually on.
+    # With no thinking switch sent, an endpoint that thinks by default is on
+    # too: DeepSeek then rejects a prior tool-call turn that has no
+    # reasoning_content, and accepts an empty one whether thinking is on or off.
     style_thinking_on = bool(style) and thinking_enabled
+    default_thinking_on = (
+        bool(style)
+        and semantic_effort in {None, "auto"}
+        and bool(getattr(spec, "thinking_default_on", False))
+    )
     kimi_thinking_on = is_kimi_thinking_model(resolved_name) and thinking_enabled
-    inject_empty_reasoning_content = style_thinking_on or kimi_thinking_on
+    inject_empty_reasoning_content = (
+        style_thinking_on or default_thinking_on or kimi_thinking_on
+    )
 
     overrides: dict[str, Any] = {}
     if spec is not None:

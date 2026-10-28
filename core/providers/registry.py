@@ -132,6 +132,9 @@ class ProviderSpec:
     is_direct: bool = False
     supports_prompt_caching: bool = False
     thinking_style: str = ""
+    # The endpoint thinks by default when no thinking switch is sent, so an
+    # "auto" request still needs reasoning_content echoed on prior turns.
+    thinking_default_on: bool = False
 
     @property
     def label(self) -> str:
@@ -289,6 +292,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         endpoint_class="first_party",
         default_api_base="https://api.deepseek.com",
         thinking_style="thinking_type",
+        thinking_default_on=True,
     ),
     ProviderSpec(
         name="gemini",

@@ -24,6 +24,8 @@ from core.providers.registry import find_by_name  # noqa: E402
 
 OPENAI = find_by_name("openai")
 DASHSCOPE = find_by_name("dashscope")
+DEEPSEEK = find_by_name("deepseek")
+ZHIPU = find_by_name("zhipu")
 
 
 # ---- primitives ------------------------------------------------------------
@@ -126,3 +128,30 @@ def test_no_spec_is_safe():
     assert c.model_name == "whatever"
     assert c.token_limit_field == "max_tokens"
     assert c.include_temperature is True
+
+
+# ---- endpoints that think by default -----------------------------------------
+
+
+def test_deepseek_auto_effort_echoes_empty_reasoning_content():
+    # DeepSeek thinks when no switch is sent and then rejects a prior tool-call
+    # turn without reasoning_content ("must be passed back to the API").
+    for effort in (None, "auto"):
+        c = resolve_model_compat(
+            model_name="deepseek-v4-pro", spec=DEEPSEEK, reasoning_effort=effort
+        )
+        assert c.thinking_extra_body is None
+        assert c.inject_empty_reasoning_content is True
+
+
+def test_deepseek_thinking_off_sends_the_switch_without_the_echo():
+    c = resolve_model_compat(
+        model_name="deepseek-v4-pro", spec=DEEPSEEK, reasoning_effort="none"
+    )
+    assert c.thinking_extra_body == {"thinking": {"type": "disabled"}}
+    assert c.inject_empty_reasoning_content is False
+
+
+def test_auto_effort_echo_is_limited_to_default_thinking_endpoints():
+    c = resolve_model_compat(model_name="glm-5", spec=ZHIPU, reasoning_effort=None)
+    assert c.inject_empty_reasoning_content is False
