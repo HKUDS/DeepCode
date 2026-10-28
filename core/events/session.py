@@ -32,6 +32,7 @@ from loguru import logger
 from core.agent_runtime.compaction import message_chars
 from core.agent_runtime.context import EnvironmentContext
 from core.agent_runtime.hook import AgentHook, AgentHookContext
+from core.agent_runtime.microcompact import MicrocompactPolicy
 from core.agent_runtime.runner import AgentRunner, AgentRunSpec
 from core.agent_runtime.token_meter import ProviderAnchoredTokenMeter
 from core.agent_runtime.tools.base import ToolResult
@@ -394,6 +395,7 @@ class AgentSession:
         hooks_engine: Any | None = None,
         agent_context: tuple[str, str] | None = None,
         context_window_tokens: int | None = None,
+        microcompact: bool = False,
         workspace: str | Path | None = None,
         streaming: bool = False,
         streaming_transport: bool | None = None,
@@ -437,6 +439,10 @@ class AgentSession:
         # model catalog is what makes "long sessions don't crash" (P2 exit
         # criterion) true for every AgentSession frontend — exec, TUI, web.
         self._context_window_tokens = context_window_tokens or context_window_for(model)
+        # User-facing microcompact switch: arms the model-free stale-tool-result
+        # clear in the runner's pressure gate (see core.agent_runtime.
+        # microcompact). Off by default so existing runs are unchanged.
+        self._microcompact = microcompact
         # The execution root is model-visible Turn context, not just an
         # implementation detail of file and shell tools. This keeps Skill
         # resource paths from being mistaken for the task workspace.
@@ -1042,6 +1048,7 @@ class AgentSession:
             transient_context_messages=tuple(turn_context_messages),
             workspace=self._workspace,
             context_window_tokens=self._context_window_tokens,
+            microcompact=MicrocompactPolicy() if self._microcompact else None,
             hook=event_hook,
             permission_checker=self._permission_checker,
             approval_callback=self._approval_callback,

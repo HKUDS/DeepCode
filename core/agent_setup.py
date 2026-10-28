@@ -480,6 +480,14 @@ def build_agent_session(
             )
         return engine.evaluate(name, arguments)
 
+    # User-facing microcompact switch (agents.defaults.microcompact): arms the
+    # model-free stale-tool-result clear in the runner's pressure gate. Read
+    # defensively so a config without the field still constructs the session.
+    agents_cfg = getattr(getattr(active_runtime, "config", None), "agents", None)
+    microcompact_enabled = bool(
+        getattr(getattr(agents_cfg, "defaults", None), "microcompact", False)
+    )
+
     session = AgentSession(
         provider,
         tool_registry,
@@ -507,6 +515,7 @@ def build_agent_session(
         streaming_transport=streaming_transport,
         skill_runtime=skill_runtime,
         context_window_tokens=resolved_execution.context_window,
+        microcompact=microcompact_enabled,
         workspace=workspace,
         execution_profile=resolved_execution,
         tool_filter=_compose_tool_filters(
