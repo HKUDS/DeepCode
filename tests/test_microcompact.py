@@ -178,9 +178,74 @@ def test_saved_output_path_line_is_preserved() -> None:
     assert "Full output saved to: .deepcode/tool-results/abc.txt" in content
     assert "[tool output persisted]" in content
     assert "PREVIEW" not in content  # the bulky preview is gone
-    assert content.startswith(MICROCOMPACT_PLACEHOLDER)
+    assert MICROCOMPACT_PLACEHOLDER in content
+    # Still opens with the persisted-result head, so the spill file keeps
+    # being renewed (see renew_tool_result_references).
+    assert content.startswith("[tool output persisted]\nFull output saved to: ")
     # The newest result (the model's pending batch) is untouched.
     assert result.messages[3].get("content") == "recent body"
+
+
+def test_bash_spill_pointer_is_preserved() -> None:
+    # The bash tool spills large output itself and writes the pointer mid-line:
+    # "...output truncated (N chars). Full output saved to: <path>".
+    policy = MicrocompactPolicy(keep_recent_tool_results=0, min_savings_tokens=1.0)
+    for header in ("", "[exit 1]\n"):
+        spilled = (
+            f"{header}...output truncated (40001 chars). "
+            "Full output saved to: /tmp/deepcode-bash-abc.txt\n\n" + "y" * 4000
+        )
+        messages = [
+            _assistant_calls(["c0"]),
+            _tool_result("c0", spilled),
+            _assistant_calls(["c1"]),
+            _tool_result("c1", "recent"),
+        ]
+        content = apply_microcompact(messages, policy).messages[1]["content"]
+        assert "Full output saved to: /tmp/deepcode-bash-abc.txt" in content
+        assert "y" * 100 not in content
+
+
+def test_cleared_spill_keeps_its_file_renewed(tmp_path: Path) -> None:
+    import os
+    import time
+
+    from core.agent_runtime.helpers import (
+        maybe_persist_tool_result,
+        renew_tool_result_references,
+    )
+
+    spilled = maybe_persist_tool_result(
+        tmp_path, "sess", "c0", "Z" * 5000, max_chars=1000
+    )
+    messages = [
+        _assistant_calls(["c0"]),
+        _tool_result("c0", spilled),
+        _assistant_calls(["c1"]),
+        _tool_result("c1", "recent"),
+    ]
+    policy = MicrocompactPolicy(keep_recent_tool_results=0, min_savings_tokens=1.0)
+    cleared = apply_microcompact(messages, policy).messages
+    path = next((tmp_path / ".deepcode" / "tool-results" / "sess").iterdir())
+    old = time.time() - 80 * 24 * 3600
+    os.utime(path, (old, old))
+    renew_tool_result_references(tmp_path, cleared)
+    assert path.stat().st_mtime > old + 3600
+
+
+def test_a_later_pass_counts_only_newly_cleared_results() -> None:
+    policy = MicrocompactPolicy(keep_recent_tool_results=1, min_savings_tokens=1.0)
+    first = apply_microcompact(_history(4), policy)
+    assert first.cleared == 3
+    grown = [
+        *first.messages,
+        _assistant_calls(["call_4"]),
+        _tool_result("call_4", "x" * 4000),
+    ]
+    second = apply_microcompact(grown, policy)
+    # Only call_3 aged out; the first three stay as they were.
+    assert second.cleared == 1
+    assert all(a is b for a, b in zip(second.messages[:7], first.messages[:7]))
 
 
 def test_below_min_savings_is_a_no_op_and_a_second_pass_converges() -> None:

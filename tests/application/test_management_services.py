@@ -865,6 +865,17 @@ def test_settings_update_refuses_a_stale_config_revision(tmp_path, monkeypatch):
     service.update({"agents": {"defaults": {"model": "gpt-5-mini"}}})
 
 
+def test_settings_update_sets_the_microcompact_switch(tmp_path, monkeypatch):
+    monkeypatch.setenv("DEEPCODE_HOME", str(tmp_path / "home"))
+    from core.application.config_store import ConfigStore
+    from core.application.settings_service import SettingsService
+
+    service = SettingsService(store=ConfigStore(tmp_path / "deepcode_config.json"))
+    assert service.read()["agents"]["defaults"]["microcompact"] is False
+    updated = service.update({"agents": {"defaults": {"microcompact": True}}})
+    assert updated["agents"]["defaults"]["microcompact"] is True
+
+
 def _seed_oauth_mcp_server(home: Path) -> dict:
     entry = {
         "type": "streamableHttp",

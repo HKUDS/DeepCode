@@ -49,6 +49,7 @@ _AGENT_FIELDS = {
     "maxToolIterations",
     "maxToolResultChars",
     "contextWindowTokens",
+    "microcompact",
 }
 _PROVIDER_FIELDS = {"apiKey", "apiBase", "extraHeaders"}
 _SECURITY_FIELDS = {"accessPreset", "permissionMode", "permissions", "sandbox"}

@@ -35,7 +35,7 @@ Three invariants the clear must keep:
   (image) block is passed through untouched.
 
 A result that was spilled to disk keeps its ``Full output saved to:`` line
-appended to the placeholder, so the model can still find the full output again.
+ahead of the placeholder, so the model can still find the full output again.
 
 The pass defaults to **off** (``None`` policy) so existing runs are
 byte-for-byte unchanged until a host opts in via the user-facing
@@ -106,7 +106,11 @@ def _has_media(msg: dict[str, Any]) -> bool:
     if not isinstance(content, list):
         return False
     for block in content:
-        if isinstance(block, dict) and block.get("type") in {"image", "input_image"}:
+        if isinstance(block, dict) and block.get("type") in {
+            "image",
+            "image_url",
+            "input_image",
+        }:
             return True
     return False
 
@@ -147,11 +151,15 @@ def _preserved_reference(content: Any) -> str:
     """
     if not isinstance(content, str):
         return ""
+    # Both spill formats put the pointer in the head: the runner's spill opens
+    # with the marker and the path line; the bash tool's own spill writes
+    # "...output truncated (N chars). Full output saved to: <path>" on its
+    # first line (second after an "[exit N]" header). Only the head is read so
+    # a preview that merely mentions the phrase is not kept.
     kept = [
         line.rstrip()
-        for line in content.splitlines()
-        if line.strip() == _PERSISTED_MARKER
-        or line.strip().startswith(_SAVED_OUTPUT_PREFIX)
+        for line in content.splitlines()[:3]
+        if line.strip() == _PERSISTED_MARKER or _SAVED_OUTPUT_PREFIX in line
     ]
     return "\n".join(kept)
 
@@ -239,10 +247,18 @@ def apply_microcompact(
         # Copy so the caller's history (and any host still holding the old
         # message) is never mutated in place — microcompact is persisted by the
         # runner reassigning ``messages[:]``, not by side effect here.
-        copy = dict(msg)
-        copy["content"] = (
-            f"{policy.placeholder}\n{reference}" if reference else policy.placeholder
+        # The reference stays first so the content still opens with the
+        # persisted-result head that ``renew_tool_result_references`` looks
+        # for: a cleared result must keep its spill file from being swept.
+        content = (
+            f"{reference}\n{policy.placeholder}" if reference else policy.placeholder
         )
+        if msg.get("content") == content:
+            # Already cleared by an earlier pass: nothing new to count.
+            new_messages.append(msg)
+            continue
+        copy = dict(msg)
+        copy["content"] = content
         new_messages.append(copy)
         cleared += 1
         savings += estimate_tokens(original) - estimate_tokens(copy["content"])
