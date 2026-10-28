@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 
@@ -12,11 +13,9 @@ from core.agent_runtime.goal_runtime import (
 )
 from core.agent_runtime.goal_verifier import (
     GoalCompletionRequest,
-    GoalCompletionVerifier,
     GoalEvidenceItem,
     GoalVerdict,
     RuleBasedVerifier,
-    model_backed_verifier,
 )
 from core.agent_runtime.tools.registry import ToolRegistry
 from core.harness.tools.goal import UpdateGoalTool
@@ -28,6 +27,7 @@ class FakeGoalHandler:
     def __init__(self, objective: str = "Ship the feature.") -> None:
         self.requests: list[dict[str, object]] = []
         self.objective = objective
+        self.events: list[str] = []
 
     def read_goal(self, context: GoalRuntimeContext):
         return {"goalId": context.goal_id, "objective": self.objective}
@@ -50,13 +50,14 @@ class FakeGoalHandler:
         *,
         reason: str | None,
     ) -> GoalCompletionRequest:
+        self.events.append("completion_request")
         return GoalCompletionRequest(
             objective=self.objective,
             reason=reason or "",
             evidence=(
                 GoalEvidenceItem(
                     kind="test_result",
-                    status="passed",
+                    status="completed",
                     summary="Focused tests pass.",
                 ),
             ),
@@ -162,7 +163,10 @@ async def test_goal_blocks_after_max_rejections_instead_of_burning_turns() -> No
         {
             "turnId": "turn_1",
             "status": "blocked",
-            "reason": "No file change evidence.",
+            "reason": (
+                "Blocked by the completion verifier after 2 rejected completion "
+                "claims. Last rejection: No file change evidence."
+            ),
         }
     ]
     assert runtime.visible_tool_names(("read", "update_goal")) == ()
@@ -236,92 +240,116 @@ async def test_blocked_status_is_not_verified() -> None:
     ]
 
 
-def test_rule_based_verifier_requires_objective_reason_and_evidence() -> None:
-    verifier = RuleBasedVerifier()
+@pytest.mark.asyncio
+async def test_disarmed_router_records_completion_without_verifying() -> None:
+    """configure_completion_verifier(None) restores the plain path."""
 
-    no_objective = asyncio.run(
-        verifier(GoalCompletionRequest(objective="  ", reason="done", evidence=()))
-    )
-    assert no_objective.confirmed is False
-    assert "no objective" in no_objective.justification.lower()
+    runtime = GoalRuntimeRouter()
+    handler = FakeGoalHandler()
+    runtime.configure(handler)
+    verifier = RejectingVerifier()
+    runtime.configure_completion_verifier(verifier)
+    runtime.configure_completion_verifier(None)
+    runtime.activate(_context())
 
-    no_reason = asyncio.run(
-        verifier(GoalCompletionRequest(objective="Ship it.", reason="   ", evidence=()))
-    )
-    assert no_reason.confirmed is False
-    assert "no reason" in no_reason.justification.lower()
+    result = await runtime.request(status="complete", reason="Shipped.")
 
-    no_evidence = asyncio.run(
-        verifier(
-            GoalCompletionRequest(
-                objective="Ship it.", reason="Looks done.", evidence=()
-            )
-        )
-    )
-    assert no_evidence.confirmed is False
-    assert "no evidence" in no_evidence.justification.lower()
-
-    failed = asyncio.run(
-        verifier(
-            GoalCompletionRequest(
-                objective="Ship it.",
-                reason="Ran the suite.",
-                evidence=(
-                    GoalEvidenceItem(
-                        kind="test_result",
-                        status="failed",
-                        summary="2 tests failed.",
-                    ),
-                ),
-            )
-        )
-    )
-    assert failed.confirmed is False
-    assert "failed" in failed.justification.lower()
-
-    good = asyncio.run(
-        verifier(
-            GoalCompletionRequest(
-                objective="Ship it.",
-                reason="Ran the suite.",
-                evidence=(
-                    GoalEvidenceItem(
-                        kind="test_result",
-                        status="passed",
-                        summary="All tests pass.",
-                    ),
-                ),
-            )
-        )
-    )
-    assert good.confirmed is True
+    assert verifier.calls == 0
+    assert handler.events == []
+    assert result["status"] == "complete"
 
 
 @pytest.mark.asyncio
-async def test_model_backed_verifier_fail_closed_on_ask_error() -> None:
-    async def ask(request: GoalCompletionRequest) -> str:
-        raise ConnectionError("model unreachable")
+async def test_settle_runs_before_the_claim_is_built() -> None:
+    """The Turn record catches up with reported steps before it is read."""
 
-    verifier = model_backed_verifier(ask)
-    verdict = await verifier(
-        GoalCompletionRequest(objective="Ship it.", reason="done", evidence=())
+    runtime = GoalRuntimeRouter()
+    handler = FakeGoalHandler()
+    runtime.configure(handler)
+
+    async def settle() -> None:
+        handler.events.append("settle")
+
+    runtime.configure_completion_verifier(ConfirmingVerifier(), settle=settle)
+    runtime.activate(_context())
+
+    await runtime.request(status="complete", reason="Shipped.")
+
+    assert handler.events == ["settle", "completion_request"]
+
+
+def _item(kind: str, status: str, summary: str, name: str = "") -> GoalEvidenceItem:
+    return GoalEvidenceItem(kind=kind, status=status, summary=summary, name=name)
+
+
+def _judge(
+    *evidence: GoalEvidenceItem, pending=(), objective="Ship it.", reason="Done."
+):
+    return asyncio.run(
+        RuleBasedVerifier()(
+            GoalCompletionRequest(
+                objective=objective,
+                reason=reason,
+                evidence=tuple(evidence),
+                pending=tuple(pending),
+            )
+        )
     )
 
+
+RED = _item("command_execution", "failed", "python -m pytest -q", "bash")
+GREEN = _item("command_execution", "completed", "python -m pytest -q", "bash")
+FIX = _item("file_change", "completed", "calc.py", "write")
+BAD_READ = _item("tool_call", "failed", "calculator.py", "read")
+READ = _item("tool_call", "completed", "calc.py", "read")
+
+
+def test_rule_requires_an_objective_and_a_reason() -> None:
+    assert "no objective" in _judge(READ, objective=" ").justification.lower()
+    assert "no reason" in _judge(READ, reason=" ").justification.lower()
+
+
+def test_rule_rejects_a_claim_with_no_finished_work() -> None:
+    verdict = _judge()
+
     assert verdict.confirmed is False
-    assert "model unreachable" in verdict.justification
+    assert "no finished work" in verdict.justification
 
 
-@pytest.mark.asyncio
-async def test_model_backed_verifier_treats_non_yes_as_rejection() -> None:
-    async def ask(request: GoalCompletionRequest) -> str:
-        return "no, the tests did not run"
+def test_rule_accepts_a_fixed_failure_red_fix_green() -> None:
+    assert _judge(RED, FIX, GREEN).confirmed is True
 
-    verifier = model_backed_verifier(ask)
-    verdict = await verifier(
-        GoalCompletionRequest(objective="Ship it.", reason="done", evidence=())
-    )
+
+def test_rule_accepts_an_early_failed_read_followed_by_work() -> None:
+    assert _judge(BAD_READ, READ).confirmed is True
+
+
+def test_rule_rejects_when_the_latest_check_failed_and_names_it() -> None:
+    verdict = _judge(GREEN, FIX, RED, READ)
 
     assert verdict.confirmed is False
+    assert "latest check failed: bash `python -m pytest -q`" in verdict.justification
+
+
+def test_rule_rejects_when_the_latest_step_failed_and_names_it() -> None:
+    verdict = _judge(GREEN, READ, BAD_READ)
+
+    assert verdict.confirmed is False
+    assert "latest step failed: read `calculator.py`" in verdict.justification
+
+
+def test_rule_never_decides_on_pending_calls_but_points_at_them() -> None:
+    # The passing re-run went out in the same step as the claim.
+    verdict = _judge(RED, FIX, pending=(GREEN,))
+
+    assert verdict.confirmed is False
+    assert "latest check failed" in verdict.justification
+    assert "same step as this claim" in verdict.justification
+    # A pending read cannot fix a failed check, so it is not offered as one.
+    unrelated = _judge(RED, pending=(READ,))
+    assert "same step" not in unrelated.justification
+    # Pending calls never turn a supported claim into a rejection.
+    assert _judge(GREEN, pending=(BAD_READ,)).confirmed is True
 
 
 @pytest.mark.asyncio
@@ -342,17 +370,6 @@ async def test_verifier_protocol_accepts_plain_async_callable() -> None:
     assert result["status"] == "complete"
 
 
-def test_completion_request_carries_real_objective_and_evidence() -> None:
-    """The request handed to the verifier is built by the handler, not hardcoded."""
-
-    handler = FakeGoalHandler(objective="Fix the off-by-one in pagination.")
-    request = handler.completion_request(_context(), reason="Tests pass now.")
-
-    assert request.objective == "Fix the off-by-one in pagination."
-    assert request.reason == "Tests pass now."
-    assert request.evidence and request.evidence[0].kind == "test_result"
-
-
 def test_configure_completion_verifier_rejects_non_positive_max() -> None:
     runtime = GoalRuntimeRouter()
 
@@ -360,15 +377,67 @@ def test_configure_completion_verifier_rejects_non_positive_max() -> None:
         runtime.configure_completion_verifier(ConfirmingVerifier(), max_rejections=0)
 
 
-def test_verifier_contract_is_async_callable_protocol() -> None:
-    """RuleBasedVerifier and model_backed_verifier both satisfy the Protocol."""
+def test_max_rejections_below_one_is_a_config_error(tmp_path) -> None:
+    from core.config import ConfigError, load_config
 
-    async def _accept(verifier: GoalCompletionVerifier) -> None:
-        await verifier(GoalCompletionRequest(objective="x", reason="y", evidence=()))
+    path = tmp_path / "deepcode_config.json"
+    path.write_text(
+        json.dumps({"goal": {"completionVerifier": "rule", "maxRejections": 0}})
+    )
 
-    asyncio.run(_accept(RuleBasedVerifier()))
-    asyncio.run(_accept(model_backed_verifier(_yes)))
+    with pytest.raises(ConfigError, match="goal.maxRejections|goal.max_rejections"):
+        load_config(path)
 
 
-async def _yes(_request: GoalCompletionRequest) -> str:
-    return "yes"
+class _Profile:
+    model = "fake-model"
+
+
+class _IdleProvider:
+    def get_default_model(self) -> str:
+        return "fake-model"
+
+
+@pytest.mark.asyncio
+async def test_rule_setting_arms_the_router_and_off_disarms_it_on_rebuild(
+    monkeypatch, tmp_path
+) -> None:
+    from core import agent_setup
+    from core.config import GoalConfig
+
+    def runtime_with(goal: GoalConfig):
+        config = type("C", (), {"security": None, "goal": goal})()
+        return type("R", (), {"config": config})()
+
+    monkeypatch.setattr(
+        agent_setup,
+        "get_workflow_provider",
+        lambda **_kwargs: (_IdleProvider(), _Profile()),
+    )
+    router = GoalRuntimeRouter()
+    handler = FakeGoalHandler()
+    handler.completion_request = lambda context, *, reason: GoalCompletionRequest(  # type: ignore[method-assign]
+        objective="Ship it.", reason=reason or "", evidence=()
+    )
+    router.configure(handler)
+    router.activate(_context())
+
+    def build(goal: GoalConfig) -> None:
+        session, _, _ = agent_setup.build_agent_session(
+            workspace=str(tmp_path / "w"),
+            goal_runtime=router,
+            runtime=runtime_with(goal),
+        )
+        sessions.append(session)
+
+    sessions: list = []
+    build(GoalConfig(completion_verifier="rule"))
+    rejected = await router.request(status="complete", reason="Nothing done.")
+    assert rejected["updated"] is False
+    assert handler.requests == []
+
+    build(GoalConfig(completion_verifier="off"))
+    accepted = await router.request(status="complete", reason="Nothing done.")
+    assert accepted["status"] == "complete"
+    for session in sessions:
+        await session.aclose()

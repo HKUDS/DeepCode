@@ -7,15 +7,15 @@ synchronous side door and no caller-supplied "already verified" flag.
 
 Rejections are data, not exceptions. A rejected claim returns its
 justification to the model so the model can either produce the missing
-evidence or declare the Goal blocked; a verifier that raises or cannot be
-asked fails closed (rejects). After a configured number of rejections the
-goal runtime moves the Goal to ``blocked`` rather than letting the model
-burn Turns retrying the same claim.
+evidence or declare the Goal blocked; a verifier that raises fails closed
+(rejects). After a configured number of rejections the goal runtime moves the
+Goal to ``blocked`` rather than letting the model burn Turns retrying the same
+claim.
 """
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -27,15 +27,25 @@ class GoalEvidenceItem:
     kind: str
     status: str
     summary: str
+    # The tool that produced the item (``read``, ``bash``...), when known.
+    name: str = ""
 
 
 @dataclass(frozen=True, slots=True)
 class GoalCompletionRequest:
-    """The claim under review: the real objective plus Turn evidence."""
+    """The claim under review: the real objective plus Turn evidence.
+
+    ``evidence`` is this Turn's most recent *settled* evidence (a recorded
+    result, ``completed`` or ``failed``), oldest first, without the Goal
+    tools' own calls. ``pending`` holds calls made in the same model step as
+    the claim: their results are only recorded once that step ends, so a
+    verifier cannot know them yet.
+    """
 
     objective: str
     reason: str
     evidence: tuple[GoalEvidenceItem, ...]
+    pending: tuple[GoalEvidenceItem, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,14 +62,38 @@ class GoalCompletionVerifier(Protocol):
     def __call__(self, request: GoalCompletionRequest) -> Awaitable[GoalVerdict]: ...
 
 
-class RuleBasedVerifier:
-    """Fail-closed structural checks over the objective, reason, and evidence.
+_CHECK_KINDS = frozenset({"command_execution", "test_result"})
+_UNSUCCESSFUL = frozenset({"failed", "declined"})
 
-    This is the built-in verifier behind the ``rule`` setting. It does not
-    judge whether the work is *good*; it judges whether the claim is
-    *supported*: a completion claim with no objective, no stated reason, or
-    no recorded Turn evidence is rejected with a justification the model can
-    act on.
+
+def _describe(item: GoalEvidenceItem) -> str:
+    label = item.name or item.kind.replace("_", " ")
+    return f"{label} `{item.summary}`" if item.summary else label
+
+
+class RuleBasedVerifier:
+    """Deterministic check that a completion claim rests on finished work.
+
+    This is the built-in verifier behind the ``rule`` setting. It judges
+    whether the claim is *supported*, not whether the work is *good*. Over
+    ``request.evidence`` (settled, newest last) a claim is rejected when:
+
+    1. the Goal has no objective, or the claim gives no reason;
+    2. there is no settled evidence — nothing in this Turn but Goal
+       bookkeeping (``get_goal`` alone is not work);
+    3. the latest check (a command run or test result) failed; or
+    4. the latest evidence item of any kind failed.
+
+    Only the latest outcome counts: a failure that later work moved past is
+    resolved, so the usual red -> fix -> green loop, or a mistyped path early
+    in the Turn, never blocks completion. Known limit: a command that exits
+    non-zero by design (``grep`` with no match) reads as a failed check when it
+    is the latest one; the justification names it, so the model can re-run a
+    real check.
+
+    ``request.pending`` never decides the verdict. When a pending call from the
+    claim's own step could still overturn a rejection, the justification says
+    so, so the model reads that result before claiming again.
     """
 
     async def __call__(self, request: GoalCompletionRequest) -> GoalVerdict:
@@ -73,60 +107,44 @@ class RuleBasedVerifier:
                 confirmed=False,
                 justification="The completion claim states no reason. Explain what was done before marking the Goal complete.",
             )
-        if not request.evidence:
-            return GoalVerdict(
-                confirmed=False,
-                justification=(
-                    "The Turn recorded no evidence (tool calls, file changes, or test "
-                    "results) to support completion. Do the work first, then claim completion."
-                ),
+        evidence = request.evidence
+        pending_checks = tuple(
+            item for item in request.pending if item.kind in _CHECK_KINDS
+        )
+        if not evidence:
+            return _reject(
+                "This Turn has no finished work behind the claim (Goal bookkeeping "
+                "such as get_goal does not count). Do and check the work, then "
+                "claim completion.",
+                request.pending,
             )
-        failed = [
-            item
-            for item in request.evidence
-            if item.status.strip().lower() in {"failed", "error"}
-        ]
-        if failed:
-            return GoalVerdict(
-                confirmed=False,
-                justification=(
-                    f"{len(failed)} of {len(request.evidence)} evidence item(s) failed "
-                    f"(latest: {failed[-1].summary!r}). Resolve the failures before completing."
-                ),
+        checks = [item for item in evidence if item.kind in _CHECK_KINDS]
+        if checks and checks[-1].status in _UNSUCCESSFUL:
+            return _reject(
+                f"The latest check failed: {_describe(checks[-1])}. Fix the "
+                "problem and run the check again before claiming completion.",
+                pending_checks,
+            )
+        if evidence[-1].status in _UNSUCCESSFUL:
+            return _reject(
+                f"The latest step failed: {_describe(evidence[-1])}. Resolve it "
+                "before claiming completion.",
+                request.pending,
             )
         return GoalVerdict(
             confirmed=True,
             justification=(
-                f"{len(request.evidence)} Turn evidence item(s) support the claim."
+                f"The latest of {len(evidence)} finished step(s) succeeded"
+                + (", including the latest check." if checks else ".")
             ),
         )
 
 
-def model_backed_verifier(
-    ask: Callable[[GoalCompletionRequest], Awaitable[str]],
-) -> GoalCompletionVerifier:
-    """Adapt a one-shot text answerer into a fail-closed verifier.
-
-    ``ask`` returns the model's answer; anything other than an affirmative
-    answer rejects, and an ``ask`` that raises rejects too (fail closed).
-    """
-
-    async def verify(request: GoalCompletionRequest) -> GoalVerdict:
-        try:
-            answer = (await ask(request)).strip().lower()
-        except Exception as exc:  # noqa: BLE001 - fail closed, report to the model
-            return GoalVerdict(
-                confirmed=False,
-                justification=f"The completion verifier failed: {exc}",
-            )
-        confirmed = answer.startswith("yes")
-        return GoalVerdict(
-            confirmed=confirmed,
-            justification=(
-                "The model verifier confirmed the evidence supports completion."
-                if confirmed
-                else "The model verifier rejected the completion claim."
-            ),
+def _reject(text: str, could_resolve: tuple[GoalEvidenceItem, ...]) -> GoalVerdict:
+    if could_resolve:
+        text += (
+            f" {_describe(could_resolve[-1])} ran in the same step as this claim "
+            "and has no recorded result yet; look at its result before claiming "
+            "completion again."
         )
-
-    return verify
+    return GoalVerdict(confirmed=False, justification=text)

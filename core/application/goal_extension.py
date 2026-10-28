@@ -12,7 +12,11 @@ from importlib.resources import files
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterator
 
-from core.agent_runtime.goal_runtime import GoalRuntimeContext, GoalRuntimeHandler
+from core.agent_runtime.goal_runtime import (
+    GOAL_TOOL_NAMES,
+    GoalRuntimeContext,
+    GoalRuntimeHandler,
+)
 from core.application.errors import (
     ConflictError,
     GoalNotFoundError,
@@ -22,7 +26,7 @@ from core.application.errors import (
 )
 from core.application.goal_turn_port import GoalTurnAssociation, GoalTurnPort
 from core.application.views import thread_goal_view
-from core.domain.item import ItemKind
+from core.domain.item import Item, ItemKind, ItemStatus
 from core.domain.message_provenance import ClientSurface, TurnInputSource
 from core.domain.thread_goal import (
     GOAL_OBJECTIVE_INPUT_MAX_CHARS,
@@ -62,10 +66,19 @@ _EVIDENCE_KINDS = frozenset(
         ItemKind.ARTIFACT,
     }
 )
+# A recorded result. Anything else is a call still in flight.
+_SETTLED_STATUSES = frozenset(
+    {ItemStatus.COMPLETED, ItemStatus.FAILED, ItemStatus.DECLINED}
+)
 
 GoalUpdateSink = Callable[[str, ThreadGoal | None], None]
 GoalLifecycleSink = Callable[[str, str, dict[str, Any]], None]
 GoalContinuationGuard = Callable[[ThreadGoal], None]
+
+
+def _is_goal_bookkeeping(item: Item) -> bool:
+    name = str(item.payload.get("name") or "").strip().lower()
+    return item.kind is ItemKind.TOOL_CALL and name in GOAL_TOOL_NAMES
 
 
 class GoalContinueDisposition(StrEnum):
@@ -653,9 +666,11 @@ class GoalExtension(GoalRuntimeHandler):
     ) -> GoalCompletionRequest:
         """Build the verifier's view: the real objective and this Turn's evidence.
 
-        The old branch hardcoded ``objective=""``; here the verifier judges the
-        actual objective the model is claiming to satisfy, plus the evidence
-        references this Turn already recorded (same filter as the outcome).
+        Evidence is the most recent settled items of the outcome's evidence
+        kinds, oldest first, without the Goal tools' own calls (``get_goal``
+        is bookkeeping, not work). Calls whose result is not recorded yet —
+        siblings of ``update_goal`` in the same model step, whose results the
+        agent reports only when that step ends — go to ``pending``.
         """
 
         from core.agent_runtime.goal_verifier import (
@@ -678,21 +693,29 @@ class GoalExtension(GoalRuntimeHandler):
                 reason=reason or "",
                 evidence=(),
             )
-        evidence = tuple(
-            GoalEvidenceItem(
+
+        def view(item: Item) -> GoalEvidenceItem:
+            return GoalEvidenceItem(
                 kind=item.kind.value,
                 status=item.status.value,
                 summary=(item.summary.strip() or item.kind.value.replace("_", " "))[
                     :GOAL_OUTCOME_EVIDENCE_SUMMARY_MAX_CHARS
                 ],
+                name=str(item.payload.get("name") or ""),
             )
+
+        items = [
+            item
             for item in sorted(snapshot.items, key=lambda candidate: candidate.ordinal)
-            if item.kind in _EVIDENCE_KINDS
-        )[:GOAL_OUTCOME_EVIDENCE_MAX_ITEMS]
+            if item.kind in _EVIDENCE_KINDS and not _is_goal_bookkeeping(item)
+        ]
+        settled = [view(item) for item in items if item.status in _SETTLED_STATUSES]
+        pending = [view(item) for item in items if item.status not in _SETTLED_STATUSES]
         return GoalCompletionRequest(
             objective=objective,
             reason=reason or "",
-            evidence=evidence,
+            evidence=tuple(settled[-GOAL_OUTCOME_EVIDENCE_MAX_ITEMS:]),
+            pending=tuple(pending[-GOAL_OUTCOME_EVIDENCE_MAX_ITEMS:]),
         )
 
     def recover_incomplete(self) -> int:

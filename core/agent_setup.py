@@ -339,15 +339,6 @@ def build_agent_session(
         mode_override=permission_mode_override,
         profile_override=execution_security_profile,
     )
-    if goal_runtime is not None:
-        goal_cfg = getattr(active_runtime.config, "goal", None)
-        if goal_cfg is not None and goal_cfg.completion_verifier == "rule":
-            from core.agent_runtime.goal_verifier import RuleBasedVerifier
-
-            goal_runtime.configure_completion_verifier(
-                RuleBasedVerifier(),
-                max_rejections=goal_cfg.max_rejections,
-            )
     engine = build_permission_engine(
         security_cfg,
         cwd=workspace,
@@ -537,6 +528,20 @@ def build_agent_session(
         mcp_runtime=mcp_runtime,
         provider_cleanup=provider_cleanup,
     )
+    if goal_runtime is not None:
+        # The Goal router outlives agent rebuilds, so every build sets the
+        # completion gate from the current config: ``off`` disarms it.
+        goal_cfg = getattr(active_runtime.config, "goal", None)
+        if goal_cfg is not None and goal_cfg.completion_verifier == "rule":
+            from core.agent_runtime.goal_verifier import RuleBasedVerifier
+
+            goal_runtime.configure_completion_verifier(
+                RuleBasedVerifier(),
+                max_rejections=goal_cfg.max_rejections,
+                settle=session.settle_events,
+            )
+        else:
+            goal_runtime.configure_completion_verifier(None)
     if control is not None:
         # `session.history` is a @property (a list), so it must be wrapped in a
         # callable — passing its value would make fork_turns call a list.

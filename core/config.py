@@ -432,7 +432,7 @@ class GoalConfig(_Base):
     """
 
     completion_verifier: Literal["off", "rule"] = "off"
-    max_rejections: int = 3
+    max_rejections: int = Field(default=3, ge=1)
 
 
 class DictationConfig(_Base):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -15,6 +16,9 @@ if TYPE_CHECKING:
 
 
 GOAL_TOOL_NAMES = frozenset({"get_goal", "update_goal"})
+# The Goal ledger's reason limit (GOAL_OUTCOME_REASON_MAX_CHARS); a longer
+# auto-block reason would fail the very update that ends the retries.
+_AUTO_BLOCK_REASON_MAX_CHARS = 2_000
 _GOAL_CLOSURE_PROMPT = """\
 Before ending this Goal-associated Turn, call get_goal and compare the latest
 objective with the current workspace and evidence.
@@ -84,9 +88,11 @@ class GoalRuntimeRouter:
         self._context: GoalRuntimeContext | None = None
         self._terminal_requested = False
         self._verifier: GoalCompletionVerifier | None = None
+        self._settle: Callable[[], Awaitable[None]] | None = None
         self._max_rejections = 3
         # Rejected completion claims per goal, so a model cannot burn Turns
-        # retrying the same claim; cleared on success or auto-block.
+        # retrying the same claim; cleared on success, auto-block, and every
+        # (re)configuration. Process memory only: a restart starts over.
         self._rejections: dict[str, int] = {}
 
     def configure(self, handler: GoalRuntimeHandler) -> None:
@@ -95,21 +101,24 @@ class GoalRuntimeRouter:
 
     def configure_completion_verifier(
         self,
-        verifier: GoalCompletionVerifier,
+        verifier: GoalCompletionVerifier | None,
         *,
         max_rejections: int = 3,
+        settle: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
-        """Arm the single asynchronous completion gate.
+        """Arm the single asynchronous completion gate, or disarm it with None.
 
         There is deliberately no way to pass a pre-computed verdict into
         :meth:`request`; every ``complete`` claim goes through ``verifier``
-        exactly once.
+        exactly once. ``settle`` runs first, so the Turn record the verifier
+        reads includes every step the agent has already reported.
         """
 
         if max_rejections < 1:
             raise ValueError("max_rejections must be positive")
         with self._lock:
             self._verifier = verifier
+            self._settle = settle if verifier is not None else None
             self._max_rejections = max_rejections
             self._rejections.clear()
 
@@ -144,11 +153,14 @@ class GoalRuntimeRouter:
         handler, context = self._snapshot()
         with self._lock:
             verifier = self._verifier
+            settle = self._settle
 
         if status == "complete" and verifier is not None:
             from core.agent_runtime.goal_verifier import GoalVerdict
 
             try:
+                if settle is not None:
+                    await settle()
                 verdict = await verifier(
                     handler.completion_request(context, reason=reason)
                 )
@@ -207,7 +219,10 @@ class GoalRuntimeRouter:
         result = handler.update_goal(
             context,
             status="blocked",
-            reason=verdict.justification,
+            reason=(
+                f"Blocked by the completion verifier after {count} rejected "
+                f"completion claims. Last rejection: {verdict.justification}"
+            )[:_AUTO_BLOCK_REASON_MAX_CHARS],
         )
         with self._lock:
             if self._context != context:

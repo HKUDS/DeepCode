@@ -445,6 +445,79 @@ def test_outcome_projects_only_bounded_existing_items_from_deciding_turn(
     assert all(len(evidence.summary) <= 240 for evidence in outcome.evidence_refs)
 
 
+def test_completion_request_reads_settled_work_without_goal_bookkeeping(
+    tmp_path,
+) -> None:
+    goals, turns, session_id = _extension(tmp_path)
+    created = goals.create(session_id, objective="Fix pagination", start=False)
+    active = Turn(
+        thread_id=session_id,
+        ordinal=1,
+        prompt="work",
+        goal_id=created.id,
+        status=TurnStatus.RUNNING,
+        started_at=utc_now(),
+    )
+
+    def item(ordinal, kind, status, summary, name):
+        return Item(
+            thread_id=session_id,
+            turn_id=active.id,
+            ordinal=ordinal,
+            kind=kind,
+            status=status,
+            summary=summary,
+            payload={"callId": f"call-{ordinal}", "name": name},
+        )
+
+    early = tuple(
+        item(
+            ordinal, ItemKind.TOOL_CALL, ItemStatus.COMPLETED, f"f{ordinal}.py", "read"
+        )
+        for ordinal in range(1, 4)
+    )
+    recent = (
+        item(4, ItemKind.TOOL_CALL, ItemStatus.COMPLETED, "get_goal", "get_goal"),
+        item(5, ItemKind.COMMAND_EXECUTION, ItemStatus.FAILED, "pytest", "bash"),
+        *(
+            item(ordinal, ItemKind.FILE_CHANGE, ItemStatus.COMPLETED, "page.py", "edit")
+            for ordinal in range(6, 16)
+        ),
+        item(16, ItemKind.COMMAND_EXECUTION, ItemStatus.COMPLETED, "pytest", "bash"),
+        item(
+            17, ItemKind.TOOL_CALL, ItemStatus.COMPLETED, "update_goal", "update_goal"
+        ),
+        item(18, ItemKind.ASSISTANT_MESSAGE, ItemStatus.COMPLETED, "done", ""),
+        item(19, ItemKind.COMMAND_EXECUTION, ItemStatus.IN_PROGRESS, "ruff", "bash"),
+        item(
+            20, ItemKind.TOOL_CALL, ItemStatus.IN_PROGRESS, "update_goal", "update_goal"
+        ),
+    )
+    turns.snapshots[active.id] = _Snapshot(active, (*reversed(recent), *early))
+
+    request = goals.completion_request(
+        GoalRuntimeContext(
+            thread_id=session_id,
+            goal_id=created.id,
+            turn_id=active.id,
+        ),
+        reason="Pagination is fixed.",
+    )
+
+    assert request.objective == "Fix pagination"
+    assert request.reason == "Pagination is fixed."
+    # The 12 most recent settled steps, oldest first (the three early reads
+    # fall out of the window); get_goal, update_goal and narrative are not
+    # evidence.
+    assert [(e.name, e.status) for e in request.evidence] == [
+        ("bash", "failed"),
+        *([("edit", "completed")] * 10),
+        ("bash", "completed"),
+    ]
+    assert request.evidence[-1].kind == "command_execution"
+    assert [(e.name, e.summary) for e in request.pending] == [("bash", "ruff")]
+
+
 def test_only_normal_completion_starts_a_continuation(tmp_path) -> None:
     goals, turns, session_id = _extension(tmp_path)
     created = goals.create(session_id, objective="Ship", start=False)

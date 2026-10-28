@@ -545,6 +545,20 @@ class AgentSession:
     async def next_event(self) -> Event:
         return await self._events.get()
 
+    async def settle_events(self, *, max_yields: int = 100) -> None:
+        """Let the stream consumer take every event emitted so far.
+
+        The Turn consumer records each event synchronously as it takes it, and
+        it takes everything queued in one go, so once the queue is empty the
+        Turn record shows every step reported before this call. Bounded: with
+        no consumer running the queue never empties, and this simply returns.
+        """
+
+        for _ in range(max_yields):
+            if self._events.empty():
+                return
+            await asyncio.sleep(0)
+
     async def run_stream(self, op: Op):
         """Submit ``op`` and yield events live until the turn ends.
 
