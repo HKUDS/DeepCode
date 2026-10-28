@@ -336,3 +336,173 @@ def test_runtime_receives_the_snapshot_and_keys_on_it(tmp_path: Path) -> None:
         agent_preset=None,
     )
     assert first != second
+
+
+# ---------------------------------------------------------------------------
+# Subagent dialect: disallowed-tools (strict) / max-turns+memory (dropped)
+# ---------------------------------------------------------------------------
+
+
+def test_disallowed_tools_load_and_unparsed_dialect_keys_stay_out(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "ws"
+    _write_preset(
+        workspace / ".agents" / "presets",
+        "reviewer",
+        "---\n"
+        "name: reviewer\n"
+        "description: cross-dialect fields\n"
+        "tools: read, bash\n"
+        "disallowed-tools: write, edit\n"
+        "max-turns: 12\n"  # deliberately NOT parsed: nothing reads it
+        "memory: true\n"  # deliberately NOT parsed (Claude Code: scope string)
+        "permission-mode: plan\n"  # deliberately NOT parsed into the preset
+        "---\nYou review code.",
+    )
+    snapshot = resolve_agent_preset("reviewer", workspace)
+    assert snapshot.tools == ("read", "bash")
+    assert snapshot.disallowed_tools == ("write", "edit")
+    # The dropped fields leave no trace — nothing may look enforced.
+    assert not hasattr(snapshot, "max_turns")
+    assert not hasattr(snapshot, "memory")
+    # Permission stays an independent session-level knob (dsh's split):
+    # the preset never carries it.
+    assert not hasattr(snapshot, "permission_mode")
+
+
+def test_malformed_disallowed_tools_marks_preset_broken(tmp_path: Path) -> None:
+    # Fail closed: a restriction that cannot be parsed must not silently
+    # vanish (the agent would keep the tools the author tried to remove).
+    workspace = tmp_path / "ws"
+    _write_preset(
+        workspace / ".agents" / "presets",
+        "sloppy",
+        "---\n"
+        "disallowed-tools: 42\n"  # not a string or list -> broken
+        "---\nbody",
+    )
+    roster = {p.id: p for p in list_agent_presets(workspace)}
+    assert roster["sloppy"].broken == (
+        "disallowed-tools must be a string or a list of strings"
+    )
+    with pytest.raises(BrokenPresetError, match="sloppy"):
+        resolve_agent_preset("sloppy", workspace)
+
+
+def test_non_string_entry_in_disallowed_tools_marks_preset_broken(
+    tmp_path: Path,
+) -> None:
+    # ``disallowed-tools: [Bash, 3]`` — the reviewer's example: one bad
+    # entry must break the preset, not drop the deny list.
+    workspace = tmp_path / "ws"
+    _write_preset(
+        workspace / ".agents" / "presets",
+        "mixed",
+        "---\ndisallowed-tools: [Bash, 3]\n---\nbody",
+    )
+    roster = {p.id: p for p in list_agent_presets(workspace)}
+    assert roster["mixed"].broken == "disallowed-tools list entries must be strings"
+
+
+def test_star_disallowed_tools_marks_preset_broken(tmp_path: Path) -> None:
+    # ``*`` would mean "deny everything"; the subtraction filter cannot
+    # express that, and both spellings fall through to a deny-nothing or
+    # unrestricted interpretation — fail closed on both.
+    workspace = tmp_path / "ws"
+    _write_preset(
+        workspace / ".agents" / "presets",
+        "star-string",
+        "---\ndisallowed-tools: '*'\n---\nbody",
+    )
+    _write_preset(
+        workspace / ".agents" / "presets",
+        "star-list",
+        "---\ndisallowed-tools: ['*']\n---\nbody",
+    )
+    roster = {p.id: p for p in list_agent_presets(workspace)}
+    message = "disallowed-tools: '*' would deny every tool; list tools explicitly"
+    assert roster["star-string"].broken == message
+    assert roster["star-list"].broken == message
+
+
+def test_unparsed_dialect_keys_never_break_a_preset(tmp_path: Path) -> None:
+    # max-turns/memory are simply not read: garbage there is inert, not
+    # broken (unknown frontmatter keys are tolerated).
+    workspace = tmp_path / "ws"
+    _write_preset(
+        workspace / ".agents" / "presets",
+        "sloppy",
+        "---\nmax-turns: later\nmemory: sometimes\n---\nbody",
+    )
+    roster = {p.id: p for p in list_agent_presets(workspace)}
+    assert roster["sloppy"].broken is None
+    assert roster["sloppy"].disallowed_tools is None
+
+
+def test_key_variant_precedence_is_kebab_then_camel_then_snake(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "ws"
+    _write_preset(
+        workspace / ".agents" / "presets",
+        "variants",
+        "---\n"
+        "disallowed-tools: Write\n"
+        "disallowedTools: Edit\n"
+        "disallowed_tools: Bash\n"
+        "---\n",
+    )
+    snapshot = resolve_agent_preset("variants", workspace)
+    assert snapshot.disallowed_tools == ("write",)
+
+    # Without kebab, camel wins over snake.
+    _write_preset(
+        workspace / ".agents" / "presets",
+        "variants2",
+        "---\ndisallowedTools: Edit\ndisallowed_tools: Bash\n---\n",
+    )
+    snapshot = resolve_agent_preset("variants2", workspace)
+    assert snapshot.disallowed_tools == ("edit",)
+
+
+def test_tool_filter_subtracts_disallowed_from_any_roster() -> None:
+    # Allowlist AND NOT disallowed: the deny side still wins.
+    both = AgentPresetSnapshot(
+        id="p", tools=("read", "bash"), disallowed_tools=("write", "edit")
+    )
+    assert both.tool_filter()(("read", "bash", "write", "glob")) == ("read", "bash")
+    # Disallowed-only narrows an arbitrary roster.
+    deny_only = AgentPresetSnapshot(id="q", disallowed_tools=("write",))
+    assert deny_only.tool_filter()(("read", "write", "bash")) == ("read", "bash")
+    # No declaration at all -> unrestricted.
+    assert AgentPresetSnapshot(id="r").tool_filter() is None
+
+
+def test_snapshot_roundtrip_and_fingerprint_cover_subagent_fields() -> None:
+    snapshot = AgentPresetSnapshot(
+        id="p",
+        tools=("read",),
+        disallowed_tools=("write",),
+    )
+    metadata = snapshot.to_metadata()
+    assert metadata["disallowedTools"] == ["write"]
+    # The dropped fields are gone from the wire — nothing may look enforced.
+    assert "maxTurns" not in metadata
+    assert "memory" not in metadata
+
+    decoded = AgentPresetSnapshot.from_metadata(metadata)
+    assert decoded == snapshot
+    assert decoded.fingerprint() == snapshot.fingerprint()
+
+    # A different deny-list yields a different runtime key (no stale reuse).
+    other = AgentPresetSnapshot(id="p", tools=("read",), disallowed_tools=("edit",))
+    assert other.fingerprint() != snapshot.fingerprint()
+
+    # Tolerant decode: garbage deny list degrades to unset; stale keys from
+    # older sessions (maxTurns/memory) are ignored.
+    decoded = AgentPresetSnapshot.from_metadata(
+        {"id": "p", "disallowedTools": "x", "maxTurns": -1, "memory": "yes"}
+    )
+    assert decoded is not None
+    assert decoded.disallowed_tools is None

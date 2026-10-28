@@ -274,6 +274,11 @@ def agent_preset_view(preset) -> dict[str, Any]:
         "name": preset.display_name or preset.id,
         "description": preset.description,
         "tools": list(preset.tools) if preset.tools is not None else None,
+        "disallowedTools": (
+            list(preset.disallowed_tools)
+            if preset.disallowed_tools is not None
+            else None
+        ),
         "broken": preset.broken,
     }
 

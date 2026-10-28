@@ -1883,3 +1883,34 @@ def test_resume_picker_marks_current_session_and_resumes_choice(monkeypatch):
     local_items = list(seen["scopes"][0].items)
     assert local_items[0].disabled_reason == "current session"
     assert local_items[1].disabled_reason is None
+
+
+def test_agent_preset_overview_shows_the_deny_list(tmp_path: Path, monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("DEEPCODE_HOME", str(tmp_path / "home"))
+    presets = tmp_path / ".agents" / "presets"
+    presets.mkdir(parents=True)
+    (presets / "deny-only.md").write_text(
+        "---\ndescription: deny only\ndisallowed-tools: write, edit\n---\nbody",
+        encoding="utf-8",
+    )
+    (presets / "allow-and-deny.md").write_text(
+        "---\n"
+        "description: allow and deny\n"
+        "tools: read, bash\n"
+        "disallowed-tools: write\n"
+        "---\nbody",
+        encoding="utf-8",
+    )
+    stub = SimpleNamespace(
+        thread_client=SimpleNamespace(
+            workspace=str(tmp_path),
+            current_agent_preset_id=lambda: None,
+        )
+    )
+    # Unbound call: the method only touches thread_client, no TuiApp state.
+    overview = tui_app.TuiApp.agent_preset_overview(stub)
+    # A deny-only preset must not claim "all tools" (the reviewer's point).
+    assert "all tools except write, edit" in overview
+    assert "read, bash except write" in overview
