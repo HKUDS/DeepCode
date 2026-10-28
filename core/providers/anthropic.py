@@ -428,6 +428,59 @@ class AnthropicProvider(LLMProvider):
                 return {"type": "tool", "name": name}
         return {"type": "auto"}
 
+    @staticmethod
+    def _strip_cache_control(message: dict[str, Any]) -> dict[str, Any]:
+        """Return a copy of ``message`` with any cache_control marker removed.
+
+        Strips markers both from the message dict itself and from any content
+        block (string or block-list form) so a replayed request never carries
+        a stale breakpoint into the next finalize step.
+        """
+        if "cache_control" in message:
+            message = {k: v for k, v in message.items() if k != "cache_control"}
+        content = message.get("content")
+        if isinstance(content, list):
+            cleaned: list[Any] = []
+            changed = False
+            for block in content:
+                if isinstance(block, dict) and "cache_control" in block:
+                    cleaned.append(
+                        {k: v for k, v in block.items() if k != "cache_control"}
+                    )
+                    changed = True
+                else:
+                    cleaned.append(block)
+            if changed:
+                message = {**message, "content": cleaned}
+        return message
+
+    @staticmethod
+    def _place_cache_control(
+        message: dict[str, Any], marker: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Return a copy of ``message`` with a fresh cache_control marker.
+
+        Handles both the plain-string content shape and the block-list shape
+        (used for tool_result / multimodal content). A message with no
+        cacheable content is returned unchanged — an image-only or empty
+        result must not host a breakpoint.
+        """
+        content = message.get("content")
+        if isinstance(content, str) and content:
+            return {
+                **message,
+                "content": [{"type": "text", "text": content, "cache_control": marker}],
+            }
+        if isinstance(content, list) and content:
+            nc = list(content)
+            nc[-1] = (
+                {**nc[-1], "cache_control": marker}
+                if isinstance(nc[-1], dict)
+                else {"type": "text", "text": str(nc[-1]), "cache_control": marker}
+            )
+            return {**message, "content": nc}
+        return message
+
     # ------------------------------------------------------------------
     # Prompt caching
     # ------------------------------------------------------------------
@@ -449,19 +502,23 @@ class AnthropicProvider(LLMProvider):
             system = list(system)
             system[-1] = {**system[-1], "cache_control": marker}
 
-        new_msgs = list(messages)
-        if len(new_msgs) >= 3:
-            m = new_msgs[-2]
-            c = m.get("content")
-            if isinstance(c, str):
-                new_msgs[-2] = {
-                    **m,
-                    "content": [{"type": "text", "text": c, "cache_control": marker}],
-                }
-            elif isinstance(c, list) and c:
-                nc = list(c)
-                nc[-1] = {**nc[-1], "cache_control": marker}
-                new_msgs[-2] = {**m, "content": nc}
+        # --- Message cache breakpoint: clear-then-finalize ---
+        # The previous write point hardcoded messages[-2], which broke when the
+        # final message was not a cacheable content block (a tool_result
+        # carrying an image, a trailing system note, a truncated turn). Now
+        # (1) strip every stale marker from the whole message list, so a reused
+        # or replayed list can never carry a leftover breakpoint that would
+        # pin the cache at the wrong offset, then (2) place a single fresh
+        # marker on the *latest non-system message*. Anchoring at the newest
+        # cacheable message (instead of a fixed -2) keeps the write point
+        # exactly at the conversation frontier, maximizing the prefix that
+        # subsequent turns hit.
+        new_msgs = [cls._strip_cache_control(m) for m in messages]
+        for idx in range(len(new_msgs) - 1, -1, -1):
+            if new_msgs[idx].get("role") == "system":
+                continue
+            new_msgs[idx] = cls._place_cache_control(new_msgs[idx], marker)
+            break
 
         new_tools = tools
         if tools:
