@@ -158,6 +158,20 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
 
 ## News
 
+**2026-10-28 · Presets that remove tools, guarded hook files, and community fixes**
+
+- **Remove tools from a preset.** Agent preset files take `disallowed-tools`
+  (Claude Code's `disallowedTools`), and `/preset` shows what is removed. (#283)
+- **Hook files need approval.** File tools ask before writing the files hooks
+  are loaded from, except under Full Access. (#271)
+- **Unpinned MCP packages are flagged.** `deepcode mcp list` marks npx and uvx
+  servers whose package has no fixed version. (#275)
+- **Community fixes.** Anthropic prompt caching now covers the latest message
+  (#280); the monitor's JSON mode reports failures in its exit code, Responses
+  tool call ids stay intact across turns, and verification runs the project's
+  own Python (#270); Desktop bundles patched Python dependencies (#278); and
+  token estimation has its own tests (#284).
+
 **2026-10-21 · A quiet Windows service, a separate code font, and community fixes**
 
 - **No console windows on Windows.** The background service no longer opens a

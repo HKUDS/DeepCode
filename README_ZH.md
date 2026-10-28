@@ -157,6 +157,19 @@ DeepCode 提供 TUI、Desktop 和 Web 三种客户端，连接同一个本地共
 
 ## 新闻
 
+**2026-10-28 · 预设可以去掉工具、写 hook 文件要确认，以及社区修复**
+
+- **预设可以去掉工具。** 代理预设文件支持 `disallowed-tools`（即 Claude Code 的
+  `disallowedTools`），`/preset` 会显示去掉了哪些工具。(#283)
+- **写 hook 文件要先确认。** 文件工具写入 hook 配置所在的文件前会先询问，Full
+  Access 下除外。(#271)
+- **标出未锁版本的 MCP 包。** `deepcode mcp list` 会标出包没有固定版本的 npx、
+  uvx 服务器。(#275)
+- **社区修复。** Anthropic 提示缓存覆盖到最新一条消息 (#280)；monitor 的 JSON
+  模式用退出码报告失败、Responses 接口的工具调用 id 跨轮保持不变、验证时用项目
+  自己的 Python (#270)；Desktop 附带的 Python 依赖升级到已修补的版本 (#278)；
+  token 估算有了专门的测试 (#284)。
+
 **2026-10-21 · Windows 后台服务不再弹窗、代码可单独设字体，以及社区修复**
 
 - **Windows 上不再弹出终端窗口。** 后台服务启动 shell、MCP 服务器等程序时，不再
