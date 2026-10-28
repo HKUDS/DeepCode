@@ -1043,8 +1043,14 @@ const ZH_CN: Record<string, string> = {
   "browser.signedOut": "已退出登录 · 运行 deepcode web 获取新的访问链接",
   "browser.picker.title": "在服务所在机器上打开项目",
   "browser.picker.body":
-    "输入运行 DeepCode 的机器上的文件夹路径。在你选择信任之前，它会以未信任状态打开。",
+    "选择或输入运行 DeepCode 的机器上的文件夹。在你选择信任之前，它会以未信任状态打开。",
   "browser.picker.folder": "项目文件夹",
+  "browser.picker.folders": "文件夹",
+  "browser.picker.up": "上一级",
+  "browser.picker.loading": "正在读取文件夹…",
+  "browser.picker.empty": "没有子文件夹",
+  "browser.picker.unreadable": "无法列出这个文件夹，仍可以直接输入路径。",
+  "browser.picker.truncated": "只显示前 {{count}} 个文件夹",
   "browser.picker.cancel": "取消",
   "browser.picker.open": "打开项目",
 };

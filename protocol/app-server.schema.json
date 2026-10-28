@@ -4127,6 +4127,15 @@
         "projectId"
       ]
     },
+    "DirectoryListParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      }
+    },
     "ProjectUpdateParams": {
       "type": "object",
       "additionalProperties": false,
@@ -6042,6 +6051,9 @@
         "project/remove": {
           "$ref": "#/$defs/ProjectReadParams"
         },
+        "directory/list": {
+          "$ref": "#/$defs/DirectoryListParams"
+        },
         "settings/read": {
           "$ref": "#/$defs/OptionalProjectParams"
         },
@@ -6351,6 +6363,7 @@
         "project/read",
         "project/update",
         "project/remove",
+        "directory/list",
         "settings/read",
         "settings/update",
         "provider/list",
@@ -6551,6 +6564,53 @@
           },
           "required": [
             "removed"
+          ]
+        },
+        "directory/list": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "parent": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "home": {
+              "type": "string"
+            },
+            "folders": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "path"
+                ]
+              }
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "path",
+            "parent",
+            "home",
+            "folders",
+            "truncated"
           ]
         },
         "settings/read": {
@@ -7452,6 +7512,7 @@
         "project/read",
         "project/update",
         "project/remove",
+        "directory/list",
         "settings/read",
         "settings/update",
         "provider/list",

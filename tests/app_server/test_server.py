@@ -1871,3 +1871,42 @@ def _read_until(reader, predicate) -> dict[str, Any]:
         if predicate(message):
             return message
     raise AssertionError("timed out waiting for matching App Server message")
+
+
+def test_directory_list_browses_folders_on_the_service_machine(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "root"
+    (root / "project").mkdir(parents=True)
+    (root / "README.md").write_text("x", encoding="utf-8")
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    initialize = _request(
+        1,
+        "initialize",
+        {"protocolVersion": "1.0", "clientInfo": {"name": "test", "version": "1.0"}},
+    )
+    source = io.BytesIO(
+        initialize
+        + _request(2, "directory/list", {"path": str(root)})
+        + _request(3, "directory/list", {"path": str(root / "missing")})
+        + _request(4, "directory/list", {"path": str(root), "hidden": True})
+        + _request(5, "shutdown", {})
+    )
+    sink = io.BytesIO()
+    assert AppServer(application).serve(source, sink) == 0
+    responses = {
+        message["id"]: message for message in _messages(sink) if "id" in message
+    }
+
+    listing = responses[2]["result"]
+    assert listing["path"] == str(root.resolve())
+    assert listing["parent"] == str(root.resolve().parent)
+    assert listing["folders"] == [
+        {"name": "project", "path": str(root.resolve() / "project")}
+    ]
+    assert listing["truncated"] is False
+    assert isinstance(listing["home"], str)
+
+    assert responses[3]["error"]["data"]["code"] == "INVALID_REQUEST"
+    assert "folder does not exist" in responses[3]["error"]["message"]
+    assert "unknown parameter" in responses[4]["error"]["message"]

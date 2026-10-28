@@ -6,8 +6,9 @@ leaking into JSON-RPC or CLI consumers.
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from core.domain.approval import Approval
 from core.domain.artifact import Artifact
@@ -19,6 +20,9 @@ from core.domain.thread import Thread
 from core.domain.thread_goal import GoalOutcome, ThreadGoal
 from core.domain.turn import Turn
 from core.domain.workflow import WorkflowRun
+
+if TYPE_CHECKING:
+    from core.application.project_service import DirectoryListing
 
 
 def file_entry_view(entry) -> dict[str, Any]:
@@ -424,6 +428,19 @@ def project_view(project: Project) -> dict[str, Any]:
         "createdAt": timestamp(project.created_at),
         "updatedAt": timestamp(project.updated_at),
         "lastOpenedAt": timestamp(project.last_opened_at),
+    }
+
+
+def directory_listing_view(listing: DirectoryListing) -> dict[str, Any]:
+    return {
+        "path": listing.path,
+        "parent": listing.parent,
+        "home": listing.home,
+        "folders": [
+            {"name": name, "path": os.path.join(listing.path, name)}
+            for name in listing.folders
+        ],
+        "truncated": listing.truncated,
     }
 
 

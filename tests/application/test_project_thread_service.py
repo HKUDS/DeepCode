@@ -8,6 +8,7 @@ import pytest
 
 from core.application import DeepCodeApplication
 from core.application.errors import (
+    InvalidArgumentError,
     ThreadNotFoundError,
     ThreadUnreadableError,
     WorkspaceOutOfScopeError,
@@ -213,3 +214,69 @@ def test_a_session_removed_from_disk_drops_its_thread(tmp_path: Path) -> None:
     assert application.threads.list(project.id) == []
     with pytest.raises(ThreadNotFoundError):
         application.threads.read(thread.id)
+
+
+def test_list_directories_shows_visible_subfolders_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    root = home / "code"
+    (root / "beta").mkdir(parents=True)
+    (root / "Alpha").mkdir()
+    (root / ".hidden").mkdir()
+    (root / "notes.txt").write_text("not a folder", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+
+    listing = application.projects.list_directories(str(root))
+    assert listing.path == str(root.resolve())
+    assert listing.parent == str(root.resolve().parent)
+    assert listing.folders == ("Alpha", "beta")
+    assert listing.truncated is False
+
+    # No path means the home folder; "~" is expanded the same way.
+    assert application.projects.list_directories().path == str(home.resolve())
+    assert application.projects.list_directories("~/code").folders == (
+        "Alpha",
+        "beta",
+    )
+
+    # The filesystem root has no parent to go up to.
+    assert application.projects.list_directories(root.anchor).parent is None
+
+
+def test_list_directories_follows_folder_links(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+    root = tmp_path / "root"
+    root.mkdir()
+    try:
+        (root / "linked").symlink_to(target, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks are not available")
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    assert application.projects.list_directories(str(root)).folders == ("linked",)
+
+
+def test_list_directories_rejects_paths_it_cannot_list(tmp_path: Path) -> None:
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    file_path = tmp_path / "file.txt"
+    file_path.write_text("x", encoding="utf-8")
+    for bad in ("relative/path", str(tmp_path / "missing"), str(file_path)):
+        with pytest.raises(InvalidArgumentError):
+            application.projects.list_directories(bad)
+
+
+def test_list_directories_marks_a_long_listing_truncated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.application import project_service
+
+    for name in ("c", "a", "b"):
+        (tmp_path / name).mkdir()
+    monkeypatch.setattr(project_service, "DIRECTORY_LIST_LIMIT", 2)
+    application = DeepCodeApplication.open(tmp_path / "state.sqlite3")
+    listing = application.projects.list_directories(str(tmp_path))
+    assert listing.folders == ("a", "b")
+    assert listing.truncated is True

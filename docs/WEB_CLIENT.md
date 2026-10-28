@@ -33,8 +33,10 @@ actual address. A running instance keeps its existing port.
 To stop the service explicitly, use the [service commands](SERVICE_RUNTIME.md).
 macOS login startup is a separate, optional OS setting.
 
-Open a project by entering its directory **on the service machine**, then trust
-it if appropriate. Create a thread, select a configured model and send a task.
+Open a project from a folder **on the service machine**: the dialog lists that
+machine's folders, starting at its home folder, and you can click through them
+or type a path. Hidden folders are not listed but can be typed. Then trust the
+project if appropriate. Create a thread, select a configured model and send a task.
 Approvals, settings, code editing, diff review and the terminal use the existing
 workspace UI. The browser's Reconnect action only reconnects its own socket.
 

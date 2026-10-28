@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+import os
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from core.application.errors import (
@@ -14,6 +15,20 @@ from core.domain.project import Project, TrustState
 from core.persistence.database import Database
 from core.persistence.errors import PersistenceConflictError
 from core.persistence.project_repository import ProjectRepository
+
+# A folder with more subfolders than this is listed only in part.
+DIRECTORY_LIST_LIMIT = 1000
+
+
+@dataclass(frozen=True, slots=True)
+class DirectoryListing:
+    """The subfolders of one folder on the machine running the service."""
+
+    path: str
+    parent: str | None
+    home: str
+    folders: tuple[str, ...]
+    truncated: bool
 
 
 class ProjectService:
@@ -99,6 +114,48 @@ class ProjectService:
         if not removed:
             raise ProjectNotFoundError(f"project not found: {project_id}")
         return True
+
+    @staticmethod
+    def list_directories(path: str | None = None) -> DirectoryListing:
+        """List the visible subfolders of ``path`` (the home folder by default).
+
+        This lets a client that cannot show a native folder picker, such as
+        the Web client, browse the service machine for a project folder. Only
+        folder names are returned, never file names or contents.
+        """
+        home = Path.home()
+        raw = (path or "").strip()
+        candidate = Path(raw).expanduser() if raw else home
+        if not candidate.is_absolute():
+            raise InvalidArgumentError(f"folder path must be absolute: {raw}")
+        try:
+            folder = candidate.resolve(strict=True)
+        except OSError as exc:
+            raise InvalidArgumentError(f"folder does not exist: {raw}") from exc
+        if not folder.is_dir():
+            raise InvalidArgumentError(f"not a folder: {raw}")
+        names: list[str] = []
+        try:
+            with os.scandir(folder) as entries:
+                for entry in entries:
+                    if entry.name.startswith("."):
+                        continue
+                    try:
+                        if entry.is_dir():
+                            names.append(entry.name)
+                    except OSError:
+                        continue
+        except OSError as exc:
+            raise InvalidArgumentError(f"folder cannot be read: {folder}") from exc
+        names.sort(key=str.casefold)
+        parent = folder.parent
+        return DirectoryListing(
+            path=str(folder),
+            parent=None if parent == folder else str(parent),
+            home=str(home),
+            folders=tuple(names[:DIRECTORY_LIST_LIMIT]),
+            truncated=len(names) > DIRECTORY_LIST_LIMIT,
+        )
 
     @staticmethod
     def _canonical_directory(path: str) -> Path:

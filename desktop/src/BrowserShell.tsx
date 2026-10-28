@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { App } from "./App";
 import { BrowserRuntime } from "./rpc/browserRuntime";
+import { ServerFolderPicker } from "./ServerFolderPicker";
 import styles from "./webShell.module.css";
 
 declare const __WEB_BUILD_ID__: string;
@@ -11,7 +12,6 @@ export function BrowserShell() {
   const [picker, setPicker] = useState<{
     resolve(value: string | null): void;
   } | null>(null);
-  const [path, setPath] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [runtime] = useState(
     () =>
@@ -19,7 +19,6 @@ export function BrowserShell() {
         buildId: __WEB_BUILD_ID__,
         chooseDirectory: () =>
           new Promise((resolve) => {
-            setPath("");
             setPicker({ resolve });
           }),
       }),
@@ -72,44 +71,12 @@ export function BrowserShell() {
       </div>
       {picker && (
         <div className={styles.backdrop}>
-          <form
-            className={styles.dialog}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="directory-title"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (path.trim()) closePicker(path.trim());
-            }}
-          >
-            <h2 id="directory-title">
-              {t("browser.picker.title", "Open a project on the service machine")}
-            </h2>
-            <p>
-              {t(
-                "browser.picker.body",
-                "Enter the folder path on the machine running DeepCode. It will be opened as untrusted until you choose to trust it.",
-              )}
-            </p>
-            <label htmlFor="server-folder">
-              {t("browser.picker.folder", "Project folder")}
-            </label>
-            <input
-              id="server-folder"
-              autoFocus
-              value={path}
-              onChange={(event) => setPath(event.target.value)}
-              placeholder="/path/to/project"
-            />
-            <footer>
-              <button type="button" onClick={() => closePicker(null)}>
-                {t("browser.picker.cancel", "Cancel")}
-              </button>
-              <button disabled={!path.trim()} type="submit">
-                {t("browser.picker.open", "Open project")}
-              </button>
-            </footer>
-          </form>
+          <ServerFolderPicker
+            listDirectories={(path) =>
+              runtime.request("directory/list", path ? { path } : {})
+            }
+            onClose={closePicker}
+          />
         </div>
       )}
     </div>

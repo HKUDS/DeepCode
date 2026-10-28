@@ -61,6 +61,35 @@
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
 }
+.browser {
+  margin-top: 12px;
+  max-height: min(320px, 40dvh);
+  overflow-y: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--surface-shell);
+}
+.dialog .browser button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.dialog .browser button:hover,
+.dialog .browser button:focus-visible {
+  background: var(--surface-hover);
+}
+.dialog .browserNote {
+  margin: 0;
+  padding: 10px 12px;
+  color: var(--text-secondary);
+}
 .dialog footer {
   display: flex;
   justify-content: flex-end;

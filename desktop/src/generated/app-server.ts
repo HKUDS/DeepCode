@@ -98,6 +98,7 @@ export interface MethodParams {
   "project/read": ProjectReadParams;
   "project/update": ProjectUpdateParams;
   "project/remove": ProjectReadParams;
+  "directory/list": DirectoryListParams;
   "settings/read": OptionalProjectParams;
   "settings/update": SettingsUpdateParams;
   "provider/list": OptionalProjectParams;
@@ -229,6 +230,9 @@ export interface ProjectUpdateParams {
 }
 export interface JsonObject {
   [k: string]: JsonValue;
+}
+export interface DirectoryListParams {
+  path?: string;
 }
 export interface OptionalProjectParams {
   projectId?: string;
@@ -703,6 +707,16 @@ export interface MethodResults {
   };
   "project/remove": {
     removed: boolean;
+  };
+  "directory/list": {
+    path: string;
+    parent: string | null;
+    home: string;
+    folders: {
+      name: string;
+      path: string;
+    }[];
+    truncated: boolean;
   };
   "settings/read": {
     settings: SettingsSnapshot;

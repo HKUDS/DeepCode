@@ -15,6 +15,15 @@ vi.mock("./rpc/browserRuntime", () => ({
     }
     dispose() {}
     async logout() {}
+    async request() {
+      return {
+        path: "/home/me",
+        parent: "/home",
+        home: "/home/me",
+        folders: [{ name: "code", path: "/home/me/code" }],
+        truncated: false,
+      };
+    }
   },
 }));
 vi.stubGlobal("__WEB_BUILD_ID__", "test");
@@ -40,5 +49,7 @@ describe("BrowserShell", () => {
     ).toBeTruthy();
     expect(screen.getByLabelText("项目文件夹")).toBeTruthy();
     expect(screen.getByRole("button", { name: "打开项目" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "code" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "上一级" })).toBeTruthy();
   });
 });

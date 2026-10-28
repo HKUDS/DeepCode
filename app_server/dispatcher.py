@@ -31,6 +31,7 @@ from core.application.views import (
     artifact_view,
     automation_run_view,
     automation_view,
+    directory_listing_view,
     event_view,
     file_content_view,
     file_diff_view,
@@ -223,6 +224,7 @@ class Dispatcher:
             rpc_methods.PROJECT_READ: self._project_read,
             rpc_methods.PROJECT_UPDATE: self._project_update,
             rpc_methods.PROJECT_REMOVE: self._project_remove,
+            rpc_methods.DIRECTORY_LIST: self._directory_list,
             rpc_methods.SETTINGS_READ: self._settings_read,
             rpc_methods.SETTINGS_UPDATE: self._settings_update,
             rpc_methods.PROVIDER_LIST: self._provider_list,
@@ -418,6 +420,13 @@ class Dispatcher:
             trust_state=trust,
         )
         return {"project": project_view(project)}
+
+    def _directory_list(self, params: Params) -> dict[str, Any]:
+        params.only("path")
+        listing = self.application.projects.list_directories(
+            params.string("path", required=False, allow_empty=True)
+        )
+        return directory_listing_view(listing)
 
     def _project_read(self, params: Params) -> dict[str, Any]:
         params.only("projectId")

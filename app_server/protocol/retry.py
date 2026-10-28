@@ -4,6 +4,7 @@ READ_METHODS = frozenset(
     {
         "project/list",
         "project/read",
+        "directory/list",
         "settings/read",
         "provider/list",
         "provider/login/poll",
