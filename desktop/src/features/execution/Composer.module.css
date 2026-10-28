@@ -491,7 +491,10 @@
   font: var(--text-micro) var(--font-mono);
 }
 
-.context span {
+/* Toolbar labels only. A picker's popover sits inside the toolbar too, but
+   styles its own text: here it would stop wrapping and gain padding. :where
+   keeps the specificity of a plain ".context span". */
+.context span:where(:not([data-popover] span)) {
   display: inline-flex;
   min-width: 0;
   align-items: center;

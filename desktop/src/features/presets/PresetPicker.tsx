@@ -96,6 +96,7 @@ export function PresetPicker({
       {open ? (
         <section
           className={styles.menu}
+          data-popover=""
           aria-label={t("presets.menu", "Choose an agent preset")}
         >
           <header>

@@ -245,6 +245,7 @@ export function ModelPicker({
       {open ? (
         <section
           className={styles.menu}
+          data-popover=""
           role="dialog"
           aria-label={t("composer.model.choose", "Choose connection and model")}
         >
