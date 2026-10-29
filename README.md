@@ -174,6 +174,9 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
   as it works, edits files with its edit tools, checks its changes before
   calling them done, keeps a progress file on long tasks, and leaves your own
   uncommitted work and git history alone.
+- **Optional extra risk check.** With `DEEPCODE_RISK_EVALUATOR=1`, a tool
+  call that would run without asking is screened first, and a risky one asks
+  for approval instead. Off by default; Full Access skips it. (#257)
 - **Fixes.** A Goal on DeepSeek with thinking on Auto no longer fails with
   "reasoning_content must be passed back", and the model picker's notes wrap
   instead of running under its controls.
