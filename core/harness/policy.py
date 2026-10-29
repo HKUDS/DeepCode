@@ -28,6 +28,7 @@ from core.harness.permissions import (
     PermissionMode,
     rules_from_snapshots,
 )
+from core.harness.risk_evaluator import default_risk_evaluator, risk_evaluator_enabled
 from core.harness.sandbox import sandbox_enabled
 
 __all__ = [
@@ -211,4 +212,7 @@ def build_permission_engine(
         protect_hook_configs=(
             profile.access_preset is not ExecutionAccessPreset.FULL_ACCESS
         ),
+        # Default off; DEEPCODE_RISK_EVALUATOR=1 opts in the rules-only second
+        # look on calls the mode default would allow (#245).
+        risk_evaluator=default_risk_evaluator() if risk_evaluator_enabled() else None,
     )
