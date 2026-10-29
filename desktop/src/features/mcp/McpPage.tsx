@@ -25,6 +25,7 @@ import type {
   McpServerInfo,
   Project,
 } from "../../generated/app-server";
+import { confirmAction } from "../../platform/confirmAction";
 import type { ClientRuntime } from "../../rpc/contracts";
 import styles from "../management/ManagementWorkspace.module.css";
 import { useMcpCatalog } from "./useMcpCatalog";
@@ -357,15 +358,19 @@ export function McpPage({
                   </button>
                   <button type="button" onClick={() => edit(server)}><Pencil size={14} /> {t("mcp.edit", "Edit")}</button>
                   <button type="button" disabled={busy !== null || server.configurationState === "blocked"} onClick={() => {
-                    if (window.confirm(t("mcp.removeConfirm", "Remove MCP server “{{name}}”?", { name: server.name }))) {
-                      void perform(`remove:${server.id}`, async () => {
+                    void (async () => {
+                      if (!(await confirmAction(
+                        t("mcp.removeConfirm", "Remove MCP server “{{name}}”?", { name: server.name }),
+                        { destructive: true, confirmLabel: t("mcp.remove", "Remove") },
+                      ))) return;
+                      await perform(`remove:${server.id}`, async () => {
                         await catalog.remove(server.name, server.source === "project" ? "project" : "user");
                         setFeedback({
                           tone: "success",
                           message: t("mcp.feedback.removed", "Removed {{name}}.", { name: server.name }),
                         });
                       });
-                    }
+                    })();
                   }}><Trash2 size={14} /> {t("mcp.remove", "Remove")}</button>
                 </>
               ) : null}

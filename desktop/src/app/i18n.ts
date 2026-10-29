@@ -930,6 +930,9 @@ const ZH_CN: Record<string, string> = {
   "confirm.discardDraft.continue": "放弃未保存的编辑器草稿并继续？你的修改将无法恢复。",
   "confirm.discardDraft.openFile": "放弃未保存的编辑器草稿并打开另一个文件？你的修改将无法恢复。",
   "confirm.discardDraft.confirm": "放弃草稿",
+  "confirm.title": "请确认",
+  "confirm.ok": "确定",
+  "confirm.cancel": "取消",
   // Inspector: changes
   "inspector.changes.eyebrow": "Git 工作区",
   "inspector.changes.noBranch": "无 Git 分支",

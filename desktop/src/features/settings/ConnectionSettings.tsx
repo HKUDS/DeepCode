@@ -18,7 +18,7 @@ import type {
   ManualModelEntry,
   ProviderTestResult,
 } from "../../generated/app-server";
-import { useEscapeLayer } from "../../app/escapeLayer";
+import { Dialog } from "../../components/Dialog";
 import { confirmAction } from "../../platform/confirmAction";
 import type { ConnectionCatalogController } from "./useConnectionCatalog";
 import { ConnectionVerification } from "./ConnectionVerification";
@@ -88,9 +88,6 @@ export function ConnectionSettings({
     ),
   );
   const endpointRequired = Boolean(selectedTemplate?.requiresApiBase);
-  // While the provider editor is open it owns Escape — closing the form,
-  // not the settings dialog behind it.
-  useEscapeLayer(() => setEditing(null), editing !== null);
 
   const beginEdit = (connection: ConnectionInfo) => {
     setEditing({
@@ -457,457 +454,460 @@ export function ConnectionSettings({
       </div>
 
       {editing ? (
-        <div className={styles.editorBackdrop} role="presentation">
-          <section
-            className={styles.editor}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="connection-editor-title"
-          >
-            <header>
-              <div>
-                <KeyRound size={16} />
+        // While the provider editor is open it owns Escape — closing the
+        // form, not the settings dialog behind it. The draft can hold an API
+        // key, so the backdrop never dismisses it.
+        <Dialog
+          as="section"
+          className={styles.editor}
+          backdropClassName={styles.editorBackdrop}
+          labelledBy="connection-editor-title"
+          busy={saving}
+          onClose={() => setEditing(null)}
+        >
+          <header>
+            <div>
+              <KeyRound size={16} />
+              <span>
+                <strong id="connection-editor-title">
+                  {editingExisting
+                    ? t("settings.connections.editProvider", "Edit provider")
+                    : t("settings.connections.connectProvider", "Connect a provider")}
+                </strong>
+                <small>
+                  {t(
+                    "settings.connections.oneSetup",
+                    "One setup works in CLI and Desktop",
+                  )}
+                </small>
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setEditing(null)}
+              aria-label={t(
+                "settings.connections.closeEditor",
+                "Close connection editor",
+              )}
+            >
+              <X size={16} />
+            </button>
+          </header>
+          {editing.template ? (
+            <div className={styles.form}>
+              {controller.error ? (
+                <p className={`${styles.error} ${styles.wide}`}>
+                  {controller.error}
+                </p>
+              ) : null}
+              <div className={`${styles.providerSummary} ${styles.wide}`}>
+                <Server size={18} />
                 <span>
-                  <strong id="connection-editor-title">
-                    {editingExisting
-                      ? t("settings.connections.editProvider", "Edit provider")
-                      : t("settings.connections.connectProvider", "Connect a provider")}
-                  </strong>
+                  <strong>{selectedTemplate?.label ?? editing.label}</strong>
                   <small>
-                    {t(
-                      "settings.connections.oneSetup",
-                      "One setup works in CLI and Desktop",
-                    )}
+                    {selectedTemplate?.local
+                      ? t("settings.connections.localService", "Local model service")
+                      : t("settings.connections.apiProvider", "API provider")}
                   </small>
                 </span>
               </div>
-              <button
-                type="button"
-                onClick={() => setEditing(null)}
-                aria-label={t(
-                  "settings.connections.closeEditor",
-                  "Close connection editor",
-                )}
-              >
-                <X size={16} />
-              </button>
-            </header>
-            {editing.template ? (
-              <div className={styles.form}>
-                {controller.error ? (
-                  <p className={`${styles.error} ${styles.wide}`}>
-                    {controller.error}
-                  </p>
-                ) : null}
-                <div className={`${styles.providerSummary} ${styles.wide}`}>
-                  <Server size={18} />
-                  <span>
-                    <strong>{selectedTemplate?.label ?? editing.label}</strong>
-                    <small>
-                      {selectedTemplate?.local
-                        ? t("settings.connections.localService", "Local model service")
-                        : t("settings.connections.apiProvider", "API provider")}
-                    </small>
-                  </span>
-                </div>
+              <label className={styles.wide}>
+                {t("settings.connections.displayName", "Display name")}
+                <input
+                  value={editing.label}
+                  onChange={(event) =>
+                    setEditing({ ...editing, label: event.target.value })
+                  }
+                  placeholder={
+                    selectedTemplate?.label ??
+                    t("settings.connections.myProvider", "My provider")
+                  }
+                />
+              </label>
+              {endpointRequired ? (
                 <label className={styles.wide}>
-                  {t("settings.connections.displayName", "Display name")}
+                  {t("settings.connections.endpoint", "API endpoint")}
                   <input
-                    value={editing.label}
+                    value={editing.apiBase}
                     onChange={(event) =>
-                      setEditing({ ...editing, label: event.target.value })
+                      setEditing({
+                        ...editing,
+                        apiBase: event.target.value,
+                      })
+                    }
+                    placeholder="https://llm.example.com/v1"
+                    aria-required="true"
+                  />
+                  <small>
+                    {t(
+                      "settings.connections.endpointNote",
+                      "This provider has no universal endpoint. Enter the base URL of your server.",
+                    )}
+                  </small>
+                </label>
+              ) : null}
+              <ProtocolSettings draft={editing} onChange={setEditing} />
+              {editing.auth === "api_key" ? (
+                <fieldset className={`${styles.credentials} ${styles.wide}`}>
+                  <legend>
+                    {t("settings.connections.credential", "Credential")}
+                  </legend>
+                  {editing.environmentShadows ? (
+                    <p className={styles.credentialShadowNote} role="note">
+                      {editing.shadowingEnvName
+                        ? t(
+                            "settings.connections.shadowedBy",
+                            "The launch environment variable {{name}} currently provides this key and takes precedence. ",
+                            { name: editing.shadowingEnvName },
+                          )
+                        : t(
+                            "settings.connections.shadowed",
+                            "A launch environment variable currently provides this key and takes precedence. ",
+                          )}
+                      {t(
+                        "settings.connections.unsetToManage",
+                        "Unset it in the launching shell to manage the key here.",
+                      )}
+                    </p>
+                  ) : null}
+                  <input
+                    type="password"
+                    value={editing.apiKey}
+                    onChange={(event) =>
+                      setEditing({
+                        ...editing,
+                        apiKey: event.target.value,
+                        clearApiKey: false,
+                      })
                     }
                     placeholder={
-                      selectedTemplate?.label ??
-                      t("settings.connections.myProvider", "My provider")
+                      editing.environmentShadows
+                        ? t(
+                            "settings.connections.keyFromEnvironment",
+                            "Provided by the launch environment (read-only)",
+                          )
+                        : editingExisting
+                          ? t(
+                              "settings.connections.keepSavedKey",
+                              "Leave blank to keep the saved key",
+                            )
+                          : t("settings.connections.pasteKey", "Paste API key")
                     }
+                    autoComplete="new-password"
+                    disabled={
+                      editing.clearApiKey || editing.environmentShadows
+                    }
+                    aria-label={t("settings.connections.apiKey", "API key")}
                   />
-                </label>
-                {endpointRequired ? (
-                  <label className={styles.wide}>
-                    {t("settings.connections.endpoint", "API endpoint")}
-                    <input
-                      value={editing.apiBase}
-                      onChange={(event) =>
-                        setEditing({
-                          ...editing,
-                          apiBase: event.target.value,
-                        })
-                      }
-                      placeholder="https://llm.example.com/v1"
-                      aria-required="true"
-                    />
+                  <small>
+                    {t(
+                      "settings.connections.writeOnly",
+                      "Write-only: stored keys are private and never returned to the app UI. Referencing an environment variable instead is available under Advanced.",
+                    )}
+                  </small>
+                </fieldset>
+              ) : null}
+              {editing.template ? (
+                <fieldset className={`${styles.modelsField} ${styles.wide}`}>
+                  <legend>{t("settings.connections.models", "Models")}</legend>
+                  <div className={styles.modelFetchRow}>
+                    <button
+                      type="button"
+                      onClick={() => void fetchModels()}
+                      disabled={modelFetch.loading || busy}
+                    >
+                      {modelFetch.loading
+                        ? t("settings.connections.fetching", "Fetching…")
+                        : t(
+                            "settings.connections.fetchModels",
+                            "Fetch models from provider",
+                          )}
+                    </button>
                     <small>
                       {t(
-                        "settings.connections.endpointNote",
-                        "This provider has no universal endpoint. Enter the base URL of your server.",
+                        "settings.connections.fetchNote",
+                        "Probes the endpoint as filled in above — an unsaved URL or key works; picks become the manual model list.",
                       )}
                     </small>
-                  </label>
-                ) : null}
-                <ProtocolSettings draft={editing} onChange={setEditing} />
-                {editing.auth === "api_key" ? (
-                  <fieldset className={`${styles.credentials} ${styles.wide}`}>
-                    <legend>
-                      {t("settings.connections.credential", "Credential")}
-                    </legend>
-                    {editing.environmentShadows ? (
-                      <p className={styles.credentialShadowNote} role="note">
-                        {editing.shadowingEnvName
-                          ? t(
-                              "settings.connections.shadowedBy",
-                              "The launch environment variable {{name}} currently provides this key and takes precedence. ",
-                              { name: editing.shadowingEnvName },
-                            )
-                          : t(
-                              "settings.connections.shadowed",
-                              "A launch environment variable currently provides this key and takes precedence. ",
-                            )}
-                        {t(
-                          "settings.connections.unsetToManage",
-                          "Unset it in the launching shell to manage the key here.",
+                  </div>
+                  {modelFetch.error ? (
+                    <p className={styles.modelFetchError} role="alert">
+                      {modelFetch.error}
+                    </p>
+                  ) : null}
+                  {modelFetch.models && modelFetch.models.length > 0 ? (
+                    <>
+                      <ul
+                        className={styles.modelPicker}
+                        aria-label={t(
+                          "settings.connections.discovered",
+                          "Discovered models",
                         )}
-                      </p>
-                    ) : null}
-                    <input
-                      type="password"
-                      value={editing.apiKey}
-                      onChange={(event) =>
-                        setEditing({
-                          ...editing,
-                          apiKey: event.target.value,
-                          clearApiKey: false,
-                        })
-                      }
-                      placeholder={
-                        editing.environmentShadows
-                          ? t(
-                              "settings.connections.keyFromEnvironment",
-                              "Provided by the launch environment (read-only)",
-                            )
-                          : editingExisting
-                            ? t(
-                                "settings.connections.keepSavedKey",
-                                "Leave blank to keep the saved key",
-                              )
-                            : t("settings.connections.pasteKey", "Paste API key")
-                      }
-                      autoComplete="new-password"
-                      disabled={
-                        editing.clearApiKey || editing.environmentShadows
-                      }
-                      aria-label={t("settings.connections.apiKey", "API key")}
-                    />
-                    <small>
-                      {t(
-                        "settings.connections.writeOnly",
-                        "Write-only: stored keys are private and never returned to the app UI. Referencing an environment variable instead is available under Advanced.",
-                      )}
-                    </small>
-                  </fieldset>
-                ) : null}
-                {editing.template ? (
-                  <fieldset className={`${styles.modelsField} ${styles.wide}`}>
-                    <legend>{t("settings.connections.models", "Models")}</legend>
-                    <div className={styles.modelFetchRow}>
+                      >
+                        {modelFetch.models.map((model) => {
+                          const listed = manualModelIds.has(model.id);
+                          const picked = pickedModels.has(model.id);
+                          return (
+                            <li key={model.id}>
+                              <label data-listed={listed || undefined}>
+                                <input
+                                  type="checkbox"
+                                  checked={listed || picked}
+                                  disabled={listed}
+                                  onChange={() => {
+                                    const next = new Set(pickedModels);
+                                    if (picked) next.delete(model.id);
+                                    else next.add(model.id);
+                                    setPickedModels(next);
+                                  }}
+                                />
+                                <span>
+                                  <strong>{model.name || model.id}</strong>
+                                  <small>
+                                    {model.id}
+                                    {model.contextWindow
+                                      ? t(
+                                          "settings.connections.contextWindow",
+                                          " · {{size}}K context",
+                                          {
+                                            size: Math.round(
+                                              model.contextWindow / 1000,
+                                            ),
+                                          },
+                                        )
+                                      : ""}
+                                    {listed
+                                      ? t(
+                                          "settings.connections.alreadyListed",
+                                          " · already listed",
+                                        )
+                                      : ""}
+                                  </small>
+                                </span>
+                              </label>
+                            </li>
+                          );
+                        })}
+                      </ul>
                       <button
                         type="button"
-                        onClick={() => void fetchModels()}
-                        disabled={modelFetch.loading || busy}
+                        className={styles.adoptButton}
+                        onClick={adoptPickedModels}
+                        disabled={pickedModels.size === 0}
                       >
-                        {modelFetch.loading
-                          ? t("settings.connections.fetching", "Fetching…")
-                          : t(
-                              "settings.connections.fetchModels",
-                              "Fetch models from provider",
-                            )}
+                        {pickedModels.size === 0
+                          ? t(
+                              "settings.connections.addSelected",
+                              "Add selected models to this connection",
+                            )
+                          : pickedModels.size === 1
+                            ? t(
+                                "settings.connections.addOne",
+                                "Add 1 model to this connection",
+                              )
+                            : t(
+                                "settings.connections.addMany",
+                                "Add {{total}} models to this connection",
+                                { total: pickedModels.size },
+                              )}
                       </button>
+                    </>
+                  ) : null}
+                  <ModelListEditor
+                    protocol={editing.protocol}
+                    entries={editing.manualModels}
+                    onChange={(manualModels) =>
+                      setEditing({ ...editing, manualModels })
+                    }
+                  />
+                  <small>
+                    {t(
+                      "settings.connections.reasoningNote",
+                      "Per-model reasoning declarations (`reasoningEfforts`) live in the configuration file — Open configuration file edits them directly.",
+                    )}
+                  </small>
+                </fieldset>
+              ) : null}
+              <ConnectionProbe key={editing.id} connection={connectionMutation(editing)} controller={controller} />
+              <details className={`${styles.advanced} ${styles.wide}`}>
+                <summary>
+                  <SlidersHorizontal size={14} />{" "}
+                  {t("settings.connections.advanced", "Advanced connection settings")}
+                </summary>
+                <div>
+                  <label>
+                    {t("settings.connections.connectionId", "Connection ID")}
+                    <input
+                      value={editing.id}
+                      onChange={(event) =>
+                        setEditing({ ...editing, id: event.target.value })
+                      }
+                      placeholder="provider-personal"
+                      disabled={editingExisting}
+                    />
+                  </label>
+                  {!selectedTemplate?.local ? (
+                    <label>
+                      {t(
+                        "settings.connections.apiKeyEnv",
+                        "API key environment variable",
+                      )}
+                      <input
+                        value={editing.apiKeyEnv}
+                        onChange={(event) =>
+                          setEditing({
+                            ...editing,
+                            apiKeyEnv: event.target.value,
+                          })
+                        }
+                        placeholder={
+                          selectedTemplate?.apiKeyEnv ?? "PROVIDER_API_KEY"
+                        }
+                      />
                       <small>
                         {t(
-                          "settings.connections.fetchNote",
-                          "Probes the endpoint as filled in above — an unsaved URL or key works; picks become the manual model list.",
+                          "settings.connections.apiKeyEnvNote",
+                          "Reference a launch-environment variable instead of a stored key. Leave blank to use the pasted key.",
                         )}
                       </small>
-                    </div>
-                    {modelFetch.error ? (
-                      <p className={styles.modelFetchError} role="alert">
-                        {modelFetch.error}
-                      </p>
-                    ) : null}
-                    {modelFetch.models && modelFetch.models.length > 0 ? (
-                      <>
-                        <ul
-                          className={styles.modelPicker}
-                          aria-label={t(
-                            "settings.connections.discovered",
-                            "Discovered models",
-                          )}
-                        >
-                          {modelFetch.models.map((model) => {
-                            const listed = manualModelIds.has(model.id);
-                            const picked = pickedModels.has(model.id);
-                            return (
-                              <li key={model.id}>
-                                <label data-listed={listed || undefined}>
-                                  <input
-                                    type="checkbox"
-                                    checked={listed || picked}
-                                    disabled={listed}
-                                    onChange={() => {
-                                      const next = new Set(pickedModels);
-                                      if (picked) next.delete(model.id);
-                                      else next.add(model.id);
-                                      setPickedModels(next);
-                                    }}
-                                  />
-                                  <span>
-                                    <strong>{model.name || model.id}</strong>
-                                    <small>
-                                      {model.id}
-                                      {model.contextWindow
-                                        ? t(
-                                            "settings.connections.contextWindow",
-                                            " · {{size}}K context",
-                                            {
-                                              size: Math.round(
-                                                model.contextWindow / 1000,
-                                              ),
-                                            },
-                                          )
-                                        : ""}
-                                      {listed
-                                        ? t(
-                                            "settings.connections.alreadyListed",
-                                            " · already listed",
-                                          )
-                                        : ""}
-                                    </small>
-                                  </span>
-                                </label>
-                              </li>
-                            );
-                          })}
-                        </ul>
-                        <button
-                          type="button"
-                          className={styles.adoptButton}
-                          onClick={adoptPickedModels}
-                          disabled={pickedModels.size === 0}
-                        >
-                          {pickedModels.size === 0
-                            ? t(
-                                "settings.connections.addSelected",
-                                "Add selected models to this connection",
-                              )
-                            : pickedModels.size === 1
-                              ? t(
-                                  "settings.connections.addOne",
-                                  "Add 1 model to this connection",
-                                )
-                              : t(
-                                  "settings.connections.addMany",
-                                  "Add {{total}} models to this connection",
-                                  { total: pickedModels.size },
-                                )}
-                        </button>
-                      </>
-                    ) : null}
-                    <ModelListEditor
-                      protocol={editing.protocol}
-                      entries={editing.manualModels}
-                      onChange={(manualModels) =>
-                        setEditing({ ...editing, manualModels })
-                      }
-                    />
-                    <small>
-                      {t(
-                        "settings.connections.reasoningNote",
-                        "Per-model reasoning declarations (`reasoningEfforts`) live in the configuration file — Open configuration file edits them directly.",
-                      )}
-                    </small>
-                  </fieldset>
-                ) : null}
-                <ConnectionProbe key={editing.id} connection={connectionMutation(editing)} controller={controller} />
-                <details className={`${styles.advanced} ${styles.wide}`}>
-                  <summary>
-                    <SlidersHorizontal size={14} />{" "}
-                    {t("settings.connections.advanced", "Advanced connection settings")}
-                  </summary>
-                  <div>
+                    </label>
+                  ) : null}
+                  {!endpointRequired ? (
                     <label>
-                      {t("settings.connections.connectionId", "Connection ID")}
+                      {t("settings.connections.apiBase", "API base")}
                       <input
-                        value={editing.id}
+                        value={editing.apiBase}
                         onChange={(event) =>
-                          setEditing({ ...editing, id: event.target.value })
+                          setEditing({
+                            ...editing,
+                            apiBase: event.target.value,
+                          })
                         }
-                        placeholder="provider-personal"
-                        disabled={editingExisting}
+                        placeholder={t(
+                          "settings.connections.providerDefault",
+                          "Use provider default",
+                        )}
                       />
                     </label>
-                    {!selectedTemplate?.local ? (
-                      <label>
-                        {t(
-                          "settings.connections.apiKeyEnv",
-                          "API key environment variable",
+                  ) : null}
+                  <label>
+                    {t("settings.connections.adapter", "Adapter")}
+                    <select
+                      value={editing.adapter}
+                      onChange={(event) =>
+                        setEditing({
+                          ...editing,
+                          adapter: event.target.value as Draft["adapter"],
+                        })
+                      }
+                    >
+                      <option value="openai_compat">
+                        {t("settings.connections.openaiCompatible", "OpenAI compatible")}
+                      </option>
+                      <option value="anthropic">
+                        {t("settings.connections.anthropicNative", "Anthropic native")}
+                      </option>
+                    </select>
+                  </label>
+                  <label>
+                    {t("settings.connections.modelCatalog", "Model catalog")}
+                    <select
+                      value={editing.modelCatalog}
+                      onChange={(event) =>
+                        setEditing({
+                          ...editing,
+                          modelCatalog: event.target
+                            .value as Draft["modelCatalog"],
+                        })
+                      }
+                    >
+                      <option value="auto">
+                        {t("settings.connections.catalogAuto", "Automatic")}
+                      </option>
+                      <option value="openrouter">OpenRouter</option>
+                      <option value="openai">
+                        {t("settings.connections.openaiCompatible", "OpenAI compatible")}
+                      </option>
+                      <option value="anthropic">Anthropic</option>
+                      <option value="manual">
+                        {t("settings.connections.catalogManual", "Manual list")}
+                      </option>
+                    </select>
+                  </label>
+
+                  {editingExisting ? (
+                    <label
+                      className={`${styles.credentialAction} ${styles.wide}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={editing.clearApiKey}
+                        aria-label={t(
+                          "settings.connections.removeSavedKey",
+                          "Remove saved API key",
                         )}
-                        <input
-                          value={editing.apiKeyEnv}
-                          onChange={(event) =>
-                            setEditing({
-                              ...editing,
-                              apiKeyEnv: event.target.value,
-                            })
-                          }
-                          placeholder={
-                            selectedTemplate?.apiKeyEnv ?? "PROVIDER_API_KEY"
-                          }
-                        />
+                        onChange={(event) =>
+                          setEditing({
+                            ...editing,
+                            apiKey: event.target.checked
+                              ? ""
+                              : editing.apiKey,
+                            clearApiKey: event.target.checked,
+                          })
+                        }
+                      />
+                      <span>
+                        <strong>
+                          {t(
+                            "settings.connections.removeSavedKeyTitle",
+                            "Remove the saved API key",
+                          )}
+                        </strong>
                         <small>
                           {t(
-                            "settings.connections.apiKeyEnvNote",
-                            "Reference a launch-environment variable instead of a stored key. Leave blank to use the pasted key.",
+                            "settings.connections.removeSavedKeyNote",
+                            "Environment and legacy credentials are unchanged.",
                           )}
                         </small>
-                      </label>
-                    ) : null}
-                    {!endpointRequired ? (
-                      <label>
-                        {t("settings.connections.apiBase", "API base")}
-                        <input
-                          value={editing.apiBase}
-                          onChange={(event) =>
-                            setEditing({
-                              ...editing,
-                              apiBase: event.target.value,
-                            })
-                          }
-                          placeholder={t(
-                            "settings.connections.providerDefault",
-                            "Use provider default",
-                          )}
-                        />
-                      </label>
-                    ) : null}
-                    <label>
-                      {t("settings.connections.adapter", "Adapter")}
-                      <select
-                        value={editing.adapter}
-                        onChange={(event) =>
-                          setEditing({
-                            ...editing,
-                            adapter: event.target.value as Draft["adapter"],
-                          })
-                        }
-                      >
-                        <option value="openai_compat">
-                          {t("settings.connections.openaiCompatible", "OpenAI compatible")}
-                        </option>
-                        <option value="anthropic">
-                          {t("settings.connections.anthropicNative", "Anthropic native")}
-                        </option>
-                      </select>
+                      </span>
                     </label>
-                    <label>
-                      {t("settings.connections.modelCatalog", "Model catalog")}
-                      <select
-                        value={editing.modelCatalog}
-                        onChange={(event) =>
-                          setEditing({
-                            ...editing,
-                            modelCatalog: event.target
-                              .value as Draft["modelCatalog"],
-                          })
-                        }
-                      >
-                        <option value="auto">
-                          {t("settings.connections.catalogAuto", "Automatic")}
-                        </option>
-                        <option value="openrouter">OpenRouter</option>
-                        <option value="openai">
-                          {t("settings.connections.openaiCompatible", "OpenAI compatible")}
-                        </option>
-                        <option value="anthropic">Anthropic</option>
-                        <option value="manual">
-                          {t("settings.connections.catalogManual", "Manual list")}
-                        </option>
-                      </select>
-                    </label>
-
-                    {editingExisting ? (
-                      <label
-                        className={`${styles.credentialAction} ${styles.wide}`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={editing.clearApiKey}
-                          aria-label={t(
-                            "settings.connections.removeSavedKey",
-                            "Remove saved API key",
-                          )}
-                          onChange={(event) =>
-                            setEditing({
-                              ...editing,
-                              apiKey: event.target.checked
-                                ? ""
-                                : editing.apiKey,
-                              clearApiKey: event.target.checked,
-                            })
-                          }
-                        />
-                        <span>
-                          <strong>
-                            {t(
-                              "settings.connections.removeSavedKeyTitle",
-                              "Remove the saved API key",
-                            )}
-                          </strong>
-                          <small>
-                            {t(
-                              "settings.connections.removeSavedKeyNote",
-                              "Environment and legacy credentials are unchanged.",
-                            )}
-                          </small>
-                        </span>
-                      </label>
-                    ) : null}
-                  </div>
-                </details>
-              </div>
-            ) : null}
-            <footer>
-              <span>
-                {t(
-                  "settings.connections.saveNote",
-                  "Saving checks credentials and model discovery. It does not send project content.",
-                )}
-              </span>
-              <button
-                type="button"
-                onClick={() => setEditing(null)}
-                disabled={saving}
-              >
-                {t("settings.connections.cancel", "Cancel")}
-              </button>
-              <button
-                type="button"
-                className={styles.saveButton}
-                onClick={() => void save()}
-                disabled={
-                  saving ||
-                  !editing.id.trim() ||
-                  !editing.template ||
-                  (endpointRequired && !editing.apiBase.trim())
-                }
-              >
-                <Save size={14} />
-                {saving
-                  ? t("settings.connections.saving", "Saving…")
-                  : t("settings.connections.saveCheck", "Save and check")}
-              </button>
-            </footer>
-          </section>
-        </div>
+                  ) : null}
+                </div>
+              </details>
+            </div>
+          ) : null}
+          <footer>
+            <span>
+              {t(
+                "settings.connections.saveNote",
+                "Saving checks credentials and model discovery. It does not send project content.",
+              )}
+            </span>
+            <button
+              type="button"
+              onClick={() => setEditing(null)}
+              disabled={saving}
+            >
+              {t("settings.connections.cancel", "Cancel")}
+            </button>
+            <button
+              type="button"
+              className={styles.saveButton}
+              onClick={() => void save()}
+              disabled={
+                saving ||
+                !editing.id.trim() ||
+                !editing.template ||
+                (endpointRequired && !editing.apiBase.trim())
+              }
+            >
+              <Save size={14} />
+              {saving
+                ? t("settings.connections.saving", "Saving…")
+                : t("settings.connections.saveCheck", "Save and check")}
+            </button>
+          </footer>
+        </Dialog>
       ) : null}
     </section>
   );

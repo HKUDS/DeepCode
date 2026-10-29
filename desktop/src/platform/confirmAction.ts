@@ -3,15 +3,21 @@ export interface ConfirmActionOptions {
   kind?: "info" | "warning" | "error";
   confirmLabel?: string;
   cancelLabel?: string;
+  /** The action deletes or discards something: the in-app dialog colours
+   * its confirm button as dangerous. Native dialogs show it as ``kind``. */
+  destructive?: boolean;
 }
 
-type ConfirmHandler = (
+export type ConfirmHandler = (
   message: string,
   options: ConfirmActionOptions,
 ) => Promise<boolean>;
 let confirmHandler: ConfirmHandler = async (message) => window.confirm(message);
-export function setConfirmHandler(handler: ConfirmHandler): void {
+/** Install ``handler``; returns the one it replaced, for restoring later. */
+export function setConfirmHandler(handler: ConfirmHandler): ConfirmHandler {
+  const previous = confirmHandler;
   confirmHandler = handler;
+  return previous;
 }
 
 /**

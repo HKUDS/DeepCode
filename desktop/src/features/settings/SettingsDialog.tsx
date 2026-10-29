@@ -16,7 +16,7 @@ import type {
   Project,
   SettingsSnapshot,
 } from "../../generated/app-server";
-import { useEscapeLayer } from "../../app/escapeLayer";
+import { Dialog } from "../../components/Dialog";
 import type { ClientRuntime } from "../../rpc/contracts";
 import {
   SETTINGS_SECTIONS,
@@ -61,11 +61,6 @@ export function SettingsDialog({
     SETTINGS_SECTIONS[0];
   const ActiveSection = active.component;
 
-  // The dialog is the outermost Escape layer: a nested editor that opens
-  // later takes the key first, so dismissing it never tears down the
-  // dialog around it.
-  useEscapeLayer(onClose);
-
   useEffect(() => {
     // The server pushes settings.changed when the config file moves under
     // us (another window, an external editor). Refreshing only while the
@@ -98,90 +93,87 @@ export function SettingsDialog({
   };
 
   return (
-    <div
-      className={styles.backdrop}
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
+    // The dialog is the outermost Escape layer: a nested editor that opens
+    // later takes the key first, so dismissing it never tears down the
+    // dialog around it. Cards hold unsaved drafts (agent models, the
+    // default preset), so a stray press on the backdrop does not close it.
+    <Dialog
+      className={styles.dialog}
+      backdropClassName={styles.backdrop}
+      labelledBy="settings-dialog-title"
+      onClose={onClose}
     >
-      <div
-        className={styles.dialog}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="settings-dialog-title"
-      >
-        <header className={styles.header}>
-          <h1 id="settings-dialog-title">{t("settings.title", "Settings")}</h1>
-          <div className={styles.headerActions}>
-            <label className={styles.scope}>
-              {t("settings.writeTo", "Write to")}
-              <select
-                value={effectiveScope}
-                onChange={(event) =>
-                  setScope(event.target.value as ConfigScope)
-                }
-              >
-                <option value="user">{t("settings.scope.user", "User config")}</option>
-                <option value="project" disabled={!canWriteProject}>
-                  {t("settings.scope.project", "Selected project")}
-                </option>
-              </select>
-            </label>
-            <button
-              className={styles.documentAction}
-              type="button"
-              disabled={!settings?.configPath}
-              title={settings?.configPath ?? undefined}
-              onClick={() => void openConfigFile()}
+      <header className={styles.header}>
+        <h1 id="settings-dialog-title">{t("settings.title", "Settings")}</h1>
+        <div className={styles.headerActions}>
+          <label className={styles.scope}>
+            {t("settings.writeTo", "Write to")}
+            <select
+              value={effectiveScope}
+              onChange={(event) =>
+                setScope(event.target.value as ConfigScope)
+              }
             >
-              <FileText size={14} />
-              {runtime.host?.nativeOpen === false ? t("settings.copyConfigPath", "Copy configuration path") : t("settings.openConfig", "Open configuration file")}
-            </button>
-            <button
-              className={styles.close}
-              type="button"
-              aria-label={t("settings.close", "Close settings")}
-              onClick={onClose}
-            >
-              <X size={16} />
-            </button>
-          </div>
-        </header>
-        {openError ? <p className={styles.openError}>{openError}</p> : null}
-        <div className={styles.body}>
-          <nav
-            className={styles.rail}
-            aria-label={t("settings.sectionsNav", "Settings sections")}
+              <option value="user">{t("settings.scope.user", "User config")}</option>
+              <option value="project" disabled={!canWriteProject}>
+                {t("settings.scope.project", "Selected project")}
+              </option>
+            </select>
+          </label>
+          <button
+            className={styles.documentAction}
+            type="button"
+            disabled={!settings?.configPath}
+            title={settings?.configPath ?? undefined}
+            onClick={() => void openConfigFile()}
           >
-            {SETTINGS_SECTIONS.map((section) => {
-              const Icon = section.icon;
-              return (
-                <button
-                  key={section.id}
-                  type="button"
-                  className={styles.railButton}
-                  data-active={section.id === active.id}
-                  onClick={() => setActiveId(section.id)}
-                >
-                  <Icon size={16} />
-                  {t(section.labelKey, section.label)}
-                </button>
-              );
-            })}
-          </nav>
-          <div className={styles.content}>
-            <ActiveSection
-              runtime={runtime}
-              project={project}
-              settings={settings}
-              busy={busy}
-              scope={effectiveScope}
-              onRefresh={onRefresh}
-              onUpdate={onUpdate}
-            />
-          </div>
+            <FileText size={14} />
+            {runtime.host?.nativeOpen === false ? t("settings.copyConfigPath", "Copy configuration path") : t("settings.openConfig", "Open configuration file")}
+          </button>
+          <button
+            className={styles.close}
+            type="button"
+            aria-label={t("settings.close", "Close settings")}
+            onClick={onClose}
+          >
+            <X size={16} />
+          </button>
+        </div>
+      </header>
+      {openError ? <p className={styles.openError}>{openError}</p> : null}
+      <div className={styles.body}>
+        <nav
+          className={styles.rail}
+          aria-label={t("settings.sectionsNav", "Settings sections")}
+        >
+          {SETTINGS_SECTIONS.map((section) => {
+            const Icon = section.icon;
+            return (
+              <button
+                key={section.id}
+                type="button"
+                className={styles.railButton}
+                data-active={section.id === active.id}
+                onClick={() => setActiveId(section.id)}
+              >
+                <Icon size={16} />
+                {t(section.labelKey, section.label)}
+              </button>
+            );
+          })}
+        </nav>
+        <div className={styles.content}>
+          <ActiveSection
+            runtime={runtime}
+            project={project}
+            settings={settings}
+            busy={busy}
+            scope={effectiveScope}
+            onRefresh={onRefresh}
+            onUpdate={onUpdate}
+          />
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

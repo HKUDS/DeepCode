@@ -1,6 +1,7 @@
 import { FolderInput, Power, RefreshCw, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { confirmAction } from "../../platform/confirmAction";
 import type { ClientRuntime } from "../../rpc/contracts";
 import styles from "../management/ManagementWorkspace.module.css";
 import { usePluginCatalog } from "./usePluginCatalog";
@@ -140,18 +141,24 @@ export function PluginsPage({ runtime }: { runtime: ClientRuntime }) {
                   disabled={catalog.loading}
                   onClick={() => {
                     const selected = catalog.selected;
-                    if (
-                      selected &&
-                      window.confirm(
-                        t(
-                          "plugins.unregisterConfirm",
-                          "Unregister “{{name}}”? Its source files will not be deleted.",
-                          { name: selected.name },
-                        ),
-                      )
-                    ) {
-                      void catalog.remove(selected.id);
-                    }
+                    if (!selected) return;
+                    void (async () => {
+                      if (
+                        await confirmAction(
+                          t(
+                            "plugins.unregisterConfirm",
+                            "Unregister “{{name}}”? Its source files will not be deleted.",
+                            { name: selected.name },
+                          ),
+                          {
+                            destructive: true,
+                            confirmLabel: t("plugins.unregister", "Unregister"),
+                          },
+                        )
+                      ) {
+                        await catalog.remove(selected.id);
+                      }
+                    })();
                   }}
                 >
                   <Trash2 size={14} />

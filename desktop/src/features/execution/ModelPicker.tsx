@@ -16,6 +16,7 @@ import type {
   SettingsSnapshot,
   Thread,
 } from "../../generated/app-server";
+import { Dialog } from "../../components/Dialog";
 import type { ClientRuntime } from "../../rpc/contracts";
 import { useConnectionCatalog } from "../settings/useConnectionCatalog";
 import styles from "./ModelPicker.module.css";
@@ -119,22 +120,6 @@ export function ModelPicker({
       cancelled = true;
     };
   }, [listModels, open, selectedConnectionId]);
-
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const escape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", escape);
-    return () => {
-      document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", escape);
-    };
-  }, [open]);
 
   const models = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -243,11 +228,13 @@ export function ModelPicker({
       </button>
 
       {open ? (
-        <section
+        <Dialog
+          as="section"
           className={styles.menu}
           data-popover=""
-          role="dialog"
-          aria-label={t("composer.model.choose", "Choose connection and model")}
+          label={t("composer.model.choose", "Choose connection and model")}
+          dismissOnPressOutside={rootRef}
+          onClose={() => setOpen(false)}
         >
           <header>
             <div>
@@ -467,7 +454,7 @@ export function ModelPicker({
               {t("composer.model.useDefaults", "Use defaults")}
             </button>
           </footer>
-        </section>
+        </Dialog>
       ) : null}
     </div>
   );

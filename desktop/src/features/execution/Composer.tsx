@@ -29,6 +29,7 @@ import type {
 import type { GoalDefinitionInput } from "../../app/useWorkspaceController";
 import type { InteractiveDelivery } from "../../app/interactiveTurnRouter";
 import { useComposerBehavior } from "../../app/composerBehavior";
+import { useEscapeLayer } from "../../app/escapeLayer";
 import { useTranslation } from "react-i18next";
 import {
   ACCESS_PRESET_OPTIONS,
@@ -166,6 +167,9 @@ export function Composer({
     initialLaunch?.skillIds ?? [],
   );
   const [deliveryNotice, setDeliveryNotice] = useState<string | null>(null);
+  // The Skill picker is a non-modal list beside the prompt (typing $name
+  // still works while it is open), so it does not trap focus; Escape closes it.
+  useEscapeLayer(() => setSkillPickerOpen(false), skillPickerOpen && !active);
   const dictation = useDictation({
     runtime,
     onTranscript: insertDictation,
