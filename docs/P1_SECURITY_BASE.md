@@ -56,5 +56,11 @@ fail-closed:checker 或 approver 抛异常 → 一律拒绝。
   及同一 Approval 状态机；legacy mode 只保留给兼容调用。
 - 可选风险评估（#245，默认关闭）：`DEEPCODE_RISK_EVALUATOR=1` 时，对模式默认
   会放行（步骤 4 的 `allow`）的调用复用 `command_guard.screen_all` 再看一眼，
-  命中只会 `allow` → `ask`（`never` 策略下即 deny）；评估器异常按 fail-closed
-  处理。它不能放宽 deny、不能覆盖显式规则，属于建议性防御而非安全边界。
+  命中只会 `allow` → `ask`；评估器异常按 fail-closed 处理。它不能放宽 deny、
+  不能覆盖显式规则，属于建议性防御而非安全边界。开关只在
+  `build_permission_engine`（`core/harness/policy.py`）读取；Full access 预设
+  不启用评估器（其审批策略为 `never`，`ask` 会变成无法批准的拒绝）。Read only
+  预设的审批策略同样是 `never`，因此命中即 deny。会话级批准按 thread + 工具名
+  授权，所以批准某个工具后，它之后被评估器标记的调用也一并放行。内置 `bash`
+  工具的入口（`core/harness/tools/shell.py`）已对同一命令跑同一组 screen 并直接
+  拒绝，所以收益主要在接受 `command` 类参数的 MCP 工具。

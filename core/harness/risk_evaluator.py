@@ -16,7 +16,10 @@ Scope, settled in issue #245 (action triage, Option A, rules-only):
   less" — so ``full_auto``'s "rules only" promise degrades to "rules, plus a
   soft ask when the evaluator objects", not a loss of the explicit rules.
 * It is **default off**. With the feature disabled every decision and reason is
-  byte-identical to today's.
+  byte-identical to today's. The opt-in flag ``DEEPCODE_RISK_EVALUATOR`` is
+  read by the policy layer (:func:`core.harness.policy.build_permission_engine`),
+  never here or in the engine, and Full Access never gets an evaluator: its
+  approval policy is ``never``, so an ``ask`` there could not be approved.
 * v1 is **rules only** — no model call in the permission path. The built-in
   evaluator reuses the screens :mod:`core.harness.command_guard` already has
   (``screen_all`` → destructive-command always, egress / install under
@@ -34,29 +37,15 @@ an operator who opted in ever sees that ask.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping
 from typing import Protocol, runtime_checkable
 
 from core.harness.command_guard import screen_all
 
-# Environment flag that turns the evaluator on. Off unless explicitly set to a
-# truthy value, matching the other opt-in harness switches (DEEPCODE_SANDBOX,
-# DEEPCODE_COMPACTION_MEMORY, …).
-_ENABLE_ENV = "DEEPCODE_RISK_EVALUATOR"
-
-_TRUTHY = frozenset({"1", "true", "on", "yes"})
-
 # Argument keys that carry a shell command, mirroring the permission engine's
 # own shell-argument extraction so the evaluator screens exactly the string the
 # user would run.
 _COMMAND_ARG_KEYS = ("command", "cmd", "commands", "script")
-
-
-def risk_evaluator_enabled() -> bool:
-    """Whether the operator opted the risk evaluator in. Off by default."""
-
-    return os.environ.get(_ENABLE_ENV, "").strip().lower() in _TRUTHY
 
 
 @runtime_checkable
@@ -98,8 +87,8 @@ class CommandGuardRiskEvaluator:
     front door already uses. Non-shell calls and calls without a command carry
     no opinion (``None``).
 
-    Deterministic for a given command, so results are cached by the caller via
-    the call signature; this evaluator holds no state of its own.
+    Stateless and cheap (a pure function of the command string), so the
+    engine simply asks it on every eligible call.
     """
 
     def __call__(self, tool_name: str, arguments: Mapping[str, object]) -> str | None:

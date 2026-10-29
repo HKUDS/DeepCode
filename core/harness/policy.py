@@ -28,7 +28,7 @@ from core.harness.permissions import (
     PermissionMode,
     rules_from_snapshots,
 )
-from core.harness.risk_evaluator import default_risk_evaluator, risk_evaluator_enabled
+from core.harness.risk_evaluator import default_risk_evaluator
 from core.harness.sandbox import sandbox_enabled
 
 __all__ = [
@@ -37,6 +37,17 @@ __all__ = [
     "resolve_execution_security_profile",
     "resolve_permission_mode",
 ]
+
+# Opt-in switch for the rules-only risk evaluator (#245). Read here, at the
+# policy layer, and nowhere else: the engine only takes an explicit evaluator.
+_RISK_EVALUATOR_ENV = "DEEPCODE_RISK_EVALUATOR"
+_TRUTHY = frozenset({"1", "true", "on", "yes"})
+
+
+def risk_evaluator_enabled() -> bool:
+    """Whether the operator opted the risk evaluator in. Off by default."""
+
+    return os.environ.get(_RISK_EVALUATOR_ENV, "").strip().lower() in _TRUTHY
 
 
 def resolve_permission_mode(
@@ -213,6 +224,13 @@ def build_permission_engine(
             profile.access_preset is not ExecutionAccessPreset.FULL_ACCESS
         ),
         # Default off; DEEPCODE_RISK_EVALUATOR=1 opts in the rules-only second
-        # look on calls the mode default would allow (#245).
-        risk_evaluator=default_risk_evaluator() if risk_evaluator_enabled() else None,
+        # look on calls the mode default would allow (#245). Full Access skips
+        # it, as it skips origin approval: its approval policy is ``never``, so
+        # the evaluator's ``ask`` would become a deny nobody can approve.
+        risk_evaluator=(
+            default_risk_evaluator()
+            if risk_evaluator_enabled()
+            and profile.access_preset is not ExecutionAccessPreset.FULL_ACCESS
+            else None
+        ),
     )

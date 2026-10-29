@@ -11,12 +11,18 @@ from __future__ import annotations
 import sys
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.domain.execution_security import ApprovalPolicy
+from core.agent_runtime.runner import AgentRunner, AgentRunSpec
+from core.agent_runtime.tools.base import Tool, tool_parameters
+from core.agent_runtime.tools.registry import ToolRegistry
+from core.domain.execution_security import ApprovalPolicy, ExecutionSecurityProfile
 from core.harness.permissions import (
     PermissionDecision,
     PermissionEngine,
@@ -29,6 +35,7 @@ from core.harness.risk_evaluator import (
     CommandGuardRiskEvaluator,
     default_risk_evaluator,
 )
+from core.providers.base import LLMResponse, ToolCallRequest
 
 ALLOW = PermissionDecision.ALLOW
 ASK = PermissionDecision.ASK
@@ -137,7 +144,7 @@ def test_raising_or_garbage_evaluator_fails_closed_without_crashing():
         assert "fail-closed" in reason
 
 
-def test_failure_is_not_cached_for_the_signature():
+def test_a_transient_failure_does_not_stick():
     spy = _Spy(opinion=RuntimeError("transient"))
     engine = PermissionEngine(
         mode=PermissionMode.FULL_AUTO, cwd="/w", risk_evaluator=spy
@@ -177,17 +184,20 @@ def test_not_consulted_when_steps_one_to_three_or_mode_already_decided():
     assert spy.calls == 0
 
 
-def test_at_most_one_call_per_signature():
-    spy = _Spy(opinion=None)
+def test_each_call_is_judged_on_its_own_arguments():
+    # No opinion cache: two calls that share a path (or any other key the
+    # engine uses for rule matching) must not share a verdict.
     engine = PermissionEngine(
-        mode=PermissionMode.FULL_AUTO, cwd="/w", risk_evaluator=spy
+        mode=PermissionMode.FULL_AUTO,
+        cwd="/w",
+        risk_evaluator=CommandGuardRiskEvaluator(),
     )
 
-    for _ in range(5):
-        engine.evaluate("execute_bash", {"command": "pytest -q"})
-    engine.evaluate("execute_bash", {"command": "pytest -x"})
-
-    assert spy.calls == 2
+    assert _decide(engine, "mcp__ops__run", command="ls", path="/w") is ALLOW
+    assert _decide(engine, "mcp__ops__run", command="rm -rf /", path="/w") is ASK
+    assert _decide(engine, "execute_bash", command="", cmd="ls") is ALLOW
+    assert _decide(engine, "execute_bash", command="", cmd="rm -rf /") is ASK
+    assert not hasattr(engine, "_risk_cache")
 
 
 # ---- 5. evasion fixtures (advisory, not a security boundary) ----------------
@@ -228,7 +238,8 @@ def test_known_gaps_are_documented_not_guarded():
 
 
 def test_feature_off_decisions_and_reasons_are_identical(monkeypatch):
-    monkeypatch.delenv("DEEPCODE_RISK_EVALUATOR", raising=False)
+    # make_engine never reads the flag: even exported, nothing changes.
+    monkeypatch.setenv("DEEPCODE_RISK_EVALUATOR", "1")
     calls = [
         ("read_file", {"file_path": "/home/u/proj/a.py"}),
         ("write_file", {"file_path": "/home/u/proj/a.py"}),
@@ -251,10 +262,12 @@ def test_feature_off_decisions_and_reasons_are_identical(monkeypatch):
                 assert built.evaluate(tool, args) == plain.evaluate(tool, args)
 
 
-def test_env_flag_opts_in_the_builtin_evaluator(monkeypatch):
-    monkeypatch.setenv("DEEPCODE_RISK_EVALUATOR", "1")
+def test_make_engine_takes_only_an_explicit_evaluator(monkeypatch):
+    monkeypatch.delenv("DEEPCODE_RISK_EVALUATOR", raising=False)
 
-    engine = make_engine("full_auto", cwd="/w")
+    engine = make_engine(
+        "full_auto", cwd="/w", risk_evaluator=CommandGuardRiskEvaluator()
+    )
 
     assert isinstance(engine.risk_evaluator, CommandGuardRiskEvaluator)
     assert _decide(engine, "execute_bash", command="rm -rf /") is ASK
@@ -270,3 +283,193 @@ def test_runtime_engine_builder_follows_the_env_flag(monkeypatch):
 
     assert isinstance(engine.risk_evaluator, CommandGuardRiskEvaluator)
     assert _decide(engine, "execute_bash", command="rm -rf /") is ASK
+
+
+def test_runtime_engine_builder_off_is_identical_to_main(monkeypatch):
+    monkeypatch.delenv("DEEPCODE_PERMISSION_MODE", raising=False)
+    monkeypatch.delenv("DEEPCODE_RISK_EVALUATOR", raising=False)
+    calls = [
+        ("read_file", {"file_path": "/w/a.py"}),
+        ("write_file", {"file_path": "/w/a.py"}),
+        ("execute_bash", {"command": "rm -rf /"}),
+        ("mcp__ops__run", {"command": "rm -rf /"}),
+    ]
+
+    for preset in ("ask", "read_only", "full_access"):
+        profile = ExecutionSecurityProfile.for_preset(preset)
+        off = build_permission_engine(
+            None, cwd="/w", execution_security_profile=profile
+        )
+        assert off.risk_evaluator is None
+        plain = PermissionEngine(
+            mode=off.mode,
+            rules=off.rules,
+            cwd=off.cwd,
+            approval_policy=off.approval_policy,
+            protect_sensitive_paths=off.protect_sensitive_paths,
+            enforce_read_only=off.enforce_read_only,
+            bypass_origin_approval=off.bypass_origin_approval,
+            protect_hook_configs=off.protect_hook_configs,
+        )
+        for tool, args in calls:
+            assert off.evaluate(tool, args) == plain.evaluate(tool, args)
+
+
+def test_full_access_skips_the_evaluator(monkeypatch):
+    monkeypatch.delenv("DEEPCODE_PERMISSION_MODE", raising=False)
+    monkeypatch.setenv("DEEPCODE_RISK_EVALUATOR", "1")
+
+    engine = build_permission_engine(
+        None,
+        cwd="/w",
+        execution_security_profile=ExecutionSecurityProfile.for_preset("full_access"),
+    )
+
+    # Full Access approves nothing (policy ``never``), so an ask would be an
+    # unapprovable deny. It skips the evaluator as it skips origin approval.
+    assert engine.risk_evaluator is None
+    assert engine.evaluate("mcp__ops__run", {"command": "rm -rf /tmp/x"}) == (
+        ALLOW,
+        "full_auto mode: no implicit gate",
+    )
+
+
+def test_read_only_preset_turns_a_flag_into_a_deny(monkeypatch):
+    monkeypatch.delenv("DEEPCODE_PERMISSION_MODE", raising=False)
+    monkeypatch.setenv("DEEPCODE_RISK_EVALUATOR", "1")
+
+    engine = build_permission_engine(
+        None,
+        cwd="/w",
+        execution_security_profile=ExecutionSecurityProfile.for_preset("read_only"),
+    )
+
+    decision, reason = engine.evaluate_tool(
+        "mcp__ops__inspect", {"command": "rm -rf /tmp/x"}, read_only=True
+    )
+    assert decision is DENY
+    assert "risk evaluator flagged this call" in reason
+    assert "approval policy is never" in reason
+
+
+# ---- 7. origin gate and runner paths ----------------------------------------
+
+
+def test_mcp_origin_gate_composes_with_the_evaluator():
+    engine = PermissionEngine(
+        mode=PermissionMode.FULL_AUTO,
+        cwd="/w",
+        risk_evaluator=CommandGuardRiskEvaluator(),
+    )
+
+    # An ``auto`` origin cannot waive the evaluator's ask...
+    decision, reason = engine.evaluate_tool(
+        "mcp__ops__run", {"command": "rm -rf /tmp/x"}, approval_mode="auto"
+    )
+    assert decision is ASK
+    assert reason.startswith("risk evaluator flagged this call")
+
+    # ...an unflagged call still meets the origin's own gate...
+    decision, reason = engine.evaluate_tool(
+        "mcp__ops__run", {"command": "ls"}, approval_mode="prompt"
+    )
+    assert (decision, reason) == (ASK, "MCP tool policy requires confirmation")
+
+    # ...and an unflagged call under ``auto`` stays allowed.
+    decision, _ = engine.evaluate_tool(
+        "mcp__ops__run", {"command": "ls"}, approval_mode="auto"
+    )
+    assert decision is ALLOW
+
+
+@tool_parameters(
+    {
+        "type": "object",
+        "properties": {"command": {"type": "string"}},
+        "required": ["command"],
+    }
+)
+class _RecordingRunTool(Tool):
+    def __init__(self) -> None:
+        self.ran: list[str] = []
+
+    @property
+    def name(self) -> str:
+        return "mcp__ops__run"
+
+    @property
+    def description(self) -> str:
+        return "Run a command on the ops server."
+
+    async def execute(self, **kwargs: Any) -> Any:
+        self.ran.append(kwargs["command"])
+        return f"ran: {kwargs['command']}"
+
+
+class _ScriptedProvider:
+    def __init__(self, responses: list[LLMResponse]) -> None:
+        self.responses = responses
+        self.calls = 0
+
+    def get_default_model(self) -> str:
+        return "fake-model"
+
+    async def chat_with_retry(self, **kwargs: Any) -> LLMResponse:
+        response = self.responses[min(self.calls, len(self.responses) - 1)]
+        self.calls += 1
+        return response
+
+
+@pytest.mark.asyncio
+async def test_runner_without_approver_blocks_a_flagged_call():
+    tool = _RecordingRunTool()
+    tools = ToolRegistry()
+    tools.register(tool)
+    provider = _ScriptedProvider(
+        [
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(
+                        id="c1", name="mcp__ops__run", arguments={"command": "ls"}
+                    ),
+                    ToolCallRequest(
+                        id="c2",
+                        name="mcp__ops__run",
+                        arguments={"command": "rm -rf /tmp/x"},
+                    ),
+                ],
+                finish_reason="tool_calls",
+            ),
+            LLMResponse(content="done", finish_reason="stop"),
+        ]
+    )
+    engine = PermissionEngine(
+        mode=PermissionMode.FULL_AUTO,
+        cwd="/w",
+        risk_evaluator=CommandGuardRiskEvaluator(),
+    )
+
+    result = await AgentRunner(provider).run(
+        AgentRunSpec(
+            initial_messages=[
+                {"role": "system", "content": "test"},
+                {"role": "user", "content": "go"},
+            ],
+            tools=tools,
+            model="fake-model",
+            max_iterations=5,
+            max_tool_result_chars=10_000,
+            permission_checker=engine.evaluate,
+            approval_callback=None,
+        )
+    )
+
+    assert tool.ran == ["ls"]
+    blocked = next(
+        m["content"]
+        for m in result.messages
+        if m.get("role") == "tool" and m.get("tool_call_id") == "c2"
+    )
+    assert "risk evaluator flagged this call" in blocked
+    assert "no approver attached" in blocked

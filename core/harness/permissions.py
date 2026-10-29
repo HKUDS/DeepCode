@@ -27,7 +27,9 @@ Evaluation precedence (first decisive wins):
   1. sensitive-path protection          → DENY   (when enabled)
   2. canonical Read only upper bound    → DENY   (mutating tools)
   3. explicit rule match (last-wins)    → its action
-  4. mode default for read-only vs mutating tools
+  4. mode default for read-only vs mutating tools; where that default is
+     ``allow``, an optional risk evaluator may raise it to ``ask`` (never
+     the other way)
 """
 
 from __future__ import annotations
@@ -45,11 +47,7 @@ from core.domain.execution_security import (
     ExecutionPermissionRuleSnapshot,
     normalize_permission_rules,
 )
-from core.harness.risk_evaluator import (
-    RiskEvaluator,
-    default_risk_evaluator,
-    risk_evaluator_enabled,
-)
+from core.harness.risk_evaluator import RiskEvaluator
 
 
 class PermissionDecision(str, Enum):
@@ -330,10 +328,12 @@ class PermissionEngine:
         Optional, strictness-only advisor. When set, it runs *only* on calls
         the mode default (step 4) would allow and may turn that ``allow`` into
         ``ask``; it can never loosen a ``deny``, override a rule, or touch the
-        sensitive-path / read-only boundaries. Off by default (``None``); the
-        caller wires in :func:`core.harness.risk_evaluator.default_risk_evaluator`
-        when ``DEEPCODE_RISK_EVALUATOR`` is enabled. A raising / misbehaving
-        evaluator is contained and fails closed to ``ask``.
+        sensitive-path / read-only boundaries. Off by default (``None``); this
+        module never reads the environment — the policy layer
+        (:func:`core.harness.policy.build_permission_engine`) wires in the
+        built-in evaluator when ``DEEPCODE_RISK_EVALUATOR`` is enabled, except
+        under Full Access. A raising / misbehaving evaluator is contained and
+        fails closed to ``ask``.
     """
 
     mode: PermissionMode = PermissionMode.DEFAULT
@@ -346,9 +346,6 @@ class PermissionEngine:
     bypass_origin_approval: bool = False
     protect_hook_configs: bool = True
     risk_evaluator: RiskEvaluator | None = None
-    _risk_cache: dict[tuple[str, str], str | None] = field(
-        default_factory=dict, repr=False, compare=False
-    )
 
     def is_read_only(self, tool_name: str) -> bool:
         known = _READ_ONLY_TOOLS | self.read_only_tools
@@ -605,28 +602,27 @@ class PermissionEngine:
     def _risk_opinion(
         self, tool_name: str, arguments: Mapping[str, object]
     ) -> str | None:
-        """Ask the evaluator for an opinion, cached by call signature.
+        """Ask the evaluator for an opinion on this exact call.
+
+        Not cached: the rules-only evaluator is cheap, and a cache keyed on
+        anything other than the exact input the evaluator inspects could hand
+        one call another call's verdict.
 
         Failures are contained and fail closed: an evaluator that raises, or
         returns anything other than ``None`` or a non-empty string, yields an
         ``ask`` reason rather than crashing the permission path or silently
         allowing. The operator opted in to a second look, so a broken advisor
-        must not quietly waive it. Failures are not cached, so a transient
-        error does not stick to a call signature for the whole session.
+        must not quietly waive it.
         """
 
         if self.risk_evaluator is None:
             return None
-        signature = (tool_name, self._argument_string(tool_name, arguments))
-        if signature in self._risk_cache:
-            return self._risk_cache[signature]
         try:
             opinion = self.risk_evaluator(tool_name, arguments)
         except Exception:  # noqa: BLE001 - advisory evaluator must never crash the gate
             return "evaluator error (fail-closed)"
         if opinion is not None and not (isinstance(opinion, str) and opinion.strip()):
             return "evaluator returned an unusable opinion (fail-closed)"
-        self._risk_cache[signature] = opinion
         return opinion
 
     def _apply_approval_policy(
@@ -691,14 +687,10 @@ def make_engine(
 ) -> PermissionEngine:
     """Convenience constructor from loosely-typed inputs (config/CLI).
 
-    When ``risk_evaluator`` is left ``None`` the built-in rules-only evaluator
-    is wired in only if ``DEEPCODE_RISK_EVALUATOR`` is enabled; otherwise the
-    engine behaves exactly as before. Pass an explicit evaluator to override
-    this (e.g. in tests), or pass one while the flag is off to force it on.
+    ``risk_evaluator`` is used only when passed explicitly; the environment is
+    never consulted here.
     """
     resolved_mode = mode if isinstance(mode, PermissionMode) else PermissionMode(mode)
-    if risk_evaluator is None and risk_evaluator_enabled():
-        risk_evaluator = default_risk_evaluator()
     return PermissionEngine(
         mode=resolved_mode,
         rules=rules_from_config(rules_config),
