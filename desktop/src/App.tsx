@@ -16,6 +16,7 @@ import {
 import { DesktopSidebar } from "./features/navigation/DesktopSidebar";
 import { ConversationSplitter } from "./features/thread/ConversationSplitter";
 import { ThreadHeader } from "./features/thread/ThreadHeader";
+import { TrustFolderDialog } from "./features/thread/TrustFolderDialog";
 import { useTranscriptMode } from "./features/thread/transcriptMode";
 import type { ClientRuntime } from "./rpc/contracts";
 import { initI18n } from "./app/i18n";
@@ -78,6 +79,8 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
   const runComposerCommand = useComposerCommands(controller, ui);
   const [composerIntent, setComposerIntent] =
     useState<ComposerLaunchIntent | null>(null);
+  // The project whose "Trust folder" confirmation is open, if any.
+  const [trustPromptFor, setTrustPromptFor] = useState<string | null>(null);
   const { state, selectedProject, selectedThread } = controller;
   const activeTurn = latestExecutingTurn(state.turns, selectedThread?.id);
   const queuedTurns = state.turns
@@ -219,7 +222,7 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
               busy={state.busy}
               inspectorOpen={inspectorVisible}
               hasActiveWork={hasPendingTurn || activeWorkflow}
-              onTrustProject={() => void controller.trustProject()}
+              onTrustProject={() => setTrustPromptFor(selectedProject?.id ?? null)}
               onForkThread={() => {
                 void (async () => {
                   if (await ui.confirmDiscardInspectorDraft()) {
@@ -524,6 +527,23 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
             onClose={ui.closeSettings}
           />
         </Suspense>
+      ) : null}
+
+      {selectedProject &&
+      trustPromptFor === selectedProject.id &&
+      selectedProject.trustState === "untrusted" ? (
+        <TrustFolderDialog
+          runtime={runtime}
+          project={selectedProject}
+          thread={selectedThread}
+          settings={state.settings}
+          busy={state.busy}
+          onCancel={() => setTrustPromptFor(null)}
+          onConfirm={() => {
+            setTrustPromptFor(null);
+            void controller.trustProject();
+          }}
+        />
       ) : null}
     </main>
   );
