@@ -46,6 +46,32 @@ from continuing automatically.
 After a connection problem, return to the conversation and check where the work
 stopped before sending it again. See [Troubleshooting](troubleshooting.md).
 
+## The same actions in each client
+
+| What you want to do | Desktop / Web | TUI |
+|---|---|---|
+| Start a Session | **New thread** | `/new [title]` |
+| Resume local history | Select it under the Project | `/resume` |
+| Find history from every Project | Browse the project list | `/resume all` |
+| Attach a file | Composer attachment | `@path/to/file` |
+| Change the next turn's model | Composer model picker | `/model` |
+| Adjust reasoning effort | Composer effort picker | `/effort` |
+| Cap the Session's context window | Model picker context control | `/context` |
+| Choose tool access | Composer access picker | `/permissions` |
+| Pick an agent preset | Preset picker | `/preset` |
+| Load Skills for the next turn | Composer Skills control | `/skill <name>` |
+| Create a reusable Skill | **Skills → Create Skill** | `$skill-creator` |
+| Set or revise a durable Goal | Goal panel | `/goal` |
+| Queue the next instruction | Composer while a turn runs | `/queue <text>` |
+| Stop the active turn | Stop control | `/stop` |
+| Re-run the last turn | Retry control on the turn | `/retry` |
+| Compact a long conversation | Automatic under pressure | `/compact` (also automatic) |
+| Change transcript detail | Transcript detail menu | `/transcript` or `Ctrl+O` |
+| Rename or delete a Session | Session menu | `/rename <title>` · `/delete <id>` |
+
+Archiving hides a Session without deleting its history. Permanent deletion
+removes the Session records but never your repository files.
+
 ## Long conversations: `/compact`
 
 When a conversation becomes long, use `/compact` to summarize its older messages

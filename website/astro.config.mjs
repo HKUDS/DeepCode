@@ -33,6 +33,10 @@ export default defineConfig({
           label: "Compounding",
           items: ["guide/skills-and-memory", "guide/goals-and-headless"],
         },
+        {
+          label: "Reference",
+          items: ["guide/configuration", "guide/security"],
+        },
       ],
     }),
   ],
