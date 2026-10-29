@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { initI18n } from "../../app/i18n";
@@ -47,6 +47,7 @@ interface TurnView {
   transcriptMode?: TranscriptMode;
   status?: Turn["status"];
   selectedItemId?: string | null;
+  following?: boolean;
 }
 
 function turnBlock(items: Item[], view: TurnView = {}) {
@@ -60,6 +61,7 @@ function turnBlock(items: Item[], view: TurnView = {}) {
       approvalsByItem={new Map()}
       selectedItemId={view.selectedItemId ?? null}
       transcriptMode={view.transcriptMode ?? "normal"}
+      following={view.following ?? true}
       busy={false}
       onSelectItem={vi.fn()}
       onOpenInspector={vi.fn()}
@@ -177,9 +179,6 @@ describe("TurnBlock", () => {
   const note = (id: string, ordinal: number, text: string) =>
     item(id, ordinal, "assistant_message", text, { text, phase: "commentary" });
 
-  /** The browser reports a toggle a task after the click that caused it. */
-  const settleToggle = () => act(() => new Promise((resolve) => setTimeout(resolve, 0)));
-
   it("keeps the run at work open while the Turn is live, and folds it once the agent moves on", () => {
     const steps = [run("lint", 1, "npm run lint"), run("test", 2, "npm test")];
     const { update } = renderTurn(
@@ -209,21 +208,42 @@ describe("TurnBlock", () => {
     expect(screen.getByText("Now: Thinking")).toBeTruthy();
   });
 
-  it("keeps the user's own open or close over the default", async () => {
+  it("keeps the user's own open or close over the default", () => {
     const steps = [run("lint", 1, "npm run lint"), run("test", 2, "npm test")];
     const { update } = renderTurn(steps, { status: "running" });
     const group = screen.getByText("Working").closest("details")!;
 
     fireEvent.click(group.querySelector("summary")!);
-    await settleToggle();
     update([...steps, run("build", 3, "npm run build")]);
     expect(group.open).toBe(false);
 
     fireEvent.click(group.querySelector("summary")!);
-    await settleToggle();
     update([...steps, run("build", 3, "npm run build"), note("note", 4, "Built")]);
     expect(group.open).toBe(true);
     expect(screen.getByText("npm run build")).toBeTruthy();
+  });
+
+  it("shows a live run's latest steps, and every step on request", () => {
+    const steps = Array.from({ length: 25 }, (_, index) =>
+      run(`step-${index}`, index + 1, `command ${index}`),
+    );
+    renderTurn(steps, { status: "running" });
+    expect(screen.queryByText("command 4")).toBeNull();
+    expect(screen.getByText("command 5")).toBeTruthy();
+    expect(screen.getByText("command 24")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show all 25 steps" }));
+    expect(screen.getByText("command 0")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Show all/ })).toBeNull();
+  });
+
+  it("keeps a finished run open for a reader who is up in it", () => {
+    const steps = [run("lint", 1, "npm run lint"), run("test", 2, "npm test")];
+    const { update } = renderTurn(steps, { status: "running", following: false });
+
+    update([...steps, note("note", 3, "Lint and tests pass")]);
+    expect(screen.getByText("Steps").closest("details")?.open).toBe(true);
+    expect(screen.getByText("npm test")).toBeTruthy();
   });
 
   it("does not open a group because one of its steps is selected", () => {

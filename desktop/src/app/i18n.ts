@@ -872,6 +872,7 @@ const ZH_CN: Record<string, string> = {
   "turn.work.now": "正在：{{step}}",
   "turn.work.steps": "步骤",
   "turn.work.working": "工作中",
+  "turn.work.showAll": "显示全部 {{count}} 个步骤",
   "turn.work.commands": "命令 {{count}}",
   "turn.work.edits": "编辑 {{count}}",
   "turn.work.reads": "读取 {{count}}",

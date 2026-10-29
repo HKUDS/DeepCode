@@ -212,6 +212,7 @@ export function ThreadConversation({
               approvalsByItem={approvalsByItem}
               selectedItemId={selectedItemId}
               transcriptMode={transcriptMode}
+              following={!showJumpToLatest}
               busy={busy}
               onSelectItem={onSelectItem}
               onOpenInspector={onOpenInspector}

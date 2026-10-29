@@ -52,6 +52,8 @@ interface TurnBlockProps {
   approvalsByItem: ReadonlyMap<string, Approval>;
   selectedItemId: string | null;
   transcriptMode: TranscriptMode;
+  /** Whether the conversation view follows its end (see ThreadConversation). */
+  following: boolean;
   busy: boolean;
   onSelectItem(itemId: string): void;
   onOpenInspector(tab?: DesktopInspectorTab): void;
@@ -418,29 +420,44 @@ function stepSubject(item: Item, t: TFunction): string {
   return itemActivity(item)?.subject || item.summary || presentItem(item).label;
 }
 
+// A run opened on its own shows only its latest steps: a long one is hundreds.
+const AUTO_OPEN_STEPS = 20;
+
 /**
  * A run of steps folded into one line that says what they did. Its steps
- * render only while it is open: a long run is hundreds of them.
+ * render only while it is open.
  *
- * The run still at work at the end of a live Turn stays open, so its steps
- * are seen as they come; it folds once the agent moves on. Opening or
- * closing it by hand wins over both.
+ * The run still at work at the end of a live Turn opens on its own, so its
+ * latest steps are seen as they come, and folds once the agent moves on —
+ * unless the reader is up in it then, not following the end: what they read
+ * stays. Opening or closing it by hand wins over all of that.
  */
 function WorkGroup({
   group,
   live,
+  following,
   transcriptMode,
   renderActivity,
 }: {
   group: TimelineWorkGroup;
   live: boolean;
+  following: boolean;
   transcriptMode: TranscriptMode;
   renderActivity(item: Item): ReactNode;
 }) {
   const { t } = useTranslation();
   const summary = summarizeWork(group.items);
   const [chosen, setChosen] = useState<boolean | null>(null);
-  const open = chosen ?? (transcriptMode === "verbose" || live);
+  const [held, setHeld] = useState(false);
+  const [wasLive, setWasLive] = useState(live);
+  if (wasLive !== live) {
+    setWasLive(live);
+    if (!live && !following) setHeld(true);
+  }
+  const automatic =
+    chosen === null && transcriptMode !== "verbose" && (live || held);
+  const open = chosen ?? (transcriptMode === "verbose" || live || held);
+  const steps = automatic ? group.items.slice(-AUTO_OPEN_STEPS) : group.items;
   const title = summary.current
     ? t("turn.work.now", "Now: {{step}}", {
         step: stepSubject(summary.current, t),
@@ -454,12 +471,13 @@ function WorkGroup({
       className={styles.workGroup}
       data-status={live ? "in_progress" : undefined}
       open={open}
-      onToggle={(event) => {
-        // React opening or closing it to match `open` is no choice of the user's.
-        if (event.currentTarget.open !== open) setChosen(event.currentTarget.open);
-      }}
     >
-      <summary>
+      <summary
+        onClick={(event) => {
+          event.preventDefault();
+          setChosen(!open);
+        }}
+      >
         <Wrench size={14} aria-hidden="true" />
         <span>
           <strong>{title}</strong>
@@ -485,7 +503,18 @@ function WorkGroup({
       </summary>
       {open ? (
         <div className={styles.workGroupItems}>
-          {group.items.map(renderActivity)}
+          {steps.length < group.items.length ? (
+            <button
+              type="button"
+              className={styles.workGroupAll}
+              onClick={() => setChosen(true)}
+            >
+              {t("turn.work.showAll", "Show all {{count}} steps", {
+                count: group.items.length,
+              })}
+            </button>
+          ) : null}
+          {steps.map(renderActivity)}
         </div>
       ) : null}
     </details>
@@ -541,6 +570,7 @@ export function TurnBlock({
   onRetryTurn,
   onCancelQueuedTurn,
   transcriptMode,
+  following,
 }: TurnBlockProps) {
   const { t } = useTranslation();
   const queued = group.turn?.status === "queued";
@@ -686,6 +716,7 @@ export function TurnBlock({
                 key={`${entry.id}:${transcriptMode}`}
                 group={entry}
                 live={live && index === group.timeline.length - 1}
+                following={following}
                 transcriptMode={transcriptMode}
                 renderActivity={renderActivity}
               />

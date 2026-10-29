@@ -480,6 +480,20 @@ div.runStep {
   background: color-mix(in srgb, var(--surface-canvas) 64%, transparent);
 }
 
+.workGroupAll {
+  justify-self: start;
+  margin: 2px 0 4px;
+  padding: 3px 8px;
+  border-radius: var(--radius-xs);
+  color: var(--text-tertiary);
+  font: var(--text-micro) var(--font-mono);
+}
+
+.workGroupAll:hover {
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+}
+
 .workGroupItems::before {
   position: absolute;
   top: 14px;
