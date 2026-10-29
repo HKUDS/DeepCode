@@ -292,6 +292,43 @@ def _is_shell_tool(tool_name: str) -> bool:
     )
 
 
+def is_shell_tool(tool_name: str) -> bool:
+    """Whether ``tool_name`` runs a shell command."""
+
+    return _is_shell_tool(tool_name)
+
+
+# Tools whose only effect is changing files: DeepCode's own, and the names
+# file-editing MCP servers commonly use.
+_FILE_EDIT_TOOL_NAMES = ("write", "edit", "apply_patch")
+_FILE_EDIT_TOOL_SUFFIXES = ("write_file", "edit_file", "create_file")
+
+
+def is_file_edit_tool(tool_name: str) -> bool:
+    """Whether ``tool_name`` changes files and nothing else."""
+
+    return (
+        tool_name in _FILE_EDIT_TOOL_NAMES
+        or tool_name in _FILE_EDIT_TOOL_SUFFIXES
+        or any(tool_name.endswith(f"_{name}") for name in _FILE_EDIT_TOOL_SUFFIXES)
+    )
+
+
+def confirmation_reason(tool_name: str) -> str:
+    """Why a call waits for the user, in words every client can show.
+
+    The approval prompt shows this sentence (the TUI under its heading, the
+    Desktop and Web card as its body) and a denied call reports it to the
+    model, so it names the action, not the engine's internals.
+    """
+
+    if _is_shell_tool(tool_name):
+        return "Running a command needs your approval."
+    if is_file_edit_tool(tool_name):
+        return "Changing files needs your approval."
+    return f"{tool_name} can make changes, so it needs your approval."
+
+
 @dataclass
 class PermissionEngine:
     """Evaluate tool calls to allow / ask / deny.
@@ -525,13 +562,14 @@ class PermissionEngine:
                         "handlers run commands in a later session"
                     ),
                 )
-            return self._apply_approval_policy(
-                matched.action,
-                (
-                    f"matched rule {matched.permission!r} pattern {matched.pattern!r} "
-                    f"→ {matched.action.value}"
-                ),
-            )
+            rule = f"{matched.permission} {matched.pattern}"
+            if matched.action is PermissionDecision.ASK:
+                reason = f"Your permission rule `{rule}` asks before this runs."
+            elif matched.action is PermissionDecision.DENY:
+                reason = f"Blocked by your permission rule `{rule}`."
+            else:
+                reason = f"Allowed by your permission rule `{rule}`."
+            return self._apply_approval_policy(matched.action, reason)
 
         if self.mode is PermissionMode.PLAN:
             if read_only:
@@ -564,7 +602,7 @@ class PermissionEngine:
             )
         return self._apply_approval_policy(
             PermissionDecision.ASK,
-            "default mode: mutating tool requires confirmation",
+            confirmation_reason(tool_name),
         )
 
     def _mode_default_allow(

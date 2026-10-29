@@ -14,6 +14,7 @@ from core.application.errors import (
 )
 from core.application.views import automation_run_view, turn_view
 from core.domain.approval import Approval, ApprovalStatus
+from core.harness.approval_scope import requested_session_target
 from core.domain.automation import AutomationRunStatus
 from core.domain.event import DomainEvent
 
@@ -161,9 +162,10 @@ def _resolve_interactively(
     request = approval.request
     tool_name = str(request.get("toolName") or "tool")
     reason = str(request.get("reason") or "sensitive operation")
+    target = requested_session_target(request)
     prompt = (
         f"Approval required · {tool_name}: {reason}\n"
-        "Approve once [y], allow this tool for the Session [a], or deny [n]? "
+        f"Allow once [y], always allow {target} this session [a], or deny [n]? "
     )
     choices = {
         "y": ApprovalStatus.APPROVED_ONCE,
@@ -178,7 +180,9 @@ def _resolve_interactively(
         raw = reader(prompt)
         decision = choices.get(raw.strip().casefold())
         if decision is None:
-            prompt = "Enter y (once), a (Session), or n (deny): "
+            prompt = (
+                f"Enter y (once), a (always allow {target} this session), or n (deny): "
+            )
             continue
         try:
             application.approvals.respond(

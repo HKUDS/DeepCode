@@ -341,11 +341,23 @@ def _route_item(
     variants, initial = _effort_ladder(efforts, requested_effort)
     return PickerItem(
         value=(connection_id, model_id),
-        title=f"{connection_id}/{model_id}",
+        title=route_title(connection_id, model_id),
         detail=" · ".join(details),
         variants=variants,
         initial_variant=initial,
     )
+
+
+def route_title(connection_id: str, model_id: str) -> str:
+    """``connection/model``, without naming the connection twice.
+
+    A model id may already carry its provider (the built-in default is
+    ``openai/gpt-4o-mini`` on the ``openai`` connection), which read as
+    ``openai/openai/gpt-4o-mini``.
+    """
+    if not connection_id or model_id.startswith(f"{connection_id}/"):
+        return model_id
+    return f"{connection_id}/{model_id}"
 
 
 async def _model_via_picker(app) -> str | None:
@@ -384,7 +396,7 @@ async def _model_via_picker(app) -> str | None:
         variants, initial = _effort_ladder(efforts, requested)
         current_item = PickerItem(
             value=current_route,
-            title=f"{profile.connection_id}/{profile.model_id}",
+            title=route_title(profile.connection_id, profile.model_id),
             detail="current · not in any catalog",
             variants=variants,
             initial_variant=initial,

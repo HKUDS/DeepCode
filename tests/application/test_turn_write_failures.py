@@ -173,7 +173,7 @@ def test_a_failed_turn_finishes_when_its_error_cannot_be_saved(tmp_path, monkeyp
             started = application.turns.start(thread_id, prompt="Try")
             failed = _wait_for(application, started.turn.id, TurnStatus.FAILED)
 
-        assert failed.turn.error_message == "RuntimeError: model connection reset"
+        assert failed.turn.error_message == "model connection reset"
         # The finish wrote the completion the projection could not.
         assert [i.kind for i in failed.items].count(ItemKind.COMPLETION) == 1
         _assert_next_turn_runs(application, thread_id)

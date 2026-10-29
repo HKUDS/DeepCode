@@ -24,6 +24,18 @@ function requestDetail(approval: Approval, t: (key: string, defaultValue: string
   return t("approval.reviewOperation", "Review this operation before the agent continues.");
 }
 
+// What "always allow" covers ("`git status …`", "edits in this workspace"),
+// computed by the service so every client names the same scope.
+function sessionLabel(approval: Approval, t: (key: string, defaultValue: string, options?: Record<string, string>) => string): string {
+  const scope = approval.request.sessionScope;
+  const target =
+    typeof scope === "object" && scope !== null && !Array.isArray(scope) ? scope.target : undefined;
+  if (typeof target === "string" && target) {
+    return t("approval.allowSessionScope", "Always allow {{target}} this session", { target });
+  }
+  return t("approval.allowSession", "Allow for Session");
+}
+
 function requestTool(approval: Approval, t: (key: string, defaultValue: string) => string): string {
   const tool = approval.request.toolName;
   return typeof tool === "string" && tool.trim() ? tool : t("approval.sensitiveOperation", "Sensitive operation");
@@ -100,7 +112,7 @@ export function ApprovalCard({ approval, busy, onRespond }: ApprovalCardProps) {
           onClick={() => onRespond(approval.id, "approved_session")}
           disabled={busy}
         >
-          {t("approval.allowSession", "Allow for Session")}
+          {sessionLabel(approval, t)}
         </button>
         <button
           className={styles.danger}

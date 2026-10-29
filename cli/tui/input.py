@@ -185,6 +185,9 @@ class TuiCompleter(Completer):
 class InputReader:
     """One awaitable ``read()`` for both interactive and piped stdin."""
 
+    _draft = ""
+    _prompt_provider: Callable[[], StyleAndTextTuples] | None = None
+
     def __init__(
         self,
         workspace: str,
@@ -197,11 +200,18 @@ class InputReader:
         # "Is there anything moving right now?" — the only question the
         # animation loop asks, several times a second.
         activity_probe: Callable[[], bool] | None = None,
+        # The caret, asked on every repaint: it changes while an approval
+        # waits for an answer.
+        prompt_provider: Callable[[], StyleAndTextTuples] | None = None,
     ) -> None:
         self.interactive = sys.stdin.isatty()
         self._prompt_session: PromptSession | None = None
         self._completer = TuiCompleter(workspace)
         self._activity_probe = activity_probe
+        self._prompt_provider = prompt_provider
+        # Text to put back in the prompt (a message held while an approval
+        # waits), consumed by the next read.
+        self._draft = ""
         if self.interactive:
             history_path = _HISTORY_PATH or deepcode_home() / "tui_history"
             ensure_private_directory(history_path.parent)
@@ -288,9 +298,14 @@ class InputReader:
                 _ANIMATION_INTERVAL_SECONDS if active else _IDLE_PROBE_SECONDS
             )
 
+    def keep_draft(self, text: str) -> None:
+        """Show ``text`` in the next prompt, ready to send or edit."""
+        self._draft = text
+
     async def read(self) -> str | None:
         """Next input line, or ``None`` on EOF (ctrl-d / pipe end)."""
         if self._prompt_session is not None:
+            draft, self._draft = self._draft, ""
             animator = asyncio.create_task(self._animate())
             try:
                 # raw=True: without it prompt_toolkit REPLACES every ESC
@@ -299,7 +314,8 @@ class InputReader:
                 # "?[36m" garbage on screen.
                 with patch_stdout(raw=True):
                     return await self._prompt_session.prompt_async(
-                        theme.prompt_fragments()
+                        self._prompt_provider or theme.prompt_fragments(),
+                        **({"default": draft} if draft else {}),
                     )
             except KeyboardInterrupt as exc:
                 raise InputInterrupted() from exc

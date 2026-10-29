@@ -25,6 +25,7 @@ from core.domain.event import DomainEvent
 from core.domain.item import Item, ItemKind, ItemStatus
 from core.domain.thread import ThreadStatus
 from core.domain.turn import TurnStatus
+from core.harness.approval_scope import SessionScope, is_covered, session_scope
 from core.persistence.database import Database
 from core.persistence.event_repository import EventRepository
 from core.persistence.execution_repository import (
@@ -88,7 +89,9 @@ class ApprovalService:
             thread = threads.get(thread_id)
             if thread is None:
                 return False
-            if ApprovalGrantRepository(connection).allows(thread_id, tool_name):
+            scope = session_scope(tool_name, arguments, thread.workspace_path)
+            grants = ApprovalGrantRepository(connection).list_for_thread(thread_id)
+            if is_covered(scope, ((grant.tool_name, grant.scopes) for grant in grants)):
                 return True
             items = ItemRepository(connection)
             now = utc_now()
@@ -117,6 +120,9 @@ class ApprovalService:
                     "toolName": tool_name,
                     "arguments": arguments,
                     "reason": reason,
+                    # What "always allow" covers, so every client can say so
+                    # and the grant is exactly what was shown.
+                    "sessionScope": scope.to_payload(),
                 },
                 requested_at=now,
             )
@@ -255,12 +261,14 @@ class ApprovalService:
                     raise ConflictError(
                         "session approval is missing its exact tool scope"
                     )
+                scope = self._session_scope(current, thread.workspace_path)
                 ApprovalGrantRepository(connection).add_if_absent(
                     ApprovalGrant(
                         thread_id=current.thread_id,
                         tool_name=tool_name,
                         source_approval_id=current.id,
                         granted_at=now,
+                        scopes=scope.keys,
                     )
                 )
             remaining_pending = approvals.pending_for_turn(current.turn_id)
@@ -395,6 +403,23 @@ class ApprovalService:
                 (local_wake,),
                 timeout=self.decision_poll_seconds,
             )
+
+    @staticmethod
+    def _session_scope(approval: Approval, workspace: str) -> SessionScope:
+        """The scope shown with ``approval``; recomputed for older requests."""
+
+        tool_name = str(approval.request["toolName"])
+        recorded = SessionScope.from_payload(
+            tool_name, approval.request.get("sessionScope")
+        )
+        if recorded is not None:
+            return recorded
+        arguments = approval.request.get("arguments")
+        return session_scope(
+            tool_name,
+            arguments if isinstance(arguments, dict) else {},
+            workspace,
+        )
 
     @staticmethod
     def _category(tool_name: str, arguments: dict[str, Any]) -> ApprovalCategory:

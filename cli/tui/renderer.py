@@ -55,6 +55,13 @@ _PREVIEW_ROWS = 3  # the unfinished answer shown above the status line
 # Below a second, a duration is noise on every row; above it, it is the
 # most useful thing the elbow can say.
 _DURATION_FLOOR_SECONDS = 1.0
+# A Turn is queued for a moment even when a slot is free; only a wait this
+# long is worth saying "Queued" about.
+_QUEUED_NOTICE_SECONDS = 1.0
+_QUEUED_DETAIL = "waiting to start"  # until the app learns why
+# How the kernel reports a call the user denied at its approval prompt.
+_USER_DENIAL = "permission denied: user rejected"
+APPROVAL_STATUS = "Waiting for your approval"
 
 
 @dataclass(slots=True)
@@ -237,6 +244,17 @@ class EventRenderer:
         # /raw: print the model's text exactly as written and let the
         # terminal wrap it, for copying.
         self.raw_output = False
+        # Approvals waiting for an answer (id -> the keys to answer with).
+        # While any waits, the Turn is not working, and the status line must
+        # not say it is.
+        self._approvals: dict[str, str] = {}
+        # This Session's Turns that wait to run (id -> since), the ones
+        # running now, and what the waiting ones wait for once known. A Turn
+        # queued behind this Session's own Turn has no TurnStarted of its own
+        # until it runs, so the queue is tracked apart from ``_turn_active``.
+        self._queued: dict[str, float] = {}
+        self._running: set[str] = set()
+        self._queue_reason: str | None = None
 
     def _emit_gap(self) -> None:
         if self._gap_pending:
@@ -323,6 +341,52 @@ class EventRenderer:
         mode = self.set_transcript_mode(self.transcript_mode.next())
         return mode.value
 
+    # -- waiting states (fed from service events by the app) ----------------
+
+    def approval_requested(self, approval_id: str, hint: str) -> None:
+        self._close_line()
+        self._approvals[approval_id] = hint
+
+    def approval_resolved(self, approval_id: str) -> None:
+        self._approvals.pop(approval_id, None)
+
+    @property
+    def approval_hint(self) -> str | None:
+        """The keys of the approval waiting for an answer, if one is."""
+        return (
+            next(reversed(self._approvals.values()), None) if self._approvals else None
+        )
+
+    def turn_queued(self, turn_id: str) -> None:
+        self._queued.setdefault(turn_id, monotonic())
+
+    def turn_running(self, turn_id: str) -> None:
+        """The Turn left the queue; its clock starts now, not when it queued."""
+        self._running.add(turn_id)
+        if self._queued.pop(turn_id, None) is not None:
+            self._stats.started_at = monotonic()
+            if not self._queued:
+                self._queue_reason = None
+
+    def turn_finished(self, turn_id: str) -> None:
+        self._running.discard(turn_id)
+        self._queued.pop(turn_id, None)
+        if not self._queued:
+            self._queue_reason = None
+
+    def set_queue_reason(self, reason: str | None) -> None:
+        """What the queued Turn waits for, e.g. "a free slot (2 running)"."""
+        self._queue_reason = reason
+
+    @property
+    def has_queued(self) -> bool:
+        return bool(self._queued)
+
+    @property
+    def waiting_in_queue(self) -> bool:
+        """A Turn of this Session waits and none of its Turns runs."""
+        return bool(self._queued) and not self._running
+
     # -- status surface -------------------------------------------------------
 
     def _activity(self) -> tuple[str, float, str] | None:
@@ -337,6 +401,20 @@ class EventRenderer:
         state is the common one: a turn spends most of its life waiting
         for the first token.
         """
+        if self.waiting_in_queue:
+            since = min(self._queued.values())
+            waited = max(0.0, monotonic() - since)
+            if waited >= _QUEUED_NOTICE_SECONDS:
+                return ("Queued", waited, self._queue_reason or _QUEUED_DETAIL)
+        activity = self._running_activity()
+        if activity is not None and self._queued:
+            # The running Turn is in front; the queued one says it is next.
+            label, elapsed, detail = activity
+            extra = f"{len(self._queued)} queued next"
+            return (label, elapsed, f"{detail} · {extra}" if detail else extra)
+        return activity
+
+    def _running_activity(self) -> tuple[str, float, str] | None:
         if self._tool_calls:
             # The newest call is the one in front; the older ones are on
             # screen as cards already.
@@ -381,7 +459,14 @@ class EventRenderer:
         second to decide whether the prompt needs an animation repaint at
         all. An idle TUI must cost nothing.
         """
-        return bool(self._tool_calls or self._active_reasoning_id or self._turn_active)
+        if self._approvals:
+            return False  # waiting on the user: nothing moves
+        return bool(
+            self._tool_calls
+            or self._active_reasoning_id
+            or self._turn_active
+            or self._queued
+        )
 
     def settle_turn(self) -> None:
         """Stop reporting activity for a turn that ended off the event stream.
@@ -401,9 +486,13 @@ class EventRenderer:
         self._active_reasoning_id = None
         self._segment_mode = None
         self._completed_message_mode = None
+        self._approvals.clear()
 
     def status_line(self) -> str:
         """The status as plain text (no motion) — pipes, tests, fallbacks."""
+        hint = self.approval_hint
+        if hint is not None:
+            return f" ◆ {APPROVAL_STATUS} · {hint} "
         activity = self._activity()
         if activity is None:
             return f" {self._idle_status()} "
@@ -446,6 +535,13 @@ class EventRenderer:
         two signals a terminal can carry that something is alive without
         redrawing the transcript.
         """
+        hint = self.approval_hint
+        if hint is not None:
+            # Still, no spinner and no clock: the Turn waits for the user.
+            return [
+                (theme.STATUS_APPROVAL_PTK, f" ◆ {APPROVAL_STATUS} "),
+                (theme.STATUS_DETAIL_PTK, f"· {hint} "),
+            ]
         activity = self._activity()
         if activity is None:
             return [(theme.STATUS_BASE_PTK, f" {self._idle_status()} ")]
@@ -826,6 +922,15 @@ class EventRenderer:
         preview = getattr(msg, "result_preview", "") or ""
         first_line = preview.splitlines()[0].strip() if preview else ""
 
+        if msg.is_error and _USER_DENIAL in first_line:
+            # The user said no: not a failure, and the approval's reason
+            # (already on screen above) is not worth repeating.
+            self.console.print(
+                f"{theme.TOOL_RESULT_ELBOW} [{theme.APPROVAL_STYLE}]Denied by you[/]",
+                highlight=False,
+            )
+            self._gap_pending = True
+            return
         if msg.is_error:
             head = f"{theme.DONE_ERR} {msg.name} failed"
             mark = f"[{theme.TOOL_ERR_STYLE}]{escape(head)}[/]"
@@ -948,3 +1053,4 @@ class EventRenderer:
         self._streaming_message = False
         self._segment_mode = None
         self._completed_message_mode = None
+        self._approvals.clear()

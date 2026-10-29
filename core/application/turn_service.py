@@ -124,6 +124,13 @@ _FINISH_RETRY_DELAYS_S = (0.5, 2.0, 10.0)
 logger = logging.getLogger(__name__)
 
 
+def _user_error_text(exc: BaseException) -> str:
+    """An exception as a user reads it: its message, not its class."""
+
+    text = str(exc).strip()
+    return text or "An unexpected error stopped this turn; see the service log."
+
+
 @dataclass(frozen=True, slots=True)
 class TurnAdmissionContext:
     """One proposed Turn, inspected inside its write transaction.
@@ -1613,7 +1620,16 @@ class TurnService:
             status = TurnStatus.FAILED
             stop_reason = "error"
             error_code = "AGENT_EXECUTION_ERROR"
-            error_message = f"{type(exc).__name__}: {exc}"
+            # Clients show this to the user: the exception class stays in
+            # the log, the message says what went wrong.
+            logger.warning(
+                "turn %s failed: %s: %s",
+                turn_id,
+                type(exc).__name__,
+                exc,
+                exc_info=True,
+            )
+            error_message = _user_error_text(exc)
             if projection is not None:
                 projection.add_error(code=error_code, message=error_message)
         finally:
@@ -1714,7 +1730,7 @@ class TurnService:
                     "status": TurnStatus.FAILED,
                     "stop_reason": "error",
                     "error_code": "TURN_FINISH_FAILED",
-                    "error_message": f"{type(exc).__name__}: {exc}",
+                    "error_message": _user_error_text(exc),
                     "ensure_completion": True,
                 }
             await asyncio.sleep(delay)

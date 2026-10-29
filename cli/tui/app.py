@@ -51,7 +51,7 @@ from cli.project_trust import (
     set_project_trusted,
 )
 from cli.thread_client import ThreadClient
-from cli.tui import commands, theme
+from cli.tui import approval_view, commands, theme
 from cli.tui.goal_controller import TuiGoalController
 from cli.tui.input import InputInterrupted, InputReader, expand_file_refs
 from cli.tui.renderer import EventRenderer
@@ -77,6 +77,7 @@ _COMPLETION_CACHE_SECONDS = 5.0
 _COMPLETION_WAIT_SECONDS = 0.15
 _RESUME_TAIL_MESSAGES = 4  # messages replayed on /resume
 _RESUME_TAIL_LINES = 3  # lines shown per replayed message
+_QUEUE_PROBE_SECONDS = 2.0  # how often a queued Turn's reason is re-read
 
 
 class TuiApp:
@@ -106,6 +107,9 @@ class TuiApp:
             status_provider=self.renderer.status_fragments,
             toggle_transcript=self.renderer.cycle_transcript_mode,
             activity_probe=self.renderer.is_working,
+            prompt_provider=lambda: theme.prompt_fragments(
+                approval=self.renderer.approval_hint is not None
+            ),
         )
         self._exit_requested = False
         self._external_refresh_task: asyncio.Task | None = None
@@ -115,6 +119,9 @@ class TuiApp:
         # resolution made elsewhere can be reported instead of misread.
         self._prompted_approval_ids: set[str] = set()
         self._answered_approval_ids: set[str] = set()
+        # The approvals shown here, by id, for the answer's wording.
+        self._shown_approvals: dict[str, dict] = {}
+        self._queue_probe_task: asyncio.Task | None = None
         self._completion_cache: dict[str, tuple[float, object]] = {}
         self._completion_loads: dict[str, concurrent.futures.Future] = {}
         self._completion_cache_lock = threading.Lock()
@@ -920,16 +927,9 @@ class TuiApp:
         return "Interrupted the turn." if accepted else "The turn had already stopped."
 
     def _respond_to_pending_approval(self, text: str) -> str | None:
-        decision = {
-            "y": ApprovalStatus.APPROVED_ONCE,
-            "yes": ApprovalStatus.APPROVED_ONCE,
-            "a": ApprovalStatus.APPROVED_SESSION,
-            "always": ApprovalStatus.APPROVED_SESSION,
-            "n": ApprovalStatus.DENIED,
-            "no": ApprovalStatus.DENIED,
-        }.get(text.strip().casefold())
+        decision = _APPROVAL_ANSWERS.get(text.strip().casefold())
         if decision is None:
-            return None
+            return self._hold_for_pending_approval(text)
         approval = self.thread_client.pending_approval()
         if approval is None:
             if self._prompted_approval_ids:
@@ -948,17 +948,38 @@ class TuiApp:
             resolved = self.thread_client.respond_to_approval(approval.id, decision)
         except ApplicationError as exc:
             return f"Could not answer the approval: {exc.user_message}"
-        outcome = {
-            ApprovalStatus.APPROVED_ONCE: "approved once",
-            ApprovalStatus.APPROVED_SESSION: "approved for this Session",
-            ApprovalStatus.DENIED: "denied",
-        }.get(resolved.status, resolved.status.value.replace("_", " "))
-        return f"Approval {outcome}."
+        shown = self._shown_approvals.pop(approval.id, None) or {
+            "request": getattr(approval, "request", {})
+        }
+        self.renderer.approval_resolved(approval.id)
+        return approval_view.outcome_text(resolved.status.value, shown)
+
+    def _hold_for_pending_approval(self, text: str) -> str | None:
+        """Keep a message typed while an approval waits out of the Turn.
+
+        Sent, it would reach the model as a steer while the Turn cannot read
+        it, and the approval would still be waiting. It goes back in the
+        prompt instead, to send once the approval is answered.
+        """
+        if not self._prompted_approval_ids:
+            return None
+        if self.thread_client.pending_approval() is None:
+            # The approval was settled without an event reaching here.
+            self._prompted_approval_ids.clear()
+            self._shown_approvals.clear()
+            return None
+        self.reader.keep_draft(text)
+        return (
+            "Answer the approval first (y, a or n). "
+            "Your message was not sent; it is back in the prompt."
+        )
 
     def _on_approval_resolved(self, approval) -> None:
         if not isinstance(approval, dict) or not isinstance(approval.get("id"), str):
             return
         approval_id = approval["id"]
+        self.renderer.approval_resolved(approval_id)
+        self._shown_approvals.pop(approval_id, None)
         if approval_id in self._answered_approval_ids:
             self._answered_approval_ids.discard(approval_id)
             return
@@ -1007,6 +1028,10 @@ class TuiApp:
                             )
 
                     self._external_refresh_task = asyncio.create_task(refresh())
+        if event.turn_id is not None and event.thread_id == getattr(
+            self.thread_client, "session_id", None
+        ):
+            self._on_turn_event(event)
         if event.type == "approval.resolved":
             self._on_approval_resolved(event.payload.get("approval"))
             return
@@ -1015,19 +1040,92 @@ class TuiApp:
         approval = event.payload.get("approval")
         if not isinstance(approval, dict):
             return
-        if isinstance(approval.get("id"), str):
-            self._prompted_approval_ids.add(approval["id"])
-        request = approval.get("request")
-        request = request if isinstance(request, dict) else {}
-        tool = str(request.get("toolName") or "tool")
-        reason = str(request.get("reason") or "sensitive operation")
+        approval_id = approval.get("id")
+        if isinstance(approval_id, str):
+            self._prompted_approval_ids.add(approval_id)
+            self._shown_approvals[approval_id] = approval
+            self.renderer.approval_requested(
+                approval_id, approval_view.answer_hint(approval)
+            )
         self.console.print(
-            f"\n[bold {theme.APPROVAL_STYLE}]◆ approval needed[/] "
-            f"[bold]{escape(tool)}[/]\n"
-            f"  {escape(reason)}\n"
-            f"[{theme.META_STYLE}]{theme.TOOL_RESULT_ELBOW.strip()} "
-            f"reply {theme.APPROVAL_PROMPT}[/]"
+            approval_view.approval_card(
+                approval,
+                workspace=self.workspace,
+                verbose=self.renderer.transcript_mode.value == "verbose",
+            ),
+            highlight=False,
         )
+
+    def _on_turn_event(self, event: DomainEvent) -> None:
+        """Tell the status line which of this Session's Turns wait or run."""
+        turn = event.payload.get("turn")
+        status = turn.get("status") if isinstance(turn, dict) else None
+        if status is None:
+            return
+        if status == "queued":
+            if event.type in {"turn.started", "turn.queued"}:
+                self.renderer.turn_queued(event.turn_id)
+                self._explain_queue()
+        elif status in {"running", "waiting_approval"}:
+            self.renderer.turn_running(event.turn_id)
+        else:
+            self.renderer.turn_finished(event.turn_id)
+            self._explain_queue()
+
+    def _explain_queue(self) -> None:
+        """Find out what a queued Turn waits for, while it waits."""
+        if self.thread_client.runtime_mode != "service":
+            return
+        task = getattr(self, "_queue_probe_task", None)
+        if task is not None and not task.done():
+            return
+
+        async def probe() -> None:
+            while self.renderer.has_queued:
+                if self.renderer.waiting_in_queue:
+                    try:
+                        reason = await asyncio.to_thread(self._queue_reason)
+                    except Exception:  # noqa: BLE001 - the reason is a courtesy
+                        reason = None
+                    self.renderer.set_queue_reason(reason)
+                await asyncio.sleep(_QUEUE_PROBE_SECONDS)
+
+        try:
+            self._queue_probe_task = asyncio.get_running_loop().create_task(probe())
+        except RuntimeError:  # no running loop (tests driving the app directly)
+            self._queue_probe_task = None
+
+    def _queue_reason(self) -> str | None:
+        """What holds this Session's queued Turn, from the service's state.
+
+        A Turn runs once it holds three things: its Session, the Project's
+        workspace (shared by the Project's Sessions, unless one works in its
+        own worktree) and one of the service's execution slots.
+        """
+        client = self.thread_client
+        if client.turns.executing_for_thread(client.session_id) is not None:
+            return "waiting for the current Turn in this session to finish"
+        if not getattr(client.thread, "worktree_path", None):
+            threads = client.rpc.call(
+                "thread/list", {"projectId": client.project.id, "limit": 100}
+            )["threads"]
+            for thread in threads:
+                if (
+                    thread.get("id") != client.session_id
+                    and not thread.get("worktreePath")
+                    and thread.get("status") in {"running", "waiting"}
+                    and client.turns.executing_for_thread(thread["id"]) is not None
+                ):
+                    return "waiting for another session in this workspace to finish"
+        from app_server.service_client import ServiceClient
+
+        # The service's own status (not a Session RPC) counts running Turns.
+        running = (
+            ServiceClient(client.rpc.files).call("status", timeout=2).get("activeTurns")
+        )
+        if running:
+            return f"waiting for a free slot ({running} running)"
+        return None
 
     # -- REPL -----------------------------------------------------------------
 
@@ -1056,8 +1154,11 @@ class TuiApp:
             )
         else:
             self.console.print(f" {theme.brand_markup()}")
+        model = self.model
+        if self._uses_builtin_default_model():
+            model += " (built-in default; no model configured)"
         self.console.print(
-            f" [{theme.META_STYLE}]{escape(self.model)} · {escape(workspace)}[/]",
+            f" [{theme.META_STYLE}]{escape(model)} · {escape(workspace)}[/]",
             soft_wrap=True,
             highlight=False,
         )
@@ -1074,6 +1175,123 @@ class TuiApp:
             highlight=False,
         )
         self.console.print()
+
+    def _uses_builtin_default_model(self) -> bool:
+        """Whether nothing chose the model: DeepCode fell back to its own."""
+        try:
+            from core.config import AgentDefaults, load_config_for_workspace
+
+            config = load_config_for_workspace(self.workspace)
+        except Exception:  # noqa: BLE001 - a banner note must never block startup
+            return False
+        builtin = AgentDefaults.model_fields["model"].default
+        phase = config.agents.implementation
+        return (
+            self.model == builtin
+            and "model" not in config.agents.defaults.model_fields_set
+            and not (phase is not None and phase.model)
+        )
+
+    def _setup_problem(self) -> list[str]:
+        """What keeps the first message from working, and the fix, if anything.
+
+        A missing key used to surface only as the first Turn's failure. The
+        connection the Session will use is checked at startup instead.
+        """
+        try:
+            connection_id = self.thread_client.execution_profile.connection_id
+            views = self.connection_views()
+        except Exception:  # noqa: BLE001 - a startup check must not block the TUI
+            return []
+        view = next((v for v in views if v.get("id") == connection_id), None)
+        if view is None or (view.get("enabled", True) and view.get("configured")):
+            return []
+        name = str(view.get("label") or connection_id)
+        if not view.get("enabled", True):
+            lines = [
+                f"The {name} connection is turned off, so messages will fail.",
+                f"Turn it on:  deepcode provider set {connection_id} --enabled",
+            ]
+        elif view.get("auth") == "oauth":
+            lines = [
+                f"{name} is not signed in, so messages will fail.",
+                f"Sign in:  deepcode provider login {connection_id}",
+            ]
+        elif view.get("credentialSource") not in {None, "missing"}:
+            # The credential is there; the endpoint is what is missing.
+            lines = [
+                f"{name} has no API address, so messages will fail.",
+                f"Set it:  deepcode provider set {connection_id} --api-base <url>",
+            ]
+        else:
+            lines = [
+                f"{name} has no API key, so messages will fail.",
+                f"Add one (it asks for the key and does not show it):  "
+                f"deepcode provider set {connection_id} --api-key",
+            ]
+            env = view.get("apiKeyEnv")
+            if env:
+                lines.append(f"or set {env} before starting DeepCode.")
+        # Connections that are set up. A built-in local one (Ollama, vLLM)
+        # needs no key but may not be running, so it counts once configured.
+        ready = [
+            str(v.get("id"))
+            for v in views
+            if v.get("enabled")
+            and v.get("configured")
+            and v.get("id") != connection_id
+            and (v.get("explicit") or v.get("credentialSource") != "not_required")
+        ]
+        if ready:
+            lines.append(
+                f"Or switch to a ready connection with /model ({', '.join(ready)})."
+            )
+        if self._uses_builtin_default_model():
+            lines.append(
+                f"{self.model} is DeepCode's built-in default: no model is configured "
+                "yet (deepcode init creates a config file)."
+            )
+        return lines
+
+    def _print_setup_problem(self) -> None:
+        lines = self._setup_problem()
+        if not lines:
+            return
+        self.console.print(
+            f"[bold {theme.WARNING}]! {escape(lines[0])}[/]",
+            soft_wrap=True,
+            highlight=False,
+        )
+        for line in lines[1:]:
+            self.console.print(f"  {escape(line)}", soft_wrap=True, highlight=False)
+        self.console.print()
+
+    def _print_exit_note(self) -> None:
+        """Say what happens to a Turn that is still running on exit.
+
+        The service owns the Turn, so it keeps running after the TUI is
+        gone; leaving without saying so read as if the work stopped.
+        """
+        if self.thread_client.runtime_mode != "service":
+            return
+        try:
+            active = self.thread_client.has_active_turn()
+            waiting = active and self.thread_client.pending_approval() is not None
+        except Exception:  # noqa: BLE001 - leaving must not fail on a status read
+            return
+        if not active:
+            return
+        state = "is waiting for an approval" if waiting else "keeps running"
+        self.console.print(
+            f"[{theme.WARNING}]The current task {state} in the background service.[/]",
+            highlight=False,
+        )
+        self.console.print(
+            f"[{theme.META_STYLE}]Reattach:  deepcode --resume "
+            f"{escape(self.thread_client.session_id)}[/]",
+            soft_wrap=True,
+            highlight=False,
+        )
 
     async def _run_line(self, text: str) -> None:
         """Run one line as a task that Ctrl-C cancels without ending the TUI.
@@ -1155,6 +1373,7 @@ class TuiApp:
         await self.thread_client.start_domain_events(self._on_domain_event)
         if self.reader.interactive:
             self._banner()
+            self._print_setup_problem()
         try:
             self.render_resume_tail()
             while not self._exit_requested:
@@ -1181,9 +1400,12 @@ class TuiApp:
                         logger.exception("TUI request failed")
                     self._print_status(f"Request failed: {_error_text(exc)}")
             if self.reader.interactive:
+                self._print_exit_note()
                 self.console.print(f"[{theme.META_STYLE}]bye[/]")
             return 0
         finally:
+            if getattr(self, "_queue_probe_task", None) is not None:
+                self._queue_probe_task.cancel()
             if self._external_refresh_task is not None:
                 self._external_refresh_task.cancel()
                 await asyncio.gather(
@@ -1252,6 +1474,16 @@ def main(argv: list[str] | None = None, *, shared_service: bool = True) -> int:
         print(f"DeepCode could not start: {exc}", file=sys.stderr)
         return 1
     return asyncio.run(app.repl())
+
+
+_APPROVAL_ANSWERS = {
+    "y": ApprovalStatus.APPROVED_ONCE,
+    "yes": ApprovalStatus.APPROVED_ONCE,
+    "a": ApprovalStatus.APPROVED_SESSION,
+    "always": ApprovalStatus.APPROVED_SESSION,
+    "n": ApprovalStatus.DENIED,
+    "no": ApprovalStatus.DENIED,
+}
 
 
 def _error_text(exc: BaseException) -> str:
@@ -1370,17 +1602,27 @@ def _confirm_trust(project: Project) -> bool:
         return False
     print(
         "DeepCode can read files and run tools in this workspace:\n"
-        f"  {project.canonical_path}\n"
-        "Trust this folder? Type yes to continue: ",
-        end="",
+        f"  {project.canonical_path}",
         file=sys.stderr,
-        flush=True,
     )
-    answer = sys.stdin.readline()
-    if answer.strip().casefold() != "yes":
-        print("Workspace was not trusted; no Session was created.", file=sys.stderr)
-        return False
-    return True
+    question = "Trust this folder? [y/n]: "
+    for _attempt in range(3):
+        print(question, end="", file=sys.stderr, flush=True)
+        line = sys.stdin.readline()
+        if not line:  # end of input
+            break
+        answer = line.strip().casefold()
+        if answer in {"y", "yes"}:
+            return True
+        if answer in {"n", "no"}:
+            break
+        question = "Please answer y (trust it) or n (leave): "
+    print(
+        "Not trusted, so DeepCode will not open this folder. To use it, run "
+        "deepcode again here and answer y, or start with --trust.",
+        file=sys.stderr,
+    )
+    return False
 
 
 if __name__ == "__main__":

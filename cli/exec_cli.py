@@ -20,6 +20,7 @@ from cli.transcript import TranscriptMode
 from core.application.errors import ApplicationError
 from core.config import ConfigError
 from core.domain.approval import Approval, ApprovalStatus
+from core.harness.approval_scope import requested_session_target
 from core.events import serialize_event
 from core.skills.models import MAX_SELECTED_SKILLS
 
@@ -91,9 +92,10 @@ def _approval_decider(approval: Approval) -> ApprovalStatus:
             flush=True,
         )
         return ApprovalStatus.DENIED
+    target = requested_session_target(request)
     print(
         f"\nApproval required for {tool}: {reason}\n"
-        "  y = approve once · a = approve this tool for the Session · "
+        f"  y = allow once · a = always allow {target} this session · "
         "anything else = deny\n> ",
         end="",
         file=sys.stderr,

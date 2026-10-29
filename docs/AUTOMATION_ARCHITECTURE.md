@@ -108,7 +108,10 @@ wake-up mechanism:
 - another application process can approve or deny the owner Turn;
 - cancellation committed first rejects a late approval;
 - concurrent decisions use compare-and-swap;
-- `approved_session` grants are persisted for the exact Thread and tool.
+- `approved_session` grants are persisted for the exact Thread, scoped to the
+  same kind of call (`core/harness/approval_scope.py`): a command's program
+  and subcommand, edits inside the workspace, or the whole tool for any other
+  tool.
 
 An Automation cannot raise its own permissions, and a Skill cannot raise
 permissions either.

@@ -293,7 +293,7 @@ def test_code_mode_ask_uses_shared_approver(tmp_path):
     assert len(calls) == 1
     assert calls[0][0] == "write"
     assert calls[0][1] == {"file_path": "approved.txt", "content": "ok"}
-    assert "requires confirmation" in calls[0][2]
+    assert calls[0][2] == "Changing files needs your approval."
     assert "permission denied" not in out
 
 

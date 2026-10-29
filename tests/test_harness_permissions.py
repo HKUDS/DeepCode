@@ -404,3 +404,36 @@ def test_shorthand_string_rule():
         cwd="/w",
     )
     assert _decide(engine, "write_file", file_path="/w/a.py") is ALLOW
+
+
+def test_ask_reasons_are_written_for_the_user():
+    engine = make_engine("default")
+    assert engine.evaluate("bash", {"command": "ls"}) == (
+        PermissionDecision.ASK,
+        "Running a command needs your approval.",
+    )
+    assert engine.evaluate("write", {"file_path": "a.txt", "content": "x"}) == (
+        PermissionDecision.ASK,
+        "Changing files needs your approval.",
+    )
+    decision, reason = engine.evaluate("mcp_tracker_create_issue", {"title": "x"})
+    assert decision is PermissionDecision.ASK
+    assert (
+        reason
+        == "mcp_tracker_create_issue can make changes, so it needs your approval."
+    )
+
+
+def test_rule_reasons_name_the_users_rule():
+    engine = make_engine(
+        "full_auto",
+        rules_config={"bash": {"git push*": "ask", "rm *": "deny"}},
+    )
+    assert engine.evaluate("bash", {"command": "git push origin"}) == (
+        PermissionDecision.ASK,
+        "Your permission rule `bash git push*` asks before this runs.",
+    )
+    assert engine.evaluate("bash", {"command": "rm -rf x"}) == (
+        PermissionDecision.DENY,
+        "Blocked by your permission rule `bash rm *`.",
+    )

@@ -60,8 +60,17 @@ PROMPT_STYLE_PTK = "bold fg:ansicyan"  # prompt_toolkit dialect of the same role
 CONTINUATION = "… "
 
 
-def prompt_fragments() -> list[tuple[str, str]]:
-    """The input caret as prompt_toolkit formatted-text fragments."""
+def prompt_fragments(*, approval: bool = False) -> list[tuple[str, str]]:
+    """The input caret as prompt_toolkit formatted-text fragments.
+
+    While an approval waits, the caret asks for the answer itself, so what
+    the user types next is read as one.
+    """
+    if approval:
+        return [
+            (APPROVAL_PROMPT_STYLE_PTK, "allow? y/a/n "),
+            (PROMPT_STYLE_PTK, PROMPT),
+        ]
     return [(PROMPT_STYLE_PTK, PROMPT)]
 
 
@@ -96,7 +105,7 @@ DONE_ERR = "✗"
 
 # -- approvals --------------------------------------------------------------
 APPROVAL_STYLE = WARNING
-APPROVAL_PROMPT = "y once · a session · n deny"
+APPROVAL_PROMPT_STYLE_PTK = "bold fg:ansiyellow"
 
 # -- pickers (prompt_toolkit dialect; it has no dim attribute, so the
 # hierarchy is bold titles over plain detail, accent on the selection) ------
@@ -125,6 +134,8 @@ STATUS_STYLE_RULES = {
     # The answer line still being written, shown above the status line until
     # its newline commits it to the transcript: plain foreground, readable.
     "status.preview": "",
+    # Waiting for the user's answer: the approval colour, still.
+    "status.approval": "fg:ansiyellow bold",
 }
 STATUS_BASE_PTK = "class:status"
 STATUS_PREVIEW_PTK = "class:status.preview"
@@ -132,6 +143,7 @@ STATUS_SPINNER_PTK = "class:status.spinner"
 STATUS_LABEL_PTK = "class:status.label"
 STATUS_GLARE_PTK = "class:status.glare"
 STATUS_DETAIL_PTK = "class:status.detail"
+STATUS_APPROVAL_PTK = "class:status.approval"
 
 
 def supports_truecolor() -> bool:
