@@ -8,6 +8,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 
+import { Dialog } from "./components/Dialog";
 import type { MethodResults } from "./generated/app-server";
 import styles from "./webShell.module.css";
 
@@ -150,11 +151,13 @@ export function ServerFolderPicker({
   }
 
   return (
-    <form
+    // The backdrop keeps a typed path: only Cancel or Escape dismiss it.
+    <Dialog
+      as="form"
       className={styles.dialog}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="directory-title"
+      backdropClassName={styles.backdrop}
+      labelledBy="directory-title"
+      onClose={() => onClose(null)}
       onSubmit={(event) => {
         event.preventDefault();
         if (path.trim()) onClose(path.trim());
@@ -195,6 +198,6 @@ export function ServerFolderPicker({
           {t("browser.picker.open", "Open project")}
         </button>
       </footer>
-    </form>
+    </Dialog>
   );
 }

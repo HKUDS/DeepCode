@@ -269,6 +269,8 @@ class TestRuntime implements ClientRuntime {
   }
 
   readonly presetState = new Map<string, string>();
+  /** Commands of the hooks the project declares (hooks/list). */
+  projectHooks: string[] = [];
   /** Threads whose Session file the service reports it can't read. */
   readonly unreadable = new Set<string>();
   /** What turn/read returns per Turn: the items as the service holds them. */
@@ -1060,6 +1062,26 @@ class TestRuntime implements ClientRuntime {
         return { files: [] } as unknown as MethodResults[M];
       case "test/discover":
         return { commands: [] } as unknown as MethodResults[M];
+      case "hooks/list":
+        return {
+          hooks: this.projectHooks.map((command, index) => ({
+            eventName: "PreToolUse",
+            matcher: null,
+            command,
+            timeoutSeconds: 60,
+            source: "project",
+            sourcePath: ".deepcode/hooks.json",
+            displayOrder: index,
+            statusMessage: null,
+          })),
+          warnings: [],
+          truncated: false,
+          projectHooks: {
+            digest: "digest",
+            approvedDigest: null,
+            status: this.projectHooks.length ? "unapproved" : "none",
+          },
+        } as unknown as MethodResults[M];
       default:
         throw new Error(`Unexpected test RPC method: ${method}`);
     }
@@ -3180,9 +3202,85 @@ describe("desktop command center", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Trust folder" }));
+    const dialog = await screen.findByRole("alertdialog", {
+      name: "Trust “Existing CLI project”?",
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Trust folder" }));
     await waitFor(() => expect(runtime.calls).toContain("project/update"));
     fireEvent.keyDown(composer, { key: "Enter" });
     await waitFor(() => expect(runtime.calls).toContain("turn/start"));
+  });
+
+  it("asks before trusting a folder and names the access and hooks that apply", async () => {
+    const untrusted: Project = { ...project, trustState: "untrusted" };
+    const runtime = new TestRuntime([untrusted], [thread], []);
+    runtime.settingsState = {
+      ...runtime.settingsState,
+      resolvedDefaultSecurityProfile: fullAccessSecurityProfile,
+    };
+    runtime.projectHooks = ["sh .deepcode/check.sh", "npm run lint"];
+    render(<App runtime={runtime} />);
+
+    const trigger = await screen.findByRole("button", { name: "Trust folder" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const dialog = await screen.findByRole("alertdialog", {
+      name: `Trust “${project.displayName}”?`,
+    });
+    // The access that will apply, read from the resolved default.
+    expect(
+      within(dialog).getByText(
+        "Agent access for new Turns: Full access (the current default).",
+      ),
+    ).toBeTruthy();
+    expect(dialog.textContent).toContain("outside the workspace sandbox");
+    expect(dialog.textContent).toContain("hooks");
+    expect(
+      await within(dialog).findByText("Project hooks declared now: 2.", {
+        exact: false,
+      }),
+    ).toBeTruthy();
+    expect(dialog.textContent).toContain(project.canonicalPath);
+    // Cancel is the default, and cancelling trusts nothing.
+    expect(document.activeElement).toBe(
+      within(dialog).getByRole("button", { name: "Cancel" }),
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    expect(runtime.calls).not.toContain("project/update");
+
+    // Escape cancels too.
+    fireEvent.click(trigger);
+    await screen.findByRole("alertdialog");
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(runtime.calls).not.toContain("project/update");
+  });
+
+  it("names the Session's own access override in the trust confirmation", async () => {
+    const untrusted: Project = { ...project, trustState: "untrusted" };
+    const readOnlyThread: Thread = { ...thread, accessPresetOverride: "read_only" };
+    const runtime = new TestRuntime([untrusted], [readOnlyThread], []);
+    render(<App runtime={runtime} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Trust folder" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(
+      within(dialog).getByText("Agent access in this Session: Read only."),
+    ).toBeTruthy();
+    expect(
+      await within(dialog).findByText(
+        "This folder declares no project hooks right now.",
+        { exact: false },
+      ),
+    ).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Trust folder" }));
+    await waitFor(() => expect(runtime.calls).toContain("project/update"));
+    expect(
+      runtime.requests.find((request) => request.method === "project/update")
+        ?.params,
+    ).toEqual({ projectId: project.id, trustState: "trusted" });
   });
 
   it("reveals Session rows through project disclosure instead of expanding every project", async () => {

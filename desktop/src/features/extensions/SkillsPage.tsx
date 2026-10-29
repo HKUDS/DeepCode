@@ -7,6 +7,7 @@ import type {
   Project,
   SkillInfo,
 } from "../../generated/app-server";
+import { confirmAction } from "../../platform/confirmAction";
 import type { ClientRuntime } from "../../rpc/contracts";
 import styles from "../management/ManagementWorkspace.module.css";
 import { MarkdownContent } from "../thread/MarkdownContent";
@@ -216,18 +217,24 @@ export function SkillsPage({ runtime, project, onCreateSkill }: SkillsPageProps)
                         disabled={catalog.loading}
                         onClick={() => {
                           const selected = catalog.selectedSkill;
-                          if (
-                            selected &&
-                            window.confirm(
-                              t(
-                                "skills.deleteConfirm",
-                                "Delete the managed Skill “{{name}}”?",
-                                { name: selected.name },
-                              ),
-                            )
-                          ) {
-                            void catalog.deleteSkill(selected.id);
-                          }
+                          if (!selected) return;
+                          void (async () => {
+                            if (
+                              await confirmAction(
+                                t(
+                                  "skills.deleteConfirm",
+                                  "Delete the managed Skill “{{name}}”?",
+                                  { name: selected.name },
+                                ),
+                                {
+                                  destructive: true,
+                                  confirmLabel: t("skills.delete", "Delete"),
+                                },
+                              )
+                            ) {
+                              await catalog.deleteSkill(selected.id);
+                            }
+                          })();
                         }}
                       >
                         <Trash2 size={14} />

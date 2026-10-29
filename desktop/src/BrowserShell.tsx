@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { App } from "./App";
+import { ConfirmHost } from "./components/ConfirmHost";
 import { BrowserRuntime } from "./rpc/browserRuntime";
 import { ServerFolderPicker } from "./ServerFolderPicker";
 import styles from "./webShell.module.css";
@@ -70,15 +71,14 @@ export function BrowserShell() {
         <App runtime={runtime} />
       </div>
       {picker && (
-        <div className={styles.backdrop}>
-          <ServerFolderPicker
-            listDirectories={(path) =>
-              runtime.request("directory/list", path ? { path } : {})
-            }
-            onClose={closePicker}
-          />
-        </div>
+        <ServerFolderPicker
+          listDirectories={(path) =>
+            runtime.request("directory/list", path ? { path } : {})
+          }
+          onClose={closePicker}
+        />
       )}
+      <ConfirmHost />
     </div>
   );
 }

@@ -15,7 +15,9 @@ const layers: Array<() => void> = [];
 let listening = false;
 
 function dispatchEscape(event: KeyboardEvent): void {
-  if (event.key !== "Escape") return;
+  // A key an IME is composing, or one a control already handled (dictation
+  // cancelling on Escape), is not a request to close anything.
+  if (event.key !== "Escape" || event.isComposing || event.defaultPrevented) return;
   const top = layers[layers.length - 1];
   if (!top) return;
   event.stopPropagation();

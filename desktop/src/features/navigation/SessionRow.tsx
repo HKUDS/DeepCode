@@ -14,6 +14,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 
+import { Dialog } from "../../components/Dialog";
 import type { Thread } from "../../generated/app-server";
 import styles from "./SessionRow.module.css";
 
@@ -41,6 +42,7 @@ export function SessionRow({
   const { t } = useTranslation();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const moreRef = useRef<HTMLButtonElement | null>(null);
   const [mode, setMode] = useState<RowMode>("closed");
   const [draft, setDraft] = useState(thread.title);
   const archiveDisabled =
@@ -54,8 +56,10 @@ export function SessionRow({
     });
   }, [mode]);
 
+  // The menu and the inline rename close themselves; the archive and delete
+  // confirmations are dialogs and handle Escape and outside presses there.
   useEffect(() => {
-    if (mode === "closed" || mode === "rename") return;
+    if (mode !== "menu") return;
     const closeOnOutsidePress = (event: PointerEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) {
         setMode("closed");
@@ -66,7 +70,7 @@ export function SessionRow({
   }, [mode]);
 
   useEffect(() => {
-    if (mode === "closed") return;
+    if (mode !== "menu" && mode !== "rename") return;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setMode("closed");
     };
@@ -145,6 +149,7 @@ export function SessionRow({
             </span>
           </button>
           <button
+            ref={moreRef}
             className={styles.moreButton}
             type="button"
             onClick={() => setMode((current) => (current === "closed" ? "menu" : "closed"))}
@@ -219,12 +224,15 @@ export function SessionRow({
       ) : null}
 
       {mode === "archive" ? (
-        <div
+        <Dialog
           className={styles.confirmation}
           role="alertdialog"
-          aria-label={t("session.archiveTitle", "Archive {{title}}", {
+          label={t("session.archiveTitle", "Archive {{title}}", {
             title: thread.title,
           })}
+          dismissOnPressOutside={rootRef}
+          returnFocus={moreRef}
+          onClose={() => setMode("closed")}
         >
           <p>
             {t("session.archiveConfirm", "Archive this Session?")}
@@ -248,16 +256,19 @@ export function SessionRow({
               {t("session.archive", "Archive")}
             </button>
           </div>
-        </div>
+        </Dialog>
       ) : null}
 
       {mode === "delete" ? (
-        <div
+        <Dialog
           className={styles.confirmation}
           role="alertdialog"
-          aria-label={t("session.deleteTitle", "Delete {{title}}", {
+          label={t("session.deleteTitle", "Delete {{title}}", {
             title: thread.title,
           })}
+          dismissOnPressOutside={rootRef}
+          returnFocus={moreRef}
+          onClose={() => setMode("closed")}
         >
           <p>
             {t("session.deleteConfirm", "Permanently delete this Session?")}
@@ -284,7 +295,7 @@ export function SessionRow({
               {t("session.delete", "Delete permanently")}
             </button>
           </div>
-        </div>
+        </Dialog>
       ) : null}
     </div>
   );

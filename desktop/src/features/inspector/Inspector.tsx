@@ -191,7 +191,7 @@ export function Inspector({
         ) : null}
         {tab === "artifacts" ? (
           <ArtifactsPanel
-            key={thread?.id ?? "no-thread"}
+            key={`artifacts:${thread?.id ?? "no-thread"}`}
             runtime={runtime}
             workflow={latestWorkflow}
             artifacts={artifacts}
@@ -205,8 +205,10 @@ export function Inspector({
             workbench={workbench}
           />
         ) : null}
+        {/* Sibling keys must differ: with one shared key React keeps the
+            Artifacts panel mounted beside every other tab. */}
         <TerminalPanel
-          key={thread?.id ?? "no-thread"}
+          key={`terminal:${thread?.id ?? "no-thread"}`}
           runtime={runtime}
           threadId={thread?.id ?? null}
           enabled={trusted}

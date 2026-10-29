@@ -9,9 +9,11 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { Dialog } from "../../components/Dialog";
+import { confirmAction } from "../../platform/confirmAction";
 import type {
   Goal,
   GoalOutcome,
@@ -54,6 +56,10 @@ export function GoalRail({
   onSelectEvidence,
 }: GoalRailProps) {
   const [editorOpen, setEditorOpen] = useState(false);
+  const editorTitleId = useId();
+  // With no Goal the editor replaces this button, so its opener is gone by
+  // the time it closes; focus goes back to the button drawn in its place.
+  const emptyRailRef = useRef<HTMLButtonElement | null>(null);
   const [resumeAfterSave, setResumeAfterSave] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [objective, setObjective] = useState("");
@@ -107,6 +113,7 @@ export function GoalRail({
   if (!goal && !editorOpen) {
     return (
       <button
+        ref={emptyRailRef}
         className={styles.emptyRail}
         type="button"
         onClick={() => openEditor()}
@@ -290,9 +297,19 @@ export function GoalRail({
                 className={styles.clearButton}
                 type="button"
                 onClick={() => {
-                  if (window.confirm(t("goal.clearConfirm", "Clear this Session Goal?"))) {
-                    void onClear();
-                  }
+                  void (async () => {
+                    if (
+                      await confirmAction(
+                        t("goal.clearConfirm", "Clear this Session Goal?"),
+                        {
+                          confirmLabel: t("goal.clearGoal", "Clear Goal"),
+                          cancelLabel: t("goal.cancel", "Cancel"),
+                        },
+                      )
+                    ) {
+                      await onClear();
+                    }
+                  })();
                 }}
                 disabled={busy}
               >
@@ -305,8 +322,13 @@ export function GoalRail({
       ) : null}
 
       {editorOpen ? (
-        <form
+        <Dialog
+          as="form"
           className={styles.editor}
+          labelledBy={editorTitleId}
+          busy={busy}
+          returnFocus={emptyRailRef}
+          onClose={() => setEditorOpen(false)}
           onSubmit={(event) => {
             event.preventDefault();
             void submit();
@@ -314,7 +336,7 @@ export function GoalRail({
         >
           <header>
             <div>
-              <strong>{goal ? t("goal.editGoal", "Edit Goal") : t("goal.newGoal", "New Goal")}</strong>
+              <strong id={editorTitleId}>{goal ? t("goal.editGoal", "Edit Goal") : t("goal.newGoal", "New Goal")}</strong>
               <span>
                 {t("goal.objectiveHint", "Objective edits keep the same Goal identity and reach the active Turn.")}
               </span>
@@ -397,7 +419,7 @@ export function GoalRail({
               {goal ? (resumeAfterSave ? t("goal.saveResume", "Save & resume") : t("goal.saveGoal", "Save Goal")) : t("goal.startGoal", "Start Goal")}
             </button>
           </footer>
-        </form>
+        </Dialog>
       ) : null}
     </section>
   );

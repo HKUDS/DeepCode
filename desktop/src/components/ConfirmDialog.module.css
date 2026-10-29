@@ -1,0 +1,123 @@
+/* Confirmation dialog — the in-app replacement for window.confirm, styled
+ * like the provider editor so every modal in the client reads as one family. */
+
+.backdrop {
+  position: fixed;
+  z-index: 1100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: rgb(18 22 20 / 32%);
+  backdrop-filter: blur(8px);
+}
+
+.dialog {
+  display: grid;
+  width: min(480px, 100%);
+  max-height: min(640px, calc(100vh - 56px));
+  overflow-y: auto;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xl);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-menu);
+  color: var(--text-primary);
+}
+
+.dialog:focus {
+  outline: none;
+}
+
+.dialog h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-display);
+  letter-spacing: var(--tracking-tight);
+}
+
+.body {
+  display: grid;
+  gap: 10px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.body p,
+.body ul {
+  margin: 0;
+}
+
+.body ul {
+  display: grid;
+  gap: 6px;
+  padding-left: 18px;
+}
+
+.body strong {
+  color: var(--text-primary);
+}
+
+.body code {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 6px;
+}
+
+.dialog footer button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+}
+
+.dialog footer button:hover {
+  border-color: var(--border-emphasis);
+  color: var(--text-primary);
+}
+
+.dialog footer .confirm {
+  border-color: var(--signal);
+  background: var(--signal);
+  color: var(--text-on-accent);
+}
+
+.dialog footer .confirm:hover {
+  border-color: var(--signal-strong);
+  background: var(--signal-strong);
+  color: var(--text-on-accent);
+}
+
+.dialog footer .confirm[data-tone="danger"] {
+  border-color: var(--danger);
+  background: var(--danger);
+}
+
+.dialog footer .confirm[data-tone="danger"]:hover {
+  border-color: color-mix(in srgb, var(--danger) 85%, black);
+  background: color-mix(in srgb, var(--danger) 85%, black);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .backdrop {
+    backdrop-filter: none;
+  }
+}
