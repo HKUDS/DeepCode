@@ -102,8 +102,14 @@ function workbenchRuntime() {
   return { request, runtime: { request } as unknown as ClientRuntime };
 }
 
-function TestInspector({ runtime }: { runtime: ClientRuntime }) {
-  const [tab, setTab] = useState<DesktopInspectorTab>("files");
+function TestInspector({
+  runtime,
+  initialTab = "files",
+}: {
+  runtime: ClientRuntime;
+  initialTab?: DesktopInspectorTab;
+}) {
+  const [tab, setTab] = useState<DesktopInspectorTab>(initialTab);
   return (
     <Inspector
       runtime={runtime}
@@ -165,5 +171,23 @@ describe("Inspector", () => {
     expect(
       request.mock.calls.filter(([method]) => method === "file/read"),
     ).toHaveLength(1);
+  });
+
+  it("shows only the selected tab after leaving Artifacts", async () => {
+    const { runtime } = workbenchRuntime();
+    render(<TestInspector runtime={runtime} initialTab="artifacts" />);
+    const artifactsEmpty = "Verified workflow outputs will appear here.";
+    expect(screen.getByText(artifactsEmpty)).toBeTruthy();
+
+    for (const name of [/^files/, /^tests/, /^terminal/, /^details/, /^changes/]) {
+      fireEvent.click(screen.getByRole("tab", { name }));
+      await waitFor(() =>
+        expect(screen.getByRole("tab", { name }).getAttribute("aria-selected")).toBe("true"),
+      );
+      expect(screen.queryByText(artifactsEmpty)).toBeNull();
+    }
+
+    fireEvent.click(screen.getByRole("tab", { name: /^artifacts/ }));
+    expect(screen.getAllByText(artifactsEmpty)).toHaveLength(1);
   });
 });
