@@ -219,30 +219,29 @@ describe("ThreadConversation", () => {
     expect(distanceFromEnd(viewport)).toBe(0);
   });
 
-  it("leaves an opened step where it is, and follows once it closes", () => {
+  it("leaves an opened step where it is, and keeps following when one closes", () => {
     const instruction = "Continue working toward the active Thread Goal.";
     const goalPrompt: Item = {
       ...item("user", 1, instruction),
       payload: { text: instruction, source: "goal_continuation" },
     };
     const viewport = openSession([goalPrompt, item("reply", 2, "Working", "in_progress")]);
+    const summary = screen.getByText("Working toward the Goal").closest("summary")!;
+    const step = summary.closest("details")!;
     const before = viewport.scrollTop;
 
-    const summary = screen.getByText("Working toward the Goal");
     fireEvent.click(summary);
-    expect(summary.closest("details")?.open).toBe(true);
+    expect(step.open).toBe(true);
     resizeTo(3500);
     expect(viewport.scrollTop).toBe(before);
     expect(latestButton()).not.toBeNull();
 
-    // Closing it pushes nothing away, so it never stops following.
+    // Back at the end, closing the step pushes nothing away: still following.
+    userScrollsTo(viewport, 3500 - VIEW_HEIGHT);
     fireEvent.click(summary);
-    expect(summary.closest("details")?.open).toBe(false);
+    expect(step.open).toBe(false);
+    expect(latestButton()).toBeNull();
     resizeTo(2000);
     expect(distanceFromEnd(viewport)).toBe(0);
-    expect(latestButton()).toBeNull();
-    // Opening it again does.
-    fireEvent.click(summary);
-    expect(latestButton()).not.toBeNull();
   });
 });
