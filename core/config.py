@@ -419,6 +419,22 @@ class WorkspaceConfig(_Base):
     max_input_mb: int = 100
 
 
+class GoalConfig(_Base):
+    """Thread Goal completion verification policy.
+
+    - ``completion_verifier``: ``"off"`` (default) keeps legacy behavior — the
+      model's ``update_goal(status="complete")`` is recorded directly. ``"rule"``
+      arms the built-in fail-closed verifier: every ``complete`` claim is judged
+      exactly once, asynchronously, against the real objective plus this Turn's
+      evidence, and the verifier's justification is returned to the model.
+    - ``max_rejections``: after this many rejected completion claims the Goal is
+      moved to ``blocked`` (instead of letting the model burn Turns retrying).
+    """
+
+    completion_verifier: Literal["off", "rule"] = "off"
+    max_rejections: int = 3
+
+
 class DictationConfig(_Base):
     """Voice input for the prompt box, transcribed by a Parakeet-style server.
 
@@ -581,6 +597,7 @@ class DeepCodeConfig(BaseSettings):
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     workspace: WorkspaceConfig = Field(default_factory=WorkspaceConfig)
+    goal: GoalConfig = Field(default_factory=GoalConfig)
     # Absent means "voice input is off"; present means the user picked an
     # endpoint for it. A default *instance* could not tell those apart, and a
     # disabled microphone that still ships an endpoint would be a config that

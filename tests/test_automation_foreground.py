@@ -38,7 +38,7 @@ class _ApprovalGoalSession:
         self._factory.decisions.append(approved)
         status = "complete" if approved else "blocked"
         reason = "verified result written" if approved else "approval denied"
-        self._goal_runtime.request(status=status, reason=reason)
+        await self._goal_runtime.request(status=status, reason=reason)
         yield Event("message", AgentMessage(reason))
         yield Event("complete", TaskComplete(reason, status))
         self.history.append({"role": "assistant", "content": reason})

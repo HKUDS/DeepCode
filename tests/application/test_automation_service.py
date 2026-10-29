@@ -43,7 +43,7 @@ class AutomationSession:
         yield Event("1", TurnStarted())
         if self.hang:
             await asyncio.Event().wait()
-        self.goal_runtime.request(
+        await self.goal_runtime.request(
             status="complete",
             reason="The requested automation and verification completed.",
         )

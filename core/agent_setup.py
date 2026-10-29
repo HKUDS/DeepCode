@@ -339,6 +339,15 @@ def build_agent_session(
         mode_override=permission_mode_override,
         profile_override=execution_security_profile,
     )
+    if goal_runtime is not None:
+        goal_cfg = getattr(active_runtime.config, "goal", None)
+        if goal_cfg is not None and goal_cfg.completion_verifier == "rule":
+            from core.agent_runtime.goal_verifier import RuleBasedVerifier
+
+            goal_runtime.configure_completion_verifier(
+                RuleBasedVerifier(),
+                max_rejections=goal_cfg.max_rejections,
+            )
     engine = build_permission_engine(
         security_cfg,
         cwd=workspace,
