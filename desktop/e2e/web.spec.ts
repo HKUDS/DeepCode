@@ -175,6 +175,12 @@ test("packaged browser: project, approval, reconnect, upload, diff and terminal"
   await page.getByLabel("Project folder", { exact: true }).fill(workspace);
   await page.getByRole("button", { name: "Open project", exact: true }).click();
   await page.getByRole("button", { name: "Trust folder", exact: true }).click();
+  // Trusting asks first, and says what access new Turns will get.
+  const trustDialog = page.getByRole("alertdialog");
+  await expect(trustDialog).toContainText("Agent access for new Turns");
+  await trustDialog
+    .getByRole("button", { name: "Trust folder", exact: true })
+    .click();
   await expect(
     page.getByText("Trusted", { exact: true }).first(),
   ).toBeVisible();
