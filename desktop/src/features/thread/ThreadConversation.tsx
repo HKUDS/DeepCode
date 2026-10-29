@@ -150,15 +150,16 @@ export function ThreadConversation({
     };
   }, [hasConversation, followLatest, setFollowing]);
 
-  // Opening a step is reading it: keep it where it is rather than pinning the
-  // end and pushing it off screen. Closing one pushes nothing away. The click
-  // comes before the toggle, so `open` is still the step's current state, and
-  // keyboard toggles click too.
+  // Opening a step, or revealing steps (`data-reveals`), is reading them: keep
+  // them where they are rather than pinning the end and pushing them off
+  // screen. Closing a step pushes nothing away. The click comes before the
+  // toggle, so `open` is still the step's current state, and keyboard toggles
+  // click too.
   const handleContentClick = (event: MouseEvent<HTMLDivElement>) => {
-    const summary =
-      event.target instanceof Element ? event.target.closest("summary") : null;
-    const step = summary?.parentElement;
-    if (step instanceof HTMLDetailsElement && !step.open) setFollowing(false);
+    if (!(event.target instanceof Element)) return;
+    const step = event.target.closest("summary")?.parentElement;
+    const opensStep = step instanceof HTMLDetailsElement && !step.open;
+    if (opensStep || event.target.closest("[data-reveals]")) setFollowing(false);
   };
 
   if (!hasConversation) {

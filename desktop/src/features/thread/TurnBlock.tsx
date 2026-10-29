@@ -424,14 +424,56 @@ function stepSubject(item: Item, t: TFunction): string {
 const AUTO_OPEN_STEPS = 20;
 
 /**
- * A run of steps folded into one line that says what they did. Its steps
- * render only while it is open.
+ * Whether a run of steps is open, and from which step it shows.
  *
- * The run still at work at the end of a live Turn opens on its own, so its
- * latest steps are seen as they come, and folds once the agent moves on —
- * unless the reader is up in it then, not following the end: what they read
- * stays. Opening or closing it by hand wins over all of that.
+ * The run still at work at the end of a live Turn opens on its own, showing
+ * its latest steps as they come. It folds once the agent moves on, unless the
+ * reader is away from the end then: it is held open until they come back.
+ * While they are away the shown steps stay put, new ones join at the end.
+ * Opening or closing it by hand, or the verbose transcript, wins over all of
+ * that and shows every step.
  */
+function useRunDisclosure({
+  live,
+  following,
+  verbose,
+  stepCount,
+}: {
+  live: boolean;
+  following: boolean;
+  verbose: boolean;
+  stepCount: number;
+}) {
+  const latestStart = Math.max(0, stepCount - AUTO_OPEN_STEPS);
+  const [chosen, setChosen] = useState<boolean | null>(null);
+  const [held, setHeld] = useState(false);
+  const [keptStart, setKeptStart] = useState<number | null>(
+    following ? null : latestStart,
+  );
+  const [wasLive, setWasLive] = useState(live);
+  const [wasFollowing, setWasFollowing] = useState(following);
+  if (wasLive !== live) {
+    setWasLive(live);
+    if (!live && !following) setHeld(true);
+  }
+  if (wasFollowing !== following) {
+    setWasFollowing(following);
+    if (following) setHeld(false);
+    setKeptStart(following ? null : latestStart);
+  }
+
+  const automatic = live || held;
+  const open = chosen ?? (verbose || automatic);
+  const showsLatest = chosen === null && !verbose && automatic;
+  return {
+    open,
+    firstShown: showsLatest ? (keptStart ?? latestStart) : 0,
+    toggle: () => setChosen(!open),
+    showAll: () => setChosen(true),
+  };
+}
+
+/** A run of steps folded into one line that says what they did. */
 function WorkGroup({
   group,
   live,
@@ -447,17 +489,13 @@ function WorkGroup({
 }) {
   const { t } = useTranslation();
   const summary = summarizeWork(group.items);
-  const [chosen, setChosen] = useState<boolean | null>(null);
-  const [held, setHeld] = useState(false);
-  const [wasLive, setWasLive] = useState(live);
-  if (wasLive !== live) {
-    setWasLive(live);
-    if (!live && !following) setHeld(true);
-  }
-  const automatic =
-    chosen === null && transcriptMode !== "verbose" && (live || held);
-  const open = chosen ?? (transcriptMode === "verbose" || live || held);
-  const steps = automatic ? group.items.slice(-AUTO_OPEN_STEPS) : group.items;
+  const disclosure = useRunDisclosure({
+    live,
+    following,
+    verbose: transcriptMode === "verbose",
+    stepCount: group.items.length,
+  });
+  const steps = group.items.slice(disclosure.firstShown);
   const title = summary.current
     ? t("turn.work.now", "Now: {{step}}", {
         step: stepSubject(summary.current, t),
@@ -470,12 +508,12 @@ function WorkGroup({
     <details
       className={styles.workGroup}
       data-status={live ? "in_progress" : undefined}
-      open={open}
+      open={disclosure.open}
     >
       <summary
         onClick={(event) => {
           event.preventDefault();
-          setChosen(!open);
+          disclosure.toggle();
         }}
       >
         <Wrench size={14} aria-hidden="true" />
@@ -501,13 +539,15 @@ function WorkGroup({
         </span>
         <ChevronDown size={14} aria-hidden="true" />
       </summary>
-      {open ? (
+      {disclosure.open ? (
         <div className={styles.workGroupItems}>
-          {steps.length < group.items.length ? (
+          {disclosure.firstShown > 0 ? (
             <button
               type="button"
               className={styles.workGroupAll}
-              onClick={() => setChosen(true)}
+              // Revealing steps above is reading them: see ThreadConversation.
+              data-reveals=""
+              onClick={disclosure.showAll}
             >
               {t("turn.work.showAll", "Show all {{count}} steps", {
                 count: group.items.length,

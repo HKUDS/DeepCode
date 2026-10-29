@@ -1,8 +1,11 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { initI18n } from "../../app/i18n";
 import type { Item, Turn } from "../../generated/app-server";
 import { ThreadConversation } from "./ThreadConversation";
+
+initI18n();
 
 const turn: Turn = {
   id: "turn-1",
@@ -128,15 +131,27 @@ describe("ThreadConversation", () => {
     FakeResizeObserver.resize();
   }
 
+  let showItems: (items: Item[]) => void = () => {};
+
   /** Opens a Session whose history arrives after it opens, as switching does. */
   function openSession(items: Item[] = [prompt, item("reply", 2, "Working", "in_progress")]) {
     const { rerender } = render(conversation([], []));
-    rerender(conversation([turn], items));
+    showItems = (next) => rerender(conversation([turn], next));
+    showItems(items);
     const viewport = screen.getByLabelText("Thread conversation");
     layOut(viewport, () => height);
     // The history lays out after it arrives.
     FakeResizeObserver.resize();
     return viewport;
+  }
+
+  /** A run of commands the running Turn is still at. */
+  function commands(count: number): Item[] {
+    return Array.from({ length: count }, (_, index) => ({
+      ...item(`run-${index}`, index + 2, `command ${index}`),
+      kind: "command_execution" as const,
+      payload: { activity: { kind: "run", label: "Run", subject: `command ${index}` } },
+    }));
   }
 
   beforeEach(() => {
@@ -243,5 +258,26 @@ describe("ThreadConversation", () => {
     expect(latestButton()).toBeNull();
     resizeTo(2000);
     expect(distanceFromEnd(viewport)).toBe(0);
+  });
+
+  it("stops following when the user reveals a run's earlier steps", () => {
+    const viewport = openSession([prompt, ...commands(25)]);
+    fireEvent.click(screen.getByRole("button", { name: "Show all 25 steps" }));
+    expect(latestButton()).not.toBeNull();
+
+    resizeTo(5000);
+    expect(distanceFromEnd(viewport)).toBeGreaterThan(0);
+  });
+
+  it("holds a run open for a reader up in it, and folds it once they return", () => {
+    const run = [prompt, ...commands(2)];
+    const viewport = openSession(run);
+    userScrollsTo(viewport, 600);
+
+    showItems([...run, { ...item("note", 4, "Both commands pass"), payload: { text: "Both commands pass", phase: "commentary" } }]);
+    expect(screen.getByText("Steps").closest("details")?.open).toBe(true);
+
+    userScrollsTo(viewport, 2000 - VIEW_HEIGHT);
+    expect(screen.getByText("Steps").closest("details")?.open).toBe(false);
   });
 });

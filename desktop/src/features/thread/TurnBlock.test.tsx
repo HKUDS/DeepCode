@@ -237,13 +237,35 @@ describe("TurnBlock", () => {
     expect(screen.queryByRole("button", { name: /Show all/ })).toBeNull();
   });
 
-  it("keeps a finished run open for a reader who is up in it", () => {
+  it("holds a finished run open for a reader away from the end, until they return", () => {
     const steps = [run("lint", 1, "npm run lint"), run("test", 2, "npm test")];
+    const done = [...steps, note("note", 3, "Lint and tests pass")];
     const { update } = renderTurn(steps, { status: "running", following: false });
 
-    update([...steps, note("note", 3, "Lint and tests pass")]);
+    update(done, { status: "running", following: false });
     expect(screen.getByText("Steps").closest("details")?.open).toBe(true);
     expect(screen.getByText("npm test")).toBeTruthy();
+
+    update(done, { status: "running", following: true });
+    expect(screen.getByText("Steps").closest("details")?.open).toBe(false);
+  });
+
+  it("keeps the shown steps in place while the reader is away from the end", () => {
+    const steps = (count: number) =>
+      Array.from({ length: count }, (_, index) =>
+        run(`step-${index}`, index + 1, `command ${index}`),
+      );
+    const { update } = renderTurn(steps(25), { status: "running" });
+    update(steps(25), { status: "running", following: false });
+
+    update(steps(27), { status: "running", following: false });
+    expect(screen.getByText("command 5")).toBeTruthy();
+    expect(screen.getByText("command 26")).toBeTruthy();
+
+    // Back at the end, the latest steps show again.
+    update(steps(27), { status: "running", following: true });
+    expect(screen.queryByText("command 6")).toBeNull();
+    expect(screen.getByText("command 7")).toBeTruthy();
   });
 
   it("does not open a group because one of its steps is selected", () => {
