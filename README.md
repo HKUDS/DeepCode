@@ -170,6 +170,10 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
   repeated rejections. (#281)
 - **Browse folders on the Web.** Opening a project in the Web client lists the
   service machine's folders to click through, instead of only a path box.
+- **Clearer working rules for the agent.** It says what it is about to do
+  as it works, edits files with its edit tools, checks its changes before
+  calling them done, keeps a progress file on long tasks, and leaves your own
+  uncommitted work and git history alone.
 - **Fixes.** A Goal on DeepSeek with thinking on Auto no longer fails with
   "reasoning_content must be passed back", and the model picker's notes wrap
   instead of running under its controls.
