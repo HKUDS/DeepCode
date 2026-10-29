@@ -18,7 +18,7 @@ deepcode init
 ```
 
 If you already installed DeepCode, skip this step. For installation from source
-or help setting up `uv`, see [installation](../../README.md#install-the-runtime).
+or help setting up `uv`, see [installation](../../README.md#quick-start).
 If your terminal cannot find `deepcode`, run `uv tool update-shell` and open a
 new terminal.
 

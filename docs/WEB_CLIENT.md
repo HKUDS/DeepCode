@@ -102,7 +102,7 @@ uv tool install --python 3.12 --force .
 deepcode web
 ```
 
-See [installation](../README.md#install-the-runtime) for the full setup and
+See [installation](../README.md#quick-start) for the full setup and
 [Troubleshooting](guide/troubleshooting.md) for startup or authentication errors.
 
 The build writes `app_server/web_assets`, including a version/build manifest.
