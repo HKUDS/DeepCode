@@ -187,6 +187,19 @@ describe("ThreadConversation", () => {
     expect(distanceFromEnd(viewport)).toBe(0);
   });
 
+  it("notices the user leaving again after they scrolled back to the end", () => {
+    const viewport = openSession();
+    userScrollsTo(viewport, 600);
+    resizeTo(5000);
+    userScrollsTo(viewport, 5000 - VIEW_HEIGHT);
+    expect(latestButton()).toBeNull();
+
+    userScrollsTo(viewport, 5000 - VIEW_HEIGHT - 600);
+    expect(latestButton()).not.toBeNull();
+    resizeTo(5020);
+    expect(viewport.scrollTop).toBe(5000 - VIEW_HEIGHT - 600);
+  });
+
   it("keeps following after a small nudge near the end", () => {
     const viewport = openSession();
     userScrollsTo(viewport, 2000 - VIEW_HEIGHT - 30);
@@ -215,13 +228,21 @@ describe("ThreadConversation", () => {
     const viewport = openSession([goalPrompt, item("reply", 2, "Working", "in_progress")]);
     const before = viewport.scrollTop;
 
-    fireEvent.click(screen.getByText("Working toward the Goal"));
+    const summary = screen.getByText("Working toward the Goal");
+    fireEvent.click(summary);
+    expect(summary.closest("details")?.open).toBe(true);
     resizeTo(3500);
     expect(viewport.scrollTop).toBe(before);
     expect(latestButton()).not.toBeNull();
 
+    // Closing it pushes nothing away, so it never stops following.
+    fireEvent.click(summary);
+    expect(summary.closest("details")?.open).toBe(false);
     resizeTo(2000);
     expect(distanceFromEnd(viewport)).toBe(0);
     expect(latestButton()).toBeNull();
+    // Opening it again does.
+    fireEvent.click(summary);
+    expect(latestButton()).not.toBeNull();
   });
 });

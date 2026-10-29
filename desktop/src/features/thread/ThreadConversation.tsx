@@ -60,8 +60,8 @@ export function ThreadConversation({
   const scrollViewportRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const followingRef = useRef(true);
-  // Where the last pin left the view, as the browser clamped it.
-  const pinnedTopRef = useRef(0);
+  // Where the view last stood at the end, as the browser clamped it.
+  const endTopRef = useRef(0);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const groupedTurns = useMemo(
     () => buildConversationTurns(turns, items),
@@ -93,7 +93,7 @@ export function ThreadConversation({
     const viewport = scrollViewportRef.current;
     if (!viewport) return;
     viewport.scrollTop = viewport.scrollHeight;
-    pinnedTopRef.current = viewport.scrollTop;
+    endTopRef.current = viewport.scrollTop;
   }, []);
   const followLatest = useCallback(() => {
     setFollowing(true);
@@ -107,8 +107,8 @@ export function ThreadConversation({
   // once. Never smoothly: a smooth scroll passes through positions that read
   // as the user scrolling away.
   //
-  // Only the user leaves the end: by scrolling above where the view was last
-  // pinned, or by opening a step to read it (see below). A scroll event can
+  // Only the user leaves the end: by scrolling above where the view last stood
+  // at it, or by opening a step to read it (see below). A scroll event can
   // also arrive after more content landed, so the view is short of the end
   // without anyone moving it; the next resize pins it again. Back at the end,
   // or with "Latest", the view follows once more.
@@ -124,8 +124,12 @@ export function ThreadConversation({
       viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <=
       FOLLOW_THRESHOLD;
     const handleScroll = () => {
-      if (atEnd()) setFollowing(true);
-      else if (viewport.scrollTop < pinnedTopRef.current) setFollowing(false);
+      if (atEnd()) {
+        endTopRef.current = viewport.scrollTop;
+        setFollowing(true);
+      } else if (viewport.scrollTop < endTopRef.current) {
+        setFollowing(false);
+      }
     };
     const handleResize = () => {
       if (followingRef.current || atEnd()) followLatest();
@@ -146,12 +150,15 @@ export function ThreadConversation({
     };
   }, [hasConversation, followLatest, setFollowing]);
 
-  // Opening or closing a step is reading it: keep it where it is rather than
-  // pinning the end and pushing it off screen. Keyboard toggles click too.
+  // Opening a step is reading it: keep it where it is rather than pinning the
+  // end and pushing it off screen. Closing one pushes nothing away. The click
+  // comes before the toggle, so `open` is still the step's current state, and
+  // keyboard toggles click too.
   const handleContentClick = (event: MouseEvent<HTMLDivElement>) => {
-    if (event.target instanceof Element && event.target.closest("summary")) {
-      setFollowing(false);
-    }
+    const summary =
+      event.target instanceof Element ? event.target.closest("summary") : null;
+    const step = summary?.parentElement;
+    if (step instanceof HTMLDetailsElement && !step.open) setFollowing(false);
   };
 
   if (!hasConversation) {
