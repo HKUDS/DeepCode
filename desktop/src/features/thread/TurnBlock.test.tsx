@@ -150,6 +150,7 @@ describe("TurnBlock", () => {
     expect(note?.textContent).toContain(instruction);
     // What the user typed stays a message of their own.
     const message = screen.getByText(steer).closest("article");
+    expect(message).not.toBeNull();
     expect(message?.dataset.goalPrompt).toBeUndefined();
     expect(screen.getByText(steer).closest("details")).toBeNull();
   });
@@ -185,7 +186,9 @@ describe("TurnBlock", () => {
     ]);
 
     expect(goalNote("Working toward the Goal")?.textContent).toContain(instruction);
-    expect(screen.getByText(prompt).closest("article")?.dataset.goalPrompt).toBeUndefined();
+    const retried = screen.getByText(prompt).closest("article");
+    expect(retried).not.toBeNull();
+    expect(retried?.dataset.goalPrompt).toBeUndefined();
   });
 
   it("unfolds the Goal instruction in the verbose transcript", () => {
