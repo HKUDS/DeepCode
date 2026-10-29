@@ -170,6 +170,9 @@ DeepCode 提供 TUI、Desktop 和 Web 三种客户端，连接同一个本地共
   再说完成；长任务会维护进度文件；不碰你未提交的改动和 git 历史。
 - **可选的额外风险检查。** 设置 `DEEPCODE_RISK_EVALUATOR=1` 后，原本无需询问就会执行的
   工具调用会先过一遍检查，有风险的改为请你确认。默认关闭，Full Access 下不生效。(#257)
+- **项目 hook 需要批准。** 仓库里声明的 hook 要批准后才会运行；信任项目时会批准当前的
+  hook，之后若有改动，要运行 `deepcode hooks approve` 才会恢复，`deepcode hooks status`
+  可查看状态。(#282)
 - **修复。** DeepSeek 思考设为 Auto 时，设定目标不再报"reasoning_content 必须回传"；
   模型选择框里的说明文字能正常换行，不再被控件盖住。
 

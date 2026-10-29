@@ -177,6 +177,10 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
 - **Optional extra risk check.** With `DEEPCODE_RISK_EVALUATOR=1`, a tool
   call that would run without asking is screened first, and a risky one asks
   for approval instead. Off by default; Full Access skips it. (#257)
+- **Approve project hooks.** Hooks a repository declares run only once
+  approved; trusting a project approves its current hooks, and a later change
+  waits for `deepcode hooks approve`. `deepcode hooks status` shows where
+  things stand. (#282)
 - **Fixes.** A Goal on DeepSeek with thinking on Auto no longer fails with
   "reasoning_content must be passed back", and the model picker's notes wrap
   instead of running under its controls.
