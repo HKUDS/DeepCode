@@ -6,10 +6,28 @@ import setuptools
 ROOT = Path(__file__).resolve().parent
 
 
+REPOSITORY = "https://github.com/HKUDS/DeepCode"
+# Markdown links whose target is relative: ](docs/x.md), ](#anchor), ](LICENSE).
+_RELATIVE_LINK = re.compile(r"\]\((?![a-z][a-z0-9+.-]*:|//)([^)\s]+)\)", re.IGNORECASE)
+
+
+def _absolute_links(markdown):
+    """PyPI renders the README outside the repository, where relative links
+    break. Point them at the repository on GitHub instead."""
+
+    def absolute(match):
+        target = match.group(1)
+        if target.startswith("#"):
+            return f"]({REPOSITORY}{target})"
+        return f"]({REPOSITORY}/blob/main/{target.removeprefix('./')})"
+
+    return _RELATIVE_LINK.sub(absolute, markdown)
+
+
 # Reading the long description from README.md
 def read_long_description():
     try:
-        return (ROOT / "README.md").read_text(encoding="utf-8")
+        return _absolute_links((ROOT / "README.md").read_text(encoding="utf-8"))
     except FileNotFoundError:
         return "DeepCode: an open agentic coding system."
 
@@ -47,7 +65,11 @@ setuptools.setup(
     version=read_version(),
     author="DeepCode Team",
     license="MIT",
-    description="Open agentic coding with durable sessions, goals, and verification",
+    description=(
+        "An open-source coding agent for long-running work: Goals that continue "
+        "across turns, a local background service, and TUI, Desktop, Web and "
+        "headless clients"
+    ),
     long_description=long_description,
     long_description_content_type="text/markdown",
     packages=setuptools.find_packages(
@@ -108,5 +130,6 @@ setuptools.setup(
         "Documentation": "https://github.com/HKUDS/DeepCode#readme",
         "Source": "https://github.com/HKUDS/DeepCode",
         "Tracker": "https://github.com/HKUDS/DeepCode/issues",
+        "Changelog": "https://github.com/HKUDS/DeepCode/blob/main/CHANGELOG.md",
     },
 )
