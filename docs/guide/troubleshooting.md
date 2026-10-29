@@ -18,7 +18,7 @@ Close and reopen your terminal, then check the installation:
 deepcode --version
 ```
 
-If the command is still missing, follow the [installation steps](../../README.md#install-the-runtime).
+If the command is still missing, follow the [installation steps](../../README.md#quick-start).
 
 ## DeepCode asks me to trust my project
 

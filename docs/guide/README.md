@@ -26,8 +26,10 @@ For installation options, see the [quick start](../../README.md#quick-start).
 | Resume a conversation or manage long chats | [Sessions](sessions.md) |
 | Add project conventions and reusable instructions | [Skills and memory](skills-and-memory.md) |
 | Work toward a larger goal or schedule recurring tasks | [Goals and automation](goals-and-headless.md) |
+| Change settings that live only in the config file or environment | [Configuration](configuration.md) |
+| Understand where data lives, the sandbox and approvals | [Security and data](security.md) |
 | Fix a startup or connection problem | [Troubleshooting](troubleshooting.md) |
 
-Looking to reproduce a paper? See the [Paper2Code guide](../../README.md#paper2code-1).
+Looking to reproduce a paper? See the [Paper2Code guide](../paper2code.md).
 Developers extending DeepCode can find architecture and integration references
 in [`docs/`](../).

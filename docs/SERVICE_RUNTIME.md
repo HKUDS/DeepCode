@@ -40,9 +40,9 @@ deepcode service restart --drain --timeout 60
 The listener provides management, browser authentication, business WebSocket RPC
 and the packaged Web client. Run `deepcode web` to open its short-lived local
 access link; see [WEB_CLIENT.md](WEB_CLIENT.md) for setup and browser behavior.
-Desktop still owns its existing private
-stdio application; this change does not make Desktop-submitted tasks survive
-Desktop exit yet. A running service can host the existing Automation scheduler,
+Desktop connects to the same service
+through a stdio relay (`app_server.stdio_relay`), so work submitted from
+Desktop keeps running after Desktop exits. A running service can host the existing Automation scheduler,
 whose leadership lease prevents duplicate scheduled triggers across processes.
 
 The manually detached service is not automatically restarted after a crash or
@@ -101,8 +101,10 @@ credential/proxy variable names without printing their values. A shell profile
 such as `.zshrc` is not sourced by the service.
 
 This user LaunchAgent runs in the GUI login domain. It does not promise
-execution while logged out or asleep. Linux/Windows service-manager installation
-remains a later stage; their existing manual start path is retained.
+execution while logged out or asleep. On Linux, `install --at-login` writes a
+systemd user unit; on Windows, it registers a per-user Task Scheduler task
+without administrator rights. The same `start`, `stop`, `doctor` and
+`uninstall` commands apply.
 
 ## Stop behavior
 

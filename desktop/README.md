@@ -12,17 +12,19 @@ converting or copying its Session.
 
 ## Start Desktop
 
-After installing the CLI, run:
+There are no Desktop installers on the GitHub Releases page yet, so Desktop
+runs from a source checkout. Follow [Run from source](#run-from-source) below,
+then run:
 
 ```console
 deepcode desktop
 ```
 
-A local-source CLI installation launches its recorded checkout and prepares
-missing development resources. A published CLI opens an installed Desktop app.
-Use `deepcode desktop --source /path/to/DeepCode` to choose a checkout explicitly,
-or `deepcode desktop --app /path/to/application` for a custom app location.
-See the [main installation guide](../README.md#install-the-runtime) for setup.
+A CLI installed from a local checkout launches that checkout and prepares
+missing development resources. Use `deepcode desktop --source /path/to/DeepCode`
+to choose a checkout explicitly, or
+`deepcode desktop --app /path/to/application` to open an app you built
+yourself. The [main README](../README.md#desktop) has the short version.
 
 ## Run from source
 

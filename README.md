@@ -118,644 +118,29 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
 
 ## 📑 Table of Contents
 
-- [📰 News](#news)
 - [🧠 What Deep means in DeepCode](#what-deep-means-in-deepcode)
-- [🚀 Core capabilities](#core-capabilities)
-  - [Work directly in your repository](#work-directly-in-your-repository)
-  - [Goal-driven Loop Engineering](#goal-driven-loop-engineering)
-  - [Evidence-driven completion](#evidence-driven-completion)
-  - [Durable Sessions and project context](#durable-sessions-and-project-context)
-  - [Your models, your reasoning settings](#your-models-your-reasoning-settings)
-  - [Reusable Skills](#reusable-skills)
-  - [Permissions you can understand](#permissions-you-can-understand)
-  - [Parallel agents without file collisions](#parallel-agents-without-file-collisions)
-  - [Automate repeatable engineering work](#automate-repeatable-engineering-work)
-  - [Paper2Code](#paper2code)
+- [💡 Why DeepCode](#why-deepcode)
 - [⚡ Quick start](#quick-start)
-  - [Launch commands at a glance](#launch-commands-at-a-glance)
-  - [Install the runtime](#install-the-runtime)
-  - [Configure a model](#configure-a-model)
-  - [Start the TUI](#start-the-tui)
-  - [Start Desktop](#start-desktop)
-  - [Start Web](#start-web)
-  - [Complete your first task](#complete-your-first-task)
-  - [Manage the shared background service](#manage-the-shared-background-service)
-- [🧭 Using DeepCode](#using-deepcode)
-- [⚙️ Headless and automation](docs/HEADLESS_AND_AUTOMATION.md)
-- [🔬 Paper2Code](#paper2code-1)
-  - [The original architecture](#the-original-architecture)
-  - [Research results](#research-results)
-- [🎬 Live demonstrations](#-live-demonstrations)
-- [🛠️ Development](#development)
-- [⭐ Star History](#-star-history)
-- [🙏 Appreciation](#-appreciation)
-- [📖 Citation](#-citation)
-- [📄 License](#-license)
+- [🖥️ Choosing a client](#choosing-a-client)
+- [📋 Requirements and platforms](#requirements-and-platforms)
+- [🚀 Core features](#core-features)
+- [🔒 Security and data](#security-and-data)
+- [📚 Documentation](#documentation)
+- [📰 What's new](#whats-new)
+- [🔬 Research origin](#research-origin)
+- [🎬 Live Demonstrations](#live-demonstrations)
+- [🤝 Contributing](#contributing)
+- [💬 Support](#support)
+- [⭐ Star History](#star-history)
+- [🙏 Appreciation](#contributors)
+- [📖 Citation](#citation)
+- [📄 License](#license)
 
 <p align="center">
   <img src="assets/readme/deepcode-overview.png" alt="A verified task completed with DeepCode" width="1080" />
 </p>
 
-## News
-
-**2026-10-29 · Lighter compaction, checked Goal completion, and folder browsing on the Web**
-
-- **Clear old tool output first.** With `agents.defaults.microcompact` on,
-  a long session that nears its context limit replaces stale tool results
-  with a short placeholder, keeping saved-output paths, before it asks the
-  model for a summary. (#279)
-- **Check a Goal before it completes.** With `goal.completionVerifier` set to
-  `"rule"`, a claim that the Goal is done is turned back while the latest
-  check failed or no work was done, and the Goal is marked blocked after
-  repeated rejections. (#281)
-- **Browse folders on the Web.** Opening a project in the Web client lists the
-  service machine's folders to click through, instead of only a path box.
-- **Clearer working rules for the agent.** It says what it is about to do
-  as it works, edits files with its edit tools, checks its changes before
-  calling them done, keeps a progress file on long tasks, and leaves your own
-  uncommitted work and git history alone.
-- **Optional extra risk check.** With `DEEPCODE_RISK_EVALUATOR=1`, a tool
-  call that would run without asking is screened first, and a risky one asks
-  for approval instead. Off by default; Full Access skips it. (#257)
-- **Approve project hooks.** Hooks a repository declares run only once
-  approved; trusting a project approves its current hooks, and a later change
-  waits for `deepcode hooks approve`. `deepcode hooks status` shows where
-  things stand. (#282)
-- **Fixes.** A Goal on DeepSeek with thinking on Auto no longer fails with
-  "reasoning_content must be passed back", and the model picker's notes wrap
-  instead of running under its controls.
-
-**2026-10-28 · Presets that remove tools, guarded hook files, and community fixes**
-
-- **Remove tools from a preset.** Agent preset files take `disallowed-tools`
-  (Claude Code's `disallowedTools`), and `/preset` shows what is removed. (#283)
-- **Hook files need approval.** File tools ask before writing the files hooks
-  are loaded from, except under Full Access. (#271)
-- **Unpinned MCP packages are flagged.** `deepcode mcp list` marks npx and uvx
-  servers whose package has no fixed version. (#275)
-- **Community fixes.** Anthropic prompt caching now covers the latest message
-  (#280); the monitor's JSON mode reports failures in its exit code, Responses
-  tool call ids stay intact across turns, and verification runs the project's
-  own Python (#270); Desktop bundles patched Python dependencies (#278); and
-  token estimation has its own tests (#284).
-
-**2026-10-21 · A quiet Windows service, a separate code font, and community fixes**
-
-- **No console windows on Windows.** The background service no longer opens a
-  console window for each program it starts, such as shells and MCP servers,
-  and closing such a window can no longer stop the service. (#267)
-- **A font for code.** The Appearance settings in Desktop and Web take a list
-  of preferred monospace fonts for code blocks, diffs and other monospace text,
-  separate from the interface font. (#265)
-- **Community fixes.** Adding or removing an MCP server keeps its settings and
-  its saved sign-in in step when one of the two writes fails (#259); the
-  bundled code and document MCP tools accept `null` for their optional
-  arguments (#261); and two TUI tests pass on Windows (#264).
-
-**2026-10-14 · Sessions that keep their history, a tighter sandbox, and the Desktop and Web apps in Chinese**
-
-- **Your history stays.** A session that cannot be read is listed with the
-  reason instead of losing its history, and a turn that is stopped or fails
-  keeps what it already wrote. Each message reaches the session file as the
-  model reads it, so a crash mid-turn no longer loses the turn, a resumed
-  session gives the model the history it had, and a line a crash cut short no
-  longer breaks the session.
-- **A tighter sandbox.** Agent commands no longer see the model keys DeepCode
-  uses (`DEEPCODE_BASH_FULL_ENV=1` still hands over everything). Credential
-  files and private keys in `~/.ssh` stay out of reach, while `git` over SSH
-  works through your SSH agent. A command can no longer plant hooks or loosen
-  the next command's sandbox, and DeepCode's own `git` calls run no program a
-  repository names. A repository's config can no longer turn the sandbox off
-  or choose Full access; that is a user setting.
-- **Tools that don't stall.** `apply_patch` applies all of its hunks or none;
-  `read`, `glob` and `grep` no longer freeze other sessions; stopping a turn
-  ends the processes it started; an MCP server that is slow to start no longer
-  holds up new sessions; and long requests no longer time out or hold up the
-  Desktop and Web apps. A Goal the model never settles stops after 20 continuations.
-- **Desktop and Web in Chinese.** Settings, MCP, automations, Paper2Code, the
-  terminal pane and the sidebar's service state follow the interface language.
-  A Settings save that fails keeps your edits, and the Latest button no longer
-  hides under the composer.
-- **Windows.** The bash tool starts on Windows and never picks WSL's `bash`,
-  and code mode and the job sandbox work in the packaged Desktop app.
-
-**2026-10-13 · Smoother streaming, a self-managing background service, and safer Web sign-in**
-
-- **Answers stream smoothly.** Live text goes straight to every client instead
-  of being saved piece by piece, so long answers keep flowing when the database
-  is busy, and a client that reconnects or reloads picks up the answer where it
-  is. The TUI follows the service's updates instead of polling it.
-- **The background service manages itself.** If port 3081 is taken, the
-  service moves to a free port. After an upgrade, a newer client restarts an
-  idle older service so both run the same version.
-- **Safer Web sign-in.** The browser session no longer travels in a cookie that
-  other programs on your computer could receive.
-- **Clearer problems, tidier projects.** An update that could not be saved
-  shows as a warning instead of a failed task, logs keep the full traceback,
-  and DeepCode no longer leaves a `logs/` folder in your project.
-
-**2026-10-12 · DeepCode v2.3.1: Markdown answers in the TUI, a Windows service that stays up, `/compact` for coding sessions, and community fixes**
-
-- **Answers render as Markdown while they stream.** Headings, lists, bold
-  text and tables are formatted as each line completes; code blocks are not
-  indented or wrapped by DeepCode, links show their address, and the line
-  still being written is previewed above the status line. `/raw` prints
-  answers exactly as written, for copying. The reasoning card now comes
-  before the answer, and `Ctrl+O` mid-answer no longer repeats or drops
-  lines. See [The terminal UI](docs/guide/the-tui.md).
-- **The Windows service stays up.** On a Windows install in a virtual
-  environment, the background service no longer stops right after it starts,
-  whether the TUI, `deepcode service start`, or `deepcode web` launched it.
-- **`/compact` handles coding sessions.** Tool-call arguments, such as the file
-  a `write_file` call carries, now count when compaction picks what to keep and
-  checks that the summary is smaller. Sessions that wrote large files compact
-  instead of being refused, and the report shows the characters actually
-  replaced. (#258)
-- **Community fixes.** Diff lines that contain a Unicode line separator or a
-  form feed stay whole (#253); web fetch refuses private addresses tunnelled
-  through NAT64 or IPv4-compatible IPv6 (#254); the destructive-command screen
-  also catches absolute paths such as `/bin/rm -rf /` (#255); and `glob` finds
-  files when the project sits under a directory named `build` or `venv` (#256).
-- **Security updates.** pypdf, PyJWT, urllib3, and multidict move to patched
-  releases.
-
-<details>
-<summary><strong>Earlier updates, August to 10 October 2026</strong></summary>
-
-**2026-10-10 · A steadier terminal UI: answers shown once, keys that keep your draft, and an orderly `/compact`**
-
-- **Answers appear once.** The TUI no longer prints an answer a second time
-  when it finishes, and a stopped answer keeps the text already shown, in every
-  client.
-- **Keys that keep your draft.** `Esc` interrupts only from an empty prompt and
-  otherwise closes a completion menu; `Ctrl+C` first clears what you are
-  typing. Stopping a command no longer closes the TUI. See
-  [The terminal UI](docs/guide/the-tui.md).
-- **Calm when the service is slow.** Typing, completion, and `Ctrl+C` stay
-  responsive while the background service is busy; a slow answer is reported
-  instead of retried three times, and `/reconnect` brings your conversation
-  back after a restart.
-- **`/compact` waits its turn.** A message sent during compaction waits for the
-  summary, the next reply no longer starts with a failed request, and a refusal
-  says why instead of "internal error". See [Sessions](docs/guide/sessions.md).
-- **Current settings, safer Goals.** Default model and access changes show up
-  in the TUI, `/new` follows your defaults, and `/goal clear out …` sets a new
-  objective instead of clearing the Goal.
-
-**2026-09-28 · DeepCode v2.3.0: voice dictation, Opper and Bedrock, Desktop polish, and opt-in hardening**
-
-- **Dictate your prompt.** Add a `dictation` block to your config and the
-  Desktop and Web composer gains a microphone. See
-  [Voice dictation](docs/guide/dictation.md). (#240)
-- **More providers and models.** Opper and Amazon Bedrock join the provider
-  templates, and DeepSeek V4 gets its own 1M context window and pricing.
-  (#242, #208, #249)
-- **Desktop polish.** Drag the conversation's edge to resize it, import a
-  VS Code color theme, and choose from fonts that are actually installed.
-  (#238, #207, #239)
-- **Opt-in hardening.** `providers.egress` limits which hosts receive your
-  prompts, `DEEPCODE_COMMAND_SCREEN=strict` screens risky commands,
-  `DEEPCODE_BASH_SCRUB_ENV=1` keeps provider keys out of shell commands, and
-  `DEEPCODE_KEYRING=1` reads keys from the OS keychain. (#229, #230, #232,
-  #246)
-- **Leaner memory and clearer signals.** `MEMORY.md` can be a short index of
-  topic files, `mcp list` flags servers worth a second look, and the agent is
-  reminded when a call keeps returning the same result. (#233, #241, #247)
-- **Steadier everywhere.** The state database keeps its locks when several
-  DeepCode processes share it, and a round of Windows fixes landed. (#210,
-  #235, #236, #237)
-
-**2026-09-09 · TUI, Desktop, and Web share one local background service**
-
-- **Choose your interface.** Run `deepcode` for the TUI, `deepcode desktop`
-  for the native app, or `deepcode web` to open the workbench in your browser.
-  All three connect to the same local service; Web needs no DeepCode account.
-- **Continue the same task across interfaces.** Closing a client leaves running
-  work in the background. Reconnect from another interface to follow the same
-  conversation, review tool activity, and respond to approvals. The computer
-  must remain awake, and pending approvals still need your response.
-- **Configure and verify your models.** Save cloud or local model connections
-  for use across all three interfaces. Browse available models, check a model's
-  response, and test streaming and tool calls before using a custom server.
-  See [Models and providers](docs/guide/models.md).
-- **Manage your background service and prepare for upgrades.** Use
-  `deepcode service` commands to check status, read logs, or stop after current
-  work finishes. Create a runtime snapshot before upgrading and restore it when
-  needed; keep project files in your usual version control or backup.
-  See [Upgrading DeepCode](docs/UPGRADE_AND_RESTORE.md).
-
-Start with the updated [Quick start](#quick-start) and
-[first coding task tutorial](docs/guide/getting-started.md).
-([#212](https://github.com/HKUDS/DeepCode/pull/212))
-
-**2026-09-06 · DeepCode v2.2.0: Session context-window caps, compaction that leaves a memory, and a fully localized Desktop**
-
-- **Cap a Session's context window.** `/context 64k` in the TUI or the
-  preset next to the Desktop model picker narrows the model's published
-  window for future Turns; the cap is frozen into each accepted Turn and
-  feeds the compaction gate directly. `/context auto` follows the model
-  again. (#203)
-- **Compaction leaves a note in memory, and memory notes cannot escape their
-  boundary.** A compaction summary is deposited into the workspace memory on
-  a background thread, and injected memory content is wrapped in an
-  `<untrusted-data>` boundary whose closing tags are escaped, so a poisoned
-  note cannot forge instructions. (#204)
-- **Appearance settings speak Simplified Chinese too**, completing the
-  Desktop shell's zh-CN coverage. (#202)
-
-**2026-09-03 · Desktop catalog race, an honest command screen, GLM-5.2, and two dependency bumps**
-
-- **Switching projects no longer strands the MCP catalog.** A probe or
-  mutation started in one project can no longer invalidate the load of the
-  project you switched to, so the catalog stops sticking in a loading state.
-  (#201)
-- **The legacy `execute_bash` screen matches on argv, not substrings.**
-  `rm -r -f`, `--recursive --force`, `chmod 0777` and a destructive stage
-  inside a pipeline are caught; `touch rm-rf-notes.txt` is not. It stays a
-  cheap first pass in front of the sandbox, which remains the boundary.
-  (#195)
-- **GLM-5.2 is in the model catalog** — 1M context, 128K output,
-  `reasoning_effort` `high` / `max`. (from #198)
-- **Security bumps:** `browserslist` past GHSA-c83g-rgw3-j3cx in the Desktop
-  toolchain, and the App Server sidecar's `pypdf` to 6.16.1
-  (CVE-2026-84309/84310/84311).
-
-**2026-08-28 · Community fixes: plugin credential warnings and a wider zh-CN Desktop**
-
-- **Agent Plugin manifests now warn about plaintext credentials.** Literal
-  `env` and `headers` values in a Plugin's `mcp.json` that look like secrets
-  produce a redacted warning instead of loading silently, and the docs point
-  to runtime credential bindings instead. (#194, landed 2026-08-27)
-- **Most of the Desktop shell speaks Simplified Chinese.** The thread header,
-  Goal rail, approval card, inspector, sidebar, and the Updates and
-  Diagnostics settings gained about a hundred zh-CN strings; English stays
-  the inline default. (#187)
-
-**2026-08-25 · Command executors close two bypasses**
-
-- **Case and whitespace no longer slip past the dangerous-command check**, and
-  the native `mkdir`/`touch`/`rm`/`cp`/`mv` fast path declines any operand
-  outside the working directory, so those commands run through the sandbox
-  like every other command instead of as in-process file operations. (#193)
-
-**2026-08-23 · Five repaired contributions land together**
-
-- **MCP servers can start lazily.** `deferLoading` keeps a server off until
-  the agent calls `activate_server`; deferred servers stay reachable and
-  cancellation-safe. (#184)
-- **Hooks see the whole lifecycle.** `SessionEnd` runs exactly once at
-  teardown and `PreCompact` can inject context before a compaction. (#172)
-- **Instruction files can be excluded, and the dangerous preset must be named
-  explicitly.** (#186)
-- **Windows private files get a fail-safe ACL**, applied once at creation
-  (#164); the Desktop sidecar's pip pin also moved past PYSEC-2026-3721 (#191).
-
-**2026-08-19 · Sessions that survive resume, compaction, and a second window**
-
-- **Resuming a session restores what the agent did, not only what it said.**
-  Tool calls and their results are part of the canonical record now, so a
-  resumed agent can answer "what did you just run?". A test makes the rule
-  executable: every request a run sends must be rebuildable from the session
-  file alone.
-- **Compaction keeps the recent tail.** The checkpoint replaces the older
-  range and everything recent survives verbatim — assistant messages and tool
-  results included — instead of dropping them and putting the summary last.
-  Manual `/compact` used to refuse almost every real conversation; it works,
-  and the checkpoint speaks as the model's own history, so it stops being
-  discounted as someone else's report.
-- **Context pressure is measured, not guessed.** The gate now anchors on the
-  size the provider itself reports. The built-in estimator prices Chinese
-  prose at more than twice its real cost, which was compacting Chinese
-  conversations at roughly half the context they could hold.
-- **Two windows on one Session no longer crash each other.** Each Session
-  now has one live writer, enforced by an OS lock held around a turn: the
-  second window gets a sentence naming who is running it, instead of a
-  process dying to a database constraint about half the time. Alternate
-  freely between Desktop and the terminal — just not mid-turn.
-
-**2026-08-18 · The runtime learns dsh's context discipline, and the TUI gets a face**
-
-- **A new turn no longer throws away the prompt cache.** The environment
-  block used to be re-inserted before your newest message every turn, so each
-  turn diverged from the previous request right where that block had been:
-  7,420 prompt tokens recomputed at every turn boundary, now 28.
-- **The TUI has a logo, a live status line, and tool cards that read.** A
-  spinner and a sweep while work runs, paths written the way you would type
-  them, the plan tool's checklist visible at last, and a turn footer with its
-  time and token usage. An idle TUI costs nothing to animate.
-- **A source-level comparison against dsh became a plan.** Where the message
-  list the model sees comes from, what compaction should keep, and what the
-  session record must contain — measured and written down, and four
-  unreferenced documents retired.
-
-**2026-08-17 · Fixes from a review pass over the new settings and TUI work**
-
-- **A declared model reads the same everywhere.** Per-model declarations now
-  shape the catalog a picker shows, not only what a Turn executes with, so a
-  context window you set to avoid overflow is the number you see.
-- **Adopting fetched models shows them immediately.** The catalog cache is
-  keyed on the settings that shape it, instead of serving the previous remote
-  listing for up to an hour.
-- **Escape closes one thing.** Dismissing the provider editor no longer tears
-  down the settings dialog around it and discards a half-typed key.
-- **A removed model row takes its own capacities with it** rather than leaving
-  them on the row that survived — which then saved them onto the wrong model.
-- **Automated runs keep their tools.** A default agent preset chosen for
-  interactive chatting no longer narrows `deepcode exec` and goal runs behind
-  your back.
-- **The provider section says it is user-scoped**, instead of letting the
-  dialog's project write scope imply otherwise.
-
-**2026-08-16 · The TUI answers every bare command with a selector**
-
-- **Type the command, pick from a list.** `/model` now opens the full model
-  directory — every configured connection's catalog (remote snapshot or
-  declared entries, near a thousand rows on OpenRouter) in one filterable
-  selector with the current route pinned first and each model's published
-  reasoning ladder on Shift+Tab; Enter commits model and effort together.
-  `/preset`, `/effort`, `/permissions`, `/transcript` and `/skill` join
-  `/resume`: a bare invocation opens a picker with the current choice
-  marked, while argument forms and piped runs keep their text paths.
-- **Background tracebacks can no longer shred the transcript.** Stdlib
-  logging is bridged into loguru with call-site fidelity, so file-only
-  transports really are file-only; and the durable event relay backs off
-  exponentially on persistent failure — one traceback per streak, one-line
-  repeats, a recovery notice.
-
-**2026-08-15 · Settings grow up: a dsh-style dialog, declared models, and a safer config**
-
-- **A connection's key now reaches exactly the requests it was resolved
-  for.** Building a provider no longer exports the key into the process
-  environment, where every same-template connection could pick it up as its
-  own; removing a provider un-configures every key source instead of letting
-  it reappear; and when a launch environment variable shadows a pasted key,
-  the editor says which one and that it wins. Verification also works from
-  async hosts now.
-- **The agent-preset picker grew up.** A menu with per-preset descriptions
-  and trust marking replaces the cramped native dropdown, the duplicate
-  "Default" row is gone, and a started session shows a read-only label of
-  what it runs.
-- **Manage what each connection actually serves.** The provider editor can
-  fetch the live model list from a connection's endpoint and adopt picked
-  models as its manual list, an environment-provided key locks the paste
-  field instead of silently outranking it, and connection rows show the
-  discovered model count.
-- **`deepcode chat` reads like a terminal app, not a log.** A restyled
-  transcript — brand-gradient banner, status-colored tool cards with result
-  elbows, block spacing, word-boundary wrapping — plus streaming that
-  survives the prompt redraw with real colors instead of `?[36m` litter.
-- **Desktop Settings became a dsh-style dialog.** General / Models /
-  Plugins / Agent presets in a left rail, with Open configuration file and
-  the write-scope picker in the header. General gains the five canonical
-  rows — default agent preset for new sessions (applied as a by-value
-  snapshot at creation, CLI and TUI included), permissions, language
-  (English/中文, first translated batch), Light/Dark/System appearance
-  cards, and a steer-or-queue busy-Enter preference.
-- **Models are declarations now.** `manualModels` entries can carry a
-  label, capacities, and the published reasoning ladder; declarations are
-  authoritative offline for execution profiles and every picker. Discovery
-  probes the editor form as shown — unsaved URL or key included — and
-  adopted picks land as accurate declaration rows. Config writes gained
-  optimistic concurrency (a changed file conflicts instead of being
-  clobbered) and a settings.changed push keeps an open dialog fresh.
-- **Session and model commands now hold up.** `/resume` and `/model` open
-  an inline selector — type to filter by title, arrows move, Enter picks,
-  Tab flips directory scope, Shift+Tab cycles the route's published
-  reasoning effort — and resume replays the conversation tail. Bare model
-  names resolve their connection, typos no longer kill the REPL, and
-  `/compact` summarizes with the model you actually selected. New verbs:
-  `/rename`, `/delete`, `/retry`, with tab completion for session ids,
-  transcript modes, permission presets, and effort levels.
-
-**2026-08-14 · Subagent runtime, compaction, and one-way persistence**
-
-- **Delegate to Codex or Claude Code as a subagent.** `spawn_agent` gains
-  external backends that run the installed CLI with a scrubbed environment and
-  strict success criteria, while native subagents gain personas, validated
-  tool allowlists, JSON output schemas, follow-up conversation via
-  `send_message`, and full transcripts in the parent session.
-- **Guard the loop.** Tools can declare timeouts the runner enforces, and a
-  repeat-call tracker injects an escalating, model-visible reminder when
-  identical calls repeat.
-- **Compact on demand.** `/compact` summarizes older turns in the resident
-  context; every refusal is a stable, readable reason (busy Turn, too little
-  history, a failed or non-shrinking summary) and canonical session data is
-  never touched.
-- **See which file sets every configuration value.** Diagnostics report each
-  configured leaf with its providing layer and a bounded preview;
-  credential-shaped subtrees are redacted whole. A verbatim deepseek-harness
-  Skill also loads unchanged from `.agents/skills`.
-- **Relieve context pressure with the cheapest sufficient measure.** Under
-  pressure the runtime first middle-prunes oversized tool results — a free,
-  convergent pass covering MCP and custom tools alike — and only summarizes
-  if that is not enough; the summarization call replays the routed request as
-  a genuine prefix so provider prompt caching is reused, and a summary that
-  would not shrink the conversation is rejected.
-- **Deleted sessions stay deleted.** The Desktop projection no longer adopts
-  a thread back into canonical storage unless SQLite genuinely owns it
-  (legacy import or automation bootstrap), and every mid-turn message the
-  model sees — goal updates, recovery prompts, injected results — now lands
-  in the canonical session log, so a resumed session rebuilds exactly the
-  history the model saw.
-- **Open a session as a different agent.** Named agent presets bundle a
-  persona and a tool face — `deepcode exec --preset code-reader`, `/preset`
-  in the TUI, or the picker beside the Desktop model control — while the
-  model route and permissions stay independent knobs. A preset is one
-  markdown agent file in the `.claude/agents`/`.agents` dialect, so
-  definitions written for other harnesses load unchanged; the resolved
-  composition is snapshotted into the session record and locked once the
-  conversation starts, at which point the Desktop picker becomes a
-  read-only label of what the session runs.
-
-**2026-08-13 · Desktop typography, themes, and native controls**
-
-- **Make the type-size preference actually resize the app.** Every interface
-  size now derives from one rem-based scale, so the Appearance slider moves the
-  whole window. It previously moved almost nothing: 255 hardcoded pixel values
-  ignored it, and the smallest labels sat at 7px.
-- **Pick from eight themes, including high contrast.** Light, Dark, Paper, and
-  Midnight are joined by two terracotta palettes and a WCAG AAA high-contrast
-  option. Tests compare each palette against the complete token set, so a theme
-  cannot half-apply and leave a stray default showing through.
-- **See one design language rather than the operating system's.** Sliders,
-  selects, and focus rings now follow the active theme instead of falling back
-  to platform chrome, and an explicit theme choice moves `color-scheme` with it
-  so native controls stop rendering in the OS scheme.
-- **Read the quiet text.** The light palette's secondary tones and every accent
-  colour were refitted to clear WCAG AA against the surfaces they actually sit
-  on, several of which previously measured under 3:1.
-
-**2026-08-12 · Reviewed upstream core Skills**
-
-- **Start with reviewed upstream Skills.** DeepCode now bundles eight pinned,
-  provenance-tracked Agent Skills from OpenAI, Codex, and Anthropic for Skill
-  authoring, code review, security analysis, frontend design, MCP construction,
-  and web application testing. They use the same catalog and Turn runtime as
-  project, user, and Plugin Skills.
-
-**2026-08-12 · Managed MCP catalog, OAuth, and real connection checks**
-
-- **Start from reviewed templates without hidden execution.** DeepCode bundles
-  a validated catalog based on Nanobot's current 16 MCP templates. Adding
-  one copies ordinary user configuration in a disabled state; it never silently
-  runs `npx`, Docker, or a remote server.
-- **Configure MCP consistently in every interface.** Desktop and TUI now join
-  the management CLI and App Server on one preset, configuration, test, OAuth,
-  and live-status service rather than maintaining interface-specific clients.
-- **Distinguish config, authorization, and connectivity.** A real MCP probe
-  initializes the server and counts tools, resources, and prompts. Browser
-  OAuth uses a loopback callback and a private credential file outside project
-  configuration, while Agent startup never opens a browser implicitly.
-
-**2026-08-10 · Generic MCP runtime and portable local Plugins**
-
-- **Connect standard MCP servers from every interface.** User and trusted
-  project configuration, App Server, CLI, and Desktop now share one generic
-  stdio/SSE/Streamable HTTP client runtime with bounded discovery, stable tool
-  identities, timeouts, cancellation, and session-owned cleanup.
-- **Keep credentials and authority explicit.** Executable config layers replace
-  whole entries, child processes receive a minimal environment, provider keys
-  stay in private DeepCode connections, and MCP policy can only narrow global
-  trust, read-only, approval, and sandbox decisions.
-- **Run Agent Plugins 1.0 MCP components without format forks.** Valid
-  `mcp.json` servers join the same runtime only when an Agent Session starts,
-  receive isolated `PLUGIN_ROOT` / `PLUGIN_DATA`, and fail independently from
-  bundled Skills and other servers.
-- **Connect OpenSpace as MCP plus two ordinary Skills.** A reviewed recipe binds
-  an OpenRouter connection without plaintext secrets, imports OpenSpace's host
-  Skills into the standalone catalog, and keeps cloud/upload tools disabled by
-  default.
-
-- **Register trusted local Plugin folders.** CLI and Desktop now share a
-  user-level Plugin registry with add, inspect, enable, disable, and unregister
-  operations; unregistering never deletes source files.
-- **Keep one execution path.** Enabled Plugins contribute authority-bound
-  Skills through the existing Skill Provider host, so selection, dependencies,
-  progressive reads, permissions, revisions, and audit metadata remain the
-  same across CLI, TUI, headless execution, and Desktop.
-- **Preserve standalone Skills.** Project and user Skills remain independently
-  installable and take precedence over a same-named Plugin Skill. Plugins are
-  an optional packaging source, never a replacement Skill lifecycle.
-- **Use one portable package contract.** Local Plugins use the Agent Plugins
-  1.0.0 root manifest and fixed `skills/` layout; experimental DeepCode
-  manifests are no longer accepted. Hooks, Apps, Marketplaces, downloads, and
-  updates remain inert.
-
-**2026-08-09 · Skills now have a real runtime contract**
-
-- **Load guidance through one provider boundary.** Skill discovery, content
-  reads, and package search now stay with the provider that owns the Skill,
-  while the catalog remains metadata-only. Local Skills keep their existing
-  precedence and identity, and future providers no longer need filesystem
-  shortcuts to fit the runtime.
-- **Compose Skills without hiding missing capabilities.** Skills can declare
-  tool and Skill dependencies; DeepCode expands them in order, detects cycles,
-  and fails before the first model request when a requirement is unavailable.
-- **Reveal only what the task needs.** The Agent can search and read bounded
-  package resources progressively, with revision, traversal, symlink, and size
-  checks applied at the shared provider contract.
-- **Keep execution constrained and auditable.** A Skill can narrow the tools
-  already allowed by the Session but cannot grant new permissions. CLI, TUI,
-  and Desktop share the same immutable Turn snapshot and persist only Skill
-  identity, invocation kind, and revision—not the instruction body.
-- **See changes everywhere without restarting.** One workspace host now owns
-  the shared catalog and provider cache, while each Agent Session keeps its own
-  Turn context. Local Skill and policy changes refresh Desktop automatically,
-  and Composer, management, CLI, and headless execution resolve through the
-  same lifecycle.
-
-**2026-08-07 · Thinking controls, more providers, and a Desktop you can tune**
-
-- **Reasoning controls work again across the board.** Thinking levels are now
-  resolved from the model catalog, so Claude, GPT-5, Kimi, Qwen and Grok all
-  offer their real effort levels, and DeepSeek, GLM and MiniMax get a working
-  thinking toggle. A newly released model inherits its family's controls
-  instead of silently losing them.
-- **Three more providers.** Requesty and Forge join as gateways, and MiniMax
-  arrives with its own catalog entry — including the 1M-context M3 tier.
-- **Make the Desktop yours.** Settings → Appearance adds conversation width,
-  a light/dark override that no longer follows the OS blindly, font size, and
-  font selection filtered to what is actually installed on your machine.
-- **Safer command execution on Windows.** A Job Object backend gives the
-  sandbox real process-tree isolation where previously there was none.
-
-**2026-08-04 · Skills that work wherever you do**
-
-- **Keep reusable expertise close to your work.** DeepCode discovers Skills
-  from the current project as well as your personal collection, while keeping
-  existing DeepCode and Claude-compatible Skill locations working.
-- **Use the same Skill from CLI or Desktop.** Select it for a task and DeepCode
-  carries its identity and version with the Turn, so the Session shows which
-  guidance shaped the result.
-- **Create Skills without leaving DeepCode.** The built-in Skill Creator helps
-  you scaffold and validate focused, reusable workflows from either interface.
-- **Stay focused as your library grows.** Context-aware discovery keeps the
-  Agent prompt concise while the complete Skill catalog remains available to
-  browse and manage.
-
-**2026-08-03 · 🎉 DeepCode v2.0 is here**
-
-DeepCode v2.0 introduces a new general-purpose Coding Agent framework for
-building, fixing, understanding, and improving real software projects.
-
-- **Take on real repository work.** DeepCode can explore a codebase, edit
-  files, run commands and tests, review changes, and carry a task through to a
-  working result.
-- **Keep complex goals moving with Loop Engineering.** Give DeepCode a goal and
-  it can continue through understanding, implementation, verification, and
-  repair instead of stopping after one plausible answer.
-- **Stay in control while the Agent works.** Add requirements, correct its
-  direction, switch models, stop, resume, or revise the goal without throwing
-  away the work already completed.
-- **See what you are getting.** Plans, tool activity, code changes, test results,
-  and verification evidence stay visible so the result is easier to review and
-  trust.
-- **Build Automations around the way you work.** Turn any natural-language
-  instruction into a project-specific task: run it on demand or on a recurring
-  interval, then edit, pause, resume, and review every result. Use it for the
-  work you want DeepCode to keep taking care of, from regression checks and
-  test repair to documentation upkeep and repository maintenance.
-- **Work your way.** Use Desktop or CLI, bring your own models and Skills, and
-  delegate focused work without changing the underlying Agent workflow.
-
-DeepCode v2.0 is built to help you spend less time supervising every step and
-more time shipping software you are proud of. We cannot wait to see what you
-build! 🚀
-
-</details>
-
-<details>
-<summary><strong>Earlier 2026 milestones</strong></summary>
-
-- **2026-07-31 · One execution model across CLI and Desktop.** Interactive,
-  headless, Goal, Automation, and Desktop work share the same durable Project,
-  Session, Thread, and Turn lifecycle. Workspace trust stays independent from
-  the Session access preset, and reasoning controls remain model-aware.
-- **2026-07-21 · Durable Goals and safe Session lifecycle.** Long-running Goals
-  are resumable across CLI and Desktop, while guarded archival and deletion
-  preserve repository files and recover safely after interruption.
-- **2026-07-20 · Session-level model control and shared Skills.** Named LLM
-  connections and future-Turn model switches preserve conversation history;
-  project and user Skills are shared across entry points.
-- **2026-07-17 · Durable Session navigation and replay.** Projects organize
-  collapsible Session history, long conversations replay incrementally, and
-  approvals, reviews, tests, and Artifacts remain attached to their task.
-- **2026-07-10 · Loop Engineering and parallel agents.** Mutable Goals can
-  inspect, implement, verify, and repair across steerable Turns, while focused
-  work can be delegated in isolated worktrees with explicit conflict handling.
-- **2026-07-08 · Durable Sessions and memory.** Session history survives
-  restarts, project instructions can live in `AGENTS.md` or `DEEPCODE.md`, and
-  persistent notes remain with the workspace.
-- **2026-07-08 · General coding agent.** The free-form TUI, native file and shell
-  tools, headless execution, context compaction, and cross-directory resume
-  established the current product foundation.
-- **2026-07-04 · Agent Harness foundation.** A shared execution contract,
-  three-valued permissions, sensitive-path protection, platform sandboxing, and
-  normalized events made supervised local execution possible.
-- The complete pre-restructure history is preserved in the
-  [legacy README](docs/archive/README_LEGACY_2026-07-20.md).
-
-</details>
+---
 
 ## What Deep means in DeepCode
 
@@ -796,191 +181,101 @@ DeepCode stands out in three ways:
 DeepCode is not designed to make an Agent look busier. It is designed to help
 you finish real software engineering work more reliably.
 
-## Core capabilities
+---
 
-DeepCode provides a complete local Coding Agent workflow. TUI, Desktop, and Web
-use the same Agent, Sessions, models, Skills, permissions, and task state through
-the shared local service.
+## Why DeepCode
+
+- **Work that outlasts one answer.** Give the agent a Goal and it keeps
+  working across turns, checking its results, until it reports the Goal
+  complete or blocked. You can add requirements, edit the Goal, pause or stop
+  it while it runs.
+- **Keeps running when you close the client.** Turns run in a local
+  background service, not in the window you started them from. Close the TUI,
+  reopen the session in the browser, and answer the pending approval there.
+- **One session, four clients.** The TUI, Desktop, Web and `deepcode exec`
+  read and write the same projects, sessions, models, Skills and permissions.
+- **You decide what it may do.** A folder must be trusted before the agent
+  works in it. Each session runs under Ask, Read only or Full access, shell
+  commands run in an OS sandbox under Ask, and repository hooks need your
+  approval. Use any of 14 built-in providers, your own OpenAI- or
+  Anthropic-compatible endpoint, or a local model.
 
 <p align="center">
-  <img src="assets/readme/verification-loop.png" alt="DeepCode Agent Harness and verification loop" width="1080" />
+  <img src="https://raw.githubusercontent.com/HKUDS/DeepCode/main/assets/readme/web-ui.png" alt="The DeepCode Web client: a session that fixed a failing test, with the agent's tool calls in the conversation and the resulting diff in the Review panel" width="100%" />
 </p>
 
-### Work directly in your repository
-
-DeepCode can read and search code, edit files, apply patches, run commands and
-tests, and continue working from the results. Tool calls, execution progress,
-and file changes stay visible, so you can see what the Agent did and what
-changed in the project.
-
-Use it to explain code, fix bugs, and add tests—or for cross-file refactors,
-feature development, and longer repository-level tasks.
-
-When you provide a public HTTP or HTTPS URL, the shared `web_fetch` tool can
-read the page without a search provider or an additional API key.
-
-### Goal-driven Loop Engineering
-
-For work that cannot be completed in one response, give DeepCode a natural-
-language Goal. The Agent keeps analyzing, implementing, verifying, and fixing
-around that Goal without requiring you to push every step manually.
-
-While it runs, you can still:
-
-- add information to the current task;
-- revise the Goal or its acceptance criteria;
-- queue the next instruction;
-- pause, stop, or continue the task;
-- resume the same Goal after leaving the application.
-
-Automatic execution does not take away your control. You can always change
-what should happen next.
-
-### Evidence-driven completion
-
-DeepCode does not use one hard-coded rule to judge every Coding task. It
-selects evidence that fits the task, such as test results, build output, static
-checks, diagnostics, file changes, Diffs, or generated Artifacts.
-
-A failed verification is not presented as success. It becomes input to the
-next repair. When a task is complete—or genuinely blocked—the result, reason,
-and related evidence remain in the Session for review and reproduction.
-
-### Durable Sessions and project context
-
-Every Session is stored locally and linked to its original project. Start
-DeepCode from any directory, find earlier projects and Sessions, and continue
-the same work in CLI or Desktop.
-
-A Session stores more than chat text: it keeps tool calls, permission
-decisions, Goals, model configuration, and verification records. Project rules,
-persistent memory, Skills, and long-conversation compaction help the Agent keep
-context throughout complex work.
-
-### Your models, your reasoning settings
-
-DeepCode is not tied to one model provider. Connect OpenRouter, OpenAI,
-Anthropic, DeepSeek, Gemini, an OpenAI-compatible gateway, Ollama, vLLM, or
-another compatible endpoint with your own API Key.
-
-Before use, a connection can check credentials, the model catalog, and a real
-inference request. Each Session can choose a model and Thinking Level. Changing
-models mid-Session affects future Turns only; it does not delete history or
-confuse where earlier work came from. When supported, DeepCode can also show a
-reasoning summary returned by the Provider.
-
-### Reusable Skills
-
-Skills turn team conventions, domain knowledge, review methods, and repeated
-workflows into reusable Agent capabilities. DeepCode includes pinned upstream
-Skills for authoring, review, security, frontend, MCP, and web testing workflows.
-Keep project Skills in `.agents/skills`, keep personal Skills in
-`~/.agents/skills`, or use the bundled Skill Creator to build one
-conversationally.
-
-DeepCode also reads existing `.deepcode/skills` and Claude-style directories
-without migrating them. A Skill can guide how the Agent works, but it cannot
-bypass project trust, tool permissions, or safety boundaries.
-
-### Permissions you can understand
-
-Every project must be explicitly trusted before execution. Each Session can
-use one of three modes:
-
-- **Ask**: confirm sensitive operations before they run;
-- **Read only**: allow analysis and reading only;
-- **Full access**: allow complete work in a trusted project.
-
-Individual tools also support `allow`, `ask`, and `deny`. CLI and Desktop share
-the same permission state, and DeepCode does not silently replay operations
-with side effects after a task is stopped or interrupted.
-
-### Parallel agents without file collisions
-
-Complex work can be split across focused Agents—for example, separate Agents
-for code investigation, test analysis, and implementation review.
-
-Parallel changes can run in isolated Git worktrees so Agents do not edit the
-same working directory at once. Results return to the main task for review and
-integration. Conflicts are shown explicitly instead of being silently
-overwritten, and the main Agent remains responsible for the final Goal.
-
-### Automate repeatable engineering work
-
-Once a workflow is stable, save it as an Automation and run it manually or on
-a schedule. For example:
-
-- check tests and builds regularly;
-- scan for regressions;
-- organize pending work;
-- run repository maintenance or periodic reviews.
-
-Automation does not launch a separate, reduced Agent. It uses the same
-Sessions, models, Skills, permissions, approvals, and recovery behavior, and
-keeps the history of every run.
-
-### Shared background service
-
-Desktop, Web, TUI, `exec`, `loop`, and MCP task calls use the same local service.
-Starting a client starts the service when needed. Closing a client leaves its
-accepted tasks running; explicitly stop the service to shut down the runtime.
-See [Quick start](#quick-start) for installation and launch commands.
-
-## Paper2Code
-
-Paper2Code was DeepCode's original research direction and remains its dedicated
-workflow for research reproduction.
-
-It can start from a paper, technical document, URL, or reference repository;
-understand the research goal; find related implementations; organize a
-development plan; generate code; and verify the result through experiments and
-Artifacts. It reflects DeepCode's core idea: the goal is not to generate code
-that merely looks correct, but to turn complex knowledge into a system that can
-run, be inspected, and keep improving.
+<p align="center"><sub>The Web client after a real task: the agent ran the tests, edited
+one file, re-ran the tests, and the change is open for review.</sub></p>
 
 ## Quick start
 
-Use DeepCode to explore a repository, make changes, and run tests. Choose the
-terminal, desktop app, or browser—your projects and conversations are available
-in all three.
-
-### Launch commands at a glance
-
-After installation, open the interface you prefer:
-
-| Interface | Start command |
-|---|---|
-| **TUI** — work in your terminal | `deepcode` |
-| **Desktop** — use a native app | `deepcode desktop` |
-| **Web** — work in your browser | `deepcode web` |
-
-DeepCode starts its local background service automatically. You can close an
-interface and return to your conversation later.
-
-### Install the runtime
-
-#### Published package
-
-With `uv` installed, run:
+**1. Install.** With [uv](https://docs.astral.sh/uv/):
 
 ```console
 uv tool install --python 3.12 deepcode-hku
 deepcode init
 ```
 
-On Windows, you can install `uv` with `winget install --id astral-sh.uv --exact`,
-then open a new terminal. DeepCode requires Python 3.12 or later.
+`deepcode init` creates `~/.deepcode` and sets the default access to **Ask**.
+If your shell cannot find `deepcode`, run `uv tool update-shell` and open a new
+terminal. On Windows, install uv with
+`winget install --id astral-sh.uv --exact`.
 
-To use the native app, also install DeepCode Desktop from
-[GitHub Releases](https://github.com/HKUDS/DeepCode/releases). To try changes
-that have not been released yet, install from source below.
+**2. Add a model.** This example uses OpenRouter; any
+[supported provider](#models-and-providers) works the same way. The key is
+read without echo and stored in `~/.deepcode/credentials.json`.
 
-<details>
-<summary>Install from source</summary>
+```console
+deepcode provider set my-openrouter --template openrouter --api-key
+deepcode provider models my-openrouter --refresh
+deepcode provider test my-openrouter --model MODEL_ID
+```
 
-#### Current source checkout
+Replace `MODEL_ID` with a model from the list. In Desktop or Web you can do the
+same under **Settings → AI providers**.
 
-You will need Git, `uv`, and Node.js 22 or later. Run these commands in your terminal:
+<div align="center">
+  <img src="assets/setting_model.png" alt="Choose a provider and model in DeepCode settings" width="100%" style="border-radius: 10px; box-shadow: 0 8px 20px rgba(45,55,72,0.2); margin: 15px 0;"/>
+</div>
+
+**3. Run it in a project.**
+
+```console
+cd /path/to/your-project
+deepcode --trust --connection my-openrouter --model MODEL_ID
+```
+
+`--trust` is needed once per project. Later, run `deepcode` in that folder and
+use `/model` to switch models. Try a first task:
+
+```text
+Explain how this project is organized and how to run its tests.
+Do not change any files yet.
+```
+
+The step-by-step tutorial is [Your first coding task](docs/guide/getting-started.md).
+
+## Choosing a client
+
+All clients connect to the same local service, so a session started in one
+can be continued in any other.
+
+| Client | Start with | Use it for |
+|---|---|---|
+| **TUI** | `deepcode` | Working in the terminal. See [The terminal UI](docs/guide/the-tui.md). |
+| **Web** | `deepcode web` | The full workbench (diffs, files, terminal, Goals) in your browser, from the same install. See [Web client](docs/WEB_CLIENT.md). |
+| **Desktop** | `deepcode desktop` | The same workbench as a native app. Runs from a source checkout for now, see [below](#desktop). |
+| **Headless** | `deepcode exec "<task>"` | One turn from a script or CI job; `--json` prints events as NDJSON. `deepcode loop "<goal>"` runs a Goal. See [Headless and automation](docs/HEADLESS_AND_AUTOMATION.md). |
+
+`deepcode web --no-open` prints the sign-in link instead of opening a browser.
+The link works once and expires after 60 seconds.
+
+### Desktop
+
+There are no Desktop installers on the Releases page yet. Desktop runs from a
+source checkout and needs Node.js 22+, Rust (stable) and the
+[Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) for your
+platform:
 
 ```console
 git clone https://github.com/HKUDS/DeepCode.git
@@ -989,420 +284,165 @@ npm --prefix desktop ci
 npm --prefix desktop run build:web
 uv tool install --python 3.12 --force .
 deepcode init
-```
-
-If you already have the repository, start in its root directory and skip cloning.
-You can now run `deepcode` from any directory. For source Desktop, also install
-Rust and the platform dependencies described in the [Desktop guide](desktop/README.md).
-
-</details>
-
-If your terminal cannot find `deepcode`, run `uv tool update-shell` and open a
-new terminal.
-
-### Configure a model
-
-Choose either the graphical setup or the terminal commands below.
-
-**In Desktop or Web:** open **Settings → AI providers**, select **Add provider**,
-and enter your provider's API key. Click **Save and check** to load its models.
-Under **Agent model**, choose a model and click **Save and verify model** to try
-a short request. Then choose the connection and model in your conversation's
-message box.
-
-<div align="center">
-  <img src="assets/setting_model.png" alt="Choose a provider and model in DeepCode settings" width="100%" style="border-radius: 10px; box-shadow: 0 8px 20px rgba(45,55,72,0.2); margin: 15px 0;"/>
-</div>
-
-**In your terminal:** this example connects to OpenRouter. Enter your API key
-when prompted; it will not be displayed as you type.
-
-```console
-deepcode provider set my-openrouter --template openrouter --api-key
-deepcode provider models my-openrouter --refresh
-```
-
-Choose a model from the list. Replace `MODEL_ID` below with its exact ID and
-send a short test request:
-
-```console
-deepcode provider test my-openrouter --model MODEL_ID
-```
-
-You can use the same connection in all three interfaces. For other providers,
-local models, and tool-calling checks, see [Models and providers](docs/guide/models.md).
-
-### Start the TUI
-
-Open a terminal in the project you want to work on. On your first visit, use
-`--trust` to allow DeepCode to work in that folder. With the connection configured
-above:
-
-```console
-cd /path/to/your-project
-deepcode --trust --connection my-openrouter --model MODEL_ID
-```
-
-Replace the path with your project directory; on Windows, for example,
-`C:\projects\my-app`. For later visits, run `deepcode` in that directory and use
-`/model` to choose your connection and model. Use `/help` to see available commands.
-
-### Start Desktop
-
-```console
 deepcode desktop
 ```
 
-Add your project folder, confirm that you trust it, and click **New thread**.
-Choose a model in the message box, then describe what you want to do.
+The first launch builds the app's resources and takes a few minutes; keep the
+terminal open while Desktop runs. Windows toolchains and troubleshooting are in
+the [Desktop guide](desktop/README.md).
 
-If you installed from source, this command opens the development app. Its first
-launch may take longer while dependencies are prepared; keep the terminal open
-while you use it. See the [Desktop guide](desktop/README.md) for platform setup
-and custom installation paths.
+### The background service
 
-### Start Web
+Starting any client starts the service if it is not running. Closing a client
+leaves accepted work running; pending approvals wait for you, and the computer
+must stay awake.
 
-```console
-deepcode web
-```
-
-DeepCode opens a browser tab. Add your project folder on this computer, confirm
-that you trust it, and create a thread. Select a model and send your first message.
-No DeepCode account is needed.
-
-To copy the access link and open it yourself, use `deepcode web --no-open`.
-Open the link within 60 seconds. If it expires or the page asks you to sign in
-again, run `deepcode web` to get a fresh link.
-
-### Complete your first task
-
-Start by asking DeepCode to help you understand your project:
-
-```text
-Explain how this project is organized and how to run its tests.
-Do not change any files yet.
-```
-
-Then ask for a small change, describing the behavior you want and how to check it:
-
-```text
-Add tests for the configuration loader's handling of missing and invalid
-values. Follow the existing test style, run the relevant tests, and summarize
-the changes and results.
-```
-
-Adapt the task to your repository. Follow the tool activity as DeepCode works,
-respond to any approval requests, and review the changed files and test output.
-You can send a follow-up message to adjust the task, or use the stop button
-(`/stop` in the TUI) to interrupt it.
-
-Your conversation is saved automatically. In Desktop/Web, select it from the
-project's thread list. In the TUI, use `/resume` to pick a saved conversation.
-You can switch interfaces and continue the same task.
-
-For a complete exercise in a new folder, follow
-[Your first coding task](docs/guide/getting-started.md). It takes you through
-creating a Python function, testing it, and returning to the conversation later.
-
-### Manage the shared background service
-
-Closing an interface leaves running tasks in the background. Pending approvals
-still need your response, and the computer must remain awake for work to continue.
-
-Most days, you can just launch your preferred interface. When you need to inspect
-or stop the background service, use the command for that action:
-
-| What you want to do | Command |
+| Task | Command |
 |---|---|
-| Check whether DeepCode is running | `deepcode service status` |
+| Check whether it is running | `deepcode service status` |
 | Read recent logs | `deepcode service logs --lines 100` |
 | Stop after current work finishes | `deepcode service stop --drain --timeout 60` |
-| Start automatically after signing into your computer | `deepcode service install --at-login` |
+| Start it when you log in | `deepcode service install --at-login` |
 
-For updates and backups, follow [Upgrading DeepCode](docs/UPGRADE_AND_RESTORE.md).
-If something does not work, start with [Troubleshooting](docs/guide/troubleshooting.md).
+Upgrades and backups: [Upgrading DeepCode](docs/UPGRADE_AND_RESTORE.md).
+Problems: [Troubleshooting](docs/guide/troubleshooting.md).
 
-## Using DeepCode
+## Requirements and platforms
 
-Prefer a guided walkthrough? The [teaching guides](docs/guide/README.md) cover
-the same ground page by page — first session, the TUI, sessions, models,
-skills and memory, and headless automation — with worked examples.
+| | |
+|---|---|
+| Python | 3.12 or later (CI tests 3.12, 3.13 and 3.14) |
+| Operating systems | macOS, Linux and Windows |
+| Tools | Git, for change review and worktrees. On Linux, bubblewrap (`bwrap`) for the command sandbox. |
+| Model | An API key for a supported provider, or a local Ollama or vLLM server. The model must support tool calling; `deepcode provider test <id> --agent` checks it. |
+| Web client | A current browser on the same computer |
+| Desktop | Node.js 22+, Rust and the Tauri prerequisites (source build) |
 
-### Sessions
-
-Every task lives in a durable Session attached to its original Project. Open a
-Project in Desktop or start `deepcode` from its directory, then create a new
-Session or resume an existing one. The same history is available in TUI,
-Desktop, and Web without export or conversion.
-
-| What you want to do | Desktop / Web | Interactive CLI |
-|---|---|---|
-| Start a Session | **New thread** | `/new [title]` |
-| Resume local history | Select it under the Project | `/resume` |
-| Find history from every Project | Browse the project list | `/resume all` |
-| Attach a file | Use the composer attachment | `@path/to/file` |
-| Change the next Turn's model | Composer model picker | `/model` |
-| Adjust Thinking effort | Composer effort picker | `/effort` |
-| Cap the Session context window | Model picker context control | `/context` |
-| Choose tool access | Composer access picker | `/permissions` |
-| Load Skills for the next Turn | Composer Skills control | `/skill <name>` |
-| Create a reusable Skill | **Skills → Create Skill** | `$skill-creator` |
-| Set or revise a durable Goal | Goal panel | `/goal` |
-| Queue the next instruction | Composer while a Turn runs | `/queue <text>` |
-| Stop the active Turn | Use the stop control | `/stop` |
-| Re-run the last Turn | Retry control on the Turn | `/retry` |
-| Compact a long conversation | Automatic under pressure | `/compact` (also automatic) |
-| Change transcript detail | — | `/transcript` or `Ctrl+O` |
-| Rename or delete a Session | Session context menu | `/rename <title>` · `/delete <id>` |
-
-Session history, tool activity, approvals, Goal state, and verification evidence
-remain together. TUI, Desktop, and Web can observe the same Session while the
-shared service serializes its execution. Normal input during a Turn steers the
-active work; explicit queueing requests a subsequent Turn. The interface reports
-how the input was accepted. Closing a client leaves accepted work running.
-Archiving hides a Session without deleting its history;
-permanent deletion removes the Session records but never repository files.
-
-### Connections and models
-
-Desktop provides connection setup and verification under **Settings → AI
-providers**. In the CLI, `/model` changes the connection and model for future
-Turns, while `/effort` selects a Thinking level supported by that model.
-Use the model picker's context control, or `/context 64k` in the TUI, to make
-future Turns compact history sooner; `/context auto` restores the model's
-published window.
-
-Model changes never rewrite earlier history or alter an active Turn. Thinking
-effort controls the request sent to the provider; transcript detail controls
-only presentation. DeepCode shows provider-designated reasoning summaries when
-available and never merges raw chain-of-thought into the assistant answer.
-
-Provider administration, environment-variable credentials, custom gateways,
-model discovery, and machine-readable checks are documented in the
-[Headless and Automation guide](docs/HEADLESS_AND_AUTOMATION.md#connection-and-model-management).
-
-### Skills
-
-Skills turn reusable engineering knowledge into instructions the Agent can load
-for a task. Desktop provides a Skills workspace; the interactive CLI uses
-`/skills` to discover them and `/skill <name>` to select one for the next Turn.
-Choose **Skills → Create Skill** in Desktop or invoke `$skill-creator` in CLI to
-create and validate one through a normal Agent Turn.
-
-Project Skills in `.agents/skills` travel with a repository; user Skills in
-`~/.agents/skills` remain available across Projects. Existing DeepCode and
-Claude-compatible directories remain readable. A Skill can guide the Agent,
-but it cannot grant permissions or bypass Project trust, approvals, or tool
-policy. Import, enable, disable, and catalog commands live in the
-[advanced guide](docs/HEADLESS_AND_AUTOMATION.md#skill-management).
-
-### Local Plugins
-
-Plugins optionally package Skills behind a validated local manifest; standalone
-project and user Skills continue to install and run without a Plugin. New
-packages must use the Agent Plugins 1.0.0 manifest and fixed `skills/` layout.
-Add a trusted folder from the Desktop Plugins workspace or with `deepcode
-plugin add <path>`; its Skills then appear in the ordinary Skill catalog and
-Composer. A standards-compliant `mcp.json` may also contribute MCP servers;
-registration remains inert and those processes start only inside an Agent
-Session. DeepCode does not execute Plugin hooks or Apps and does not download
-from a Marketplace. See the
-[local Plugin contract](docs/LOCAL_PLUGINS.md).
-
-### MCP servers
-
-Generic coding-agent MCP servers live in the top-level `mcpServers` section of
-`deepcode_config.json`; the historical Paper2Code `tools.mcpServers` section is
-kept separate. Configure servers in Desktop under **MCP**, or use the compact
-`deepcode mcp` CLI. The bundled catalog is listed with `deepcode mcp presets`;
-`add <id>` copies a disabled definition, `test <name>` performs a real
-handshake, and `login/logout <name>` manages explicit browser OAuth. The TUI
-offers the same actions under the single `/mcp` command. User and
-trusted-project layers replace whole server entries rather than merging
-executable fields. Provider secrets are referenced from private DeepCode
-connections, and MCP tool policy can only narrow global trust, read-only,
-approval, and sandbox decisions.
-
-DeepCode supports stdio, SSE, and Streamable HTTP, session-owned startup and
-shutdown, bounded discovery, stable `mcp__server__tool` identities, tool
-annotations, allow/deny lists, per-tool approvals, timeouts, and cancellation.
-For a concrete two-Skill plus MCP integration, see the
-[OpenSpace guide](docs/integrations/OPENSPACE.md). Setup, preset, OAuth, and
-connection-state details are in the [MCP client guide](docs/integrations/MCP.md).
-
-### Safety and execution
-
-DeepCode treats execution as a product boundary rather than a client-side
-confirmation:
-
-- Projects require explicit trust before Agent execution on every interface.
-- Permission decisions are `allow`, `ask`, or `deny`.
-- An approval resumes the exact suspended tool call.
-- **Ask** keeps the workspace command sandbox and protected-path checks;
-  **Read only** denies mutating tools; **Full access** is an explicit,
-  confirmed Session grant that removes approval and filesystem sandbox
-  boundaries. Explicit deny rules still win.
-- CLI and Desktop edit the same Session override. Each admitted Turn freezes
-  the complete resolved security profile: changes apply to new submissions,
-  while active and already queued Turns keep their recorded access after
-  resume or worker handoff.
-- Shell and code processes are terminated as owned process trees on timeout,
-  interruption, or shutdown.
-- Crash recovery settles incomplete Turns without automatically replaying side
-  effects.
-
-### Long-running work
-
-Ordinary prompts can run a full multi-tool coding Turn. When work must continue
-across several Turns or process restarts, attach a durable Goal to the Session.
-Use the Goal panel in Desktop or `/goal <objective>` in the CLI.
-
-While DeepCode works, new input can steer the active Turn. You can edit the
-Goal, stop the current Turn, queue a follow-up, pause the Goal, or resume it
-later. These actions preserve the same Session, history, permissions, Skills,
-and evidence instead of starting an isolated execution.
-
-The working Agent requests `complete` or `blocked` from its full context.
-DeepCode enforces ownership, lifecycle, permission, and budget boundaries, but
-does not pretend a generic host-side rule can validate every coding task. A
-normal semantic result is labelled **Completed**; tests, builds, diagnostics,
-diffs, or independent review remain visible evidence. No provider, model, task
-type, or test command is fixed by the Goal engine.
-
-### Automations and headless workflows
-
-The Desktop Automation workspace turns a trusted Project instruction into a
-manual or interval run while keeping the normal Agent, Session, Goal,
-permissions, recovery, and Run history. Use it for repeatable work such as
-repository health checks, regression review, or scheduled maintenance.
-
-Shell scripts and CI systems can use the same runtime without opening an
-interface. The separate
-[Headless and Automation guide](docs/HEADLESS_AND_AUTOMATION.md) contains the
-`exec`, `loop`, Automation, Provider, Skill, and Session administration
-commands. They are advanced integration surfaces—not a second way ordinary
-Desktop or CLI users must learn to talk to DeepCode.
-
-## Paper2Code
-
-Paper2Code is the research origin of DeepCode and remains its specialized
-workflow for scientific code reproduction. The general coding Agent extends
-the product; it does not replace or flatten the original Paper2Code design.
-
-Its central idea is unchanged: reproducing a paper is not a one-shot generation
-task. A central orchestrator coordinates distinct responsibilities for
-understanding the source, planning the reproduction, finding and indexing
-useful references, implementing the system, and verifying the result.
-
-### The original architecture
+## Core features
 
 <p align="center">
-  <img src="assets/readme/framework2.png" alt="Paper2Code framework from source documents through code generation, verification, and refinement" width="1080" />
+  <img src="assets/readme/verification-loop.png" alt="DeepCode Agent Harness and verification loop" width="1080" />
 </p>
 
-The specialist roles preserve the separation of concerns that made the
-original system effective:
+- **Repository work.** Reads, searches and edits files, applies patches, runs
+  commands and tests, and shows each change as a diff.
+  [Getting started](docs/guide/getting-started.md)
+- **Goals.** `/goal <objective>` in the TUI or the Goal panel in Desktop and
+  Web. The Goal continues across turns and survives restarts; an optional
+  check turns back a completion claim while the latest check failed.
+  [Goals and automation](docs/guide/goals-and-headless.md)
+- **Sessions and context.** Every session is saved with its tool calls,
+  approvals and Goal state. `/resume`, `/compact` and per-session context caps
+  keep long work going. [Sessions](docs/guide/sessions.md)
+- **Project instructions and memory.** Reads `AGENTS.md` and `CLAUDE.md`, and
+  keeps project notes in `.deepcode/memory/`.
+  [Skills and memory](docs/guide/skills-and-memory.md)
+- **Models and providers.** Named connections, per-session model and
+  reasoning effort, and connection checks before use.
+  [Models and providers](docs/guide/models.md)
+- **Skills and plugins.** Reusable instructions from `.agents/skills` and
+  `~/.agents/skills`, eight bundled Skills, and a Skill creator. Plugins
+  package Skills and MCP servers. [Skills](docs/guide/skills-and-memory.md) ·
+  [Local plugins](docs/LOCAL_PLUGINS.md)
+- **MCP.** Connects to stdio, SSE and Streamable HTTP servers, with a bundled
+  catalog and OAuth sign-in. `deepcode mcp serve` exposes DeepCode itself as an
+  MCP server. [MCP guide](docs/integrations/MCP.md)
+- **Agent presets and sub-agents.** Presets set a persona and narrow the tool
+  set. Sub-agents can work in separate Git worktrees.
+  [Configuration](docs/guide/configuration.md#agent-presets)
+- **Automations.** Run a saved instruction on a schedule with the same
+  agent, permissions and history.
+  [Automations](docs/guide/goals-and-headless.md#persistent-interval-automations)
+- **Voice input.** Optional dictation in the Desktop and Web composer.
+  [Voice dictation](docs/guide/dictation.md)
+- **Paper2Code.** Turn a paper or technical document into a code base.
+  [Paper2Code](docs/paper2code.md)
 
-| Role                            | Responsibility                                                                                                                      |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| **Central Orchestrating Agent** | Interprets progress, selects the next phase, coordinates specialists, and adapts the plan when evidence changes.                    |
-| **Intent Understanding Agent**  | Turns the user's objective into explicit functional requirements, technical constraints, and an actionable task decomposition.      |
-| **Document Parsing Agent**      | Processes papers and technical documents, extracting algorithms, equations, methods, assumptions, and implementation requirements.  |
-| **Code Planning Agent**         | Converts the understood method into an implementation roadmap, module boundaries, dependencies, interfaces, and verification goals. |
-| **Code Reference Mining Agent** | Discovers relevant repositories, libraries, and implementation patterns, then evaluates their relevance and integration potential.  |
-| **Code Indexing Agent**         | Builds a searchable semantic index and knowledge graph so useful components and relationships can be recovered during generation.   |
-| **Code Generation Agent**       | Synthesizes the plan and evidence into executable code, tests, documentation, and the interfaces needed for a reproducible result.  |
+### Models and providers
 
-Four ideas connect those roles into one system:
+Built-in templates: OpenRouter, Requesty, Opper, Forge, Amazon Bedrock,
+Anthropic, OpenAI, DeepSeek, Gemini, Zhipu AI, DashScope, MiniMax, Ollama and
+vLLM. A **Custom** connection points at any endpoint that speaks the OpenAI
+Chat Completions, OpenAI Responses or Anthropic Messages API.
+`deepcode provider list` shows them and which ones are ready.
 
-- **Intelligent orchestration.** The central Agent chooses and revisits phases
-  according to task state instead of treating reproduction as a fixed prompt
-  chain.
-- **Document and intent grounding.** Papers, specifications, URLs, and attached
-  files are converted into explicit implementation requirements before code is
-  written.
-- **Memory and CodeRAG.** Large documents and reference repositories are
-  segmented, indexed, and retrieved as bounded context rather than repeatedly
-  placed into the model window.
-- **Iterative verification.** Execution, tests, and observed failures feed back
-  into planning and implementation until the deliverable has supporting
-  evidence.
+## Security and data
 
-The supporting tool layer follows the same division:
+- **Data stays on your computer.** Settings, sessions, state and logs are under
+  `~/.deepcode` (or `$DEEPCODE_HOME`). Project notes are in
+  `<project>/.deepcode/memory/`. DeepCode has no account system and sends no
+  analytics.
+- **Local service.** The background service listens on `127.0.0.1` only (port
+  3081, or a free port if that is taken). Native clients authenticate with a
+  private token; the Web client signs in with a one-time link.
+- **Project trust.** The agent does not run in a folder you have not trusted.
+  A project's own config cannot select Full access, turn off the sandbox or
+  redirect model requests.
+- **Access presets and approvals.** **Ask** asks before edits and commands and
+  runs shell commands in an OS sandbox; **Read only** denies changes; **Full
+  access** removes approvals and the sandbox. Your `deny` rules apply under
+  every preset.
+- **Hooks.** Hooks a repository declares run only after you approve them;
+  changed hooks wait for `deepcode hooks approve`.
+- **Credentials.** API keys are stored in `~/.deepcode/credentials.json` with
+  owner-only permissions and never returned to a client. Shell commands do not
+  see them.
+- **What model providers receive.** The system prompt, project instructions,
+  tool definitions, the conversation and tool results (file contents, command
+  output) go to the endpoint of the connection you chose. `providers.egress`
+  can restrict which hosts are allowed. A local model keeps everything on your
+  machine.
 
-| Layer                     | Purpose                                                                                           |
-| ------------------------- | ------------------------------------------------------------------------------------------------- |
-| Document ingestion        | Fetch and normalize papers, URLs, PDFs, DOCX, presentations, text, and HTML.                      |
-| Document segmentation     | Divide long technical material into coherent, recoverable sections for analysis.                  |
-| Reference discovery       | Find candidate repositories and supporting implementations.                                       |
-| Code reference indexing   | Build searchable context over external and local code, including cross-file relationships.        |
-| Implementation execution  | Read and write files, run shell or Python commands, inspect the project structure, and keep logs. |
-| Verification and delivery | Run tests, record results, and deliver the codebase together with documentation and Artifacts.    |
+Details: [Security and data](docs/guide/security.md). To report a
+vulnerability, see [SECURITY.md](SECURITY.md).
 
-The modern product adds durable plans, explicit plan review, checkpoints,
-bounded retries, and interactive inspection around this workflow. Those
-additions make recovery and supervision stronger while preserving the
-Paper2Code architecture and its order of reasoning.
+## Documentation
 
-<!--
-README VISUAL SLOT — PAPER2CODE WORKFLOW
+| Topic | Guide |
+|---|---|
+| First task, step by step | [Getting started](docs/guide/getting-started.md) |
+| Terminal UI keys and commands | [The terminal UI](docs/guide/the-tui.md) |
+| Resume, compact and manage sessions | [Sessions](docs/guide/sessions.md) |
+| Providers, local models, reasoning | [Models and providers](docs/guide/models.md) |
+| Project instructions, memory, Skills | [Skills and memory](docs/guide/skills-and-memory.md) |
+| Goals, automations, headless runs | [Goals and automation](docs/guide/goals-and-headless.md) |
+| Config file and environment variables | [Configuration](docs/guide/configuration.md) |
+| Data, sandbox, approvals | [Security and data](docs/guide/security.md) |
+| Startup and connection problems | [Troubleshooting](docs/guide/troubleshooting.md) |
+| Scripts, CI and administration | [Headless and automation](docs/HEADLESS_AND_AUTOMATION.md) |
+| MCP servers | [MCP guide](docs/integrations/MCP.md) |
+| Background service | [Local background service](docs/SERVICE_RUNTIME.md) |
+| Upgrades and backups | [Upgrading DeepCode](docs/UPGRADE_AND_RESTORE.md) |
+| Desktop from source | [Desktop guide](desktop/README.md) |
+| Paper2Code | [Paper2Code](docs/paper2code.md) |
 
-Add a current Paper2Code workflow capture at:
-  assets/readme/paper2code-workflow.png
+## What's new
 
-Capture:
-- the workflow plan or checkpoint state;
-- one verification result;
-- the Artifact/Inspector surface.
+- **2026-10-29** — Optional microcompact that clears old tool output before
+  summarizing (`agents.defaults.microcompact`), an optional check before a
+  Goal completes (`goal.completionVerifier`), folder browsing in the Web
+  client, an opt-in risk check (`DEEPCODE_RISK_EVALUATOR=1`), and approval for
+  project hooks (`deepcode hooks status` / `approve`).
+- **2026-10-28** — Agent presets can remove tools with `disallowed-tools`,
+  file tools ask before writing hook files, and `deepcode mcp list` flags MCP
+  packages without a fixed version.
+- **2026-10-21** — The Windows background service no longer opens console
+  windows, and Desktop and Web take a separate font for code.
 
-Do not reuse the legacy browser UI screenshot.
--->
+All changes: [CHANGELOG.md](CHANGELOG.md).
 
-### Research results
+## Research origin
 
-The original DeepCode study evaluates scientific code reproduction on
-[PaperBench](https://openai.com/index/paperbench/), which asks agents to
-reproduce 20 ICML 2024 papers across 8,316 gradable components.
-
-<table align="center" width="100%">
-<tr>
-<td width="25%" align="center">
-  <strong>75.9%</strong><br/>
-  <sub>Human expert subset<br/>+3.5 points</sub>
-</td>
-<td width="25%" align="center">
-  <strong>84.8%</strong><br/>
-  <sub>Commercial-agent subset<br/>+26.1 points</sub>
-</td>
-<td width="25%" align="center">
-  <strong>73.5%</strong><br/>
-  <sub>Scientific coding<br/>+22.4 points</sub>
-</td>
-<td width="25%" align="center">
-  <strong>73.5%</strong><br/>
-  <sub>LLM-agent baseline<br/>+30.2 points</sub>
-</td>
-</tr>
-</table>
+DeepCode started as Paper2Code, a multi-agent system that turns research papers
+into working code. On [PaperBench](https://openai.com/index/paperbench/) it
+scored 75.9% on the human-expert subset, above the best reported human
+baseline (72.4%). The method is described in
+[DeepCode: Open Agentic Coding](https://arxiv.org/abs/2512.07921). Paper2Code
+is still available in Desktop and Web; see [Paper2Code](docs/paper2code.md).
 
 <p align="center">
   <img src="assets/result_main02.jpg" alt="DeepCode PaperBench results" width="920" />
 </p>
-
-| Evaluation subset       | DeepCode | Reported comparison                   | Difference   |
-| ----------------------- | -------- | ------------------------------------- | ------------ |
-| Human expert subset     | 75.9%    | Best reported human baseline: 72.4%   | +3.5 points  |
-| Commercial-agent subset | 84.8%    | Best reported commercial agent: 58.7% | +26.1 points |
-| Scientific coding       | 73.5%    | PaperCoder: 51.1%                     | +22.4 points |
-| LLM-agent baseline      | 73.5%    | Best reported LLM agent: 43.3%        | +30.2 points |
-
-These are PaperBench-specific results reported by the original study. They are
-not a general-purpose coding benchmark or a comparison against continuously
-updated products.
-
-Read the [paper](https://arxiv.org/abs/2512.07921) for methodology, evaluation
-scope, models, and baseline details.
 
 <a id="live-demonstrations"></a>
 
@@ -1464,66 +504,20 @@ are output demonstrations rather than screenshots of the current Desktop UI.
 The [DeepCode V2 introduction video](https://youtu.be/TxwBHRQoaBw) gives a
 broader walkthrough.
 
-## Development
+---
 
-### Source installation
+## Contributing
 
-```bash
-git clone https://github.com/HKUDS/DeepCode.git
-cd DeepCode
+Development setup, checks and pull request guidelines are in
+[CONTRIBUTING.md](CONTRIBUTING.md). Everyone who has opened a pull request is
+listed in [CONTRIBUTORS.md](CONTRIBUTORS.md).
 
-curl -LsSf https://astral.sh/uv/install.sh | sh
-uv venv --python=3.13
-source .venv/bin/activate
-uv pip install -e .
-```
+## Support
 
-On Windows PowerShell, activate with `.\.venv\Scripts\Activate.ps1`.
-
-### Verification
-
-To reproduce CI's Python environment and understand each check, see the
-[CI guide](docs/CI.md).
-
-```bash
-uvx pre-commit run --all-files
-python -m compileall -q app_server cli core tools workflows
-deepcode --version
-deepcode-app-server --verify-runtime
-
-cd desktop
-npm run lint
-npm test -- --run
-npm run build
-```
-
-Desktop packaging, Rust checks, signing, and release procedures are documented
-in [`desktop/README.md`](desktop/README.md) and the
-[Desktop release runbook](docs/DESKTOP_RELEASE_RUNBOOK.md).
-
-<details>
-<summary><strong>Contributor architecture notes</strong></summary>
-
-| Topic                                         | Document                                                      |
-| --------------------------------------------- | ------------------------------------------------------------- |
-| Agent execution and approvals                 | [P2 Agent execution](docs/P2_AGENT_EXECUTION_ARCHITECTURE.md) |
-| Desktop sidecar and lifecycle                 | [P3 Desktop runtime](docs/P3_DESKTOP_RUNTIME_ARCHITECTURE.md) |
-| Git review, files, terminal, and tests        | [P4 Code workbench](docs/P4_CODE_WORKBENCH_ARCHITECTURE.md)   |
-| Durable Paper2Code workflow                   | [P5 Paper2Code](docs/P5_PAPER2CODE_ARCHITECTURE.md)           |
-| Canonical Sessions and cross-directory resume | [P6 Session alignment](docs/P6_SESSION_ALIGNMENT_REVIEW.md)   |
-| Skills identity, security, and persistence    | [Skills architecture](docs/SKILLS_PRODUCT_ARCHITECTURE.md)    |
-| Generic MCP setup and connection lifecycle     | [MCP client guide](docs/integrations/MCP.md)                  |
-| OpenSpace integration                          | [OpenSpace integration](docs/integrations/OPENSPACE.md)       |
-| Automation scheduling and execution           | [Automation architecture](docs/AUTOMATION_ARCHITECTURE.md)    |
-| Desktop product and interaction model         | [Desktop UI specification](docs/DESKTOP_PRODUCT_UI_SPEC.md)   |
-| Privacy and diagnostics                       | [Privacy contract](docs/PRIVACY_AND_DIAGNOSTICS.md)           |
-
-</details>
-
-The pre-restructure README is preserved in
-[`docs/archive/README_LEGACY_2026-07-20.md`](docs/archive/README_LEGACY_2026-07-20.md).
-The empty product-image slots have a shared
-[capture brief](assets/readme/README.md).
+- Bugs and feature requests: [GitHub Issues](https://github.com/HKUDS/DeepCode/issues)
+- Security reports: [SECURITY.md](SECURITY.md)
+- Community: the Feishu and WeChat groups listed on the
+  [HKUDS profile](https://github.com/HKUDS/.github/blob/main/profile/README.md)
 
 ---
 
