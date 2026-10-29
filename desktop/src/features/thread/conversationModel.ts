@@ -6,14 +6,14 @@ export interface TimelineItemEntry {
   item: Item;
 }
 
-export interface TimelineActivityGroup {
-  type: "activity_group";
+/** A run of steps the agent took between things it showed the user. */
+export interface TimelineWorkGroup {
+  type: "work_group";
   id: string;
-  activityKind: "exploration";
   items: Item[];
 }
 
-export type TimelineEntry = TimelineItemEntry | TimelineActivityGroup;
+export type TimelineEntry = TimelineItemEntry | TimelineWorkGroup;
 
 export interface ConversationTurn {
   id: string;
@@ -63,8 +63,6 @@ export function goalPrompt(item: Item): GoalPrompt | null {
   return client === "internal" ? "automatic" : "requested";
 }
 
-const groupedActivityKinds = new Set(["read", "search", "list"]);
-
 function itemActivityKind(item: Item): string | null {
   const activity = item.payload.activity;
   if (
@@ -77,44 +75,126 @@ function itemActivityKind(item: Item): string | null {
   return typeof activity.kind === "string" ? activity.kind : null;
 }
 
-function canJoinExplorationGroup(item: Item): boolean {
-  const activityKind = itemActivityKind(item);
-  return activityKind !== null && groupedActivityKinds.has(activityKind);
+// Steps the agent takes on its way. Everything else stays in place for the
+// user to see: what the agent says, approvals, errors, plans, artifacts.
+const workKinds = new Set<Item["kind"]>([
+  "reasoning_summary",
+  "command_execution",
+  "tool_call",
+  "file_change",
+  "diff",
+  "test_result",
+]);
+
+/** What a step did, for a work group's tally. Thinking is not an action. */
+export type WorkTally =
+  | "commands"
+  | "edits"
+  | "reads"
+  | "searches"
+  | "tests"
+  | "tools";
+
+const tallyOrder: readonly WorkTally[] = [
+  "commands",
+  "edits",
+  "reads",
+  "searches",
+  "tests",
+  "tools",
+];
+
+function workTally(item: Item): WorkTally | null {
+  switch (item.kind) {
+    case "reasoning_summary":
+      return null;
+    case "file_change":
+    case "diff":
+      return "edits";
+    case "test_result":
+      return "tests";
+  }
+  switch (itemActivityKind(item)) {
+    case "read":
+      return "reads";
+    case "search":
+    case "list":
+      return "searches";
+    case "edit":
+      return "edits";
+    case "run":
+      return "commands";
+  }
+  return item.kind === "command_execution" ? "commands" : "tools";
 }
+
+// A run of work folds into one group once it holds this many actions; a
+// single action reads fine on its own.
+const MIN_GROUPED_ACTIONS = 2;
 
 function compactTimeline(items: Item[]): TimelineEntry[] {
   const entries: TimelineEntry[] = [];
-  let index = 0;
+  let run: Item[] = [];
+  const endRun = () => {
+    const actions = run.filter((item) => workTally(item) !== null).length;
+    if (actions >= MIN_GROUPED_ACTIONS) {
+      // Keyed by its first step, so the group keeps its identity (and its
+      // open state) while later steps stream into it.
+      entries.push({ type: "work_group", id: `work:${run[0].id}`, items: run });
+    } else {
+      for (const item of run) entries.push({ type: "item", id: item.id, item });
+    }
+    run = [];
+  };
 
-  while (index < items.length) {
-    const item = items[index];
-    if (!canJoinExplorationGroup(item)) {
-      entries.push({ type: "item", id: item.id, item });
-      index += 1;
+  for (const item of items) {
+    if (workKinds.has(item.kind)) {
+      run.push(item);
       continue;
     }
-
-    const adjacent: Item[] = [item];
-    let cursor = index + 1;
-    while (cursor < items.length && canJoinExplorationGroup(items[cursor])) {
-      adjacent.push(items[cursor]);
-      cursor += 1;
-    }
-
-    if (adjacent.length === 1) {
-      entries.push({ type: "item", id: item.id, item });
-    } else {
-      entries.push({
-        type: "activity_group",
-        id: `exploration:${item.id}`,
-        activityKind: "exploration",
-        items: adjacent,
-      });
-    }
-    index = cursor;
+    endRun();
+    entries.push({ type: "item", id: item.id, item });
   }
-
+  endRun();
   return entries;
+}
+
+export interface WorkSummary {
+  /** Actions by kind, in display order; kinds with none are left out. */
+  tallies: [WorkTally, number][];
+  failed: number;
+  /** The step running now, if the group is still at work. */
+  current: Item | null;
+  /** From the first step's start to the last update; null if unknown. */
+  seconds: number | null;
+}
+
+export function summarizeWork(items: readonly Item[]): WorkSummary {
+  const counts = new Map<WorkTally, number>();
+  let failed = 0;
+  let current: Item | null = null;
+  let start = Number.POSITIVE_INFINITY;
+  let end = Number.NEGATIVE_INFINITY;
+  for (const item of items) {
+    const tally = workTally(item);
+    if (tally) counts.set(tally, (counts.get(tally) ?? 0) + 1);
+    if (item.status === "failed") failed += 1;
+    if (item.status === "in_progress") current = item;
+    start = Math.min(start, Date.parse(item.createdAt));
+    end = Math.max(end, Date.parse(item.updatedAt));
+  }
+  return {
+    tallies: tallyOrder.flatMap((tally): [WorkTally, number][] => {
+      const count = counts.get(tally);
+      return count ? [[tally, count]] : [];
+    }),
+    failed,
+    current,
+    seconds:
+      Number.isFinite(start) && Number.isFinite(end)
+        ? Math.max(0, Math.round((end - start) / 1000))
+        : null,
+  };
 }
 
 export function buildConversationTurns(

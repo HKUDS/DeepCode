@@ -4,6 +4,7 @@ import type { Item, Turn } from "../../generated/app-server";
 import {
   buildConversationTurns,
   formatTurnDuration,
+  summarizeWork,
   turnDurationSeconds,
 } from "./conversationModel";
 
@@ -72,51 +73,92 @@ describe("conversationModel", () => {
     expect(group.completion?.id).toBe("completion");
   });
 
-  it("folds only adjacent read, search, and list activities", () => {
-    const activity = (kind: string, subject: string) => ({
-      activity: { kind, label: kind, subject },
-      text: subject,
-    });
-    const items = [
-      item("user", 1, "user_message", "Inspect"),
-      item("read", 2, "command_execution", "Read README", activity("read", "README.md")),
-      item("search", 3, "command_execution", "Searched symbols", activity("search", "symbols")),
-      item("commentary", 4, "assistant_message", "I found the entrypoint"),
-      item("list", 5, "command_execution", "Listed files", activity("list", "src")),
-      item("run", 6, "command_execution", "Ran tests", activity("run", "pytest")),
-    ];
+  const activity = (kind: string, subject: string) => ({
+    activity: { kind, label: kind, subject },
+    text: subject,
+  });
+  const entryIds = (items: Item[]) =>
+    buildConversationTurns([turn], items)[0].timeline.map((entry) =>
+      entry.type === "item" ? entry.item.id : [entry.id, entry.items.map((step) => step.id)],
+    );
 
-    const [group] = buildConversationTurns([turn], items);
-
-    expect(group.timeline).toHaveLength(4);
-    expect(group.timeline[0]).toMatchObject({
-      type: "activity_group",
-      id: "exploration:read",
-      items: [{ id: "read" }, { id: "search" }],
-    });
-    expect(group.timeline[1]).toMatchObject({
-      type: "item",
-      item: { id: "commentary" },
-    });
-    expect(group.timeline[2]).toMatchObject({
-      type: "item",
-      item: { id: "list" },
-    });
-    expect(group.timeline[3]).toMatchObject({
-      type: "item",
-      item: { id: "run" },
-    });
+  it("folds the work between what the user sees into one group", () => {
+    expect(
+      entryIds([
+        item("user", 1, "user_message", "Inspect"),
+        item("think", 2, "reasoning_summary", "Thinking"),
+        item("read", 3, "command_execution", "Read README", activity("read", "README.md")),
+        item("run", 4, "command_execution", "Ran tests", activity("run", "pytest")),
+        item("commentary", 5, "assistant_message", "Tests pass; checking the docs"),
+        item("edit", 6, "file_change", "Edited docs"),
+        item("diff", 7, "diff", "Docs diff"),
+        item("final", 8, "assistant_message", "Done"),
+      ]),
+    ).toEqual([
+      ["work:think", ["think", "read", "run"]],
+      "commentary",
+      ["work:edit", ["edit", "diff"]],
+      "final",
+    ]);
   });
 
-  it("leaves legacy activity items readable when semantic metadata is absent", () => {
-    const items = [
-      item("legacy-read", 1, "command_execution", "Read README"),
-      item("legacy-search", 2, "command_execution", "Searched symbols"),
+  it("leaves a single action, and thinking alone, as they are", () => {
+    expect(
+      entryIds([
+        item("think", 1, "reasoning_summary", "Thinking"),
+        item("run", 2, "command_execution", "Ran tests"),
+        item("commentary", 3, "assistant_message", "Looking further"),
+        item("think-2", 4, "reasoning_summary", "Thinking"),
+        item("think-3", 5, "reasoning_summary", "Thinking"),
+      ]),
+    ).toEqual(["think", "run", "commentary", "think-2", "think-3"]);
+  });
+
+  it("never folds approvals, errors or plans into a group", () => {
+    expect(
+      entryIds([
+        item("run", 1, "command_execution", "Ran tests"),
+        item("approval", 2, "approval_request", "Approve the edit"),
+        item("edit", 3, "file_change", "Edited a file"),
+        item("plan", 4, "plan", "Plan"),
+        item("run-2", 5, "command_execution", "Ran tests"),
+        item("error", 6, "error", "Command failed"),
+        item("run-3", 7, "command_execution", "Ran tests"),
+      ]),
+    ).toEqual(["run", "approval", "edit", "plan", "run-2", "error", "run-3"]);
+  });
+
+  it("tallies what a group did, what failed, and what runs now", () => {
+    const steps = [
+      { ...item("think", 1, "reasoning_summary", "Thinking"), createdAt: "2026-07-17T01:00:00Z" },
+      item("read", 2, "command_execution", "Read", activity("read", "a.py")),
+      item("grep", 3, "tool_call", "Search", activity("search", "TODO")),
+      item("glob", 4, "tool_call", "List", activity("list", "src")),
+      { ...item("run", 5, "command_execution", "Ran tests", activity("run", "pytest")), status: "failed" as const },
+      item("legacy", 6, "command_execution", "Ran something"),
+      item("mcp", 7, "tool_call", "Browser click", activity("other", "button")),
+      item("edit", 8, "file_change", "Edited a.py"),
+      item("test", 9, "test_result", "3 passed"),
+      {
+        ...item("live", 10, "command_execution", "Running", activity("run", "npm test")),
+        status: "in_progress" as const,
+        updatedAt: "2026-07-17T01:02:05Z",
+      },
     ];
 
-    const [group] = buildConversationTurns([turn], items);
+    const summary = summarizeWork(steps);
 
-    expect(group.timeline.map((entry) => entry.type)).toEqual(["item", "item"]);
+    expect(summary.tallies).toEqual([
+      ["commands", 3],
+      ["edits", 1],
+      ["reads", 1],
+      ["searches", 2],
+      ["tests", 1],
+      ["tools", 1],
+    ]);
+    expect(summary.failed).toBe(1);
+    expect(summary.current?.id).toBe("live");
+    expect(summary.seconds).toBe(125);
   });
 
   it("keeps recovered items whose Turn record is unavailable", () => {

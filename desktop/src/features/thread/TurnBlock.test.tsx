@@ -1,10 +1,13 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { initI18n } from "../../app/i18n";
 import type { Item, Turn } from "../../generated/app-server";
 import { buildConversationTurns } from "./conversationModel";
 import type { TranscriptMode } from "./transcriptMode";
 import { TurnBlock } from "./TurnBlock";
+
+initI18n();
 
 const turn: Turn = {
   id: "turn-1",
@@ -121,6 +124,66 @@ describe("TurnBlock", () => {
     expect(row?.textContent).toContain("Warning");
     expect(screen.queryByText("Execution error")).toBeNull();
     expect(row?.textContent).not.toMatch(/completed|failed/);
+  });
+
+  const run = (id: string, ordinal: number, command: string) =>
+    item(id, ordinal, "command_execution", command, {
+      activity: { kind: "run", label: "Run", subject: command },
+      resultPreview: `${command} output`,
+    });
+
+  it("folds a run of steps into one line and renders them only when opened", async () => {
+    renderTurn([
+      item("user", 1, "user_message", turn.prompt, { text: turn.prompt }),
+      run("lint", 2, "npm run lint"),
+      { ...run("test", 3, "npm test"), status: "failed" },
+      item("edit", 4, "file_change", "Edited parse.py", {}),
+      item("final", 5, "assistant_message", "Done", { text: "Done", phase: "final_answer" }),
+    ]);
+
+    const group = screen.getByText("Steps").closest("details")!;
+    expect(group.open).toBe(false);
+    expect(group.textContent).toContain("1s");
+    expect(group.textContent).toContain("Commands 2");
+    expect(group.textContent).toContain("Edits 1");
+    expect(group.textContent).toContain("Failed 1");
+    expect(screen.queryByText("npm run lint")).toBeNull();
+
+    fireEvent.click(group.querySelector("summary")!);
+    expect(group.open).toBe(true);
+    expect(await screen.findByText("npm run lint")).toBeTruthy();
+    expect(screen.getByText("Edited parse.py")).toBeTruthy();
+    expect(screen.getByText("Done")).toBeTruthy();
+  });
+
+  it("names the step a running group is on", () => {
+    renderTurn([
+      run("lint", 1, "npm run lint"),
+      { ...run("test", 2, "npm test"), status: "in_progress" },
+    ]);
+
+    expect(screen.getByText("Now: npm test").closest("details")?.open).toBe(false);
+  });
+
+  it("opens every group in the verbose transcript", () => {
+    renderTurn([run("lint", 1, "npm run lint"), run("test", 2, "npm test")], "verbose");
+
+    expect(screen.getByText("npm test").closest("details[open]")).not.toBeNull();
+  });
+
+  it("keeps a group's changes, not its steps, in the summary transcript", () => {
+    renderTurn(
+      [
+        run("lint", 1, "npm run lint"),
+        item("edit", 2, "file_change", "Edited parse.py", {}),
+        run("test", 3, "npm test"),
+      ],
+      "summary",
+    );
+
+    expect(screen.getByText("Edited parse.py")).toBeTruthy();
+    expect(screen.queryByText("npm run lint")).toBeNull();
+    expect(screen.queryByText("Commands 2")).toBeNull();
   });
 
   const instruction = "Continue working toward the active Thread Goal.";

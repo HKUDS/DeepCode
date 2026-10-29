@@ -399,14 +399,14 @@ div.runStep {
   color: var(--text-primary);
 }
 
-.activityGroup {
+.workGroup {
   overflow: hidden;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--surface-raised) 66%, transparent);
 }
 
-.activityGroup > summary {
+.workGroup > summary {
   display: grid;
   min-height: 42px;
   grid-template-columns: 18px minmax(0, 1fr) 16px;
@@ -418,16 +418,16 @@ div.runStep {
   list-style: none;
 }
 
-.activityGroup > summary::-webkit-details-marker {
+.workGroup > summary::-webkit-details-marker {
   display: none;
 }
 
-.activityGroup > summary:hover {
+.workGroup > summary:hover {
   background: var(--surface-hover);
   color: var(--text-secondary);
 }
 
-.activityGroup > summary > span {
+.workGroup > summary > span {
   display: flex;
   min-width: 0;
   align-items: baseline;
@@ -435,7 +435,7 @@ div.runStep {
   gap: 12px;
 }
 
-.activityGroup > summary strong {
+.workGroup > summary strong {
   overflow: hidden;
   color: var(--text-secondary);
   font-size: var(--text-xs);
@@ -444,21 +444,31 @@ div.runStep {
   white-space: nowrap;
 }
 
-.activityGroup > summary small {
+.workGroup[data-status="in_progress"] > summary strong {
+  color: var(--text-primary);
+}
+
+.workTallies {
+  display: flex;
   flex: 0 0 auto;
+  gap: 10px;
   color: var(--text-tertiary);
   font: var(--text-micro) var(--font-mono);
 }
 
-.activityGroup > summary > svg:last-child {
+.workTallies > [data-failed="true"] {
+  color: var(--danger);
+}
+
+.workGroup > summary > svg:last-child {
   transition: transform 150ms ease;
 }
 
-.activityGroup[open] > summary > svg:last-child {
+.workGroup[open] > summary > svg:last-child {
   transform: rotate(180deg);
 }
 
-.activityGroupItems {
+.workGroupItems {
   position: relative;
   display: grid;
   gap: 2px;
@@ -467,7 +477,7 @@ div.runStep {
   background: color-mix(in srgb, var(--surface-canvas) 64%, transparent);
 }
 
-.activityGroupItems::before {
+.workGroupItems::before {
   position: absolute;
   top: 14px;
   bottom: 14px;
@@ -477,7 +487,7 @@ div.runStep {
   content: "";
 }
 
-.activityGroupItems .runStep::before {
+.workGroupItems .runStep::before {
   left: -16px;
 }
 
@@ -597,7 +607,7 @@ div.runStep {
 }
 
 .assistantMessage[data-phase="commentary"] + .activityEntry,
-.assistantMessage[data-phase="commentary"] + .activityGroup {
+.assistantMessage[data-phase="commentary"] + .workGroup {
   margin-top: 1px;
 }
 

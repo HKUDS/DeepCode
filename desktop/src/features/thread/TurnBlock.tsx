@@ -34,10 +34,12 @@ import { isWarning, presentItem } from "../execution/itemPresentation";
 import {
   formatTurnDuration,
   goalPrompt,
+  summarizeWork,
   turnDurationSeconds,
   type ConversationTurn,
   type GoalPrompt,
-  type TimelineActivityGroup,
+  type TimelineWorkGroup,
+  type WorkTally,
 } from "./conversationModel";
 import { MarkdownContent } from "./MarkdownContent";
 import { ReasoningBlock } from "./ReasoningBlock";
@@ -425,7 +427,24 @@ function RunStatus({ group }: { group: ConversationTurn }) {
   );
 }
 
-function ExplorationGroup({
+const tallyLabels: Record<WorkTally, [key: string, fallback: string]> = {
+  commands: ["turn.work.commands", "Commands {{count}}"],
+  edits: ["turn.work.edits", "Edits {{count}}"],
+  reads: ["turn.work.reads", "Reads {{count}}"],
+  searches: ["turn.work.searches", "Searches {{count}}"],
+  tests: ["turn.work.tests", "Tests {{count}}"],
+  tools: ["turn.work.tools", "Tools {{count}}"],
+};
+
+function stepSubject(item: Item): string {
+  return itemActivity(item)?.subject || item.summary || presentItem(item).label;
+}
+
+/**
+ * A run of steps folded into one line that says what they did. Its steps
+ * render only while it is open: a long run is hundreds of them.
+ */
+function WorkGroup({
   group,
   approvalsByItem,
   selectedItemId,
@@ -435,7 +454,7 @@ function ExplorationGroup({
   onRespondToApproval,
   transcriptMode,
 }: {
-  group: TimelineActivityGroup;
+  group: TimelineWorkGroup;
   approvalsByItem: ReadonlyMap<string, Approval>;
   selectedItemId: string | null;
   busy: boolean;
@@ -445,46 +464,65 @@ function ExplorationGroup({
   transcriptMode: TranscriptMode;
 }) {
   const { t } = useTranslation();
-  const active = group.items.some(
-    (item) => item.status === "in_progress" || item.id === selectedItemId,
+  const summary = summarizeWork(group.items);
+  const [open, setOpen] = useState(
+    () =>
+      transcriptMode === "verbose" ||
+      group.items.some((item) => item.id === selectedItemId),
   );
-  const completed = group.items.filter(
-    (item) => item.status === "completed",
-  ).length;
+  // The Turn's own status already says how long it worked, so the title
+  // names the step at work, or just what this is.
+  const title = summary.current
+    ? t("turn.work.now", "Now: {{step}}", { step: stepSubject(summary.current) })
+    : t("turn.work.steps", "Steps");
 
   return (
     <details
-      className={styles.activityGroup}
-      open={active || transcriptMode === "verbose"}
+      className={styles.workGroup}
+      data-status={summary.current ? "in_progress" : undefined}
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary>
-        <Search size={14} aria-hidden="true" />
+        <Wrench size={14} aria-hidden="true" />
         <span>
-          <strong>{t("turn.explored", "Explored project context")}</strong>
-          <small>
-            {t("turn.activities", "{{completed}}/{{total}} activities", {
-              completed,
-              total: group.items.length,
+          <strong>{title}</strong>
+          <small className={styles.workTallies}>
+            {summary.seconds ? (
+              <span>{formatTurnDuration(summary.seconds)}</span>
+            ) : null}
+            {summary.tallies.map(([tally, count]) => {
+              const [key, fallback] = tallyLabels[tally];
+              return <span key={tally}>{t(key, fallback, { count })}</span>;
             })}
+            {summary.failed ? (
+              <span data-failed="true">
+                {t("turn.work.failed", "Failed {{count}}", {
+                  count: summary.failed,
+                })}
+              </span>
+            ) : null}
           </small>
         </span>
         <ChevronDown size={14} aria-hidden="true" />
       </summary>
-      <div className={styles.activityGroupItems}>
-        {group.items.map((item) => (
-          <ActivityItem
-            key={item.id}
-            item={item}
-            approval={approvalsByItem.get(item.id)}
-            active={item.id === selectedItemId}
-            busy={busy}
-            onSelectItem={onSelectItem}
-            onOpenInspector={onOpenInspector}
-            onRespondToApproval={onRespondToApproval}
-            transcriptMode={transcriptMode}
-          />
-        ))}
-      </div>
+      {open ? (
+        <div className={styles.workGroupItems}>
+          {group.items.map((item) => (
+            <ActivityItem
+              key={item.id}
+              item={item}
+              approval={approvalsByItem.get(item.id)}
+              active={item.id === selectedItemId}
+              busy={busy}
+              onSelectItem={onSelectItem}
+              onOpenInspector={onOpenInspector}
+              onRespondToApproval={onRespondToApproval}
+              transcriptMode={transcriptMode}
+            />
+          ))}
+        </div>
+      ) : null}
     </details>
   );
 }
@@ -576,6 +614,26 @@ export function TurnBlock({
         )
       : group.turn?.errorMessage;
 
+  const renderStep = (item: Item) => {
+    if (transcriptMode === "summary" && !summaryVisibleItemKinds.has(item.kind)) {
+      return null;
+    }
+    return (
+      <div className={styles.activityEntry} key={item.id}>
+        <ActivityItem
+          item={item}
+          approval={approvalsByItem.get(item.id)}
+          active={item.id === selectedItemId}
+          busy={busy}
+          onSelectItem={onSelectItem}
+          onOpenInspector={onOpenInspector}
+          onRespondToApproval={onRespondToApproval}
+          transcriptMode={transcriptMode}
+        />
+      </div>
+    );
+  };
+
   return (
     <section className={styles.turnBlock} data-status={group.turn?.status}>
       {userMessages.map((message) => (
@@ -647,11 +705,13 @@ export function TurnBlock({
 
       <div className={styles.timeline}>
         {group.timeline.map((entry) => {
-          if (entry.type === "activity_group") {
-            if (transcriptMode === "summary") return null;
+          if (entry.type === "work_group") {
+            // The summary keeps a run's changes and results, not its steps.
+            if (transcriptMode === "summary") return entry.items.map(renderStep);
             return (
-              <ExplorationGroup
-                key={entry.id}
+              <WorkGroup
+                // A new transcript mode starts the group in that mode's state.
+                key={`${entry.id}:${transcriptMode}`}
                 group={entry}
                 approvalsByItem={approvalsByItem}
                 selectedItemId={selectedItemId}
@@ -672,26 +732,7 @@ export function TurnBlock({
             }
             return <AssistantMessage key={entry.id} item={entry.item} />;
           }
-          if (
-            transcriptMode === "summary" &&
-            !summaryVisibleItemKinds.has(entry.item.kind)
-          ) {
-            return null;
-          }
-          return (
-            <div className={styles.activityEntry} key={entry.id}>
-              <ActivityItem
-                item={entry.item}
-                approval={approvalsByItem.get(entry.item.id)}
-                active={entry.item.id === selectedItemId}
-                busy={busy}
-                onSelectItem={onSelectItem}
-                onOpenInspector={onOpenInspector}
-                onRespondToApproval={onRespondToApproval}
-                transcriptMode={transcriptMode}
-              />
-            </div>
-          );
+          return renderStep(entry.item);
         })}
       </div>
 
