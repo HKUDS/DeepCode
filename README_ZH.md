@@ -1,24 +1,170 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/HKUDS/DeepCode/main/assets/logo.png" alt="DeepCode logo" width="120" />
+<table style="border: none; margin: 0 auto; padding: 0; border-collapse: collapse;">
+<tr>
+<td align="center" style="vertical-align: middle; padding: 10px; border: none; width: 250px;">
+  <img src="assets/logo.png" alt="DeepCode Logo" width="200" style="margin: 0; padding: 0; display: block;"/>
+</td>
+<td align="left" style="vertical-align: middle; padding: 10px 0 10px 30px; border: none;">
+  <pre style="font-family: 'Courier New', monospace; font-size: 16px; color: #0EA5E9; margin: 0; padding: 0; text-shadow: 0 0 10px #0EA5E9, 0 0 20px rgba(14,165,233,0.5); line-height: 1.2; transform: skew(-1deg, 0deg); display: block;">    ██████╗ ███████╗███████╗██████╗  ██████╗ ██████╗ ██████╗ ███████╗
+    ██╔══██╗██╔════╝██╔════╝██╔══██╗██╔════╝██╔═══██╗██╔══██╗██╔════╝
+    ██║  ██║█████╗  █████╗  ██████╔╝██║     ██║   ██║██║  ██║█████╗
+    ██║  ██║██╔══╝  ██╔══╝  ██╔═══╝ ██║     ██║   ██║██║  ██║██╔══╝
+    ██████╔╝███████╗███████╗██║     ╚██████╗╚██████╔╝██████╔╝███████╗
+    ╚═════╝ ╚══════╝╚══════╝╚═╝      ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝</pre>
+</td>
+</tr>
+</table>
 
-# DeepCode
+<div align="center">
+<a href="https://trendshift.io/repositories/14665?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-14665" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/14665" alt="HKUDS%2FDeepCode | Trendshift" width="250" height="55"/></a>
+<a href="https://trendshift.io/repositories/14665?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-14665" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/14665/daily?language=Python" alt="HKUDS%2FDeepCode | Trendshift" width="250" height="55"/></a>
+</div>
 
-**为长时间任务打造的开源 coding agent。**<br/>
-Goal 可以跨多个回合持续推进，关掉窗口后本地后台服务继续工作，终端、桌面、
-浏览器和无界面客户端共用同一批会话。
+<!-- <img src="https://readme-typing-svg.herokuapp.com?font=Russo+One&size=28&duration=2000&pause=800&color=06B6D4&background=00000000&center=true&vCenter=true&width=800&height=50&lines=%E2%9A%A1+OPEN+AGENTIC+CODING+%E2%9A%A1" alt="DeepCode Tech Subtitle" style="margin-top: 5px; filter: drop-shadow(0 0 12px #06B6D4) drop-shadow(0 0 24px rgba(6,182,212,0.4));"/> -->
 
-<p>
-  <a href="https://pypi.org/project/deepcode-hku/"><img src="https://img.shields.io/pypi/v/deepcode-hku?label=PyPI" alt="PyPI version" /></a>
-  <img src="https://img.shields.io/badge/Python-3.12%2B-blue" alt="Python 3.12+" />
-  <a href="https://github.com/HKUDS/DeepCode/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="MIT License" /></a>
-  <a href="https://arxiv.org/abs/2512.07921"><img src="https://img.shields.io/badge/arXiv-2512.07921-b31b1b" alt="arXiv paper" /></a>
+# <img src="https://github.com/Zongwei9888/Experiment_Images/raw/43c585dca3d21b8e4b6390d835cdd34dc4b4b23d/DeepCode_images/title_logo.svg" alt="DeepCode Logo" width="32" height="32" style="vertical-align: middle; margin-right: 8px;"/> DeepCode: 开源智能体编程
+
+### *基于多智能体系统推进代码生成技术*
+
+<p align="center">
+  <a href="https://hkuds.github.io/DeepCode/" target="_blank"><img alt="官网 — hkuds.github.io/DeepCode" src="https://img.shields.io/badge/%E5%AE%98%E7%BD%91-hkuds.github.io%2FDeepCode%20%E2%86%97-06B6D4?style=for-the-badge&labelColor=0B1116" height="36"></a>
 </p>
 
-[English](https://github.com/HKUDS/DeepCode/blob/main/README.md) · 中文 ·
-[网站](https://hkuds.github.io/DeepCode/)
+<!-- <p align="center">
+  <img src="https://img.shields.io/badge/Version-1.0.0-00d4ff?style=for-the-badge&logo=rocket&logoColor=white" alt="Version">
+
+  <img src="https://img.shields.io/badge/License-MIT-4ecdc4?style=for-the-badge&logo=opensourceinitiative&logoColor=white" alt="License">
+  <img src="https://img.shields.io/badge/AI-Multi--Agent-9b59b6?style=for-the-badge&logo=brain&logoColor=white" alt="AI">
+  <img src="https://img.shields.io/badge/HKU-Data_Intelligence_Lab-f39c12?style=for-the-badge&logo=university&logoColor=white" alt="HKU">
+</p> -->
+<p>
+  <a href="https://github.com/HKUDS/DeepCode/stargazers"><img src='https://img.shields.io/github/stars/HKUDS/DeepCode?color=00d9ff&style=for-the-badge&logo=star&logoColor=white&labelColor=1a1a2e' /></a>
+  <img src="https://img.shields.io/badge/🐍Python-3.12%2B-4ecdc4?style=for-the-badge&logo=python&logoColor=white&labelColor=1a1a2e">
+  <a href="https://pypi.org/project/deepcode-hku/"><img src="https://img.shields.io/pypi/v/deepcode-hku.svg?style=for-the-badge&logo=pypi&logoColor=white&labelColor=1a1a2e&color=ff6b6b"></a>
+</p>
+<p>
+  <a href="https://discord.gg/yF2MmDJyGJ"><img src="https://img.shields.io/badge/💬Discord-社区-7289da?style=for-the-badge&logo=discord&logoColor=white&labelColor=1a1a2e"></a>
+  <a href="https://github.com/HKUDS/DeepCode/issues/11"><img src="https://img.shields.io/badge/💬微信-群组-07c160?style=for-the-badge&logo=wechat&logoColor=white&labelColor=1a1a2e"></a>
+</p>
+<div align="center">
+  <div style="width: 100%; height: 2px; margin: 20px 0; background: linear-gradient(90deg, transparent, #00d9ff, transparent);"></div>
+</div>
+
+<div align="center">
+  <a href="#快速开始" style="text-decoration: none;">
+    <img src="https://img.shields.io/badge/快速开始-立即开始-00d9ff?style=for-the-badge&logo=rocket&logoColor=white&labelColor=1a1a2e">
+  </a>
+</div>
+
+<div align="center" style="margin-top: 10px;">
+  <a href="README.md">
+    <img src="https://img.shields.io/badge/English-00d4ff?style=for-the-badge&logo=readme&logoColor=white&labelColor=1a1a2e" alt="English">
+  </a>
+  <a href="README_ZH.md">
+    <img src="https://img.shields.io/badge/中文-00d4ff?style=for-the-badge&logo=readme&logoColor=white&labelColor=1a1a2e" alt="中文">
+  </a>
+</div>
+
+### 🖥️ **界面展示**
+
+#### 🖥️ **DeepCode Desktop**
+
+<div align="center">
+
+  <img src="https://github.com/Zongwei9888/Experiment_Images/raw/e389750e733ec2c1b94986cb990036899dcaec52/DeepCode_images/Area.gif" alt="DeepCode Desktop 编程智能体演示" width="100%" style="border-radius: 10px; box-shadow: 0 8px 20px rgba(45,55,72,0.3); margin: 15px 0;"/>
+
+*在可视化工作台中使用 DeepCode，管理 Session 和目标，并查看工具活动、代码修改与验证过程。*
+</div>
+
+DeepCode 提供 TUI、Desktop 和 Web 三种客户端，连接同一个本地共享后台，
+共用 Project、Session 历史、模型、Skills、权限、Goals 与 Automations。
+分别使用 `deepcode`、`deepcode desktop` 和 `deepcode web` 启动；安装及首次任务
+见[快速开始](#快速开始)。
+
+---
+
+<div align="center">
+
+### 🎬 **介绍视频**
+
+<div style="margin: 20px 0;">
+  <a href="https://youtu.be/TxwBHRQoaBw" target="_blank">
+    <img src="https://img.youtube.com/vi/TxwBHRQoaBw/maxresdefault.jpg"
+         alt="DeepCode Introduction Video"
+         width="75%"
+         style="border-radius: 12px; box-shadow: 0 8px 25px rgba(0,0,0,0.15); transition: transform 0.3s ease;"/>
+  </a>
+</div>
+
+*🎯 **观看 DeepCode V2 介绍** - 100 秒看完长程任务、循环工程、Agent Harness 与自我进化*
+
+<p>
+  <a href="https://youtu.be/TxwBHRQoaBw" target="_blank">
+    <img src="https://img.shields.io/badge/▶️_观看视频-FF0000?style=for-the-badge&logo=youtube&logoColor=white" alt="Watch Video"/>
+  </a>
+</p>
 
 </div>
+
+---
+
+> *"AI智能体将创意转化为生产就绪代码的地方"*
+
+</div>
+
+---
+
+## 📑 目录
+
+- [🧠 DeepCode 中的 Deep](#deepcode-中的-deep)
+- [💡 为什么选 DeepCode](#为什么选-deepcode)
+- [⚡ 快速开始](#快速开始)
+- [🖥️ 选择客户端](#选择客户端)
+- [📋 运行要求与支持平台](#运行要求与支持平台)
+- [🚀 核心功能](#核心功能)
+- [🔒 安全与数据](#安全与数据)
+- [📚 文档](#文档)
+- [📰 最近更新](#最近更新)
+- [🔬 研究起源](#研究起源)
+- [🎬 实时演示](#live-demonstrations)
+- [🤝 参与贡献](#参与贡献)
+- [💬 支持](#支持)
+- [⭐ 星标历史](#star-history)
+- [🙏 致谢](#contributors)
+- [📖 引用](#citation)
+- [📄 许可证](#license)
+
+<p align="center">
+  <img src="assets/readme/deepcode-overview.png" alt="DeepCode 完成并验证一个真实任务" width="1080" />
+</p>
+
+---
+
+## DeepCode 中的 Deep
+
+大多数 Coding Agent 都能生成代码。真正困难的是：理解一个真实项目、在正确的边界内完成修改、根据运行结果持续修正，并让用户清楚地知道结果为什么可信。
+
+DeepCode 是一个面向真实软件工程的开源 Coding Agent。你可以把一个简单修改交给它，也可以给它一个需要持续数十个步骤的目标。它能够理解项目、操作代码、运行工具、验证结果，并在中断、重启或模型切换之后继续工作。
+
+“Deep”代表四种贯穿任务始终的深度：
+
+| 深度                  | 对用户意味着什么                                                                                         |
+| --------------------- | -------------------------------------------------------------------------------------------------------- |
+| **Deep Context**      | 不只读取当前文件，还结合项目结构、工程规则、Skills、Session 历史和长期记忆理解任务。                     |
+| **Deep Execution**    | 不只提出建议，而是实际搜索、编辑、运行命令、执行测试，并展示正在发生的工作。                             |
+| **Deep Verification** | 不把一段听起来合理的回答当作完成，而是使用测试、构建、诊断、Diff 和任务产物检查结果。                    |
+| **Deep Continuity**   | 保存对话、决策、工具记录和验证证据，让任务可以跨时间、目录、客户端和模型继续。                           |
+
+DeepCode 最特别的地方可以归纳为三点：
+
+- **从复杂知识走向可运行系统。** DeepCode 不只处理 Issue 和代码片段。Paper2Code 可以从论文、文档、参考仓库和实验目标出发，完成理解、实现与验证。
+- **让长任务持续运行，同时始终可控。** Goal 不是一次性的提示词。你可以在运行中补充要求、修订目标、暂停、停止或继续，而不必丢掉已经完成的工作。
+- **从代码修改走到验证与审查。** DeepCode 不会停在生成 Patch。它会根据任务运行命令与测试、检查构建结果和文件变化，并把 Goal 的完成或受阻原因关联到相关执行记录，方便你审查最终修改。
+
+DeepCode 的目标不是让 Agent 显得更忙，而是帮助你更可靠地完成真正的软件工程工作。
+
+---
 
 ## 为什么选 DeepCode
 
@@ -64,6 +210,10 @@ deepcode provider test my-openrouter --model MODEL_ID
 
 把 `MODEL_ID` 换成列表里的模型。在 Desktop 或 Web 中，也可以在
 **设置 → AI 提供方** 里完成同样的操作。
+
+<div align="center">
+  <img src="assets/setting_model.png" alt="在 DeepCode 设置中选择模型服务和模型" width="100%" style="border-radius: 10px; box-shadow: 0 8px 20px rgba(45,55,72,0.2); margin: 15px 0;"/>
+</div>
 
 **3. 在项目里运行。**
 
@@ -143,6 +293,10 @@ Windows 工具链和排错见 [Desktop 指南](desktop/README.md)。
 | Desktop | Node.js 22+、Rust 和 Tauri 前置依赖（源码构建） |
 
 ## 核心功能
+
+<p align="center">
+  <img src="assets/readme/verification-loop.png" alt="DeepCode Agent Harness 与验证循环" width="1080" />
+</p>
 
 - **在仓库里干活。** 读取、搜索、编辑文件，应用补丁，运行命令和测试，每处改动
   都以 diff 呈现。[Getting started](docs/guide/getting-started.md)
@@ -243,14 +397,75 @@ DeepCode 起源于 Paper2Code：一个把研究论文变成可运行代码的多
 [DeepCode: Open Agentic Coding](https://arxiv.org/abs/2512.07921)。Paper2Code
 仍可在 Desktop 和 Web 中使用，见 [Paper2Code](docs/paper2code.zh-CN.md)。
 
+<p align="center">
+  <img src="assets/result_main02.jpg" alt="DeepCode PaperBench 结果" width="920" />
+</p>
+
+<a id="live-demonstrations"></a>
+
+## 🎬 实时演示
+
+下面的录像展示了早期 DeepCode 工作流生成的项目结果。它们是输出案例，
+不是当前 Desktop 界面的截图。
+
+<table align="center" width="100%">
+<tr>
+<td width="33%" align="center">
+
+#### 📄 Paper2Code
+
+**从研究到实现**
+
+<a href="https://www.youtube.com/watch?v=MQZYpLkzsbw">
+  <img src="https://img.youtube.com/vi/MQZYpLkzsbw/maxresdefault.jpg" alt="Paper2Code 演示" width="100%" />
+</a>
+
+**[▶ 观看演示](https://www.youtube.com/watch?v=MQZYpLkzsbw)**
+
+<sub>将研究论文复现为可以执行的工程项目。</sub>
+
+</td>
+<td width="33%" align="center">
+
+#### 🖼️ 生成式视觉项目
+
+**图像工作流案例**
+
+<a href="https://www.youtube.com/watch?v=nFt5mLaMEac">
+  <img src="https://img.youtube.com/vi/nFt5mLaMEac/maxresdefault.jpg" alt="生成的图像处理项目" width="100%" />
+</a>
+
+**[▶ 观看演示](https://www.youtube.com/watch?v=nFt5mLaMEac)**
+
+<sub>查看早期 DeepCode 生成的图像处理工作流。</sub>
+
+</td>
+<td width="33%" align="center">
+
+#### 🌐 生成式 Web 项目
+
+**前端实现案例**
+
+<a href="https://www.youtube.com/watch?v=78wx3dkTaAU">
+  <img src="https://img.youtube.com/vi/78wx3dkTaAU/maxresdefault.jpg" alt="生成的前端项目" width="100%" />
+</a>
+
+**[▶ 观看演示](https://www.youtube.com/watch?v=78wx3dkTaAU)**
+
+<sub>从想法开始，查看完整前端项目的实现结果。</sub>
+
+</td>
+</tr>
+</table>
+
+[DeepCode V2 介绍视频](https://youtu.be/TxwBHRQoaBw)提供更完整的产品说明。
+
+---
+
 ## 参与贡献
 
 开发环境、检查项和 PR 规范见 [CONTRIBUTING.md](CONTRIBUTING.md)。所有提交过
 PR 的贡献者都列在 [CONTRIBUTORS.md](CONTRIBUTORS.md) 中。
-
-<a href="https://github.com/HKUDS/DeepCode/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=HKUDS/DeepCode&max=999" alt="DeepCode contributors" />
-</a>
 
 ## 支持
 
@@ -259,9 +474,68 @@ PR 的贡献者都列在 [CONTRIBUTORS.md](CONTRIBUTORS.md) 中。
 - 社区：飞书群和微信群见
   [HKUDS 主页](https://github.com/HKUDS/.github/blob/main/profile/README.md)
 
-## 引用
+---
 
-如果 DeepCode 对你的研究有帮助，请引用：
+<a id="star-history"></a>
+
+## ⭐ 星标历史
+
+<div align="center">
+
+*社区增长轨迹*
+
+  <a href="https://star-history.com/#HKUDS/DeepCode&Date">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=HKUDS/DeepCode&type=Date&theme=dark" />
+      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=HKUDS/DeepCode&type=Date" />
+      <img src="https://api.star-history.com/svg?repos=HKUDS/DeepCode&type=Date" alt="DeepCode 星标历史图" width="900" />
+    </picture>
+  </a>
+
+</div>
+
+---
+
+### 🚀 准备好使用 DeepCode 了吗？
+
+<div align="center">
+
+<p>
+  <a href="#快速开始"><img src="https://img.shields.io/badge/🚀_立即开始-00d4ff?style=for-the-badge&logo=rocket&logoColor=white" alt="立即开始" /></a>
+  <a href="https://github.com/HKUDS/DeepCode"><img src="https://img.shields.io/badge/🏛️_在_GitHub_查看-00d4ff?style=for-the-badge&logo=github&logoColor=white" alt="在 GitHub 查看 DeepCode" /></a>
+  <a href="https://github.com/HKUDS/DeepCode/stargazers"><img src="https://img.shields.io/badge/⭐_Star_项目-00d4ff?style=for-the-badge&logo=star&logoColor=white" alt="Star DeepCode" /></a>
+</p>
+
+</div>
+
+---
+
+<a id="contributors"></a>
+
+## 🙏 致谢
+
+感谢开源社区的每一位——你们的 star、issue、pull request 和讨论，
+共同塑造了 DeepCode 的走向。
+
+<div align="center">
+
+<a href="https://github.com/HKUDS/DeepCode/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=HKUDS/DeepCode&max=999" alt="DeepCode contributors" />
+</a>
+
+</div>
+
+所有提交过 pull request 的贡献者都记录在
+[CONTRIBUTORS.md](CONTRIBUTORS.md) 中，其中也包含早于 v2.0 重构、
+因而未体现在上方贡献图中的那些贡献。
+
+---
+
+<a id="citation"></a>
+
+## 📖 引用
+
+如果 DeepCode 对您的研究有所帮助，请引用：
 
 ```bibtex
 @misc{li2025deepcodeopenagenticcoding,
@@ -275,7 +549,17 @@ PR 的贡献者都列在 [CONTRIBUTORS.md](CONTRIBUTORS.md) 中。
 }
 ```
 
-## 许可证
+---
 
-DeepCode 以 [MIT License](LICENSE) 发布。
-Copyright © 2025 Data Intelligence Lab at The University of Hong Kong.
+<a id="license"></a>
+
+## 📄 许可证
+
+<div align="center">
+
+<a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-4ecdc4?style=for-the-badge&logo=opensourceinitiative&logoColor=white" alt="MIT License" /></a>
+
+DeepCode 采用 [MIT License](LICENSE)。<br/>
+版权所有 © 2025 香港大学数据智能实验室。
+
+</div>

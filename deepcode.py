@@ -39,7 +39,7 @@ def print_banner():
         "",
         " DeepCode — Open Agentic Coding",
         "",
-        " An open-source coding agent for long-running work",
+        " Agentic code generation with multi-agent LLM systems",
         "",
     ]
     top = "╔" + "═" * width + "╗"
