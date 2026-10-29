@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 
 from core.domain.approval import (
@@ -596,12 +597,22 @@ class ApprovalRepository:
 
 
 class ApprovalGrantRepository:
-    """Persist exact-tool grants shared by every worker for one Thread."""
+    """Persist Session grants shared by every worker for one Thread.
+
+    A scoped grant is stored in the ``tool_name`` column as the tool name, a
+    unit separator and its scope keys as JSON. The schema stays as it was,
+    and a release that predates scopes reads such a row as a different tool,
+    so it asks again instead of treating the grant as the whole tool.
+    """
+
+    _SCOPE_SEPARATOR = "\x1f"
 
     def __init__(self, connection: sqlite3.Connection) -> None:
         self.connection = connection
 
     def allows(self, thread_id: str, tool_name: str) -> bool:
+        """Whether a whole-tool grant exists for ``tool_name``."""
+
         row = self.connection.execute(
             "SELECT 1 FROM approval_grants WHERE thread_id = ? AND tool_name = ?",
             (thread_id, tool_name),
@@ -616,7 +627,7 @@ class ApprovalGrantRepository:
             "ON CONFLICT(thread_id, tool_name) DO NOTHING",
             (
                 grant.thread_id,
-                grant.tool_name,
+                self._encode(grant),
                 grant.source_approval_id,
                 dump_datetime(grant.granted_at),
             ),
@@ -631,11 +642,36 @@ class ApprovalGrantRepository:
         ).fetchall()
         return [self._from_row(row) for row in rows]
 
-    @staticmethod
-    def _from_row(row: sqlite3.Row) -> ApprovalGrant:
+    @classmethod
+    def _encode(cls, grant: ApprovalGrant) -> str:
+        if not grant.scopes:
+            return grant.tool_name
+        return (
+            grant.tool_name
+            + cls._SCOPE_SEPARATOR
+            + json.dumps(list(grant.scopes), ensure_ascii=True)
+        )
+
+    @classmethod
+    def _from_row(cls, row: sqlite3.Row) -> ApprovalGrant:
+        tool_name, separator, encoded = row["tool_name"].partition(cls._SCOPE_SEPARATOR)
+        scopes: tuple[str, ...] = ()
+        if separator:
+            try:
+                decoded = json.loads(encoded)
+            except ValueError:
+                decoded = None
+            if isinstance(decoded, list) and all(
+                isinstance(scope, str) and scope for scope in decoded
+            ):
+                scopes = tuple(decoded)
+            else:
+                # Unreadable scopes must not widen into a whole-tool grant.
+                scopes = ("unreadable:" + encoded,)
         return ApprovalGrant(
             thread_id=row["thread_id"],
-            tool_name=row["tool_name"],
+            tool_name=tool_name,
             source_approval_id=row["source_approval_id"],
             granted_at=load_required_datetime(row["granted_at"]),
+            scopes=scopes,
         )

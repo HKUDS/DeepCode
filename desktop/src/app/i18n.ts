@@ -222,6 +222,7 @@ const ZH_CN: Record<string, string> = {
   "approval.reviewArguments": "查看参数",
   "approval.allowOnce": "允许一次",
   "approval.allowSession": "允许本次会话",
+  "approval.allowSessionScope": "本次会话内始终允许 {{target}}",
   "approval.deny": "拒绝",
   // Runtime notice
   "runtime.offline": "本地应用服务器不可用。",

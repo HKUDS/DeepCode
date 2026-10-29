@@ -40,24 +40,34 @@ class ApprovalStatus(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ApprovalGrant:
-    """A durable Thread-scoped grant for one exact tool capability.
+    """A durable Thread-scoped grant from one ``approved_session`` answer.
 
     The permission engine still evaluates every call before the approval
-    callback runs.  This record only remembers a user's ``approved_session``
-    response for the same canonical Thread and tool; it cannot widen policy,
-    bypass a deny, or authorize a different tool.
+    callback runs.  This record only remembers what the user allowed for
+    the rest of the Session; it cannot widen policy or bypass a deny.
+
+    ``scopes`` are the keys of :mod:`core.harness.approval_scope` (the same
+    kind of command, edits in the workspace).  Empty means the whole tool,
+    which only tools other than commands and file edits are granted.
     """
 
     thread_id: str
     tool_name: str
     source_approval_id: str
     granted_at: datetime = field(default_factory=utc_now)
+    scopes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         require_non_empty(self.thread_id, "thread_id")
         require_non_empty(self.tool_name, "tool_name")
         require_prefixed_id(self.source_approval_id, "apr")
         require_aware(self.granted_at, "granted_at")
+        if "\x1f" in self.tool_name:
+            raise ValueError("tool_name cannot contain a unit separator")
+        if not isinstance(self.scopes, tuple) or not all(
+            isinstance(scope, str) and scope for scope in self.scopes
+        ):
+            raise ValueError("scopes must be a tuple of non-empty strings")
 
 
 @dataclass(frozen=True, slots=True)
