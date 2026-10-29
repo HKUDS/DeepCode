@@ -113,6 +113,8 @@ def _projected_item_payload(message: SessionMessage) -> dict[str, object]:
             ):
                 if isinstance(metadata.get(key), str):
                     payload[key] = metadata[key]
+            if isinstance(retry_of := metadata.get("retryOf"), dict):
+                payload["retryOf"] = dict(retry_of)
         return payload
     metadata = message.metadata or {}
     name = str(metadata.get("name") or "tool")

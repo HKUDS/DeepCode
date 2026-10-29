@@ -53,7 +53,9 @@ def goal_prompt(provenance: Mapping[str, object]) -> GoalPrompt | None:
     metadata; both carry ``source`` and ``client``, and a retry carries the
     first retried Turn's under ``retryOf``. The prompt such a record holds
     was written for the model, not typed by the user, so clients must not
-    show it as the user's words.
+    show it as the user's words. ``goalPrompt`` in
+    ``desktop/src/features/thread/conversationModel.ts`` mirrors this; change
+    both together.
     """
     source = provenance.get("source")
     if source == TurnInputSource.RETRY.value:

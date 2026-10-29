@@ -145,12 +145,13 @@ describe("TurnBlock", () => {
     ]);
 
     const note = goalNote("Goal continued automatically");
+    expect(note?.closest("article")?.dataset.goalPrompt).toBe("automatic");
     expect(note?.open).toBe(false);
     expect(note?.textContent).toContain(instruction);
-    // What the user typed stays a message bubble of their own.
-    const bubble = screen.getByText(steer).closest('[class*="userBubble"]');
-    expect(bubble).not.toBeNull();
-    expect(bubble?.closest("details")).toBeNull();
+    // What the user typed stays a message of their own.
+    const message = screen.getByText(steer).closest("article");
+    expect(message?.dataset.goalPrompt).toBeUndefined();
+    expect(screen.getByText(steer).closest("details")).toBeNull();
   });
 
   it("does not call a Goal Turn the user started automatic", () => {
@@ -184,7 +185,7 @@ describe("TurnBlock", () => {
     ]);
 
     expect(goalNote("Working toward the Goal")?.textContent).toContain(instruction);
-    expect(screen.getByText(prompt).closest('[class*="userBubble"]')).not.toBeNull();
+    expect(screen.getByText(prompt).closest("article")?.dataset.goalPrompt).toBeUndefined();
   });
 
   it("unfolds the Goal instruction in the verbose transcript", () => {

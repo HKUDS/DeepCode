@@ -13,6 +13,7 @@ from core.domain.execution_security import (
     ExecutionSecurityProfile,
 )
 from core.domain.item import Item, ItemKind, ItemStatus
+from core.domain.message_provenance import GoalPrompt, goal_prompt
 from core.domain.project import Project
 from core.domain.runtime_coordination import ExecutionClass
 from core.domain.thread import Thread, ThreadMode
@@ -280,6 +281,41 @@ def test_projection_rebuild_restores_the_canonical_turn_security_snapshot(
         assert turns[0].execution_permission_mode is profile.permission_mode
         assert turns[0].goal_id == "goal_projection"
         assert turns[0].execution_class is ExecutionClass.SCHEDULED_AUTOMATION
+    finally:
+        application.close()
+
+
+def test_projection_rebuild_keeps_a_retried_goal_prompt_recognizable(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = SessionStore(tmp_path / "sessions")
+    session = store.create_session(
+        title="goal",
+        metadata={"kind": "tui", "workspace": str(workspace)},
+    )
+    retry_of = {"turnId": "turn_0", "source": "goal_continuation", "client": "internal"}
+    store.append_message(
+        session.session_id,
+        "user",
+        "Continue working toward the active Thread Goal.",
+        metadata={"source": "retry", "client": "internal", "retryOf": retry_of},
+    )
+    store.append_message(session.session_id, "assistant", "done")
+
+    application = DeepCodeApplication.open(
+        tmp_path / "state.sqlite3",
+        session_store=store,
+    )
+    try:
+        with application.database.read() as connection:
+            items = ItemRepository(connection).conversation_for_thread(
+                session.session_id
+            )
+        prompt = next(item for item in items if item.kind is ItemKind.USER_MESSAGE)
+        assert prompt.payload["retryOf"] == retry_of
+        assert goal_prompt(prompt.payload) is GoalPrompt.REQUESTED
     finally:
         application.close()
 

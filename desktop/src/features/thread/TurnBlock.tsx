@@ -579,7 +579,12 @@ export function TurnBlock({
   return (
     <section className={styles.turnBlock} data-status={group.turn?.status}>
       {userMessages.map((message) => (
-        <article className={styles.userMessage} data-queued={queued} key={message.id}>
+        <article
+          className={styles.userMessage}
+          data-queued={queued}
+          data-goal-prompt={message.goalPrompt ?? undefined}
+          key={message.id}
+        >
           {message.goalPrompt ? (
             <GoalPromptNote
               kind={message.goalPrompt}

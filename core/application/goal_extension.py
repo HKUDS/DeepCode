@@ -27,7 +27,12 @@ from core.application.errors import (
 from core.application.goal_turn_port import GoalTurnAssociation, GoalTurnPort
 from core.application.views import thread_goal_view
 from core.domain.item import Item, ItemKind, ItemStatus
-from core.domain.message_provenance import ClientSurface, TurnInputSource
+from core.domain.message_provenance import (
+    ClientSurface,
+    GoalPrompt,
+    TurnInputSource,
+    goal_prompt,
+)
 from core.domain.thread_goal import (
     GOAL_OBJECTIVE_INPUT_MAX_CHARS,
     GOAL_OUTCOME_EVIDENCE_MAX_ITEMS,
@@ -971,9 +976,7 @@ class GoalExtension(GoalRuntimeHandler):
             )
             if (
                 prompt is None
-                or prompt.payload.get("source")
-                != TurnInputSource.GOAL_CONTINUATION.value
-                or prompt.payload.get("client") != ClientSurface.INTERNAL.value
+                or goal_prompt(prompt.payload) is not GoalPrompt.AUTOMATIC
             ):
                 break
             count += 1
