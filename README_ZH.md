@@ -381,7 +381,8 @@ vLLM。**Custom** 连接可以指向任何支持 OpenAI Chat Completions、OpenA
   （`agents.defaults.microcompact`）；Goal 完成前的可选检查
   （`goal.completionVerifier`）；Web 客户端可以浏览文件夹；可选的风险检查
   （`DEEPCODE_RISK_EVALUATOR=1`）；项目 hook 需要批准
-  （`deepcode hooks status` / `approve`）。
+  （`deepcode hooks status` / `approve`）。审批更清楚：TUI 会说明正在等你批准、
+  将改动什么；"始终允许"只覆盖同一类命令，不再是整个工具；信任文件夹前会先确认。
 - **2026-10-28** — Agent 预设可以用 `disallowed-tools` 去掉工具；文件工具写入
   hook 文件前会先询问；`deepcode mcp list` 会标出没有固定版本的 MCP 包。
 - **2026-10-21** — Windows 后台服务不再弹出终端窗口；Desktop 和 Web 可以给代码

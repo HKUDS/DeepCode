@@ -422,7 +422,10 @@ vulnerability, see [SECURITY.md](SECURITY.md).
   summarizing (`agents.defaults.microcompact`), an optional check before a
   Goal completes (`goal.completionVerifier`), folder browsing in the Web
   client, an opt-in risk check (`DEEPCODE_RISK_EVALUATOR=1`), and approval for
-  project hooks (`deepcode hooks status` / `approve`).
+  project hooks (`deepcode hooks status` / `approve`). Clearer approvals:
+  the TUI shows when it waits for you and what will change, "always allow"
+  covers one kind of command instead of the whole tool, and trusting a folder
+  asks first.
 - **2026-10-28** — Agent presets can remove tools with `disallowed-tools`,
   file tools ask before writing hook files, and `deepcode mcp list` flags MCP
   packages without a fixed version.

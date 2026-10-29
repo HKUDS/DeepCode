@@ -31,6 +31,22 @@ Released versions are named in the entry title; the version on PyPI is
 - **Fixes.** A Goal on DeepSeek with thinking on Auto no longer fails with
   "reasoning_content must be passed back", and the model picker's notes wrap
   instead of running under its controls.
+- **Clearer approvals in the terminal.** While a call waits for you, the TUI
+  says so and lists the keys; edits show their diff and commands their full
+  text. Text typed meanwhile stays in the prompt instead of reaching the
+  model. A Turn waiting for a free slot shows as queued.
+- **"Always allow" covers one kind of call.** Allowing `ls` for the session
+  no longer allows `rm`: commands are matched by program and subcommand,
+  edits by workspace. Desktop and Web label the button with exactly what it
+  covers.
+- **Safer Desktop and Web dialogs.** Trusting a folder first shows the access
+  new Turns will get and the project hooks it approves. Every dialog closes
+  with Esc, keeps keyboard focus inside and returns it afterwards.
+- **First run and exit.** With no API key the TUI says so at startup and
+  shows the command to add one; Ctrl-D during a Turn prints how to reattach;
+  the trust prompt accepts `y`.
+- **New README layout.** Release notes moved here, with new security,
+  configuration and contributing guides.
 
 ## 2026-10-28 · Presets that remove tools, guarded hook files, and community fixes
 
