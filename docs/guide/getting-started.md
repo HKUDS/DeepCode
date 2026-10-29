@@ -106,7 +106,7 @@ choose whether to allow it. In the TUI:
 | Response | What it allows |
 |---|---|
 | `y` | This action once |
-| `a` | This tool for the rest of the current Session |
+| `a` | The same kind of action for the rest of the current Session: the same command (`git status …`, `npm run test …`), or edits in this workspace. The prompt names what `a` covers. |
 | `n` | Deny this action |
 
 Desktop and Web show buttons for answering the same requests. You can send a

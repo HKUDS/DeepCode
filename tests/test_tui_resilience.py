@@ -75,9 +75,28 @@ class _Client:
 class _Renderer:
     def __init__(self) -> None:
         self.settled = 0
+        self.approvals: dict[str, str] = {}
 
     def settle_turn(self):
         self.settled += 1
+
+    def approval_requested(self, approval_id, hint):
+        self.approvals[approval_id] = hint
+
+    def approval_resolved(self, approval_id):
+        self.approvals.pop(approval_id, None)
+
+    @property
+    def approval_hint(self):
+        return next(iter(self.approvals.values()), None)
+
+
+class _Reader:
+    def __init__(self) -> None:
+        self.draft = ""
+
+    def keep_draft(self, text):
+        self.draft = text
 
 
 def _app(client: _Client) -> tuple[tui_app.TuiApp, io.StringIO]:
@@ -88,6 +107,8 @@ def _app(client: _Client) -> tuple[tui_app.TuiApp, io.StringIO]:
     app.renderer = _Renderer()
     app._prompted_approval_ids = set()
     app._answered_approval_ids = set()
+    app._shown_approvals = {}
+    app.reader = _Reader()
     app._last_send_delivered = True
     app.selected_skill_ids = []
     app.workspace = "."
@@ -144,7 +165,7 @@ def test_own_approval_answer_is_not_announced_as_elsewhere() -> None:
     app, output = _app(client)
     app._prompted_approval_ids.add("appr-1")
 
-    assert app._respond_to_pending_approval("n") == "Approval denied."
+    assert app._respond_to_pending_approval("n") == "Denied."
     app._on_approval_resolved({"id": "appr-1", "status": ApprovalStatus.DENIED.value})
 
     assert "elsewhere" not in output.getvalue()

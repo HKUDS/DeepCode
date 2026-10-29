@@ -100,16 +100,34 @@ You don't have to wait for a turn to finish:
 
 ## Approvals
 
-Under the default `ask` preset, sensitive tools pause for you:
+Under the default `ask` preset, sensitive tools pause for you. The card shows
+the whole command and where it runs, or the change an edit would make:
 
 ```text
-◆ approval needed bash
-  rm -rf build/
-  ⎿ reply y once · a session · n deny
+◆ Approval needed · Run a command
+  Running a command needs your approval.
+    $ rm -rf build && echo removed
+    in ~/projects/app
+  y allow once · a always allow `rm …` and `echo …` this session · n deny
 ```
 
-`y`/`yes` allows this once. `a`/`always` allows that tool for the rest of the
-session. `n`/`no` denies — the agent is told, and works around it.
+While it waits, the status line stops and says `◆ Waiting for your approval`,
+and the prompt reads `allow? y/a/n ›`. Anything else you type is kept in the
+prompt, not sent, until you answer.
+
+`y`/`yes` allows this once. `n`/`no` denies — the agent is told, and works
+around it. `a`/`always` allows the same kind of action for the rest of the
+session, and the card says which:
+
+- **Commands** — the program and its subcommand: allowing `git status` allows
+  `git status -s` but not `git push`; allowing `ls` does not allow `rm`. A
+  command joined with `&&`, `;` or `|` runs without asking only when every
+  part was allowed. A command that writes a file with `>`, runs through
+  `sudo`, `env` or `xargs`, or runs inline code (`python -c`) is allowed only
+  exactly as written.
+- **File edits** — edits anywhere in this workspace. An edit outside it is
+  allowed for that file only.
+- **Other tools** — that tool.
 
 Switching to `/permissions full-access` asks you to confirm explicitly before
 it takes effect; `read-only` denies mutating actions under the tool policy. These are
@@ -123,10 +141,19 @@ The bottom line is alive during work — a spinner plus what the agent is on:
 ⠸ Run · 4s · pytest -q
 ⠼ Thinking · 8s · High · comparing the two configs
 ⠋ Working · 2s
+⠙ Queued · 6s · waiting for another task to finish
+◆ Waiting for your approval · y allow once · a always allow `ls …` this session · n deny
 ```
 
 `Run` shows the current tool or command. `Thinking` appears when the provider
 shares reasoning progress; `Working` means DeepCode is waiting for its response
 to begin; `Responding` means the answer is arriving, with its unfinished line
-shown just above. If it stays there unexpectedly long, see [Troubleshooting](troubleshooting.md).
+shown just above. `Queued` means the service is already running as many tasks
+as it runs at once (two); yours starts when one finishes. While an approval
+waits, nothing runs and the line stands still. If it stays there unexpectedly
+long, see [Troubleshooting](troubleshooting.md).
 When idle, the line shows your display mode and keyboard hints.
+
+Leaving with `Ctrl-D` while a task runs does not stop it: the service keeps
+running it, and the TUI prints the command to come back to it
+(`deepcode --resume <session id>`).

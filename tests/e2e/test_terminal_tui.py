@@ -290,3 +290,73 @@ def test_a_long_url_is_never_split_by_an_inserted_newline(deepcode):
     # The terminal wraps it on screen; the bytes keep it whole, so a copy
     # from the scrollback or a terminal that reflows gets the real address.
     assert f"The link: {url} works." in tui.text(start)
+
+
+def test_an_approval_waits_still_holds_typing_and_always_allow_is_narrow(deepcode):
+    deepcode.model.on(
+        "list the files",
+        Reply([ToolCall("bash", {"command": "ls"})]),
+        Reply([Text("Listed the files.")]),
+    )
+    deepcode.model.on(
+        "list again",
+        Reply([ToolCall("bash", {"command": "ls -la"})]),
+        Reply([Text("Listed again.")]),
+    )
+    deepcode.model.on(
+        "clean the build",
+        Reply([ToolCall("bash", {"command": "rm -rf build"})]),
+        Reply([Text("Left it alone.")]),
+    )
+    tui = deepcode.open_tui("--access", "ask")
+    start = tui.mark()
+
+    tui.submit("list the files")
+    tui.wait_for(r"Approval needed · Run a command", since=start)
+    tui.wait_for_screen(
+        r"◆ Waiting for your approval · y allow once · a always allow `ls …`"
+    )
+    assert "allow? y/a/n" in tui.screen()
+
+    # Text typed now is not sent to the model as a steer.
+    tui.submit("what is this?")
+    tui.wait_for(r"Answer the approval first", since=start)
+    assert not any("what is this" in json.dumps(r) for r in deepcode.model.requests)
+    tui.send(CTRL_C)  # clear the message that came back to the prompt
+
+    tui.submit("a")
+    tui.wait_for(r"Allowed `ls …` for the rest of this session\.", since=start)
+    tui.wait_for(r"Listed the files\.", since=start)
+    deepcode.wait_idle()
+
+    again = tui.mark()
+    tui.submit("list again")
+    tui.wait_for(r"Listed again\.", since=again)
+    assert "Approval needed" not in tui.text(again)
+    deepcode.wait_idle()
+
+    later = tui.mark()
+    tui.submit("clean the build")
+    tui.wait_for(r"Approval needed · Run a command", since=later)
+    tui.submit("n")
+    tui.wait_for(r"Left it alone\.", since=later)
+    deepcode.wait_idle()
+
+
+def test_leaving_during_a_turn_says_it_keeps_running_and_how_to_return(deepcode):
+    deepcode.model.on(
+        "tell a long story",
+        Reply([Text("The story begins.\n"), Pause(4), Text("The story ends.")]),
+    )
+    tui = deepcode.open_tui("--access", "read-only")
+
+    tui.submit("tell a long story")
+    tui.wait_for(r"The story begins\.")
+    tui.send("\x04", 1.0)  # Ctrl-D
+    tui.process.wait(timeout=20)
+
+    text = tui.text()
+    assert "The current task keeps running in the background service." in text
+    assert re.search(r"Reattach:\s+deepcode --resume \S+", text)
+    assert deepcode.status()["activeTurns"]
+    deepcode.wait_idle()
