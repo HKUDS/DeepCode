@@ -38,7 +38,7 @@ from core.application.views import (
     file_entry_view,
     git_status_view,
     goal_outcome_view,
-    hook_info_view,
+    hook_discovery_view,
     item_view,
     mcp_inventory_view,
     mcp_oauth_flow_view,
@@ -251,6 +251,7 @@ class Dispatcher:
             rpc_methods.PLUGINS_SET_ENABLED: self._plugins_set_enabled,
             rpc_methods.PLUGINS_REMOVE: self._plugins_remove,
             rpc_methods.HOOKS_LIST: self._hooks_list,
+            rpc_methods.HOOKS_APPROVE: self._hooks_approve,
             rpc_methods.MCP_LIST: self._mcp_list,
             rpc_methods.MCP_UPSERT: self._mcp_upsert,
             rpc_methods.MCP_REMOVE: self._mcp_remove,
@@ -705,11 +706,15 @@ class Dispatcher:
     def _hooks_list(self, params: Params) -> dict[str, Any]:
         params.only("projectId")
         discovery = self.application.extensions.hooks(str(params.string("projectId")))
-        return {
-            "hooks": [hook_info_view(hook) for hook in discovery.hooks],
-            "warnings": list(discovery.warnings),
-            "truncated": discovery.truncated,
-        }
+        return hook_discovery_view(discovery)
+
+    def _hooks_approve(self, params: Params) -> dict[str, Any]:
+        params.only("projectId", "digest")
+        discovery = self.application.extensions.approve_hooks(
+            str(params.string("projectId")),
+            str(params.string("digest")),
+        )
+        return hook_discovery_view(discovery)
 
     def _mcp_list(self, params: Params) -> dict[str, Any]:
         params.only("projectId")

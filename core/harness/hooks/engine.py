@@ -29,6 +29,7 @@ from core.harness.hooks.execution import (
     parse_handler_output,
     run_command,
 )
+from core.harness.hooks.trust import ProjectHookApproval
 
 
 @dataclass(slots=True)
@@ -109,16 +110,17 @@ class HooksEngine:
         *,
         model: str = "",
         permission_mode: str = "default",
-        trust_store=None,
+        project_hook_approval: ProjectHookApproval | None = None,
     ):
         """Build an engine for ``workspace``, or ``None`` if no hooks configured.
 
-        ``trust_store`` is an optional
-        :class:`~core.harness.hooks.trust.HookTrustStore`; when given, project
-        hook files are discovered only if their declaration digest is
-        approved, so a changed ``hooks.json`` stops running until re-approved.
+        With ``project_hook_approval``, project hooks run only while their
+        declaration digest is the approved one (see
+        :mod:`core.harness.hooks.trust`); without it, nothing is gated.
         """
-        result = discover_hooks(workspace, home=home, trust_store=trust_store)
+        result = discover_hooks(
+            workspace, home=home, project_hook_approval=project_hook_approval
+        )
         if not result.handlers:
             return None, result.warnings
         engine = cls(

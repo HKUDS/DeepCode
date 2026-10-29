@@ -14,7 +14,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from core.private_storage import ensure_private_directory, open_private_file
 
@@ -45,12 +45,16 @@ from core.domain.execution_profile import ExecutionProfile
 from core.domain.execution_security import ExecutionSecurityProfile
 from core.domain.message_provenance import InputDeliveryState, TurnInputSource
 from core.file_lock import FileLease
+from core.harness.hooks.trust import declaration_digest
 from core.sessions import Session, SessionStore
 from core.sessions.transcript import (
     new_records_from_history,
     visible_kernel_history,
 )
 from core.skills.host import SkillWorkspaceRegistry
+
+if TYPE_CHECKING:
+    from core.harness.hooks.trust import ProjectHookApproval
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +112,8 @@ class LiveSessionRuntime:
     inputs_enabled: bool
     goals: GoalRuntimeRouter
     goals_enabled: bool
+    # The project hook approval the agent was built under; a rebuild keeps it.
+    project_hook_approval: ProjectHookApproval | None = None
     active: bool = False
     # Held for the duration of one execution window: the cross-process
     # guarantee that only one process runs this Session at a time.
@@ -171,11 +177,14 @@ class SessionRuntimeRegistry:
         permission_mode_override: ExecutionPermissionMode | None = None,
         approval_callback: ApprovalCallback,
         history_recorder: Callable[[list[dict[str, Any]]], None] | None = None,
+        project_hook_approval: ProjectHookApproval | None = None,
     ) -> AgentSessionPort:
         """Take the Session's agent for one Turn.
 
         ``history_recorder`` receives the model history as the agent reports
-        it, for the Turn to record as it happens.
+        it, for the Turn to record as it happens. ``project_hook_approval``
+        decides which project hooks the agent may run; a different approval
+        rebuilds the agent, so a new approval applies from the next Turn.
         """
         await self._wait_for_compaction(session_id)
         canonical = self.store.get_session(session_id)
@@ -196,6 +205,7 @@ class SessionRuntimeRegistry:
             execution_security_profile=execution_security_profile,
             permission_mode_override=permission_mode_override,
             agent_preset=agent_preset,
+            project_hook_approval=project_hook_approval,
         )
         runtime = self._runtimes.pop(session_id, None)
         if runtime is not None and runtime.active:
@@ -214,6 +224,7 @@ class SessionRuntimeRegistry:
                 permission_mode_override=permission_mode_override,
                 agent_preset=agent_preset,
                 runtime_key=runtime_key,
+                project_hook_approval=project_hook_approval,
             )
         elif runtime.canonical_message_count != len(canonical.messages):
             # Another DeepCode process appended to the shared Session. Visible
@@ -503,6 +514,7 @@ class SessionRuntimeRegistry:
         permission_mode_override: ExecutionPermissionMode | None,
         runtime_key: object,
         agent_preset: AgentPresetSnapshot | None = None,
+        project_hook_approval: ProjectHookApproval | None = None,
     ) -> LiveSessionRuntime:
         approvals = ApprovalRouter()
         history = HistoryRouter()
@@ -516,6 +528,10 @@ class SessionRuntimeRegistry:
         }
         if agent_preset is not None and _accepts_keyword(create, "agent_preset"):
             create_kwargs["agent_preset"] = agent_preset
+        if project_hook_approval is not None and _accepts_keyword(
+            create, "project_hook_approval"
+        ):
+            create_kwargs["project_hook_approval"] = project_hook_approval
         if _accepts_keyword(create, "execution_profile"):
             create_kwargs["execution_profile"] = execution_profile
         if _accepts_keyword(create, "execution_security_profile"):
@@ -573,6 +589,7 @@ class SessionRuntimeRegistry:
             inputs_enabled=inputs_enabled,
             goals=goals,
             goals_enabled=goals_enabled,
+            project_hook_approval=project_hook_approval,
         )
 
     async def _refresh_idle_runtime(
@@ -601,6 +618,7 @@ class SessionRuntimeRegistry:
             execution_security_profile=runtime.execution_security_profile,
             permission_mode_override=runtime.permission_mode_override,
             agent_preset=agent_preset,
+            project_hook_approval=runtime.project_hook_approval,
         )
         if runtime_key == runtime.runtime_key:
             return runtime
@@ -614,6 +632,7 @@ class SessionRuntimeRegistry:
             permission_mode_override=runtime.permission_mode_override,
             agent_preset=agent_preset,
             runtime_key=runtime_key,
+            project_hook_approval=runtime.project_hook_approval,
         )
         # The rebuilt runtime inherits the caller's claim before it becomes
         # visible, so a Turn never sees it as idle mid-compaction.
@@ -648,6 +667,7 @@ class SessionRuntimeRegistry:
         execution_security_profile: ExecutionSecurityProfile | None,
         permission_mode_override: ExecutionPermissionMode | None,
         agent_preset: AgentPresetSnapshot | None = None,
+        project_hook_approval: ProjectHookApproval | None = None,
     ) -> object:
         resolver = getattr(self.factory, "runtime_key", None)
         if callable(resolver):
@@ -688,6 +708,14 @@ class SessionRuntimeRegistry:
             (
                 execution_security_profile.to_dict()
                 if execution_security_profile is not None
+                else None
+            ),
+            # A new approval, or changed project hook declarations, rebuild
+            # the agent: its hooks engine holds the handlers it was built with.
+            project_hook_approval,
+            (
+                declaration_digest(workspace)
+                if project_hook_approval is not None
                 else None
             ),
         )

@@ -122,6 +122,9 @@ def test_extension_inventory_matches_agent_skill_and_hook_discovery(
         assert hooks.hooks[0].event_name == "PreToolUse"
         assert hooks.hooks[0].matcher == "Bash"
         assert hooks.hooks[0].timeout_seconds == 15
+        # Added as trusted, so the hooks it declared then are approved.
+        assert hooks.project_hooks.status == "approved"
+        assert hooks.project_hooks.approved_digest == hooks.project_hooks.digest
     finally:
         application.close()
 

@@ -219,6 +219,20 @@ def hook_info_view(hook) -> dict[str, Any]:
     }
 
 
+def hook_discovery_view(discovery) -> dict[str, Any]:
+    approval = discovery.project_hooks
+    return {
+        "hooks": [hook_info_view(hook) for hook in discovery.hooks],
+        "warnings": list(discovery.warnings),
+        "truncated": discovery.truncated,
+        "projectHooks": {
+            "digest": approval.digest,
+            "approvedDigest": approval.approved_digest,
+            "status": approval.status,
+        },
+    }
+
+
 def mcp_server_view(server) -> dict[str, Any]:
     return {
         "id": server.id,

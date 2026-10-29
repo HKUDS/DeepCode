@@ -148,6 +148,7 @@ class AgentControl:
         context_note_sink: Any | None = None,
         transcript_sink: Any | None = None,
         project_trusted: bool = False,
+        project_hook_approval: Any | None = None,
     ) -> None:
         self._workspace = workspace
         self._model = model
@@ -165,6 +166,8 @@ class AgentControl:
         # Per-child transcript writer (see _dump_transcript); host-provided.
         self._transcript_sink = transcript_sink
         self._project_trusted = project_trusted
+        # Sub-agents run the parent's project hooks under the same approval.
+        self._project_hook_approval = project_hook_approval
         self._local_runtime_id = f"local-agent-runtime-{uuid.uuid4().hex}"
         self._agents: dict[str, SubAgent] = {}
         self._seq = 0
@@ -609,6 +612,7 @@ class AgentControl:
             execution_security_profile=self._execution_security_profile,
             runtime=self._runtime,
             project_trusted=self._project_trusted,
+            project_hook_approval=self._project_hook_approval,
             extra_tools=extra_tools,
             tool_filter=tool_filter,
         )

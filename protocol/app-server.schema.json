@@ -3125,6 +3125,85 @@
         "statusMessage"
       ]
     },
+    "ProjectHooksApproval": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Whether the project's own hooks run on the next Turn. status is none when the project declares no runnable hooks, approved when digest is the approved one, else unapproved (new or changed since approval).",
+      "properties": {
+        "digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "approvedDigest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "none",
+            "approved",
+            "unapproved"
+          ]
+        }
+      },
+      "required": [
+        "digest",
+        "approvedDigest",
+        "status"
+      ]
+    },
+    "HookCatalogResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "hooks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HookInfo"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "projectHooks": {
+          "$ref": "#/$defs/ProjectHooksApproval"
+        }
+      },
+      "required": [
+        "hooks",
+        "warnings",
+        "truncated",
+        "projectHooks"
+      ]
+    },
+    "HookApproveParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^proj_"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "projectId",
+        "digest"
+      ]
+    },
     "McpServerInfo": {
       "type": "object",
       "additionalProperties": false,
@@ -6120,6 +6199,9 @@
         "hooks/list": {
           "$ref": "#/$defs/ProjectReadParams"
         },
+        "hooks/approve": {
+          "$ref": "#/$defs/HookApproveParams"
+        },
         "mcp/list": {
           "$ref": "#/$defs/OptionalProjectParams"
         },
@@ -6386,6 +6468,7 @@
         "plugins/set-enabled",
         "plugins/remove",
         "hooks/list",
+        "hooks/approve",
         "mcp/list",
         "mcp/upsert",
         "mcp/remove",
@@ -6717,30 +6800,10 @@
           ]
         },
         "hooks/list": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "hooks": {
-              "type": "array",
-              "items": {
-                "$ref": "#/$defs/HookInfo"
-              }
-            },
-            "warnings": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "truncated": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "hooks",
-            "warnings",
-            "truncated"
-          ]
+          "$ref": "#/$defs/HookCatalogResult"
+        },
+        "hooks/approve": {
+          "$ref": "#/$defs/HookCatalogResult"
         },
         "mcp/list": {
           "$ref": "#/$defs/McpInventory"
@@ -7535,6 +7598,7 @@
         "plugins/set-enabled",
         "plugins/remove",
         "hooks/list",
+        "hooks/approve",
         "mcp/list",
         "mcp/upsert",
         "mcp/remove",

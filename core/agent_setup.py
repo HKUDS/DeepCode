@@ -342,6 +342,9 @@ def build_agent_session(
     provider_cleanup: Callable[[], Awaitable[None]] | None = None,
     skill_runtime: Any | None = None,
     project_trusted: bool = False,
+    # Which project hook declarations may run (``ProjectHookApproval``).
+    # ``None`` gates nothing; application Turns always pass one.
+    project_hook_approval: Any | None = None,
     plugin_mcp_servers: tuple[Any, ...] = (),
     mcp_status_observer: Any | None = None,
     # Caller-supplied tools registered after the standard set — e.g. a
@@ -475,11 +478,14 @@ def build_agent_session(
             context_note_sink=context_note_sink,
             transcript_sink=subagent_transcript_sink,
             project_trusted=project_trusted,
+            project_hook_approval=project_hook_approval,
         )
 
     # External-command hooks (C3): discover Claude-Code-compatible hooks.json in
     # the workspace. None when no hooks are configured (the common case), so the
-    # feature stays dormant at zero cost. Warnings surface misconfigured hooks.
+    # feature stays dormant at zero cost. Warnings surface misconfigured hooks,
+    # and project hooks whose declarations are not the approved ones are left
+    # out with a single warning naming how to approve them.
     import uuid
 
     from core.harness.hooks import HooksEngine
@@ -489,6 +495,7 @@ def build_agent_session(
         session_id=uuid.uuid4().hex,
         model=resolved_model,
         permission_mode=getattr(engine.mode, "value", str(engine.mode)),
+        project_hook_approval=project_hook_approval,
     )
     for warning in hook_warnings:
         logger.warning("hooks config: {}", warning)

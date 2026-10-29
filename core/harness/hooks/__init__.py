@@ -19,17 +19,17 @@ from core.harness.hooks.engine import (
     PreToolUseOutcome,
     StopOutcome,
 )
-from core.harness.hooks.trust import HookTrustStore, declaration_digest
+from core.harness.hooks.trust import ProjectHookApproval, declaration_digest
 
 __all__ = [
     "ContextOutcome",
     "DiscoveryResult",
     "Handler",
-    "HookTrustStore",
     "HooksEngine",
     "PermissionRequestOutcome",
     "PostToolUseOutcome",
     "PreToolUseOutcome",
+    "ProjectHookApproval",
     "StopOutcome",
     "declaration_digest",
     "discover_hooks",

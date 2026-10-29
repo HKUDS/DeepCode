@@ -1,87 +1,60 @@
-"""Project hook declaration trust — sha256 digest approval store (ZCode).
+"""Project hook approval: a digest of the hook declarations a project ships.
 
-ZCode's rule: a project's ``hooks.json`` is *workspace-supplied code*. Trusting
-a project once must not silently trust it forever — if the declaration changes,
-the approval is void and the operator must re-approve the new content.
+A project's ``.deepcode/hooks.json`` and ``.claude/settings.json`` are
+workspace-supplied commands. Trusting a project lets its hooks run, but a later
+change to those declarations (a ``git pull`` that adds or edits a hook) should
+not run silently: the approval is tied to a digest of the declarations, and a
+changed digest skips the project's hooks until someone approves it again.
 
-The existing engine gate is a boolean ``project_trusted``. This module layers a
-content digest on top:
+What the digest covers, and what it does not:
 
-* :func:`declaration_digest` hashes the canonical declaration content, so
-  whitespace/key-order churn does not invalidate an approval while any real
-  command/matcher/event change does.
-* :class:`HookTrustStore` persists approved digests keyed by workspace in a
-  small JSON file under ``deepcode_home()``. It is intentionally dependency-free
-  (no SQLite) so hook wiring stays cheap.
-* The gate stays **opt-in**: with no store configured, behavior is the existing
-  boolean ``project_trusted`` path, byte-for-byte.
+* It covers the *declarations*: per project hook file, every event name and,
+  per matcher group, the matcher and each handler's ``type``, ``command``,
+  ``timeout``, ``async`` and ``priority``. Key order, whitespace and other keys
+  (descriptions, status messages, unrelated settings) do not change it.
+* It does **not** cover anything a command runs. ``sh .deepcode/check.sh``
+  keeps its approval when ``check.sh`` changes; approving a hook approves a
+  command line, not the files that command reads.
+* Files are named by their path relative to the workspace, so the same
+  declarations give the same digest through a symlink, from a git worktree, or
+  after the folder moves.
 
-An approval is per (workspace, digest). A changed declaration produces a new
-digest, so the old approval no longer matches and project hooks revert to
-blocked until the operator re-approves.
+The user's own ``~/.deepcode/hooks.json`` is never part of the digest and is
+never gated. The approved digest is stored on the Project record; see
+``core.application.project_service`` for when it is recorded.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-import logging
-import os
-import tempfile
-import threading
-from pathlib import Path
+from collections.abc import Iterable
+from dataclasses import dataclass
 
-logger = logging.getLogger(__name__)
+# Markers for a project hook file without usable declarations. Each differs
+# from any canonical JSON, so a file appearing, breaking or disappearing
+# changes the digest.
+MISSING = b"<missing>"
+UNREADABLE = b"<unreadable>"
+NO_HOOKS = b"<no-hooks>"
 
-_STORE_FILENAME = "hook_trust.json"
-_STORE_VERSION = 1
 
+@dataclass(frozen=True, slots=True)
+class ProjectHookApproval:
+    """The project hook declarations a session may run.
 
-def declaration_digest(
-    workspace: str,
-    *,
-    home: str | None = None,
-    paths: tuple[Path, ...] | None = None,
-) -> str:
-    """sha256 digest over the canonical project hook declarations.
-
-    ``paths`` lets callers pass the exact discovered project files; when omitted
-    the two project sources are used (user-level config is the operator's own
-    machine and is never gated, so it never feeds the digest).
-
-    Only *declaration* content is hashed — event name, matcher, command, timeout,
-    priority, type — so cosmetic edits (reordering keys, reindenting) keep the
-    approval while any semantic change produces a new digest. Files that are
-    absent or unreadable contribute a stable marker so a file appearing/disappearing
-    changes the digest.
+    Project hooks run only when the digest of their current declarations
+    equals ``approved_digest``; ``None`` approves nothing.
     """
-    from core.harness.hooks.discovery import _hook_source_files
 
-    if paths is None:
-        paths = tuple(
-            path
-            for path, source in _hook_source_files(workspace, home)
-            if source == "project"
-        )
-    hasher = hashlib.sha256()
-    for path in sorted(paths, key=str):
-        hasher.update(str(path).encode("utf-8"))
-        hasher.update(b"\x00")
-        hasher.update(_canonical_declaration(path))
-        hasher.update(b"\x00")
-    return hasher.hexdigest()
+    approved_digest: str | None
 
 
-def _canonical_declaration(path: Path) -> bytes:
-    """Canonical, order-stable bytes for one hooks file's declarations."""
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        # Absent/unreadable: a stable per-path marker that differs from real content.
-        return b"<missing>"
+def canonical_declaration(data: object) -> bytes:
+    """Order-stable bytes for the declarations in one parsed hooks file."""
     hooks = data.get("hooks") if isinstance(data, dict) else None
     if not isinstance(hooks, dict):
-        return b"<no-hooks>"
+        return NO_HOOKS
     reduced: dict[str, list] = {}
     for event_name in sorted(hooks):
         groups = hooks[event_name]
@@ -94,7 +67,7 @@ def _canonical_declaration(path: Path) -> bytes:
 
 
 def _canonical_group(group: dict) -> dict:
-    """Reduce one matcher-group to its declaration-relevant fields."""
+    """Reduce one matcher group to the fields that decide what runs."""
     out: dict[str, object] = {}
     matcher = group.get("matcher")
     if isinstance(matcher, str):
@@ -105,7 +78,7 @@ def _canonical_group(group: dict) -> dict:
             {
                 key: handler[key]
                 for key in ("type", "command", "timeout", "async", "priority")
-                if isinstance(handler, dict) and key in handler
+                if key in handler
             }
             for handler in handlers
             if isinstance(handler, dict)
@@ -113,99 +86,27 @@ def _canonical_group(group: dict) -> dict:
     return out
 
 
-class HookTrustStore:
-    """Persist approved project hook digests per workspace.
-
-    Thread-safe and file-backed. Approvals are a set of digests per workspace so
-    a workspace can be re-approved across restarts without re-prompting until its
-    declaration actually changes.
-    """
-
-    def __init__(self, path: Path | None = None) -> None:
-        self._path = path or (self._default_dir() / _STORE_FILENAME)
-        self._lock = threading.Lock()
-
-    @staticmethod
-    def _default_dir() -> Path:
-        from core.config import deepcode_home
-
-        return deepcode_home()
-
-    @property
-    def path(self) -> Path:
-        return self._path
-
-    def is_approved(self, workspace: str, digest: str) -> bool:
-        """True when this exact declaration digest is approved for ``workspace``."""
-        with self._lock:
-            return digest in self._read().get(_key(workspace), [])
-
-    def approve(self, workspace: str, digest: str) -> None:
-        """Approve one declaration digest for ``workspace`` (idempotent)."""
-        with self._lock:
-            data = self._read()
-            approved = data.setdefault(_key(workspace), [])
-            if digest not in approved:
-                approved.append(digest)
-                self._write(data)
-
-    def revoke(self, workspace: str, digest: str | None = None) -> None:
-        """Revoke one digest, or every approval for ``workspace`` when None."""
-        with self._lock:
-            data = self._read()
-            key = _key(workspace)
-            if key not in data:
-                return
-            if digest is None:
-                del data[key]
-            else:
-                approved = [d for d in data[key] if d != digest]
-                if approved:
-                    data[key] = approved
-                else:
-                    del data[key]
-            self._write(data)
-
-    def _read(self) -> dict[str, list[str]]:
-        try:
-            raw = json.loads(self._path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {}
-        if not isinstance(raw, dict) or raw.get("version") != _STORE_VERSION:
-            return {}
-        workspaces = raw.get("workspaces")
-        if not isinstance(workspaces, dict):
-            return {}
-        return {
-            key: [d for d in value if isinstance(d, str)]
-            for key, value in workspaces.items()
-            if isinstance(value, list)
-        }
-
-    def _write(self, data: dict[str, list[str]]) -> None:
-        payload = {"version": _STORE_VERSION, "workspaces": data}
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        # Atomic replace so a crash mid-write never corrupts the store.
-        fd, tmp = tempfile.mkstemp(
-            dir=str(self._path.parent), prefix=".hook_trust.", suffix=".tmp"
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(payload, handle, indent=2, sort_keys=True)
-            os.replace(tmp, self._path)
-        except OSError:
-            logger.exception("failed to persist hook trust store at %s", self._path)
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
+def digest_declarations(entries: Iterable[tuple[str, bytes]]) -> str:
+    """sha256 over ``(relative path, canonical declaration)`` pairs."""
+    hasher = hashlib.sha256()
+    for label, canonical in sorted(entries):
+        hasher.update(label.encode("utf-8"))
+        hasher.update(b"\x00")
+        hasher.update(canonical)
+        hasher.update(b"\x00")
+    return hasher.hexdigest()
 
 
-def _key(workspace: str) -> str:
-    return str(Path(workspace).resolve())
+def declaration_digest(workspace: str) -> str:
+    """The digest of ``workspace``'s project hook declarations right now."""
+    from core.harness.hooks.discovery import project_declaration_digest
+
+    return project_declaration_digest(workspace)
 
 
 __all__ = [
-    "HookTrustStore",
+    "ProjectHookApproval",
+    "canonical_declaration",
     "declaration_digest",
+    "digest_declarations",
 ]

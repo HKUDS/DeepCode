@@ -56,6 +56,7 @@ from core.application.goal_turn_port import (
     GoalTurnAssociation,
 )
 from core.application.llm_configuration_service import LLMConfigurationService
+from core.application.project_service import ProjectService
 from core.application.input_identity import submission_fingerprint
 from core.application.session_runtime import SessionRuntimeRegistry
 from core.application.turn_input_service import (
@@ -95,6 +96,7 @@ from core.domain.runtime_coordination import ExecutionClass, ResourceClaim
 from core.domain.thread import Thread, ThreadStatus
 from core.domain.turn import Turn, TurnExecutor, TurnStatus
 from core.events import Event, SkillLoaded, TurnStarted, UserInput
+from core.harness.hooks.trust import ProjectHookApproval
 from core.persistence.coordination_repository import RuntimeCoordinationRepository
 from core.persistence.database import Database
 from core.persistence.event_repository import EventRepository
@@ -1464,6 +1466,7 @@ class TurnService:
 
             session = await self.session_runtimes.acquire(
                 turn.thread_id,
+                project_hook_approval=self._project_hook_approval(turn.thread_id),
                 workspace=workspace,
                 model=execution_profile.model_id,
                 execution_profile=execution_profile,
@@ -2362,6 +2365,14 @@ class TurnService:
         for turn in recovered_turns:
             self._notify_settled(turn)
         return len(active_turns)
+
+    def _project_hook_approval(self, thread_id: str) -> ProjectHookApproval:
+        """Which project hooks this Turn's agent may run (read per Turn)."""
+        with self.database.read() as connection:
+            thread = ThreadRepository(connection).get(thread_id)
+        if thread is None:
+            raise ConflictError("turn thread is missing")
+        return ProjectService(self.database).hook_approval(thread.project_id)
 
     @staticmethod
     def _validate_workspace(thread: Thread, project_path: str) -> None:

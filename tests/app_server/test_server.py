@@ -1157,6 +1157,7 @@ def test_management_methods_round_trip_real_project_state(
             hook["eventName"] == "PreToolUse" and hook["command"] == "python3 check.py"
             for hook in responses[4]["hooks"]
         )
+        assert responses[4]["projectHooks"]["status"] == "approved"
         demo = next(
             server for server in responses[5]["servers"] if server["name"] == "demo"
         )

@@ -121,6 +121,7 @@ export interface MethodParams {
   "plugins/set-enabled": PluginSetEnabledParams;
   "plugins/remove": PluginIdentityParams;
   "hooks/list": ProjectReadParams;
+  "hooks/approve": HookApproveParams;
   "mcp/list": OptionalProjectParams;
   "mcp/upsert": McpUpsertParams;
   "mcp/remove": McpRemoveParams;
@@ -349,6 +350,10 @@ export interface PluginSetEnabledParams {
 }
 export interface PluginIdentityParams {
   pluginId: string;
+}
+export interface HookApproveParams {
+  projectId: string;
+  digest: string;
 }
 export interface McpUpsertParams {
   projectId?: string;
@@ -746,11 +751,8 @@ export interface MethodResults {
     removed: boolean;
     plugin: PluginInfo;
   };
-  "hooks/list": {
-    hooks: HookInfo[];
-    warnings: string[];
-    truncated: boolean;
-  };
+  "hooks/list": HookCatalogResult;
+  "hooks/approve": HookCatalogResult;
   "mcp/list": McpInventory;
   "mcp/upsert": McpInventory;
   "mcp/remove": McpInventory;
@@ -1277,6 +1279,12 @@ export interface PluginDiagnostic {
   component: "skills" | "mcp" | null;
   resource: string | null;
 }
+export interface HookCatalogResult {
+  hooks: HookInfo[];
+  warnings: string[];
+  truncated: boolean;
+  projectHooks: ProjectHooksApproval;
+}
 export interface HookInfo {
   eventName: string;
   matcher: string | null;
@@ -1286,6 +1294,14 @@ export interface HookInfo {
   sourcePath: string;
   displayOrder: number;
   statusMessage: string | null;
+}
+/**
+ * Whether the project's own hooks run on the next Turn. status is none when the project declares no runnable hooks, approved when digest is the approved one, else unapproved (new or changed since approval).
+ */
+export interface ProjectHooksApproval {
+  digest: string;
+  approvedDigest: string | null;
+  status: "none" | "approved" | "unapproved";
 }
 export interface McpInventory {
   servers: McpServerInfo[];

@@ -1,9 +1,11 @@
 """Hook discovery — parse ``hooks.json`` into runnable handlers (C3).
 
 Adapted from the reference agent's ``hooks/src/engine/discovery.rs``. The
-enterprise-only machinery there (MDM / managed requirements / trust-hash
-gating) does not apply to DeepCode and is deliberately left out — what remains
-is the config shape both agents share:
+enterprise-only machinery there (MDM / managed requirements) does not apply to
+DeepCode and is left out. Project hooks are gated by a digest of their
+declarations instead (see :mod:`core.harness.hooks.trust`): given a
+:class:`ProjectHookApproval`, project hooks whose current digest is not the
+approved one are skipped. The config shape both agents share:
 
     {
       "hooks": {
@@ -30,16 +32,19 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from core.harness.hooks.events import (
     HOOK_EVENT_NAMES,
     matcher_applies_to_event,
     validate_matcher,
 )
-
-if TYPE_CHECKING:  # avoid a runtime import cycle (trust imports discovery).
-    from core.harness.hooks.trust import HookTrustStore
+from core.harness.hooks.trust import (
+    MISSING,
+    UNREADABLE,
+    ProjectHookApproval,
+    canonical_declaration,
+    digest_declarations,
+)
 
 _DEFAULT_TIMEOUT_SEC = 600
 _SESSION_END_DEFAULT_TIMEOUT_SEC = 2
@@ -65,6 +70,10 @@ class Handler:
 class DiscoveryResult:
     handlers: list[Handler]
     warnings: list[str]
+    # Digest of the project hook declarations these handlers were read from.
+    project_digest: str = ""
+    # True when project hooks exist but were left out as unapproved.
+    project_hooks_skipped: bool = False
 
 
 def _hook_source_files(workspace: str, home: str | None) -> list[tuple[Path, str]]:
@@ -82,32 +91,35 @@ def discover_hooks(
     workspace: str,
     home: str | None = None,
     *,
-    trust_store: HookTrustStore | None = None,
+    project_hook_approval: ProjectHookApproval | None = None,
 ) -> DiscoveryResult:
     """Discover all configured hook handlers for ``workspace``.
 
     Returns a :class:`DiscoveryResult`; an empty ``handlers`` list means the
     feature is dormant (no config files), which callers use to skip hook wiring
     entirely so a project with no hooks pays zero cost.
-    """
-    handlers: list[Handler] = []
-    warnings: list[str] = []
-    order = 0
-    sources = _hook_source_files(workspace, home)
-    if trust_store is not None:
-        from core.harness.hooks.trust import declaration_digest
 
-        digest = declaration_digest(workspace, home=home)
-        if not trust_store.is_approved(workspace, digest):
-            warnings.append(
-                "project hook declarations are not approved (or changed since "
-                "approval); project hooks were skipped"
-            )
-            sources = [
-                (path, source) for path, source in sources if source != "project"
-            ]
-    for path, source in sources:
-        events = _load_hook_events(path, warnings)
+    With ``project_hook_approval``, project hooks run only if the digest of the
+    declarations read here equals the approved digest. Otherwise they are
+    left out and one warning says so; the user's own hooks are never gated.
+    The digest is taken from the same bytes the handlers are built from, so a
+    file edited mid-discovery cannot slip in under an older approval.
+    """
+    warnings: list[str] = []
+    loaded: list[tuple[Path, str, dict | None]] = []
+    declarations: list[tuple[str, bytes]] = []
+    workspace_root = Path(workspace)
+    for path, source in _hook_source_files(workspace, home):
+        events, canonical = _load_hook_events(path, warnings)
+        if source == "project":
+            label = path.relative_to(workspace_root).as_posix()
+            declarations.append((label, canonical))
+        loaded.append((path, source, events))
+    digest = digest_declarations(declarations)
+
+    handlers: list[Handler] = []
+    order = 0
+    for path, source, events in loaded:
         if not events:
             continue
         for event_name, groups in events.items():
@@ -117,22 +129,54 @@ def discover_hooks(
                 order = _append_group(
                     handlers, warnings, event_name, group, source, path, order
                 )
-    return DiscoveryResult(handlers=handlers, warnings=warnings)
+
+    skipped = False
+    if (
+        project_hook_approval is not None
+        and project_hook_approval.approved_digest != digest
+        and any(handler.source == "project" for handler in handlers)
+    ):
+        handlers = [handler for handler in handlers if handler.source != "project"]
+        skipped = True
+        warnings.append(
+            "project hooks were not run: the hooks declared in this project's "
+            ".deepcode/hooks.json or .claude/settings.json are new or changed "
+            "since they were approved. Review them, then approve the current "
+            f"declarations (digest {digest[:12]}) to run them."
+        )
+    return DiscoveryResult(
+        handlers=handlers,
+        warnings=warnings,
+        project_digest=digest,
+        project_hooks_skipped=skipped,
+    )
 
 
-def _load_hook_events(path: Path, warnings: list[str]) -> dict | None:
-    """Read one config file and return its ``hooks`` object (or ``None``)."""
+def project_declaration_digest(workspace: str) -> str:
+    """Digest of ``workspace``'s project hook declarations, without warnings."""
+    workspace_root = Path(workspace)
+    declarations = [
+        (path.relative_to(workspace_root).as_posix(), _load_hook_events(path, [])[1])
+        for path, source in _hook_source_files(workspace, None)
+        if source == "project"
+    ]
+    return digest_declarations(declarations)
+
+
+def _load_hook_events(path: Path, warnings: list[str]) -> tuple[dict | None, bytes]:
+    """Read one config file: its ``hooks`` object and canonical declarations."""
     if not path.is_file():
-        return None
+        return None, MISSING
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         warnings.append(f"failed to read hooks config {path}: {exc}")
-        return None
+        return None, UNREADABLE
+    canonical = canonical_declaration(data)
     hooks = data.get("hooks") if isinstance(data, dict) else None
     if not isinstance(hooks, dict):
-        return None
-    return hooks
+        return None, canonical
+    return hooks, canonical
 
 
 def _append_group(

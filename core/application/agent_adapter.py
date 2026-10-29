@@ -20,6 +20,7 @@ from core.harness.permissions import PermissionMode
 from core.providers.credentials import default_credentials_path
 
 if TYPE_CHECKING:
+    from core.harness.hooks import ProjectHookApproval
     from core.mcp.models import ResolvedMcpServer
     from core.skills.runtime import SkillRuntime
 
@@ -122,6 +123,7 @@ class ConfiguredAgentSessionFactory:
         goal_runtime: GoalRuntimeRouter | None = None,
         skill_runtime: SkillRuntime | None = None,
         agent_preset: AgentPresetSnapshot | None = None,
+        project_hook_approval: ProjectHookApproval | None = None,
     ) -> AgentSessionPort:
         options: dict[str, Any] = {}
         if self.max_iterations is not None:
@@ -171,6 +173,7 @@ class ConfiguredAgentSessionFactory:
             runtime=runtime,
             provider_cleanup=runtime.aclose,
             project_trusted=True,
+            project_hook_approval=project_hook_approval,
             plugin_mcp_servers=plugin_mcp_servers,
             mcp_status_observer=self._mcp_status_observer,
             **options,
