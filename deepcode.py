@@ -123,6 +123,10 @@ def main():
             from cli.plugin_cli import run as plugin_run
 
             raise SystemExit(plugin_run(sys.argv[2:]))
+        elif sys.argv[1] == "hooks":
+            from cli.hooks_cli import run as hooks_run
+
+            raise SystemExit(hooks_run(sys.argv[2:]))
         elif sys.argv[1] in {"provider", "providers"}:
             from cli.provider_cli import run as provider_run
 
@@ -202,6 +206,10 @@ def main():
                         row(
                             "deepcode plugin <command>",
                             "Register and manage local Agent Plugins",
+                        ),
+                        row(
+                            "deepcode hooks status|approve",
+                            "Show and approve a project's hooks",
                         ),
                         row(
                             "deepcode provider <command>",

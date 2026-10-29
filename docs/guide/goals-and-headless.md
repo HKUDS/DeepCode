@@ -182,3 +182,13 @@ Use hooks when you want to run your own checks or logging around agent activity.
 For example, `PreToolUse` runs before a tool, while `PostToolUse` observes its
 result afterward. See [Headless and Automation](../HEADLESS_AND_AUTOMATION.md)
 for configuration and the actions each hook supports.
+
+Hooks a project declares in `.deepcode/hooks.json` or `.claude/settings.json`
+run only while they are approved. Trusting a project approves the hooks it
+declares at that moment. If those declarations change later, for example after
+a `git pull`, DeepCode skips the project's hooks and logs a notice until you
+approve them again: run `deepcode hooks status` in the project to see them,
+then `deepcode hooks approve` to approve exactly what was listed. The approval
+covers the declarations (events, matchers and commands), not the scripts they
+run, so a hook such as `sh .deepcode/check.sh` keeps its approval when
+`check.sh` changes. Your own hooks in `~/.deepcode/hooks.json` always run.

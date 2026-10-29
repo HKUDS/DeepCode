@@ -187,7 +187,7 @@ def test_gate_skips_unapproved_project_hooks_with_one_warning(
         assert gated.project_hooks_skipped
         assert len(gated.warnings) == 1
         assert "not run" in gated.warnings[0]
-        assert "approve" in gated.warnings[0]
+        assert "deepcode hooks approve" in gated.warnings[0]
 
     approved = discover_hooks(
         str(workspace),
@@ -417,7 +417,7 @@ def test_project_hooks_run_on_turns_only_once_approved(
     sink = logger.add(
         lambda message: notices.append(str(message)),
         level="WARNING",
-        filter=lambda record: "project hooks were not run" in record["message"],
+        filter=lambda record: "Project hooks were not run" in record["message"],
     )
     workspace = tmp_path / "workspace"
     workspace.mkdir()

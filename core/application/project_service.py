@@ -10,6 +10,7 @@ from core.application.errors import (
     ConflictError,
     InvalidArgumentError,
     ProjectNotFoundError,
+    ProjectNotTrustedError,
 )
 from core.domain.common import JsonObject, utc_now
 from core.domain.project import Project, TrustState
@@ -144,13 +145,25 @@ class ProjectService:
 
         ``digest`` is the one the user reviewed in the hooks list. If the
         declarations changed since, approving would run hooks nobody saw, so
-        the call is refused and the list has to be read again.
+        the call is refused and the list has to be read again. An untrusted
+        project is refused too: its hooks cannot run until it is trusted, and
+        trusting it approves the hooks it declares then.
         """
         with self.database.transaction() as connection:
             repository = ProjectRepository(connection)
             current = repository.get(project_id)
             if current is None:
                 raise ProjectNotFoundError(f"project not found: {project_id}")
+            if current.trust_state is not TrustState.TRUSTED:
+                raise ProjectNotTrustedError(
+                    "project must be trusted before its hooks can be approved",
+                    user_message=(
+                        "This project is not trusted, so its hooks cannot "
+                        "run. Trust the project first; trusting it approves "
+                        "the hooks it declares at that moment."
+                    ),
+                    details={"projectId": project_id},
+                )
             actual = declaration_digest(current.canonical_path)
             if digest != actual:
                 raise ConflictError(

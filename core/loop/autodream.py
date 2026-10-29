@@ -21,6 +21,7 @@ from dataclasses import dataclass
 
 from core.agent_setup import build_agent_session
 from core.events import UserInput
+from core.harness.hooks.trust import ProjectHookApproval
 from core.harness.memory import consolidate_pointer_index, memory_dir
 
 _CONSOLIDATE_PROMPT = (
@@ -73,12 +74,15 @@ async def consolidate_memory(
         _stop_reason, final_text = await prompt_runner(_CONSOLIDATE_PROMPT)
         summary = final_text
     else:
+        # This direct pass has no Project, hence no hook approval to check:
+        # it runs the user's own hooks but never the project's.
         session, _model, _engine = build_agent_session(
             workspace=workspace,
             model=model,
             connection_id=connection_id,
             reasoning_effort=reasoning_effort,
             max_iterations=max_iterations,
+            project_hook_approval=ProjectHookApproval(None),
         )
         summary = ""
         try:

@@ -139,10 +139,10 @@ def discover_hooks(
         handlers = [handler for handler in handlers if handler.source != "project"]
         skipped = True
         warnings.append(
-            "project hooks were not run: the hooks declared in this project's "
-            ".deepcode/hooks.json or .claude/settings.json are new or changed "
-            "since they were approved. Review them, then approve the current "
-            f"declarations (digest {digest[:12]}) to run them."
+            "Project hooks were not run: the hooks declared in .deepcode/"
+            "hooks.json or .claude/settings.json are new or changed since they "
+            "were approved. Run `deepcode hooks approve` in this project to "
+            "enable them."
         )
     return DiscoveryResult(
         handlers=handlers,
