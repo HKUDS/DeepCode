@@ -116,6 +116,11 @@ class AgentDefaults(_Base):
     max_tool_iterations: int = 200
     max_tool_result_chars: int = 16_000
     context_window_tokens: int = 65_536
+    # Model-free microcompact pass: when True, stale tool results are replaced
+    # by a placeholder under the runner's pressure gate before the summarizer
+    # runs (see core.agent_runtime.microcompact). Off by default — existing
+    # runs are unchanged.
+    microcompact: bool = False
 
 
 class AgentPhase(_Base):

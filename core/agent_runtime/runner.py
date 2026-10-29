@@ -50,6 +50,10 @@ from core.agent_runtime.evidence_ledger import (
     EvidenceLedger,
 )
 from core.agent_runtime.hook import AgentHook, AgentHookContext
+from core.agent_runtime.microcompact import (
+    MicrocompactPolicy,
+    apply_microcompact as _apply_microcompact,
+)
 from core.agent_runtime.pruner import ToolResultPruner
 from core.agent_runtime.repeat_guard import (
     DEFAULT_THRESHOLDS as DEFAULT_REPEAT_THRESHOLDS,
@@ -247,6 +251,14 @@ class AgentRunSpec:
         default_factory=ToolResultPruner
     )
     compaction_strategy: CompactionStrategy = DEFAULT_COMPACTION_STRATEGY
+    # Optional model-free microcompact pass. When armed, old tool results (all
+    # but the most recent N and the entire latest tool batch) are replaced by a
+    # placeholder under the runner's own pressure gate, before the summarizer is
+    # ever considered — the cheap first rung the ladder was missing. The policy
+    # carries the recency window and the min-savings floor. ``None`` — the
+    # default — disables it (existing runs unchanged); the user-facing
+    # ``agents.defaults.microcompact`` switch arms it.
+    microcompact: MicrocompactPolicy | None = None
     # Per-run: the anchored meter carries this conversation's last
     # reported prompt size, which must not leak into another Session.
     token_meter: TokenMeter = field(default_factory=DEFAULT_TOKEN_METER_FACTORY)
@@ -1803,10 +1815,11 @@ class AgentRunner:
     ) -> list[dict[str, Any]]:
         """Relieve context pressure with the cheapest sufficient measure.
 
-        The ladder (dsh's ordering): pressure gate → model-free prune of
+        The ladder (dsh's ordering): pressure gate → model-free clear of old
+        tool results (microcompact, when armed) → model-free prune of
         oversized tool results → remeasure → only if still over pressure,
         a summarization round-trip that replaces old turns (C4a). Both
-        effects are persisted in ``messages``; the drop-based
+        model-free effects are persisted in ``messages``; the drop-based
         ``_snip_history`` fallback still follows for anything left over.
 
         PreCompact/PostCompact hooks fire around it; a PreCompact ``block`` skips
@@ -1824,6 +1837,28 @@ class AgentRunner:
         estimate = self._estimate_prompt(spec, messages)
         if estimate is None or estimate <= trigger:
             return messages
+
+        # Cheapest model-free rung first: clear OLD tool results to a
+        # placeholder, keeping only the most recent N plus the entire latest
+        # tool batch (the one the model has not read yet). This fires ahead of
+        # the middle-pruner because it is strictly cheaper (no per-block
+        # head/tail slicing) and clears the common "40 stale results still
+        # resident" case whole. The gate above already decided to compact using
+        # the provider's real token count, so no second estimate is made here.
+        # A landed clear is durable and never triggers a model round-trip.
+        if spec.microcompact is not None:
+            mc = _apply_microcompact(messages, spec.microcompact)
+            if mc.applied:
+                messages = mc.messages
+                logger.info(
+                    "Micro-cleared {} stale tool result(s) for {} (~{} tok)",
+                    mc.cleared,
+                    spec.session_key or "default",
+                    int(mc.savings_tokens),
+                )
+                estimate = self._estimate_prompt(spec, messages)
+                if estimate is None or estimate <= trigger:
+                    return messages
 
         # Model-free pass first (the dsh ladder): middle-prune oversized tool
         # results in the persisted history, remeasure, and skip the model
