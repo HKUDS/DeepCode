@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { initI18n } from "../../app/i18n";
@@ -43,22 +43,40 @@ function item(
   };
 }
 
-function renderTurn(items: Item[], transcriptMode: TranscriptMode = "normal") {
-  const [group] = buildConversationTurns([turn], items);
-  return render(
+interface TurnView {
+  transcriptMode?: TranscriptMode;
+  status?: Turn["status"];
+  selectedItemId?: string | null;
+}
+
+function turnBlock(items: Item[], view: TurnView = {}) {
+  const [group] = buildConversationTurns(
+    [{ ...turn, status: view.status ?? turn.status }],
+    items,
+  );
+  return (
     <TurnBlock
       group={group}
       approvalsByItem={new Map()}
-      selectedItemId={null}
-      transcriptMode={transcriptMode}
+      selectedItemId={view.selectedItemId ?? null}
+      transcriptMode={view.transcriptMode ?? "normal"}
       busy={false}
       onSelectItem={vi.fn()}
       onOpenInspector={vi.fn()}
       onRespondToApproval={vi.fn()}
       onRetryTurn={vi.fn()}
       onCancelQueuedTurn={vi.fn()}
-    />,
+    />
   );
+}
+
+function renderTurn(items: Item[], view: TurnView = {}) {
+  const result = render(turnBlock(items, view));
+  return {
+    ...result,
+    update: (next: Item[], nextView: TurnView = view) =>
+      result.rerender(turnBlock(next, nextView)),
+  };
 }
 
 describe("TurnBlock", () => {
@@ -156,17 +174,78 @@ describe("TurnBlock", () => {
     expect(screen.getByText("Done")).toBeTruthy();
   });
 
-  it("names the step a running group is on", () => {
-    renderTurn([
-      run("lint", 1, "npm run lint"),
-      { ...run("test", 2, "npm test"), status: "in_progress" },
-    ]);
+  const note = (id: string, ordinal: number, text: string) =>
+    item(id, ordinal, "assistant_message", text, { text, phase: "commentary" });
 
-    expect(screen.getByText("Now: npm test").closest("details")?.open).toBe(false);
+  /** The browser reports a toggle a task after the click that caused it. */
+  const settleToggle = () => act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+
+  it("keeps the run at work open while the Turn is live, and folds it once the agent moves on", () => {
+    const steps = [run("lint", 1, "npm run lint"), run("test", 2, "npm test")];
+    const { update } = renderTurn(
+      [steps[0], { ...steps[1], status: "in_progress" }],
+      { status: "running" },
+    );
+    expect(screen.getByText("Now: npm test").closest("details")?.open).toBe(true);
+    expect(screen.getByText("npm run lint")).toBeTruthy();
+
+    // Between steps it is still at work.
+    update(steps);
+    expect(screen.getByText("Working").closest("details")?.open).toBe(true);
+
+    update([...steps, note("note", 3, "Lint and tests pass")]);
+    expect(screen.getByText("Steps").closest("details")?.open).toBe(false);
+  });
+
+  it("names a live run's thinking in the user's words", () => {
+    renderTurn(
+      [
+        run("lint", 1, "npm run lint"),
+        run("test", 2, "npm test"),
+        { ...item("think", 3, "reasoning_summary", "Thinking", {}), status: "in_progress" },
+      ],
+      { status: "running" },
+    );
+    expect(screen.getByText("Now: Thinking")).toBeTruthy();
+  });
+
+  it("keeps the user's own open or close over the default", async () => {
+    const steps = [run("lint", 1, "npm run lint"), run("test", 2, "npm test")];
+    const { update } = renderTurn(steps, { status: "running" });
+    const group = screen.getByText("Working").closest("details")!;
+
+    fireEvent.click(group.querySelector("summary")!);
+    await settleToggle();
+    update([...steps, run("build", 3, "npm run build")]);
+    expect(group.open).toBe(false);
+
+    fireEvent.click(group.querySelector("summary")!);
+    await settleToggle();
+    update([...steps, run("build", 3, "npm run build"), note("note", 4, "Built")]);
+    expect(group.open).toBe(true);
+    expect(screen.getByText("npm run build")).toBeTruthy();
+  });
+
+  it("does not open a group because one of its steps is selected", () => {
+    renderTurn([run("lint", 1, "npm run lint"), run("test", 2, "npm test")], {
+      selectedItemId: "test",
+    });
+    expect(screen.getByText("Steps").closest("details")?.open).toBe(false);
+  });
+
+  it("starts every group in a newly chosen transcript mode's state", () => {
+    const steps = [run("lint", 1, "npm run lint"), run("test", 2, "npm test")];
+    const { update } = renderTurn(steps);
+    expect(screen.getByText("Steps").closest("details")?.open).toBe(false);
+
+    update(steps, { transcriptMode: "verbose" });
+    expect(screen.getByText("Steps").closest("details")?.open).toBe(true);
   });
 
   it("opens every group in the verbose transcript", () => {
-    renderTurn([run("lint", 1, "npm run lint"), run("test", 2, "npm test")], "verbose");
+    renderTurn([run("lint", 1, "npm run lint"), run("test", 2, "npm test")], {
+      transcriptMode: "verbose",
+    });
 
     expect(screen.getByText("npm test").closest("details[open]")).not.toBeNull();
   });
@@ -178,7 +257,7 @@ describe("TurnBlock", () => {
         item("edit", 2, "file_change", "Edited parse.py", {}),
         run("test", 3, "npm test"),
       ],
-      "summary",
+      { transcriptMode: "summary" },
     );
 
     expect(screen.getByText("Edited parse.py")).toBeTruthy();
@@ -263,7 +342,7 @@ describe("TurnBlock", () => {
           client: "internal",
         }),
       ],
-      "verbose",
+      { transcriptMode: "verbose" },
     );
     expect(goalNote("Goal continued automatically")?.open).toBe(true);
   });

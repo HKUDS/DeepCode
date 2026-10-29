@@ -430,9 +430,10 @@ div.runStep {
 .workGroup > summary > span {
   display: flex;
   min-width: 0;
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
+  gap: 2px 12px;
 }
 
 .workGroup > summary strong {
@@ -450,8 +451,10 @@ div.runStep {
 
 .workTallies {
   display: flex;
-  flex: 0 0 auto;
-  gap: 10px;
+  min-width: 0;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  gap: 2px 10px;
   color: var(--text-tertiary);
   font: var(--text-micro) var(--font-mono);
 }

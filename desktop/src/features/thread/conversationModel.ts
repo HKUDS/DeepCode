@@ -63,46 +63,46 @@ export function goalPrompt(item: Item): GoalPrompt | null {
   return client === "internal" ? "automatic" : "requested";
 }
 
-function itemActivityKind(item: Item): string | null {
-  const activity = item.payload.activity;
+/** How the backend described a tool call (`ToolActivity` in core/events/protocol.py). */
+export interface ItemActivity {
+  kind: string;
+  label: string;
+  subject: string | null;
+}
+
+export function itemActivity(item: Item): ItemActivity | null {
+  const value = item.payload.activity;
   if (
-    typeof activity !== "object" ||
-    activity === null ||
-    Array.isArray(activity)
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    typeof value.kind !== "string" ||
+    typeof value.label !== "string"
   ) {
     return null;
   }
-  return typeof activity.kind === "string" ? activity.kind : null;
+  return {
+    kind: value.kind,
+    label: value.label,
+    subject: typeof value.subject === "string" ? value.subject : null,
+  };
 }
 
 // Steps the agent takes on its way. Everything else stays in place for the
-// user to see: what the agent says, approvals, errors, plans, artifacts.
+// user to see: what the agent says, approvals, errors, plans, artifacts, and
+// test results (the user runs those, after the Turn).
 const workKinds = new Set<Item["kind"]>([
   "reasoning_summary",
   "command_execution",
   "tool_call",
   "file_change",
   "diff",
-  "test_result",
 ]);
 
-/** What a step did, for a work group's tally. Thinking is not an action. */
-export type WorkTally =
-  | "commands"
-  | "edits"
-  | "reads"
-  | "searches"
-  | "tests"
-  | "tools";
+const tallyOrder = ["commands", "edits", "reads", "searches", "tools"] as const;
 
-const tallyOrder: readonly WorkTally[] = [
-  "commands",
-  "edits",
-  "reads",
-  "searches",
-  "tests",
-  "tools",
-];
+/** What a step did, for a work group's tally. Thinking is not an action. */
+export type WorkTally = (typeof tallyOrder)[number];
 
 function workTally(item: Item): WorkTally | null {
   switch (item.kind) {
@@ -111,10 +111,8 @@ function workTally(item: Item): WorkTally | null {
     case "file_change":
     case "diff":
       return "edits";
-    case "test_result":
-      return "tests";
   }
-  switch (itemActivityKind(item)) {
+  switch (itemActivity(item)?.kind) {
     case "read":
       return "reads";
     case "search":
@@ -162,6 +160,7 @@ function compactTimeline(items: Item[]): TimelineEntry[] {
 export interface WorkSummary {
   /** Actions by kind, in display order; kinds with none are left out. */
   tallies: [WorkTally, number][];
+  /** Failed actions. A stopped Turn also fails its open thinking, which is no action. */
   failed: number;
   /** The step running now, if the group is still at work. */
   current: Item | null;
@@ -177,11 +176,15 @@ export function summarizeWork(items: readonly Item[]): WorkSummary {
   let end = Number.NEGATIVE_INFINITY;
   for (const item of items) {
     const tally = workTally(item);
-    if (tally) counts.set(tally, (counts.get(tally) ?? 0) + 1);
-    if (item.status === "failed") failed += 1;
+    if (tally) {
+      counts.set(tally, (counts.get(tally) ?? 0) + 1);
+      if (item.status === "failed") failed += 1;
+    }
     if (item.status === "in_progress") current = item;
-    start = Math.min(start, Date.parse(item.createdAt));
-    end = Math.max(end, Date.parse(item.updatedAt));
+    const created = Date.parse(item.createdAt);
+    const updated = Date.parse(item.updatedAt);
+    if (Number.isFinite(created)) start = Math.min(start, created);
+    if (Number.isFinite(updated)) end = Math.max(end, updated);
   }
   return {
     tallies: tallyOrder.flatMap((tally): [WorkTally, number][] => {

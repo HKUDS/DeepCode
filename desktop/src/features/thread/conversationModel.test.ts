@@ -114,7 +114,7 @@ describe("conversationModel", () => {
     ).toEqual(["think", "run", "commentary", "think-2", "think-3"]);
   });
 
-  it("never folds approvals, errors or plans into a group", () => {
+  it("never folds approvals, errors, plans or test results into a group", () => {
     expect(
       entryIds([
         item("run", 1, "command_execution", "Ran tests"),
@@ -124,8 +124,20 @@ describe("conversationModel", () => {
         item("run-2", 5, "command_execution", "Ran tests"),
         item("error", 6, "error", "Command failed"),
         item("run-3", 7, "command_execution", "Ran tests"),
+        item("tests", 8, "test_result", "3 passed"),
+        item("run-4", 9, "command_execution", "Ran tests"),
       ]),
-    ).toEqual(["run", "approval", "edit", "plan", "run-2", "error", "run-3"]);
+    ).toEqual([
+      "run",
+      "approval",
+      "edit",
+      "plan",
+      "run-2",
+      "error",
+      "run-3",
+      "tests",
+      "run-4",
+    ]);
   });
 
   it("tallies what a group did, what failed, and what runs now", () => {
@@ -138,9 +150,11 @@ describe("conversationModel", () => {
       item("legacy", 6, "command_execution", "Ran something"),
       item("mcp", 7, "tool_call", "Browser click", activity("other", "button")),
       item("edit", 8, "file_change", "Edited a.py"),
-      item("test", 9, "test_result", "3 passed"),
+      // A stopped Turn fails its open thinking; that is no failed action.
+      { ...item("stopped", 9, "reasoning_summary", "Thinking"), status: "failed" as const },
+      { ...item("bad-time", 10, "file_change", "Edited b.py"), createdAt: "not a time" },
       {
-        ...item("live", 10, "command_execution", "Running", activity("run", "npm test")),
+        ...item("live", 11, "command_execution", "Running", activity("run", "npm test")),
         status: "in_progress" as const,
         updatedAt: "2026-07-17T01:02:05Z",
       },
@@ -150,10 +164,9 @@ describe("conversationModel", () => {
 
     expect(summary.tallies).toEqual([
       ["commands", 3],
-      ["edits", 1],
+      ["edits", 2],
       ["reads", 1],
       ["searches", 2],
-      ["tests", 1],
       ["tools", 1],
     ]);
     expect(summary.failed).toBe(1);

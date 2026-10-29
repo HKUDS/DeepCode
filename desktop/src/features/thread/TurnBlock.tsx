@@ -20,7 +20,7 @@ import {
   Wrench,
 } from "lucide-react";
 import type { TFunction } from "i18next";
-import { useEffect, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type {
@@ -34,6 +34,7 @@ import { isWarning, presentItem } from "../execution/itemPresentation";
 import {
   formatTurnDuration,
   goalPrompt,
+  itemActivity,
   summarizeWork,
   turnDurationSeconds,
   type ConversationTurn,
@@ -73,30 +74,6 @@ interface SkillInvocationView {
   name: string;
   revision?: string;
   invocation?: string;
-}
-
-interface ItemActivityView {
-  kind: string;
-  label: string;
-  subject: string | null;
-}
-
-function itemActivity(item: Item): ItemActivityView | null {
-  const value = item.payload.activity;
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    Array.isArray(value) ||
-    typeof value.kind !== "string" ||
-    typeof value.label !== "string"
-  ) {
-    return null;
-  }
-  return {
-    kind: value.kind,
-    label: value.label,
-    subject: typeof value.subject === "string" ? value.subject : null,
-  };
 }
 
 function itemSkills(item: Item): SkillInvocationView[] {
@@ -317,9 +294,7 @@ function ActivityItem({
         <ActivityIcon kind={item.kind} activityKind={activity?.kind} />
       )}
       <span className={styles.runStepCopy}>
-        <strong>
-          {activity?.subject ?? (item.summary || presentation.label)}
-        </strong>
+        <strong>{stepSubject(item, t)}</strong>
         <small>{activity?.label ?? presentation.label}</small>
       </span>
       {warning ? null : (
@@ -432,63 +407,65 @@ const tallyLabels: Record<WorkTally, [key: string, fallback: string]> = {
   edits: ["turn.work.edits", "Edits {{count}}"],
   reads: ["turn.work.reads", "Reads {{count}}"],
   searches: ["turn.work.searches", "Searches {{count}}"],
-  tests: ["turn.work.tests", "Tests {{count}}"],
   tools: ["turn.work.tools", "Tools {{count}}"],
 };
 
-function stepSubject(item: Item): string {
+/** What a step is about, for its row and for a group's live title. */
+function stepSubject(item: Item, t: TFunction): string {
+  if (item.kind === "reasoning_summary") {
+    return t("thread.reasoning.thinking", "Thinking");
+  }
   return itemActivity(item)?.subject || item.summary || presentItem(item).label;
 }
 
 /**
  * A run of steps folded into one line that says what they did. Its steps
  * render only while it is open: a long run is hundreds of them.
+ *
+ * The run still at work at the end of a live Turn stays open, so its steps
+ * are seen as they come; it folds once the agent moves on. Opening or
+ * closing it by hand wins over both.
  */
 function WorkGroup({
   group,
-  approvalsByItem,
-  selectedItemId,
-  busy,
-  onSelectItem,
-  onOpenInspector,
-  onRespondToApproval,
+  live,
   transcriptMode,
+  renderActivity,
 }: {
   group: TimelineWorkGroup;
-  approvalsByItem: ReadonlyMap<string, Approval>;
-  selectedItemId: string | null;
-  busy: boolean;
-  onSelectItem(itemId: string): void;
-  onOpenInspector(tab?: DesktopInspectorTab): void;
-  onRespondToApproval(approvalId: string, decision: ApprovalDecision): void;
+  live: boolean;
   transcriptMode: TranscriptMode;
+  renderActivity(item: Item): ReactNode;
 }) {
   const { t } = useTranslation();
   const summary = summarizeWork(group.items);
-  const [open, setOpen] = useState(
-    () =>
-      transcriptMode === "verbose" ||
-      group.items.some((item) => item.id === selectedItemId),
-  );
-  // The Turn's own status already says how long it worked, so the title
-  // names the step at work, or just what this is.
+  const [chosen, setChosen] = useState<boolean | null>(null);
+  const open = chosen ?? (transcriptMode === "verbose" || live);
   const title = summary.current
-    ? t("turn.work.now", "Now: {{step}}", { step: stepSubject(summary.current) })
-    : t("turn.work.steps", "Steps");
+    ? t("turn.work.now", "Now: {{step}}", {
+        step: stepSubject(summary.current, t),
+      })
+    : live
+      ? t("turn.work.working", "Working")
+      : t("turn.work.steps", "Steps");
 
   return (
     <details
       className={styles.workGroup}
-      data-status={summary.current ? "in_progress" : undefined}
+      data-status={live ? "in_progress" : undefined}
       open={open}
-      onToggle={(event) => setOpen(event.currentTarget.open)}
+      onToggle={(event) => {
+        // React opening or closing it to match `open` is no choice of the user's.
+        if (event.currentTarget.open !== open) setChosen(event.currentTarget.open);
+      }}
     >
       <summary>
         <Wrench size={14} aria-hidden="true" />
         <span>
           <strong>{title}</strong>
           <small className={styles.workTallies}>
-            {summary.seconds ? (
+            {/* A live run's last update is not its end. */}
+            {summary.seconds && !live ? (
               <span>{formatTurnDuration(summary.seconds)}</span>
             ) : null}
             {summary.tallies.map(([tally, count]) => {
@@ -508,19 +485,7 @@ function WorkGroup({
       </summary>
       {open ? (
         <div className={styles.workGroupItems}>
-          {group.items.map((item) => (
-            <ActivityItem
-              key={item.id}
-              item={item}
-              approval={approvalsByItem.get(item.id)}
-              active={item.id === selectedItemId}
-              busy={busy}
-              onSelectItem={onSelectItem}
-              onOpenInspector={onOpenInspector}
-              onRespondToApproval={onRespondToApproval}
-              transcriptMode={transcriptMode}
-            />
-          ))}
+          {group.items.map(renderActivity)}
         </div>
       ) : null}
     </details>
@@ -614,22 +579,27 @@ export function TurnBlock({
         )
       : group.turn?.errorMessage;
 
-  const renderStep = (item: Item) => {
+  const live = activeTurnStatuses.has(group.turn?.status ?? "");
+  const renderActivity = (item: Item) => (
+    <ActivityItem
+      key={item.id}
+      item={item}
+      approval={approvalsByItem.get(item.id)}
+      active={item.id === selectedItemId}
+      busy={busy}
+      onSelectItem={onSelectItem}
+      onOpenInspector={onOpenInspector}
+      onRespondToApproval={onRespondToApproval}
+      transcriptMode={transcriptMode}
+    />
+  );
+  const renderItem = (item: Item) => {
     if (transcriptMode === "summary" && !summaryVisibleItemKinds.has(item.kind)) {
       return null;
     }
     return (
       <div className={styles.activityEntry} key={item.id}>
-        <ActivityItem
-          item={item}
-          approval={approvalsByItem.get(item.id)}
-          active={item.id === selectedItemId}
-          busy={busy}
-          onSelectItem={onSelectItem}
-          onOpenInspector={onOpenInspector}
-          onRespondToApproval={onRespondToApproval}
-          transcriptMode={transcriptMode}
-        />
+        {renderActivity(item)}
       </div>
     );
   };
@@ -704,22 +674,20 @@ export function TurnBlock({
       <RunStatus group={group} />
 
       <div className={styles.timeline}>
-        {group.timeline.map((entry) => {
+        {group.timeline.map((entry, index) => {
           if (entry.type === "work_group") {
-            // The summary keeps a run's changes and results, not its steps.
-            if (transcriptMode === "summary") return entry.items.map(renderStep);
+            // The summary keeps a run's changes, not its steps.
+            if (transcriptMode === "summary") {
+              return <Fragment key={entry.id}>{entry.items.map(renderItem)}</Fragment>;
+            }
             return (
               <WorkGroup
                 // A new transcript mode starts the group in that mode's state.
                 key={`${entry.id}:${transcriptMode}`}
                 group={entry}
-                approvalsByItem={approvalsByItem}
-                selectedItemId={selectedItemId}
-                busy={busy}
-                onSelectItem={onSelectItem}
-                onOpenInspector={onOpenInspector}
-                onRespondToApproval={onRespondToApproval}
+                live={live && index === group.timeline.length - 1}
                 transcriptMode={transcriptMode}
+                renderActivity={renderActivity}
               />
             );
           }
@@ -732,7 +700,7 @@ export function TurnBlock({
             }
             return <AssistantMessage key={entry.id} item={entry.item} />;
           }
-          return renderStep(entry.item);
+          return renderItem(entry.item);
         })}
       </div>
 
