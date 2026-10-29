@@ -141,16 +141,18 @@ The bottom line is alive during work — a spinner plus what the agent is on:
 ⠸ Run · 4s · pytest -q
 ⠼ Thinking · 8s · High · comparing the two configs
 ⠋ Working · 2s
-⠙ Queued · 6s · waiting for another task to finish
+⠙ Queued · 6s · waiting for a free slot (2 running)
 ◆ Waiting for your approval · y allow once · a always allow `ls …` this session · n deny
 ```
 
 `Run` shows the current tool or command. `Thinking` appears when the provider
 shares reasoning progress; `Working` means DeepCode is waiting for its response
 to begin; `Responding` means the answer is arriving, with its unfinished line
-shown just above. `Queued` means the service is already running as many tasks
-as it runs at once (two); yours starts when one finishes. While an approval
-waits, nothing runs and the line stands still. If it stays there unexpectedly
+shown just above. `Queued` says what your message waits for: the current Turn
+in this session, another session working in the same folder, or a free slot
+(the service runs two Turns at once). A message queued behind a running Turn
+shows as `1 queued next`. While an approval waits, nothing runs and the line
+stands still. A tool call you denied shows as `Denied by you`. If it stays there unexpectedly
 long, see [Troubleshooting](troubleshooting.md).
 When idle, the line shows your display mode and keyboard hints.
 

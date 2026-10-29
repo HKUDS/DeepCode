@@ -77,6 +77,7 @@ _COMPLETION_CACHE_SECONDS = 5.0
 _COMPLETION_WAIT_SECONDS = 0.15
 _RESUME_TAIL_MESSAGES = 4  # messages replayed on /resume
 _RESUME_TAIL_LINES = 3  # lines shown per replayed message
+_QUEUE_PROBE_SECONDS = 2.0  # how often a queued Turn's reason is re-read
 
 
 class TuiApp:
@@ -120,6 +121,7 @@ class TuiApp:
         self._answered_approval_ids: set[str] = set()
         # The approvals shown here, by id, for the answer's wording.
         self._shown_approvals: dict[str, dict] = {}
+        self._queue_probe_task: asyncio.Task | None = None
         self._completion_cache: dict[str, tuple[float, object]] = {}
         self._completion_loads: dict[str, concurrent.futures.Future] = {}
         self._completion_cache_lock = threading.Lock()
@@ -1055,14 +1057,75 @@ class TuiApp:
         )
 
     def _on_turn_event(self, event: DomainEvent) -> None:
-        """Tell the status line whether this Session's Turn is queued."""
+        """Tell the status line which of this Session's Turns wait or run."""
         turn = event.payload.get("turn")
         status = turn.get("status") if isinstance(turn, dict) else None
-        if event.type == "turn.started" and status == "queued":
-            # Accepted, but every execution slot is busy with other work.
-            self.renderer.turn_queued(event.turn_id)
-        elif status is not None and status != "queued":
+        if status is None:
+            return
+        if status == "queued":
+            if event.type in {"turn.started", "turn.queued"}:
+                self.renderer.turn_queued(event.turn_id)
+                self._explain_queue()
+        elif status in {"running", "waiting_approval"}:
             self.renderer.turn_running(event.turn_id)
+        else:
+            self.renderer.turn_finished(event.turn_id)
+            self._explain_queue()
+
+    def _explain_queue(self) -> None:
+        """Find out what a queued Turn waits for, while it waits."""
+        if self.thread_client.runtime_mode != "service":
+            return
+        task = getattr(self, "_queue_probe_task", None)
+        if task is not None and not task.done():
+            return
+
+        async def probe() -> None:
+            while self.renderer.has_queued:
+                if self.renderer.waiting_in_queue:
+                    try:
+                        reason = await asyncio.to_thread(self._queue_reason)
+                    except Exception:  # noqa: BLE001 - the reason is a courtesy
+                        reason = None
+                    self.renderer.set_queue_reason(reason)
+                await asyncio.sleep(_QUEUE_PROBE_SECONDS)
+
+        try:
+            self._queue_probe_task = asyncio.get_running_loop().create_task(probe())
+        except RuntimeError:  # no running loop (tests driving the app directly)
+            self._queue_probe_task = None
+
+    def _queue_reason(self) -> str | None:
+        """What holds this Session's queued Turn, from the service's state.
+
+        A Turn runs once it holds three things: its Session, the Project's
+        workspace (shared by the Project's Sessions, unless one works in its
+        own worktree) and one of the service's execution slots.
+        """
+        client = self.thread_client
+        if client.turns.executing_for_thread(client.session_id) is not None:
+            return "waiting for the current Turn in this session to finish"
+        if not getattr(client.thread, "worktree_path", None):
+            threads = client.rpc.call(
+                "thread/list", {"projectId": client.project.id, "limit": 100}
+            )["threads"]
+            for thread in threads:
+                if (
+                    thread.get("id") != client.session_id
+                    and not thread.get("worktreePath")
+                    and thread.get("status") in {"running", "waiting"}
+                    and client.turns.executing_for_thread(thread["id"]) is not None
+                ):
+                    return "waiting for another session in this workspace to finish"
+        from app_server.service_client import ServiceClient
+
+        # The service's own status (not a Session RPC) counts running Turns.
+        running = (
+            ServiceClient(client.rpc.files).call("status", timeout=2).get("activeTurns")
+        )
+        if running:
+            return f"waiting for a free slot ({running} running)"
+        return None
 
     # -- REPL -----------------------------------------------------------------
 
@@ -1341,6 +1404,8 @@ class TuiApp:
                 self.console.print(f"[{theme.META_STYLE}]bye[/]")
             return 0
         finally:
+            if getattr(self, "_queue_probe_task", None) is not None:
+                self._queue_probe_task.cancel()
             if self._external_refresh_task is not None:
                 self._external_refresh_task.cancel()
                 await asyncio.gather(

@@ -21,7 +21,7 @@ from cli.tui.commands import route_title
 from cli.tui.renderer import EventRenderer
 from core.domain.approval import ApprovalStatus
 from core.domain.event import DomainEvent
-from core.events import Event, ToolStarted, TurnStarted
+from core.events import Event, TaskComplete, ToolCompleted, ToolStarted, TurnStarted
 
 THREAD = "thread-1"
 TURN = "turn_" + "a" * 26
@@ -226,8 +226,11 @@ def test_a_queued_turn_says_queued_then_working_once_it_starts(monkeypatch) -> N
     # A moment in the queue is normal; it is not worth a word.
     assert "Working" in renderer.status_line()
     clock[0] = 105.0
+    # Until the app has learned why, it says only that it waits.
+    assert renderer.status_line() == " Queued · 5s · waiting to start "
+    renderer.set_queue_reason("waiting for a free slot (2 running)")
     assert renderer.status_line() == (
-        " Queued · 5s · waiting for another task to finish "
+        " Queued · 5s · waiting for a free slot (2 running) "
     )
     assert "Working" not in renderer.status_line()
 
@@ -399,10 +402,169 @@ def test_another_sessions_turn_events_are_ignored(monkeypatch) -> None:
     assert app.renderer._queued == {}
 
 
-def test_a_session_queued_behind_its_own_turn_is_not_reported_as_queued() -> None:
+SECOND = "turn_" + "b" * 26
+
+
+def test_a_turn_queued_behind_this_sessions_turn_is_shown_then_waits(
+    monkeypatch,
+) -> None:
+    clock = [10.0]
+    monkeypatch.setattr(renderer_module, "monotonic", lambda: clock[0])
+    app, _ = _app()
+    app._on_domain_event(_event("turn.started", {"turn": {"status": "queued"}}))
+    app._on_domain_event(_event("turn.updated", {"turn": {"status": "running"}}))
+    app.renderer.on_event(Event("1", TurnStarted()))
+    # A second message, queued behind the running Turn.
+    app._on_domain_event(
+        _event("turn.queued", {"turn": {"status": "queued"}}, turn_id=SECOND)
+    )
+    clock[0] = 13.0
+    assert app.renderer.status_line() == " Working · 3s · 1 queued next "
+
+    # The first Turn ends; the second has not started yet.
+    app._on_domain_event(_event("turn.completed", {"turn": {"status": "completed"}}))
+    app.renderer.on_event(Event("2", TaskComplete(None, "completed")))
+    clock[0] = 15.0
+    assert app.renderer.is_working()
+    app.renderer.set_queue_reason(
+        "waiting for another session in this workspace to finish"
+    )
+    assert app.renderer.status_line() == (
+        " Queued · 5s · waiting for another session in this workspace to finish "
+    )
+
+    app._on_domain_event(
+        _event("turn.updated", {"turn": {"status": "running"}}, turn_id=SECOND)
+    )
+    app.renderer.on_event(Event("3", TurnStarted()))
+    clock[0] = 16.0
+    assert app.renderer.status_line() == " Working · 1s "
+
+
+def test_an_interrupted_queued_turn_stops_being_shown() -> None:
     app, _ = _app()
     app._on_domain_event(_event("turn.queued", {"turn": {"status": "queued"}}))
-    assert app.renderer._queued == {}
+    app._on_domain_event(
+        _event("turn.interrupted", {"turn": {"status": "interrupted"}})
+    )
+    assert not app.renderer.has_queued
+    assert "Transcript" in app.renderer.status_line()
+
+
+class _QueueClient(_Client):
+    def __init__(self, *, own=None, others=(), running=0, worktree=None) -> None:
+        super().__init__()
+        self.thread = SimpleNamespace(worktree_path=worktree)
+        executing = {THREAD: own, **{thread: "turn" for thread in others}}
+        self.turns = SimpleNamespace(
+            executing_for_thread=lambda thread_id: executing.get(thread_id)
+        )
+        listing = [
+            {"id": THREAD, "status": "running", "worktreePath": None},
+            *(
+                {"id": thread, "status": "running", "worktreePath": None}
+                for thread in others
+            ),
+            {"id": "idle-thread", "status": "idle", "worktreePath": None},
+        ]
+        self.running = running
+        self.rpc = SimpleNamespace(
+            call=lambda method, params: {"thread/list": {"threads": listing}}[method],
+            files=self,
+        )
+
+
+def _service_status(monkeypatch) -> None:
+    """``status`` is the service's control call, read with its files."""
+
+    class _ServiceClient:
+        def __init__(self, files) -> None:
+            self.files = files
+
+        def call(self, method, timeout=5.0):
+            assert method == "status"
+            return {"activeTurns": self.files.running}
+
+    import app_server.service_client as service_client
+
+    monkeypatch.setattr(service_client, "ServiceClient", _ServiceClient)
+
+
+@pytest.mark.parametrize(
+    ("client", "reason"),
+    [
+        (
+            _QueueClient(own="turn"),
+            "waiting for the current Turn in this session to finish",
+        ),
+        (
+            _QueueClient(others=("other-thread",), running=1),
+            "waiting for another session in this workspace to finish",
+        ),
+        (
+            # In its own worktree, another session's work does not hold it.
+            _QueueClient(others=("other-thread",), running=2, worktree="/wt"),
+            "waiting for a free slot (2 running)",
+        ),
+        (_QueueClient(running=2), "waiting for a free slot (2 running)"),
+        (_QueueClient(), None),
+    ],
+)
+def test_the_queue_reason_names_what_holds_the_turn(
+    monkeypatch, client, reason
+) -> None:
+    _service_status(monkeypatch)
+    app, _ = _app(client)
+    assert app._queue_reason() == reason
+
+
+def test_the_queue_reason_is_found_while_the_turn_waits(monkeypatch) -> None:
+    _service_status(monkeypatch)
+
+    async def scenario():
+        client = _QueueClient(running=2)
+        app, _ = _app(client)
+        app._on_domain_event(_event("turn.started", {"turn": {"status": "queued"}}))
+        for _ in range(100):
+            if app.renderer._queue_reason:
+                break
+            await asyncio.sleep(0.01)
+        reason = app.renderer._queue_reason
+        app._on_domain_event(_event("turn.updated", {"turn": {"status": "running"}}))
+        await asyncio.sleep(0)
+        app._queue_probe_task.cancel()
+        return reason
+
+    assert asyncio.run(scenario()) == "waiting for a free slot (2 running)"
+
+
+# -- denied by the user -------------------------------------------------------
+
+
+def _elbow(preview: str, *, is_error: bool = True) -> str:
+    output = io.StringIO()
+    renderer = EventRenderer(Console(file=output, color_system=None, width=100))
+    renderer.on_event(Event("1", TurnStarted()))
+    renderer.on_event(Event("2", ToolStarted("call-1", "bash", "rm -rf build")))
+    renderer.on_event(Event("3", ToolCompleted("call-1", "bash", is_error, preview)))
+    return output.getvalue()
+
+
+def test_a_call_the_user_denied_reads_denied_by_you() -> None:
+    text = _elbow(
+        "Error: permission denied: user rejected: Running a command needs your approval."
+    )
+    assert "⎿ Denied by you" in text
+    assert "failed" not in text
+    assert "needs your approval" not in text
+
+
+def test_other_failures_still_read_as_failures() -> None:
+    text = _elbow(
+        "Error: permission denied: Blocked by your permission rule `bash rm *`."
+    )
+    assert "bash failed" in text
+    assert "Denied by you" not in text
 
 
 # -- first run ----------------------------------------------------------------
