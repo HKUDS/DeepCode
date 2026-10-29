@@ -15,6 +15,7 @@ import {
   ScrollText,
   Search,
   Sparkles,
+  Target,
   TerminalSquare,
   Wrench,
 } from "lucide-react";
@@ -32,6 +33,7 @@ import { ApprovalCard } from "../execution/ApprovalCard";
 import { isWarning, presentItem } from "../execution/itemPresentation";
 import {
   formatTurnDuration,
+  isGoalContinuation,
   turnDurationSeconds,
   type ConversationTurn,
   type TimelineActivityGroup,
@@ -373,6 +375,33 @@ function ActivityItem({
   );
 }
 
+/** Stands in for the instruction the Goal runtime sent; the text is one click away. */
+function GoalContinuationNote({
+  text,
+  transcriptMode,
+}: {
+  text: string;
+  transcriptMode: TranscriptMode;
+}) {
+  const { t } = useTranslation();
+  return (
+    <details
+      className={styles.goalContinuation}
+      open={transcriptMode === "verbose"}
+    >
+      <summary>
+        <Target size={12} aria-hidden="true" />
+        <span>{t("turn.goalContinued", "Goal continued automatically")}</span>
+        <ChevronDown size={12} aria-hidden="true" />
+      </summary>
+      <div className={styles.goalContinuationText}>
+        <small>{t("turn.goalInstruction", "Instruction sent to the model")}</small>
+        <MarkdownContent>{text}</MarkdownContent>
+      </div>
+    </details>
+  );
+}
+
 function RunStatus({ group }: { group: ConversationTurn }) {
   const active = Boolean(
     group.turn && activeTurnStatuses.has(group.turn.status),
@@ -511,9 +540,17 @@ export function TurnBlock({
         id: item.id,
         text: presentItem(item).body ?? item.summary,
         skills: itemSkills(item),
+        goalContinuation: isGoalContinuation(item),
       }))
     : group.turn?.prompt
-      ? [{ id: `${group.id}-prompt`, text: group.turn.prompt, skills: [] }]
+      ? [
+          {
+            id: `${group.id}-prompt`,
+            text: group.turn.prompt,
+            skills: [],
+            goalContinuation: false,
+          },
+        ]
       : [];
   const orderedItems = timelineItems(group);
   const lastExecutionItem =
@@ -536,9 +573,16 @@ export function TurnBlock({
     <section className={styles.turnBlock} data-status={group.turn?.status}>
       {userMessages.map((message) => (
         <article className={styles.userMessage} data-queued={queued} key={message.id}>
-          <div className={styles.userBubble}>
-            <MarkdownContent>{message.text}</MarkdownContent>
-          </div>
+          {message.goalContinuation ? (
+            <GoalContinuationNote
+              text={message.text}
+              transcriptMode={transcriptMode}
+            />
+          ) : (
+            <div className={styles.userBubble}>
+              <MarkdownContent>{message.text}</MarkdownContent>
+            </div>
+          )}
           {message.skills.length ? (
             <div
               className={styles.userSkills}

@@ -1492,6 +1492,37 @@ def test_startup_resume_shows_history_without_running_another_turn(
     assert store.list_sessions()[0].message_count == session.message_count
 
 
+def test_resume_replay_shows_a_goal_continuation_as_one_line():
+    from types import SimpleNamespace
+
+    from core.sessions.models import SessionMessage
+
+    messages = [
+        SessionMessage("user", "Fix the parser"),
+        SessionMessage("assistant", "Fixed it."),
+        SessionMessage(
+            "user",
+            "Continue working toward the active Thread Goal.\nGoal: ship it",
+            metadata={"source": "goal_continuation"},
+        ),
+        SessionMessage("assistant", "Shipped."),
+    ]
+    app = object.__new__(tui_app.TuiApp)
+    output = io.StringIO()
+    app.console = Console(file=output, color_system=None, width=120)
+    app.thread_client = SimpleNamespace(session_id="s1")
+    session = SimpleNamespace(messages=messages)
+    app.bridge = SimpleNamespace(store=SimpleNamespace(get_session=lambda _: session))
+
+    app.render_resume_tail()
+
+    text = output.getvalue()
+    assert "› Fix the parser" in text
+    assert "↻ Goal continued automatically" in text
+    assert "Continue working toward" not in text
+    assert "Shipped." in text
+
+
 def test_resume_without_arg_lists_sessions(monkeypatch, tmp_path, capsys):
     _run_tui(monkeypatch, tmp_path, "task one\n/exit\n", ["done"])
     capsys.readouterr()

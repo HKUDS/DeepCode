@@ -40,6 +40,14 @@ function createGroup(turn: Turn): MutableConversationTurn {
   };
 }
 
+/**
+ * A user message the Goal runtime wrote to start its next Turn. Its text is
+ * an instruction for the model, not something the user typed.
+ */
+export function isGoalContinuation(item: Item): boolean {
+  return item.kind === "user_message" && item.payload.source === "goal_continuation";
+}
+
 const groupedActivityKinds = new Set(["read", "search", "list"]);
 
 function itemActivityKind(item: Item): string | null {

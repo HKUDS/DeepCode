@@ -871,6 +871,8 @@ const ZH_CN: Record<string, string> = {
   "turn.responding": "智能体正在回复",
   "turn.restarted": "上一个进程已停止。请从同一提示重试。",
   "turn.skillsUsed": "本次 Turn 使用的技能",
+  "turn.goalContinued": "目标自动继续",
+  "turn.goalInstruction": "发给模型的指令",
   "turn.cancel": "取消",
   "turn.thinking": "思考 {{effort}}",
   "turn.retry": "重试",

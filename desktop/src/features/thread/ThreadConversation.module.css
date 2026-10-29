@@ -51,6 +51,61 @@
   color: var(--text-secondary);
 }
 
+/* A Goal continuation sits where the user's message would, but quietly:
+   the model's instruction is there for whoever wants to read it. */
+.goalContinuation {
+  max-width: min(660px, 82%);
+  color: var(--text-tertiary);
+}
+
+.goalContinuation > summary {
+  display: flex;
+  width: fit-content;
+  min-height: 26px;
+  margin-left: auto;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  font-size: var(--text-xs);
+  list-style: none;
+}
+
+.goalContinuation > summary::-webkit-details-marker {
+  display: none;
+}
+
+.goalContinuation > summary:hover {
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+}
+
+.goalContinuation > summary > svg:last-child {
+  transition: transform 150ms ease;
+}
+
+.goalContinuation[open] > summary > svg:last-child {
+  transform: rotate(180deg);
+}
+
+.goalContinuationText {
+  margin-top: 8px;
+  padding: 10px 14px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.goalContinuationText > small {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-tertiary);
+  font: var(--text-micro) var(--font-mono);
+}
+
 .userSkills {
   display: flex;
   max-width: min(660px, 82%);

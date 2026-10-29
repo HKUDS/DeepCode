@@ -61,9 +61,11 @@ from core.config import ConfigError
 from core.domain.approval import ApprovalStatus
 from core.domain.event import DomainEvent
 from core.domain.execution_security import ExecutionAccessPreset
+from core.domain.message_provenance import TurnInputSource
 from core.domain.project import Project, TrustState
 from core.file_lock import FileLease
 from core.providers.reasoning import normalize_reasoning_effort
+from core.sessions.models import SessionMessage
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +80,14 @@ _COMPLETION_WAIT_SECONDS = 0.15
 _RESUME_TAIL_MESSAGES = 4  # messages replayed on /resume
 _RESUME_TAIL_LINES = 3  # lines shown per replayed message
 _QUEUE_PROBE_SECONDS = 2.0  # how often a queued Turn's reason is re-read
+
+
+def _is_goal_continuation(message: SessionMessage) -> bool:
+    metadata = message.metadata or {}
+    return (
+        message.role == "user"
+        and metadata.get("source") == TurnInputSource.GOAL_CONTINUATION.value
+    )
 
 
 class TuiApp:
@@ -241,6 +251,13 @@ class TuiApp:
                 highlight=False,
             )
         for message in tail:
+            if _is_goal_continuation(message):
+                # The Goal runtime's instruction to the model, not the user's words.
+                self.console.print(
+                    f"[{theme.META_STYLE}]↻ Goal continued automatically[/]",
+                    highlight=False,
+                )
+                continue
             lines = [
                 line for line in message.content.strip().splitlines() if line.strip()
             ]

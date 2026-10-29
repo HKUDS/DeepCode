@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Item, Turn } from "../../generated/app-server";
 import { buildConversationTurns } from "./conversationModel";
+import type { TranscriptMode } from "./transcriptMode";
 import { TurnBlock } from "./TurnBlock";
 
 const turn: Turn = {
@@ -39,14 +40,14 @@ function item(
   };
 }
 
-function renderTurn(items: Item[]) {
+function renderTurn(items: Item[], transcriptMode: TranscriptMode = "normal") {
   const [group] = buildConversationTurns([turn], items);
   return render(
     <TurnBlock
       group={group}
       approvalsByItem={new Map()}
       selectedItemId={null}
-      transcriptMode="normal"
+      transcriptMode={transcriptMode}
       busy={false}
       onSelectItem={vi.fn()}
       onOpenInspector={vi.fn()}
@@ -120,5 +121,40 @@ describe("TurnBlock", () => {
     expect(row?.textContent).toContain("Warning");
     expect(screen.queryByText("Execution error")).toBeNull();
     expect(row?.textContent).not.toMatch(/completed|failed/);
+  });
+
+  it("shows a Goal continuation as a note with its instruction folded away", () => {
+    const instruction = "Continue working toward the active Thread Goal.";
+    const steer = "Also keep the public API unchanged.";
+    renderTurn([
+      item("goal", 1, "user_message", instruction, {
+        text: instruction,
+        source: "goal_continuation",
+      }),
+      item("steer", 2, "user_message", steer, { text: steer, source: "steer" }),
+    ]);
+
+    const note = screen.getByText("Goal continued automatically").closest("details");
+    expect(note).not.toBeNull();
+    expect(note?.open).toBe(false);
+    expect(note?.textContent).toContain(instruction);
+    // What the user typed stays a message of their own.
+    expect(screen.getByText(steer).closest("details")).toBeNull();
+  });
+
+  it("unfolds the Goal instruction in the verbose transcript", () => {
+    const instruction = "Continue working toward the active Thread Goal.";
+    renderTurn(
+      [
+        item("goal", 1, "user_message", instruction, {
+          text: instruction,
+          source: "goal_continuation",
+        }),
+      ],
+      "verbose",
+    );
+    expect(
+      screen.getByText("Goal continued automatically").closest("details")?.open,
+    ).toBe(true);
   });
 });
