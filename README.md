@@ -158,6 +158,17 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
 
 ## News
 
+**2026-10-29 · Lighter compaction and checked Goal completion, both opt-in**
+
+- **Clear old tool output first.** With `agents.defaults.microcompact` on,
+  a long session that nears its context limit replaces stale tool results
+  with a short placeholder, keeping saved-output paths, before it asks the
+  model for a summary. (#279)
+- **Check a Goal before it completes.** With `goal.completionVerifier` set to
+  `"rule"`, a claim that the Goal is done is turned back while the latest
+  check failed or no work was done, and the Goal is marked blocked after
+  repeated rejections. (#281)
+
 **2026-10-28 · Presets that remove tools, guarded hook files, and community fixes**
 
 - **Remove tools from a preset.** Agent preset files take `disallowed-tools`
