@@ -237,6 +237,22 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         # route, so the prefix must survive rather than be stripped.
     ),
     ProviderSpec(
+        name="atlascloud",
+        keywords=("atlascloud",),
+        env_key="ATLASCLOUD_API_KEY",
+        display_name="Atlas Cloud",
+        backend="openai_compat",
+        is_gateway=True,
+        endpoint_class="gateway",
+        detect_by_base_keyword="atlascloud",
+        default_api_base="https://api.atlascloud.ai/v1",
+        # Atlas Cloud accepts the Anthropic cache-control markers on its
+        # OpenAI-compatible endpoint and lists cached-input prices.
+        supports_prompt_caching=True,
+        # Ids are ``vendor/model`` (for example ``deepseek-ai/deepseek-v4-flash``)
+        # and the whole string is the model id, so the prefix must survive.
+    ),
+    ProviderSpec(
         name="forge",
         keywords=("forge",),
         env_key="FORGE_API_KEY",
