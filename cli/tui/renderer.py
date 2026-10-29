@@ -407,7 +407,7 @@ class EventRenderer:
             if waited >= _QUEUED_NOTICE_SECONDS:
                 return ("Queued", waited, self._queue_reason or _QUEUED_DETAIL)
         activity = self._running_activity()
-        if activity is not None and self._queued:
+        if activity is not None and self._queued and self._running:
             # The running Turn is in front; the queued one says it is next.
             label, elapsed, detail = activity
             extra = f"{len(self._queued)} queued next"

@@ -441,6 +441,18 @@ def test_a_turn_queued_behind_this_sessions_turn_is_shown_then_waits(
     assert app.renderer.status_line() == " Working · 1s "
 
 
+def test_a_new_message_is_not_counted_as_queued_behind_itself(monkeypatch) -> None:
+    # Every Turn is queued for a moment before it starts. With nothing else
+    # running, that moment must read "Working", not "1 queued next".
+    clock = [10.0]
+    monkeypatch.setattr(renderer_module, "monotonic", lambda: clock[0])
+    app, _ = _app()
+    app.renderer.on_event(Event("1", TurnStarted()))
+    app._on_domain_event(_event("turn.queued", {"turn": {"status": "queued"}}))
+    clock[0] = 10.4
+    assert app.renderer.status_line() == " Working · 0s "
+
+
 def test_an_interrupted_queued_turn_stops_being_shown() -> None:
     app, _ = _app()
     app._on_domain_event(_event("turn.queued", {"turn": {"status": "queued"}}))
