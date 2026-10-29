@@ -158,7 +158,7 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
 
 ## News
 
-**2026-10-29 · Lighter compaction and checked Goal completion, both opt-in**
+**2026-10-29 · Lighter compaction, checked Goal completion, and folder browsing on the Web**
 
 - **Clear old tool output first.** With `agents.defaults.microcompact` on,
   a long session that nears its context limit replaces stale tool results
@@ -168,6 +168,11 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
   `"rule"`, a claim that the Goal is done is turned back while the latest
   check failed or no work was done, and the Goal is marked blocked after
   repeated rejections. (#281)
+- **Browse folders on the Web.** Opening a project in the Web client lists the
+  service machine's folders to click through, instead of only a path box.
+- **Fixes.** A Goal on DeepSeek with thinking on Auto no longer fails with
+  "reasoning_content must be passed back", and the model picker's notes wrap
+  instead of running under its controls.
 
 **2026-10-28 · Presets that remove tools, guarded hook files, and community fixes**
 
