@@ -30,12 +30,16 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from core.harness.hooks.events import (
     HOOK_EVENT_NAMES,
     matcher_applies_to_event,
     validate_matcher,
 )
+
+if TYPE_CHECKING:  # avoid a runtime import cycle (trust imports discovery).
+    from core.harness.hooks.trust import HookTrustStore
 
 _DEFAULT_TIMEOUT_SEC = 600
 _SESSION_END_DEFAULT_TIMEOUT_SEC = 2
@@ -74,7 +78,12 @@ def _hook_source_files(workspace: str, home: str | None) -> list[tuple[Path, str
     ]
 
 
-def discover_hooks(workspace: str, home: str | None = None) -> DiscoveryResult:
+def discover_hooks(
+    workspace: str,
+    home: str | None = None,
+    *,
+    trust_store: HookTrustStore | None = None,
+) -> DiscoveryResult:
     """Discover all configured hook handlers for ``workspace``.
 
     Returns a :class:`DiscoveryResult`; an empty ``handlers`` list means the
@@ -84,7 +93,20 @@ def discover_hooks(workspace: str, home: str | None = None) -> DiscoveryResult:
     handlers: list[Handler] = []
     warnings: list[str] = []
     order = 0
-    for path, source in _hook_source_files(workspace, home):
+    sources = _hook_source_files(workspace, home)
+    if trust_store is not None:
+        from core.harness.hooks.trust import declaration_digest
+
+        digest = declaration_digest(workspace, home=home)
+        if not trust_store.is_approved(workspace, digest):
+            warnings.append(
+                "project hook declarations are not approved (or changed since "
+                "approval); project hooks were skipped"
+            )
+            sources = [
+                (path, source) for path, source in sources if source != "project"
+            ]
+    for path, source in sources:
         events = _load_hook_events(path, warnings)
         if not events:
             continue
