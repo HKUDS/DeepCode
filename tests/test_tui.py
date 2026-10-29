@@ -1492,35 +1492,39 @@ def test_startup_resume_shows_history_without_running_another_turn(
     assert store.list_sessions()[0].message_count == session.message_count
 
 
-def test_resume_replay_shows_a_goal_continuation_as_one_line():
-    from types import SimpleNamespace
+def test_resume_replay_shows_only_what_people_said(monkeypatch, tmp_path, capsys):
+    from core.sessions.store import SessionStore
 
-    from core.sessions.models import SessionMessage
+    rc, _ = _run_tui(monkeypatch, tmp_path, "Fix the parser\n/exit\n", ["Fixed it."])
+    assert rc == 0
+    store = SessionStore(tmp_path / "sessions")
+    session_id = store.list_sessions()[0].session_id
+    store.append_message(
+        session_id,
+        "user",
+        "Continue working toward the active Thread Goal.\nGoal: ship it",
+        metadata={"source": "goal_continuation", "client": "internal"},
+    )
+    store.append_message(
+        session_id,
+        "user",
+        "The persistent Goal for this Thread was updated.",
+        metadata={"source": "goal_update", "delivery": "between_turns"},
+    )
+    store.append_message(session_id, "assistant", "Shipped.")
+    capsys.readouterr()
+    monkeypatch.setattr("sys.stdin", io.StringIO("/exit\n"))
 
-    messages = [
-        SessionMessage("user", "Fix the parser"),
-        SessionMessage("assistant", "Fixed it."),
-        SessionMessage(
-            "user",
-            "Continue working toward the active Thread Goal.\nGoal: ship it",
-            metadata={"source": "goal_continuation"},
-        ),
-        SessionMessage("assistant", "Shipped."),
-    ]
-    app = object.__new__(tui_app.TuiApp)
-    output = io.StringIO()
-    app.console = Console(file=output, color_system=None, width=120)
-    app.thread_client = SimpleNamespace(session_id="s1")
-    session = SimpleNamespace(messages=messages)
-    app.bridge = SimpleNamespace(store=SimpleNamespace(get_session=lambda _: session))
+    assert (
+        tui_app.main(["--workspace", str(tmp_path / "ws"), "--resume", session_id]) == 0
+    )
 
-    app.render_resume_tail()
-
-    text = output.getvalue()
-    assert "› Fix the parser" in text
-    assert "↻ Goal continued automatically" in text
-    assert "Continue working toward" not in text
-    assert "Shipped." in text
+    output = capsys.readouterr().out
+    assert "› Fix the parser" in output
+    assert f"{theme.GOAL_PROMPT_MARK} Goal continued automatically" in output
+    assert "Continue working toward" not in output
+    assert "was updated" not in output
+    assert "Shipped." in output
 
 
 def test_resume_without_arg_lists_sessions(monkeypatch, tmp_path, capsys):

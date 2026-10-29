@@ -123,38 +123,81 @@ describe("TurnBlock", () => {
     expect(row?.textContent).not.toMatch(/completed|failed/);
   });
 
-  it("shows a Goal continuation as a note with its instruction folded away", () => {
-    const instruction = "Continue working toward the active Thread Goal.";
+  const instruction = "Continue working toward the active Thread Goal.";
+
+  function goalNote(label: string) {
+    return screen.getByText(label).closest("details");
+  }
+
+  it("shows an automatic Goal continuation as a note, not as the user's message", () => {
     const steer = "Also keep the public API unchanged.";
     renderTurn([
       item("goal", 1, "user_message", instruction, {
         text: instruction,
         source: "goal_continuation",
+        client: "internal",
       }),
-      item("steer", 2, "user_message", steer, { text: steer, source: "steer" }),
+      item("steer", 2, "user_message", steer, {
+        text: steer,
+        source: "steer",
+        client: "web",
+      }),
     ]);
 
-    const note = screen.getByText("Goal continued automatically").closest("details");
-    expect(note).not.toBeNull();
+    const note = goalNote("Goal continued automatically");
     expect(note?.open).toBe(false);
     expect(note?.textContent).toContain(instruction);
-    // What the user typed stays a message of their own.
-    expect(screen.getByText(steer).closest("details")).toBeNull();
+    // What the user typed stays a message bubble of their own.
+    const bubble = screen.getByText(steer).closest('[class*="userBubble"]');
+    expect(bubble).not.toBeNull();
+    expect(bubble?.closest("details")).toBeNull();
+  });
+
+  it("does not call a Goal Turn the user started automatic", () => {
+    renderTurn([
+      item("goal", 1, "user_message", instruction, {
+        text: instruction,
+        source: "goal_continuation",
+        client: "desktop",
+      }),
+    ]);
+
+    expect(goalNote("Working toward the Goal")?.textContent).toContain(instruction);
+    expect(screen.queryByText("Goal continued automatically")).toBeNull();
+  });
+
+  it("keeps a retried Goal instruction a note, and a retried prompt a message", () => {
+    const prompt = "Fix the parser";
+    renderTurn([
+      item("goal", 1, "user_message", instruction, {
+        text: instruction,
+        source: "retry",
+        client: "internal",
+        retryOf: { turnId: "turn-0", source: "goal_continuation", client: "internal" },
+      }),
+      item("prompt", 2, "user_message", prompt, {
+        text: prompt,
+        source: "retry",
+        client: "internal",
+        retryOf: { turnId: "turn-0", source: "start", client: "web" },
+      }),
+    ]);
+
+    expect(goalNote("Working toward the Goal")?.textContent).toContain(instruction);
+    expect(screen.getByText(prompt).closest('[class*="userBubble"]')).not.toBeNull();
   });
 
   it("unfolds the Goal instruction in the verbose transcript", () => {
-    const instruction = "Continue working toward the active Thread Goal.";
     renderTurn(
       [
         item("goal", 1, "user_message", instruction, {
           text: instruction,
           source: "goal_continuation",
+          client: "internal",
         }),
       ],
       "verbose",
     );
-    expect(
-      screen.getByText("Goal continued automatically").closest("details")?.open,
-    ).toBe(true);
+    expect(goalNote("Goal continued automatically")?.open).toBe(true);
   });
 });

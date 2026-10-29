@@ -54,6 +54,7 @@ from core.providers.reasoning import normalize_reasoning_effort
 from core.sessions import Session, SessionMessage, SessionStore
 from core.sessions.transcript import (
     is_compaction_checkpoint as _is_compaction_checkpoint,
+    is_context_note,
 )
 
 logger = logging.getLogger(__name__)
@@ -846,7 +847,7 @@ class ThreadService:
             for message in session.messages
             if message.role in {"user", "assistant", "tool"}
             and (message.content or (message.metadata or {}).get("toolCalls"))
-            and not self._is_context_note(message)
+            and not is_context_note(message)
             and not _is_compaction_checkpoint(message)
         ]
         items = ItemRepository(connection)
@@ -1487,33 +1488,6 @@ class ThreadService:
             dict(session.metadata),
         )
 
-    @staticmethod
-    def _is_context_note(message: SessionMessage) -> bool:
-        """True for runner-injected mid-turn context, not a conversational turn.
-
-        The context-note sink stamps every note with a ``delivery`` marker
-        (``mid_turn``/``between_turns``). Notes are model-visible log entries
-        — repeat-guard reminders, sub-agent results, Goal updates — that sit
-        BETWEEN a Turn's user prompt and its assistant reply in the canonical
-        JSONL. The projection timeline tracks conversational turns only, so
-        pair-matching must skip them or every noted Turn would read as a
-        projection conflict.
-
-        The marker an interrupted Turn leaves for the model is the same kind
-        of record: it closes that Turn, it does not open one.
-        """
-        metadata = message.metadata or {}
-        if message.role != "user":
-            return False
-        if metadata.get("source") == TurnInputSource.TURN_INTERRUPT.value:
-            return True
-        # User input also carries delivery provenance (current_turn/next_turn).
-        # Only the context-note sink's markers identify internal user-role notes.
-        return metadata.get("delivery") in (
-            "mid_turn",
-            "between_turns",
-        )
-
     def _merge_projection_tail(
         self,
         canonical: Session,
@@ -1527,7 +1501,7 @@ class ThreadService:
             for message in canonical.messages
             if message.role in {"user", "assistant"}
             and message.content
-            and not self._is_context_note(message)
+            and not is_context_note(message)
         ]
         projected_pairs = [
             (

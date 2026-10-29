@@ -51,14 +51,14 @@
   color: var(--text-secondary);
 }
 
-/* A Goal continuation sits where the user's message would, but quietly:
+/* A Goal prompt sits where the user's message would, but quietly:
    the model's instruction is there for whoever wants to read it. */
-.goalContinuation {
+.goalPrompt {
   max-width: min(660px, 82%);
   color: var(--text-tertiary);
 }
 
-.goalContinuation > summary {
+.goalPrompt > summary {
   display: flex;
   width: fit-content;
   min-height: 26px;
@@ -73,24 +73,24 @@
   list-style: none;
 }
 
-.goalContinuation > summary::-webkit-details-marker {
+.goalPrompt > summary::-webkit-details-marker {
   display: none;
 }
 
-.goalContinuation > summary:hover {
+.goalPrompt > summary:hover {
   background: var(--surface-hover);
   color: var(--text-secondary);
 }
 
-.goalContinuation > summary > svg:last-child {
+.goalPrompt > summary > svg:last-child {
   transition: transform 150ms ease;
 }
 
-.goalContinuation[open] > summary > svg:last-child {
+.goalPrompt[open] > summary > svg:last-child {
   transform: rotate(180deg);
 }
 
-.goalContinuationText {
+.goalPromptText {
   margin-top: 8px;
   padding: 10px 14px;
   border: 1px dashed var(--border-subtle);
@@ -99,7 +99,7 @@
   font-size: var(--text-sm);
 }
 
-.goalContinuationText > small {
+.goalPromptText > small {
   display: block;
   margin-bottom: 6px;
   color: var(--text-tertiary);

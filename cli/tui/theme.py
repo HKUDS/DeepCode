@@ -78,6 +78,7 @@ def prompt_fragments(*, approval: bool = False) -> list[tuple[str, str]]:
 ASSISTANT_STYLE = "default"
 THINKING_STYLE = DIM
 THINKING_MARK = "◇"
+GOAL_PROMPT_MARK = "↻"  # a Goal Turn's prompt, written by the runtime
 
 # -- tool cards -------------------------------------------------------------
 TOOL_BULLET = "●"

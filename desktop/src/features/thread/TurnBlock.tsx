@@ -33,9 +33,10 @@ import { ApprovalCard } from "../execution/ApprovalCard";
 import { isWarning, presentItem } from "../execution/itemPresentation";
 import {
   formatTurnDuration,
-  isGoalContinuation,
+  goalPrompt,
   turnDurationSeconds,
   type ConversationTurn,
+  type GoalPrompt,
   type TimelineActivityGroup,
 } from "./conversationModel";
 import { MarkdownContent } from "./MarkdownContent";
@@ -376,25 +377,31 @@ function ActivityItem({
 }
 
 /** Stands in for the instruction the Goal runtime sent; the text is one click away. */
-function GoalContinuationNote({
+function GoalPromptNote({
+  kind,
   text,
   transcriptMode,
 }: {
+  kind: GoalPrompt;
   text: string;
   transcriptMode: TranscriptMode;
 }) {
   const { t } = useTranslation();
+  const label =
+    kind === "automatic"
+      ? t("turn.goalContinued", "Goal continued automatically")
+      : t("turn.goalRequested", "Working toward the Goal");
   return (
     <details
-      className={styles.goalContinuation}
+      className={styles.goalPrompt}
       open={transcriptMode === "verbose"}
     >
       <summary>
         <Target size={12} aria-hidden="true" />
-        <span>{t("turn.goalContinued", "Goal continued automatically")}</span>
+        <span>{label}</span>
         <ChevronDown size={12} aria-hidden="true" />
       </summary>
-      <div className={styles.goalContinuationText}>
+      <div className={styles.goalPromptText}>
         <small>{t("turn.goalInstruction", "Instruction sent to the model")}</small>
         <MarkdownContent>{text}</MarkdownContent>
       </div>
@@ -540,7 +547,7 @@ export function TurnBlock({
         id: item.id,
         text: presentItem(item).body ?? item.summary,
         skills: itemSkills(item),
-        goalContinuation: isGoalContinuation(item),
+        goalPrompt: goalPrompt(item),
       }))
     : group.turn?.prompt
       ? [
@@ -548,7 +555,7 @@ export function TurnBlock({
             id: `${group.id}-prompt`,
             text: group.turn.prompt,
             skills: [],
-            goalContinuation: false,
+            goalPrompt: null,
           },
         ]
       : [];
@@ -573,8 +580,9 @@ export function TurnBlock({
     <section className={styles.turnBlock} data-status={group.turn?.status}>
       {userMessages.map((message) => (
         <article className={styles.userMessage} data-queued={queued} key={message.id}>
-          {message.goalContinuation ? (
-            <GoalContinuationNote
+          {message.goalPrompt ? (
+            <GoalPromptNote
+              kind={message.goalPrompt}
               text={message.text}
               transcriptMode={transcriptMode}
             />

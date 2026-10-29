@@ -22,7 +22,12 @@ from core.domain.approval import Approval, ApprovalCategory, ApprovalStatus
 from core.domain.execution_permission import ExecutionPermissionMode
 from core.domain.execution_security import ExecutionAccessPreset
 from core.domain.item import Item, ItemKind, ItemStatus
-from core.domain.message_provenance import ClientSurface, TurnInputSource
+from core.domain.message_provenance import (
+    ClientSurface,
+    GoalPrompt,
+    TurnInputSource,
+    goal_prompt,
+)
 from core.domain.thread import ThreadStatus
 from core.domain.turn import Turn, TurnStatus
 from core.events import (
@@ -905,6 +910,50 @@ def test_retry_re_resolves_current_session_access_after_downgrade(
             retried.turn.execution_security_profile.access_preset
             is ExecutionAccessPreset.READ_ONLY
         )
+    finally:
+        application.close()
+
+
+def test_a_retry_records_where_its_prompt_came_from(tmp_path: Path) -> None:
+    application, thread_id = _application(tmp_path, ScriptedFactory())
+    try:
+        original = application.turns.start(
+            thread_id,
+            prompt="Continue working toward the active Thread Goal.",
+            client_surface=ClientSurface.INTERNAL,
+            input_source=TurnInputSource.GOAL_CONTINUATION,
+        )
+        _wait_for(application, original.turn.id, TurnStatus.COMPLETED)
+        retried = application.turns.retry(original.turn.id)
+        _wait_for(application, retried.turn.id, TurnStatus.COMPLETED)
+        # A retry of the retry still points at the Turn first retried.
+        again = application.turns.retry(retried.turn.id)
+        _wait_for(application, again.turn.id, TurnStatus.COMPLETED)
+
+        origin = {
+            "turnId": original.turn.id,
+            "source": TurnInputSource.GOAL_CONTINUATION.value,
+            "client": ClientSurface.INTERNAL.value,
+        }
+        for turn_id in (retried.turn.id, again.turn.id):
+            prompt = next(
+                item
+                for item in application.turns.read(turn_id).items
+                if item.kind is ItemKind.USER_MESSAGE
+            )
+            assert prompt.payload["source"] == TurnInputSource.RETRY.value
+            assert prompt.payload["retryOf"] == origin
+            assert goal_prompt(prompt.payload) is GoalPrompt.REQUESTED
+
+        session = application.session_store.get_session(thread_id)
+        assert session is not None
+        records = [
+            message.metadata
+            for message in session.messages
+            if message.role == "user"
+            and message.metadata.get("turnId") == retried.turn.id
+        ]
+        assert [record["retryOf"] for record in records] == [origin]
     finally:
         application.close()
 

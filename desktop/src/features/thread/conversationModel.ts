@@ -40,12 +40,27 @@ function createGroup(turn: Turn): MutableConversationTurn {
   };
 }
 
+/** Who asked for a Turn whose prompt the Goal runtime wrote. */
+export type GoalPrompt = "automatic" | "requested";
+
 /**
- * A user message the Goal runtime wrote to start its next Turn. Its text is
- * an instruction for the model, not something the user typed.
+ * Whether a user message is the Goal runtime's instruction to the model
+ * rather than words the user typed, and who asked for it. Mirrors
+ * `goal_prompt` in `core/domain/message_provenance.py`: a retry carries the
+ * first retried Turn's provenance under `retryOf`.
  */
-export function isGoalContinuation(item: Item): boolean {
-  return item.kind === "user_message" && item.payload.source === "goal_continuation";
+export function goalPrompt(item: Item): GoalPrompt | null {
+  if (item.kind !== "user_message") return null;
+  const { source, client, retryOf } = item.payload;
+  if (source === "retry") {
+    const retried =
+      typeof retryOf === "object" && retryOf !== null && !Array.isArray(retryOf)
+        ? retryOf
+        : null;
+    return retried?.source === "goal_continuation" ? "requested" : null;
+  }
+  if (source !== "goal_continuation") return null;
+  return client === "internal" ? "automatic" : "requested";
 }
 
 const groupedActivityKinds = new Set(["read", "search", "list"]);

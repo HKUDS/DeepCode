@@ -61,11 +61,11 @@ from core.config import ConfigError
 from core.domain.approval import ApprovalStatus
 from core.domain.event import DomainEvent
 from core.domain.execution_security import ExecutionAccessPreset
-from core.domain.message_provenance import TurnInputSource
+from core.domain.message_provenance import GoalPrompt, goal_prompt
 from core.domain.project import Project, TrustState
 from core.file_lock import FileLease
 from core.providers.reasoning import normalize_reasoning_effort
-from core.sessions.models import SessionMessage
+from core.sessions.transcript import is_compaction_checkpoint, is_context_note
 
 logger = logging.getLogger(__name__)
 
@@ -82,12 +82,11 @@ _RESUME_TAIL_LINES = 3  # lines shown per replayed message
 _QUEUE_PROBE_SECONDS = 2.0  # how often a queued Turn's reason is re-read
 
 
-def _is_goal_continuation(message: SessionMessage) -> bool:
-    metadata = message.metadata or {}
-    return (
-        message.role == "user"
-        and metadata.get("source") == TurnInputSource.GOAL_CONTINUATION.value
-    )
+# How a replayed Goal instruction reads, in place of its text.
+_GOAL_PROMPT_LABELS = {
+    GoalPrompt.AUTOMATIC: "Goal continued automatically",
+    GoalPrompt.REQUESTED: "Working toward the Goal",
+}
 
 
 class TuiApp:
@@ -235,10 +234,14 @@ class TuiApp:
         stored = self.bridge.store.get_session(self.thread_client.session_id)
         if stored is None:
             return
+        # Notes and compaction checkpoints are user-role records nobody said.
         visible = [
             message
             for message in stored.messages
-            if message.role in ("user", "assistant") and message.content
+            if message.role in ("user", "assistant")
+            and message.content
+            and not is_context_note(message)
+            and not is_compaction_checkpoint(message)
         ]
         if not visible:
             return
@@ -251,10 +254,14 @@ class TuiApp:
                 highlight=False,
             )
         for message in tail:
-            if _is_goal_continuation(message):
+            kind = (
+                goal_prompt(message.metadata or {}) if message.role == "user" else None
+            )
+            if kind is not None:
                 # The Goal runtime's instruction to the model, not the user's words.
                 self.console.print(
-                    f"[{theme.META_STYLE}]↻ Goal continued automatically[/]",
+                    f"[{theme.META_STYLE}]{theme.GOAL_PROMPT_MARK} "
+                    f"{_GOAL_PROMPT_LABELS[kind]}[/]",
                     highlight=False,
                 )
                 continue

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from core.sessions.models import SessionMessage
 from core.sessions.transcript import (
+    is_context_note,
     new_records_from_history,
     visible_kernel_history,
 )
@@ -181,3 +182,18 @@ def test_a_tool_result_pruned_under_pressure_is_not_saved_again() -> None:
     added = new_records_from_history(history, stored)
 
     assert [(item.role, item.content) for item in added] == [("assistant", "done")]
+
+
+def test_only_runtime_notes_count_as_context_notes() -> None:
+    def user(**metadata: str) -> SessionMessage:
+        return SessionMessage("user", "text", metadata=metadata)
+
+    assert is_context_note(user(delivery="mid_turn", source="goal_update"))
+    assert is_context_note(user(delivery="between_turns", source="subagent"))
+    assert is_context_note(user(source="turn_interrupt"))
+    # What a person sent, whenever it was delivered, is not a note.
+    assert not is_context_note(user(delivery="current_turn", source="start"))
+    assert not is_context_note(user(source="steer", messageId="m1"))
+    assert not is_context_note(
+        SessionMessage("assistant", "text", metadata={"delivery": "mid_turn"})
+    )
