@@ -1,5 +1,12 @@
 import { ArrowDown } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type MouseEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 
 import type {
@@ -31,8 +38,8 @@ interface ThreadConversationProps {
   onCancelQueuedTurn(turnId: string): void;
 }
 
-// Close enough to the end to count as reading the latest. A following view is
-// pinned to the end, so anything further is the user scrolling away.
+// How near the end still counts as at the end: room for a small nudge and for
+// fractional scroll positions.
 const FOLLOW_THRESHOLD = 40;
 
 export function ThreadConversation({
@@ -53,6 +60,8 @@ export function ThreadConversation({
   const scrollViewportRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const followingRef = useRef(true);
+  // Where the last pin left the view, as the browser clamped it.
+  const pinnedTopRef = useRef(0);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const groupedTurns = useMemo(
     () => buildConversationTurns(turns, items),
@@ -76,18 +85,33 @@ export function ThreadConversation({
     [turns],
   );
   const activePlan = activeTurn ? plansByTurnId[activeTurn.id] ?? null : null;
-  const pinToLatest = useCallback(() => {
-    const viewport = scrollViewportRef.current;
-    if (viewport) viewport.scrollTop = viewport.scrollHeight;
+  const setFollowing = useCallback((following: boolean) => {
+    followingRef.current = following;
+    setShowJumpToLatest(!following);
   }, []);
+  const pinToEnd = useCallback(() => {
+    const viewport = scrollViewportRef.current;
+    if (!viewport) return;
+    viewport.scrollTop = viewport.scrollHeight;
+    pinnedTopRef.current = viewport.scrollTop;
+  }, []);
+  const followLatest = useCallback(() => {
+    setFollowing(true);
+    pinToEnd();
+  }, [pinToEnd, setFollowing]);
 
   // Follow the end of the conversation while the user reads it. Whatever
   // makes the transcript taller — a new item, streamed text, Markdown laying
-  // out after it arrives, the composer or plan dock taking room — resizes the
-  // content or the viewport, and a following view is pinned to the end at
-  // once. Never smoothly: the scroll events of a smooth scroll pass through
-  // positions that read as the user scrolling away. Only the user leaves the
-  // end, by scrolling up; reaching it again, or "Latest", follows once more.
+  // out after it arrives, the composer's clearance growing — resizes the
+  // content box or the viewport, and a following view is pinned to the end at
+  // once. Never smoothly: a smooth scroll passes through positions that read
+  // as the user scrolling away.
+  //
+  // Only the user leaves the end: by scrolling above where the view was last
+  // pinned, or by opening a step to read it (see below). A scroll event can
+  // also arrive after more content landed, so the view is short of the end
+  // without anyone moving it; the next resize pins it again. Back at the end,
+  // or with "Latest", the view follows once more.
   //
   // The scroller exists once there is a conversation. A Session opens empty
   // and its history arrives after, so attach when it appears.
@@ -96,35 +120,38 @@ export function ThreadConversation({
     const content = contentRef.current;
     if (!viewport || !content) return;
 
+    const atEnd = () =>
+      viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <=
+      FOLLOW_THRESHOLD;
     const handleScroll = () => {
-      const distanceFromEnd =
-        viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
-      const following = distanceFromEnd <= FOLLOW_THRESHOLD;
-      followingRef.current = following;
-      setShowJumpToLatest(!following);
+      if (atEnd()) setFollowing(true);
+      else if (viewport.scrollTop < pinnedTopRef.current) setFollowing(false);
     };
-    const followResize = () => {
-      if (followingRef.current) pinToLatest();
+    const handleResize = () => {
+      if (followingRef.current || atEnd()) followLatest();
     };
 
     viewport.addEventListener("scroll", handleScroll, { passive: true });
     const observer =
       typeof ResizeObserver === "undefined"
         ? null
-        : new ResizeObserver(followResize);
-    observer?.observe(content);
+        : new ResizeObserver(handleResize);
+    // The border box: the composer's clearance is the content's padding.
+    observer?.observe(content, { box: "border-box" });
     observer?.observe(viewport);
-    pinToLatest();
+    followLatest();
     return () => {
       viewport.removeEventListener("scroll", handleScroll);
       observer?.disconnect();
     };
-  }, [hasConversation, pinToLatest]);
+  }, [hasConversation, followLatest, setFollowing]);
 
-  const jumpToLatest = () => {
-    followingRef.current = true;
-    setShowJumpToLatest(false);
-    pinToLatest();
+  // Opening or closing a step is reading it: keep it where it is rather than
+  // pinning the end and pushing it off screen. Keyboard toggles click too.
+  const handleContentClick = (event: MouseEvent<HTMLDivElement>) => {
+    if (event.target instanceof Element && event.target.closest("summary")) {
+      setFollowing(false);
+    }
   };
 
   if (!hasConversation) {
@@ -166,7 +193,11 @@ export function ThreadConversation({
         aria-label={t("thread.conversation", "Thread conversation")}
         ref={scrollViewportRef}
       >
-        <div className={styles.conversation} ref={contentRef}>
+        <div
+          className={styles.conversation}
+          ref={contentRef}
+          onClick={handleContentClick}
+        >
           {groupedTurns.map((group) => (
             <TurnBlock
               key={group.id}
@@ -195,7 +226,7 @@ export function ThreadConversation({
         <button
           type="button"
           className={styles.jumpToLatest}
-          onClick={jumpToLatest}
+          onClick={followLatest}
         >
           <ArrowDown size={14} />
           {t("thread.latest", "Latest")}

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Item, Turn } from "../../generated/app-server";
@@ -56,25 +56,43 @@ function conversation(turns: Turn[], items: Item[]) {
   );
 }
 
-/** jsdom has no layout: a viewport 500px tall over a transcript of `height`. */
-function sizeViewport(viewport: HTMLElement, height: () => number) {
-  Object.defineProperty(viewport, "scrollHeight", {
-    configurable: true,
-    get: height,
-  });
-  Object.defineProperty(viewport, "clientHeight", {
-    configurable: true,
-    value: 500,
+const VIEW_HEIGHT = 500;
+
+/**
+ * jsdom has no layout: a 500px viewport over a transcript as tall as
+ * `transcriptHeight()`, whose scroll position the "browser" clamps.
+ */
+function layOut(viewport: HTMLElement, transcriptHeight: () => number) {
+  let top = 0;
+  const maxTop = () => Math.max(0, transcriptHeight() - VIEW_HEIGHT);
+  Object.defineProperties(viewport, {
+    scrollHeight: { configurable: true, get: transcriptHeight },
+    clientHeight: { configurable: true, value: VIEW_HEIGHT },
+    scrollTop: {
+      configurable: true,
+      get: () => Math.min(top, maxTop()),
+      set: (value: number) => {
+        top = Math.max(0, Math.min(value, maxTop()));
+      },
+    },
   });
 }
 
-function scrollTo(viewport: HTMLElement, scrollTop: number) {
+function distanceFromEnd(viewport: HTMLElement) {
+  return viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+}
+
+function userScrollsTo(viewport: HTMLElement, scrollTop: number) {
   viewport.scrollTop = scrollTop;
   fireEvent.scroll(viewport);
 }
 
-/** Stands in for the browser telling the view that the transcript resized. */
-class FakeResizeObserver {
+function latestButton() {
+  return screen.queryByRole("button", { name: "Latest" });
+}
+
+/** Stands in for the browser reporting that the transcript resized. */
+class FakeResizeObserver implements ResizeObserver {
   static observers: FakeResizeObserver[] = [];
 
   constructor(private readonly callback: ResizeObserverCallback) {
@@ -83,6 +101,8 @@ class FakeResizeObserver {
 
   observe() {}
 
+  unobserve() {}
+
   disconnect() {
     FakeResizeObserver.observers = FakeResizeObserver.observers.filter(
       (observer) => observer !== this,
@@ -90,9 +110,11 @@ class FakeResizeObserver {
   }
 
   static resize() {
-    for (const observer of FakeResizeObserver.observers) {
-      observer.callback([], observer as unknown as ResizeObserver);
-    }
+    act(() => {
+      for (const observer of FakeResizeObserver.observers) {
+        observer.callback([], observer);
+      }
+    });
   }
 }
 
@@ -100,14 +122,18 @@ describe("ThreadConversation", () => {
   let height = 2000;
   const prompt = item("user", 1, turn.prompt);
 
+  /** Grows or shrinks the transcript, as layout would, and reports it. */
+  function resizeTo(next: number) {
+    height = next;
+    FakeResizeObserver.resize();
+  }
+
   /** Opens a Session whose history arrives after it opens, as switching does. */
-  function openSession() {
+  function openSession(items: Item[] = [prompt, item("reply", 2, "Working", "in_progress")]) {
     const { rerender } = render(conversation([], []));
-    rerender(
-      conversation([turn], [prompt, item("reply", 2, "Working", "in_progress")]),
-    );
+    rerender(conversation([turn], items));
     const viewport = screen.getByLabelText("Thread conversation");
-    sizeViewport(viewport, () => height);
+    layOut(viewport, () => height);
     // The history lays out after it arrives.
     FakeResizeObserver.resize();
     return viewport;
@@ -126,50 +152,76 @@ describe("ThreadConversation", () => {
 
   it("opens at the latest and stays there as the transcript grows", () => {
     const viewport = openSession();
-    expect(viewport.scrollTop).toBe(2000);
+    expect(distanceFromEnd(viewport)).toBe(0);
 
-    height = 2600;
-    FakeResizeObserver.resize();
-    expect(viewport.scrollTop).toBe(2600);
-    expect(screen.queryByRole("button", { name: "Latest" })).toBeNull();
+    resizeTo(2600);
+    expect(distanceFromEnd(viewport)).toBe(0);
+    expect(latestButton()).toBeNull();
   });
 
-  it("stays put once the user scrolls up, until they return to the latest", () => {
+  it("keeps following when content lands before the pin's scroll event", () => {
     const viewport = openSession();
-    scrollTo(viewport, 1000);
-    expect(screen.getByRole("button", { name: "Latest" })).toBeTruthy();
+    resizeTo(2100);
+    // More arrives, then the scroll event of the last pin is delivered.
+    height = 2200;
+    fireEvent.scroll(viewport);
+    expect(latestButton()).toBeNull();
 
-    height = 2600;
     FakeResizeObserver.resize();
+    expect(distanceFromEnd(viewport)).toBe(0);
+  });
+
+  it("stays put once the user scrolls up, until they ask for the latest", () => {
+    const viewport = openSession();
+    userScrollsTo(viewport, 1000);
+    expect(latestButton()).not.toBeNull();
+
+    resizeTo(2600);
     expect(viewport.scrollTop).toBe(1000);
 
-    fireEvent.click(screen.getByRole("button", { name: "Latest" }));
-    expect(viewport.scrollTop).toBe(2600);
-    expect(screen.queryByRole("button", { name: "Latest" })).toBeNull();
+    fireEvent.click(latestButton()!);
+    expect(distanceFromEnd(viewport)).toBe(0);
+    expect(latestButton()).toBeNull();
 
-    height = 3000;
-    FakeResizeObserver.resize();
-    expect(viewport.scrollTop).toBe(3000);
+    resizeTo(3000);
+    expect(distanceFromEnd(viewport)).toBe(0);
   });
 
-  it("keeps following after a small scroll near the end", () => {
+  it("keeps following after a small nudge near the end", () => {
     const viewport = openSession();
-    scrollTo(viewport, 2000 - 500 - 30);
-    expect(screen.queryByRole("button", { name: "Latest" })).toBeNull();
+    userScrollsTo(viewport, 2000 - VIEW_HEIGHT - 30);
+    expect(latestButton()).toBeNull();
 
-    height = 2400;
-    FakeResizeObserver.resize();
-    expect(viewport.scrollTop).toBe(2400);
+    resizeTo(2400);
+    expect(distanceFromEnd(viewport)).toBe(0);
   });
 
   it("follows again once the user scrolls back to the end", () => {
     const viewport = openSession();
-    scrollTo(viewport, 600);
-    scrollTo(viewport, 1500);
-    expect(screen.queryByRole("button", { name: "Latest" })).toBeNull();
+    userScrollsTo(viewport, 600);
+    userScrollsTo(viewport, 2000 - VIEW_HEIGHT);
+    expect(latestButton()).toBeNull();
 
-    height = 2200;
-    FakeResizeObserver.resize();
-    expect(viewport.scrollTop).toBe(2200);
+    resizeTo(2200);
+    expect(distanceFromEnd(viewport)).toBe(0);
+  });
+
+  it("leaves an opened step where it is, and follows once it closes", () => {
+    const instruction = "Continue working toward the active Thread Goal.";
+    const goalPrompt: Item = {
+      ...item("user", 1, instruction),
+      payload: { text: instruction, source: "goal_continuation" },
+    };
+    const viewport = openSession([goalPrompt, item("reply", 2, "Working", "in_progress")]);
+    const before = viewport.scrollTop;
+
+    fireEvent.click(screen.getByText("Working toward the Goal"));
+    resizeTo(3500);
+    expect(viewport.scrollTop).toBe(before);
+    expect(latestButton()).not.toBeNull();
+
+    resizeTo(2000);
+    expect(distanceFromEnd(viewport)).toBe(0);
+    expect(latestButton()).toBeNull();
   });
 });
