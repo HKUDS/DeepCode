@@ -10,7 +10,8 @@
   height: 100%;
   overflow-y: auto;
   overscroll-behavior: contain;
-  scroll-behavior: smooth;
+  /* No smooth scroll-behavior: following the end must land there at once
+     (see ThreadConversation), or its own scroll reads as the user's. */
 }
 
 .conversation {
@@ -661,10 +662,6 @@ div.runStep {
 
 .conversationFrame[data-plan-active="true"] .jumpToLatest {
   bottom: calc(var(--composer-clearance, 148px) + 50px);
-}
-
-.conversationEnd {
-  height: 1px;
 }
 
 .srOnly {

@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Item, Turn } from "../../generated/app-server";
 import { ThreadConversation } from "./ThreadConversation";
@@ -56,56 +56,120 @@ function conversation(turns: Turn[], items: Item[]) {
   );
 }
 
-function placeViewport(viewport: HTMLElement, scrollTop: number) {
+/** jsdom has no layout: a viewport 500px tall over a transcript of `height`. */
+function sizeViewport(viewport: HTMLElement, height: () => number) {
   Object.defineProperty(viewport, "scrollHeight", {
     configurable: true,
-    value: 2000,
+    get: height,
   });
   Object.defineProperty(viewport, "clientHeight", {
     configurable: true,
     value: 500,
   });
+}
+
+function scrollTo(viewport: HTMLElement, scrollTop: number) {
   viewport.scrollTop = scrollTop;
   fireEvent.scroll(viewport);
 }
 
-describe("ThreadConversation", () => {
-  afterEach(() => {
-    cleanup();
-    delete (HTMLElement.prototype as Partial<HTMLElement>).scrollTo;
-  });
+/** Stands in for the browser telling the view that the transcript resized. */
+class FakeResizeObserver {
+  static observers: FakeResizeObserver[] = [];
 
-  it("tracks scrolling in a Session whose history arrives after it opens", () => {
-    const scrollTo = vi.fn();
-    HTMLElement.prototype.scrollTo = scrollTo as HTMLElement["scrollTo"];
-    // Switching threads clears the conversation before the history is read.
+  constructor(private readonly callback: ResizeObserverCallback) {
+    FakeResizeObserver.observers.push(this);
+  }
+
+  observe() {}
+
+  disconnect() {
+    FakeResizeObserver.observers = FakeResizeObserver.observers.filter(
+      (observer) => observer !== this,
+    );
+  }
+
+  static resize() {
+    for (const observer of FakeResizeObserver.observers) {
+      observer.callback([], observer as unknown as ResizeObserver);
+    }
+  }
+}
+
+describe("ThreadConversation", () => {
+  let height = 2000;
+  const prompt = item("user", 1, turn.prompt);
+
+  /** Opens a Session whose history arrives after it opens, as switching does. */
+  function openSession() {
     const { rerender } = render(conversation([], []));
-    const prompt = item("user", 1, turn.prompt);
     rerender(
       conversation([turn], [prompt, item("reply", 2, "Working", "in_progress")]),
     );
-    // Opens at the bottom at once rather than smooth-scrolling from the top.
-    expect(scrollTo).toHaveBeenNthCalledWith(1, {
-      top: expect.any(Number),
-      behavior: "auto",
-    });
-
     const viewport = screen.getByLabelText("Thread conversation");
-    placeViewport(viewport, 200);
-    scrollTo.mockClear();
+    sizeViewport(viewport, () => height);
+    // The history lays out after it arrives.
+    FakeResizeObserver.resize();
+    return viewport;
+  }
 
-    expect(screen.getByRole("button", { name: "Latest" })).toBeTruthy();
-    rerender(conversation([turn], [prompt, item("reply", 2, "Still working")]));
-    expect(scrollTo).not.toHaveBeenCalled();
+  beforeEach(() => {
+    height = 2000;
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+  });
 
-    placeViewport(viewport, 1500);
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    FakeResizeObserver.observers = [];
+  });
+
+  it("opens at the latest and stays there as the transcript grows", () => {
+    const viewport = openSession();
+    expect(viewport.scrollTop).toBe(2000);
+
+    height = 2600;
+    FakeResizeObserver.resize();
+    expect(viewport.scrollTop).toBe(2600);
     expect(screen.queryByRole("button", { name: "Latest" })).toBeNull();
-    rerender(
-      conversation(
-        [turn],
-        [prompt, item("reply", 2, "Still working"), item("done", 3, "Done")],
-      ),
-    );
-    expect(scrollTo).toHaveBeenCalledWith({ top: 2000, behavior: "auto" });
+  });
+
+  it("stays put once the user scrolls up, until they return to the latest", () => {
+    const viewport = openSession();
+    scrollTo(viewport, 1000);
+    expect(screen.getByRole("button", { name: "Latest" })).toBeTruthy();
+
+    height = 2600;
+    FakeResizeObserver.resize();
+    expect(viewport.scrollTop).toBe(1000);
+
+    fireEvent.click(screen.getByRole("button", { name: "Latest" }));
+    expect(viewport.scrollTop).toBe(2600);
+    expect(screen.queryByRole("button", { name: "Latest" })).toBeNull();
+
+    height = 3000;
+    FakeResizeObserver.resize();
+    expect(viewport.scrollTop).toBe(3000);
+  });
+
+  it("keeps following after a small scroll near the end", () => {
+    const viewport = openSession();
+    scrollTo(viewport, 2000 - 500 - 30);
+    expect(screen.queryByRole("button", { name: "Latest" })).toBeNull();
+
+    height = 2400;
+    FakeResizeObserver.resize();
+    expect(viewport.scrollTop).toBe(2400);
+  });
+
+  it("follows again once the user scrolls back to the end", () => {
+    const viewport = openSession();
+    scrollTo(viewport, 600);
+    scrollTo(viewport, 1500);
+    expect(screen.queryByRole("button", { name: "Latest" })).toBeNull();
+
+    height = 2200;
+    FakeResizeObserver.resize();
+    expect(viewport.scrollTop).toBe(2200);
   });
 });

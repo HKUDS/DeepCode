@@ -31,7 +31,9 @@ interface ThreadConversationProps {
   onCancelQueuedTurn(turnId: string): void;
 }
 
-const FOLLOW_THRESHOLD = 120;
+// Close enough to the end to count as reading the latest. A following view is
+// pinned to the end, so anything further is the user scrolling away.
+const FOLLOW_THRESHOLD = 40;
 
 export function ThreadConversation({
   turns,
@@ -49,7 +51,7 @@ export function ThreadConversation({
 }: ThreadConversationProps) {
   const { t } = useTranslation();
   const scrollViewportRef = useRef<HTMLDivElement | null>(null);
-  const endRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const followingRef = useRef(true);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const groupedTurns = useMemo(
@@ -74,53 +76,55 @@ export function ThreadConversation({
     [turns],
   );
   const activePlan = activeTurn ? plansByTurnId[activeTurn.id] ?? null : null;
-  const latestItem = items.at(-1);
-  const itemUpdate = latestItem
-    ? `${latestItem.id}:${latestItem.status}:${latestItem.updatedAt}:${JSON.stringify(latestItem.payload).length}`
-    : `${turns.at(-1)?.id ?? "empty"}:${turns.at(-1)?.status ?? "idle"}`;
-  const latestUpdate = `${itemUpdate}:${activePlan?.updatedAt ?? "no-plan"}`;
-  const scrollToLatest = useCallback((behavior: ScrollBehavior) => {
+  const pinToLatest = useCallback(() => {
     const viewport = scrollViewportRef.current;
-    if (typeof viewport?.scrollTo === "function") {
-      viewport.scrollTo({ top: viewport.scrollHeight, behavior });
-      return;
-    }
-    const end = endRef.current;
-    if (typeof end?.scrollIntoView === "function") {
-      end.scrollIntoView({ block: "end", behavior });
-    }
+    if (viewport) viewport.scrollTop = viewport.scrollHeight;
   }, []);
 
-  // The scroller only exists once there is a conversation; a Session opens
-  // empty and its history arrives after, so attach when it appears and start
-  // at the bottom at once: a smooth scroll from the top would read as the
-  // user scrolling away.
+  // Follow the end of the conversation while the user reads it. Whatever
+  // makes the transcript taller — a new item, streamed text, Markdown laying
+  // out after it arrives, the composer or plan dock taking room — resizes the
+  // content or the viewport, and a following view is pinned to the end at
+  // once. Never smoothly: the scroll events of a smooth scroll pass through
+  // positions that read as the user scrolling away. Only the user leaves the
+  // end, by scrolling up; reaching it again, or "Latest", follows once more.
+  //
+  // The scroller exists once there is a conversation. A Session opens empty
+  // and its history arrives after, so attach when it appears.
   useEffect(() => {
     const viewport = scrollViewportRef.current;
-    if (!viewport) return;
+    const content = contentRef.current;
+    if (!viewport || !content) return;
 
     const handleScroll = () => {
-      const distanceFromBottom =
+      const distanceFromEnd =
         viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
-      const nearBottom = distanceFromBottom <= FOLLOW_THRESHOLD;
-      followingRef.current = nearBottom;
-      setShowJumpToLatest(!nearBottom);
+      const following = distanceFromEnd <= FOLLOW_THRESHOLD;
+      followingRef.current = following;
+      setShowJumpToLatest(!following);
+    };
+    const followResize = () => {
+      if (followingRef.current) pinToLatest();
     };
 
     viewport.addEventListener("scroll", handleScroll, { passive: true });
-    scrollToLatest("auto");
-    return () => viewport.removeEventListener("scroll", handleScroll);
-  }, [hasConversation, scrollToLatest]);
-
-  useEffect(() => {
-    if (!followingRef.current) return;
-    scrollToLatest(latestItem?.status === "in_progress" ? "smooth" : "auto");
-  }, [latestItem?.status, latestUpdate, scrollToLatest]);
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(followResize);
+    observer?.observe(content);
+    observer?.observe(viewport);
+    pinToLatest();
+    return () => {
+      viewport.removeEventListener("scroll", handleScroll);
+      observer?.disconnect();
+    };
+  }, [hasConversation, pinToLatest]);
 
   const jumpToLatest = () => {
     followingRef.current = true;
     setShowJumpToLatest(false);
-    scrollToLatest("smooth");
+    pinToLatest();
   };
 
   if (!hasConversation) {
@@ -162,7 +166,7 @@ export function ThreadConversation({
         aria-label={t("thread.conversation", "Thread conversation")}
         ref={scrollViewportRef}
       >
-        <div className={styles.conversation}>
+        <div className={styles.conversation} ref={contentRef}>
           {groupedTurns.map((group) => (
             <TurnBlock
               key={group.id}
@@ -178,7 +182,6 @@ export function ThreadConversation({
               onCancelQueuedTurn={onCancelQueuedTurn}
             />
           ))}
-          <div className={styles.conversationEnd} ref={endRef} />
         </div>
       </div>
 
