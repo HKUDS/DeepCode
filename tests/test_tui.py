@@ -549,6 +549,9 @@ def test_a_summary_line_drops_markdown_marks_but_keeps_identifiers():
     for text in ("self._cache", "os._exit(1)", "*args / **kwargs", "a * b"):
         assert _clean_line(text) == text
     assert _clean_line("open `__init__.py` and `*.py`") == "open __init__.py and *.py"
+    # Chinese has no spaces around bold; marks around a code span go too.
+    assert _clean_line("这是**重点**内容") == "这是重点内容"
+    assert _clean_line("**`relic_offer`** 在哪里触发") == "relic_offer 在哪里触发"
 
 
 def test_a_summary_line_is_cleaned_in_linear_time():
@@ -558,7 +561,7 @@ def test_a_summary_line_is_cleaned_in_linear_time():
     from cli.tui.renderer import _clean_line
 
     started = perf_counter()
-    for text in (" _x" * 7000, " *x" * 7000, " **x" * 5000):
+    for text in (" _x" * 7000, " *x" * 7000, " **x" * 5000, "`" * 4000):
         _clean_line(text)
     assert perf_counter() - started < 0.5
 

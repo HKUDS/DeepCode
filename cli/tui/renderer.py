@@ -139,30 +139,33 @@ class _TurnStats:
 # or bullet's at the start, code-span backticks, and emphasis marks that come
 # in pairs around text. Anything else is text: self._cache, *args, a * b.
 _LEADING_MARKS = re.compile(r"^\s*(?:#{1,6}\s+|>\s*|[-*+]\s+)*")
-_CODE_SPAN = re.compile(r"(`+)(.+?)\1")
+# A span closes on a run of backticks as long as the one that opened it.
+_CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")
 # The text inside a pair holds no mark of its own kind, so a search from an
-# unpaired mark stops at the next one: linear on any line.
+# unpaired mark stops at the next one: linear on any line. Like Markdown,
+# * pairs work inside a word (这是**重点**内容), _ pairs only around one.
 _EMPHASIS = (
-    re.compile(r"(?<![\w*])(\*{1,3})(?=\S)([^*]+?)(?<=\S)\1(?![\w*])"),
+    re.compile(r"(?<!\*)(\*{1,3})(?=\S)([^*]+?)(?<=\S)\1(?!\*)"),
     re.compile(r"(?<![\w_])(_{1,3})(?=\S)([^_]+?)(?<=\S)\1(?![\w_])"),
 )
-
-
-def _unemphasized(text: str) -> str:
-    for pattern in _EMPHASIS:
-        text = pattern.sub(r"\2", text)
-    return text
+_HELD = "\ue000"  # a private-use character holding a code span's place
 
 
 def _clean_line(line: str) -> str:
     """One line without its Markdown marks, for a status tail or a preview."""
-    # split() alternates prose, a span's backticks and its code, kept as written.
-    parts = _CODE_SPAN.split(_LEADING_MARKS.sub("", line))
-    return "".join(
-        _unemphasized(part) if index % 3 == 0 else part
-        for index, part in enumerate(parts)
-        if index % 3 != 1
-    ).strip()
+    spans: list[str] = []
+
+    def hold(match: re.Match[str]) -> str:
+        spans.append(match[2])
+        return _HELD
+
+    # Code spans are kept as written, and held out while emphasis marks
+    # around them (**`relic_offer`**) are stripped.
+    text = _CODE_SPAN.sub(hold, _LEADING_MARKS.sub("", line.replace(_HELD, "")))
+    for pattern in _EMPHASIS:
+        text = pattern.sub(r"\2", text)
+    code = iter(spans)
+    return re.sub(_HELD, lambda _: next(code), text).strip()
 
 
 def _first_content_line(text: str, *, limit: int) -> str:
