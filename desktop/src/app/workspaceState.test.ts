@@ -556,3 +556,19 @@ describe("live streamed text in the workspace", () => {
     expect(state.liveGaps).toEqual([]);
   });
 });
+
+describe("thread history", () => {
+  it("knows when a thread's history has been replayed in full", () => {
+    const loaded = workspaceReducer(initialWorkspaceState, { type: "history-loaded" });
+    expect(initialWorkspaceState.historyLoaded).toBe(false);
+    expect(loaded.historyLoaded).toBe(true);
+    expect(workspaceReducer(loaded, { type: "trace-reset" }).historyLoaded).toBe(false);
+    // Leaving the thread drops its history, and with it the flag.
+    expect(
+      workspaceReducer(loaded, { type: "select-thread", threadId: "other" }).historyLoaded,
+    ).toBe(false);
+    expect(
+      workspaceReducer(loaded, { type: "select-project", projectId: "other" }).historyLoaded,
+    ).toBe(false);
+  });
+});

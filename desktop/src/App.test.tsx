@@ -3967,3 +3967,148 @@ describe("a Session whose file can't be read", () => {
     ).toBeNull();
   });
 });
+
+describe("a long Session's history", () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => {
+    cleanup();
+    localStorage.clear();
+  });
+
+  /** 40 Turns, each a prompt, ten runs of six commands with a note, and an answer. */
+  function longSession(): Event[] {
+    const events: Event[] = [];
+    const push = (event: Omit<Event, "sequence" | "eventId">) => {
+      const sequence = events.length + 1;
+      events.push({ ...event, sequence, eventId: `event-${sequence}` } as Event);
+    };
+    for (let index = 0; index < 40; index += 1) {
+      const turnId = `turn-long-${index}`;
+      push({
+        type: "turn.completed",
+        threadId: thread.id,
+        turnId,
+        itemId: null,
+        timestamp: "2026-07-16T00:00:03Z",
+        payload: {
+          turn: { ...turn, id: turnId, ordinal: index + 1, prompt: `Prompt ${index}` } as unknown as JsonValue,
+        },
+      });
+      let ordinal = 0;
+      const add = (kind: Item["kind"], text: string, extra: Record<string, JsonValue> = {}) => {
+        ordinal += 1;
+        const id = `item-long-${index}-${ordinal}`;
+        push({
+          type: "item.created",
+          threadId: thread.id,
+          turnId,
+          itemId: id,
+          timestamp: "2026-07-16T00:00:02Z",
+          payload: {
+            item: {
+              id,
+              threadId: thread.id,
+              turnId,
+              ordinal,
+              kind,
+              status: "completed",
+              summary: text,
+              payload: { text, ...extra },
+              createdAt: "2026-07-16T00:00:02Z",
+              updatedAt: "2026-07-16T00:00:02Z",
+            } as unknown as JsonValue,
+          },
+        });
+      };
+      add("user_message", `Prompt ${index}`);
+      for (let run = 0; run < 10; run += 1) {
+        for (let step = 0; step < 6; step += 1) add("command_execution", `command ${step}`);
+        add("assistant_message", `Turn ${index} note ${run}`, { phase: "commentary" });
+      }
+      add("assistant_message", `Turn ${index} answer`, { phase: "final_answer" });
+    }
+    return events;
+  }
+
+  /** Replay pages arrive in later tasks, as they do over a socket. */
+  class PagedReplayRuntime extends TestRuntime {
+    async request<M extends RpcMethod>(
+      method: M,
+      params: MethodParams[M],
+    ): Promise<MethodResults[M]> {
+      if (method === "event/replay") {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+      return super.request(method, params);
+    }
+  }
+
+  it("opens at its recent history once every replayed page is in", async () => {
+    const events = longSession();
+    const runtime = new PagedReplayRuntime([project], [thread], events);
+    render(<App runtime={runtime} />);
+
+    await screen.findByText("Turn 39 answer", {}, { timeout: 5000 });
+    expect(
+      runtime.requests.filter((request) => request.method === "event/replay").length,
+    ).toBeGreaterThan(1);
+    // 22 rows a Turn: nine fit in a batch.
+    expect(screen.queryByText("Turn 30 answer")).toBeNull();
+    expect(screen.getByText("Turn 31 answer")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Show earlier Turns · 31 more" }),
+    ).toBeTruthy();
+
+    // A Turn that arrives later does not push the opening batch out.
+    const live: Event[] = [];
+    const deliver = (event: Omit<Event, "sequence" | "eventId">) => {
+      const sequence = events.length + live.length + 1;
+      live.push({ ...event, sequence, eventId: `event-${sequence}` } as Event);
+    };
+    const later = "turn-long-40";
+    deliver({
+      type: "turn.completed",
+      threadId: thread.id,
+      turnId: later,
+      itemId: null,
+      timestamp: "2026-07-16T00:00:04Z",
+      payload: {
+        turn: { ...turn, id: later, ordinal: 41, prompt: "Prompt 40" } as unknown as JsonValue,
+      },
+    });
+    for (let ordinal = 1; ordinal <= 21; ordinal += 1) {
+      const id = `item-long-40-${ordinal}`;
+      deliver({
+        type: "item.created",
+        threadId: thread.id,
+        turnId: later,
+        itemId: id,
+        timestamp: "2026-07-16T00:00:04Z",
+        payload: {
+          item: {
+            id,
+            threadId: thread.id,
+            turnId: later,
+            ordinal,
+            kind: "assistant_message",
+            status: "completed",
+            summary: `Turn 40 note ${ordinal}`,
+            payload: { text: `Turn 40 note ${ordinal}`, phase: "commentary" },
+            createdAt: "2026-07-16T00:00:04Z",
+            updatedAt: "2026-07-16T00:00:04Z",
+          } as unknown as JsonValue,
+        },
+      });
+    }
+    events.push(...live);
+    act(() =>
+      live.forEach((event) =>
+        runtime.notifications.forEach((receive) =>
+          receive({ jsonrpc: "2.0", method: event.type, params: event } as AnyRpcNotification),
+        ),
+      ),
+    );
+    await screen.findByText("Turn 40 note 21");
+    expect(screen.getByText("Turn 31 answer")).toBeTruthy();
+  });
+});

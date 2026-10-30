@@ -14,6 +14,11 @@
      (see ThreadConversation), or its own scroll reads as the user's. */
 }
 
+.conversationScroller:focus-visible {
+  outline: 2px solid var(--signal-soft);
+  outline-offset: -2px;
+}
+
 .conversation {
   width: var(--conversation-width);
   margin: 0 auto;

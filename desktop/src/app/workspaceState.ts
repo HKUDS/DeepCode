@@ -433,6 +433,7 @@ export function workspaceReducer(
         ...state,
         selectedProjectId: action.projectId,
         selectedThreadId: null,
+        historyLoaded: false,
         turns: [],
         items: [],
         approvals: [],
@@ -464,6 +465,7 @@ export function workspaceReducer(
         ...state,
         threads: state.threads.filter((thread) => thread.id !== action.threadId),
         selectedThreadId: selected ? null : state.selectedThreadId,
+        historyLoaded: selected ? false : state.historyLoaded,
         turns: selected ? [] : state.turns,
         items: selected ? [] : state.items,
         approvals: selected ? [] : state.approvals,
@@ -480,6 +482,7 @@ export function workspaceReducer(
       return {
         ...state,
         selectedThreadId: action.threadId,
+        historyLoaded: false,
         turns: [],
         items: [],
         approvals: [],

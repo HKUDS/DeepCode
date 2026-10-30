@@ -324,16 +324,16 @@ describe("ThreadConversation", () => {
   });
 
   /** 30 Turns of 20 rows each (a prompt and 19 notes): a batch holds 10. */
-  function longSession(count = 30) {
+  function longSession(count = 30, prefix = "turn") {
     const turns = Array.from({ length: count }, (_, index): Turn => ({
       ...turn,
-      id: `turn-${index}`,
+      id: `${prefix}-${index}`,
       ordinal: index + 1,
       status: "completed",
     }));
     const items = turns.flatMap((each, index) =>
       Array.from({ length: 19 }, (_, step) =>
-        note(`t${index}-${step}`, each.id, `Turn ${index} line ${step}`),
+        note(`${each.id}-${step}`, each.id, `${prefix} ${index} line ${step}`),
       ),
     );
     return { turns, items };
@@ -351,24 +351,24 @@ describe("ThreadConversation", () => {
   it("opens a long Session at its recent history and loads earlier Turns on request", () => {
     const { turns, items } = longSession();
     const { rerender } = render(conversation(turns, items));
-    expect(screen.queryByText("Turn 19 line 0")).toBeNull();
-    expect(screen.getByText("Turn 20 line 0")).toBeTruthy();
+    expect(screen.queryByText("turn 19 line 0")).toBeNull();
+    expect(screen.getByText("turn 20 line 0")).toBeTruthy();
 
     // A new Turn does not push the first shown one out.
     const next: Turn = { ...turn, id: "turn-30", ordinal: 31, status: "completed" };
     rerender(
-      conversation([...turns, next], [...items, note("t30", next.id, "Turn 30 line 0")]),
+      conversation([...turns, next], [...items, note("t30", next.id, "turn 30 line 0")]),
     );
-    expect(screen.getByText("Turn 20 line 0")).toBeTruthy();
+    expect(screen.getByText("turn 20 line 0")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Show earlier Turns · 20 more" }));
-    expect(screen.getByText("Turn 10 line 0")).toBeTruthy();
-    expect(screen.queryByText("Turn 9 line 0")).toBeNull();
+    expect(screen.getByText("turn 10 line 0")).toBeTruthy();
+    expect(screen.queryByText("turn 9 line 0")).toBeNull();
     // Reading back through history is leaving the end.
     expect(latestButton()).not.toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Show earlier Turns · 10 more" }));
-    expect(screen.getByText("Turn 0 line 0")).toBeTruthy();
+    expect(screen.getByText("turn 0 line 0")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Show earlier Turns/ })).toBeNull();
   });
 
@@ -380,8 +380,8 @@ describe("ThreadConversation", () => {
     );
     rerender(conversation(turns, items, null, true));
 
-    expect(screen.queryByText("Turn 19 line 0")).toBeNull();
-    expect(screen.getByText("Turn 20 line 0")).toBeTruthy();
+    expect(screen.queryByText("turn 19 line 0")).toBeNull();
+    expect(screen.getByText("turn 20 line 0")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Show earlier Turns · 20 more" })).toBeTruthy();
   });
 
@@ -404,5 +404,28 @@ describe("ThreadConversation", () => {
     fireEvent.click(last);
     expect(screen.queryByRole("button", { name: /Show earlier Turns/ })).toBeNull();
     expect(document.activeElement).toBe(viewport);
+  });
+
+  it("chooses again after a fresh replay brings other Turns, and keeps a reader's start otherwise", () => {
+    const first = longSession();
+    const { rerender } = render(conversation(first.turns, first.items));
+    fireEvent.click(screen.getByRole("button", { name: "Show earlier Turns · 20 more" }));
+    expect(screen.getByText("turn 10 line 0")).toBeTruthy();
+
+    // The same history replayed afresh keeps where the reader got to.
+    rerender(conversation([], [], null, false));
+    rerender(conversation(first.turns, first.items));
+    expect(screen.getByText("turn 10 line 0")).toBeTruthy();
+
+    // Other Turns start again from their latest batch.
+    const other = longSession(30, "other");
+    rerender(conversation([], [], null, false));
+    rerender(conversation(other.turns, other.items));
+    expect(screen.queryByText("other 19 line 0")).toBeNull();
+    expect(screen.getByText("other 20 line 0")).toBeTruthy();
+    // ...and that start holds as more Turns come.
+    const more = longSession(31, "other");
+    rerender(conversation(more.turns, more.items));
+    expect(screen.getByText("other 20 line 0")).toBeTruthy();
   });
 });

@@ -91,8 +91,7 @@ export function ThreadConversation({
   if (historyLoaded && anchored < 0 && groupedTurns.length > 0) {
     setFirstTurnId(groupedTurns[latestBatchStart()].id);
   }
-  const firstShown =
-    anchored >= 0 ? anchored : groupedTurns.length > 0 ? latestBatchStart() : 0;
+  const firstShown = anchored >= 0 ? anchored : latestBatchStart();
 
   // Loading earlier Turns keeps the reader where they were: at the same
   // distance from the end, whatever the browser does with content added
@@ -250,6 +249,7 @@ export function ThreadConversation({
     >
       <div
         className={styles.conversationScroller}
+        role="region"
         aria-label={t("thread.conversation", "Thread conversation")}
         ref={scrollViewportRef}
         // Focus lands here when the control a reader used goes away.
