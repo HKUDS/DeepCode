@@ -241,3 +241,59 @@ def test_raw_mode_drops_leading_blank_lines():
     lines = _lines(output)
     # Only the turn's own gap precedes the text, not the model's blank lines.
     assert lines[: lines.index("First line.")] == [""]
+
+
+def test_chinese_prose_fills_each_line_and_keeps_english_words_whole():
+    renderer, output = _renderer(width=40)
+    _stream(
+        renderer,
+        "埋点：run_start、death、relic_offer 这些事件都要记录下来，"
+        "并且在面板里展示出来以便调试。\n",
+    )
+    assert [line for line in _lines(output) if line] == [
+        "埋点：run_start、death、relic_offer 这些",
+        "事件都要记录下来，并且在面板里展示出来以",
+        "便调试。",
+    ]
+
+
+def test_a_wrapped_list_item_or_quote_hangs_under_its_text():
+    renderer, output = _renderer(width=40)
+    _stream(
+        renderer,
+        "- 列表项：使用 Python 编写一个 Web 服务器，监听 8080 端口并返回 JSON。\n"
+        "12. 第十二项，内容很长很长很长很长很长很长很长很长很长很长很长。\n"
+        "> 引用：这是一段很长的引用文字，需要换行显示才能完整看到全部内容。\n",
+    )
+    assert [line for line in _lines(output) if line] == [
+        " • 列表项：使用 Python 编写一个 Web 服务",
+        "   器，监听 8080 端口并返回 JSON。",
+        " 12 第十二项，内容很长很长很长很长很长很",
+        "    长很长很长很长很长很长。",
+        "▌ 引用：这是一段很长的引用文字，需要换行",
+        "▌ 显示才能完整看到全部内容。",
+    ]
+
+
+def test_headings_and_rules_keep_the_terminal_width():
+    renderer, output = _renderer(width=40)
+    _stream(renderer, "# Title\n\n---\n\n> ## Quoted heading\n")
+    title, rule, quoted = [line for line in _lines(output) if line]
+    # Rich centres a title and draws a rule across the width it is given.
+    assert title == "Title".center(40).rstrip()
+    assert len(rule) == 40 and set(rule) <= {"-", "─"}
+    assert quoted == "▌ Quoted heading"
+
+
+def test_the_line_being_written_wraps_by_the_same_rule():
+    renderer, _ = _renderer(width=40)
+    _stream(
+        renderer,
+        "先看一下这个函数里面的处理逻辑handle_relic_offer然后再决定怎么修改它的返回值。",
+        final=False,
+    )
+    assert renderer.preview_lines() == [
+        " 先看一下这个函数里面的处理逻辑",
+        " handle_relic_offer然后再决定怎么修改它",
+        " 的返回值。",
+    ]

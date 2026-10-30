@@ -55,6 +55,9 @@ its last word has arrived, and lines already printed never change:
 
 - Headings, lists, quotes and paragraphs are styled as soon as their line is
   complete. Links show their address, as `text (https://…)`.
+- Paragraphs wrap at spaces, and Chinese or Japanese text also wraps between
+  characters, so lines stay full and English words inside stay whole. A
+  wrapped list item or quote continues under its own text.
 - Code blocks appear line by line with syntax highlighting. They have no
   indent and DeepCode never wraps them, so a copied block is exactly what the
   model wrote. Your terminal wraps lines that are too long for the window.

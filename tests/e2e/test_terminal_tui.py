@@ -6,8 +6,10 @@ import json
 import re
 import time
 
+from rich.cells import cell_len
+
 from tests.e2e.fake_model import Pause, Reasoning, Reply, Text, ToolCall
-from tests.e2e.terminal import CTRL_C, CTRL_O, ESC
+from tests.e2e.terminal import COLUMNS, CTRL_C, CTRL_O, ESC
 
 _INTERRUPTED = r"[Ii]nterrupt|[Ss]topped"
 
@@ -290,6 +292,35 @@ def test_a_long_url_is_never_split_by_an_inserted_newline(deepcode):
     # The terminal wraps it on screen; the bytes keep it whole, so a copy
     # from the scrollback or a terminal that reflows gets the real address.
     assert f"The link: {url} works." in tui.text(start)
+
+
+def test_chinese_text_fills_each_line_and_hangs_under_its_mark(deepcode):
+    sentence = "先读取配置文件，确认 relic_offer 在哪里触发，再决定埋点放在哪个函数里。"
+    deepcode.model.on(
+        "wrap chinese",
+        Reply([Reasoning(sentence * 4), Pause(0.3), Text("- " + sentence * 4)]),
+    )
+    tui = deepcode.open_tui("--access", "read-only")
+    tui.send(CTRL_O, 0.3)  # verbose: the whole reasoning, under its card
+
+    tui.submit("wrap chinese")
+    deepcode.wait_idle()
+    tui.wait_for_screen(r"\n· [\d.]+s · ")  # the Turn's footer, after the answer
+
+    lines = tui.screen().splitlines()
+    card = next(i for i, line in enumerate(lines) if "Thought for" in line)
+    thought = lines[card + 1 : lines.index("", card)]
+    item = next(i for i, line in enumerate(lines) if line.startswith(" • 先读取"))
+    answer = lines[item : lines.index("", item)]
+    for block, mark, hang in ((thought, "  ", "  "), (answer, " • ", "   ")):
+        assert len(block) >= 2, lines
+        assert block[0].startswith(mark) and block[0][len(mark)] != " "
+        assert all(row.startswith(hang) and row[len(hang)] != " " for row in block[1:])
+        # Full lines: only a word that did not fit is left for the next one.
+        assert all(cell_len(row) > COLUMNS - 14 for row in block[:-1]), block
+        text = "".join(row.strip() for row in block).replace(" ", "")
+        assert text.endswith((sentence * 4).replace(" ", ""))
+        assert "".join(block).count("relic_offer") == 4  # never split
 
 
 def test_an_approval_waits_still_holds_typing_and_always_allow_is_narrow(deepcode):

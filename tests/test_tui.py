@@ -21,6 +21,7 @@ import pytest
 pytestmark = pytest.mark.usefixtures("shared_cli_service")
 from rich.cells import cell_len
 from rich.console import Console
+from rich.text import Text
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -470,6 +471,45 @@ def test_cli_reasoning_respects_transcript_mode(mode, included, excluded):
         assert text not in rendered
 
 
+def test_verbose_reasoning_is_indented_under_its_card():
+    """The full reasoning reads as the card's body, not as stray prose."""
+    output = io.StringIO()
+    renderer = EventRenderer(
+        Console(file=output, color_system=None, width=40),
+        transcript_mode=TranscriptMode.VERBOSE,
+    )
+    thought = (
+        "先读取 main.js，确认 relic_offer 在哪里触发，再决定埋点的位置。\n\n"
+        "- 检查 death 事件"
+    )
+    renderer.on_event(Event("1", AgentReasoningStarted("r1", effort="high")))
+    renderer.on_event(
+        Event("2", AgentReasoningDelta("r1", ReasoningChannel.SUMMARY, thought))
+    )
+    renderer.on_event(
+        Event(
+            "3",
+            AgentReasoningCompleted(
+                "r1",
+                summary_text=thought,
+                trace_text="",
+                availability=ReasoningAvailability.AVAILABLE,
+                effort="high",
+                duration_ms=2200,
+            ),
+        )
+    )
+
+    lines = [line.rstrip() for line in output.getvalue().splitlines()]
+    card = next(i for i, line in enumerate(lines) if "Thought for 2s" in line)
+    assert lines[card + 1 :] == [
+        "  先读取 main.js，确认 relic_offer 在哪",
+        "  里触发，再决定埋点的位置。",
+        "",
+        "   • 检查 death 事件",
+    ]
+
+
 def test_cli_status_line_tracks_live_reasoning_without_printing_deltas():
     output = io.StringIO()
     renderer = EventRenderer(Console(file=output, color_system=None, width=120))
@@ -733,6 +773,48 @@ def test_text_fits_to_terminal_cells_not_characters():
     assert text_fitting.fit_tail("short", 40) == "short"
 
 
+def _wrapped(text: str, width: int) -> list[str]:
+    return [line.plain for line in text_fitting.wrap_text(Text(text), width)]
+
+
+def test_cjk_prose_breaks_between_characters_and_keeps_words_whole():
+    """Rich breaks only at spaces, and CJK text has none between words.
+
+    A CJK run jumped whole to the next line, leaving a short one behind, or
+    was cut at the edge, splitting an English word inside it ("rel|ic_offer").
+    """
+    text = "埋点：run_start、death、relic_offer 这些事件都要记录下来，并且在面板里展示出来以便调试。"
+    assert _wrapped(text, 30) == [
+        "埋点：run_start、death、",  # "relic_offer" would cross the edge
+        "relic_offer 这些事件都要记录下",
+        "来，并且在面板里展示出来以便调",
+        "试。",
+    ]
+    # Text with spaces wraps at them, as before.
+    sentence = "This sentence is long enough that it has to wrap at least once."
+    assert _wrapped(sentence, 40) == [
+        "This sentence is long enough that it has",
+        "to wrap at least once.",
+    ]
+
+
+def test_cjk_punctuation_never_starts_or_ends_a_line_on_the_wrong_side():
+    lines = _wrapped("他说：“你好”。然后离开了这个房间，没有再回来。", 12)
+    assert lines == ["他说：“你", "好”。然后离", "开了这个房", "间，没有再回", "来。"]
+    assert all(cell_len(line) <= 12 for line in lines)
+
+
+def test_a_word_wider_than_the_line_is_cut_at_the_edge():
+    assert _wrapped("averyveryverylongidentifier and more", 10) == [
+        "averyveryv",
+        "erylongide",
+        "ntifier",
+        "and more",
+    ]
+    # Every line keeps at least one character, even one wider than the line.
+    assert _wrapped("中文", 1) == ["中", "文"]
+
+
 def test_workspace_paths_shorten_only_when_they_are_paths():
     assert text_fitting.workspace_path("/repo/core/app.py", "/repo") == "core/app.py"
     # Outside the workspace it stays absolute (home-folded), and a value that
@@ -902,6 +984,17 @@ def test_verbose_wraps_a_long_line_under_the_elbow():
     assert len(below) >= 2
     assert all(line.startswith("   ") for line in below)
     assert "".join(line.strip() for line in below).count("configuration") == 8
+
+
+def test_verbose_output_wraps_cjk_without_splitting_words():
+    output = (
+        "先看一下这个函数里面的处理逻辑handle_relic_offer然后再决定怎么修改它的返回值。"
+    )
+    elbow, *below = _settled_elbow(output, mode=TranscriptMode.VERBOSE, width=40)
+
+    assert len(below) >= 2
+    assert any("handle_relic_offer" in line for line in below)
+    assert not any(line.strip().startswith("。") for line in below)
 
 
 def test_verbose_survives_a_terminal_a_few_columns_wide():

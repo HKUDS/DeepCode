@@ -34,14 +34,19 @@ from time import monotonic
 
 from rich.cells import cell_len
 from rich.console import Console
-from rich.markdown import Markdown
 from rich.markup import escape
 from rich.text import Text
 
 from cli.transcript import TranscriptMode
 from cli.tui import animation, theme
 from cli.tui.markdown_stream import MarkdownStream
-from cli.tui.text import fit_head, fit_tail, terminal_text, workspace_path
+from cli.tui.text import (
+    fit_head,
+    fit_tail,
+    terminal_text,
+    workspace_path,
+    wrap_text,
+)
 from core.events.protocol import RESULT_ELISION, Event
 from core.reasoning import ReasoningAvailability, ReasoningChannel
 
@@ -330,6 +335,14 @@ class EventRenderer:
             raw=self.raw_output,
             before_output=self._emit_gap if gap else None,
         )
+        self._feed_all(stream, text)
+
+    def _print_detail(self, text: str, style: str) -> None:
+        """Markdown that belongs to the line above it, indented under its mark."""
+        self._feed_all(MarkdownStream(self.console, indent=2, style=style), text)
+
+    @staticmethod
+    def _feed_all(stream: MarkdownStream, text: str) -> None:
         for line in text.split("\n"):
             stream.feed_line(line)
         stream.finish()
@@ -593,7 +606,7 @@ class EventRenderer:
         rows: list[str] = []
         for line in pending:
             text = Text(line.replace("\r", "").replace("\t", "    "))
-            rows.extend(row.plain for row in text.wrap(self.console, width))
+            rows.extend(row.plain for row in wrap_text(text, width))
         return [f" {row}" for row in rows[-_PREVIEW_ROWS:]]
 
     def status_fragments(self) -> list[tuple[str, str]]:
@@ -774,7 +787,7 @@ class EventRenderer:
         self.console.print(
             f"[{theme.META_STYLE}]{theme.THINKING_MARK} Thinking summary[/]"
         )
-        self.console.print(Markdown(msg.text), style=theme.META_STYLE)
+        self._print_detail(msg.text, theme.META_STYLE)
 
     def _on_agent_reasoning_started(self, msg) -> None:
         self._reasoning[msg.reasoning_id] = _ReasoningState(
@@ -860,7 +873,7 @@ class EventRenderer:
         self._gap_pending = True
         if availability is ReasoningAvailability.OPAQUE:
             self.console.print(
-                f"[{theme.META_STYLE}]Details were not provided by this model.[/]"
+                f"  [{theme.META_STYLE}]Details were not provided by this model.[/]"
             )
             return
 
@@ -880,17 +893,13 @@ class EventRenderer:
             return
 
         if state.summary_text:
-            self.console.print(
-                Markdown(state.summary_text),
-                style=theme.THINKING_STYLE,
-            )
+            self._print_detail(state.summary_text, theme.THINKING_STYLE)
         if state.trace_text and state.trace_text != state.summary_text:
             if state.summary_text:
-                self.console.print(f"[{theme.META_STYLE}]Provider reasoning details[/]")
-            self.console.print(
-                Markdown(state.trace_text),
-                style=theme.THINKING_STYLE,
-            )
+                self.console.print(
+                    f"  [{theme.META_STYLE}]Provider reasoning details[/]"
+                )
+            self._print_detail(state.trace_text, theme.THINKING_STYLE)
 
     def _tool_heading(self, msg) -> tuple[str, str | None, str | None]:
         """Presentation ``(label, kind, subject)`` for one tool call.
@@ -1055,14 +1064,14 @@ class EventRenderer:
             # end, wrapped under the elbow rather than cut.
             indent = " " * (cell_len(theme.TOOL_RESULT_ELBOW) + 1)
             width = max(_ELBOW_MIN_CELLS, self.console.width - len(indent) - 1)
-            text = Text(terminal_text(preview).strip("\n"))
-            for row in text.wrap(self.console, width):
-                self.console.print(
-                    f"{indent}{row.plain}".rstrip(),
-                    style=theme.TOOL_DETAIL_STYLE,
-                    markup=False,
-                    highlight=False,
-                )
+            for line in terminal_text(preview).strip("\n").split("\n"):
+                for row in wrap_text(Text(line), width):
+                    self.console.print(
+                        f"{indent}{row.plain}".rstrip(),
+                        style=theme.TOOL_DETAIL_STYLE,
+                        markup=False,
+                        highlight=False,
+                    )
         self._gap_pending = True
 
     def _on_plan_updated(self, msg) -> None:

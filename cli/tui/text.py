@@ -15,6 +15,9 @@ the command statuses, and the pickers cannot drift apart:
 Paths get the same treatment they get in a shell prompt: relative to the
 workspace the user launched in, ``~`` for home, absolute only when it is
 neither.
+
+Prose wraps the way CJK typesetting does (:func:`wrap_text`): a line may also
+end between two CJK characters, which have no spaces between them.
 """
 
 from __future__ import annotations
@@ -23,7 +26,8 @@ import os
 import re
 from pathlib import Path
 
-from rich.cells import cell_len, set_cell_size
+from rich.cells import cell_len, get_character_cell_size, set_cell_size
+from rich.text import Text
 
 _ELLIPSIS = "…"
 
@@ -52,6 +56,70 @@ def terminal_text(text: str) -> str:
     return "\n".join(
         line.rstrip("\r").rsplit("\r", 1)[-1].expandtabs(4) for line in lines
     )
+
+
+# Spaces separate words. At a line break they stay at the end of the line,
+# past the edge, and are dropped.
+_SPACES = " \u3000"
+# Kinsoku, the basic rule of CJK line breaking: closing punctuation never
+# starts a line and opening punctuation never ends one.
+_NO_LINE_START = frozenset("，。、；：！？）」』】》〉〕］｝〗”’…ー々.,;:!?)]}%")
+_NO_LINE_END = frozenset("（「『【《〈〔［｛〖“‘([{")
+
+
+def _may_break(before: str, after: str) -> bool:
+    """Whether a line may end between the characters ``before`` and ``after``."""
+    if after in _SPACES:
+        return False
+    if before in _SPACES:
+        return True
+    if after in _NO_LINE_START or before in _NO_LINE_END:
+        return False
+    before_cells = get_character_cell_size(before)
+    after_cells = get_character_cell_size(after)
+    if not before_cells or not after_cells:
+        return False  # a combining mark or a joiner stays with its neighbours
+    return before_cells == 2 or after_cells == 2
+
+
+def wrap_offsets(text: str, width: int) -> list[int]:
+    """Where lines of at most ``width`` cells start in ``text``, after the first.
+
+    A line ends after a space or next to a CJK character, never inside a word
+    of other text: Rich breaks only at spaces, so CJK text either jumped whole
+    to the next line or was cut at the edge mid-word. Spaces at a break stay
+    on the line they end. A word wider than a whole line is cut at the edge.
+    """
+    width = max(1, width)
+    offsets: list[int] = []
+    used = 0  # cells on the current line, its trailing spaces included
+    start = 0
+    ends = [i for i in range(1, len(text)) if _may_break(text[i - 1], text[i])]
+    for end in [*ends, len(text)]:
+        unit = text[start:end]
+        body = cell_len(unit.rstrip(_SPACES))
+        if used and used + body > width:
+            offsets.append(start)
+            used = 0
+        if body > width:
+            for index, char in enumerate(unit):
+                size = get_character_cell_size(char)
+                if used and used + size > width and char not in _SPACES:
+                    offsets.append(start + index)
+                    used = 0
+                used += size
+        else:
+            used += cell_len(unit)
+        start = end
+    return offsets
+
+
+def wrap_text(text: Text, width: int) -> list[Text]:
+    """``text`` as lines of at most ``width`` cells, styles kept (:func:`wrap_offsets`)."""
+    lines = list(text.divide(wrap_offsets(text.plain, width)))
+    for line in lines:
+        line.rstrip()
+    return lines
 
 
 def fit_head(text: str, width: int, *, mark: bool = True) -> str:

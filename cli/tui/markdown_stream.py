@@ -12,8 +12,9 @@ longer change.
   copy back exactly as written.
 - A table is held until its last row: a later row can widen every column.
 - A line that carries a URL is left to the terminal's own soft wrap, so the
-  address is not split by an inserted newline. Other prose wraps at word
-  boundaries.
+  address is not split by an inserted newline. Other prose wraps at spaces
+  and between CJK characters (:func:`cli.tui.text.wrap_text`); a list item's
+  or a quote's wrapped lines hang under its text.
 
 In raw mode every source line is printed exactly as the model wrote it and
 the terminal does all the wrapping (Codex's ``/raw``), for copying.
@@ -30,10 +31,20 @@ from rich.markdown import Markdown
 from rich.syntax import Syntax
 from rich.text import Text
 
+from cli.tui.text import wrap_text
+
 _FENCE = re.compile(r"^(?P<indent> {0,3})(?P<marker>`{3,}|~{3,})(?P<info>[^`]*)$")
 _TABLE_ROW = re.compile(r"^\s*\|")
 _URL = re.compile(r"https?://\S")
-_HEADING = re.compile(r"^\s*#{1,6}\s")
+# A heading or a rule, alone or inside quote and list markers. Rich lays it
+# out across the line it is given (a centred title, a full-width rule).
+_SPANS_LINE = re.compile(
+    r"^(?:>[ \t]*)*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?"
+    r"(?:#{1,6}(?:[ \t]|$)|([-*_])(?:[ \t]*\1){2,}[ \t]*$)"
+)
+# What Rich renders before the text of a line: a bar per quote level, then a
+# list item's bullet or number.
+_BLOCK_MARKER = re.compile(r"(?:▌ )*(?: +(?:•|\d+) )?")
 # Wide enough that no prose line wraps; the terminal soft-wraps it instead.
 _UNWRAPPED_WIDTH = 4096
 _CODE_THEME = "ansi_dark"  # ANSI colors, so the user's terminal theme applies
@@ -55,9 +66,15 @@ class MarkdownStream:
         *,
         raw: bool = False,
         before_output: Callable[[], None] | None = None,
+        indent: int = 0,
+        style: str | None = None,
     ) -> None:
         self.console = console
         self.raw = raw
+        # Every printed line, code included, is indented by ``indent`` and
+        # drawn in ``style``: a block that belongs under another one's mark.
+        self.indent = indent
+        self.style = style
         # Called before anything is printed: the renderer owns the blank line
         # that separates this segment from the block above it.
         self._before_output = before_output or (lambda: None)
@@ -118,9 +135,11 @@ class MarkdownStream:
             self.console.print()
         self._blank_pending = False
         self._printed = True
+        if self.indent:
+            text = Text(" " * self.indent) + text
         # soft_wrap: the text is already laid out (or deliberately left to
         # the terminal); DeepCode must not insert newlines into it.
-        self.console.print(text, soft_wrap=True, highlight=False)
+        self.console.print(text, style=self.style, soft_wrap=True, highlight=False)
 
     def _code_line(self, line: str) -> None:
         fence = self._fence
@@ -148,17 +167,30 @@ class MarkdownStream:
 
     def _flush_table(self) -> None:
         rows, self._table = self._table, []
-        self._render("\n".join(rows), width=self.console.width)
+        self._emit(self._render("\n".join(rows), self.console.width - self.indent))
 
     def _markdown(self, line: str) -> None:
         body = line.lstrip(" \t")
         indent = len(line[: len(line) - len(body)].expandtabs(4))
-        width = max(20, self.console.width - indent)
-        if _URL.search(body) and not _HEADING.match(body):
-            width = _UNWRAPPED_WIDTH
-        self._render(body, width=width, indent=indent)
+        width = max(20, self.console.width - self.indent - indent)
+        if _SPANS_LINE.match(body):
+            self._emit(self._render(body, width), indent)
+        elif _URL.search(body):
+            self._emit(self._render(body, _UNWRAPPED_WIDTH), indent)
+        else:
+            # Rich lays the line out unwrapped; the wrapping is DeepCode's.
+            rendered = self._render(body, _UNWRAPPED_WIDTH)
+            self._emit([row for text in rendered for row in _wrap(text, width)], indent)
 
-    def _render(self, source: str, *, width: int, indent: int = 0) -> None:
+    def _emit(self, lines: list[Text], indent: int = 0) -> None:
+        prefix = " " * indent
+        for index, text in enumerate(lines):
+            if prefix:
+                text = Text(prefix) + text
+            self._print(text, separate=index == 0)
+
+    def _render(self, source: str, width: int) -> list[Text]:
+        """Rich's lines for ``source`` laid out at ``width``, unframed."""
         options = self.console.options.update_width(width)
         rendered = self.console.render_lines(
             Markdown(source, hyperlinks=False, code_theme=_CODE_THEME),
@@ -177,8 +209,18 @@ class MarkdownStream:
             lines.pop(0)
         while lines and not lines[-1].plain.strip():
             lines.pop()
-        prefix = " " * indent
-        for index, text in enumerate(lines):
-            if prefix:
-                text = Text(prefix) + text
-            self._print(text, separate=index == 0)
+        return lines
+
+
+def _wrap(line: Text, width: int) -> list[Text]:
+    """One rendered line of prose wrapped to ``width`` cells.
+
+    The wrapped lines hang under the text: a list item's bullet or number
+    becomes space, a quote's bars repeat.
+    """
+    marker = _BLOCK_MARKER.match(line.plain).end()
+    head = line[:marker]
+    hang = head.copy()
+    hang.plain = re.sub(r"[^▌ ]", " ", head.plain)
+    rows = wrap_text(line[marker:], width - head.cell_len)
+    return [(head if index == 0 else hang) + row for index, row in enumerate(rows)]
