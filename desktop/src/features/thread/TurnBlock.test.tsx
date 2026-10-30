@@ -362,9 +362,10 @@ describe("TurnBlock", () => {
   });
 
   it("does not repeat a failed Turn's error as the outcome's reason", () => {
+    // The stored reason is the error trimmed and bounded, so not always equal.
     renderTurn([run("test", 1, "npm test")], {
       status: "failed",
-      errorMessage: "The API key is missing.",
+      errorMessage: "The API key is missing.\n",
       goalOutcome: blocked,
     });
 

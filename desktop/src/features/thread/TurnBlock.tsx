@@ -823,8 +823,9 @@ export function TurnBlock({
           <GoalOutcomeView
             outcome={goalOutcome}
             headingId={goalOutcomeHeading}
-            // A runtime block records this Turn's own error, shown above.
-            showReason={goalOutcome.reason !== group.turn?.errorMessage}
+            // The only runtime outcome a Turn decides is the block after it
+            // failed, and its reason is that Turn's error, shown above.
+            showReason={!(goalOutcome.source === "runtime" && errorMessage)}
             onSelectEvidence={(itemId) => {
               onSelectItem(itemId);
               onOpenInspector("details");

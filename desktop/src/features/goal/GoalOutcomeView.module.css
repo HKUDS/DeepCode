@@ -27,6 +27,8 @@
 
 .outcome > header strong {
   color: var(--text-primary);
+  /* As large as the reason below it, which compact Markdown sets. */
+  font-size: var(--text-sm);
   font-weight: var(--weight-bold);
 }
 

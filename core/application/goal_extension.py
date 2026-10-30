@@ -232,8 +232,8 @@ class GoalExtension(GoalRuntimeHandler):
                 exc,
             )
             return outcome
-        # The same work the completion check judged: the deciding Turn's
-        # latest settled steps (see ``completion_request``).
+        # The deciding Turn's latest settled work, chosen as the completion
+        # check chooses (see ``completion_request``).
         settled = [
             item
             for item in _goal_work(snapshot.items)

@@ -192,7 +192,7 @@
   border-top: 1px solid var(--border-subtle);
 }
 
-.details ul {
+.details > ul {
   display: grid;
   gap: 4px;
   margin: 5px 0 0;
@@ -200,7 +200,7 @@
   list-style: none;
 }
 
-.details li {
+.details > ul > li {
   display: flex;
   align-items: flex-start;
   gap: 6px;
@@ -209,13 +209,13 @@
   line-height: 1.45;
 }
 
-.details li svg {
+.details > ul > li > svg {
   flex: 0 0 auto;
   margin-top: 1px;
   color: var(--success);
 }
 
-.details p {
+.details > p {
   margin: 0;
   color: var(--text-tertiary);
   font-size: var(--text-2xs);
@@ -236,7 +236,7 @@
   font: var(--text-micro) var(--font-mono);
 }
 
-.outcome code {
+.outcome > small code {
   color: var(--text-secondary);
 }
 
