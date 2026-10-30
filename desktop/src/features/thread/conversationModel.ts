@@ -255,11 +255,13 @@ export function buildConversationTurns(
 }
 
 /**
- * What a Turn costs to show, in rows: a folded run of steps is one row, so a
- * Turn of hundreds of steps is cheap while its runs stay folded.
+ * What a Turn costs to show in the normal transcript, in rows: a folded run
+ * of steps is one row, so a Turn of hundreds of steps is cheap while its runs
+ * stay folded. Without a user message item, the Turn's prompt is shown.
  */
 function turnRows(group: ConversationTurn): number {
-  return group.userMessages.length + group.timeline.length + (group.completion ? 1 : 0);
+  const asked = group.userMessages.length || (group.turn?.prompt ? 1 : 0);
+  return asked + group.timeline.length + (group.completion ? 1 : 0);
 }
 
 /**

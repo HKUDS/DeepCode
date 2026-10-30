@@ -3,6 +3,7 @@ import {
   type MouseEvent,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -31,6 +32,8 @@ interface ThreadConversationProps {
   plansByTurnId: Record<string, TurnPlanState>;
   /** The Session Goal's outcome, shown with the Turn that decided it. */
   goalOutcome: GoalOutcome | null;
+  /** The whole history has been replayed (it arrives a page at a time). */
+  historyLoaded: boolean;
   selectedItemId: string | null;
   transcriptMode: TranscriptMode;
   busy: boolean;
@@ -44,9 +47,9 @@ interface ThreadConversationProps {
 // How near the end still counts as at the end: room for a small nudge and for
 // fractional scroll positions.
 const FOLLOW_THRESHOLD = 40;
-// How much history a batch renders, in rows (see historyBatchStart): opening
-// a long Session costs this much, not its whole length. Earlier Turns load on
-// request.
+// How much history a batch renders, in rows (see historyBatchStart): in the
+// normal transcript, opening a long Session costs about this much, not its
+// whole length. Earlier Turns load on request.
 const HISTORY_BATCH_ROWS = 200;
 
 export function ThreadConversation({
@@ -55,6 +58,7 @@ export function ThreadConversation({
   approvals,
   plansByTurnId,
   goalOutcome,
+  historyLoaded,
   selectedItemId,
   transcriptMode,
   busy,
@@ -75,25 +79,46 @@ export function ThreadConversation({
     () => buildConversationTurns(turns, items),
     [items, turns],
   );
-  // The first Turn shown. Fixed once the history arrives, so Turns that come
-  // later never push older ones out of view.
+  // The first Turn shown: the latest batch of history, fixed once the whole
+  // history is in, so Turns that come later never push older ones out of
+  // view. Fixed earlier, it would sit on the oldest part, which replay sends
+  // first. A fixed Turn that is gone (the trace was replayed afresh) is
+  // chosen again.
   const [firstTurnId, setFirstTurnId] = useState<string | null>(null);
-  if (firstTurnId === null && groupedTurns.length > 0) {
-    const start = historyBatchStart(
-      groupedTurns,
-      groupedTurns.length,
-      HISTORY_BATCH_ROWS,
-    );
-    setFirstTurnId(groupedTurns[start].id);
+  const anchored = groupedTurns.findIndex((group) => group.id === firstTurnId);
+  const latestBatchStart = () =>
+    historyBatchStart(groupedTurns, groupedTurns.length, HISTORY_BATCH_ROWS);
+  if (historyLoaded && anchored < 0 && groupedTurns.length > 0) {
+    setFirstTurnId(groupedTurns[latestBatchStart()].id);
   }
-  const firstShown = Math.max(
-    0,
-    groupedTurns.findIndex((group) => group.id === firstTurnId),
-  );
-  const showEarlierTurns = () => {
+  const firstShown =
+    anchored >= 0 ? anchored : groupedTurns.length > 0 ? latestBatchStart() : 0;
+
+  // Loading earlier Turns keeps the reader where they were: at the same
+  // distance from the end, whatever the browser does with content added
+  // above. If the button they used is gone, focus stays in the conversation.
+  const revealRef = useRef<{ fromEnd: number; hadFocus: boolean } | null>(null);
+  const showEarlierTurns = (event: MouseEvent<HTMLButtonElement>) => {
+    const viewport = scrollViewportRef.current;
+    revealRef.current = viewport
+      ? {
+          fromEnd: viewport.scrollHeight - viewport.scrollTop,
+          hadFocus: document.activeElement === event.currentTarget,
+        }
+      : null;
     const start = historyBatchStart(groupedTurns, firstShown, HISTORY_BATCH_ROWS);
     setFirstTurnId(groupedTurns[start].id);
   };
+  useLayoutEffect(() => {
+    const reveal = revealRef.current;
+    const viewport = scrollViewportRef.current;
+    revealRef.current = null;
+    if (!reveal || !viewport) return;
+    viewport.scrollTop = viewport.scrollHeight - reveal.fromEnd;
+    if (reveal.hadFocus && !viewport.contains(document.activeElement)) {
+      viewport.focus({ preventScroll: true });
+    }
+  }, [firstTurnId]);
   const hasConversation = groupedTurns.length > 0;
   const approvalsByItem = useMemo(
     () => new Map(approvals.map((approval) => [approval.itemId, approval])),
@@ -227,6 +252,8 @@ export function ThreadConversation({
         className={styles.conversationScroller}
         aria-label={t("thread.conversation", "Thread conversation")}
         ref={scrollViewportRef}
+        // Focus lands here when the control a reader used goes away.
+        tabIndex={-1}
       >
         <div
           className={styles.conversation}
@@ -241,7 +268,7 @@ export function ThreadConversation({
               data-reveals=""
               onClick={showEarlierTurns}
             >
-              {t("thread.earlierTurns", "Show earlier Turns ({{count}})", {
+              {t("thread.earlierTurns", "Show earlier Turns · {{count}} more", {
                 count: firstShown,
               })}
             </button>

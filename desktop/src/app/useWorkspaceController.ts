@@ -164,6 +164,7 @@ export function useWorkspaceController(runtime: ClientRuntime): WorkspaceControl
         reportError,
         () => {
           if (selectedThreadRef.current === threadId) {
+            dispatch({ type: "history-loaded" });
             dispatch({ type: "live-stale" });
           }
         },

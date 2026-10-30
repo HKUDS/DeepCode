@@ -347,6 +347,7 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
                     approvals={state.approvals}
                     plansByTurnId={state.plansByTurnId}
                     goalOutcome={state.goalOutcome}
+                    historyLoaded={state.historyLoaded}
                     selectedItemId={state.selectedItemId}
                     transcriptMode={transcript.mode}
                     busy={state.busy}

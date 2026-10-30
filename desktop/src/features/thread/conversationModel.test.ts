@@ -192,7 +192,7 @@ describe("conversationModel", () => {
   });
 
   it("batches history from the end by rows shown, always at least one Turn", () => {
-    // Turns of 3, 3, 10 and 3 rows: each assistant message is one.
+    // Turns of 4, 4, 11 and 4 rows: the prompt, and each assistant message.
     const sizes = [3, 3, 10, 3];
     const turns = sizes.map((_, index) => ({ ...turn, id: `turn-${index}`, ordinal: index + 1 }));
     const items = sizes.flatMap((size, index) =>
@@ -204,19 +204,22 @@ describe("conversationModel", () => {
     const groups = buildConversationTurns(turns, items);
 
     expect(historyBatchStart(groups, 4, 100)).toBe(0);
-    expect(historyBatchStart(groups, 4, 13)).toBe(2);
-    expect(historyBatchStart(groups, 4, 12)).toBe(3);
+    expect(historyBatchStart(groups, 4, 15)).toBe(2);
+    expect(historyBatchStart(groups, 4, 14)).toBe(3);
     // A Turn larger than the budget still comes whole.
     expect(historyBatchStart(groups, 3, 5)).toBe(2);
-    expect(historyBatchStart(groups, 2, 6)).toBe(0);
+    expect(historyBatchStart(groups, 2, 8)).toBe(0);
 
-    // A folded run of hundreds of steps is a single row.
-    const steps = Array.from({ length: 300 }, (_, step) =>
-      item(`step-${step}`, step + 1, "command_execution", `step ${step}`),
+    // A folded run of hundreds of steps is a single row: two such Turns,
+    // with their prompts, fit in four rows.
+    const folded = [0, 1].map((index) => ({ ...turn, id: `long-${index}`, ordinal: index + 1 }));
+    const steps = folded.flatMap((each) =>
+      Array.from({ length: 300 }, (_, step) => ({
+        ...item(`${each.id}-${step}`, step + 1, "command_execution", `step ${step}`),
+        turnId: each.id,
+      })),
     );
-    const [long] = buildConversationTurns([turn], steps);
-    expect(historyBatchStart([long], 1, 0)).toBe(0);
-    expect(long.timeline).toHaveLength(1);
+    expect(historyBatchStart(buildConversationTurns(folded, steps), 2, 4)).toBe(0);
   });
 
   it("formats stable elapsed durations for completed Turns", () => {

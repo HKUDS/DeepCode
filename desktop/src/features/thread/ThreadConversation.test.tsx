@@ -44,6 +44,7 @@ function conversation(
   turns: Turn[],
   items: Item[],
   goalOutcome: GoalOutcome | null = null,
+  historyLoaded = true,
 ) {
   return (
     <ThreadConversation
@@ -52,6 +53,7 @@ function conversation(
       approvals={[]}
       plansByTurnId={{}}
       goalOutcome={goalOutcome}
+      historyLoaded={historyLoaded}
       selectedItemId={null}
       transcriptMode="normal"
       busy={false}
@@ -321,25 +323,33 @@ describe("ThreadConversation", () => {
     expect(screen.queryByRole("region", { name: "Goal complete" })).toBeNull();
   });
 
-  it("opens a long Session at its recent history and loads earlier Turns on request", () => {
-    // 30 Turns of 20 rows: a batch of history holds 10 of them.
-    const turns = Array.from({ length: 30 }, (_, index): Turn => ({
+  /** 30 Turns of 20 rows each (a prompt and 19 notes): a batch holds 10. */
+  function longSession(count = 30) {
+    const turns = Array.from({ length: count }, (_, index): Turn => ({
       ...turn,
       id: `turn-${index}`,
       ordinal: index + 1,
       status: "completed",
     }));
-    const note = (id: string, turnId: string, text: string): Item => ({
+    const items = turns.flatMap((each, index) =>
+      Array.from({ length: 19 }, (_, step) =>
+        note(`t${index}-${step}`, each.id, `Turn ${index} line ${step}`),
+      ),
+    );
+    return { turns, items };
+  }
+
+  function note(id: string, turnId: string, text: string): Item {
+    return {
       ...item(id, 1, text),
       turnId,
       kind: "assistant_message",
       payload: { text, phase: "commentary" },
-    });
-    const items = turns.flatMap((each, index) =>
-      Array.from({ length: 20 }, (_, step) =>
-        note(`t${index}-${step}`, each.id, `Turn ${index} line ${step}`),
-      ),
-    );
+    };
+  }
+
+  it("opens a long Session at its recent history and loads earlier Turns on request", () => {
+    const { turns, items } = longSession();
     const { rerender } = render(conversation(turns, items));
     expect(screen.queryByText("Turn 19 line 0")).toBeNull();
     expect(screen.getByText("Turn 20 line 0")).toBeTruthy();
@@ -351,12 +361,48 @@ describe("ThreadConversation", () => {
     );
     expect(screen.getByText("Turn 20 line 0")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Show earlier Turns (20)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show earlier Turns · 20 more" }));
     expect(screen.getByText("Turn 10 line 0")).toBeTruthy();
     expect(screen.queryByText("Turn 9 line 0")).toBeNull();
+    // Reading back through history is leaving the end.
+    expect(latestButton()).not.toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Show earlier Turns (10)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show earlier Turns · 10 more" }));
     expect(screen.getByText("Turn 0 line 0")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Show earlier Turns/ })).toBeNull();
+  });
+
+  it("chooses where history starts only once all of it has been replayed", () => {
+    const { turns, items } = longSession();
+    // Replay sends the oldest events first, a page at a time.
+    const { rerender } = render(
+      conversation(turns.slice(0, 15), items.slice(0, 15 * 19), null, false),
+    );
+    rerender(conversation(turns, items, null, true));
+
+    expect(screen.queryByText("Turn 19 line 0")).toBeNull();
+    expect(screen.getByText("Turn 20 line 0")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Show earlier Turns · 20 more" })).toBeTruthy();
+  });
+
+  it("keeps the reader in place and focused when earlier Turns load", () => {
+    const { turns, items } = longSession();
+    render(conversation(turns, items));
+    const viewport = screen.getByLabelText("Thread conversation");
+    // Each Turn shown is 1000px tall.
+    layOut(viewport, () => viewport.querySelectorAll("section[data-status]").length * 1000);
+    userScrollsTo(viewport, 300);
+    const fromEnd = distanceFromEnd(viewport);
+
+    const button = screen.getByRole("button", { name: /Show earlier Turns/ });
+    button.focus();
+    fireEvent.click(button);
+    expect(distanceFromEnd(viewport)).toBe(fromEnd);
+
+    const last = screen.getByRole("button", { name: /Show earlier Turns/ });
+    last.focus();
+    fireEvent.click(last);
+    expect(screen.queryByRole("button", { name: /Show earlier Turns/ })).toBeNull();
+    expect(document.activeElement).toBe(viewport);
   });
 });

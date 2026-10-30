@@ -20,19 +20,25 @@
   padding: 42px 30px calc(var(--composer-clearance, 160px) + 42px);
 }
 
+/* Quiet controls that reveal more of the transcript. */
+.earlierTurns,
+.workGroupAll {
+  color: var(--text-tertiary);
+  font: var(--text-micro) var(--font-mono);
+}
+
+.earlierTurns:hover,
+.workGroupAll:hover {
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+}
+
 .earlierTurns {
   display: block;
   margin: 0 auto 28px;
   padding: 5px 12px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-pill);
-  color: var(--text-tertiary);
-  font: var(--text-micro) var(--font-mono);
-}
-
-.earlierTurns:hover {
-  background: var(--surface-hover);
-  color: var(--text-secondary);
 }
 
 .turnBlock {
@@ -515,13 +521,6 @@ div.runStep {
   margin: 2px 0 4px;
   padding: 3px 8px;
   border-radius: var(--radius-xs);
-  color: var(--text-tertiary);
-  font: var(--text-micro) var(--font-mono);
-}
-
-.workGroupAll:hover {
-  background: var(--surface-hover);
-  color: var(--text-secondary);
 }
 
 .workGroupItems::before {
