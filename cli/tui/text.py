@@ -63,9 +63,8 @@ def fit_head(text: str, width: int, *, mark: bool = True) -> str:
         return ""
     if cell_len(text) <= width:
         return text
-    if not mark:
-        return set_cell_size(text, width).rstrip()
-    return set_cell_size(text, max(1, width - 1)).rstrip() + _ELLIPSIS
+    kept = set_cell_size(text, max(1, width - 1) if mark else width).rstrip()
+    return kept + _ELLIPSIS if mark else kept
 
 
 def fit_tail(text: str, width: int, *, mark: bool = True) -> str:
@@ -77,16 +76,12 @@ def fit_tail(text: str, width: int, *, mark: bool = True) -> str:
         return ""
     if cell_len(text) <= width:
         return text
-    if not mark:
-        cut = len(text)
-        while cut > 0 and cell_len(text[len(text) - cut :]) > width:
-            cut -= 1
-        return text[len(text) - cut :].lstrip()
-    budget = max(1, width - 1)
+    budget = max(1, width - 1) if mark else width
     cut = len(text)
     while cut > 0 and cell_len(text[len(text) - cut :]) > budget:
         cut -= 1
-    return _ELLIPSIS + text[len(text) - cut :]
+    kept = text[len(text) - cut :]
+    return _ELLIPSIS + kept if mark else kept.lstrip()
 
 
 def short_path(path: str) -> str:

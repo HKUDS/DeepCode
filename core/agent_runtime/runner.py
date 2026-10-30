@@ -49,7 +49,7 @@ from core.agent_runtime.evidence_ledger import (
     DEFAULT_NO_PROGRESS_THRESHOLD,
     EvidenceLedger,
 )
-from core.agent_runtime.hook import AgentHook, AgentHookContext
+from core.agent_runtime.hook import AgentHook, AgentHookContext, ToolEvent
 from core.agent_runtime.microcompact import (
     MicrocompactPolicy,
     apply_microcompact as _apply_microcompact,
@@ -69,11 +69,7 @@ from core.agent_runtime.runtime import (
     repeated_external_lookup_error,
 )
 from core.agent_runtime.tools.base import ToolResult
-from core.agent_runtime.tools.model_notes import (
-    ERROR_HINT,
-    HOOK_CONTEXT_AT,
-    with_hook_context,
-)
+from core.agent_runtime.tools.model_notes import ERROR_HINT, with_hook_context
 from core.agent_runtime.tools.registry import ToolRegistry
 from core.agent_runtime.tools.semantic_hint import build_miss_message
 from core.providers.base import (
@@ -353,7 +349,7 @@ class AgentRunResult:
     usage: dict[str, int] = field(default_factory=dict)
     stop_reason: str = "completed"
     error: str | None = None
-    tool_events: list[dict[str, str]] = field(default_factory=list)
+    tool_events: list[ToolEvent] = field(default_factory=list)
     had_injections: bool = False
 
 
@@ -536,7 +532,7 @@ class AgentRunner:
         usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0}
         error: str | None = None
         stop_reason = "completed"
-        tool_events: list[dict[str, str]] = []
+        tool_events: list[ToolEvent] = []
         external_lookup_counts: dict[str, int] = {}
         repeat_tracker = (
             RepeatCallTracker(spec.repeat_call_thresholds)
@@ -1241,9 +1237,9 @@ class AgentRunner:
         spec: AgentRunSpec,
         tool_calls: list[ToolCallRequest],
         external_lookup_counts: dict[str, int],
-    ) -> tuple[list[Any], list[dict[str, str]], BaseException | None]:
+    ) -> tuple[list[Any], list[ToolEvent], BaseException | None]:
         batches = self._partition_tool_batches(spec, tool_calls)
-        tool_results: list[tuple[Any, dict[str, str], BaseException | None]] = []
+        tool_results: list[tuple[Any, ToolEvent, BaseException | None]] = []
         for batch in batches:
             if spec.concurrent_tools and len(batch) > 1:
                 tool_results.extend(
@@ -1261,7 +1257,7 @@ class AgentRunner:
                     )
 
         results: list[Any] = []
-        events: list[dict[str, str]] = []
+        events: list[ToolEvent] = []
         fatal_error: BaseException | None = None
         for result, event, error in tool_results:
             results.append(result)
@@ -1275,7 +1271,7 @@ class AgentRunner:
         spec: AgentRunSpec,
         tool_call: ToolCallRequest,
         external_lookup_counts: dict[str, int],
-    ) -> tuple[Any, dict[str, str], BaseException | None]:
+    ) -> tuple[Any, ToolEvent, BaseException | None]:
         allowed = spec.allowed_tool_names()
         if allowed is not None and tool_call.name not in allowed:
             visible = [
@@ -1521,10 +1517,10 @@ class AgentRunner:
         spec: AgentRunSpec,
         tool_call: ToolCallRequest,
         result: Any,
-        event: dict[str, str],
+        event: ToolEvent,
         error: BaseException | None,
         pre_contexts: list[str],
-    ) -> tuple[Any, dict[str, str], BaseException | None]:
+    ) -> tuple[Any, ToolEvent, BaseException | None]:
         """Apply PostToolUse (the tool ran) and fold hook context into the result."""
         contexts = list(pre_contexts)
         if spec.post_tool_hook is not None:
@@ -1570,7 +1566,7 @@ class AgentRunner:
 
     @staticmethod
     def _compose_hook_context(
-        result: Any, contexts: list[str], event: dict[str, str]
+        result: Any, contexts: list[str], event: ToolEvent
     ) -> Any:
         """Append accumulated hook context to a tool result the model will read.
 
@@ -1582,10 +1578,14 @@ class AgentRunner:
         if not contexts:
             return result
         result = encode_structured_tool_result(result)
+        if isinstance(result, dict):  # one content block
+            result = [result]
         if isinstance(result, list):
-            return [*result, {"type": "text", "text": with_hook_context("", contexts)}]
+            event["hook_context_at"] = len(result)
+            context = with_hook_context("", contexts).lstrip()
+            return [*result, {"type": "text", "text": context}]
         text = str(result)
-        event[HOOK_CONTEXT_AT] = str(len(text))
+        event["hook_context_at"] = len(text)
         content = with_hook_context(text, contexts)
         if isinstance(result, ToolResult):
             return result.with_content(content)

@@ -710,12 +710,12 @@ async def test_each_refused_call_and_only_it_is_marked_denied():
 
 @pytest.mark.asyncio
 async def test_a_tool_preview_cuts_hook_context_where_the_runner_put_it():
-    from core.agent_runtime.hook import AgentHookContext
+    from core.agent_runtime.hook import AgentHookContext, ToolEvent
     from core.agent_runtime.runner import AgentRunner
     from core.events.session import _EventEmittingHook
 
     output = "step 1\n\n[hook] printed by the program\nstep 2 ran"
-    event = {"name": "bash", "status": "ok", "detail": ""}
+    event: ToolEvent = {"name": "bash", "status": "ok", "detail": ""}
     composed = AgentRunner._compose_hook_context(output, ["lint: 2 issues"], event)
     emitted: list = []
     hook = _EventEmittingHook(emitted.append)

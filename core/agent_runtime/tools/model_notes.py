@@ -11,11 +11,10 @@ from collections.abc import Iterable
 
 # Appended to a result built from a failure.
 ERROR_HINT = "\n\n[Analyze the error above and try a different approach.]"
-# Begins each block of hook context that follows a result.
+# Begins each block of hook context that follows a result. Whoever appends
+# it records where it begins (``ToolEvent.hook_context_at``), so a display can
+# cut there without searching the text.
 HOOK_CONTEXT_MARK = "\n\n[hook] "
-# Where hook context begins in a text result, recorded on the call's event by
-# whoever appends it, so a display can cut there without searching the text.
-HOOK_CONTEXT_AT = "hookContextAt"
 
 
 def with_hook_context(result: str, contexts: Iterable[str]) -> str:

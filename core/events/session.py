@@ -36,7 +36,7 @@ from core.agent_runtime.microcompact import MicrocompactPolicy
 from core.agent_runtime.runner import AgentRunner, AgentRunSpec
 from core.agent_runtime.token_meter import ProviderAnchoredTokenMeter
 from core.agent_runtime.tools.base import ToolResult
-from core.agent_runtime.tools.model_notes import HOOK_CONTEXT_AT, without_error_hint
+from core.agent_runtime.tools.model_notes import without_error_hint
 from core.agent_runtime.tools.registry import ToolRegistry
 from core.events.protocol import (
     AgentMessage,
@@ -90,21 +90,16 @@ def display_preview(result: Any, *, hook_context_at: int | None = None) -> str:
     """The bounded preview of a tool result that people see.
 
     It leaves out what only the model needs: the error hint, and hook context
-    from ``hook_context_at`` on. Used for a live Turn's tool items and for
-    those rebuilt from the session file, so both read the same.
+    from ``hook_context_at`` on (see ``ToolEvent``). Used for a live Turn's
+    tool items and for those rebuilt from the session file, so both read the
+    same.
     """
+    if hook_context_at is not None:
+        result = result[:hook_context_at]
     if isinstance(result, str):
         # A ToolResult is a str too; the preview needs only its text.
-        text = str(result)
-        if hook_context_at is not None:
-            text = text[:hook_context_at]
-        result = without_error_hint(text)
+        result = without_error_hint(str(result))
     return summarize_result(result)
-
-
-def _hook_context_at(event: dict[str, str]) -> int | None:
-    value = event.get(HOOK_CONTEXT_AT)
-    return int(value) if value is not None else None
 
 
 def _is_error_result(result: Any) -> bool:
@@ -397,7 +392,7 @@ class _EventEmittingHook(AgentHook):
                     name=call.name,
                     is_error=is_error,
                     result_preview=display_preview(
-                        result, hook_context_at=_hook_context_at(event)
+                        result, hook_context_at=event.get("hook_context_at")
                     ),
                     denied=event.get("status") == "denied",
                 )
