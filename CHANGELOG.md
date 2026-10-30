@@ -5,6 +5,12 @@ Released versions are named in the entry title; the version on PyPI is
 [deepcode-hku](https://pypi.org/project/deepcode-hku/). 中文版见
 [CHANGELOG_ZH.md](CHANGELOG_ZH.md).
 
+## 2026-10-31 · Keep distinct memory topics in the index
+
+- **Preserve different topic links during memory consolidation.** A filename
+  prefix or a `|` inside a title or target no longer makes separate pointers
+  collapse into one; repeated links still merge and prose still deduplicates.
+
 ## 2026-10-29 · Lighter compaction, checked Goal completion, and folder browsing on the Web
 
 - **Clear old tool output first.** With `agents.defaults.microcompact` on,
