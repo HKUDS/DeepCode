@@ -25,6 +25,11 @@ deepcode --resume SESSION_ID
 Replace `SESSION_ID` with the ID shown for your conversation. Read the latest
 messages, then tell DeepCode what you want to do next.
 
+If the conversation is still working on a Turn, for example one you started in
+another terminal, the TUI shows what that Turn is doing now (the answer so far,
+the thinking or tool in progress) and follows it to the end. Steps the Turn
+finished before you joined are not repeated.
+
 ## Multiple clients, one Session
 
 You can start a task in the TUI and open the same conversation in Desktop or Web.

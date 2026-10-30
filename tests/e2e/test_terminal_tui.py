@@ -327,6 +327,26 @@ def test_chinese_text_fills_each_line_and_hangs_under_its_mark(deepcode):
         ]
 
 
+def test_resuming_mid_answer_shows_each_line_once_in_order(deepcode):
+    lines = _numbered_lines(24, "Resumed")
+    deepcode.model.on("answer slowly", _slow_answer(lines, pause=0.25))
+    first = deepcode.open_tui("--access", "read-only")
+    session = re.search(r"session ([0-9a-f]{8})", first.screen())[1]
+
+    first.submit("answer slowly")
+    first.wait_for(lines[6])
+    second = deepcode.open_tui("--access", "read-only", "--resume", session)
+    deepcode.wait_idle(timeout=30)
+    second.wait_for_screen(r"\n· [\d.]+s · ")  # the Turn's footer
+
+    # The lines streamed before it attached come first, then the rest; the
+    # end of the Turn adds no second copy.
+    screen = second.screen()
+    assert [screen.count(line) for line in lines] == [1] * len(lines), screen
+    positions = [screen.index(line) for line in lines]
+    assert positions == sorted(positions)
+
+
 def test_an_approval_waits_still_holds_typing_and_always_allow_is_narrow(deepcode):
     deepcode.model.on(
         "list the files",

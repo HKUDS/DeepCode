@@ -10,7 +10,13 @@ from cli.service_events import ServiceEventRenderer
 from cli.tui.renderer import EventRenderer
 from core.domain.event import DomainEvent
 from core.domain.item import Item, ItemKind, ItemStatus
-from core.events import AgentMessage, AgentMessageDelta, Event, TaskComplete
+from core.events import (
+    AgentMessage,
+    AgentMessageDelta,
+    Event,
+    TaskComplete,
+    TurnStarted,
+)
 
 THREAD = "thread-1"
 TURN_A = "turn_" + "a" * 26
@@ -335,3 +341,92 @@ def test_a_refused_tool_call_stays_refused_through_the_service() -> None:
         (f"call-{refused}", True),
         (f"call-{broken}", False),
     ]
+
+
+def _running_item(item_id, kind, payload, *, ordinal=1):
+    return Item(
+        id=item_id,
+        thread_id=THREAD,
+        turn_id=TURN_A,
+        ordinal=ordinal,
+        kind=kind,
+        status=ItemStatus.IN_PROGRESS,
+        summary="",
+        payload=payload,
+    )
+
+
+def test_joining_a_running_turn_shows_what_it_said_so_far_once() -> None:
+    """A client that attaches mid-answer, as `--resume` into a running Turn.
+
+    Its earlier text used to be skipped, so the live text started mid-answer
+    and the completion then printed the whole answer again.
+    """
+    renderer = ServiceEventRenderer()
+    so_far = "First line.\nSecond li"
+    answer = _running_item(
+        ITEM, ItemKind.ASSISTANT_MESSAGE, {"text": so_far, "messageId": "msg-1"}
+    )
+
+    joined = renderer.join(TURN_A, [answer])
+    live = renderer.convert_live(_live(len(so_far.encode()), "ne.\nThird line."))
+    done = _messages(
+        renderer,
+        [
+            _event(
+                5,
+                "item.updated",
+                _assistant(
+                    "completed",
+                    "First line.\nSecond line.\nThird line.",
+                    streaming=False,
+                ),
+                item_id=ITEM,
+            ),
+            _event(6, "turn.completed", {"turn": {"status": "completed"}}),
+        ],
+    )
+
+    assert isinstance(joined[0].msg, TurnStarted)
+    text = _render([event.msg for event in joined + live] + done)
+    for line in ("First line.", "Second line.", "Third line."):
+        assert text.count(line) == 1, text
+    assert text.index("First") < text.index("Second") < text.index("Third")
+
+
+def test_joining_shows_the_thinking_and_the_tool_in_progress() -> None:
+    renderer = ServiceEventRenderer()
+    thinking = _running_item(
+        ITEM,
+        ItemKind.REASONING_SUMMARY,
+        {"summaryText": "Weighing it", "traceText": "", "streaming": True},
+        ordinal=2,
+    )
+    tool = _running_item(
+        "item_" + "t" * 26,
+        ItemKind.TOOL_CALL,
+        {"callId": "call-1", "name": "bash", "detail": "pytest -q"},
+        ordinal=3,
+    )
+    finished = Item(
+        thread_id=THREAD,
+        turn_id=TURN_A,
+        ordinal=1,
+        kind=ItemKind.TOOL_CALL,
+        status=ItemStatus.COMPLETED,
+        summary="done",
+        payload={"callId": "call-0", "name": "read"},
+    )
+
+    shown = [event.msg for event in renderer.join(TURN_A, [finished, thinking, tool])]
+
+    assert [type(message).__name__ for message in shown] == [
+        "TurnStarted",
+        "AgentReasoningStarted",
+        "AgentReasoningDelta",
+        "ToolStarted",
+    ]
+    assert shown[3].call_id == "call-1"
+    # The thinking continues from what was shown.
+    more = renderer.convert_live(_live(len(b"Weighing it"), " up", channel="summary"))
+    assert [event.msg.delta for event in more] == [" up"]

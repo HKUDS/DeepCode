@@ -76,6 +76,9 @@ class ServiceThreadClient:
         self._event_sink = event_sink
         self._domain_task = None
         self._renderer = ServiceEventRenderer()
+        # What a running Turn had shown before this client selected its
+        # Session, rendered before anything newer.
+        self._joined = []
         self._domain_sink = None
         self._selection_generation = 0
         self._sequence = 0
@@ -215,11 +218,14 @@ class ServiceThreadClient:
         sequence = self.rpc.call("event/replay", {"threadId": thread.id, "limit": 1})[
             "headSequence"
         ]
-        renderer = self._fresh_renderer(thread.id)
+        renderer, joined = self._fresh_renderer(thread.id, shown=False)
         self.thread, self.project = thread, project
         self.execution_profile, self._security = execution, security
         self._sequence, self._renderer = sequence, renderer
+        self._joined = joined
         self._selection_generation += 1
+        if joined:
+            self._hand_to_pump(_REPLAY)  # wakes the pump to show it now
 
     def access_summary(self):
         override = self.thread.access_preset_override
@@ -495,20 +501,34 @@ class ServiceThreadClient:
                 resynced = True
             self._sequence = event.sequence
 
-    def _fresh_renderer(self, thread_id):
-        """A renderer that follows whatever Turn is running right now."""
+    def _fresh_renderer(self, thread_id, *, shown):
+        """A renderer following whatever Turn is running now, and what to show.
+
+        ``shown`` says the screen already has that Turn's text so far (a
+        resync). A newly selected Session has none of it, so the Turn as it
+        stands is returned to be shown first.
+        """
 
         renderer = ServiceEventRenderer()
         try:
             active = self.turns.executing_for_thread(thread_id)
-            if active:
-                renderer.seed(self.turns.read(active.id).items, turn_id=active.id)
+            items = self.turns.read(active.id).items if active else None
         except (RuntimeError, OSError):
-            logger.exception("could not read the running Turn while resyncing")
-        return renderer
+            logger.exception("could not read the running Turn")
+            return renderer, []
+        if items is None:
+            return renderer, []
+        if shown:
+            renderer.seed(items, turn_id=active.id)
+            return renderer, []
+        return renderer, renderer.join(active.id, items)
+
+    def _show_joined(self):
+        joined, self._joined = self._joined, []
+        self._emit(joined)
 
     def _resync(self, reason, *, announce=True):
-        self._renderer = self._fresh_renderer(self.thread.id)
+        self._renderer, _ = self._fresh_renderer(self.thread.id, shown=True)
         if announce:
             self._notify_connection(
                 f"The display was resynchronized with the service: {reason}."
@@ -521,6 +541,7 @@ class ServiceThreadClient:
     def drain_events(self):
         """Render what happened since the last call (for callers without the pump)."""
 
+        self._show_joined()
         through = None
         while True:
             params = {"threadId": self.thread.id, "after": self._sequence, "limit": 100}
@@ -538,6 +559,7 @@ class ServiceThreadClient:
                 self._emit(self._renderer.convert_streamed(items))
 
     async def drain_events_async(self):
+        self._show_joined()
         through = None
         generation = self._selection_generation
         while True:
@@ -608,6 +630,7 @@ class ServiceThreadClient:
     def _render_pushed(self, pushed):
         """Render pushes in order; returns the Turns whose stream missed a delta."""
 
+        self._show_joined()
         gaps = set()
         for value in pushed:
             if "eventId" in value:
