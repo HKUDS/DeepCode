@@ -225,13 +225,10 @@ class ServiceThreadClient:
         # renderer skips what the snapshot already showed.
         running = self._running_turn(thread.id)
         renderer = ServiceEventRenderer()
-        self.thread, self.project = thread, project
-        self.execution_profile, self._security = execution, security
-        self._sequence, self._renderer = sequence, renderer
-        self._joined, self._joined_approvals = [], []
+        joined, approvals = [], []
         if running is not None:
-            self._joined = renderer.join(running.turn.id, running.items)
-            self._joined_approvals = [
+            joined = renderer.join(running.turn.id, running.items)
+            approvals = [
                 DomainEvent(
                     sequence=max(1, sequence),
                     type="approval.requested",
@@ -242,8 +239,14 @@ class ServiceThreadClient:
                 for approval in running.approvals
                 if approval.status is ApprovalStatus.PENDING
             ]
-            self._hand_to_pump(_REPLAY)  # wakes the pump to show it now
+        # Everything that can fail is done: switch in one step.
+        self.thread, self.project = thread, project
+        self.execution_profile, self._security = execution, security
+        self._sequence, self._renderer = sequence, renderer
+        self._joined, self._joined_approvals = joined, approvals
         self._selection_generation += 1
+        if running is not None:
+            self._hand_to_pump(_REPLAY)  # wakes the pump to show it now
 
     def access_summary(self):
         override = self.thread.access_preset_override
