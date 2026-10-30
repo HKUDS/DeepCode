@@ -802,6 +802,47 @@ def test_tool_cards_name_paths_the_way_the_user_would_type_them():
     assert "/repo/core" not in rendered
 
 
+_TEST_RUN = "\n".join(
+    ["===== test session starts ====="]
+    + [f"tests/test_{index}.py ......" for index in range(60)]
+    + ["===== 360 passed in 1.2s ====="]
+)
+
+
+def _settled_elbow(mode: TranscriptMode) -> list[str]:
+    from core.events.protocol import summarize_result
+
+    output = io.StringIO()
+    renderer = EventRenderer(
+        Console(file=output, color_system=None, width=100),
+        transcript_mode=mode,
+    )
+    renderer.on_event(Event("1", ToolStarted("call", "bash", "pytest")))
+    renderer.on_event(
+        Event("2", ToolCompleted("call", "bash", False, summarize_result(_TEST_RUN)))
+    )
+    lines = output.getvalue().splitlines()
+    elbow = next(index for index, line in enumerate(lines) if "⎿" in line)
+    return lines[elbow:]
+
+
+def test_a_long_result_reads_by_both_ends_on_one_line():
+    shown = _settled_elbow(TranscriptMode.NORMAL)
+
+    assert len(shown) == 1
+    assert "test session starts" in shown[0]
+    assert "360 passed" in shown[0]
+
+
+def test_the_verbose_transcript_shows_what_came_back():
+    elbow, *below = _settled_elbow(TranscriptMode.VERBOSE)
+
+    assert "360 passed" in elbow
+    assert any("tests/test_0.py" in line for line in below)
+    assert any(line.strip() == "…" for line in below)
+    assert below[-1].strip() == "===== 360 passed in 1.2s ====="
+
+
 def test_elbow_names_its_card_only_while_calls_overlap():
     output = io.StringIO()
     renderer = EventRenderer(

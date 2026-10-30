@@ -11,7 +11,7 @@ and control the conversation. New to DeepCode? Follow
 |---|---|
 | `Esc` | With an empty prompt, interrupt the running turn: the turn stops and the conversation survives. With a completion menu open, close the menu. While you are typing a message, `Esc` does nothing, so your draft is kept. |
 | `Ctrl+C` | Clear the message you are typing. With an empty prompt, interrupt the running turn, like `Esc`. While a command such as `/compact` or `/goal wait` is running, stop waiting for that command. |
-| `Ctrl+O` | Cycle transcript detail: `normal → verbose → summary`. Show more or less detail about the work. |
+| `Ctrl+O` | Cycle transcript detail: `normal → verbose → summary`. `normal` shows each tool's result in one line (its first and last line); `verbose` also lists what came back and the model's full reasoning; `summary` keeps only the answers. Applies to what comes next. |
 | `Ctrl+D` | Close the client (same as `/exit`); running work continues in the background. |
 
 ## Slash commands

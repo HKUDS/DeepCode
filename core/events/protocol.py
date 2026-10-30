@@ -376,11 +376,17 @@ class ToolCompleted:
     type: str = field(default="tool_completed", init=False)
 
 
+# The line that stands for the middle a long result preview leaves out.
+RESULT_ELISION = "…"
+
+
 def summarize_result(result: Any, limit: int = 400) -> str:
     """A compact, single-block preview of a tool result for display.
 
-    Collapses to the leading ``limit`` characters with an elision marker.
-    Pure and defensive: any value becomes a string, never raises.
+    A result longer than ``limit`` characters keeps its start and its end,
+    joined by a line holding only ``…``: a command's summary or its error is
+    usually at the end. Pure and defensive: any value becomes a string, never
+    raises.
     """
     if isinstance(result, str):
         text = result
@@ -394,9 +400,19 @@ def summarize_result(result: Any, limit: int = 400) -> str:
     else:
         text = str(result)
     text = text.strip()
-    if len(text) > limit:
-        return text[:limit].rstrip() + " …"
-    return text
+    if len(text) <= limit:
+        return text
+    head_size = limit * 3 // 5
+    tail_size = limit - head_size
+    # Cut at line breaks where one is near, so neither end starts or stops
+    # mid-line.
+    head = text[:head_size]
+    if (cut := head.rfind("\n")) > head_size // 2:
+        head = head[:cut]
+    tail = text[-tail_size:]
+    if 0 <= (cut := tail.find("\n")) < tail_size // 2:
+        tail = tail[cut + 1 :]
+    return f"{head.rstrip()}\n{RESULT_ELISION}\n{tail.strip()}"
 
 
 @dataclass(frozen=True)

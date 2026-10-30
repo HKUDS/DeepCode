@@ -187,3 +187,16 @@ def test_a_structured_tool_result_preview_reads_as_json():
     preview = summarize_result({"goal": {"status": "active"}, "canUpdate": True})
 
     assert preview == '{"goal": {"status": "active"}, "canUpdate": true}'
+
+
+def test_a_long_result_preview_keeps_both_ends_at_line_breaks():
+    lines = [f"line {index:03d} " + "x" * 20 for index in range(100)]
+    preview = summarize_result("\n".join(lines), limit=400)
+
+    head, elision, tail = preview.partition("\n…\n")
+    assert elision
+    assert head.startswith("line 000 ")
+    assert tail.endswith("line 099 " + "x" * 20)
+    # Neither end is cut mid-line.
+    assert all(line in lines for line in head.splitlines() + tail.splitlines())
+    assert len(preview) <= 400 + len("\n…\n")

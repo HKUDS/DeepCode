@@ -42,7 +42,7 @@ from cli.transcript import TranscriptMode
 from cli.tui import animation, theme
 from cli.tui.markdown_stream import MarkdownStream
 from cli.tui.text import fit_head, fit_tail, workspace_path
-from core.events.protocol import Event
+from core.events.protocol import RESULT_ELISION, Event
 from core.reasoning import ReasoningAvailability, ReasoningChannel
 
 
@@ -188,6 +188,29 @@ def _duration_label(duration_ms: int | None) -> str | None:
         return f"{seconds}s"
     minutes, remainder = divmod(seconds, 60)
     return f"{minutes}m {remainder:02d}s"
+
+
+def _result_lines(preview: str) -> list[str]:
+    """A result preview's lines with content, without its elision mark."""
+    return [
+        line.strip()
+        for line in preview.splitlines()
+        if line.strip() and line.strip() != RESULT_ELISION
+    ]
+
+
+def _fit_ends(first: str, last: str, width: int) -> str:
+    """``first … last`` within ``width`` cells, or ``first`` alone."""
+    if not last:
+        return fit_head(first, width)
+    joined = f"{first} {RESULT_ELISION} {last}"
+    if cell_len(joined) <= width:
+        return joined
+    # Each end gets half; the last line keeps its start, where its point is.
+    half = max(1, (width - 3) // 2)
+    return (
+        f"{fit_head(first, half)} {RESULT_ELISION} {fit_head(last, width - half - 3)}"
+    )
 
 
 def _refusal_reason(line: str) -> str:
@@ -928,7 +951,11 @@ class EventRenderer:
             if elapsed >= _DURATION_FLOOR_SECONDS:
                 parts.append(_elapsed_label(elapsed))
         preview = getattr(msg, "result_preview", "") or ""
-        first_line = preview.splitlines()[0].strip() if preview else ""
+        lines = _result_lines(preview)
+        first_line = lines[0] if lines else ""
+        # A result's news is often its last line (a test summary, the error
+        # under a traceback), so a longer one shows both ends.
+        last_line = lines[-1] if len(lines) > 1 else ""
 
         if msg.denied and _USER_DENIAL in first_line:
             # The user said no: the approval's reason is on screen above and
@@ -945,7 +972,7 @@ class EventRenderer:
             # wording the model reads.
             head = f"{theme.DONE_DECLINED} {msg.name} declined"
             mark = f"[{theme.APPROVAL_STYLE}]{escape(head)}[/]"
-            first_line = _refusal_reason(first_line)
+            first_line, last_line = _refusal_reason(first_line), ""
         elif msg.is_error:
             head = f"{theme.DONE_ERR} {msg.name} failed"
             mark = f"[{theme.TOOL_ERR_STYLE}]{escape(head)}[/]"
@@ -962,12 +989,23 @@ class EventRenderer:
         if first_line:
             used = cell_len(theme.TOOL_RESULT_ELBOW) + 1 + cell_len(head) + 3
             budget = max(_ELBOW_MIN_CELLS, self.console.width - used - 1)
-            snippet = fit_head(first_line, budget)
+            snippet = _fit_ends(first_line, last_line, budget)
             # A dot separates two facts; a space separates a mark from the
             # one fact it carries ("✓ total 0", but "✗ bash failed · …").
             separator = " · " if (rendered or msg.is_error) else " "
             mark += f"{separator}[{theme.TOOL_DETAIL_STYLE}]{escape(snippet)}[/]"
         self.console.print(f"{theme.TOOL_RESULT_ELBOW} {mark}", highlight=False)
+        if self.transcript_mode is TranscriptMode.VERBOSE and len(lines) > 1:
+            # Verbose shows what came back, as far as the preview holds it.
+            indent = " " * (cell_len(theme.TOOL_RESULT_ELBOW) + 1)
+            width = max(_ELBOW_MIN_CELLS, self.console.width - len(indent) - 1)
+            for line in preview.splitlines():
+                if line.strip():
+                    self.console.print(
+                        f"{indent}[{theme.TOOL_DETAIL_STYLE}]"
+                        f"{escape(fit_head(line.rstrip(), width))}[/]",
+                        highlight=False,
+                    )
         self._gap_pending = True
 
     def _on_plan_updated(self, msg) -> None:
