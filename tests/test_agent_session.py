@@ -506,6 +506,8 @@ async def test_nonzero_bash_exit_emits_failed_tool_completion(tmp_path):
     )
     assert completed.name == "bash"
     assert completed.is_error is True
+    # It ran and failed; nothing refused it.
+    assert completed.denied is False
     assert completed.result_preview.startswith("[exit 9]")
     tool_message = next(
         message for message in session.history if message.get("role") == "tool"
@@ -636,6 +638,8 @@ async def test_denied_tool_marks_completed_as_error():
 
     completed = [e.msg for e in events if isinstance(e.msg, ToolCompleted)][0]
     assert completed.is_error is True
+    # Refused, not broken: it never ran.
+    assert completed.denied is True
 
 
 @pytest.mark.asyncio

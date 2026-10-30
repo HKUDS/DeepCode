@@ -242,7 +242,9 @@ class TurnEventProjector:
             if item_id is not None:
                 self._update_item(
                     item_id,
-                    status=ItemStatus.FAILED
+                    status=ItemStatus.DECLINED
+                    if message.denied
+                    else ItemStatus.FAILED
                     if message.is_error
                     else ItemStatus.COMPLETED,
                     payload_update={

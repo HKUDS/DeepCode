@@ -88,6 +88,7 @@ class ScriptedSession:
                     "write",
                     not approved,
                     "written" if approved else "denied",
+                    denied=not approved,
                 ),
             )
         yield Event("4", AgentMessageDelta("do"))
@@ -1231,6 +1232,27 @@ def test_approval_round_trip_resumes_the_same_turn(tmp_path: Path) -> None:
             item for item in completed.items if item.kind is ItemKind.FILE_CHANGE
         )
         assert tool.status is ItemStatus.COMPLETED
+    finally:
+        application.close()
+
+
+def test_a_call_the_user_denies_is_declined_not_failed(tmp_path: Path) -> None:
+    factory = ScriptedFactory(approval=True)
+    application, thread_id = _application(tmp_path, factory)
+    try:
+        started = application.turns.start(thread_id, prompt="Write it")
+        waiting = _wait_for(application, started.turn.id, TurnStatus.WAITING_APPROVAL)
+
+        application.approvals.respond(
+            waiting.approvals[0].id, decision=ApprovalStatus.DENIED
+        )
+        completed = _wait_for(application, started.turn.id, TurnStatus.COMPLETED)
+
+        tool = next(
+            item for item in completed.items if item.kind is ItemKind.FILE_CHANGE
+        )
+        assert tool.status is ItemStatus.DECLINED
+        assert tool.payload["isError"] is True
     finally:
         application.close()
 

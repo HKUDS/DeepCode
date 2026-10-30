@@ -368,6 +368,9 @@ class ToolCompleted:
     # frontend can show "what came back" on an expandable card without the
     # full — possibly huge — payload. Empty when the result was empty.
     result_preview: str = ""
+    # The call never ran: a permission rule, a hook or the user said no. It
+    # is an error for the model, but no failure of the tool.
+    denied: bool = False
     type: str = field(default="tool_completed", init=False)
 
 

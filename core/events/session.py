@@ -357,7 +357,12 @@ class _EventEmittingHook(AgentHook):
             )
 
     async def after_iteration(self, context: AgentHookContext) -> None:
-        for call, result in zip(context.tool_calls, context.tool_results):
+        # The runner reports one event per call, in order; "denied" means the
+        # call was refused before it ran.
+        denied = [event.get("status") == "denied" for event in context.tool_events]
+        for index, (call, result) in enumerate(
+            zip(context.tool_calls, context.tool_results)
+        ):
             is_error = _is_error_result(result)
             if call.name.lower() == "update_plan" and not is_error:
                 try:
@@ -372,6 +377,7 @@ class _EventEmittingHook(AgentHook):
                     name=call.name,
                     is_error=is_error,
                     result_preview=summarize_result(result),
+                    denied=index < len(denied) and denied[index],
                 )
             )
 
