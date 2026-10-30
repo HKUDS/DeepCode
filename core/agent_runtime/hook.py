@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, NotRequired, TypedDict
+from typing import Any, TypedDict
 
 from loguru import logger
 
@@ -11,16 +11,19 @@ from core.providers.base import LLMResponse, ToolCallRequest
 from core.reasoning import ReasoningChannel
 
 
-class ToolEvent(TypedDict):
-    """What the runner reports for one tool call."""
-
+class _ToolEventBase(TypedDict):
     name: str
     # "ok", "error", "denied" (refused before it ran) or "timeout".
     status: str
     detail: str
+
+
+class ToolEvent(_ToolEventBase, total=False):
+    """What the runner reports for one tool call."""
+
     # Where hook context begins in the result, when there is any: a character
     # offset in text, the index of its first block in a list of content blocks.
-    hook_context_at: NotRequired[int]
+    hook_context_at: int
 
 
 @dataclass(slots=True)

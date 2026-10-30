@@ -21,7 +21,15 @@ from cli.tui.commands import route_title
 from cli.tui.renderer import EventRenderer
 from core.domain.approval import ApprovalStatus
 from core.domain.event import DomainEvent
-from core.events import Event, TaskComplete, ToolCompleted, ToolStarted, TurnStarted
+from core.events import (
+    Event,
+    TaskComplete,
+    ToolActivity,
+    ToolActivityKind,
+    ToolCompleted,
+    ToolStarted,
+    TurnStarted,
+)
 
 THREAD = "thread-1"
 TURN = "turn_" + "a" * 26
@@ -781,11 +789,53 @@ def test_ctrl_o_says_which_transcript_mode_it_chose_while_work_runs(
     monkeypatch.setattr(renderer_module, "monotonic", lambda: clock[0])
     renderer = EventRenderer(Console(file=io.StringIO(), color_system=None, width=120))
     renderer.on_event(Event("1", TurnStarted()))
+    long_command = "pytest -q " + "tests/test_module.py " * 6
+    renderer.on_event(
+        Event(
+            "2",
+            ToolStarted(
+                "call-1",
+                "bash",
+                activity=ToolActivity(ToolActivityKind.RUN, "Run", long_command),
+            ),
+        )
+    )
 
     renderer.cycle_transcript_mode()
-    assert "Transcript: verbose from here on" in renderer.status_line()
+    notice = "Transcript: verbose from here on"
+    # It stands in for the detail, so a normal-width line shows it.
+    assert notice in renderer.status_line()[:80]
     fragments = "".join(text for _style, text in renderer.status_fragments())
-    assert "Transcript: verbose from here on" in fragments
+    assert notice in fragments[:80]
 
     clock[0] = 14.0
     assert "Transcript" not in renderer.status_line()
+    fragments = "".join(text for _style, text in renderer.status_fragments())
+    assert "Transcript" not in fragments
+
+
+def test_ctrl_o_answers_during_an_approval_and_clears_itself(monkeypatch) -> None:
+    clock = [10.0]
+    monkeypatch.setattr(renderer_module, "monotonic", lambda: clock[0])
+    renderer = EventRenderer(Console(file=io.StringIO(), color_system=None, width=120))
+    renderer.on_event(Event("1", TurnStarted()))
+    renderer.approval_requested("approval-1", "y allow once · n deny")
+
+    renderer.cycle_transcript_mode()
+    assert "Transcript: verbose from here on" in renderer.status_line()
+    # Nothing else moves while an approval waits; the notice keeps the line
+    # repainting until it has gone.
+    assert renderer.is_working()
+
+    clock[0] = 14.0
+    assert "y allow once" in renderer.status_line()
+    assert not renderer.is_working()
+
+
+def test_ctrl_o_while_idle_leaves_the_idle_line_to_say_the_mode() -> None:
+    renderer = EventRenderer(Console(file=io.StringIO(), color_system=None, width=120))
+
+    renderer.cycle_transcript_mode()
+
+    assert "Transcript: verbose ·" in renderer.status_line()
+    assert "from here on" not in renderer.status_line()

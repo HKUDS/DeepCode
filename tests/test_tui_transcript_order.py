@@ -292,6 +292,20 @@ def test_hook_context_never_turns_an_empty_result_into_none():
     assert "noop" in composed and composed.endswith("[hook] note")
 
 
+def test_hook_context_keeps_an_empty_error_an_error():
+    from core.agent_runtime.runner import AgentRunner
+    from core.agent_runtime.tools.base import ToolResult
+
+    composed = AgentRunner._compose_hook_context(
+        ToolResult("", is_error=True),
+        ["note"],
+        {"name": "mcp", "status": "error", "detail": ""},
+    )
+
+    assert isinstance(composed, ToolResult) and composed.is_error
+    assert composed.endswith("[hook] note")
+
+
 def test_a_rebuilt_preview_finds_hook_context_by_its_mark():
     from core.agent_runtime.tools.model_notes import (
         before_hook_context,

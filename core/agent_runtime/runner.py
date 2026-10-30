@@ -1577,10 +1577,14 @@ class AgentRunner:
         """
         if not contexts:
             return result
-        # What the model would read without the context: never "None".
-        result = ensure_nonempty_tool_result(
+        # What the model would read without the context: never "None". An
+        # empty ToolResult keeps its wrapper, and with it is_error.
+        filled = ensure_nonempty_tool_result(
             event["name"], encode_structured_tool_result(result)
         )
+        if isinstance(result, ToolResult) and not isinstance(filled, ToolResult):
+            filled = result.with_content(filled)
+        result = filled
         if isinstance(result, dict):  # one content block
             result = [result]
         if isinstance(result, list):

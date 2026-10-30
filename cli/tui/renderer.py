@@ -62,8 +62,8 @@ _QUEUED_DETAIL = "waiting to start"  # until the app learns why
 # How the kernel reports a call the user denied at its approval prompt.
 _USER_DENIAL = "permission denied: user rejected"
 APPROVAL_STATUS = "Waiting for your approval"
-# How long the status line says which transcript mode Ctrl+O chose, while a
-# Turn's activity otherwise fills it.
+# How long the status line says which transcript mode Ctrl+O chose, in place
+# of its detail, while a Turn's activity or an approval otherwise fills it.
 _MODE_NOTICE_SECONDS = 3.0
 
 
@@ -395,10 +395,10 @@ class EventRenderer:
 
     def _mode_notice(self) -> str | None:
         """The mode Ctrl+O just chose, for a few seconds after it."""
-        if self._mode_chosen_at is None:
-            return None
-        if monotonic() - self._mode_chosen_at > _MODE_NOTICE_SECONDS:
-            self._mode_chosen_at = None
+        if (
+            self._mode_chosen_at is None
+            or monotonic() - self._mode_chosen_at > _MODE_NOTICE_SECONDS
+        ):
             return None
         return f"Transcript: {self.transcript_mode.value} from here on"
 
@@ -520,6 +520,8 @@ class EventRenderer:
         second to decide whether the prompt needs an animation repaint at
         all. An idle TUI must cost nothing.
         """
+        if self._mode_notice() is not None:
+            return True  # repaint until the notice is gone
         if self._approvals:
             return False  # waiting on the user: nothing moves
         return bool(
@@ -552,17 +554,17 @@ class EventRenderer:
     def status_line(self) -> str:
         """The status as plain text (no motion) — pipes, tests, fallbacks."""
         hint = self.approval_hint
+        notice = self._mode_notice()
         if hint is not None:
-            return f" ◆ {APPROVAL_STATUS} · {hint} "
+            # The prompt still lists the keys while the notice stands in.
+            return f" ◆ {APPROVAL_STATUS} · {notice or hint} "
         activity = self._activity()
         if activity is None:
             return f" {self._idle_status()} "
         label, elapsed, detail = activity
         parts = [label, f"{int(elapsed)}s"]
-        if detail:
-            parts.append(detail)
-        if notice := self._mode_notice():
-            parts.append(notice)
+        if notice or detail:
+            parts.append(notice or detail)
         return f" {' · '.join(parts)} "
 
     def preview_lines(self) -> list[str]:
@@ -599,11 +601,15 @@ class EventRenderer:
         redrawing the transcript.
         """
         hint = self.approval_hint
+        notice = self._mode_notice()
         if hint is not None:
             # Still, no spinner and no clock: the Turn waits for the user.
+            # The prompt still lists the keys while the notice stands in.
             return [
                 (theme.STATUS_APPROVAL_PTK, f" ◆ {APPROVAL_STATUS} "),
-                (theme.STATUS_DETAIL_PTK, f"· {hint} "),
+                (theme.STATUS_LABEL_PTK, f"· {notice} ")
+                if notice
+                else (theme.STATUS_DETAIL_PTK, f"· {hint} "),
             ]
         activity = self._activity()
         if activity is None:
@@ -623,12 +629,12 @@ class EventRenderer:
                 glare_style=theme.STATUS_GLARE_PTK,
             )
         )
-        tail = f" · {int(elapsed)}s"
-        if detail:
-            tail += f" · {detail}"
-        fragments.append((theme.STATUS_DETAIL_PTK, tail))
-        if notice := self._mode_notice():
+        fragments.append((theme.STATUS_DETAIL_PTK, f" · {int(elapsed)}s"))
+        # The notice stands in for the detail, so it fits a normal width.
+        if notice:
             fragments.append((theme.STATUS_LABEL_PTK, f" · {notice}"))
+        elif detail:
+            fragments.append((theme.STATUS_DETAIL_PTK, f" · {detail}"))
         fragments.append((theme.STATUS_DETAIL_PTK, " "))
         return fragments
 
