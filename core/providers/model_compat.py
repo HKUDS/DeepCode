@@ -22,6 +22,7 @@ this layer sits on top and folds in the per-*model* behavior.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -136,8 +137,15 @@ def resolve_model_compat(
     semantic_effort = normalize_effort(reasoning_effort)
     reasoning_active = semantic_effort not in {None, "auto", "none"}
 
-    # Temperature: reasoning models reject it while reasoning is active.
-    include_temperature = not (reasoning_active and is_reasoning_model(resolved_name))
+    # Older OpenAI reasoning models reject temperature even at the default effort.
+    bare_name = _bare_model_name(resolved_name.lower())
+    always_reasoning = bool(
+        re.match(r"^o[134](?:$|-)", bare_name)
+        or re.match(r"^gpt-5(?:$|-(?!chat(?:-|$)))", bare_name)
+    )
+    include_temperature = not (
+        always_reasoning or (reasoning_active and is_reasoning_model(resolved_name))
+    )
 
     # Token-limit field is a provider-level capability.
     token_limit_field = (

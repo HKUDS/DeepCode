@@ -5,6 +5,12 @@ Released versions are named in the entry title; the version on PyPI is
 [deepcode-hku](https://pypi.org/project/deepcode-hku/). 中文版见
 [CHANGELOG_ZH.md](CHANGELOG_ZH.md).
 
+## 2026-10-30 · Reasoning model request compatibility
+
+- **Fix Auto reasoning requests.** Older GPT-5 and o-series reasoning
+  models no longer receive an unsupported temperature by default. Explicit
+  compatibility overrides still apply.
+
 ## 2026-10-29 · Lighter compaction, checked Goal completion, and folder browsing on the Web
 
 - **Clear old tool output first.** With `agents.defaults.microcompact` on,
