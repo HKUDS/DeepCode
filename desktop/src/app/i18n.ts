@@ -253,6 +253,13 @@ const ZH_CN: Record<string, string> = {
   "goal.objectiveHint":
     "目标编辑保持同一 Goal 身份,并到达活跃的 Turn。",
   "goal.outcome": "目标结果",
+  "goal.reached.complete": "目标已完成",
+  "goal.reached.blocked": "目标受阻",
+  "goal.evidence": "依据",
+  "goal.decidedBy.user": "由你决定",
+  "goal.decidedBy.agent": "由智能体决定",
+  "goal.decidedBy.runtime": "由 DeepCode 决定",
+  "goal.decidedBy.migration": "沿用自旧版本",
   "goal.tokenBudget": "Token 预算",
   "goal.tokenBudgetOptional": "可选",
   "goal.noLimit": "无限制",

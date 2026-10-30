@@ -1,4 +1,6 @@
-import type { Goal, Turn } from "../../generated/app-server";
+import type { TFunction } from "i18next";
+
+import type { Goal, GoalOutcome, Turn } from "../../generated/app-server";
 
 export type GoalPresentationStatus =
   | "working"
@@ -65,4 +67,30 @@ function isTerminal(status: Turn["status"]): boolean {
     status === "failed" ||
     status === "interrupted"
   );
+}
+
+/** Who decided a Goal's outcome, as the user reads it. */
+export function outcomeDecider(
+  source: GoalOutcome["source"],
+  t: TFunction,
+): string {
+  switch (source) {
+    case "user":
+      return t("goal.decidedBy.user", "Decided by you");
+    case "agent":
+      return t("goal.decidedBy.agent", "Decided by the agent");
+    case "runtime":
+      return t("goal.decidedBy.runtime", "Decided by DeepCode");
+    case "migration":
+      return t("goal.decidedBy.migration", "Carried over from an earlier version");
+  }
+}
+
+export function formatOutcomeTime(value: string): string {
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) return value;
+  return timestamp.toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
 }

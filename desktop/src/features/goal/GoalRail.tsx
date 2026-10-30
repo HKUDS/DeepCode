@@ -21,7 +21,11 @@ import type {
   Turn,
 } from "../../generated/app-server";
 import type { GoalDefinitionInput } from "../../app/useWorkspaceController";
-import { deriveGoalPresentation } from "./goalPresentation";
+import {
+  deriveGoalPresentation,
+  formatOutcomeTime,
+  outcomeDecider,
+} from "./goalPresentation";
 import styles from "./GoalRail.module.css";
 
 interface GoalRailProps {
@@ -249,7 +253,7 @@ export function GoalRail({
                         : t("goal.blockedOutcome", "Blocked outcome")}
                     </strong>
                     <small>
-                      {outcome.source}
+                      {outcomeDecider(outcome.source, t)}
                       {" · "}
                       {formatOutcomeTime(outcome.decidedAt)}
                     </small>
@@ -437,15 +441,6 @@ function formatDuration(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m`;
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
-}
-
-function formatOutcomeTime(value: string): string {
-  const timestamp = new Date(value);
-  if (Number.isNaN(timestamp.getTime())) return value;
-  return timestamp.toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
 }
 
 function shortId(value: string): string {

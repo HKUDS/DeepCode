@@ -2184,14 +2184,17 @@ describe("desktop command center", () => {
 
     await screen.findByText("Complete");
     fireEvent.click(screen.getByText("Ship version one").closest("button")!);
+    const rail = screen.getByRole("region", { name: "Goal outcome" });
     expect(
-      screen.getByText(
+      within(rail).getByText(
         "The requested change is implemented and focused tests pass.",
       ),
     ).toBeTruthy();
-    expect(screen.getByText(/Deciding Turn/)).toBeTruthy();
+    expect(within(rail).getByText(/Deciding Turn/)).toBeTruthy();
+    // The deciding Turn shows the outcome in the conversation too.
+    expect(screen.getByRole("region", { name: "Goal complete" })).toBeTruthy();
     fireEvent.click(
-      screen.getByRole("button", { name: "Focused tests passed" }),
+      within(rail).getByRole("button", { name: "Focused tests passed" }),
     );
     expect(
       await screen.findByRole("heading", { name: "Focused tests passed" }),

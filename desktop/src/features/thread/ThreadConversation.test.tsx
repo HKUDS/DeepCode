@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { initI18n } from "../../app/i18n";
-import type { Item, Turn } from "../../generated/app-server";
+import type { GoalOutcome, Item, Turn } from "../../generated/app-server";
 import { ThreadConversation } from "./ThreadConversation";
 
 initI18n();
@@ -40,13 +40,18 @@ function item(
   };
 }
 
-function conversation(turns: Turn[], items: Item[]) {
+function conversation(
+  turns: Turn[],
+  items: Item[],
+  goalOutcome: GoalOutcome | null = null,
+) {
   return (
     <ThreadConversation
       turns={turns}
       items={items}
       approvals={[]}
       plansByTurnId={{}}
+      goalOutcome={goalOutcome}
       selectedItemId={null}
       transcriptMode="normal"
       busy={false}
@@ -279,5 +284,35 @@ describe("ThreadConversation", () => {
 
     userScrollsTo(viewport, 2000 - VIEW_HEIGHT);
     expect(screen.getByText("Steps").closest("details")?.open).toBe(false);
+  });
+
+  it("shows a Goal's outcome with the Turn that decided it, and only there", () => {
+    const later: Turn = { ...turn, id: "turn-2", ordinal: 2, status: "completed" };
+    const reply = (id: string, turnId: string, text: string) => ({
+      ...item(id, 2, text),
+      turnId,
+      payload: { text, phase: "final_answer" },
+    });
+    render(
+      conversation(
+        [{ ...turn, status: "completed" }, later],
+        [reply("reply-1", turn.id, "First done"), reply("reply-2", later.id, "Second done")],
+        {
+          status: "complete",
+          reason: "All checks pass.",
+          source: "agent",
+          decidedByTurnId: later.id,
+          decidedAt: "2026-07-23T01:10:00Z",
+          evidenceRefs: [],
+        },
+      ),
+    );
+
+    const [card, ...others] = screen.getAllByRole("region", { name: "Goal complete" });
+    expect(others).toHaveLength(0);
+    expect(card.textContent).toContain("All checks pass.");
+    const deciding = card.parentElement?.textContent ?? "";
+    expect(deciding).toContain("Second done");
+    expect(deciding).not.toContain("First done");
   });
 });

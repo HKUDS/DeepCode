@@ -26,6 +26,7 @@ import { useTranslation } from "react-i18next";
 import type {
   Approval,
   ApprovalDecision,
+  GoalOutcome,
   Item,
 } from "../../generated/app-server";
 import type { DesktopInspectorTab } from "../../app/useDesktopUi";
@@ -42,6 +43,7 @@ import {
   type TimelineWorkGroup,
   type WorkTally,
 } from "./conversationModel";
+import { GoalOutcomeCard } from "./GoalOutcomeCard";
 import { MarkdownContent } from "./MarkdownContent";
 import { ReasoningBlock } from "./ReasoningBlock";
 import type { TranscriptMode } from "./transcriptMode";
@@ -54,6 +56,8 @@ interface TurnBlockProps {
   transcriptMode: TranscriptMode;
   /** Whether the conversation view follows its end (see ThreadConversation). */
   following: boolean;
+  /** The Goal outcome this Turn decided, if it decided one. */
+  goalOutcome: GoalOutcome | null;
   busy: boolean;
   onSelectItem(itemId: string): void;
   onOpenInspector(tab?: DesktopInspectorTab): void;
@@ -617,6 +621,7 @@ export function TurnBlock({
   onCancelQueuedTurn,
   transcriptMode,
   following,
+  goalOutcome,
 }: TurnBlockProps) {
   const { t } = useTranslation();
   const queued = group.turn?.status === "queued";
@@ -782,6 +787,15 @@ export function TurnBlock({
       </div>
 
       {errorMessage ? <p className={styles.runError}>{errorMessage}</p> : null}
+      {goalOutcome ? (
+        <GoalOutcomeCard
+          outcome={goalOutcome}
+          onSelectEvidence={(itemId) => {
+            onSelectItem(itemId);
+            onOpenInspector("details");
+          }}
+        />
+      ) : null}
       {failed || lastExecutionItem ? (
         <div className={styles.runActions}>
           {failed && turnId ? (

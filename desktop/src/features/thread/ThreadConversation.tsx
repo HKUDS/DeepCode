@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next";
 import type {
   Approval,
   ApprovalDecision,
+  GoalOutcome,
   Item,
   Turn,
 } from "../../generated/app-server";
@@ -28,6 +29,8 @@ interface ThreadConversationProps {
   items: Item[];
   approvals: Approval[];
   plansByTurnId: Record<string, TurnPlanState>;
+  /** The Session Goal's outcome, shown with the Turn that decided it. */
+  goalOutcome: GoalOutcome | null;
   selectedItemId: string | null;
   transcriptMode: TranscriptMode;
   busy: boolean;
@@ -47,6 +50,7 @@ export function ThreadConversation({
   items,
   approvals,
   plansByTurnId,
+  goalOutcome,
   selectedItemId,
   transcriptMode,
   busy,
@@ -214,6 +218,11 @@ export function ThreadConversation({
               selectedItemId={selectedItemId}
               transcriptMode={transcriptMode}
               following={!showJumpToLatest}
+              goalOutcome={
+                goalOutcome && goalOutcome.decidedByTurnId === group.turn?.id
+                  ? goalOutcome
+                  : null
+              }
               busy={busy}
               onSelectItem={onSelectItem}
               onOpenInspector={onOpenInspector}

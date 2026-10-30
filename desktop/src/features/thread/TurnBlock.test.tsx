@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { initI18n } from "../../app/i18n";
-import type { Item, Turn } from "../../generated/app-server";
+import type { GoalOutcome, Item, Turn } from "../../generated/app-server";
 import { buildConversationTurns } from "./conversationModel";
 import type { TranscriptMode } from "./transcriptMode";
 import { TurnBlock } from "./TurnBlock";
@@ -48,6 +48,9 @@ interface TurnView {
   status?: Turn["status"];
   selectedItemId?: string | null;
   following?: boolean;
+  goalOutcome?: GoalOutcome | null;
+  onSelectItem?: (itemId: string) => void;
+  onOpenInspector?: (tab?: string) => void;
 }
 
 function turnBlock(items: Item[], view: TurnView = {}) {
@@ -62,9 +65,10 @@ function turnBlock(items: Item[], view: TurnView = {}) {
       selectedItemId={view.selectedItemId ?? null}
       transcriptMode={view.transcriptMode ?? "normal"}
       following={view.following ?? true}
+      goalOutcome={view.goalOutcome ?? null}
       busy={false}
-      onSelectItem={vi.fn()}
-      onOpenInspector={vi.fn()}
+      onSelectItem={view.onSelectItem ?? vi.fn()}
+      onOpenInspector={view.onOpenInspector ?? vi.fn()}
       onRespondToApproval={vi.fn()}
       onRetryTurn={vi.fn()}
       onCancelQueuedTurn={vi.fn()}
@@ -310,6 +314,39 @@ describe("TurnBlock", () => {
     expect(screen.getByText("Edited parse.py")).toBeTruthy();
     expect(screen.queryByText("npm run lint")).toBeNull();
     expect(screen.queryByText("Commands 2")).toBeNull();
+  });
+
+  it("ends the deciding Turn with the Goal's outcome and its evidence", () => {
+    const onSelectItem = vi.fn();
+    const onOpenInspector = vi.fn();
+    renderTurn([run("test", 1, "npm test")], {
+      onSelectItem,
+      onOpenInspector,
+      goalOutcome: {
+        status: "blocked",
+        reason: "The API key is missing.",
+        source: "runtime",
+        decidedByTurnId: turn.id,
+        decidedAt: "2026-07-23T01:10:00Z",
+        evidenceRefs: [
+          {
+            itemId: "test",
+            turnId: turn.id,
+            kind: "command_execution",
+            status: "failed",
+            summary: "npm test failed: missing key",
+          },
+        ],
+      },
+    });
+
+    const card = screen.getByRole("region", { name: "Goal blocked" });
+    expect(card.textContent).toContain("Decided by DeepCode");
+    expect(card.textContent).toContain("The API key is missing.");
+
+    fireEvent.click(screen.getByRole("button", { name: /npm test failed/ }));
+    expect(onSelectItem).toHaveBeenCalledWith("test");
+    expect(onOpenInspector).toHaveBeenCalledWith("details");
   });
 
   const instruction = "Continue working toward the active Thread Goal.";
