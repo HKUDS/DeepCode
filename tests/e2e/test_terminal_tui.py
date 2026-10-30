@@ -6,8 +6,9 @@ import json
 import re
 import time
 
-from rich.cells import cell_len
+from rich.text import Text as RichText
 
+from cli.tui.text import wrap_text
 from tests.e2e.fake_model import Pause, Reasoning, Reply, Text, ToolCall
 from tests.e2e.terminal import COLUMNS, CTRL_C, CTRL_O, ESC
 
@@ -312,15 +313,14 @@ def test_chinese_text_fills_each_line_and_hangs_under_its_mark(deepcode):
     thought = lines[card + 1 : lines.index("", card)]
     item = next(i for i, line in enumerate(lines) if line.startswith(" • 先读取"))
     answer = lines[item : lines.index("", item)]
-    for block, mark, hang in ((thought, "  ", "  "), (answer, " • ", "   ")):
-        assert len(block) >= 2, lines
-        assert block[0].startswith(mark) and block[0][len(mark)] != " "
-        assert all(row.startswith(hang) and row[len(hang)] != " " for row in block[1:])
-        # Full lines: only a word that did not fit is left for the next one.
-        assert all(cell_len(row) > COLUMNS - 14 for row in block[:-1]), block
-        text = "".join(row.strip() for row in block).replace(" ", "")
-        assert text.endswith((sentence * 4).replace(" ", ""))
-        assert "".join(block).count("relic_offer") == 4  # never split
+    for block, mark in ((thought, "  "), (answer, " • ")):
+        # Exactly the wrapped rows, the first after its mark, the rest under it.
+        rows = wrap_text(RichText(sentence * 4), COLUMNS - len(mark))
+        assert len(rows) >= 2
+        hang = " " * len(mark)
+        assert block == [
+            (mark if index == 0 else hang) + row.plain for index, row in enumerate(rows)
+        ]
 
 
 def test_an_approval_waits_still_holds_typing_and_always_allow_is_narrow(deepcode):

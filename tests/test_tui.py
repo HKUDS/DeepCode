@@ -510,6 +510,36 @@ def test_verbose_reasoning_is_indented_under_its_card():
     ]
 
 
+def test_the_reasoning_preview_wraps_under_its_card_and_keeps_words():
+    output = io.StringIO()
+    renderer = EventRenderer(Console(file=output, color_system=None, width=40))
+    thought = "**先读取** main.js，确认 `relic_offer` 在哪里触发，再决定埋点的位置。"
+    renderer.on_event(Event("1", AgentReasoningStarted("r1", effort="high")))
+    renderer.on_event(
+        Event("2", AgentReasoningDelta("r1", ReasoningChannel.SUMMARY, thought))
+    )
+    renderer.on_event(
+        Event(
+            "3",
+            AgentReasoningCompleted(
+                "r1",
+                summary_text=thought,
+                trace_text="",
+                availability=ReasoningAvailability.AVAILABLE,
+                effort="high",
+                duration_ms=2200,
+            ),
+        )
+    )
+
+    lines = [line.rstrip() for line in output.getvalue().splitlines()]
+    card = next(i for i, line in enumerate(lines) if "Thought for 2s" in line)
+    assert lines[card + 1 :] == [
+        "  先读取 main.js，确认 relic_offer 在哪",
+        "  里触发，再决定埋点的位置。",
+    ]
+
+
 def test_cli_status_line_tracks_live_reasoning_without_printing_deltas():
     output = io.StringIO()
     renderer = EventRenderer(Console(file=output, color_system=None, width=120))
@@ -802,6 +832,21 @@ def test_cjk_punctuation_never_starts_or_ends_a_line_on_the_wrong_side():
     lines = _wrapped("他说：“你好”。然后离开了这个房间，没有再回来。", 12)
     assert lines == ["他说：“你", "好”。然后离", "开了这个房", "间，没有再回", "来。"]
     assert all(cell_len(line) <= 12 for line in lines)
+
+
+def test_straight_quotes_stay_with_the_text_they_enclose():
+    assert _wrapped('然后点击"保存"按钮即可。', 10) == [
+        "然后点",
+        '击"保存"按',
+        "钮即可。",
+    ]
+
+
+def test_leading_spaces_stay_with_the_first_word():
+    """An indented line too long for the width keeps its indent."""
+    url = "https://example.com/a/very/long/path/that/does/not/fit"
+    first, *_ = _wrapped(" " * 12 + url, 40)
+    assert first == " " * 12 + url[:28]
 
 
 def test_a_word_wider_than_the_line_is_cut_at_the_edge():

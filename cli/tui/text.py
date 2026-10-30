@@ -62,9 +62,10 @@ def terminal_text(text: str) -> str:
 # past the edge, and are dropped.
 _SPACES = " \u3000"
 # Kinsoku, the basic rule of CJK line breaking: closing punctuation never
-# starts a line and opening punctuation never ends one.
-_NO_LINE_START = frozenset("，。、；：！？）」』】》〉〕］｝〗”’…ー々.,;:!?)]}%")
-_NO_LINE_END = frozenset("（「『【《〈〔［｛〖“‘([{")
+# starts a line and opening punctuation never ends one. A straight quote can
+# be either, so it stays with the characters on both sides.
+_NO_LINE_START = frozenset("，。、；：！？）」』】》〉〕］｝〗”’…ー々.,;:!?)]}%\"'")
+_NO_LINE_END = frozenset("（「『【《〈〔［｛〖“‘([{\"'")
 
 
 def _may_break(before: str, after: str) -> bool:
@@ -88,13 +89,15 @@ def wrap_offsets(text: str, width: int) -> list[int]:
     A line ends after a space or next to a CJK character, never inside a word
     of other text: Rich breaks only at spaces, so CJK text either jumped whole
     to the next line or was cut at the edge mid-word. Spaces at a break stay
-    on the line they end. A word wider than a whole line is cut at the edge.
+    on the line they end; spaces that begin the text stay with its first word.
+    A word wider than a whole line is cut at the edge.
     """
     width = max(1, width)
     offsets: list[int] = []
     used = 0  # cells on the current line, its trailing spaces included
     start = 0
-    ends = [i for i in range(1, len(text)) if _may_break(text[i - 1], text[i])]
+    lead = len(text) - len(text.lstrip(_SPACES))
+    ends = [i for i in range(lead + 1, len(text)) if _may_break(text[i - 1], text[i])]
     for end in [*ends, len(text)]:
         unit = text[start:end]
         body = cell_len(unit.rstrip(_SPACES))

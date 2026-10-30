@@ -135,9 +135,16 @@ class _TurnStats:
         return self._first("completion_tokens", "output_tokens")
 
 
+# Markdown marks that say nothing in a one-line summary: a heading's, quote's
+# or bullet's at the start, emphasis and code marks around words. An
+# underscore inside a word (relic_offer) belongs to the word.
+_LEADING_MARKS = re.compile(r"^\s*(?:#{1,6}\s+|>\s*|[-*+]\s+)*")
+_INLINE_MARKS = re.compile(r"\*+|`+|(?<!\w)_+|_+(?!\w)")
+
+
 def _clean_line(line: str) -> str:
-    """One line with its markdown punctuation stripped, for a status tail."""
-    return re.sub(r"[*_`#>\[\]]", "", line).strip()
+    """One line without its Markdown marks, for a status tail or a preview."""
+    return _INLINE_MARKS.sub("", _LEADING_MARKS.sub("", line)).strip()
 
 
 def _first_content_line(text: str, *, limit: int) -> str:
@@ -886,10 +893,13 @@ class EventRenderer:
                 limit=_NORMAL_PREVIEW_CHARS,
             )
             if preview:
-                self.console.print(
-                    f"  [{theme.THINKING_STYLE}]{escape(preview)}[/]",
-                    highlight=False,
-                )
+                for row in wrap_text(Text(preview), self.console.width - 2):
+                    self.console.print(
+                        Text("  ") + row,
+                        style=theme.THINKING_STYLE,
+                        soft_wrap=True,
+                        highlight=False,
+                    )
             return
 
         if state.summary_text:

@@ -297,3 +297,35 @@ def test_the_line_being_written_wraps_by_the_same_rule():
         " handle_relic_offer然后再决定怎么修改它",
         " 的返回值。",
     ]
+
+
+def test_a_rule_or_heading_nested_in_markers_keeps_the_terminal_width():
+    renderer, output = _renderer(width=40)
+    _stream(renderer, "- > ---\n\n- > # Title\n\n1. 2. ---\n")
+    lines = [line for line in _lines(output) if line]
+    assert all(len(line) <= 40 for line in lines)
+    assert any("Title" in line and "▌" in line for line in lines)
+
+
+def test_wrapped_lines_hang_under_the_innermost_marker():
+    renderer, output = _renderer(width=40)
+    _stream(
+        renderer,
+        "- > 引用在列表里：这是一段很长的引用文字，需要换行显示才能完整看到。\n\n"
+        "- - 嵌套的列表项：这也是一段很长的文字，需要换行显示才能完整看到。\n",
+    )
+    assert [line for line in _lines(output) if line] == [
+        " • ▌ 引用在列表里：这是一段很长的引用文",
+        "   ▌ 字，需要换行显示才能完整看到。",
+        " •  • 嵌套的列表项：这也是一段很长的文",
+        "      字，需要换行显示才能完整看到。",
+    ]
+
+
+def test_a_paragraph_wider_than_rich_is_given_still_wraps_by_word():
+    renderer, output = _renderer(width=40)
+    words = "abc_relic_offer_identifier"
+    _stream(renderer, "- " + "这是很长的中文内容" * 227 + f"{words} 结尾。\n")
+    rows = [line for line in _lines(output) if line]
+    assert any(words in row for row in rows)
+    assert all(row.startswith("   ") and len(row) <= 40 for row in rows[1:])
