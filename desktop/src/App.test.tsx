@@ -3969,7 +3969,10 @@ describe("a Session whose file can't be read", () => {
 });
 
 describe("a long Session's history", () => {
-  beforeEach(() => localStorage.clear());
+  beforeEach(() => {
+    localStorage.clear();
+    __setLocaleForTests("en");
+  });
   afterEach(() => {
     cleanup();
     localStorage.clear();
