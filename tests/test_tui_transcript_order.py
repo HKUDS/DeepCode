@@ -244,11 +244,37 @@ def test_program_output_reads_as_a_terminal_shows_it():
 
 
 def test_a_preview_for_people_leaves_out_the_models_notes():
-    from core.agent_runtime.tools.model_notes import ERROR_HINT, with_hook_context
+    from core.agent_runtime.runner import AgentRunner
+    from core.agent_runtime.tools.model_notes import ERROR_HINT, HOOK_CONTEXT_AT
     from core.events.session import display_preview
 
-    result = with_hook_context(
-        "Error: lint failed" + ERROR_HINT, ["ruff found 2 issues"]
+    # Program output may hold the hook mark itself; only the runner's own
+    # hook context is left out, found where the runner recorded it.
+    output = "step 1\n\n[hook] printed by the program\nstep 2 ran" + ERROR_HINT
+    event: dict[str, str] = {}
+    composed = AgentRunner._compose_hook_context(output, ["ruff found 2 issues"], event)
+
+    assert "ruff found 2 issues" in composed
+    shown = display_preview(composed, hook_context_at=int(event[HOOK_CONTEXT_AT]))
+    assert shown == "step 1\n\n[hook] printed by the program\nstep 2 ran"
+
+
+def test_hook_context_keeps_a_structured_result_structured():
+    from core.agent_runtime.runner import AgentRunner
+
+    as_json = AgentRunner._compose_hook_context({"goal": "x"}, ["note"], {})
+    assert as_json.startswith('{"goal": "x"}')
+    blocks = AgentRunner._compose_hook_context(
+        [{"type": "image", "source": "..."}], ["note"], {}
+    )
+    assert blocks[0] == {"type": "image", "source": "..."}
+    assert blocks[-1]["type"] == "text" and "note" in blocks[-1]["text"]
+
+
+def test_a_rebuilt_preview_finds_hook_context_by_its_mark():
+    from core.agent_runtime.tools.model_notes import (
+        before_hook_context,
+        with_hook_context,
     )
 
-    assert display_preview(result) == "Error: lint failed"
+    assert before_hook_context(with_hook_context("output", ["note"])) == "output"

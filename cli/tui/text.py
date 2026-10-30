@@ -54,21 +54,34 @@ def terminal_text(text: str) -> str:
     )
 
 
-def fit_head(text: str, width: int) -> str:
-    """Keep the head of ``text`` within ``width`` terminal cells."""
+def fit_head(text: str, width: int, *, mark: bool = True) -> str:
+    """Keep the head of ``text`` within ``width`` terminal cells.
+
+    A cut ends in ``…`` unless ``mark`` is false (the caller marks it).
+    """
     if width <= 0:
         return ""
     if cell_len(text) <= width:
         return text
+    if not mark:
+        return set_cell_size(text, width).rstrip()
     return set_cell_size(text, max(1, width - 1)).rstrip() + _ELLIPSIS
 
 
-def fit_tail(text: str, width: int) -> str:
-    """Keep the tail of ``text`` within ``width`` terminal cells."""
+def fit_tail(text: str, width: int, *, mark: bool = True) -> str:
+    """Keep the tail of ``text`` within ``width`` terminal cells.
+
+    A cut starts with ``…`` unless ``mark`` is false (the caller marks it).
+    """
     if width <= 0:
         return ""
     if cell_len(text) <= width:
         return text
+    if not mark:
+        cut = len(text)
+        while cut > 0 and cell_len(text[len(text) - cut :]) > width:
+            cut -= 1
+        return text[len(text) - cut :].lstrip()
     budget = max(1, width - 1)
     cut = len(text)
     while cut > 0 and cell_len(text[len(text) - cut :]) > budget:

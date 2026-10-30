@@ -1,27 +1,37 @@
 """Text that tool results carry for the model only.
 
 The runner and the tool registry append these notes to results the model
-reads. A result shown to people leaves them out (``for_people``). This
-module imports nothing, so every layer can use it.
+reads; a result shown to people leaves them out. This module imports
+nothing itself.
 """
 
 from __future__ import annotations
+
+from collections.abc import Iterable
 
 # Appended to a result built from a failure.
 ERROR_HINT = "\n\n[Analyze the error above and try a different approach.]"
 # Begins each block of hook context that follows a result.
 HOOK_CONTEXT_MARK = "\n\n[hook] "
+# Where hook context begins in a text result, recorded on the call's event by
+# whoever appends it, so a display can cut there without searching the text.
+HOOK_CONTEXT_AT = "hookContextAt"
 
 
-def with_hook_context(result: str, contexts: list[str]) -> str:
+def with_hook_context(result: str, contexts: Iterable[str]) -> str:
     """``result`` followed by each piece of hook context, for the model."""
     return result + "".join(f"{HOOK_CONTEXT_MARK}{context}" for context in contexts)
 
 
-def for_people(text: str) -> str:
-    """A result without the notes only the model needs.
+def without_error_hint(text: str) -> str:
+    """``text`` without the error hint, which only the model needs."""
+    return text.replace(ERROR_HINT, "")
 
-    Hook context always comes last, so the result ends where it begins; the
-    error hint can sit before hook context, so it is removed wherever it is.
+
+def before_hook_context(text: str) -> str:
+    """``text`` up to the first hook-context mark.
+
+    Only for a result whose composition was not recorded (one rebuilt from
+    the session file): output that itself contains the mark is cut early.
     """
-    return text.split(HOOK_CONTEXT_MARK, 1)[0].replace(ERROR_HINT, "")
+    return text.split(HOOK_CONTEXT_MARK, 1)[0]

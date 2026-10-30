@@ -196,7 +196,7 @@ def _wire_code_mode(
         if hooks_engine is not None and hooks_engine.has_event("PostToolUse"):
             post = await hooks_engine.run_post_tool_use(tool_name, args, result)
             if post.additional_contexts:
-                result = with_hook_context(str(result), list(post.additional_contexts))
+                result = with_hook_context(str(result), post.additional_contexts)
         return result
 
     tool_registry.register(

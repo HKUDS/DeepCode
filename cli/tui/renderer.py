@@ -202,14 +202,13 @@ def _fit_ends(first: str, last: str, width: int, *, skipped: bool) -> str:
 
     ``…`` joins them when lines between them are left out, `` · `` when
     they are all there is. Each end gets the room it needs, up to half; a
-    last line the preview cut into keeps its real end.
+    last line the preview cut into keeps its real end. Where a cut meets the
+    joining ``…`` it needs no mark of its own.
     """
     if not last:
         return fit_head(first, width)
-    # A last line the preview cut into shows its end, where the news is.
-    fit_last = fit_tail if last.startswith(RESULT_ELISION) else fit_head
+    cut_into = last.startswith(RESULT_ELISION)
     if skipped:
-        # The joining ellipsis already says text is left out between them.
         first = first.removesuffix(RESULT_ELISION)
         last = last.removeprefix(RESULT_ELISION)
     separator = f" {RESULT_ELISION} " if skipped else " · "
@@ -218,9 +217,15 @@ def _fit_ends(first: str, last: str, width: int, *, skipped: bool) -> str:
         return joined
     room = max(2, width - cell_len(separator))
     first_width = min(cell_len(first), max(room // 2, room - cell_len(last)))
-    return (
-        f"{fit_head(first, first_width)}{separator}{fit_last(last, room - first_width)}"
+    last_width = room - first_width
+    head = fit_head(first, first_width, mark=not skipped)
+    # A last line the preview cut into shows its end, where the news is.
+    tail = (
+        fit_tail(last, last_width, mark=not skipped)
+        if cut_into
+        else fit_head(last, last_width)
     )
+    return f"{head}{separator}{tail}"
 
 
 def _refusal_reason(line: str) -> str:
@@ -1019,10 +1024,11 @@ class EventRenderer:
             # Verbose shows the preview the elbow could not: its start and its
             # end, wrapped under the elbow rather than cut.
             indent = " " * (cell_len(theme.TOOL_RESULT_ELBOW) + 1)
+            width = max(_ELBOW_MIN_CELLS, self.console.width - len(indent) - 1)
             text = Text(terminal_text(preview).strip("\n"))
-            for row in text.wrap(self.console, self.console.width - len(indent) - 1):
+            for row in text.wrap(self.console, width):
                 self.console.print(
-                    f"{indent}{row.plain.rstrip()}",
+                    f"{indent}{row.plain}".rstrip(),
                     style=theme.TOOL_DETAIL_STYLE,
                     markup=False,
                     highlight=False,

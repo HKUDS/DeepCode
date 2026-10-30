@@ -69,7 +69,11 @@ from core.agent_runtime.runtime import (
     repeated_external_lookup_error,
 )
 from core.agent_runtime.tools.base import ToolResult
-from core.agent_runtime.tools.model_notes import ERROR_HINT, with_hook_context
+from core.agent_runtime.tools.model_notes import (
+    ERROR_HINT,
+    HOOK_CONTEXT_AT,
+    with_hook_context,
+)
 from core.agent_runtime.tools.registry import ToolRegistry
 from core.agent_runtime.tools.semantic_hint import build_miss_message
 from core.providers.base import (
@@ -1368,7 +1372,9 @@ class AgentRunner:
                 "detail": refusal.reason.replace("\n", " ").strip()[:120],
             }
             result = self._compose_hook_context(
-                f"Error: permission denied: {refusal.reason}" + ERROR_HINT, pre_contexts
+                f"Error: permission denied: {refusal.reason}" + ERROR_HINT,
+                pre_contexts,
+                event,
             )
             return result, event, None
 
@@ -1389,7 +1395,9 @@ class AgentRunner:
             }
             # Tool never ran (bad args) — surface pre-hook context, no PostToolUse.
             return (
-                self._compose_hook_context(prep_error + ERROR_HINT, pre_contexts),
+                self._compose_hook_context(
+                    prep_error + ERROR_HINT, pre_contexts, event
+                ),
                 event,
                 RuntimeError(prep_error) if spec.fail_on_tool_error else None,
             )
@@ -1529,7 +1537,7 @@ class AgentRunner:
                     reason = getattr(post, "block_reason", None)
                     if reason:
                         contexts.append(f"PostToolUse hook feedback: {reason}")
-        return self._compose_hook_context(result, contexts), event, error
+        return self._compose_hook_context(result, contexts, event), event, error
 
     @staticmethod
     async def _call_tool_hook(hook: Any, *args: Any) -> Any:
@@ -1561,11 +1569,24 @@ class AgentRunner:
         return None
 
     @staticmethod
-    def _compose_hook_context(result: Any, contexts: list[str]) -> Any:
-        """Append accumulated hook context to a tool result the model will read."""
+    def _compose_hook_context(
+        result: Any, contexts: list[str], event: dict[str, str]
+    ) -> Any:
+        """Append accumulated hook context to a tool result the model will read.
+
+        A structured value is first the JSON the model reads anyway, and a list
+        of content blocks gets the context as one more text block. For text,
+        ``event`` records where the result ends, so a display can leave the
+        context out without searching the text for it.
+        """
         if not contexts:
             return result
-        content = with_hook_context(str(result), contexts)
+        result = encode_structured_tool_result(result)
+        if isinstance(result, list):
+            return [*result, {"type": "text", "text": with_hook_context("", contexts)}]
+        text = str(result)
+        event[HOOK_CONTEXT_AT] = str(len(text))
+        content = with_hook_context(text, contexts)
         if isinstance(result, ToolResult):
             return result.with_content(content)
         return content

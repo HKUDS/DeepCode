@@ -904,6 +904,22 @@ def test_verbose_wraps_a_long_line_under_the_elbow():
     assert "".join(line.strip() for line in below).count("configuration") == 8
 
 
+def test_verbose_survives_a_terminal_a_few_columns_wide():
+    shown = _settled_elbow(_TEST_RUN, mode=TranscriptMode.VERBOSE, width=5)
+
+    assert shown
+
+
+def test_a_line_cut_at_both_ends_carries_one_mark_between_them():
+    from cli.tui.renderer import _fit_ends
+    from core.events.protocol import summarize_result
+
+    head, _, tail = summarize_result("x" * 500).split("\n")
+    shown = _fit_ends(head, tail, 40, skipped=True)
+
+    assert shown.count("…") == 1
+
+
 def test_elbow_names_its_card_only_while_calls_overlap():
     output = io.StringIO()
     renderer = EventRenderer(

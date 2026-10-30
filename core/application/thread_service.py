@@ -42,6 +42,7 @@ from core.domain.runtime_coordination import ExecutionClass
 from core.domain.thread import Thread, ThreadMode, ThreadStatus
 from core.domain.turn import Turn, TurnExecutor, TurnStatus
 from core.domain.workflow import WorkflowRun, WorkflowStatus
+from core.agent_runtime.tools.model_notes import before_hook_context
 from core.events.session import display_preview
 from core.persistence.automation_repository import AutomationRepository
 from core.persistence.database import Database
@@ -127,7 +128,8 @@ def _projected_item_payload(message: SessionMessage) -> dict[str, object]:
         "isError": False,
         # The preview a live Turn stores, made from what the model read: for
         # an output too large to keep inline that is its saved-file notice.
-        "resultPreview": display_preview(message.content),
+        # Where hook context begins was not recorded, so it is found by mark.
+        "resultPreview": display_preview(before_hook_context(message.content)),
         "projectedFromSession": True,
     }
 
