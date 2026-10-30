@@ -821,14 +821,19 @@ def test_ctrl_o_answers_during_an_approval_and_clears_itself(monkeypatch) -> Non
     renderer.on_event(Event("1", TurnStarted()))
     renderer.approval_requested("approval-1", "y allow once · n deny")
 
+    def fragments() -> str:
+        return "".join(text for _style, text in renderer.status_fragments())
+
     renderer.cycle_transcript_mode()
     assert "Transcript: verbose from here on" in renderer.status_line()
+    assert "Transcript: verbose from here on" in fragments()
     # Nothing else moves while an approval waits; the notice keeps the line
     # repainting until it has gone.
     assert renderer.is_working()
 
     clock[0] = 14.0
     assert "y allow once" in renderer.status_line()
+    assert "y allow once" in fragments()
     assert not renderer.is_working()
 
 
@@ -839,3 +844,15 @@ def test_ctrl_o_while_idle_leaves_the_idle_line_to_say_the_mode() -> None:
 
     assert "Transcript: verbose ·" in renderer.status_line()
     assert "from here on" not in renderer.status_line()
+
+
+def test_a_long_tool_name_leaves_room_on_the_status_line() -> None:
+    renderer = EventRenderer(Console(file=io.StringIO(), color_system=None, width=120))
+    renderer.on_event(Event("1", TurnStarted()))
+    renderer.on_event(
+        Event("2", ToolStarted("call-1", "mcp__github__create_pull_request_review"))
+    )
+
+    renderer.cycle_transcript_mode()
+
+    assert "Transcript: verbose from here on" in renderer.status_line()[:80]

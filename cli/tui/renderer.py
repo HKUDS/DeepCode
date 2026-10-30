@@ -48,6 +48,7 @@ from core.reasoning import ReasoningAvailability, ReasoningChannel
 
 _NORMAL_PREVIEW_CHARS = 240
 _STATUS_DETAIL_CHARS = 72
+_STATUS_LABEL_CELLS = 24
 _SUBJECT_CELLS = 88  # ceiling; the real budget is the terminal's width
 _SUBJECT_TAIL_CELLS = 32  # the elbow's "which call is this" fragment
 _ELBOW_MIN_CELLS = 24
@@ -486,7 +487,10 @@ class EventRenderer:
                 detail = (
                     f"{detail} (+{extra} running)" if detail else f"+{extra} running"
                 )
-            return (call.label, max(0.0, monotonic() - call.started_at), detail)
+            # A tool without a known label is named after itself, which can
+            # be long (an MCP tool's full name); the status line has no room.
+            label = fit_head(call.label, _STATUS_LABEL_CELLS)
+            return (label, max(0.0, monotonic() - call.started_at), detail)
         reasoning_id = self._active_reasoning_id
         if reasoning_id is not None:
             state = self._reasoning.get(reasoning_id)
@@ -514,16 +518,16 @@ class EventRenderer:
         )
 
     def is_working(self) -> bool:
-        """Whether the status line currently has motion to show.
+        """Whether the status line has motion to show, or a notice to take down.
 
         O(1) and side-effect free: the input layer asks this several times a
         second to decide whether the prompt needs an animation repaint at
         all. An idle TUI must cost nothing.
         """
-        if self._mode_notice() is not None:
-            return True  # repaint until the notice is gone
         if self._approvals:
-            return False  # waiting on the user: nothing moves
+            # Waiting on the user, nothing moves; only a Ctrl+O notice on the
+            # approval line needs the repaint that takes it down.
+            return self._mode_notice() is not None
         return bool(
             self._tool_calls
             or self._active_reasoning_id
