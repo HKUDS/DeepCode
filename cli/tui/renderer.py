@@ -190,6 +190,14 @@ def _duration_label(duration_ms: int | None) -> str | None:
     return f"{minutes}m {remainder:02d}s"
 
 
+def _refusal_reason(line: str) -> str:
+    """A refusal's reason without the error wording the model reads."""
+    for prefix in ("Error: permission denied: ", "Error: "):
+        if line.startswith(prefix):
+            return line[len(prefix) :]
+    return line
+
+
 class EventRenderer:
     """Render events to a rich console, reconciling streamed deltas."""
 
@@ -932,10 +940,12 @@ class EventRenderer:
             self._gap_pending = True
             return
         if msg.denied:
-            # A rule or a hook refused it before it ran: no failure, but
-            # its reason is the news.
+            # A rule, a hook or the turn's tool set refused it before it ran:
+            # no failure, but its reason is the news, without the error
+            # wording the model reads.
             head = f"{theme.DONE_DECLINED} {msg.name} declined"
             mark = f"[{theme.APPROVAL_STYLE}]{escape(head)}[/]"
+            first_line = _refusal_reason(first_line)
         elif msg.is_error:
             head = f"{theme.DONE_ERR} {msg.name} failed"
             mark = f"[{theme.TOOL_ERR_STYLE}]{escape(head)}[/]"

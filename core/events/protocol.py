@@ -368,9 +368,10 @@ class ToolCompleted:
     # frontend can show "what came back" on an expandable card without the
     # full — possibly huge — payload. Empty when the result was empty.
     result_preview: str = ""
-    # The runner refused it before it ran: a permission decision (a rule or
-    # the user), a PreToolUse hook, or a tool outside this turn's set. It is
-    # an error for the model (``is_error`` stays true), but no failure.
+    # The runner refused it before it ran: a permission decision (a rule, a
+    # PermissionRequest hook, the user, or no approver in a non-interactive
+    # run), a PreToolUse hook, or a tool outside this turn's set. It is an
+    # error for the model (``is_error`` stays true), but no failure.
     denied: bool = False
     type: str = field(default="tool_completed", init=False)
 

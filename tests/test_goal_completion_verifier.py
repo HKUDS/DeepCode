@@ -346,6 +346,10 @@ def test_rule_rejects_a_declined_check_without_asking_to_rerun_it() -> None:
     assert "latest check was declined before it ran" in verdict.justification
     assert "run the check again" not in verdict.justification
 
+    # A declined step that is no check reads the same way.
+    step = _judge(GREEN, _item("tool_call", "declined", "notes.txt", "write"))
+    assert "latest step was declined before it ran" in step.justification
+
 
 def test_rule_never_decides_on_pending_calls_but_points_at_them() -> None:
     # The passing re-run went out in the same step as the claim.

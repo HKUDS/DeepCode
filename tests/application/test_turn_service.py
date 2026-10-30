@@ -280,14 +280,46 @@ class PlannedSession(ScriptedSession):
 
 
 class PlannedFactory(ScriptedFactory):
+    session_class: type[ScriptedSession] = PlannedSession
+
     def create(self, *, workspace, model, approval_callback):
-        session = PlannedSession(
+        session = self.session_class(
             approval_callback,
             approval=False,
             hang=False,
         )
         self.sessions.append(session)
         return session
+
+
+class RefusedPlanSession(ScriptedSession):
+    """A plan update the runner refused before it ran."""
+
+    async def run_stream(self, _op):
+        self.history.append({"role": "user", "content": _op.text})
+        yield Event("1", TurnStarted())
+        yield Event(
+            "2",
+            ToolStarted(
+                "plan-1",
+                "update_plan",
+                "",
+                ToolActivity(ToolActivityKind.PLAN, "Update plan"),
+            ),
+        )
+        yield Event(
+            "3",
+            ToolCompleted(
+                "plan-1", "update_plan", True, "Error: not allowed", denied=True
+            ),
+        )
+        yield Event("4", AgentMessage("done"))
+        yield Event("5", TaskComplete("done", "completed"))
+        self.history.append({"role": "assistant", "content": "done"})
+
+
+class RefusedPlanFactory(PlannedFactory):
+    session_class = RefusedPlanSession
 
 
 class ReasoningSession(ScriptedSession):
@@ -1232,6 +1264,17 @@ def test_approval_round_trip_resumes_the_same_turn(tmp_path: Path) -> None:
             item for item in completed.items if item.kind is ItemKind.FILE_CHANGE
         )
         assert tool.status is ItemStatus.COMPLETED
+    finally:
+        application.close()
+
+
+def test_a_refused_plan_update_is_no_error(tmp_path: Path) -> None:
+    application, thread_id = _application(tmp_path, RefusedPlanFactory())
+    try:
+        started = application.turns.start(thread_id, prompt="Plan it")
+        snapshot = _wait_for(application, started.turn.id, TurnStatus.COMPLETED)
+
+        assert ItemKind.ERROR not in {item.kind for item in snapshot.items}
     finally:
         application.close()
 

@@ -253,6 +253,8 @@ async def test_skill_policy_denies_unexposed_tool_even_if_model_requests_it(
     )
     assert completed.is_error is True
     assert "not available in this turn" in completed.result_preview
+    # Refused before it ran, not a failure.
+    assert completed.denied is True
 
 
 def test_claude_style_allowed_tools_keep_the_skill_usable(tmp_path: Path) -> None:

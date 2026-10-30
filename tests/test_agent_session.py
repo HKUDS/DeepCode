@@ -656,6 +656,7 @@ async def test_each_refused_call_and_only_it_is_marked_denied():
                     call("ruled", "rule"),
                     call("rejected", "ask"),
                     call("broken", "ask-and-break"),
+                    call("unchecked", "check-and-break"),
                     ToolCallRequest(id="unknown", name="no_such_tool", arguments={}),
                 ],
                 finish_reason="tool_calls",
@@ -666,6 +667,8 @@ async def test_each_refused_call_and_only_it_is_marked_denied():
 
     def checker(_name, args):
         text = args.get("text", "")
+        if text == "check-and-break":
+            raise RuntimeError("policy store unreadable")
         if text == "rule":
             return ("deny", "blocked by a rule")
         if text.startswith("ask"):
@@ -690,13 +693,15 @@ async def test_each_refused_call_and_only_it_is_marked_denied():
         # A rule and the user refused these before they ran.
         "ruled": True,
         "rejected": True,
-        # A broken approval is a fault, and an unknown tool an error: neither
-        # is a decision.
+        # A broken approval or permission check is a fault, and an unknown
+        # tool an error: none of them is a decision.
         "broken": False,
+        "unchecked": False,
         "unknown": False,
     }
     assert all(
-        completed[call_id].is_error for call_id in ("ruled", "rejected", "broken")
+        completed[call_id].is_error
+        for call_id in ("ruled", "rejected", "broken", "unchecked")
     )
 
 

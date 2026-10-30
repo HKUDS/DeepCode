@@ -579,8 +579,8 @@ def test_a_call_a_rule_refused_reads_declined_with_its_reason() -> None:
         "Error: permission denied: Blocked by your permission rule `bash rm *`.",
         denied=True,
     )
-    assert "⊘ bash declined" in text
-    assert "Blocked by your permission rule" in text
+    assert "⊘ bash declined · Blocked by your permission rule" in text
+    assert "Error" not in text
     assert "failed" not in text
 
 
