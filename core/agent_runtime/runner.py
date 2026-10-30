@@ -144,6 +144,19 @@ def _build_precompact_checkpoint(
     return prefix + "\n".join(parts)
 
 
+@dataclass(frozen=True, slots=True)
+class _Refusal:
+    """Why a tool call may not run.
+
+    ``errored`` when the permission check or the approval request itself
+    broke: the call is refused all the same (fail-closed), but that is a
+    fault, not a decision.
+    """
+
+    reason: str
+    errored: bool = False
+
+
 @dataclass(slots=True)
 class AgentRunSpec:
     """Configuration for a single agent execution."""
@@ -1346,15 +1359,16 @@ class AgentRunner:
         # Permission gate (P1 security base). Denials and unresolved asks
         # become errors-as-data results the model can read and react to,
         # never exceptions — a blocked tool must not abort the run.
-        denial = await self._check_permission(spec, tool_call)
-        if denial is not None:
+        refusal = await self._check_permission(spec, tool_call)
+        if refusal is not None:
             event = {
                 "name": tool_call.name,
-                "status": "denied",
-                "detail": denial.replace("\n", " ").strip()[:120],
+                # A check that broke is a fault to see, not a decision.
+                "status": "error" if refusal.errored else "denied",
+                "detail": refusal.reason.replace("\n", " ").strip()[:120],
             }
             result = self._compose_hook_context(
-                f"Error: permission denied: {denial}" + _HINT, pre_contexts
+                f"Error: permission denied: {refusal.reason}" + _HINT, pre_contexts
             )
             return result, event, None
 
@@ -1565,8 +1579,8 @@ class AgentRunner:
         self,
         spec: AgentRunSpec,
         tool_call: ToolCallRequest,
-    ) -> str | None:
-        """Return a denial reason, or ``None`` if the call is permitted.
+    ) -> _Refusal | None:
+        """Return why the call may not run, or ``None`` if it is permitted.
 
         ``allow`` → ``None``. ``deny`` → its reason. ``ask`` → resolved via
         ``approval_callback`` (approved → ``None``, rejected → reason);
@@ -1586,13 +1600,13 @@ class AgentRunner:
                 "permission_checker failed for {}; denying by default",
                 tool_call.name,
             )
-            return "permission check errored (fail-closed)"
+            return _Refusal("permission check errored (fail-closed)", errored=True)
 
         value = self._decision_value(decision)
         if value == "allow":
             return None
         if value == "deny":
-            return reason or "denied by policy"
+            return _Refusal(reason or "denied by policy")
 
         # ask — a PermissionRequest hook may resolve it before the human is
         # prompted: a hook "deny" blocks, "allow" permits, no verdict falls
@@ -1603,7 +1617,7 @@ class AgentRunner:
             )
             if verdict is not None:
                 if getattr(verdict, "decision", None) == "deny":
-                    return (
+                    return _Refusal(
                         getattr(verdict, "message", None) or reason or "denied by hook"
                     )
                 if getattr(verdict, "decision", None) == "allow":
@@ -1611,7 +1625,7 @@ class AgentRunner:
 
         approver = spec.approval_callback
         if approver is None:
-            return (
+            return _Refusal(
                 (reason or "requires confirmation")
                 + " — no approver attached (non-interactive run), so this "
                 "action is blocked. Choose a path/command inside the allowed "
@@ -1623,10 +1637,10 @@ class AgentRunner:
                 approved = await approved
         except Exception:
             logger.exception("approval_callback failed for {}", tool_call.name)
-            return "approval request errored (fail-closed)"
+            return _Refusal("approval request errored (fail-closed)", errored=True)
         if approved:
             return None
-        return f"user rejected: {reason or 'action not approved'}"
+        return _Refusal(f"user rejected: {reason or 'action not approved'}")
 
     async def _emit_checkpoint(
         self,

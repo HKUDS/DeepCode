@@ -922,16 +922,21 @@ class EventRenderer:
         preview = getattr(msg, "result_preview", "") or ""
         first_line = preview.splitlines()[0].strip() if preview else ""
 
-        if msg.is_error and _USER_DENIAL in first_line:
-            # The user said no: not a failure, and the approval's reason
-            # (already on screen above) is not worth repeating.
+        if msg.denied and _USER_DENIAL in first_line:
+            # The user said no: the approval's reason is on screen above and
+            # not worth repeating.
             self.console.print(
                 f"{theme.TOOL_RESULT_ELBOW} [{theme.APPROVAL_STYLE}]Denied by you[/]",
                 highlight=False,
             )
             self._gap_pending = True
             return
-        if msg.is_error:
+        if msg.denied:
+            # A rule or a hook refused it before it ran: no failure, but
+            # its reason is the news.
+            head = f"{theme.DONE_DECLINED} {msg.name} declined"
+            mark = f"[{theme.APPROVAL_STYLE}]{escape(head)}[/]"
+        elif msg.is_error:
             head = f"{theme.DONE_ERR} {msg.name} failed"
             mark = f"[{theme.TOOL_ERR_STYLE}]{escape(head)}[/]"
         else:

@@ -553,30 +553,41 @@ def test_the_queue_reason_is_found_while_the_turn_waits(monkeypatch) -> None:
 # -- denied by the user -------------------------------------------------------
 
 
-def _elbow(preview: str, *, is_error: bool = True) -> str:
+def _elbow(preview: str, *, is_error: bool = True, denied: bool = False) -> str:
     output = io.StringIO()
     renderer = EventRenderer(Console(file=output, color_system=None, width=100))
     renderer.on_event(Event("1", TurnStarted()))
     renderer.on_event(Event("2", ToolStarted("call-1", "bash", "rm -rf build")))
-    renderer.on_event(Event("3", ToolCompleted("call-1", "bash", is_error, preview)))
+    renderer.on_event(
+        Event("3", ToolCompleted("call-1", "bash", is_error, preview, denied=denied))
+    )
     return output.getvalue()
 
 
 def test_a_call_the_user_denied_reads_denied_by_you() -> None:
     text = _elbow(
-        "Error: permission denied: user rejected: Running a command needs your approval."
+        "Error: permission denied: user rejected: Running a command needs your approval.",
+        denied=True,
     )
     assert "⎿ Denied by you" in text
     assert "failed" not in text
     assert "needs your approval" not in text
 
 
-def test_other_failures_still_read_as_failures() -> None:
+def test_a_call_a_rule_refused_reads_declined_with_its_reason() -> None:
     text = _elbow(
-        "Error: permission denied: Blocked by your permission rule `bash rm *`."
+        "Error: permission denied: Blocked by your permission rule `bash rm *`.",
+        denied=True,
     )
+    assert "⊘ bash declined" in text
+    assert "Blocked by your permission rule" in text
+    assert "failed" not in text
+
+
+def test_a_call_that_ran_and_failed_reads_as_a_failure() -> None:
+    text = _elbow("[exit 1] rm: build: Permission denied")
     assert "bash failed" in text
-    assert "Denied by you" not in text
+    assert "declined" not in text
 
 
 # -- first run ----------------------------------------------------------------

@@ -103,6 +103,7 @@ ERROR_STYLE = f"bold {ERROR}"
 INTERRUPT_HINT = "esc interrupts · ctrl+o transcript detail"
 DONE_OK = "✓"
 DONE_ERR = "✗"
+DONE_DECLINED = "⊘"  # refused before it ran: no failure
 
 # -- approvals --------------------------------------------------------------
 APPROVAL_STYLE = WARNING

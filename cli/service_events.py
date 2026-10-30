@@ -315,6 +315,8 @@ class ServiceEventRenderer:
                         data["name"],
                         data.get("isError", item["status"] != "completed"),
                         preview,
+                        # Only a refusal declines a tool item.
+                        denied=item["status"] == "declined",
                     )
                 ]
         if kind == "error":

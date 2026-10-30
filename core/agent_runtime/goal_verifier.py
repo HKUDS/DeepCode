@@ -71,6 +71,20 @@ def _describe(item: GoalEvidenceItem) -> str:
     return f"{label} `{item.summary}`" if item.summary else label
 
 
+def _unsuccessful(what: str, item: GoalEvidenceItem, remedy: str) -> str:
+    """Why the latest ``what`` does not support the claim.
+
+    A declined step was refused before it ran: running it again would be
+    refused the same way, so the advice differs from a failure's.
+    """
+    if item.status == "declined":
+        return (
+            f"The latest {what} was declined before it ran: {_describe(item)}. "
+            "Verify the work another way before claiming completion."
+        )
+    return f"The latest {what} failed: {_describe(item)}. {remedy} before claiming completion."
+
+
 class RuleBasedVerifier:
     """Deterministic check that a completion claim rests on finished work.
 
@@ -81,8 +95,9 @@ class RuleBasedVerifier:
     1. the Goal has no objective, or the claim gives no reason;
     2. there is no settled evidence — nothing in this Turn but Goal
        bookkeeping (``get_goal`` alone is not work);
-    3. the latest check (a command run or test result) failed; or
-    4. the latest evidence item of any kind failed.
+    3. the latest check (a command run or test result) failed or was
+       declined; or
+    4. the latest evidence item of any kind failed or was declined.
 
     Only the latest outcome counts: a failure that later work moved past is
     resolved, so the usual red -> fix -> green loop, or a mistyped path early
@@ -121,14 +136,14 @@ class RuleBasedVerifier:
         checks = [item for item in evidence if item.kind in _CHECK_KINDS]
         if checks and checks[-1].status in _UNSUCCESSFUL:
             return _reject(
-                f"The latest check failed: {_describe(checks[-1])}. Fix the "
-                "problem and run the check again before claiming completion.",
+                _unsuccessful(
+                    "check", checks[-1], "Fix the problem and run the check again"
+                ),
                 pending_checks,
             )
         if evidence[-1].status in _UNSUCCESSFUL:
             return _reject(
-                f"The latest step failed: {_describe(evidence[-1])}. Resolve it "
-                "before claiming completion.",
+                _unsuccessful("step", evidence[-1], "Resolve it"),
                 request.pending,
             )
         return GoalVerdict(

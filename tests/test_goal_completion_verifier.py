@@ -338,6 +338,15 @@ def test_rule_rejects_when_the_latest_step_failed_and_names_it() -> None:
     assert "latest step failed: read `calculator.py`" in verdict.justification
 
 
+def test_rule_rejects_a_declined_check_without_asking_to_rerun_it() -> None:
+    declined = _item("command_execution", "declined", "python -m pytest -q", "bash")
+    verdict = _judge(GREEN, FIX, declined)
+
+    assert verdict.confirmed is False
+    assert "latest check was declined before it ran" in verdict.justification
+    assert "run the check again" not in verdict.justification
+
+
 def test_rule_never_decides_on_pending_calls_but_points_at_them() -> None:
     # The passing re-run went out in the same step as the claim.
     verdict = _judge(RED, FIX, pending=(GREEN,))

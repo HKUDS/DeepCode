@@ -643,6 +643,64 @@ async def test_denied_tool_marks_completed_as_error():
 
 
 @pytest.mark.asyncio
+async def test_each_refused_call_and_only_it_is_marked_denied():
+    def call(call_id: str, text: str) -> ToolCallRequest:
+        return ToolCallRequest(id=call_id, name="echo", arguments={"text": text})
+
+    provider = ScriptedProvider(
+        [
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    call("ran", "hello"),
+                    call("ruled", "rule"),
+                    call("rejected", "ask"),
+                    call("broken", "ask-and-break"),
+                    ToolCallRequest(id="unknown", name="no_such_tool", arguments={}),
+                ],
+                finish_reason="tool_calls",
+            ),
+            LLMResponse(content="ok", finish_reason="stop"),
+        ]
+    )
+
+    def checker(_name, args):
+        text = args.get("text", "")
+        if text == "rule":
+            return ("deny", "blocked by a rule")
+        if text.startswith("ask"):
+            return ("ask", "needs approval")
+        return ("allow", "")
+
+    def approver(_name, args, _reason):
+        if args.get("text") == "ask-and-break":
+            raise RuntimeError("approval channel lost")
+        return False
+
+    session = _session(provider, permission_checker=checker, approval_callback=approver)
+    await session.submit(UserInput(text="go"))
+    completed = {
+        event.msg.call_id: event.msg
+        for event in session.drain_events()
+        if isinstance(event.msg, ToolCompleted)
+    }
+
+    assert {call_id: done.denied for call_id, done in completed.items()} == {
+        "ran": False,
+        # A rule and the user refused these before they ran.
+        "ruled": True,
+        "rejected": True,
+        # A broken approval is a fault, and an unknown tool an error: neither
+        # is a decision.
+        "broken": False,
+        "unknown": False,
+    }
+    assert all(
+        completed[call_id].is_error for call_id in ("ruled", "rejected", "broken")
+    )
+
+
+@pytest.mark.asyncio
 async def test_history_persists_across_turns():
     provider = ScriptedProvider(
         [

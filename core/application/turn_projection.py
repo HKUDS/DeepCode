@@ -227,7 +227,8 @@ class TurnEventProjector:
         elif isinstance(message, ToolCompleted):
             if message.call_id in self._plan_tool_calls:
                 self._plan_tool_calls.discard(message.call_id)
-                if message.is_error:
+                # A refused plan update is no failure to show.
+                if message.is_error and not message.denied:
                     self._add_item(
                         kind=ItemKind.ERROR,
                         status=ItemStatus.FAILED,
@@ -240,13 +241,15 @@ class TurnEventProjector:
                 return
             item_id = self._tool_item_ids.get(message.call_id)
             if item_id is not None:
+                if message.denied:
+                    status = ItemStatus.DECLINED
+                elif message.is_error:
+                    status = ItemStatus.FAILED
+                else:
+                    status = ItemStatus.COMPLETED
                 self._update_item(
                     item_id,
-                    status=ItemStatus.DECLINED
-                    if message.denied
-                    else ItemStatus.FAILED
-                    if message.is_error
-                    else ItemStatus.COMPLETED,
+                    status=status,
                     payload_update={
                         "isError": message.is_error,
                         "resultPreview": message.result_preview,

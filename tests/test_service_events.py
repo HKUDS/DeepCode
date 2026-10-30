@@ -294,3 +294,44 @@ def test_live_reasoning_streams_each_channel() -> None:
         ("summary", "plan"),
         ("provider_trace", "trace"),
     ]
+
+
+def test_a_refused_tool_call_stays_refused_through_the_service() -> None:
+    refused, broken = "item_" + "d" * 26, "item_" + "e" * 26
+
+    def tool(status: str, *, item_id: str) -> dict:
+        return {
+            "item": {
+                "id": item_id,
+                "kind": "command_execution",
+                "status": status,
+                "summary": "rm -rf build",
+                "payload": {
+                    "callId": f"call-{item_id}",
+                    "name": "bash",
+                    "isError": status != "completed",
+                    "resultPreview": "Error: permission denied: blocked",
+                },
+            }
+        }
+
+    converter = ServiceEventRenderer()
+    completed = _messages(
+        converter,
+        [
+            _event(1, "turn.started", {"turn": {"status": "running"}}),
+            _event(
+                2, "item.updated", tool("declined", item_id=refused), item_id=refused
+            ),
+            _event(3, "item.updated", tool("failed", item_id=broken), item_id=broken),
+        ],
+    )
+
+    assert [
+        (done.call_id, done.denied)
+        for done in completed
+        if done.type == "tool_completed"
+    ] == [
+        (f"call-{refused}", True),
+        (f"call-{broken}", False),
+    ]

@@ -40,7 +40,7 @@ def _emit_human(event, transcript_mode: TranscriptMode) -> None:
             print(f"  → {msg.name}", flush=True)
     elif event_type == "tool_completed":
         if transcript_mode is not TranscriptMode.SUMMARY:
-            mark = "✗" if msg.is_error else "✓"
+            mark = "⊘" if msg.denied else "✗" if msg.is_error else "✓"
             print(f"  {mark} {msg.name}", flush=True)
     elif event_type == "skill_loaded":
         if transcript_mode is not TranscriptMode.SUMMARY:
